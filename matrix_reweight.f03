@@ -158,12 +158,8 @@ program matrix_reweight
            enddo
            if ((reweight_mode.ge.0 .and. reweight_mode.le.9) .or. reweight_mode.eq.15) then
               call amplitudes_NLC%evaluate(p,hel)
-              write (*,*) 'AAAAAAAAAAA'
-              stop
            elseif (reweight_mode.eq.16) then
               call amplitudes%evaluate_cache(p,hel)
-              write (*,*) 'AAAAAAAAAAA'
-              stop
            endif
         endif
         call cpu_time(tAfter)
