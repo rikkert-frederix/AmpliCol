@@ -68,8 +68,12 @@ contains
        this%nperm=factorial(next-1)
     endif
     this%col_acc=col_acc
-    write (*,*) 'Setup colmap' 
-    call setup_colmap_CSR(this,next,order)
+    write (*,*) 'Setup colmap'
+    if (present(order)) then
+       call setup_colmap(this,next,order)
+    else
+       call setup_colmap_CSR(this,next,order)
+    endif
     write (*,*) 'Setup imap'
     call setup_imap(this,order)
     write (*,*) 'Setup helmap' 
@@ -195,7 +199,7 @@ contains
              wf(4,ip)*wf(4,0))
     enddo
 !!$    write (*,*) this%amps(1:nperm)
-    write (*,*) sum(abs(this%amps(1:nperm)))
+!!$    write (*,*) sum(abs(this%amps(1:nperm)))
     
   end subroutine evaluate_cache
 
@@ -349,7 +353,7 @@ contains
        enddo
     enddo
 !!$    write (*,*) this%amps(0,1:this%nperm)
-    write (*,*) sum(abs(this%amps(0,1:this%nperm)))/2d0
+!!$    write (*,*) sum(abs(this%amps(0,1:this%nperm)))/2d0
     deallocate(wf)
     deallocate(pp)
   end subroutine evaluate
