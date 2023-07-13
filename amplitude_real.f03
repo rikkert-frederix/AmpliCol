@@ -4,7 +4,6 @@ module ext_wfs
   real(kind=8),dimension(:,:),allocatable :: p_ext,wf_ext
 end module ext_wfs
 
-
 module amplitude_mod
   implicit none
   type amplitude
@@ -20,14 +19,14 @@ module amplitude_mod
      procedure :: init,evaluate,init_onlycol,evaluate_order,init_CSR,init_onlycol_CSR
   end type amplitude
   type amplitude_cache
-     integer :: next,nwave_tot
-     integer,dimension(:),allocatable :: nw_start,nw_end,nsplit2,nsplit3,n3gluon,n4gluon
-     integer,dimension(:,:),allocatable :: wave_n,imap2,imap3
+     integer :: next,nwave_tot,nperm,col_acc
+     integer,dimension(:),allocatable :: nw_start,nw_end,nsplit2,nsplit3,n3gluon,n4gluon,col_value
+     integer,dimension(:,:),allocatable :: wave_n,imap2,imap3,col_index,row_index
      integer,dimension(:,:,:),allocatable :: n_3gluon,wave_3gluon,n_4gluon,wave_4gluon
      logical,dimension(:,:),allocatable :: wave_sign2,wave_sign3
      real(kind=8),dimension(:),allocatable :: amps
    contains
-     procedure :: setup_imap_cache,evaluate_cache
+     procedure :: setup_imap_cache,setup_colmap_cache,evaluate_cache
   end type amplitude_cache
   type col_amp
      real(kind=8),dimension(:,:,:),allocatable :: wf,pp
@@ -76,6 +75,7 @@ contains
     call setup_helmap(this,next)
     if (.not. allocated(this%amps)) allocate(this%amps(0:this%nhel(this%isize+1)-1,this%nperm))
   end subroutine init
+
   subroutine init_CSR(this,next,col_acc,sum_hel,order)
     implicit none
     class(amplitude) :: this
@@ -111,7 +111,6 @@ contains
     call setup_helmap(this,next)
     if (.not. allocated(this%amps)) allocate(this%amps(0:this%nhel(this%isize+1)-1,this%nperm))
   end subroutine init_CSR
-
 
   subroutine init_onlycol_CSR(this,next,col_acc,sum_hel,order)
     implicit none
@@ -175,12 +174,84 @@ contains
     call setup_colmap(this,next,order)
   end subroutine init_onlycol
 
+  subroutine setup_colmap_cache(this,col_acc)
+    use color_algebra
+    implicit none
+    class(amplitude_cache) :: this
+    integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,val_sum,nperm,nw
+    integer,dimension(:),allocatable :: ic,ir,iper,jper
+    n=this%next
+    allocate(iper(1:n))
+    allocate(jper(1:n))
+
+    nperm=factorial(n-1)
+    
+    this%col_acc=col_acc
+    allocate(this%col_value((n+1)/2))
+    allocate(ic((n+1)/2))
+    allocate(ir((n+1)/2))
+    allocate(this%col_index(nperm**2,(n+1)/2))
+    allocate(this%row_index(0:nperm,(n+1)/2))
+    this%row_index(0,:)=0
+    do i=1,(n+1)/2
+       this%col_value(i)=3**(n-2*(i-1))
+    enddo
+    do i=1,n
+       iper(i)=i
+       jper(i)=i
+    enddo
+    ic=0
+    ir=0
+    do iperm=1,nperm
+       if (iperm.le.nperm/2) then
+          nw=this%nw_start(this%next-1)-1+iperm
+          iper(1:n)=[this%wave_n(1:n-1,nw),n]
+       else
+          nw=this%nw_start(this%next-1)-1-nperm/2+iperm
+          iper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+       endif
+       do jperm=iperm,nperm
+          if (jperm.le.nperm/2) then
+             nw=this%nw_start(this%next-1)-1+jperm
+             jper(1:n)=[this%wave_n(1:n-1,nw),n]
+          else
+             nw=this%nw_start(this%next-1)-1-nperm/2+jperm
+             jper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+          endif
+          call compute_color_factor(this%col_acc,n,iper,jper,col_fac,.true.)
+          if (col_fac.eq.0) cycle
+          do i=1,(n+1)/2
+             if (this%col_value(i).eq.col_fac) exit
+          enddo
+          ic(i)=ic(i)+1
+          ir(i)=ir(i)+1
+          this%col_index(ic(i),i)=jperm
+       enddo
+       this%row_index(iperm,:)=ir(:)
+    enddo
+
+    ! remove the largest one.
+    imax=0
+    max_val=0
+    do i=1,(n+1)/2
+       if (this%row_index(nperm,i).gt.max_val) then
+          max_val=max(this%row_index(nperm,i),max_val)
+          imax=i
+       endif
+    enddo
+    if (all(this%row_index(nperm,:).ne.0)) then
+       this%row_index(:,imax)=0
+       this%col_value(:)=this%col_value(:)-this%col_value(imax)
+    endif
+    
+  end subroutine setup_colmap_cache
+  
   subroutine evaluate_cache(this,p,hel)
     implicit none
     class(amplitude_cache) :: this
     integer,dimension(this%next) :: hel
     real(kind=8),dimension(0:3,this%next) :: p
-    integer :: isize,nw,ihel,n3,n4,isplit,nperm,ip,iperm
+    integer :: isize,nw,ihel,n3,n4,isplit,ip,iperm
     real(kind=8),dimension(:,:),allocatable :: wf,pp,wfout_3gluon,wfout_4gluon
     real(kind=8) :: propagator
     if (.not.allocated(wf)) allocate(wf(1:4,0:this%nwave_tot))
@@ -248,11 +319,11 @@ contains
           endif
        enddo
     enddo
-
-    nperm=this%nw_end(this%next-1)-this%nw_start(this%next-1)+1
-    if (.not.allocated(this%amps)) allocate(this%amps(1:nperm))
-    this%amps(1:nperm)=0d0
-    do iperm=1,nperm    ! permutations
+    this%nperm=this%nw_end(this%next-1)-this%nw_start(this%next-1)+1
+    
+    if (.not.allocated(this%amps)) allocate(this%amps(1:this%nperm*2))
+    this%amps(1:this%nperm)=0d0
+    do iperm=1,this%nperm    ! permutations
        ip=iperm+this%nw_start(this%next-1)-1
        this%amps(iperm)=this%amps(iperm)+ &
             (wf(1,ip)*wf(1,0)+ &
@@ -260,8 +331,16 @@ contains
              wf(3,ip)*wf(3,0)+ &
              wf(4,ip)*wf(4,0))
     enddo
-!!$    write (*,*) this%amps(1:nperm)
-!!$    write (*,*) sum(abs(this%amps(1:nperm)))
+    do iperm=this%nperm+1,this%nperm*2    ! permutations
+       ip=iperm-this%nperm
+       if (mod(this%next,2).eq.1) then
+          this%amps(iperm)=-this%amps(ip)
+       else
+          this%amps(iperm)=this%amps(ip)
+       endif
+    enddo
+!!$    write (*,*) this%amps(1:this%nperm)
+!!$    write (*,*) sum(abs(this%amps(1:this%nperm)))
     
   end subroutine evaluate_cache
 
@@ -516,7 +595,7 @@ contains
     do iperm=1,this%nperm
        do jperm=1,this%nperm
           if (jperm.ge.iperm) then
-             call compute_color_factor(this,n,iper,jper,col_fac,color_flow)
+             call compute_color_factor(this%col_acc,n,iper,jper,col_fac,color_flow)
           endif
           call ipnext(jper,n-1)
           if (jperm.ge.iperm) then
@@ -581,7 +660,7 @@ contains
        this%colmap(0,0)=0
        jperm=0
        do iperm=1,this%nperm
-          call compute_color_factor(this,n,iper,jper,col_fac,color_flow)
+          call compute_color_factor(this%col_acc,n,iper,jper,col_fac,color_flow)
           if (col_fac.ne.0 .or. iperm.eq.1) then  ! include the iperm==1 case, since col_fac is zero for diagonal in fundamental basis at NLC
              this%colmap(0,0)=this%colmap(0,0)+1
              this%colmap(0,this%colmap(0,0))=col_fac
@@ -740,11 +819,10 @@ contains
 
 
   
-  subroutine compute_color_factor(this,n,iper,jper,col_fac,color_flow)
+  subroutine compute_color_factor(col_acc,n,iper,jper,col_fac,color_flow)
     use color_algebra
     implicit none
-    class(amplitude) :: this
-    integer :: i,col_fac,n,acc
+    integer :: i,col_fac,n,acc,col_acc
     integer,dimension(n) :: iper,jper
     logical :: color_flow
     real(kind=16) :: col_factor
@@ -753,19 +831,19 @@ contains
     ! terms (to be set by col_acc in the init subroutine):
     if (color_flow) then
        call color_flow_factor(n,jper,iper,col_fac)
-       if (col_fac.ge.n-2*this%col_acc) then
+       if (col_fac.ge.n-2*col_acc) then
           col_fac=3**col_fac
        else
           col_fac=0
        endif
     else
-       if (this%col_acc.eq.0) then ! LC
+       if (col_acc.eq.0) then ! LC
           if (all(iper.eq.jper)) then
              col_fac=3**n
           else
              col_fac=0
           endif
-       elseif (this%col_acc.eq.1) then ! NLC
+       elseif (col_acc.eq.1) then ! NLC
           if (all(iper.eq.jper)) then
              col_fac = 3**n - n * 3**(n-2)
           else
@@ -786,7 +864,7 @@ contains
           ! compute the colour factor by simplifying the colour string
           call Tr_full_simplify(col_factor) 
           col_fac=0
-          do i=n,max(n-2*this%col_acc,0),-1 ! do not include any Nc
+          do i=n,max(n-2*col_acc,0),-1 ! do not include any Nc
              ! contributions with negative
              ! powers, since they must cancel.
              col_fac=col_fac+coef_nc(i,0)*3**i
