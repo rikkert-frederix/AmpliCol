@@ -17,7 +17,7 @@ module amplitude_mod
      integer,dimension(:,:),allocatable :: col_index,row_index
      integer,dimension(:),allocatable :: col_value
    contains
-     procedure :: init,evaluate,init_onlycol,evaluate_order
+     procedure :: init,evaluate,init_onlycol,evaluate_order,init_CSR,init_onlycol_CSR
   end type amplitude
   type amplitude_cache
      integer :: next,nwave_tot
@@ -69,18 +69,80 @@ contains
     endif
     this%col_acc=col_acc
     write (*,*) 'Setup colmap'
-    if (present(order)) then
-       call setup_colmap(this,next,order)
-    else
-       call setup_colmap_CSR(this,next,order)
-    endif
+    call setup_colmap(this,next,order)
     write (*,*) 'Setup imap'
     call setup_imap(this,order)
     write (*,*) 'Setup helmap' 
     call setup_helmap(this,next)
     if (.not. allocated(this%amps)) allocate(this%amps(0:this%nhel(this%isize+1)-1,this%nperm))
   end subroutine init
+  subroutine init_CSR(this,next,col_acc,sum_hel,order)
+    implicit none
+    class(amplitude) :: this
+    integer :: next,col_acc,i,j
+    integer,dimension(next),optional :: order
+    integer,dimension(next) :: o
+    logical :: sum_hel
+    this%next=next
+    this%sum_hel=sum_hel
+    if (present(order)) then
+       this%nperm=1
+       ! Bring the colour order to a canonical order (final in the
+       ! list should be particle 'next' such that the momenta get
+       ! assigned correctly).
+       o=order
+       do i=1,next
+          if (o(i).eq.next) then
+             do j=0,next-1
+                order(j+1)=o(1+mod(i+j,next))
+             enddo
+             exit
+          endif
+       enddo
+    else
+       this%nperm=factorial(next-1)
+    endif
+    this%col_acc=col_acc
+    write (*,*) 'Setup colmap'
+    call setup_colmap_CSR(this,next,order)
+    write (*,*) 'Setup imap'
+    call setup_imap(this,order)
+    write (*,*) 'Setup helmap' 
+    call setup_helmap(this,next)
+    if (.not. allocated(this%amps)) allocate(this%amps(0:this%nhel(this%isize+1)-1,this%nperm))
+  end subroutine init_CSR
 
+
+  subroutine init_onlycol_CSR(this,next,col_acc,sum_hel,order)
+    implicit none
+    class(amplitude) :: this
+    integer :: next,col_acc,i,j
+    integer,dimension(next),optional :: order
+    integer,dimension(next) :: o
+    logical :: sum_hel
+    this%next=next
+    this%sum_hel=sum_hel
+    if (present(order)) then
+       this%nperm=1
+       ! Bring the colour order to a canonical order (final in the
+       ! list should be particle 'next' such that the momenta get
+       ! assigned correctly).
+       o=order
+       do i=1,next
+          if (o(i).eq.next) then
+             do j=0,next-1
+                order(j+1)=o(1+mod(i+j,next))
+             enddo
+             exit
+          endif
+       enddo
+    else
+       this%nperm=factorial(next-1)
+    endif
+    this%col_acc=col_acc
+    write (*,*) 'Setup colmap' 
+    call setup_colmap_CSR(this,next,order)
+  end subroutine init_onlycol_CSR
 
   subroutine init_onlycol(this,next,col_acc,sum_hel,order)
     implicit none
@@ -110,7 +172,7 @@ contains
     endif
     this%col_acc=col_acc
     write (*,*) 'Setup colmap' 
-    call setup_colmap_CSR(this,next,order)
+    call setup_colmap(this,next,order)
   end subroutine init_onlycol
 
   subroutine evaluate_cache(this,p,hel)

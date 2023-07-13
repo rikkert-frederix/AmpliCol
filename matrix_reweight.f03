@@ -53,7 +53,7 @@ program matrix_reweight
   !12 : same as reweight_mode=11, but with re-using wavefunctions
   !13 : same as reweight_mode=11, but allows for setting number of colours
   !14 : same as reweight_mode=11, but looping over colours
-  !15 : same as 0, but smarter summing over the colour matrix
+  !15 : same as 0, but smarter summing over the colour matrix (using CSR format)
   !16 : same as 15, but with better caching of interactions
   ! ...
   ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
@@ -102,13 +102,20 @@ program matrix_reweight
   if (reweight_mode.eq.8 .or. reweight_mode.eq.9) then
      col_acc=0
      call amplitudes_NLC%init(next,col_acc,sum_hel)
-  elseif ((reweight_mode.ge.0 .and. reweight_mode.le.7) .or. reweight_mode.eq.15) then
+  elseif (reweight_mode.ge.0 .and. reweight_mode.le.7) then
      col_acc=0
      call amplitudes_LC%init_onlycol(next,col_acc,sum_hel)
      col_acc=1
      call amplitudes_NLC%init(next,col_acc,sum_hel)
      col_acc=20
      call amplitudes_full%init_onlycol(next,col_acc,sum_hel)
+  elseif (reweight_mode.eq.15) then
+     col_acc=0
+     call amplitudes_LC%init_onlycol_CSR(next,col_acc,sum_hel)
+     col_acc=1
+     call amplitudes_NLC%init_CSR(next,col_acc,sum_hel)
+     col_acc=20
+     call amplitudes_full%init_onlycol_CSR(next,col_acc,sum_hel)
   elseif(reweight_mode.eq.16) then
     call amplitudes%setup_imap_cache(next)
   endif
