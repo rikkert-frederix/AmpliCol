@@ -11,7 +11,7 @@ def run_program(program, args, output_file):
 
 if __name__ == '__main__':
 
-    nexternal=['4','5']
+    nexternal=['4','5','6','7','8','9']
 #    nexternal=['10','11','12']
 #    nexternal=['7']
 

@@ -6,7 +6,7 @@ module common
   implicit none
   integer :: next
   type(amplitude) :: amplitudes_LC,amplitudes_NLC,amplitudes_full
-  type(amplitude_cache) :: amplitudes_cache_full,amplitudes_cache_LC,amplitudes_cache_NLC
+  type(amplitude_cache) :: amplitudes_cache
   real(kind=8),dimension(:,:),allocatable :: p
   type(col_amp) :: color_amp
 !!$  type(col_amp),dimension(:),allocatable :: col_amp_list
@@ -117,15 +117,9 @@ program matrix_reweight
      col_acc=20
      call amplitudes_full%init_onlycol_CSR(next,col_acc,sum_hel)
   elseif(reweight_mode.eq.16) then
-     col_acc=0
-     call amplitudes_cache_LC%setup_imap_cache(next)
-     call amplitudes_cache_LC%setup_colmap_cache(col_acc)
-     col_acc=1
-     call amplitudes_cache_NLC%setup_imap_cache(next)
-     call amplitudes_cache_NLC%setup_colmap_cache(col_acc)
+     call amplitudes_cache%setup_imap_cache(next)
      col_acc=20
-     call amplitudes_cache_full%setup_imap_cache(next)
-     call amplitudes_cache_full%setup_colmap_cache(col_acc)
+     call amplitudes_cache%setup_colmap_cache(col_acc)
   endif
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
@@ -174,7 +168,7 @@ program matrix_reweight
            if ((reweight_mode.ge.0 .and. reweight_mode.le.9) .or. reweight_mode.eq.15) then
               call amplitudes_NLC%evaluate(p,hel)
            elseif (reweight_mode.eq.16) then
-              call amplitudes_cache_full%evaluate_cache(p,hel)
+              call amplitudes_cache%evaluate_cache(p,hel)
            endif
         endif
         call cpu_time(tAfter)
@@ -216,19 +210,15 @@ program matrix_reweight
         elseif (reweight_mode.eq.16) then
            do irow=1,factorial(next-1)
               amp_col=0d0
-              do i=1,(next+1)/2
+              do i=1,1
                  amp2=0d0
-                 do ic=amplitudes_cache_LC%row_index(irow-1,i)+1,amplitudes_cache_LC%row_index(irow,i)
-                    icol=amplitudes_cache_LC%col_index(ic,i)
-                    amp2=amp2+amplitudes_cache_full%amps(icol)
+                 do ic=amplitudes_cache%row_index_LC(irow-1,i)+1,amplitudes_cache%row_index_LC(irow,i)
+                    icol=amplitudes_cache%col_index_LC(ic,i)
+                    amp2=amp2+amplitudes_cache%amps(icol)
                  enddo
-                 if (i.eq.1) then
-                    amp_col=amp_col+amp2*amplitudes_cache_LC%col_value(i)
-                 else
-                    amp_col=amp_col+amp2*amplitudes_cache_LC%col_value(i)*2d0
-                 endif
+                 amp_col=amp_col+amp2*amplitudes_cache%col_value_LC(i)
               enddo
-              amp2_LC(k)=amp2_LC(k)+amp_col*amplitudes_cache_full%amps(irow)
+              amp2_LC(k)=amp2_LC(k)+amp_col*amplitudes_cache%amps(irow)
            enddo
         elseif (reweight_mode.eq.8 .or. reweight_mode.eq.9) then
            do ih=0,amplitudes_NLC%nhel(amplitudes_NLC%isize+1)-1
@@ -319,19 +309,19 @@ program matrix_reweight
            call cpu_time(tBefore)
            do irow=1,factorial(next-1)
               amp_col=0d0
-              do i=1,(next+1)/2
+              do i=1,2
                  amp2=0d0
-                 do ic=amplitudes_cache_NLC%row_index(irow-1,i)+1,amplitudes_cache_NLC%row_index(irow,i)
-                    icol=amplitudes_cache_NLC%col_index(ic,i)
-                    amp2=amp2+amplitudes_cache_full%amps(icol)
+                 do ic=amplitudes_cache%row_index_NLC(irow-1,i)+1,amplitudes_cache%row_index_NLC(irow,i)
+                    icol=amplitudes_cache%col_index_NLC(ic,i)
+                    amp2=amp2+amplitudes_cache%amps(icol)
                  enddo
                  if (i.eq.1) then
-                    amp_col=amp_col+amp2*amplitudes_cache_NLC%col_value(i)
+                    amp_col=amp_col+amp2*amplitudes_cache%col_value_NLC(i)
                  else
-                    amp_col=amp_col+amp2*amplitudes_cache_NLC%col_value(i)*2d0
+                    amp_col=amp_col+amp2*amplitudes_cache%col_value_NLC(i)*2d0
                  endif
               enddo
-              amp2_NLC(k)=amp2_NLC(k)+amp_col*amplitudes_cache_full%amps(irow)
+              amp2_NLC(k)=amp2_NLC(k)+amp_col*amplitudes_cache%amps(irow)
            enddo
            call cpu_time(tAfter)
            t_mat_NLC=t_mat_NLC+tAfter-tBefore
@@ -376,23 +366,23 @@ program matrix_reweight
            enddo
            call cpu_time(tAfter)
            t_mat_full=t_mat_full+tAfter-tBefore
-        elseif (reweight_mode.eq.16) then
+        elseif (reweight_mode.eq.16 .and. amplitudes_cache%col_acc.ge.2) then
            call cpu_time(tBefore)
            do irow=1,factorial(next-1)
               amp_col=0d0
               do i=1,(next+1)/2
                  amp2=0d0
-                 do ic=amplitudes_cache_full%row_index(irow-1,i)+1,amplitudes_cache_full%row_index(irow,i)
-                    icol=amplitudes_cache_full%col_index(ic,i)
-                    amp2=amp2+amplitudes_cache_full%amps(icol)
+                 do ic=amplitudes_cache%row_index_full(irow-1,i)+1,amplitudes_cache%row_index_full(irow,i)
+                    icol=amplitudes_cache%col_index_full(ic,i)
+                    amp2=amp2+amplitudes_cache%amps(icol)
                  enddo
                  if (i.eq.1) then
-                    amp_col=amp_col+amp2*amplitudes_cache_full%col_value(i)
+                    amp_col=amp_col+amp2*amplitudes_cache%col_value_full(i)
                  else
-                    amp_col=amp_col+amp2*amplitudes_cache_full%col_value(i)*2d0
+                    amp_col=amp_col+amp2*amplitudes_cache%col_value_full(i)*2d0
                  endif
               enddo
-              amp2_full(k)=amp2_full(k)+amp_col*amplitudes_cache_full%amps(irow)
+              amp2_full(k)=amp2_full(k)+amp_col*amplitudes_cache%amps(irow)
            enddo
            call cpu_time(tAfter)
            t_mat_full=t_mat_full+tAfter-tBefore

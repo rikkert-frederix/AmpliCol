@@ -20,8 +20,9 @@ module amplitude_mod
   end type amplitude
   type amplitude_cache
      integer :: next,nwave_tot,nperm,col_acc
-     integer,dimension(:),allocatable :: nw_start,nw_end,nsplit2,nsplit3,n3gluon,n4gluon,col_value
-     integer,dimension(:,:),allocatable :: wave_n,imap2,imap3,col_index,row_index
+     integer,dimension(:),allocatable :: nw_start,nw_end,nsplit2,nsplit3,n3gluon,n4gluon,col_value_LC,col_value_NLC,col_value_full
+     integer,dimension(:,:),allocatable :: wave_n,imap2,imap3,col_index_LC,row_index_LC,col_index_NLC,row_index_NLC, &
+          col_index_full,row_index_full
      integer,dimension(:,:,:),allocatable :: n_3gluon,wave_3gluon,n_4gluon,wave_4gluon
      logical,dimension(:,:),allocatable :: wave_sign2,wave_sign3
      real(kind=8),dimension(:),allocatable :: amps
@@ -180,6 +181,7 @@ contains
     class(amplitude_cache) :: this
     integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,val_sum,nperm,nw
     integer,dimension(:),allocatable :: ic,ir,iper,jper
+
     n=this%next
     allocate(iper(1:n))
     allocate(jper(1:n))
@@ -187,14 +189,24 @@ contains
     nperm=factorial(n-1)
     
     this%col_acc=col_acc
-    allocate(this%col_value((n+1)/2))
+    if (col_acc.ge.2) allocate(this%col_value_full((n+1)/2))
+    if (col_acc.ge.1) allocate(this%col_value_NLC(2))
+    allocate(this%col_value_LC(1))
     allocate(ic((n+1)/2))
     allocate(ir((n+1)/2))
-    allocate(this%col_index(nperm**2,(n+1)/2))
-    allocate(this%row_index(0:nperm,(n+1)/2))
-    this%row_index(0,:)=0
+    if (col_acc.ge.2) allocate(this%col_index_full(nperm**2,(n+1)/2))
+    if (col_acc.ge.2) allocate(this%row_index_full(0:nperm,(n+1)/2))
+    if (col_acc.ge.1) allocate(this%col_index_NLC(nperm**2,2))
+    if (col_acc.ge.1) allocate(this%row_index_NLC(0:nperm,2))
+    allocate(this%col_index_LC(nperm,1))
+    allocate(this%row_index_LC(0:nperm,1))
+    if (col_acc.ge.2) this%row_index_full(0,:)=0
+    if (col_acc.ge.1) this%row_index_NLC(0,:)=0
+    this%row_index_LC(0,:)=0
     do i=1,(n+1)/2
-       this%col_value(i)=3**(n-2*(i-1))
+       if (col_acc.ge.2) this%col_value_full(i)=3**(n-2*(i-1))
+       if (i.le.2 .and. col_acc.ge.1) this%col_value_NLC(i)=3**(n-2*(i-1))
+       if (i.le.1) this%col_value_LC(i)=3**(n-2*(i-1))
     enddo
     do i=1,n
        iper(i)=i
@@ -218,30 +230,44 @@ contains
              nw=this%nw_start(this%next-1)-1-nperm/2+jperm
              jper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
           endif
-          call compute_color_factor(this%col_acc,n,iper,jper,col_fac,.true.)
+          call compute_color_factor(100,n,iper,jper,col_fac,.true.)
           if (col_fac.eq.0) cycle
           do i=1,(n+1)/2
-             if (this%col_value(i).eq.col_fac) exit
+             if (col_acc.ge.2) then
+                if (this%col_value_full(i).eq.col_fac) exit
+             elseif (col_acc.ge.1 .and. i.le.2) then
+                if (this%col_value_NLC(i).eq.col_fac) exit
+             elseif (col_acc.ge.0 .and. i.le.1) then
+                if (this%col_value_LC(i).eq.col_fac) exit
+             endif
           enddo
+          if (col_acc.eq.1 .and. i.gt.2) cycle
+          if (col_acc.eq.0 .and. i.gt.1) cycle
           ic(i)=ic(i)+1
           ir(i)=ir(i)+1
-          this%col_index(ic(i),i)=jperm
+          if (col_acc.ge.2) this%col_index_full(ic(i),i)=jperm
+          if (col_acc.ge.1.and.i.le.2) this%col_index_NLC(ic(i),i)=jperm
+          if (i.le.1) this%col_index_LC(ic(i),i)=jperm
        enddo
-       this%row_index(iperm,:)=ir(:)
+       if (col_acc.ge.2) this%row_index_full(iperm,:)=ir(:)
+       if (col_acc.ge.1) this%row_index_NLC(iperm,1:2)=ir(1:2)
+       this%row_index_LC(iperm,1)=ir(1)
     enddo
 
     ! remove the largest one.
-    imax=0
-    max_val=0
-    do i=1,(n+1)/2
-       if (this%row_index(nperm,i).gt.max_val) then
-          max_val=max(this%row_index(nperm,i),max_val)
-          imax=i
+    if (col_acc.ge.2) then
+       imax=0
+       max_val=0
+       do i=1,(n+1)/2
+          if (this%row_index_full(nperm,i).gt.max_val) then
+             max_val=max(this%row_index_full(nperm,i),max_val)
+             imax=i
+          endif
+       enddo
+       if (all(this%row_index_full(nperm,:).ne.0)) then
+          this%row_index_full(:,imax)=0
+          this%col_value_full(:)=this%col_value_full(:)-this%col_value_full(imax)
        endif
-    enddo
-    if (all(this%row_index(nperm,:).ne.0)) then
-       this%row_index(:,imax)=0
-       this%col_value(:)=this%col_value(:)-this%col_value(imax)
     endif
     
   end subroutine setup_colmap_cache
@@ -1281,7 +1307,8 @@ contains
        this%nw_end(isize)=nwave
     enddo
 
-    write (*,*) 'AAAAAAAAAAAA',this%n3gluon(:),':',this%n4gluon(:),':',nwave
+    write (*,*) 'number of 3 and 4-gluon vertices at each size, and the number of currents:'
+    write (*,*) this%n3gluon(:),':',this%n4gluon(:),':',nwave
     
   contains
     subroutine find_splits3(n,ns,ip,imap,minus_sign)
