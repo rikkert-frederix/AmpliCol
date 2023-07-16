@@ -1186,7 +1186,7 @@ contains
     implicit none
     class(amplitude_cache) :: this
     integer :: nwave,isize,nw,isplit,isplit1,isplit2,n1,n2,n3,iw1,iw2,iw3,i,next,nwave_tot
-
+!    real(kind=4) :: tBefore,tAfter
     this%next=next
     call set_size(this%next-1,nwave_tot,factorial(this%next-1))
     this%nwave_tot=(nwave_tot+(this%next-1))/2
@@ -1208,12 +1208,14 @@ contains
     allocate(this%wave_sign2(this%next-2,this%nwave_tot))
     allocate(this%wave_sign3((this%next-2)*(this%next-3)/2,this%nwave_tot))
     
+!    call cpu_time(tBefore)
     
     nwave=0
     this%n3gluon(:)=0
     this%n4gluon(:)=0
     do isize=1,this%next-1
-       write (*,*) 'isize',isize
+!       call cpu_time(tAfter)
+!       write (*,*) 'isizeA',isize,tAfter-tBefore
        this%nw_start(isize)=nwave+1
        if (isize.eq.1) then
           do nw=1,this%next-1
@@ -1239,6 +1241,8 @@ contains
                 enddo
              enddo
           enddo
+!          call cpu_time(tAfter)
+!          write (*,*) 'isizeB',isize,tAfter-tBefore
           ! determine which 4-particle interactions to compute
           do isplit1=1,isize-2
              do isplit2=isplit1+1,isize-1
@@ -1264,6 +1268,8 @@ contains
                 enddo
              enddo
           enddo
+!          call cpu_time(tAfter)
+!          write (*,*) 'isizeC',isize,tAfter-tBefore
           ! determine which currents to compute and which 3-particle and 4-particle interactions they combine
           n1=1
           n2=isize-1
@@ -1306,6 +1312,8 @@ contains
        endif
        this%nw_end(isize)=nwave
     enddo
+!    call cpu_time(tAfter)
+!    write (*,*) 'isizeD',isize,tAfter-tBefore
 
     write (*,*) 'number of 3 and 4-gluon vertices at each size, and the number of currents:'
     write (*,*) this%n3gluon(:),':',this%n4gluon(:),':',nwave
@@ -1330,36 +1338,36 @@ contains
             minus_sign(isplit)=.false.
             do i=1,this%n4gluon(n)
                if (this%n_4gluon(1,i,n).eq.n1 .and. this%n_4gluon(2,i,n).eq.n2 .and. this%n_4gluon(3,i,n).eq.n3) then
-                  if (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(1:n1)) .and. &
+                  if ( all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(1:n1)) .and. &
                        all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
+                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3)) ) then
                      imap(isplit)=i
 !                     write (*,*) 'check1',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                      exit
                   elseif (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(n1:1:-1)) .and. &
-                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
+                          all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
+                          all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
                      imap(isplit)=i
                      if (mod(n1,2).eq.0) minus_sign(isplit)=.true.
 !                     write (*,*) 'check2',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                      exit
                   elseif (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(1:n1)) .and. &
-                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
+                          all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                          all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
                      imap(isplit)=i
                      if (mod(n2,2).eq.0) minus_sign(isplit)=.true.
 !                     write (*,*) 'check3',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                      exit
                   elseif (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(1:n1)) .and. &
-                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(n3:1:-1))) then
+                          all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
+                          all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(n3:1:-1))) then
                      imap(isplit)=i
                      if (mod(n3,2).eq.0) minus_sign(isplit)=.true.
 !                     write (*,*) 'check4',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                      exit
                   elseif (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(n1:1:-1)) .and. &
-                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
+                          all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                          all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(1:n3))) then
                      imap(isplit)=i
                      if (mod(n1+n2,2).eq.1) minus_sign(isplit)=.true.
 !                     write (*,*) 'check5',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
@@ -1372,15 +1380,15 @@ contains
 !                     write (*,*) 'check6',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                      exit
                   elseif (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(1:n1)) .and. &
-                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(n3:1:-1))) then
+                          all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                          all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(n3:1:-1))) then
                      imap(isplit)=i
                      if (mod(n2+n3,2).eq.1) minus_sign(isplit)=.true.
 !                     write (*,*) 'check7',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                      exit
                   elseif (all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(n1:1:-1)) .and. &
-                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                       all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(n3:1:-1))) then
+                          all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                          all(this%wave_n(1:n3,this%wave_4gluon(3,i,n)).eq.ip3(n3:1:-1))) then
                      imap(isplit)=i
                      if (mod(n,2).eq.0) minus_sign(isplit)=.true.
 !                     write (*,*) 'check8',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
@@ -1388,7 +1396,7 @@ contains
                endif
             endif
             if (this%n_4gluon(1,i,n).eq.n3 .and. this%n_4gluon(2,i,n).eq.n2 .and. this%n_4gluon(3,i,n).eq.n1) then
-               if (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(1:n1)) .and. &
+               if ( all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(1:n1)) .and. &
                     all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
                     all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(1:n3))) then
                   imap(isplit)=i
@@ -1396,22 +1404,22 @@ contains
 !                  write (*,*) 'check9',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                   exit
                elseif (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
-                    all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(1:n3))) then
+                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
+                       all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(1:n3))) then
                   imap(isplit)=i
                   if (mod(n1,2).eq.0) minus_sign(isplit)=.true.
 !                  write (*,*) 'check0',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                   exit
                elseif (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(1:n1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                    all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(1:n3))) then
+                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                       all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(1:n3))) then
                   imap(isplit)=i
                   if (mod(n2,2).eq.0) minus_sign(isplit)=.true.
 !                  write (*,*) 'checkA',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                   exit
                elseif (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(1:n1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
-                    all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
+                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
+                       all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
                   imap(isplit)=i
                   if (mod(n3,2).eq.0) minus_sign(isplit)=.true.
 !                  write (*,*) 'checkB',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
@@ -1424,22 +1432,22 @@ contains
 !                  write (*,*) 'checkC',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                   exit
                elseif (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
-                    all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
+                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
+                       all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
                   imap(isplit)=i
                   if (mod(n1+n3,2).eq.1) minus_sign(isplit)=.true.
 !                  write (*,*) 'checkD',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                   exit
                elseif (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(1:n1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                    all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
+                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                       all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
                   imap(isplit)=i
                   if (mod(n2+n3,2).eq.1) minus_sign(isplit)=.true.
 !                  write (*,*) 'checkE',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
                   exit
                elseif (all(this%wave_n(1:n1,this%wave_4gluon(3,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
-                    all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
+                       all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(n2:1:-1)) .and. &
+                       all(this%wave_n(1:n3,this%wave_4gluon(1,i,n)).eq.ip3(n3:1:-1))) then
                   imap(isplit)=i
                   if (mod(n,2).eq.0) minus_sign(isplit)=.true.
 !                  write (*,*) 'checkF',i,n1,n2,n3,':',ip(1:n),':',imap(1:3,isplit)
@@ -1479,25 +1487,25 @@ contains
 !!$            endif
 !!$                   
             if (this%n_3gluon(1,i,n).eq.n1 .and. this%n_3gluon(2,i,n).eq.n2) then
-               if (all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(1:n1)) .and. &
+               if ( all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(1:n1)) .and. &
                     all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(1:n2))) then
                   imap(isplit)=i
 !                  write (*,*) 'check1',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
                   exit
                elseif(all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(1:n1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(n2:1:-1))) then
+                      all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(n2:1:-1))) then
                   imap(isplit)=i
                   if (mod(n2,2).eq.0) minus_sign(isplit)=.true.
 !                  write (*,*) 'check2',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
                   exit
                elseif(all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(1:n2))) then
+                      all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(1:n2))) then
                   imap(isplit)=i
                   if (mod(n1,2).eq.0) minus_sign(isplit)=.true.
 !                  write (*,*) 'check3',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
                   exit
                elseif(all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(n2:1:-1))) then
+                      all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(n2:1:-1))) then
                   imap(isplit)=i
                   if (mod(n,2).eq.1) minus_sign(isplit)=.true.
 !                  write (*,*) 'check4',i,n1,n2,':',ip(1:n),':',imap(isplit)
@@ -1505,26 +1513,26 @@ contains
                endif
             endif
             if (this%n_3gluon(1,i,n).eq.n2 .and. this%n_3gluon(2,i,n).eq.n1) then
-               if (all(this%wave_n(1:n1,this%wave_3gluon(2,i,n)).eq.ip1(1:n1)) .and. &
+               if ( all(this%wave_n(1:n1,this%wave_3gluon(2,i,n)).eq.ip1(1:n1)) .and. &
                     all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(1:n2))) then
                   imap(isplit)=i
                   minus_sign(isplit)=.true.
 !                  write (*,*) 'check5',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
                   exit
                elseif(all(this%wave_n(1:n1,this%wave_3gluon(2,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(1:n2))) then
+                      all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(1:n2))) then
                   imap(isplit)=i
                   if (mod(n1,2).eq.1) minus_sign(isplit)=.true.
 !                  write (*,*) 'check6',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
                   exit
                elseif(all(this%wave_n(1:n1,this%wave_3gluon(2,i,n)).eq.ip1(1:n1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(n2:1:-1))) then
+                      all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(n2:1:-1))) then
                   imap(isplit)=i
                   if (mod(n2,2).eq.1) minus_sign(isplit)=.true.
 !                  write (*,*) 'check7',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
                   exit
                elseif(all(this%wave_n(1:n1,this%wave_3gluon(2,i,n)).eq.ip1(n1:1:-1)) .and. &
-                    all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(n2:1:-1))) then
+                      all(this%wave_n(1:n2,this%wave_3gluon(1,i,n)).eq.ip2(n2:1:-1))) then
                   if (mod(n,2).eq.0) minus_sign(isplit)=.true.
                   imap(isplit)=i
 !                  write (*,*) 'check8',i,n1,n2,':',ip(1:n),':',imap(1:2,isplit)
