@@ -230,7 +230,7 @@ contains
              nw=this%nw_start(this%next-1)-1-nperm/2+jperm
              jper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
           endif
-          call compute_color_factor(100,n,iper,jper,col_fac,.true.)
+          call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
           if (col_fac.eq.0) cycle
           do i=1,(n+1)/2
              if (col_acc.ge.2) then
@@ -1186,7 +1186,7 @@ contains
     implicit none
     class(amplitude_cache) :: this
     integer :: nwave,isize,nw,isplit,isplit1,isplit2,n1,n2,n3,iw1,iw2,iw3,i,next,nwave_tot
-!    real(kind=4) :: tBefore,tAfter
+    real(kind=4) :: tBefore,tAfter
     this%next=next
     call set_size(this%next-1,nwave_tot,factorial(this%next-1))
     this%nwave_tot=(nwave_tot+(this%next-1))/2
@@ -1208,14 +1208,14 @@ contains
     allocate(this%wave_sign2(this%next-2,this%nwave_tot))
     allocate(this%wave_sign3((this%next-2)*(this%next-3)/2,this%nwave_tot))
     
-!    call cpu_time(tBefore)
+    call cpu_time(tBefore)
     
     nwave=0
     this%n3gluon(:)=0
     this%n4gluon(:)=0
     do isize=1,this%next-1
-!       call cpu_time(tAfter)
-!       write (*,*) 'isizeA',isize,tAfter-tBefore
+       call cpu_time(tAfter)
+       write (*,*) 'isizeA',isize,tAfter-tBefore
        this%nw_start(isize)=nwave+1
        if (isize.eq.1) then
           do nw=1,this%next-1
@@ -1312,8 +1312,8 @@ contains
        endif
        this%nw_end(isize)=nwave
     enddo
-!    call cpu_time(tAfter)
-!    write (*,*) 'isizeD',isize,tAfter-tBefore
+    call cpu_time(tAfter)
+    write (*,*) 'isizeD',isize,tAfter-tBefore
 
     write (*,*) 'number of 3 and 4-gluon vertices at each size, and the number of currents:'
     write (*,*) this%n3gluon(:),':',this%n4gluon(:),':',nwave
@@ -1476,16 +1476,6 @@ contains
          ip2(1:n2)=ip(n1+1:n)
          minus_sign(isplit)=.false.
          do i=1,this%n3gluon(n)
-!!$
-!!$            if (n.eq.4) then
-!!$               if (all(ip(1:4).eq.[2,1,4,3])) then
-!!$                  write (*,*) isplit
-!!$                  write (*,*) 'A',n1,this%n_3gluon(1,i,n),n2,this%n_3gluon(2,i,n)
-!!$                  write (*,*) ip1(1:n1) ,':',ip2(1:n2)
-!!$                  write (*,*) this%wave_n(1:n1,this%wave_3gluon(1,i,n)),':',this%wave_n(1:n2,this%wave_3gluon(2,i,n))
-!!$               endif
-!!$            endif
-!!$                   
             if (this%n_3gluon(1,i,n).eq.n1 .and. this%n_3gluon(2,i,n).eq.n2) then
                if ( all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(1:n1)) .and. &
                     all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(1:n2))) then
