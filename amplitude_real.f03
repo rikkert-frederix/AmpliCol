@@ -181,7 +181,10 @@ contains
     class(amplitude_cache) :: this
     integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,val_sum,nperm,nw
     integer,dimension(:),allocatable :: ic,ir,iper,jper
+    real(kind=4) :: tBefore,tAfter
 
+    call cpu_time(tBefore)
+    write (*,'(a,i3,a)') ' Setting up colour factor (col_acc =',col_acc,')...'
     n=this%next
     allocate(iper(1:n))
     allocate(jper(1:n))
@@ -269,6 +272,10 @@ contains
           this%col_value_full(:)=this%col_value_full(:)-this%col_value_full(imax)
        endif
     endif
+
+    call cpu_time(tAfter)
+    write (*,*) '... colour setup in',tAfter-tBefore,'seconds'
+
     
   end subroutine setup_colmap_cache
   
@@ -280,6 +287,7 @@ contains
     integer :: isize,nw,ihel,n3,n4,isplit,ip,iperm
     real(kind=8),dimension(:,:),allocatable :: wf,pp,wfout_3gluon,wfout_4gluon
     real(kind=8) :: propagator
+
     if (.not.allocated(wf)) allocate(wf(1:4,0:this%nwave_tot))
     if (.not.allocated(pp)) allocate(pp(0:3,this%nwave_tot))
     if (.not.allocated(wfout_3gluon)) allocate(wfout_3gluon(1:4,maxval(this%n3gluon(1:this%next-1))))
@@ -1186,7 +1194,11 @@ contains
     implicit none
     class(amplitude_cache) :: this
     integer :: nwave,isize,nw,isplit,isplit1,isplit2,n1,n2,n3,iw1,iw2,iw3,i,next,nwave_tot
+    integer,dimension(0:611953-1,next-1) :: bucket_size2,bucket_size3
+    integer,dimension(100,0:611953-1,next-1) :: bucket_val2,bucket_val3
     real(kind=4) :: tBefore,tAfter
+    call cpu_time(tBefore)
+    write (*,*) 'Setting up imap ...'
     this%next=next
     call set_size(this%next-1,nwave_tot,factorial(this%next-1))
     this%nwave_tot=(nwave_tot+(this%next-1))/2
@@ -1198,24 +1210,22 @@ contains
     allocate(this%n3gluon(this%next-1))
     allocate(this%n4gluon(this%next-1))
 
-    allocate(this%n_3gluon(2,1000000,this%next-1))
-    allocate(this%n_4gluon(3,1000000,this%next-1))
-    allocate(this%wave_3gluon(2,1000000,this%next-1))
-    allocate(this%wave_4gluon(3,1000000,this%next-1))
+    allocate(this%n_3gluon(2,100000000,this%next-1))
+    allocate(this%n_4gluon(3,100000000,this%next-1))
+    allocate(this%wave_3gluon(2,100000000,this%next-1))
+    allocate(this%wave_4gluon(3,100000000,this%next-1))
 
     allocate(this%imap2(this%next-2,this%nwave_tot))
     allocate(this%imap3((this%next-2)*(this%next-3)/2,this%nwave_tot))
     allocate(this%wave_sign2(this%next-2,this%nwave_tot))
     allocate(this%wave_sign3((this%next-2)*(this%next-3)/2,this%nwave_tot))
     
-    call cpu_time(tBefore)
-    
     nwave=0
     this%n3gluon(:)=0
     this%n4gluon(:)=0
     do isize=1,this%next-1
        call cpu_time(tAfter)
-       write (*,*) 'isizeA',isize,tAfter-tBefore
+       write (*,*) '   isize',isize,tAfter-tBefore
        this%nw_start(isize)=nwave+1
        if (isize.eq.1) then
           do nw=1,this%next-1
@@ -1225,6 +1235,7 @@ contains
           enddo
        else
           ! determine which 3-particle interaction to compute
+          call fill_ibuck2(1,isize,1,.true.)
           do isplit=1,isize/2
              n1=isplit
              n2=isize-isplit
@@ -1237,6 +1248,7 @@ contains
                       this%n_3gluon(2,this%n3gluon(isize),isize)=n2
                       this%wave_3gluon(1,this%n3gluon(isize),isize)=iw1
                       this%wave_3gluon(2,this%n3gluon(isize),isize)=iw2
+                      call fill_ibuck2(ibuck2(n1,n2,this%wave_n(1:n1,iw1),this%wave_n(1:n2,iw2)),isize,this%n3gluon(isize),.false.)
                    endif
                 enddo
              enddo
@@ -1244,6 +1256,7 @@ contains
 !          call cpu_time(tAfter)
 !          write (*,*) 'isizeB',isize,tAfter-tBefore
           ! determine which 4-particle interactions to compute
+          call fill_ibuck3(1,isize,1,.true.)
           do isplit1=1,isize-2
              do isplit2=isplit1+1,isize-1
                 n1=isplit1
@@ -1262,6 +1275,8 @@ contains
                             this%wave_4gluon(1,this%n4gluon(isize),isize)=iw1
                             this%wave_4gluon(2,this%n4gluon(isize),isize)=iw2
                             this%wave_4gluon(3,this%n4gluon(isize),isize)=iw3
+                            call fill_ibuck3(ibuck3(n1,n2,n3,this%wave_n(1:n1,iw1),this%wave_n(1:n2,iw2),&
+                                 this%wave_n(1:n3,iw3)),isize,this%n4gluon(isize),.false.)
                          endif
                       enddo
                    enddo
@@ -1312,16 +1327,26 @@ contains
        endif
        this%nw_end(isize)=nwave
     enddo
-    call cpu_time(tAfter)
-    write (*,*) 'isizeD',isize,tAfter-tBefore
 
-    write (*,*) 'number of 3 and 4-gluon vertices at each size, and the number of currents:'
-    write (*,*) this%n3gluon(:),':',this%n4gluon(:),':',nwave
+    call cpu_time(tAfter)
+    write (*,*) '   isize',isize,tAfter-tBefore
+    
+    write (*,*) '   hashing: max and average number of elements in a single bucket (3)',&
+         maxval(bucket_size2),nint(sum(bucket_size2(:,this%next-1))/dble(size(bucket_size2(:,this%next-1))))
+    write (*,*) '   hashing: max and average number of elements in a single bucket (4)',&
+         maxval(bucket_size3),nint(sum(bucket_size3(:,this%next-1))/dble(size(bucket_size3(:,this%next-1))))
+    
+
+    write (*,*) '   number of 3 and 4-gluon vertices at each size, and the number of currents:'
+    write (*,*) '   ',this%n3gluon(:),':',this%n4gluon(:),':',nwave
+
+    call cpu_time(tAfter)
+    write (*,*) '... imap setup in ',tAfter-tBefore,'seconds'
     
   contains
     subroutine find_splits3(n,ns,ip,imap,minus_sign)
       implicit none
-      integer :: i,n,ns,n1,n2,n3,isplit1,isplit2,isplit
+      integer :: i,n,ns,n1,n2,n3,isplit1,isplit2,isplit,ibuck,j
       integer,dimension(n) :: ip,ip1,ip2,ip3
       integer,dimension(ns) :: imap
       logical,dimension(ns) :: minus_sign
@@ -1336,7 +1361,9 @@ contains
             ip3(1:n3)=ip(n1+n2+1:n)
             isplit=isplit+1
             minus_sign(isplit)=.false.
-            do i=1,this%n4gluon(n)
+            ibuck=ibuck3(n1,n2,n3,ip1,ip2,ip3)
+            do j=1,bucket_size3(ibuck,n)
+               i=bucket_val3(j,ibuck,n)
                if (this%n_4gluon(1,i,n).eq.n1 .and. this%n_4gluon(2,i,n).eq.n2 .and. this%n_4gluon(3,i,n).eq.n3) then
                   if ( all(this%wave_n(1:n1,this%wave_4gluon(1,i,n)).eq.ip1(1:n1)) .and. &
                        all(this%wave_n(1:n2,this%wave_4gluon(2,i,n)).eq.ip2(1:n2)) .and. &
@@ -1455,17 +1482,90 @@ contains
                   endif
                endif
             enddo
-            if (i.eq.this%n4gluon(n)+1) then
+            if (j.eq.bucket_size3(ibuck,n)+1) then
                write (*,*) 'NOT FOUND',n1,n2,n3,':',ip(1:n)
                stop
             endif
          enddo
       enddo
     end subroutine find_splits3
+
+    subroutine fill_ibuck2(ibuck,isize,ival,reset)
+      implicit none
+      logical :: reset
+      integer :: ibuck,ival,isize
+      if (reset) then
+         bucket_size2(:,isize)=0
+         return
+      endif
+      bucket_size2(ibuck,isize)=bucket_size2(ibuck,isize)+1
+      if (bucket_size2(ibuck,isize).gt.10000) then
+         write (*,*) 'array bucket_val() out of bounds',ibuck,isize,bucket_size2(ibuck,isize)
+         stop 1
+      endif
+      bucket_val2(bucket_size2(ibuck,isize),ibuck,isize)=ival
+    end subroutine fill_ibuck2
+    subroutine fill_ibuck3(ibuck,isize,ival,reset)
+      implicit none
+      logical :: reset
+      integer :: ibuck,ival,isize
+      if (reset) then
+         bucket_size3(:,isize)=0
+         return
+      endif
+      bucket_size3(ibuck,isize)=bucket_size3(ibuck,isize)+1
+      if (bucket_size3(ibuck,isize).gt.10000) then
+         write (*,*) 'array bucket_val() out of bounds',ibuck,isize,bucket_size3(ibuck,isize)
+         stop 1
+      endif
+      bucket_val3(bucket_size3(ibuck,isize),ibuck,isize)=ival
+    end subroutine fill_ibuck3
+    integer function ibuck2(n1,n2,ip1,ip2)
+      implicit none
+      integer :: i,n1,n2
+      integer,dimension(n1) :: ip1
+      integer,dimension(n2) :: ip2
+      integer(kind=8),dimension(2) :: isum1,isum2
+      isum1(1:2)=0
+      do i=1,n1
+         isum1(1)=isum1(1)+ip1(i)*this%next**(i-1)
+         isum1(2)=isum1(2)+ip1(n1+1-i)*this%next**(i-1)
+      enddo
+      isum2(1:2)=0
+      do i=1,n2
+         isum2(1)=isum2(1)+ip2(i)*this%next**(i-1)
+         isum2(2)=isum2(2)+ip2(n2+1-i)*this%next**(i-1)
+      enddo
+      ibuck2=mod(minval(isum1(1:2))+minval(isum2(1:2)),611953)
+    end function ibuck2
+    integer function ibuck3(n1,n2,n3,ip1,ip2,ip3)
+      implicit none
+      integer :: i,n1,n2,n3
+      integer,dimension(n1) :: ip1
+      integer,dimension(n2) :: ip2
+      integer,dimension(n3) :: ip3
+      integer(kind=8),dimension(2) :: isum1,isum2,isum3
+      isum1(1:2)=0
+      do i=1,n1
+         isum1(1)=isum1(1)+ip1(i)*this%next**(i-1)
+         isum1(2)=isum1(2)+ip1(n1+1-i)*this%next**(i-1)
+      enddo
+      isum2(1:2)=0
+      do i=1,n2
+         isum2(1)=isum2(1)+ip2(i)*this%next**(i-1)
+         isum2(2)=isum2(2)+ip2(n2+1-i)*this%next**(i-1)
+      enddo
+      isum3(1:2)=0
+      do i=1,n3
+         isum3(1)=isum3(1)+ip3(i)*this%next**(i-1)
+         isum3(2)=isum3(2)+ip3(n3+1-i)*this%next**(i-1)
+      enddo
+      ibuck3=mod(minval(isum1(1:2))+minval(isum3(1:2))+minval(isum2(1:2))*305551,611953)
+    end function ibuck3
     
     subroutine find_splits2(n,ip,imap,minus_sign)
       implicit none
-      integer :: i,n,n1,n2,isplit
+      integer :: i,j,n,n1,n2,isplit,ibuck
       integer,dimension(n) :: ip,ip1,ip2
       integer,dimension(n-1) :: imap
       logical,dimension(n-1) :: minus_sign
@@ -1475,7 +1575,9 @@ contains
          ip1(1:n1)=ip(1:n1)
          ip2(1:n2)=ip(n1+1:n)
          minus_sign(isplit)=.false.
-         do i=1,this%n3gluon(n)
+         ibuck=ibuck2(n1,n2,ip1,ip2)
+         do j=1,bucket_size2(ibuck,n)
+            i=bucket_val2(j,ibuck,n)
             if (this%n_3gluon(1,i,n).eq.n1 .and. this%n_3gluon(2,i,n).eq.n2) then
                if ( all(this%wave_n(1:n1,this%wave_3gluon(1,i,n)).eq.ip1(1:n1)) .and. &
                     all(this%wave_n(1:n2,this%wave_3gluon(2,i,n)).eq.ip2(1:n2))) then
@@ -1530,7 +1632,7 @@ contains
                endif
             endif
          enddo
-         if (i.eq.this%n3gluon(n)+1) then
+         if (j.eq.bucket_size2(ibuck,n)+1) then
             write (*,*) 'NOT FOUND'
             stop
          endif
