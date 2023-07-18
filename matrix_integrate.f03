@@ -1,5 +1,5 @@
 
-! gfortran -ffast-math -O3 -o matrix_integrate simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 color_algebra.f95 amplitude_real.f03 matrix_integrate.f03
+! gfortran -mcmodel=large -ffast-math -O3 -o matrix_integrate simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 color_algebra.f95 amplitude_real.f03 matrix_integrate.f03
 
 
 module common

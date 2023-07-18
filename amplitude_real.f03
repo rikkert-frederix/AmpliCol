@@ -27,7 +27,7 @@ module amplitude_mod
      logical,dimension(:,:),allocatable :: wave_sign2,wave_sign3
      real(kind=8),dimension(:),allocatable :: amps
    contains
-     procedure :: setup_imap_cache,setup_colmap_cache,evaluate_cache
+     procedure :: setup_imap_cache,setup_colmap_cache,evaluate_cache,setup_colmap_cache_NLC
   end type amplitude_cache
   type col_amp
      real(kind=8),dimension(:,:,:),allocatable :: wf,pp
@@ -195,8 +195,8 @@ contains
     if (col_acc.ge.2) allocate(this%col_value_full((n+1)/2))
     if (col_acc.ge.1) allocate(this%col_value_NLC(2))
     allocate(this%col_value_LC(1))
-    allocate(ic((n+1)/2))
-    allocate(ir((n+1)/2))
+    allocate(ic(max((n+1)/2,2)))
+    allocate(ir(max((n+1)/2,2)))
     if (col_acc.ge.2) allocate(this%col_index_full(nperm**2,(n+1)/2))
     if (col_acc.ge.2) allocate(this%row_index_full(0:nperm,(n+1)/2))
     if (col_acc.ge.1) allocate(this%col_index_NLC(nperm**2,2))
@@ -207,13 +207,9 @@ contains
     if (col_acc.ge.1) this%row_index_NLC(0,:)=0
     this%row_index_LC(0,:)=0
     do i=1,(n+1)/2
-       if (col_acc.ge.2) this%col_value_full(i)=3**(n-2*(i-1))
-       if (i.le.2 .and. col_acc.ge.1) this%col_value_NLC(i)=3**(n-2*(i-1))
+       if (col_acc.gt.2) this%col_value_full(i)=3**(n-2*(i-1))
+       if (col_acc.ge.1 .and. i.le.2) this%col_value_NLC(i)=3**(n-2*(i-1))
        if (i.le.1) this%col_value_LC(i)=3**(n-2*(i-1))
-    enddo
-    do i=1,n
-       iper(i)=i
-       jper(i)=i
     enddo
     ic=0
     ir=0
@@ -256,7 +252,7 @@ contains
        if (col_acc.ge.1) this%row_index_NLC(iperm,1:2)=ir(1:2)
        this%row_index_LC(iperm,1)=ir(1)
     enddo
-
+    
     ! remove the largest one.
     if (col_acc.ge.2) then
        imax=0
@@ -276,6 +272,152 @@ contains
     write (*,*) '... colour setup in',tAfter-tBefore,'seconds'
   end subroutine setup_colmap_cache
   
+  subroutine setup_colmap_cache_NLC(this,col_acc)
+    use color_algebra
+    implicit none
+    class(amplitude_cache) :: this
+    integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,val_sum,nperm,nw,Q1_start,Q1_end,Q2_start,Q2_end
+    integer,dimension(:),allocatable :: ic,ir,iper,jper
+    integer,dimension(0:611953-1) :: bucket_size
+    integer,dimension(1000,0:611953-1) :: bucket_val
+    real(kind=4) :: tBefore,tAfter
+
+    call cpu_time(tBefore)
+    write (*,'(a,i3,a)') ' Setting up colour factor (col_acc =',col_acc,')...'
+    n=this%next
+    allocate(iper(1:n))
+    allocate(jper(1:n))
+
+    nperm=factorial(n-1)
+    call fill_ibuck(1,1,.true.)
+    do iperm=1,nperm
+       if (iperm.le.nperm/2) then
+          nw=this%nw_start(this%next-1)-1+iperm
+          iper(1:n)=[this%wave_n(1:n-1,nw),n]
+       else
+          nw=this%nw_start(this%next-1)-1-nperm/2+iperm
+          iper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+       endif
+       call fill_ibuck(ibucket(n,iper),iperm,.false.)
+    enddo
+    
+    this%col_acc=col_acc
+    if (col_acc.ge.1) allocate(this%col_value_NLC(3))
+    allocate(this%col_value_LC(1))
+    allocate(ic(max((n+1)/2,2)))
+    allocate(ir(max((n+1)/2,2)))
+    if (col_acc.ge.1) allocate(this%col_index_NLC(nperm*500,2))
+    if (col_acc.ge.1) allocate(this%row_index_NLC(0:nperm,2))
+    allocate(this%col_index_LC(nperm,1))
+    allocate(this%row_index_LC(0:nperm,1))
+    if (col_acc.ge.1) this%row_index_NLC(0,:)=0
+    this%row_index_LC(0,:)=0
+    if (col_acc.ge.1) then ! NLC
+       this%col_value_LC(1)= 3**n
+       this%col_value_NLC(1)=3**n
+       this%col_value_NLC(2)=3**(n-2)
+    else ! LC
+       this%col_value_LC(1)=3**n
+    endif
+    ic=0
+    ir=0
+    do iperm=1,nperm
+       if (iperm.le.nperm/2) then
+          nw=this%nw_start(this%next-1)-1+iperm
+          iper(1:n)=[this%wave_n(1:n-1,nw),n]
+       else
+          nw=this%nw_start(this%next-1)-1-nperm/2+iperm
+          iper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+       endif
+       ! LC contribution:
+       i=1
+       ic(i)=ic(i)+1
+       ir(i)=ir(i)+1
+       if (col_acc.ge.1) this%col_index_NLC(ic(i),i)=iperm
+       this%col_index_LC(ic(i),i)=iperm
+       ! NLC contributions (make the block interchange and check if it is a
+       ! valid one): Tr[R.Q1.S.Q2.P]*Tr[R.Q2.S.Q1.P]
+       jperm=0
+       do Q1_start=1,n-2
+          do Q1_end=Q1_start,n-2
+             do Q2_start=Q1_end+1,n-1
+                do Q2_end=Q2_start,n-1
+                   jper(1:n)=[iper(1:Q1_start-1),iper(Q2_start:Q2_end),iper(Q1_end+1:Q2_start-1),&
+                              iper(Q1_start:Q1_end),iper(Q2_end+1:n)]
+                   call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
+                   if (col_fac.eq.0) cycle
+                   call find_jperm(n,jper,jperm)
+                   if (jperm.gt.iperm) cycle
+                   do i=1,2
+                      if (col_acc.ge.1) then
+                         if (this%col_value_NLC(i).eq.col_fac) exit
+                      elseif (col_acc.ge.0 .and. i.le.1) then
+                         if (this%col_value_LC(i).eq.col_fac) exit
+                      endif
+                   enddo
+                   if (col_acc.eq.0 .and. i.gt.1) cycle
+                   ic(i)=ic(i)+1
+                   ir(i)=ir(i)+1
+                   if (col_acc.ge.1.and.i.le.2) this%col_index_NLC(ic(i),i)=jperm
+                   if (i.le.1) this%col_index_LC(ic(i),i)=jperm
+                enddo
+             enddo
+          enddo
+       enddo
+       if (col_acc.ge.1) this%row_index_NLC(iperm,1:2)=ir(1:2)
+       this%row_index_LC(iperm,1)=ir(1)
+    enddo
+    call cpu_time(tAfter)
+    write (*,*) '... colour setup in',tAfter-tBefore,'seconds'
+  contains
+    subroutine find_jperm(n,jper,jperm)
+      implicit none
+      integer :: n,jperm,i,ib
+      integer,dimension(n) :: jper
+      ib=ibucket(n,jper)
+      do i=1,bucket_size(ib)
+         jperm=bucket_val(i,ib)
+         if (jperm.le.nperm/2) then
+            nw=this%nw_start(this%next-1)-1+jperm
+            if (all(jper(1:n-1).eq.this%wave_n(1:n-1,nw))) then
+               return
+            endif
+         else
+            nw=this%nw_start(this%next-1)-1+jperm-nperm/2
+            if (all(jper(1:n-1).eq.this%wave_n(n-1:1:-1,nw))) then
+               return
+            endif
+         endif
+      enddo
+    end subroutine find_jperm
+    subroutine fill_ibuck(ibuck,ival,reset)
+      implicit none
+      logical :: reset
+      integer :: ibuck,ival
+      if (reset) then
+         bucket_size(:)=0
+         return
+      endif
+      bucket_size(ibuck)=bucket_size(ibuck)+1
+      if (bucket_size(ibuck).gt.1000) then
+         write (*,*) 'array bucket_val() out of bounds',ibuck,bucket_size(ibuck)
+         stop 1
+      endif
+      bucket_val(bucket_size(ibuck),ibuck)=ival
+    end subroutine fill_ibuck
+    integer function ibucket(n,ip)
+      implicit none
+      integer :: i,n
+      integer,dimension(n) :: ip
+      integer(kind=8) :: isum1
+      isum1=0
+      do i=1,n-1
+         isum1=isum1+ip(i)*this%next**(i-1)
+      enddo
+      ibucket=mod(isum1,611953)
+    end function ibucket
+  end subroutine setup_colmap_cache_NLC
+  
   subroutine evaluate_cache(this,p,hel)
     implicit none
     class(amplitude_cache) :: this
@@ -287,8 +429,8 @@ contains
 
     if (.not.allocated(wf)) allocate(wf(1:4,0:this%nwave_tot))
     if (.not.allocated(pp)) allocate(pp(0:3,this%nwave_tot))
-    if (.not.allocated(wfout_3gluon)) allocate(wfout_3gluon(1:4,maxval(this%n3gluon(1:this%next-1))))
-    if (.not.allocated(wfout_4gluon)) allocate(wfout_4gluon(1:4,maxval(this%n4gluon(1:this%next-1))))
+    if (.not.allocated(wfout_3gluon)) allocate(wfout_3gluon(1:4,maxval(this%n3gluon(2:this%next-1))))
+    if (.not.allocated(wfout_4gluon)) allocate(wfout_4gluon(1:4,maxval(this%n4gluon(3:this%next-1))))
     
     do isize=1,this%next-1
        if (isize.eq.1) then
@@ -313,12 +455,14 @@ contains
                       wfout_3gluon(1,n3))
        enddo
        ! compute the 4-gluon interactions
-       do n4=1,this%n4gluon(isize)
-          call gluon4(wf(1,this%wave_4gluon(1,n4,isize)), &
-               wf(1,this%wave_4gluon(2,n4,isize)), &
-               wf(1,this%wave_4gluon(3,n4,isize)), &
-               wfout_4gluon(1,n4))
-       enddo
+       if (isize.ge.3) then
+          do n4=1,this%n4gluon(isize)
+             call gluon4(wf(1,this%wave_4gluon(1,n4,isize)), &
+                  wf(1,this%wave_4gluon(2,n4,isize)), &
+                  wf(1,this%wave_4gluon(3,n4,isize)), &
+                  wfout_4gluon(1,n4))
+          enddo
+       endif
        do nw=this%nw_start(isize),this%nw_end(isize)
           ! compute the combined wave-functions
           wf(1:4,nw)=0d0
@@ -828,9 +972,6 @@ contains
     integer,dimension(n) :: iper,jper
     logical :: color_flow
     real(kind=16) :: col_factor
-
-    ! include only leading and dominant subleading colour
-    ! terms (to be set by col_acc in the init subroutine):
     if (color_flow) then
        call color_flow_factor(n,jper,iper,col_fac)
        if (col_fac.ge.n-2*col_acc) then
@@ -1163,7 +1304,7 @@ contains
     class(amplitude_cache) :: this
     integer :: nwave,isize,nw,isplit,isplit1,isplit2,n1,n2,n3,iw1,iw2,iw3,i,next,nwave_tot
     integer,dimension(0:611953-1) :: bucket_size2,bucket_size3
-    integer,dimension(256,0:611953-1) :: bucket_val2,bucket_val3
+    integer,dimension(1000,0:611953-1) :: bucket_val2,bucket_val3
     integer,dimension(:,:,:),allocatable :: n_3gluon,n_4gluon
     real(kind=4) :: tBefore,tAfter
     call cpu_time(tBefore)
@@ -1308,7 +1449,7 @@ contains
          return
       endif
       bucket_size2(ibuck)=bucket_size2(ibuck)+1
-      if (bucket_size2(ibuck).gt.256) then
+      if (bucket_size2(ibuck).gt.1000) then
          write (*,*) 'array bucket_val() out of bounds',ibuck,bucket_size2(ibuck)
          stop 1
       endif
@@ -1323,7 +1464,7 @@ contains
          return
       endif
       bucket_size3(ibuck)=bucket_size3(ibuck)+1
-      if (bucket_size3(ibuck).gt.256) then
+      if (bucket_size3(ibuck).gt.1000) then
          write (*,*) 'array bucket_val() out of bounds',ibuck,bucket_size3(ibuck)
          stop 1
       endif

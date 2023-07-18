@@ -1,5 +1,5 @@
 
-! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 matrix_reweight.f03
+! gfortran -mcmodel=large -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 matrix_reweight.f03
 
 module common
   use amplitude_mod
@@ -118,8 +118,12 @@ program matrix_reweight
      call amplitudes_full%init_onlycol_CSR(next,col_acc,sum_hel)
   elseif(reweight_mode.eq.16) then
      call amplitudes_cache%setup_imap_cache(next)
-     col_acc=20
-     call amplitudes_cache%setup_colmap_cache(col_acc)
+     col_acc=1
+     if (col_acc.le.1) then
+        call amplitudes_cache%setup_colmap_cache_NLC(col_acc)
+     else
+        call amplitudes_cache%setup_colmap_cache(col_acc)
+     endif
   endif
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
