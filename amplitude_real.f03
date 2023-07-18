@@ -412,9 +412,9 @@ contains
       integer(kind=8) :: isum1
       isum1=0
       do i=1,n-1
-         isum1=isum1+ip(i)*this%next**(i-1)
+         isum1=isum1+int(ip(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
       enddo
-      ibucket=mod(isum1,611953)
+      ibucket=int(mod(isum1,611953),kind=4)
     end function ibucket
   end subroutine setup_colmap_cache_NLC
   
