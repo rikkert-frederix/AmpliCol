@@ -1478,13 +1478,13 @@ contains
       integer(kind=8),dimension(2) :: isum1,isum2
       isum1(1:2)=0
       do i=1,n1
-         isum1(1)=isum1(1)+ip1(i)*this%next**(i-1)
-         isum1(2)=isum1(2)+ip1(n1+1-i)*this%next**(i-1)
+         isum1(1)=isum1(1)+int(ip1(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
+         isum1(2)=isum1(2)+int(ip1(n1+1-i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
       enddo
       isum2(1:2)=0
       do i=1,n2
-         isum2(1)=isum2(1)+ip2(i)*this%next**(i-1)
-         isum2(2)=isum2(2)+ip2(n2+1-i)*this%next**(i-1)
+         isum2(1)=isum2(1)+int(ip2(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
+         isum2(2)=isum2(2)+int(ip2(n2+1-i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
       enddo
       ibuck2=mod(minval(isum1(1:2))+minval(isum2(1:2)),611953)
     end function ibuck2
@@ -1497,18 +1497,18 @@ contains
       integer(kind=8),dimension(2) :: isum1,isum2,isum3
       isum1(1:2)=0
       do i=1,n1
-         isum1(1)=isum1(1)+ip1(i)*this%next**(i-1)
-         isum1(2)=isum1(2)+ip1(n1+1-i)*this%next**(i-1)
+         isum1(1)=isum1(1)+int(ip1(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
+         isum1(2)=isum1(2)+int(ip1(n1+1-i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
       enddo
       isum2(1:2)=0
       do i=1,n2
-         isum2(1)=isum2(1)+ip2(i)*this%next**(i-1)
-         isum2(2)=isum2(2)+ip2(n2+1-i)*this%next**(i-1)
+         isum2(1)=isum2(1)+int(ip2(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
+         isum2(2)=isum2(2)+int(ip2(n2+1-i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
       enddo
       isum3(1:2)=0
       do i=1,n3
-         isum3(1)=isum3(1)+ip3(i)*this%next**(i-1)
-         isum3(2)=isum3(2)+ip3(n3+1-i)*this%next**(i-1)
+         isum3(1)=isum3(1)+int(ip3(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
+         isum3(2)=isum3(2)+int(ip3(n3+1-i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
       enddo
       ibuck3=mod(minval(isum1(1:2))+minval(isum3(1:2))+minval(isum2(1:2))*305551,611953)
     end function ibuck3
