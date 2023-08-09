@@ -450,17 +450,17 @@ contains
        endif
        ! compute the 3-gluon interactions
        do n3=1,this%n3gluon(isize)
-          call gluon3(wf(1,this%wave_3gluon(1,n3,isize)),pp(0,this%wave_3gluon(1,n3,isize)), &
-                      wf(1,this%wave_3gluon(2,n3,isize)),pp(0,this%wave_3gluon(2,n3,isize)), &
-                      wfout_3gluon(1,n3))
+          call ThreeGluon(wf(1,this%wave_3gluon(1,n3,isize)),pp(0,this%wave_3gluon(1,n3,isize)), &
+                          wf(1,this%wave_3gluon(2,n3,isize)),pp(0,this%wave_3gluon(2,n3,isize)), &
+                          wfout_3gluon(1,n3))
        enddo
        ! compute the 4-gluon interactions
        if (isize.ge.3) then
           do n4=1,this%n4gluon(isize)
-             call gluon4(wf(1,this%wave_4gluon(1,n4,isize)), &
-                  wf(1,this%wave_4gluon(2,n4,isize)), &
-                  wf(1,this%wave_4gluon(3,n4,isize)), &
-                  wfout_4gluon(1,n4))
+             call FourGluon(wf(1,this%wave_4gluon(1,n4,isize)), &
+                            wf(1,this%wave_4gluon(2,n4,isize)), &
+                            wf(1,this%wave_4gluon(3,n4,isize)), &
+                            wfout_4gluon(1,n4))
           enddo
        endif
        do nw=this%nw_start(isize),this%nw_end(isize)
@@ -593,9 +593,9 @@ contains
              ! double-loop over the helicities of the daughter wavefunctions.
              do ih2=1,this%nhel(this%imap2(2,isplit,i))
                 do ih1=1,this%nhel(this%imap2(1,isplit,i))
-                   call gluon3(wf(1,ih1,this%imap2(1,isplit,i)),pp(0,this%imap2(1,isplit,i)), &
-                               wf(1,ih2,this%imap2(2,isplit,i)),pp(0,this%imap2(2,isplit,i)), &
-                               wfout)
+                   call ThreeGluon(wf(1,ih1,this%imap2(1,isplit,i)),pp(0,this%imap2(1,isplit,i)), &
+                                   wf(1,ih2,this%imap2(2,isplit,i)),pp(0,this%imap2(2,isplit,i)), &
+                                   wfout)
                    ! helicity label:
                    icount=(ih2-1)*this%nhel(this%imap2(1,isplit,i))+ih1
                    ! add the computed wavefunction to the current wave function
@@ -612,10 +612,10 @@ contains
                                   this%nhel(this%imap3(1,isplit,i))+ &
                           (ih2-1)*this%nhel(this%imap3(1,isplit,i))
                    do ih1=1,this%nhel(this%imap3(1,isplit,i))
-                      call gluon4(wf(1,ih1,this%imap3(1,isplit,i)), &
-                                  wf(1,ih2,this%imap3(2,isplit,i)), &
-                                  wf(1,ih3,this%imap3(3,isplit,i)), &
-                                  wfout)
+                      call FourGluon(wf(1,ih1,this%imap3(1,isplit,i)), &
+                                     wf(1,ih2,this%imap3(2,isplit,i)), &
+                                     wf(1,ih3,this%imap3(3,isplit,i)), &
+                                     wfout)
                       ! helicity label:
                       ! add the computed wavefunction to the current wave function
                       wf(1:4,icount+ih1,i)=wf(1:4,icount+ih1,i)+wfout(1:4)
@@ -694,7 +694,7 @@ contains
     endif
   end subroutine v_ext1
   
-  subroutine gluon3(wf1,pwf1,wf2,pwf2,wf)
+  subroutine ThreeGluon(wf1,pwf1,wf2,pwf2,wf)
     ! Colour-ordered three-gluon interaction
     implicit none
     real(kind=8),dimension(4) :: wf1,wf2,wf
@@ -705,9 +705,9 @@ contains
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
     wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
-  end subroutine gluon3
+  end subroutine ThreeGluon
 
-  subroutine gluon4(wf1,wf2,wf3,wf)
+  subroutine FourGluon(wf1,wf2,wf3,wf)
     ! Colour-ordered four-gluon interaction
     implicit none
     real(kind=8),dimension(4) :: wf1,wf2,wf3,wf
@@ -717,8 +717,43 @@ contains
     TMP2 = (wf1(1)*wf3(1)-wf1(2)*wf3(2)-wf1(3)*wf3(3)-wf1(4)*wf3(4))
     TMP3 = (wf2(1)*wf3(1)-wf2(2)*wf3(2)-wf2(3)*wf3(3)-wf2(4)*wf3(4))
     wf(1:4) = prefact*(2d0*wf2(1:4)*TMP2-wf1(1:4)*TMP3-wf3(1:4)*TMP1)
-  end subroutine gluon4
-  
+  end subroutine FourGluon
+
+  subroutine TwoGluontoTensor(wfg1,wfg2,wfT)
+    implicit none
+    real(kind=8),dimension(4) :: wfg1,wfg2
+    real(kind=8),dimension(4,4) :: wfT
+    real(kind=8),parameter :: prefact=1d0/(sqrt(2d0))
+    integer :: i
+    do i=1,4
+       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))*prefact
+    enddo
+  end subroutine TwoGluontoTensor
+
+  subroutine TensorGluontoGluon(wfT1,wfg2,wfg)
+    implicit none
+    real(kind=8),dimension(4) :: wfg2,wfg
+    real(kind=8),dimension(4,4) :: wfT1
+    real(kind=8),parameter :: prefact=1d0/(sqrt(2d0))
+    integer :: i
+    do i=1,4
+       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
+               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*prefact
+    enddo
+  end subroutine TensorGluontoGluon
+
+  subroutine GluonTensortoGluon(wfg1,wfT2,wfg)
+    implicit none 
+    real(kind=8),dimension(4) :: wfg1,wfg
+    real(kind=8),dimension(4,4) :: wfT2
+    real(kind=8),parameter :: prefact=1d0/(sqrt(2d0))
+    integer :: i
+    do i=1,4
+       wfg(i)=((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)wfT2(4,i))- &
+               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)wfT2(i,4)))*prefact
+    enddo
+  end subroutine GluonTensortoGluon
+
   subroutine setup_colmap_CSR(this,n,order)
     use color_algebra
     implicit none
@@ -1129,12 +1164,12 @@ contains
              if (check_reuse(this,icol,ilength,i)) cycle
              this%wf(1:4,ilength,i)=0d0
              do ipart=1,ilength-1
-                call gluon3(this%wf(1,ipart,i),this%pp(0,ipart,i), &
-                     this%wf(1,ilength-ipart,i+ipart),this%pp(0,ilength-ipart,i+ipart),wfout)
+                call ThreeGluon(this%wf(1,ipart,i),this%pp(0,ipart,i), &
+                                this%wf(1,ilength-ipart,i+ipart),this%pp(0,ilength-ipart,i+ipart),wfout)
                 this%wf(1:4,ilength,i)=this%wf(1:4,ilength,i)+wfout(1:4)
                 do ipart2=1,ilength-ipart-1
-                   call gluon4(this%wf(1,ipart,i),this%wf(1,ipart2,i+ipart), &
-                        this%wf(1,ilength-ipart-ipart2,i+ipart+ipart2),wfout)
+                   call FourGluon(this%wf(1,ipart,i),this%wf(1,ipart2,i+ipart), &
+                                  this%wf(1,ilength-ipart-ipart2,i+ipart+ipart2),wfout)
                    this%wf(1:4,ilength,i)=this%wf(1:4,ilength,i)+wfout(1:4)
                 enddo
                 if (ipart.eq.1) then
@@ -1203,12 +1238,12 @@ contains
           do i=1,n-ilength
              wf(1:4,ilength,i)=0d0
              do ipart=1,ilength-1
-                call gluon3(wf(1,ipart,i),pp(0,ipart,i), &
-                     wf(1,ilength-ipart,i+ipart),pp(0,ilength-ipart,i+ipart),wfout)
+                call ThreeGluon(wf(1,ipart,i),pp(0,ipart,i), &
+                                wf(1,ilength-ipart,i+ipart),pp(0,ilength-ipart,i+ipart),wfout)
                 wf(1:4,ilength,i)=wf(1:4,ilength,i)+wfout(1:4)
                 do ipart2=1,ilength-ipart-1
-                   call gluon4(wf(1,ipart,i),wf(1,ipart2,i+ipart), &
-                        wf(1,ilength-ipart-ipart2,i+ipart+ipart2),wfout)
+                   call FourGluon(wf(1,ipart,i),wf(1,ipart2,i+ipart), &
+                                  wf(1,ilength-ipart-ipart2,i+ipart+ipart2),wfout)
                    wf(1:4,ilength,i)=wf(1:4,ilength,i)+wfout(1:4)
                 enddo
                 if (ipart.eq.1) then
@@ -1281,7 +1316,7 @@ contains
     do i=1,len-1
        call eval_order(i,order(1:i),wf1,pp1)
        call eval_order(len-i,order(i+1:len),wf2,pp2)
-       call gluon3(wf1,pp1,wf2,pp2,wfout)
+       call ThreeGluon(wf1,pp1,wf2,pp2,wfout)
        wf(1:4)=wf(1:4)+wfout(1:4)
        if (i.eq.1) then
           pp(0:3)=pp1(0:3)+pp2(0:3)
@@ -1289,7 +1324,7 @@ contains
        do j=i+1,len-1
           call eval_order(j-i,order(i+1:j),wf2,pp2)
           call eval_order(len-j,order(j+1:len),wf3,pp3)
-          call gluon4(wf1,wf2,wf3,wfout)
+          call FourGluon(wf1,wf2,wf3,wfout)
           wf(1:4)=wf(1:4)+wfout(1:4)
        enddo
     enddo
