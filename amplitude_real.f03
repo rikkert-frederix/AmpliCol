@@ -1796,7 +1796,7 @@ contains
     end function valid_3gluon_comb
     logical function valid_4gluon_comb(n1,n2,n3,ip1,ip2,ip3)
       implicit none
-      integer :: i,n1,n2,n3,maxi,mini,maxi_loc,mini_loc
+      integer :: i,n1,n2,n3
       integer,dimension(n1) :: ip1
       integer,dimension(n2) :: ip2
       integer,dimension(n3) :: ip3
@@ -1819,8 +1819,6 @@ contains
          endif
       enddo
       if (n1.eq.n3) then
-         maxi=0
-         mini=100
          if (maxval(ip1(1:n1)).gt.maxval(ip3(1:n3))) then
             valid_4gluon_comb=.false.
             return
