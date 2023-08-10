@@ -527,21 +527,21 @@ contains
     integer,dimension(this%next) :: hel
     real(kind=8),dimension(0:3,this%next) :: p
     integer :: isize,ic,ihel,ivert,iperm,ip
-    real(kind=8),dimension(:,:),allocatable :: cur_gluon,pp,cur_gluon_out
-    real(kind=8),dimension(:,:,:),allocatable :: cur_tensor,cur_tensor_out
+    real(kind=8),dimension(:,:),allocatable :: current4,pp,current4_out,current6,current6_out
+!!$    real(kind=8),dimension(:,:,:),allocatable :: 
     real(kind=8) :: propagator
 
-    if (.not.allocated(cur_gluon)) allocate(cur_gluon(1:4,0:this%n_cur_end(this%next-1)))
-    if (.not.allocated(cur_tensor)) allocate(cur_tensor(1:4,1:4,1:this%n_cur_end(this%next-1)))
+    if (.not.allocated(current4)) allocate(current4(1:4,0:this%n_cur_end(this%next-1)))
+    if (.not.allocated(current6)) allocate(current6(1:6,1:this%n_cur_end(this%next-1)))
     if (.not.allocated(pp)) allocate(pp(0:3,this%n_cur_end(this%next-1)))
 
-    if (.not.allocated(cur_gluon_out)) allocate(cur_gluon_out(1:4,1:this%n_vert_end(this%next-1)))
-    if (.not.allocated(cur_tensor_out)) allocate(cur_tensor_out(1:4,1:4,1:this%n_vert_end(this%next-1)))
+    if (.not.allocated(current4_out)) allocate(current4_out(1:4,1:this%n_vert_end(this%next-1)))
+    if (.not.allocated(current6_out)) allocate(current6_out(1:6,1:this%n_vert_end(this%next-1)))
 
     do isize=1,this%next-1
        if (isize.eq.1) then
           ! this final wave function
-          call v_ext(p(0:3,this%next),hel(this%next),1,cur_gluon(1,0))
+          call v_ext(p(0:3,this%next),hel(this%next),1,current4(1,0))
           ! fill the other external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)
              if (this%cur_type(ic).ne.0) then
@@ -554,28 +554,28 @@ contains
                 pp(0:3,ic)=p(0:3,ic)
              endif
              ihel=hel(ic)
-             call v_ext(pp(0,ic),ihel,1,cur_gluon(1,ic))
+             call v_ext(pp(0,ic),ihel,1,current4(1,ic))
           enddo
           cycle
        endif
        ! compute the interactions
        do ivert=this%n_vert_start(isize),this%n_vert_end(isize)
           if (this%vert_type(ivert).eq.0) then
-             call threeGluon(cur_gluon(1:4,this%vert_cur(1,ivert)),pp(0:3,this%vert_cur(1,ivert)),&
-                             cur_gluon(1:4,this%vert_cur(2,ivert)),pp(0:3,this%vert_cur(2,ivert)),&
-                             cur_gluon_out(1:4,ivert))
+             call threeGluon(current4(1:4,this%vert_cur(1,ivert)),pp(0:3,this%vert_cur(1,ivert)),&
+                             current4(1:4,this%vert_cur(2,ivert)),pp(0:3,this%vert_cur(2,ivert)),&
+                             current4_out(1:4,ivert))
           elseif(this%vert_type(ivert).eq.1) then
-             call TwoGluonToTensor(cur_gluon(1:4,this%vert_cur(1,ivert)),&
-                                   cur_gluon(1:4,this%vert_cur(2,ivert)),&
-                                   cur_tensor_out(1:4,1:4,ivert))
+             call TwoGluonToTensor(current4(1:4,this%vert_cur(1,ivert)),&
+                                   current4(1:4,this%vert_cur(2,ivert)),&
+                                   current6_out(1:6,ivert))
           elseif(this%vert_type(ivert).eq.2) then
-             call TensorGluontoGluon(cur_tensor(1:4,1:4,this%vert_cur(1,ivert)),&
-                                     cur_gluon(1:4,this%vert_cur(2,ivert)),&
-                                     cur_gluon_out(1:4,ivert))
+             call TensorGluontoGluon(current6(1:6,this%vert_cur(1,ivert)),&
+                                     current4(1:4,this%vert_cur(2,ivert)),&
+                                     current4_out(1:4,ivert))
           elseif(this%vert_type(ivert).eq.3) then
-             call GluonTensortoGluon(cur_gluon(1:4,this%vert_cur(1,ivert)),&
-                                     cur_tensor(1:4,1:4,this%vert_cur(2,ivert)),&
-                                     cur_gluon_out(1:4,ivert))
+             call GluonTensortoGluon(current4(1:4,this%vert_cur(1,ivert)),&
+                                     current6(1:6,this%vert_cur(2,ivert)),&
+                                     current4_out(1:4,ivert))
           else
              write (*,*) 'Unknown vertex type',ivert,this%vert_type(ivert)
              stop 1
@@ -586,19 +586,19 @@ contains
           pp(0:3,ic)=pp(0:3,this%vert_cur(1,this%cur_vertices(1,ic)))+ &
                      pp(0:3,this%vert_cur(2,this%cur_vertices(1,ic)))
           if (this%cur_type(ic).eq.0) then ! gluon current
-             cur_gluon(1:4,ic)=0d0
+             current4(1:4,ic)=0d0
              do ivert=1,this%cur_n_vert(ic)
-                cur_gluon(1:4,ic)=cur_gluon(1:4,ic)+cur_gluon_out(1:4,this%cur_vertices(ivert,ic))
+                current4(1:4,ic)=current4(1:4,ic)+current4_out(1:4,this%cur_vertices(ivert,ic))
              enddo
              ! include the gluon propagator
              if (isize.ne.this%next-1)  then
                 propagator=1d0/(pp(0,ic)**2-pp(1,ic)**2-pp(2,ic)**2-pp(3,ic)**2)
-                cur_gluon(1:4,ic)=cur_gluon(1:4,ic)*propagator
+                current4(1:4,ic)=current4(1:4,ic)*propagator
              endif
           elseif (this%cur_type(ic).eq.-1) then ! tensor current
-             cur_tensor(1:4,1:4,ic)=0d0
+             current6(1:6,ic)=0d0
              do ivert=1,this%cur_n_vert(ic)
-                cur_tensor(1:4,1:4,ic)=cur_tensor(1:4,1:4,ic)+cur_tensor_out(1:4,1:4,this%cur_vertices(ivert,ic))
+                current6(1:6,ic)=current6(1:6,ic)+current6_out(1:6,this%cur_vertices(ivert,ic))
              enddo
           else
              write (*,*) 'Unknown current type',ic,this%cur_type(ic)
@@ -615,10 +615,10 @@ contains
     do iperm=1,this%nperm    ! permutations
        ip=iperm+this%n_cur_start(this%next-1)-1
        this%amps(iperm)=this%amps(iperm)+ &
-            (cur_gluon(1,ip)*cur_gluon(1,0)+ &
-             cur_gluon(2,ip)*cur_gluon(2,0)+ &
-             cur_gluon(3,ip)*cur_gluon(3,0)+ &
-             cur_gluon(4,ip)*cur_gluon(4,0))
+            (current4(1,ip)*current4(1,0)+ &
+             current4(2,ip)*current4(2,0)+ &
+             current4(3,ip)*current4(3,0)+ &
+             current4(4,ip)*current4(4,0))
     enddo
 
     write (*,*) '3vert',this%amps
@@ -831,39 +831,54 @@ contains
   end subroutine FourGluon
 
   subroutine TwoGluontoTensor(wfg1,wfg2,wfT)
+    ! This vertex includes the all factors such that the tensor "propagator"
+    ! is simply the identity
     implicit none
     real(kind=8),dimension(4) :: wfg1,wfg2
-    real(kind=8),dimension(4,4) :: wfT
-    real(kind=8),parameter :: prefact=0.5d0
+    real(kind=8),dimension(6) :: wfT
     integer :: i
-    do i=1,4
-       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))*prefact
-    enddo
-    
+    ! Since it is an anti-symmetric 4x4 tensor, take only the upper-right triangle.
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))
+!!$    do i=1,4
+!!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))*0.5d0
+!!$    enddo
   end subroutine TwoGluontoTensor
 
   subroutine TensorGluontoGluon(wfT1,wfg2,wfg)
     implicit none
     real(kind=8),dimension(4) :: wfg2,wfg
-    real(kind=8),dimension(4,4) :: wfT1
+    real(kind=8),dimension(6) :: wfT1
     real(kind=8),parameter :: prefact=0.5d0
     integer :: i
-    do i=1,4
-       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
-               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*prefact
-    enddo
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+!!$    do i=1,4
+!!$       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
+!!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.5d0
+!!$    enddo
   end subroutine TensorGluontoGluon
 
   subroutine GluonTensortoGluon(wfg1,wfT2,wfg)
     implicit none 
     real(kind=8),dimension(4) :: wfg1,wfg
-    real(kind=8),dimension(4,4) :: wfT2
+    real(kind=8),dimension(6) :: wfT2
     real(kind=8),parameter :: prefact=0.5d0
     integer :: i
-    do i=1,4
-       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
-               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*prefact
-    enddo
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+!!$    do i=1,4
+!!$       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
+!!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.5d0
+!!$    enddo
   end subroutine GluonTensortoGluon
 
   subroutine setup_colmap_CSR(this,n,order)
