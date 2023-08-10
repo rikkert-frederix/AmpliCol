@@ -29,6 +29,7 @@ module amplitude_mod
 
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,cur_type,cur_n_vert,vert_type,n_vert_start,n_vert_end
      integer,dimension(:,:),allocatable :: vert_cur,cur_vertices
+     logical,dimension(:,:),allocatable :: cur_vert_sign
 
      
    contains
@@ -517,7 +518,7 @@ contains
        endif
     enddo
 
-    write (*,*) 'cache',this%amps
+!!$    write (*,*) 'cache',this%amps(1:this%nperm)
     
   end subroutine evaluate_cache
 
@@ -588,7 +589,11 @@ contains
           if (this%cur_type(ic).eq.0) then ! gluon current
              current4(1:4,ic)=0d0
              do ivert=1,this%cur_n_vert(ic)
-                current4(1:4,ic)=current4(1:4,ic)+current4_out(1:4,this%cur_vertices(ivert,ic))
+                if (.not.this%cur_vert_sign(ivert,ic)) then
+                   current4(1:4,ic)=current4(1:4,ic)+current4_out(1:4,this%cur_vertices(ivert,ic))
+                else
+                   current4(1:4,ic)=current4(1:4,ic)-current4_out(1:4,this%cur_vertices(ivert,ic))
+                endif
              enddo
              ! include the gluon propagator
              if (isize.ne.this%next-1)  then
@@ -598,7 +603,11 @@ contains
           elseif (this%cur_type(ic).eq.-1) then ! tensor current
              current6(1:6,ic)=0d0
              do ivert=1,this%cur_n_vert(ic)
-                current6(1:6,ic)=current6(1:6,ic)+current6_out(1:6,this%cur_vertices(ivert,ic))
+                if (.not.this%cur_vert_sign(ivert,ic)) then
+                   current6(1:6,ic)=current6(1:6,ic)+current6_out(1:6,this%cur_vertices(ivert,ic))
+                else
+                   current6(1:6,ic)=current6(1:6,ic)-current6_out(1:6,this%cur_vertices(ivert,ic))
+                endif
              enddo
           else
              write (*,*) 'Unknown current type',ic,this%cur_type(ic)
@@ -621,7 +630,7 @@ contains
              current4(4,ip)*current4(4,0))
     enddo
 
-    write (*,*) '3vert',this%amps
+!!$    write (*,*) '3vert',this%amps(1:this%nperm)
 
   end subroutine evaluate_3vert
 
@@ -1479,6 +1488,7 @@ contains
     allocate(this%vert_type(max_vert))
     allocate(this%vert_cur(2,max_vert))
     allocate(this%cur_vertices(2*next,max_cur))
+    allocate(this%cur_vert_sign(2*next,max_cur))
 
     n_cur=0  ! number of currents
     n_vert=0 ! number of vertices
@@ -1511,10 +1521,14 @@ contains
     subroutine add_if_allowed_threevertex()
       implicit none
       integer :: i
+      ! only consider one ordering; the other will be obtained from symmetry
+      if (maxval(cur_part(1:n1,ic1)).gt.maxval(cur_part(1:n2,ic2))) return
       ! check that all particles are different in the two currents
       do i=1,n1
          if (any(cur_part(i,ic1).eq.cur_part(1:n2,ic2))) return
       enddo
+!!$      write (*,*) cur_part(1:n1,ic1),';',cur_part(1:n2,ic2)
+      
       ! check that types form a valid vertex. If so, add it to the list.
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
          ! add a gluon-gluon to gluon vertex
@@ -1523,15 +1537,14 @@ contains
          this%vert_cur(1,n_vert)=ic1
          this%vert_cur(2,n_vert)=ic2
 !!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
-         call add_to_currents()
+         call add_all_to_currents()
          if (isize.ne.next-1) then
             ! add a gluon-gluon to tensor vertex
             n_vert=n_vert+1
             this%vert_type(n_vert)=1
             this%vert_cur(1,n_vert)=ic1
             this%vert_cur(2,n_vert)=ic2
-!!$            write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
-            call add_to_currents()
+            call add_all_to_currents()
          endif
       elseif (this%cur_type(ic1).eq.-1 .and. this%cur_type(ic2).eq.0) then
          ! add a tensor-gluon to gluon vertex
@@ -1540,7 +1553,7 @@ contains
          this%vert_cur(1,n_vert)=ic1
          this%vert_cur(2,n_vert)=ic2
 !!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
-         call add_to_currents()
+         call add_all_to_currents()
       elseif (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.-1) then
          ! add a gluon-tensor to gluon vertex
          n_vert=n_vert+1
@@ -1548,12 +1561,66 @@ contains
          this%vert_cur(1,n_vert)=ic1
          this%vert_cur(2,n_vert)=ic2
 !!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
-         call add_to_currents()
+         call add_all_to_currents()
       endif
     end subroutine add_if_allowed_threevertex
-    subroutine add_to_currents()
+    subroutine add_all_to_currents()
       implicit none
+      logical :: vertex_sign
+      integer,dimension(isize,8) :: ip
+      integer :: i
+      ! 8 possible permutations
+      ip(1:isize,1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2)]
+      ip(1:isize,2)=[cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
+      ip(1:isize,3)=[cur_part(n1:1:-1,ic1),cur_part(1:n2   ,ic2)]
+      ip(1:isize,4)=[cur_part(1:n2   ,ic2),cur_part(n1:1:-1,ic1)]
+      ip(1:isize,5)=[cur_part(1:n1   ,ic1),cur_part(n2:1:-1,ic2)]
+      ip(1:isize,6)=[cur_part(n2:1:-1,ic2),cur_part(1:n1   ,ic1)]
+      ip(1:isize,7)=[cur_part(n1:1:-1,ic1),cur_part(n2:1:-1,ic2)]
+      ip(1:isize,8)=[cur_part(n2:1:-1,ic2),cur_part(n1:1:-1,ic1)]
+      do i=1,8
+         if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
+         if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
+         if (valid_current_order(ip(1:isize,i))) then
+            if (i.eq.1 .or. &
+                 (i.eq.3 .and. mod(n1,2).eq.1)    .or. (i.eq.4 .and. mod(n1,2).eq.0) .or. &
+                 (i.eq.5 .and. mod(n2,2).eq.1)    .or. (i.eq.6 .and. mod(n2,2).eq.0) .or. &
+                 (i.eq.7 .and. mod(isize,2).eq.0) .or. (i.eq.8 .and. mod(isize,2).eq.1)) then
+               vertex_sign=.false. ! no extra sign needed
+            else
+               vertex_sign=.true.  ! need to include a minus sign
+            endif
+            call add_one_to_currents(vertex_sign,ip(1:isize,i))
+         endif
+      enddo
+    end subroutine add_all_to_currents
+    logical function valid_current_order(ip)
+      implicit none
+      integer :: i,maxi,mini,min_loc,max_loc
+      integer,dimension(isize) :: ip
+      maxi=0
+      mini=100
+      do i=1,isize
+         if (ip(i).gt.maxi) then
+            maxi=ip(i)
+            max_loc=i
+         endif
+         if (ip(i).lt.mini) then
+            mini=ip(i)
+            min_loc=i
+         endif
+      enddo
+      if (min_loc.gt.max_loc) then
+         valid_current_order=.false.
+      else
+         valid_current_order=.true.
+      endif
+    end function valid_current_order
+    subroutine add_one_to_currents(vertex_sign,ip)
+      implicit none
+      logical :: vertex_sign
       integer :: ic
+      integer,dimension(isize) :: ip
       ! check if the current is already in the list
       do ic=this%n_cur_start(isize),n_cur
          ! check that the type is consistent
@@ -1561,9 +1628,10 @@ contains
               (this%cur_type(ic).eq.-1 .and. this%vert_type(n_vert).eq.1) &      ! tensor current
               ) then
             ! check that the particles are consistent
-            if (all(cur_part(1:isize,ic).eq.[cur_part(1:n1,ic1),cur_part(1:n2,ic2)])) then
+            if (all(cur_part(1:isize,ic).eq.ip(1:isize))) then
                this%cur_n_vert(ic)=this%cur_n_vert(ic)+1
                this%cur_vertices(this%cur_n_vert(ic),ic)=n_vert
+               this%cur_vert_sign(this%cur_n_vert(ic),ic)=vertex_sign
 !!$               write (*,*) 'add to existing current',ic,':',this%cur_type(ic),':',cur_part(1:isize,ic),':', &
 !!$                    n_vert,':',this%vert_type(n_vert)
                return
@@ -1577,14 +1645,15 @@ contains
       else
          this%cur_type(n_cur)=-1 ! tensor current
       endif
-      cur_part(1:isize,n_cur)=[cur_part(1:n1,ic1),cur_part(1:n2,ic2)]
+      cur_part(1:isize,n_cur)=ip(1:isize)
       this%cur_n_vert(n_cur)=1 ! so far, one vertex
       this%cur_vertices(1,n_cur)=n_vert ! and this is the one
+      this%cur_vert_sign(1,n_cur)=vertex_sign
 
 !!$      write (*,*) 'adding new current     ',n_cur,':',this%cur_type(n_cur),':',cur_part(1:isize,n_cur),':',&
 !!$           this%cur_vertices(1,n_cur),':',this%vert_type(n_vert)
       
-    end subroutine add_to_currents
+    end subroutine add_one_to_currents
   end subroutine setup_imap_3vert
   
 
