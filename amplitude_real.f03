@@ -26,8 +26,13 @@ module amplitude_mod
      integer,dimension(:,:,:),allocatable :: wave_3gluon,wave_4gluon
      logical,dimension(:,:),allocatable :: wave_sign2,wave_sign3
      real(kind=8),dimension(:),allocatable :: amps
+
+     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,cur_type,cur_n_vert,vert_type,n_vert_start,n_vert_end
+     integer,dimension(:,:),allocatable :: vert_cur,cur_vertices
+
+     
    contains
-     procedure :: setup_imap_cache,setup_colmap_cache,evaluate_cache,setup_colmap_cache_NLC
+     procedure :: setup_imap_cache,setup_imap_3vert,setup_colmap_cache,evaluate_cache,setup_colmap_cache_NLC,evaluate_3vert
   end type amplitude_cache
   type col_amp
      real(kind=8),dimension(:,:,:),allocatable :: wf,pp
@@ -511,8 +516,114 @@ contains
           this%amps(iperm)=this%amps(ip)
        endif
     enddo
+
+    write (*,*) 'cache',this%amps
     
   end subroutine evaluate_cache
+
+  subroutine evaluate_3vert(this,p,hel)
+    implicit none
+    class(amplitude_cache) :: this
+    integer,dimension(this%next) :: hel
+    real(kind=8),dimension(0:3,this%next) :: p
+    integer :: isize,ic,ihel,ivert,iperm,ip
+    real(kind=8),dimension(:,:),allocatable :: cur_gluon,pp,cur_gluon_out
+    real(kind=8),dimension(:,:,:),allocatable :: cur_tensor,cur_tensor_out
+    real(kind=8) :: propagator
+
+    if (.not.allocated(cur_gluon)) allocate(cur_gluon(1:4,0:this%n_cur_end(this%next-1)))
+    if (.not.allocated(cur_tensor)) allocate(cur_tensor(1:4,1:4,1:this%n_cur_end(this%next-1)))
+    if (.not.allocated(pp)) allocate(pp(0:3,this%n_cur_end(this%next-1)))
+
+    if (.not.allocated(cur_gluon_out)) allocate(cur_gluon_out(1:4,1:this%n_vert_end(this%next-1)))
+    if (.not.allocated(cur_tensor_out)) allocate(cur_tensor_out(1:4,1:4,1:this%n_vert_end(this%next-1)))
+
+    do isize=1,this%next-1
+       if (isize.eq.1) then
+          ! this final wave function
+          call v_ext(p(0:3,this%next),hel(this%next),1,cur_gluon(1,0))
+          ! fill the other external wave_functions
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+             if (this%cur_type(ic).ne.0) then
+                write (*,*) 'external particle is not a gluon'
+                stop
+             endif
+             if (ic.le.2) then
+                pp(0:3,ic)=-p(0:3,ic) ! treat all momenta as outgoing
+             else
+                pp(0:3,ic)=p(0:3,ic)
+             endif
+             ihel=hel(ic)
+             call v_ext(pp(0,ic),ihel,1,cur_gluon(1,ic))
+          enddo
+          cycle
+       endif
+       ! compute the interactions
+       do ivert=this%n_vert_start(isize),this%n_vert_end(isize)
+          if (this%vert_type(ivert).eq.0) then
+             call threeGluon(cur_gluon(1:4,this%vert_cur(1,ivert)),pp(0:3,this%vert_cur(1,ivert)),&
+                             cur_gluon(1:4,this%vert_cur(2,ivert)),pp(0:3,this%vert_cur(2,ivert)),&
+                             cur_gluon_out(1:4,ivert))
+          elseif(this%vert_type(ivert).eq.1) then
+             call TwoGluonToTensor(cur_gluon(1:4,this%vert_cur(1,ivert)),&
+                                   cur_gluon(1:4,this%vert_cur(2,ivert)),&
+                                   cur_tensor_out(1:4,1:4,ivert))
+          elseif(this%vert_type(ivert).eq.2) then
+             call TensorGluontoGluon(cur_tensor(1:4,1:4,this%vert_cur(1,ivert)),&
+                                     cur_gluon(1:4,this%vert_cur(2,ivert)),&
+                                     cur_gluon_out(1:4,ivert))
+          elseif(this%vert_type(ivert).eq.3) then
+             call GluonTensortoGluon(cur_gluon(1:4,this%vert_cur(1,ivert)),&
+                                     cur_tensor(1:4,1:4,this%vert_cur(2,ivert)),&
+                                     cur_gluon_out(1:4,ivert))
+          else
+             write (*,*) 'Unknown vertex type',ivert,this%vert_type(ivert)
+             stop 1
+          endif
+       enddo
+       ! compute the currents by combining the interactions
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          pp(0:3,ic)=pp(0:3,this%vert_cur(1,this%cur_vertices(1,ic)))+ &
+                     pp(0:3,this%vert_cur(2,this%cur_vertices(1,ic)))
+          if (this%cur_type(ic).eq.0) then ! gluon current
+             cur_gluon(1:4,ic)=0d0
+             do ivert=1,this%cur_n_vert(ic)
+                cur_gluon(1:4,ic)=cur_gluon(1:4,ic)+cur_gluon_out(1:4,this%cur_vertices(ivert,ic))
+             enddo
+             ! include the gluon propagator
+             if (isize.ne.this%next-1)  then
+                propagator=1d0/(pp(0,ic)**2-pp(1,ic)**2-pp(2,ic)**2-pp(3,ic)**2)
+                cur_gluon(1:4,ic)=cur_gluon(1:4,ic)*propagator
+             endif
+          elseif (this%cur_type(ic).eq.-1) then ! tensor current
+             cur_tensor(1:4,1:4,ic)=0d0
+             do ivert=1,this%cur_n_vert(ic)
+                cur_tensor(1:4,1:4,ic)=cur_tensor(1:4,1:4,ic)+cur_tensor_out(1:4,1:4,this%cur_vertices(ivert,ic))
+             enddo
+          else
+             write (*,*) 'Unknown current type',ic,this%cur_type(ic)
+             stop 1
+          endif
+       enddo
+    enddo
+
+       
+    this%nperm=this%n_cur_end(this%next-1)-this%n_cur_start(this%next-1)+1
+    
+    if (.not.allocated(this%amps)) allocate(this%amps(1:this%nperm))
+    this%amps(1:this%nperm)=0d0
+    do iperm=1,this%nperm    ! permutations
+       ip=iperm+this%n_cur_start(this%next-1)-1
+       this%amps(iperm)=this%amps(iperm)+ &
+            (cur_gluon(1,ip)*cur_gluon(1,0)+ &
+             cur_gluon(2,ip)*cur_gluon(2,0)+ &
+             cur_gluon(3,ip)*cur_gluon(3,0)+ &
+             cur_gluon(4,ip)*cur_gluon(4,0))
+    enddo
+
+    write (*,*) '3vert',this%amps
+
+  end subroutine evaluate_3vert
 
   subroutine evaluate(this,p,hel)
     implicit none
@@ -723,18 +834,19 @@ contains
     implicit none
     real(kind=8),dimension(4) :: wfg1,wfg2
     real(kind=8),dimension(4,4) :: wfT
-    real(kind=8),parameter :: prefact=1d0/(sqrt(2d0))
+    real(kind=8),parameter :: prefact=0.5d0
     integer :: i
     do i=1,4
        wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))*prefact
     enddo
+    
   end subroutine TwoGluontoTensor
 
   subroutine TensorGluontoGluon(wfT1,wfg2,wfg)
     implicit none
     real(kind=8),dimension(4) :: wfg2,wfg
     real(kind=8),dimension(4,4) :: wfT1
-    real(kind=8),parameter :: prefact=1d0/(sqrt(2d0))
+    real(kind=8),parameter :: prefact=0.5d0
     integer :: i
     do i=1,4
        wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
@@ -746,11 +858,11 @@ contains
     implicit none 
     real(kind=8),dimension(4) :: wfg1,wfg
     real(kind=8),dimension(4,4) :: wfT2
-    real(kind=8),parameter :: prefact=1d0/(sqrt(2d0))
+    real(kind=8),parameter :: prefact=0.5d0
     integer :: i
     do i=1,4
-       wfg(i)=((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)wfT2(4,i))- &
-               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)wfT2(i,4)))*prefact
+       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
+               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*prefact
     enddo
   end subroutine GluonTensortoGluon
 
@@ -1333,6 +1445,133 @@ contains
        wf(1:4)=wf(1:4)*propagator
     endif
   end subroutine eval_order
+
+  subroutine setup_imap_3vert(this,next)
+    implicit none
+    class(amplitude_cache) :: this
+    integer :: n_cur,n_vert,nc,isize,next,n1,n2,isplit,ic1,ic2
+    integer,parameter :: max_cur=100000
+    integer,parameter :: max_vert=100000
+    integer,dimension(next-1,max_cur) :: cur_part
+    write (*,*) 'enertering setup_imap_3vert'
+    this%next=next
+    allocate(this%n_cur_start(next-1))
+    allocate(this%n_cur_end(next-1))
+    allocate(this%n_vert_start(next-1))
+    allocate(this%n_vert_end(next-1))
+    allocate(this%cur_type(max_cur))
+    allocate(this%cur_n_vert(max_cur))
+    allocate(this%vert_type(max_vert))
+    allocate(this%vert_cur(2,max_vert))
+    allocate(this%cur_vertices(2*next,max_cur))
+
+    n_cur=0  ! number of currents
+    n_vert=0 ! number of vertices
+    do isize=1,next-1
+       this%n_cur_start(isize)=n_cur+1
+       this%n_vert_start(isize)=n_vert+1
+       if (isize.eq.1) then
+          ! external particles
+          do nc=1,next-1
+             n_cur=n_cur+1
+             this%cur_type(n_cur)=0    ! gluon
+             cur_part(1,n_cur)=nc
+          enddo
+       else
+          do isplit=1,isize-1
+             n1=isplit
+             n2=isize-isplit
+             do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
+                do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
+                   call add_if_allowed_threevertex()
+                enddo
+             enddo
+          enddo
+       endif
+       this%n_cur_end(isize)=n_cur
+       this%n_vert_end(isize)=n_vert
+    enddo
+    write (*,*) 'total number of currents and vertices',n_cur,n_vert
+  contains
+    subroutine add_if_allowed_threevertex()
+      implicit none
+      integer :: i
+      ! check that all particles are different in the two currents
+      do i=1,n1
+         if (any(cur_part(i,ic1).eq.cur_part(1:n2,ic2))) return
+      enddo
+      ! check that types form a valid vertex. If so, add it to the list.
+      if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
+         ! add a gluon-gluon to gluon vertex
+         n_vert=n_vert+1
+         this%vert_type(n_vert)=0
+         this%vert_cur(1,n_vert)=ic1
+         this%vert_cur(2,n_vert)=ic2
+!!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+         call add_to_currents()
+         if (isize.ne.next-1) then
+            ! add a gluon-gluon to tensor vertex
+            n_vert=n_vert+1
+            this%vert_type(n_vert)=1
+            this%vert_cur(1,n_vert)=ic1
+            this%vert_cur(2,n_vert)=ic2
+!!$            write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+            call add_to_currents()
+         endif
+      elseif (this%cur_type(ic1).eq.-1 .and. this%cur_type(ic2).eq.0) then
+         ! add a tensor-gluon to gluon vertex
+         n_vert=n_vert+1
+         this%vert_type(n_vert)=2
+         this%vert_cur(1,n_vert)=ic1
+         this%vert_cur(2,n_vert)=ic2
+!!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+         call add_to_currents()
+      elseif (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.-1) then
+         ! add a gluon-tensor to gluon vertex
+         n_vert=n_vert+1
+         this%vert_type(n_vert)=3
+         this%vert_cur(1,n_vert)=ic1
+         this%vert_cur(2,n_vert)=ic2
+!!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+         call add_to_currents()
+      endif
+    end subroutine add_if_allowed_threevertex
+    subroutine add_to_currents()
+      implicit none
+      integer :: ic
+      ! check if the current is already in the list
+      do ic=this%n_cur_start(isize),n_cur
+         ! check that the type is consistent
+         if ( (this%cur_type(ic).eq.0  .and. this%vert_type(n_vert).ne.1) .or. & ! gluon current
+              (this%cur_type(ic).eq.-1 .and. this%vert_type(n_vert).eq.1) &      ! tensor current
+              ) then
+            ! check that the particles are consistent
+            if (all(cur_part(1:isize,ic).eq.[cur_part(1:n1,ic1),cur_part(1:n2,ic2)])) then
+               this%cur_n_vert(ic)=this%cur_n_vert(ic)+1
+               this%cur_vertices(this%cur_n_vert(ic),ic)=n_vert
+!!$               write (*,*) 'add to existing current',ic,':',this%cur_type(ic),':',cur_part(1:isize,ic),':', &
+!!$                    n_vert,':',this%vert_type(n_vert)
+               return
+            endif
+         endif
+      enddo
+      ! not already in the list. Add it to the list
+      n_cur=n_cur+1
+      if (this%vert_type(n_vert).ne.1) then
+         this%cur_type(n_cur)=0 ! gluon current
+      else
+         this%cur_type(n_cur)=-1 ! tensor current
+      endif
+      cur_part(1:isize,n_cur)=[cur_part(1:n1,ic1),cur_part(1:n2,ic2)]
+      this%cur_n_vert(n_cur)=1 ! so far, one vertex
+      this%cur_vertices(1,n_cur)=n_vert ! and this is the one
+
+!!$      write (*,*) 'adding new current     ',n_cur,':',this%cur_type(n_cur),':',cur_part(1:isize,n_cur),':',&
+!!$           this%cur_vertices(1,n_cur),':',this%vert_type(n_vert)
+      
+    end subroutine add_to_currents
+  end subroutine setup_imap_3vert
+  
 
   subroutine setup_imap_cache(this,next)
     implicit none
