@@ -1611,10 +1611,10 @@ contains
       do j=1,isize
          val=val+ips(isize+1-j)*next**(j-1)
       enddo
+      val=val*2
       if (itype.eq.-1) then
-         val=-val
+         val=val+1
       endif
-!!$      val=val+itype*next**(next-1)
     end subroutine get_value
     subroutine add_if_allowed_threevertex()
       implicit none
