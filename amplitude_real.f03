@@ -285,7 +285,7 @@ contains
     integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,val_sum,nperm,nw,Q1_start,Q1_end,Q2_start,Q2_end
     integer,dimension(:),allocatable :: ic,ir,iper,jper
     integer,dimension(0:611953-1) :: bucket_size
-    integer,dimension(1000,0:611953-1) :: bucket_val
+    integer,dimension(10000,0:611953-1) :: bucket_val
     real(kind=4) :: tBefore,tAfter
 
     call cpu_time(tBefore)
@@ -405,7 +405,7 @@ contains
          return
       endif
       bucket_size(ibuck)=bucket_size(ibuck)+1
-      if (bucket_size(ibuck).gt.1000) then
+      if (bucket_size(ibuck).gt.10000) then
          write (*,*) 'array bucket_val() out of bounds',ibuck,bucket_size(ibuck)
          stop 1
       endif
@@ -518,7 +518,8 @@ contains
        endif
     enddo
 
-!!$    write (*,*) 'cache',this%amps(1:this%nperm)
+    write (*,*) 'cache',this%amps(1:this%nperm)
+    stop
     
   end subroutine evaluate_cache
 
@@ -619,7 +620,7 @@ contains
        
     this%nperm=this%n_cur_end(this%next-1)-this%n_cur_start(this%next-1)+1
     
-    if (.not.allocated(this%amps)) allocate(this%amps(1:this%nperm))
+    if (.not.allocated(this%amps)) allocate(this%amps(1:this%nperm*2))
     this%amps(1:this%nperm)=0d0
     do iperm=1,this%nperm    ! permutations
        ip=iperm+this%n_cur_start(this%next-1)-1
@@ -629,9 +630,17 @@ contains
              current4(3,ip)*current4(3,0)+ &
              current4(4,ip)*current4(4,0))
     enddo
+    do iperm=this%nperm+1,this%nperm*2    ! permutations
+       ip=iperm-this%nperm
+       if (mod(this%next,2).eq.1) then
+          this%amps(iperm)=-this%amps(ip)
+       else
+          this%amps(iperm)=this%amps(ip)
+       endif
+    enddo
 
-!!$    write (*,*) '3vert',this%amps(1:this%nperm)
-
+    write (*,*) '3vert',this%amps(1:this%nperm)
+    stop
   end subroutine evaluate_3vert
 
   subroutine evaluate(this,p,hel)
@@ -854,7 +863,7 @@ contains
     wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))
     wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))
 !!$    do i=1,4
-!!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))*0.5d0
+!!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
 !!$    enddo
   end subroutine TwoGluontoTensor
 
@@ -870,7 +879,7 @@ contains
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
 !!$    do i=1,4
 !!$       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
-!!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.5d0
+!!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.25d0
 !!$    enddo
   end subroutine TensorGluontoGluon
 
@@ -886,7 +895,7 @@ contains
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
 !!$    do i=1,4
 !!$       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
-!!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.5d0
+!!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.25d0
 !!$    enddo
   end subroutine GluonTensortoGluon
 
@@ -1473,26 +1482,37 @@ contains
   subroutine setup_imap_3vert(this,next)
     implicit none
     class(amplitude_cache) :: this
-    integer :: n_cur,n_vert,nc,isize,next,n1,n2,isplit,ic1,ic2
-    integer,parameter :: max_cur=100000
-    integer,parameter :: max_vert=100000
-    integer,dimension(next-1,max_cur) :: cur_part
-    write (*,*) 'enertering setup_imap_3vert'
+    integer :: n_cur,n_vert,nc,isize,next,n1,n2,isplit,ic1,ic2,max_cur,max_gluon_cur
+    integer,parameter :: max_vert=1000000
+    integer,dimension(:),allocatable :: current_dict
+    integer,dimension(:,:),allocatable :: cur_part
+    real(kind=4) :: tBefore,tAfter
+    call cpu_time(tBefore)
+    write (*,*) 'setup imap with only 3-vertices...'
     this%next=next
     allocate(this%n_cur_start(next-1))
     allocate(this%n_cur_end(next-1))
     allocate(this%n_vert_start(next-1))
     allocate(this%n_vert_end(next-1))
+    call set_max_cur()
+    allocate(current_dict(max_cur))
+    allocate(cur_part(next-1,max_cur))
     allocate(this%cur_type(max_cur))
     allocate(this%cur_n_vert(max_cur))
+    this%cur_n_vert(1:max_cur)=0
     allocate(this%vert_type(max_vert))
     allocate(this%vert_cur(2,max_vert))
-    allocate(this%cur_vertices(2*next,max_cur))
-    allocate(this%cur_vert_sign(2*next,max_cur))
+    allocate(this%cur_vertices(3*(next-2),max_cur)) ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
+    allocate(this%cur_vert_sign(3*(next-2),max_cur))
+
+    call create_current_dict()
+    
 
     n_cur=0  ! number of currents
     n_vert=0 ! number of vertices
     do isize=1,next-1
+       call cpu_time(tAfter)
+       write (*,*) '   isize',isize,tAfter-tBefore
        this%n_cur_start(isize)=n_cur+1
        this%n_vert_start(isize)=n_vert+1
        if (isize.eq.1) then
@@ -1513,63 +1533,132 @@ contains
              enddo
           enddo
        endif
+       write (*,*) 'end',isize,n_cur
        this%n_cur_end(isize)=n_cur
        this%n_vert_end(isize)=n_vert
     enddo
-    write (*,*) 'total number of currents and vertices',n_cur,n_vert
+    call cpu_time(tAfter)
+    write (*,*) '   isize',isize,tAfter-tBefore
+    allocate(this%nw_start(next-1:next-1))
+    this%nw_start(next-1)=1
+    allocate(this%wave_n(1:next-1,1:(this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)))
+    this%wave_n(1:next-1,1:this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)=&
+         cur_part(1:next-1,this%n_cur_start(next-1):this%n_cur_end(next-1))
+    write (*,*) '   total number of currents and vertices',n_cur,n_vert
+    call cpu_time(tAfter)
+    write (*,*) '... imap setup in ',tAfter-tBefore,'seconds'
   contains
+    subroutine set_max_cur()
+      ! Computes the total number of needed currents
+      ! - Number of gluon currents:
+      !   (next-1) + ( (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ... )/2
+      ! - Number of tensor currents: 
+      !   same as for the gluons except that the first and final terms are not present
+      implicit none
+      integer :: i,j,ifact
+      max_cur=0
+      do i=1,next-1
+         ifact=next-1
+         do j=1,i-1
+            ifact=ifact*(next-1-j)
+         enddo
+         if (i.eq.1) then
+            max_cur=max_cur+ifact
+         elseif (i.lt.next-1) then
+            max_cur=max_cur+ifact
+         else
+            max_cur=max_cur+ifact/2
+         endif
+      enddo
+    end subroutine set_max_cur
+    subroutine create_current_dict()
+      implicit none
+      integer :: size,i,val,key
+      integer,dimension(:),allocatable :: ips_in,ips
+      key=0
+      size=1
+      do isize=1,next-1
+         size=size*(next-isize)
+         allocate(ips_in(1:isize))
+         do i=1,isize
+            ips_in(i)=i
+         enddo
+         allocate(ips(1:isize))
+         do i=1,size
+            if (valid_current_order(ips_in)) then
+               key=key+1
+               call get_value(ips_in,0,val) ! add the gluon
+               current_dict(key)=val
+               if (isize.ne.1 .and. isize.ne.next-1) then
+                  key=key+1
+                  call get_value(ips_in,-1,val) ! add the tensor
+                  current_dict(key)=val
+               endif
+            endif
+            call get_next_iperm(isize,ips_in,ips,next-1)
+            ips_in=ips
+         enddo
+         deallocate(ips_in)
+         deallocate(ips)
+      enddo
+      write (*,*) current_dict
+    end subroutine create_current_dict
+    subroutine get_value(ips,itype,val)
+      implicit none
+      integer,dimension(isize) :: ips
+      integer :: val,j,itype
+      val=0
+      do j=1,isize
+         val=val+ips(isize+1-j)*next**(j-1)
+      enddo
+      if (itype.eq.-1) then
+         val=-val
+      endif
+!!$      val=val+itype*next**(next-1)
+    end subroutine get_value
     subroutine add_if_allowed_threevertex()
       implicit none
       integer :: i
-      ! only consider one ordering; the other will be obtained from symmetry
+      ! only consider one ordering; the other will be obtained from symmetry:
       if (maxval(cur_part(1:n1,ic1)).gt.maxval(cur_part(1:n2,ic2))) return
-      ! check that all particles are different in the two currents
+      ! check that all particles are different in the two currents:
       do i=1,n1
          if (any(cur_part(i,ic1).eq.cur_part(1:n2,ic2))) return
       enddo
-!!$      write (*,*) cur_part(1:n1,ic1),';',cur_part(1:n2,ic2)
-      
       ! check that types form a valid vertex. If so, add it to the list.
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
          ! add a gluon-gluon to gluon vertex
-         n_vert=n_vert+1
-         this%vert_type(n_vert)=0
-         this%vert_cur(1,n_vert)=ic1
-         this%vert_cur(2,n_vert)=ic2
-!!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+         call valid_vertex(0)
          call add_all_to_currents()
          if (isize.ne.next-1) then
             ! add a gluon-gluon to tensor vertex
-            n_vert=n_vert+1
-            this%vert_type(n_vert)=1
-            this%vert_cur(1,n_vert)=ic1
-            this%vert_cur(2,n_vert)=ic2
+            call valid_vertex(1)
             call add_all_to_currents()
          endif
       elseif (this%cur_type(ic1).eq.-1 .and. this%cur_type(ic2).eq.0) then
          ! add a tensor-gluon to gluon vertex
-         n_vert=n_vert+1
-         this%vert_type(n_vert)=2
-         this%vert_cur(1,n_vert)=ic1
-         this%vert_cur(2,n_vert)=ic2
-!!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+         call valid_vertex(2)
          call add_all_to_currents()
       elseif (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.-1) then
          ! add a gluon-tensor to gluon vertex
-         n_vert=n_vert+1
-         this%vert_type(n_vert)=3
-         this%vert_cur(1,n_vert)=ic1
-         this%vert_cur(2,n_vert)=ic2
-!!$         write (*,*) 'new vertex',n_vert,this%vert_type(n_vert),ic1,ic2
+         call valid_vertex(3)
          call add_all_to_currents()
       endif
     end subroutine add_if_allowed_threevertex
+    subroutine valid_vertex(itype)
+      implicit none
+      integer :: itype
+      n_vert=n_vert+1
+      this%vert_type(n_vert)=itype
+      this%vert_cur(1,n_vert)=ic1
+      this%vert_cur(2,n_vert)=ic2
+    end subroutine valid_vertex
     subroutine add_all_to_currents()
       implicit none
       logical :: vertex_sign
       integer,dimension(isize,8) :: ip
       integer :: i
-      ! 8 possible permutations
+      ! Need to consider the 8 possible permutations (between 2 and 4 will actually be a valid order)
       ip(1:isize,1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2)]
       ip(1:isize,2)=[cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
       ip(1:isize,3)=[cur_part(n1:1:-1,ic1),cur_part(1:n2   ,ic2)]
@@ -1588,13 +1677,16 @@ contains
                  (i.eq.7 .and. mod(isize,2).eq.0) .or. (i.eq.8 .and. mod(isize,2).eq.1)) then
                vertex_sign=.false. ! no extra sign needed
             else
-               vertex_sign=.true.  ! need to include a minus sign
+               vertex_sign=.true.  ! permutation requires a minus sign
             endif
             call add_one_to_currents(vertex_sign,ip(1:isize,i))
          endif
       enddo
     end subroutine add_all_to_currents
     logical function valid_current_order(ip)
+      ! Checks that ip(1:isize) is an order for a current to be considered:
+      ! the smallest number needs to come before the largest number in this
+      ! list.
       implicit none
       integer :: i,maxi,mini,min_loc,max_loc
       integer,dimension(isize) :: ip
@@ -1619,44 +1711,40 @@ contains
     subroutine add_one_to_currents(vertex_sign,ip)
       implicit none
       logical :: vertex_sign
-      integer :: ic
+      integer :: ic,val
       integer,dimension(isize) :: ip
-      ! check if the current is already in the list
-      do ic=this%n_cur_start(isize),n_cur
-         ! check that the type is consistent
-         if ( (this%cur_type(ic).eq.0  .and. this%vert_type(n_vert).ne.1) .or. & ! gluon current
-              (this%cur_type(ic).eq.-1 .and. this%vert_type(n_vert).eq.1) &      ! tensor current
-              ) then
-            ! check that the particles are consistent
-            if (all(cur_part(1:isize,ic).eq.ip(1:isize))) then
-               this%cur_n_vert(ic)=this%cur_n_vert(ic)+1
-               this%cur_vertices(this%cur_n_vert(ic),ic)=n_vert
-               this%cur_vert_sign(this%cur_n_vert(ic),ic)=vertex_sign
-!!$               write (*,*) 'add to existing current',ic,':',this%cur_type(ic),':',cur_part(1:isize,ic),':', &
-!!$                    n_vert,':',this%vert_type(n_vert)
-               return
-            endif
-         endif
-      enddo
-      ! not already in the list. Add it to the list
-      n_cur=n_cur+1
       if (this%vert_type(n_vert).ne.1) then
-         this%cur_type(n_cur)=0 ! gluon current
+         ! gluon current
+         call get_value(ip,0,val)
       else
-         this%cur_type(n_cur)=-1 ! tensor current
+         ! tensor current
+         call get_value(ip,-1,val)
       endif
-      cur_part(1:isize,n_cur)=ip(1:isize)
-      this%cur_n_vert(n_cur)=1 ! so far, one vertex
-      this%cur_vertices(1,n_cur)=n_vert ! and this is the one
-      this%cur_vert_sign(1,n_cur)=vertex_sign
-
-!!$      write (*,*) 'adding new current     ',n_cur,':',this%cur_type(n_cur),':',cur_part(1:isize,n_cur),':',&
-!!$           this%cur_vertices(1,n_cur),':',this%vert_type(n_vert)
-      
+      call solve_dict(val,ic)
+      if (this%cur_n_vert(ic).eq.0) then
+         n_cur=n_cur+1
+         cur_part(1:isize,ic)=ip(1:isize)
+         if (this%vert_type(n_vert).ne.1) then
+            this%cur_type(ic)=0
+         else
+            this%cur_type(ic)=-1
+         endif
+      endif
+      this%cur_n_vert(ic)=this%cur_n_vert(ic)+1
+      this%cur_vertices(this%cur_n_vert(ic),ic)=n_vert
+      this%cur_vert_sign(this%cur_n_vert(ic),ic)=vertex_sign
+      write (*,*) isize,ic,val,this%cur_n_vert(ic),ip,this%vert_type(n_vert),':',ic1,ic2
     end subroutine add_one_to_currents
+    subroutine solve_dict(val,key)
+      implicit none
+      integer :: val,key
+      do key=1,max_cur
+         if (val.eq.current_dict(key)) return
+      enddo
+      write (*,*) 'value not found in current dictionary',val
+      stop 1
+    end subroutine solve_dict
   end subroutine setup_imap_3vert
-  
-
   subroutine setup_imap_cache(this,next)
     implicit none
     class(amplitude_cache) :: this
