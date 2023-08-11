@@ -1483,8 +1483,8 @@ contains
     implicit none
     class(amplitude_cache) :: this
     integer :: n_cur,n_vert,nc,isize,next,n1,n2,isplit,ic1,ic2,max_cur,max_gluon_cur
-    integer,parameter :: max_vert=1000000
-    integer,dimension(:),allocatable :: current_dict
+    integer,parameter :: max_vert=50000000
+    integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: cur_part
     real(kind=4) :: tBefore,tAfter
     call cpu_time(tBefore)
@@ -1504,10 +1504,8 @@ contains
     allocate(this%vert_cur(2,max_vert))
     allocate(this%cur_vertices(3*(next-2),max_cur)) ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
     allocate(this%cur_vert_sign(3*(next-2),max_cur))
-
+    ! create a dictionary with all currents to be able to quickly find them in the list.
     call create_current_dict()
-    
-
     n_cur=0  ! number of currents
     n_vert=0 ! number of vertices
     do isize=1,next-1
@@ -1523,6 +1521,8 @@ contains
              cur_part(1,n_cur)=nc
           enddo
        else
+          ! try any combination of two previously computed currents
+          ! that can give a current of size 'isize'
           do isplit=1,isize-1
              n1=isplit
              n2=isize-isplit
@@ -1533,7 +1533,6 @@ contains
              enddo
           enddo
        endif
-       write (*,*) 'end',isize,n_cur
        this%n_cur_end(isize)=n_cur
        this%n_vert_end(isize)=n_vert
     enddo
@@ -1548,75 +1547,12 @@ contains
     call cpu_time(tAfter)
     write (*,*) '... imap setup in ',tAfter-tBefore,'seconds'
   contains
-    subroutine set_max_cur()
-      ! Computes the total number of needed currents
-      ! - Number of gluon currents:
-      !   (next-1) + ( (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ... )/2
-      ! - Number of tensor currents: 
-      !   same as for the gluons except that the first and final terms are not present
-      implicit none
-      integer :: i,j,ifact
-      max_cur=0
-      do i=1,next-1
-         ifact=next-1
-         do j=1,i-1
-            ifact=ifact*(next-1-j)
-         enddo
-         if (i.eq.1) then
-            max_cur=max_cur+ifact
-         elseif (i.lt.next-1) then
-            max_cur=max_cur+ifact
-         else
-            max_cur=max_cur+ifact/2
-         endif
-      enddo
-    end subroutine set_max_cur
-    subroutine create_current_dict()
-      implicit none
-      integer :: size,i,val,key
-      integer,dimension(:),allocatable :: ips_in,ips
-      key=0
-      size=1
-      do isize=1,next-1
-         size=size*(next-isize)
-         allocate(ips_in(1:isize))
-         do i=1,isize
-            ips_in(i)=i
-         enddo
-         allocate(ips(1:isize))
-         do i=1,size
-            if (valid_current_order(ips_in)) then
-               key=key+1
-               call get_value(ips_in,0,val) ! add the gluon
-               current_dict(key)=val
-               if (isize.ne.1 .and. isize.ne.next-1) then
-                  key=key+1
-                  call get_value(ips_in,-1,val) ! add the tensor
-                  current_dict(key)=val
-               endif
-            endif
-            call get_next_iperm(isize,ips_in,ips,next-1)
-            ips_in=ips
-         enddo
-         deallocate(ips_in)
-         deallocate(ips)
-      enddo
-      write (*,*) current_dict
-    end subroutine create_current_dict
-    subroutine get_value(ips,itype,val)
-      implicit none
-      integer,dimension(isize) :: ips
-      integer :: val,j,itype
-      val=0
-      do j=1,isize
-         val=val+ips(isize+1-j)*next**(j-1)
-      enddo
-      val=val*2
-      if (itype.eq.-1) then
-         val=val+1
-      endif
-    end subroutine get_value
     subroutine add_if_allowed_threevertex()
+      ! check if we should consider the current combination, and if
+      ! so, and the corresponding vertices to the list. Once the
+      ! vertices are added, we need to check all the currents to which
+      ! this vertex contributions and add it to all of them (using the
+      ! 'add_all_to_currents()' subroutine).
       implicit none
       integer :: i
       ! only consider one ordering; the other will be obtained from symmetry:
@@ -1628,32 +1564,38 @@ contains
       ! check that types form a valid vertex. If so, add it to the list.
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
          ! add a gluon-gluon to gluon vertex
-         call valid_vertex(0)
+         call add_valid_vertex(0)
          call add_all_to_currents()
          if (isize.ne.next-1) then
             ! add a gluon-gluon to tensor vertex
-            call valid_vertex(1)
+            call add_valid_vertex(1)
             call add_all_to_currents()
          endif
       elseif (this%cur_type(ic1).eq.-1 .and. this%cur_type(ic2).eq.0) then
          ! add a tensor-gluon to gluon vertex
-         call valid_vertex(2)
+         call add_valid_vertex(2)
          call add_all_to_currents()
       elseif (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.-1) then
          ! add a gluon-tensor to gluon vertex
-         call valid_vertex(3)
+         call add_valid_vertex(3)
          call add_all_to_currents()
       endif
     end subroutine add_if_allowed_threevertex
-    subroutine valid_vertex(itype)
+    subroutine add_valid_vertex(itype)
+      ! We have a valid vertex, so add it to the list
       implicit none
       integer :: itype
       n_vert=n_vert+1
       this%vert_type(n_vert)=itype
       this%vert_cur(1,n_vert)=ic1
       this%vert_cur(2,n_vert)=ic2
-    end subroutine valid_vertex
+    end subroutine add_valid_vertex
     subroutine add_all_to_currents()
+      ! Given the vertex, we have to check all the permutations and
+      ! add them to the corresponding currents. That is, if a vertex
+      ! permutation contributes to a valid current, add that to that
+      ! current with the 'add_one_to_currents()' subroutine. Also keep
+      ! track of the sign: some permutations require a minus sign.
       implicit none
       logical :: vertex_sign
       integer,dimension(isize,8) :: ip
@@ -1709,9 +1651,12 @@ contains
       endif
     end function valid_current_order
     subroutine add_one_to_currents(vertex_sign,ip)
+      ! The vertex contributions to the current 'ip'. Find this in the
+      ! list of all currents and add this vertex to it.
       implicit none
       logical :: vertex_sign
-      integer :: ic,val
+      integer :: ic
+      integer(kind=8) :: val
       integer,dimension(isize) :: ip
       if (this%vert_type(n_vert).ne.1) then
          ! gluon current
@@ -1733,13 +1678,108 @@ contains
       this%cur_n_vert(ic)=this%cur_n_vert(ic)+1
       this%cur_vertices(this%cur_n_vert(ic),ic)=n_vert
       this%cur_vert_sign(this%cur_n_vert(ic),ic)=vertex_sign
-      write (*,*) isize,ic,val,this%cur_n_vert(ic),ip,this%vert_type(n_vert),':',ic1,ic2
+!!$      write (*,*) isize,ic,val,this%cur_n_vert(ic),ip,this%vert_type(n_vert),':',ic1,ic2
     end subroutine add_one_to_currents
-    subroutine solve_dict(val,key)
+    subroutine set_max_cur()
+      ! Computes the total number of needed currents
+      ! - Number of gluon currents:
+      !   (next-1) + ( (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ... )/2
+      ! - Number of tensor currents: 
+      !   same as for the gluons except that the first and final terms are not present
       implicit none
-      integer :: val,key
-      do key=1,max_cur
-         if (val.eq.current_dict(key)) return
+      integer :: i,j,ifact
+      max_cur=0
+      do i=1,next-1
+         ifact=next-1
+         do j=1,i-1
+            ifact=ifact*(next-1-j)
+         enddo
+         if (i.eq.1) then
+            max_cur=max_cur+ifact
+         elseif (i.lt.next-1) then
+            max_cur=max_cur+ifact
+         else
+            max_cur=max_cur+ifact/2
+         endif
+      enddo
+    end subroutine set_max_cur
+    subroutine create_current_dict()
+      ! create an ordered dictionary that uniquely gives every current
+      ! a label. This can be used to quickly find, (O(logN)), a
+      ! current in the list of currents
+      implicit none
+      integer :: size,i,key
+      integer(kind=8) :: val
+      integer,dimension(:),allocatable :: ips_in,ips
+      key=0
+      size=1
+      do isize=1,next-1
+         size=size*(next-isize)
+         allocate(ips_in(1:isize))
+         do i=1,isize
+            ips_in(i)=i
+         enddo
+         allocate(ips(1:isize))
+         do i=1,size
+            if (valid_current_order(ips_in)) then
+               key=key+1
+               call get_value(ips_in,0,val) ! add the gluon
+               current_dict(key)=val
+               if (isize.ne.1 .and. isize.ne.next-1) then
+                  key=key+1
+                  call get_value(ips_in,-1,val) ! add the tensor
+                  current_dict(key)=val
+               endif
+            endif
+            call get_next_iperm(isize,ips_in,ips,next-1)
+            ips_in=ips
+         enddo
+         deallocate(ips_in)
+         deallocate(ips)
+      enddo
+    end subroutine create_current_dict
+    subroutine get_value(ips,itype,val)
+      ! Give every current a unique value. This is based on the
+      ! (external) particles that are part of the current as well as
+      ! the current type.
+      implicit none
+      integer,dimension(isize) :: ips
+      integer :: j,itype
+      integer(kind=8) :: val
+      val=0
+      ! Give a unique identifier based on the external
+      ! particles. Simply convert the list to an integer with base
+      ! equal to the number of external particles.
+      do j=1,isize
+         val=val+int(ips(isize+1-j),kind=8)*int(next,kind=8)**int(j-1,kind=8)
+      enddo
+      ! Take the types into account (we have only 2 types (gluon and
+      ! tensor), so multiply by two (and add one for the tensor))
+      val=val*int(2,kind=8)
+      if (itype.eq.-1) then
+         val=val+int(1,kind=8)
+      endif
+    end subroutine get_value
+    subroutine solve_dict(val,key)
+      ! Given the value 'val', find the corresponding key in the
+      ! 'current_dict' dictionary. Use a binary search
+      ! algorithm. (This only works if the dictionary values are
+      ! ordered, and all values only appear once).
+      implicit none
+      integer :: key,left,middle,right
+      integer(kind=8) :: val
+      left=1
+      right=max_cur
+      do while (left.le.right)
+         middle=(right+left)/2
+         if (current_dict(middle).eq.val) then
+            key=middle
+            return
+         elseif(current_dict(middle).gt.val) then
+            right=middle-1
+         else
+            left=middle+1
+         endif
       enddo
       write (*,*) 'value not found in current dictionary',val
       stop 1

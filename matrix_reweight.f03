@@ -55,11 +55,12 @@ program matrix_reweight
   !14 : same as reweight_mode=11, but looping over colours
   !15 : same as 0, but smarter summing over the colour matrix (using CSR format)
   !16 : same as 15, but with better caching of interactions
+  !17 : same as 16, but with 4-gloun vertex replaced by two 3-vertices
   ! ...
   ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
-  integer,parameter :: reweight_mode=16
+  integer,parameter :: reweight_mode=17
   logical,parameter :: sum_hel=.false.
-  integer,parameter :: n_rwgt=1   ! number of colour configurations to use average over per event (use n_rwgt=1 for reweight_mode<=1)
+  integer,parameter :: n_rwgt=1   ! number of colour configurations to use average over per event (use n_rwgt=1 for reweight_mode<=1 or reweight_mode >=15)
   integer :: i,j,k,col_acc,icol,ih,iperm,jperm,ihel,iperm_ev,hel_picked,n_valid,irow,ic
   integer,dimension(:),allocatable :: hel,list,list_valid_iperm,o
   integer,dimension(:,:),allocatable :: list_orders
@@ -118,6 +119,17 @@ program matrix_reweight
      call amplitudes_full%init_onlycol_CSR(next,col_acc,sum_hel)
   elseif(reweight_mode.eq.16) then
      call amplitudes_cache%setup_imap_cache(next)
+     
+     col_acc=1
+     if (col_acc.le.1) then
+        call amplitudes_cache%setup_colmap_cache_NLC(col_acc)
+     else
+        call amplitudes_cache%setup_colmap_cache(col_acc)
+     endif
+  elseif(reweight_mode.eq.17) then
+
+     call amplitudes_cache%setup_imap_3vert(next)
+     
      col_acc=1
      if (col_acc.le.1) then
         call amplitudes_cache%setup_colmap_cache_NLC(col_acc)
@@ -173,6 +185,8 @@ program matrix_reweight
               call amplitudes_NLC%evaluate(p,hel)
            elseif (reweight_mode.eq.16) then
               call amplitudes_cache%evaluate_cache(p,hel)
+           elseif (reweight_mode.eq.17) then
+              call amplitudes_cache%evaluate_3vert(p,hel)
            endif
         endif
         call cpu_time(tAfter)
@@ -211,7 +225,7 @@ program matrix_reweight
               enddo
               amp2_LC(k)=amp2_LC(k)+amp_col*amplitudes_NLC%amps(amplitudes_NLC%helmap(irow,ih),irow)
            enddo
-        elseif (reweight_mode.eq.16) then
+        elseif (reweight_mode.eq.16 .or. reweight_mode.eq.17) then
            do irow=1,factorial(next-1)
               amp_col=0d0
               do i=1,1
@@ -309,7 +323,7 @@ program matrix_reweight
            enddo
            call cpu_time(tAfter)
            t_mat_NLC=t_mat_NLC+tAfter-tBefore
-        elseif (reweight_mode.eq.16) then
+        elseif (reweight_mode.eq.16 .or. reweight_mode.eq.17) then
            call cpu_time(tBefore)
            do irow=1,factorial(next-1)
               amp_col=0d0
@@ -370,7 +384,7 @@ program matrix_reweight
            enddo
            call cpu_time(tAfter)
            t_mat_full=t_mat_full+tAfter-tBefore
-        elseif (reweight_mode.eq.16 .and. amplitudes_cache%col_acc.ge.2) then
+        elseif ((reweight_mode.eq.16 .or. reweight_mode.eq.17) .and. amplitudes_cache%col_acc.ge.2) then
            call cpu_time(tBefore)
            do irow=1,factorial(next-1)
               amp_col=0d0
