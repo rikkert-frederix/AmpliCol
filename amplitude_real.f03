@@ -1496,7 +1496,11 @@ contains
     real(kind=4) :: tBefore,tAfter
     logical,parameter :: decompose_4vert=.false.
     call cpu_time(tBefore)
-    write (*,*) 'setup imap with only 3-vertices...'
+    if (decompose_4vert) then
+       write (*,*) 'setup imap with only 3-vertices...'
+    else
+       write (*,*) 'setup imap...'
+    endif
     this%next=next
     allocate(this%n_cur_start(next-1))
     allocate(this%n_cur_end(next-1))
@@ -1515,8 +1519,13 @@ contains
     else
        allocate(this%vert_cur(3,max_vert))
     endif
-    allocate(this%cur_vertices(3*(next-2),max_cur)) ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
-    allocate(this%cur_vert_sign(3*(next-2),max_cur))
+    if (decompose_4vert) then
+       allocate(this%cur_vertices(3*(next-2),max_cur)) ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
+       allocate(this%cur_vert_sign(3*(next-2),max_cur))
+    else
+       allocate(this%cur_vertices((next-2)+(next-2)*(next-3)/2,max_cur)) ! need (next-2) for 3-gluon and (next-2)*(next-3)/2 for 4-gluon
+       allocate(this%cur_vert_sign((next-2)+(next-2)*(next-3)/2,max_cur))
+    endif
     ! create a dictionary with all currents to be able to quickly find them in the list.
     call create_current_dict()
     n_cur=0  ! number of currents
@@ -1545,7 +1554,7 @@ contains
                    call add_if_allowed_threevertex()
                 enddo
              enddo
-             if (decompose_4vert) cycle ! skip the 4-gluon vertex
+             if (decompose_4vert .or. isize.le.2 .or. isplit.eq.isize-1) cycle
              do isplit2=isplit+1,isize-1
                 n2=isplit2-isplit
                 n3=isize-isplit2
@@ -1562,6 +1571,7 @@ contains
        this%n_cur_end(isize)=n_cur
        this%n_vert_end(isize)=n_vert
     enddo
+    
     call cpu_time(tAfter)
     write (*,*) '   isize',isize,tAfter-tBefore
     allocate(this%nw_start(next-1:next-1))
@@ -1574,6 +1584,7 @@ contains
     write (*,*) '... imap setup in ',tAfter-tBefore,'seconds'
   contains
     subroutine add_if_allowed_fourvertex()
+      ! same as add_if_alllowed_threevertex, but for 4-vertices.
       implicit none
       integer :: i
       ! only consider one ordering; the other will be obtained from symmetry:
@@ -1592,13 +1603,13 @@ contains
       ! so, and the corresponding vertices to the list. Once the
       ! vertices are added, we need to check all the currents to which
       ! this vertex contributions and add it to all of them (using the
-      ! 'add_all_to_currents()' subroutine).
+      ! 'add_all_3vert_to_currents()' subroutine).
       implicit none
       integer :: i
       ! only consider one ordering; the other will be obtained from symmetry:
       if (maxval(cur_part(1:n1,ic1)).ge.maxval(cur_part(1:n2,ic2))) return
       ! check that all particles are different in the two currents:
-      if (popcnt(iparity([this%cur_bin(ic1),this%cur_bin(ic2)])).ne.isize) return
+      if (popcnt(ieor(this%cur_bin(ic1),this%cur_bin(ic2))).ne.isize) return
       ! check that types form a valid vertex. If so, add it to the list.
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
          ! add a gluon-gluon to gluon vertex
@@ -1627,9 +1638,10 @@ contains
       this%vert_type(n_vert)=itype
       this%vert_cur(1,n_vert)=ic1
       this%vert_cur(2,n_vert)=ic2
-      if (.not.decompose_4vert) this%vert_cur(3,n_vert)=ic3
+      if (.not.decompose_4vert .and. itype.eq.99) this%vert_cur(3,n_vert)=ic3
     end subroutine add_valid_vertex
     subroutine add_all_4vert_to_currents()
+      ! same as add_all_3vert_to_currents, but for 4-vertices
       implicit none
       logical :: vertex_sign
       integer,dimension(isize,16) :: ip
