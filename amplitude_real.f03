@@ -27,7 +27,7 @@ module amplitude_mod
      logical,dimension(:,:),allocatable :: wave_sign2,wave_sign3
      real(kind=8),dimension(:),allocatable :: amps
 
-     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,cur_type,cur_n_vert,vert_type,n_vert_start,n_vert_end
+     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,cur_type,cur_n_vert,vert_type,n_vert_start,n_vert_end,cur_bin
      integer,dimension(:,:),allocatable :: vert_cur,cur_vertices
      logical,dimension(:,:),allocatable :: cur_vert_sign
 
@@ -528,61 +528,64 @@ contains
     class(amplitude_cache) :: this
     integer,dimension(this%next) :: hel
     real(kind=8),dimension(0:3,this%next) :: p
-    integer :: isize,ic,ihel,ivert,iperm,ip
-    real(kind=8),dimension(:,:),allocatable :: current4,pp,current4_out,current6,current6_out
+    integer :: isize,ic,ihel,ivert,iperm,ip,i
+    real(kind=8),dimension(:,:),allocatable :: current,pp,current_out
 !!$    real(kind=8),dimension(:,:,:),allocatable :: 
     real(kind=8) :: propagator
 
-    if (.not.allocated(current4)) allocate(current4(1:4,0:this%n_cur_end(this%next-1)))
-    if (.not.allocated(current6)) allocate(current6(1:6,1:this%n_cur_end(this%next-1)))
-    if (.not.allocated(pp)) allocate(pp(0:3,this%n_cur_end(this%next-1)))
+    if (.not.allocated(current)) allocate(current(1:6,0:this%n_cur_end(this%next-1)))
+    if (.not.allocated(pp)) allocate(pp(0:3,maskr(this%next-1)))
+    if (.not.allocated(current_out)) allocate(current_out(1:6,1:this%n_vert_end(this%next-1)))
 
-    if (.not.allocated(current4_out)) allocate(current4_out(1:4,1:this%n_vert_end(this%next-1)))
-    if (.not.allocated(current6_out)) allocate(current6_out(1:6,1:this%n_vert_end(this%next-1)))
-
+    ! Setup the momenta for all intermediate (and external) particles (use binary labeling)
+    do ip=1,maskr(this%next-1)
+       pp(0:3,ip)=0d0
+       do i=1,2 ! treat incoming momenta as out-going
+          if (btest(ip,i-1)) pp(0:3,ip)=pp(0:3,ip)-p(0:3,i)
+       enddo
+       do i=3,this%next-1
+          if (btest(ip,i-1)) pp(0:3,ip)=pp(0:3,ip)+p(0:3,i)
+       enddo
+    enddo
+    
     do isize=1,this%next-1
        if (isize.eq.1) then
           ! this final wave function
-          call v_ext(p(0:3,this%next),hel(this%next),1,current4(1,0))
+          call v_ext(p(0:3,this%next),hel(this%next),1,current(1,0))
           ! fill the other external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)
              if (this%cur_type(ic).ne.0) then
                 write (*,*) 'external particle is not a gluon'
                 stop
              endif
-             if (ic.le.2) then
-                pp(0:3,ic)=-p(0:3,ic) ! treat all momenta as outgoing
-             else
-                pp(0:3,ic)=p(0:3,ic)
-             endif
              ihel=hel(ic)
-             call v_ext(pp(0,ic),ihel,1,current4(1,ic))
+             call v_ext(pp(0,this%cur_bin(ic)),ihel,1,current(1,ic))
           enddo
           cycle
        endif
        ! compute the interactions
        do ivert=this%n_vert_start(isize),this%n_vert_end(isize)
           if (this%vert_type(ivert).eq.0) then
-             call threeGluon(current4(1:4,this%vert_cur(1,ivert)),pp(0:3,this%vert_cur(1,ivert)),&
-                             current4(1:4,this%vert_cur(2,ivert)),pp(0:3,this%vert_cur(2,ivert)),&
-                             current4_out(1:4,ivert))
+             call threeGluon(current(1:4,this%vert_cur(1,ivert)),pp(0:3,this%cur_bin(this%vert_cur(1,ivert))),&
+                             current(1:4,this%vert_cur(2,ivert)),pp(0:3,this%cur_bin(this%vert_cur(2,ivert))),&
+                             current_out(1:4,ivert))
           elseif(this%vert_type(ivert).eq.1) then
-             call TwoGluonToTensor(current4(1:4,this%vert_cur(1,ivert)),&
-                                   current4(1:4,this%vert_cur(2,ivert)),&
-                                   current6_out(1:6,ivert))
+             call TwoGluonToTensor(current(1:4,this%vert_cur(1,ivert)),&
+                                   current(1:4,this%vert_cur(2,ivert)),&
+                                   current_out(1:6,ivert))
           elseif(this%vert_type(ivert).eq.2) then
-             call TensorGluontoGluon(current6(1:6,this%vert_cur(1,ivert)),&
-                                     current4(1:4,this%vert_cur(2,ivert)),&
-                                     current4_out(1:4,ivert))
+             call TensorGluontoGluon(current(1:6,this%vert_cur(1,ivert)),&
+                                     current(1:4,this%vert_cur(2,ivert)),&
+                                     current_out(1:4,ivert))
           elseif(this%vert_type(ivert).eq.3) then
-             call GluonTensortoGluon(current4(1:4,this%vert_cur(1,ivert)),&
-                                     current6(1:6,this%vert_cur(2,ivert)),&
-                                     current4_out(1:4,ivert))
+             call GluonTensortoGluon(current(1:4,this%vert_cur(1,ivert)),&
+                                     current(1:6,this%vert_cur(2,ivert)),&
+                                     current_out(1:4,ivert))
           elseif(this%vert_type(ivert).eq.99) then
-             call FourGluon(current4(1:4,this%vert_cur(1,ivert)),&
-                            current4(1:4,this%vert_cur(2,ivert)),&
-                            current4(1:4,this%vert_cur(3,ivert)),&
-                            current4_out(1:4,ivert))
+             call FourGluon(current(1:4,this%vert_cur(1,ivert)),&
+                            current(1:4,this%vert_cur(2,ivert)),&
+                            current(1:4,this%vert_cur(3,ivert)),&
+                            current_out(1:4,ivert))
           else
              write (*,*) 'Unknown vertex type',ivert,this%vert_type(ivert)
              stop 1
@@ -590,29 +593,28 @@ contains
        enddo
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          pp(0:3,ic)=pp(0:3,this%vert_cur(1,this%cur_vertices(1,ic)))+ &
-                     pp(0:3,this%vert_cur(2,this%cur_vertices(1,ic)))
           if (this%cur_type(ic).eq.0) then ! gluon current
-             current4(1:4,ic)=0d0
+             current(1:4,ic)=0d0
              do ivert=1,this%cur_n_vert(ic)
                 if (.not.this%cur_vert_sign(ivert,ic)) then
-                   current4(1:4,ic)=current4(1:4,ic)+current4_out(1:4,this%cur_vertices(ivert,ic))
+                   current(1:4,ic)=current(1:4,ic)+current_out(1:4,this%cur_vertices(ivert,ic))
                 else
-                   current4(1:4,ic)=current4(1:4,ic)-current4_out(1:4,this%cur_vertices(ivert,ic))
+                   current(1:4,ic)=current(1:4,ic)-current_out(1:4,this%cur_vertices(ivert,ic))
                 endif
              enddo
              ! include the gluon propagator
              if (isize.ne.this%next-1)  then
-                propagator=1d0/(pp(0,ic)**2-pp(1,ic)**2-pp(2,ic)**2-pp(3,ic)**2)
-                current4(1:4,ic)=current4(1:4,ic)*propagator
+                propagator=1d0/(pp(0,this%cur_bin(ic))**2-pp(1,this%cur_bin(ic))**2- &
+                                pp(2,this%cur_bin(ic))**2-pp(3,this%cur_bin(ic))**2)
+                current(1:4,ic)=current(1:4,ic)*propagator
              endif
           elseif (this%cur_type(ic).eq.-1) then ! tensor current
-             current6(1:6,ic)=0d0
+             current(1:6,ic)=0d0
              do ivert=1,this%cur_n_vert(ic)
                 if (.not.this%cur_vert_sign(ivert,ic)) then
-                   current6(1:6,ic)=current6(1:6,ic)+current6_out(1:6,this%cur_vertices(ivert,ic))
+                   current(1:6,ic)=current(1:6,ic)+current_out(1:6,this%cur_vertices(ivert,ic))
                 else
-                   current6(1:6,ic)=current6(1:6,ic)-current6_out(1:6,this%cur_vertices(ivert,ic))
+                   current(1:6,ic)=current(1:6,ic)-current_out(1:6,this%cur_vertices(ivert,ic))
                 endif
              enddo
           else
@@ -630,10 +632,10 @@ contains
     do iperm=1,this%nperm    ! permutations
        ip=iperm+this%n_cur_start(this%next-1)-1
        this%amps(iperm)=this%amps(iperm)+ &
-            (current4(1,ip)*current4(1,0)+ &
-             current4(2,ip)*current4(2,0)+ &
-             current4(3,ip)*current4(3,0)+ &
-             current4(4,ip)*current4(4,0))
+            (current(1,ip)*current(1,0)+ &
+             current(2,ip)*current(2,0)+ &
+             current(3,ip)*current(3,0)+ &
+             current(4,ip)*current(4,0))
     enddo
     do iperm=this%nperm+1,this%nperm*2    ! permutations
        ip=iperm-this%nperm
@@ -1504,6 +1506,7 @@ contains
     allocate(current_dict(max_cur))
     allocate(cur_part(next-1,max_cur))
     allocate(this%cur_type(max_cur))
+    allocate(this%cur_bin(max_cur))
     allocate(this%cur_n_vert(max_cur))
     this%cur_n_vert(1:max_cur)=0
     allocate(this%vert_type(max_vert))
@@ -1529,9 +1532,10 @@ contains
              n_cur=n_cur+1
              this%cur_type(n_cur)=0    ! gluon
              cur_part(1,n_cur)=nc
+             this%cur_bin(n_cur)=ibset(0,nc-1) ! binary labeling for external particles included in this current
           enddo
        else
-          ! try any combination of two previously computed currents
+          ! try any combination of two (or three) previously computed currents
           ! that can give a current of size 'isize'
           do isplit=1,isize-1
              n1=isplit
@@ -1573,17 +1577,12 @@ contains
       implicit none
       integer :: i
       ! only consider one ordering; the other will be obtained from symmetry:
-      if (maxval(cur_part(1:n1,ic1)).gt.maxval(cur_part(1:n3,ic3))) return
+      if (maxval(cur_part(1:n1,ic1)).ge.maxval(cur_part(1:n3,ic3))) return
       ! check that all particles are different in the three currents:
-      do i=1,n1
-         if (any(cur_part(i,ic1).eq.cur_part(1:n2,ic2))) return
-         if (any(cur_part(i,ic1).eq.cur_part(1:n3,ic3))) return
-      enddo
-      do i=1,n2
-         if (any(cur_part(i,ic2).eq.cur_part(1:n3,ic3))) return
-      enddo
+      if (popcnt(iparity([this%cur_bin(ic1),this%cur_bin(ic2),this%cur_bin(ic3)])).ne.isize) return
       ! check that types form a valid vertex. If so, add it to the list.
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0 .and. this%cur_type(ic3).eq.0) then
+         ! add a gluon-gluon-gluon to gluon vertex
          call add_valid_vertex(99)
          call add_all_4vert_to_currents()
       endif
@@ -1597,11 +1596,9 @@ contains
       implicit none
       integer :: i
       ! only consider one ordering; the other will be obtained from symmetry:
-      if (maxval(cur_part(1:n1,ic1)).gt.maxval(cur_part(1:n2,ic2))) return
+      if (maxval(cur_part(1:n1,ic1)).ge.maxval(cur_part(1:n2,ic2))) return
       ! check that all particles are different in the two currents:
-      do i=1,n1
-         if (any(cur_part(i,ic1).eq.cur_part(1:n2,ic2))) return
-      enddo
+      if (popcnt(iparity([this%cur_bin(ic1),this%cur_bin(ic2)])).ne.isize) return
       ! check that types form a valid vertex. If so, add it to the list.
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
          ! add a gluon-gluon to gluon vertex
@@ -1636,7 +1633,7 @@ contains
       implicit none
       logical :: vertex_sign
       integer,dimension(isize,16) :: ip
-      integer :: i
+      integer :: i,cur_bin
       ! need to consider 16 possible permutations
       ip(1:isize, 1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2),cur_part(1:n3   ,ic3)]
       ip(1:isize, 2)=[cur_part(1:n3   ,ic3),cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
@@ -1654,6 +1651,8 @@ contains
       ip(1:isize,14)=[cur_part(n3:1:-1,ic3),cur_part(n2:1:-1,ic2),cur_part(1:n1   ,ic1)]
       ip(1:isize,15)=[cur_part(n1:1:-1,ic1),cur_part(n2:1:-1,ic2),cur_part(n3:1:-1,ic3)]
       ip(1:isize,16)=[cur_part(n3:1:-1,ic3),cur_part(n2:1:-1,ic2),cur_part(n1:1:-1,ic1)]
+      ! the binary label for the external particles included in this current
+      cur_bin=this%cur_bin(ic1)+this%cur_bin(ic2)+this%cur_bin(ic3)
       do i=1,16
          if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.9 .or. i.eq.10 .or. i.eq.11 .or. i.eq.12 .or. i.eq.15 .or. i.eq.16)) cycle
          if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.9 .or. i.eq.10 .or. i.eq.13 .or. i.eq.14 .or. i.eq.15 .or. i.eq.16)) cycle
@@ -1671,7 +1670,7 @@ contains
             else
                vertex_sign=.true.  ! permutation requires a minus sign
             endif
-            call add_one_to_currents(vertex_sign,ip(1:isize,i))
+            call add_one_to_currents(vertex_sign,cur_bin,ip(1:isize,i))
          endif
       enddo
     end subroutine add_all_4vert_to_currents
@@ -1684,7 +1683,7 @@ contains
       implicit none
       logical :: vertex_sign
       integer,dimension(isize,8) :: ip
-      integer :: i
+      integer :: i,cur_bin
       ! Need to consider the 8 possible permutations (between 2 and 4 will actually be a valid order)
       ip(1:isize,1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2)]
       ip(1:isize,2)=[cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
@@ -1694,6 +1693,8 @@ contains
       ip(1:isize,6)=[cur_part(n2:1:-1,ic2),cur_part(1:n1   ,ic1)]
       ip(1:isize,7)=[cur_part(n1:1:-1,ic1),cur_part(n2:1:-1,ic2)]
       ip(1:isize,8)=[cur_part(n2:1:-1,ic2),cur_part(n1:1:-1,ic1)]
+      ! the binary label for the external particles included in this current
+      cur_bin=this%cur_bin(ic1)+this%cur_bin(ic2)
       do i=1,8
          if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
          if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
@@ -1706,7 +1707,7 @@ contains
             else
                vertex_sign=.true.  ! permutation requires a minus sign
             endif
-            call add_one_to_currents(vertex_sign,ip(1:isize,i))
+            call add_one_to_currents(vertex_sign,cur_bin,ip(1:isize,i))
          endif
       enddo
     end subroutine add_all_3vert_to_currents
@@ -1735,12 +1736,12 @@ contains
          valid_current_order=.true.
       endif
     end function valid_current_order
-    subroutine add_one_to_currents(vertex_sign,ip)
+    subroutine add_one_to_currents(vertex_sign,cur_bin,ip)
       ! The vertex contributions to the current 'ip'. Find this in the
       ! list of all currents and add this vertex to it.
       implicit none
       logical :: vertex_sign
-      integer :: ic
+      integer :: ic,cur_bin
       integer(kind=8) :: val
       integer,dimension(isize) :: ip
       if (this%vert_type(n_vert).ne.1) then
@@ -1754,6 +1755,7 @@ contains
       if (this%cur_n_vert(ic).eq.0) then
          n_cur=n_cur+1
          cur_part(1:isize,ic)=ip(1:isize)
+         this%cur_bin(ic)=cur_bin
          if (this%vert_type(n_vert).ne.1) then
             this%cur_type(ic)=0
          else
