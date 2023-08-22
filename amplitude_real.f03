@@ -518,8 +518,8 @@ contains
        endif
     enddo
 
-    write (*,*) 'cache',this%amps(1:this%nperm)
-    stop
+!!$    write (*,*) 'cache',this%amps(1:this%nperm)
+!!$    stop
     
   end subroutine evaluate_cache
 
@@ -578,6 +578,11 @@ contains
              call GluonTensortoGluon(current4(1:4,this%vert_cur(1,ivert)),&
                                      current6(1:6,this%vert_cur(2,ivert)),&
                                      current4_out(1:4,ivert))
+          elseif(this%vert_type(ivert).eq.99) then
+             call FourGluon(current4(1:4,this%vert_cur(1,ivert)),&
+                            current4(1:4,this%vert_cur(2,ivert)),&
+                            current4(1:4,this%vert_cur(3,ivert)),&
+                            current4_out(1:4,ivert))
           else
              write (*,*) 'Unknown vertex type',ivert,this%vert_type(ivert)
              stop 1
@@ -639,8 +644,8 @@ contains
        endif
     enddo
 
-    write (*,*) '3vert',this%amps(1:this%nperm)
-    stop
+!!$    write (*,*) '3vert',this%amps(1:this%nperm)
+!!$    stop
   end subroutine evaluate_3vert
 
   subroutine evaluate(this,p,hel)
@@ -1482,11 +1487,12 @@ contains
   subroutine setup_imap_3vert(this,next)
     implicit none
     class(amplitude_cache) :: this
-    integer :: n_cur,n_vert,nc,isize,next,n1,n2,isplit,ic1,ic2,max_cur,max_gluon_cur
+    integer :: n_cur,n_vert,nc,isize,next,n1,n2,n3,isplit,isplit2,ic1,ic2,ic3,max_cur,max_gluon_cur
     integer,parameter :: max_vert=50000000
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: cur_part
     real(kind=4) :: tBefore,tAfter
+    logical,parameter :: decompose_4vert=.false.
     call cpu_time(tBefore)
     write (*,*) 'setup imap with only 3-vertices...'
     this%next=next
@@ -1501,7 +1507,11 @@ contains
     allocate(this%cur_n_vert(max_cur))
     this%cur_n_vert(1:max_cur)=0
     allocate(this%vert_type(max_vert))
-    allocate(this%vert_cur(2,max_vert))
+    if (decompose_4vert) then
+       allocate(this%vert_cur(2,max_vert))
+    else
+       allocate(this%vert_cur(3,max_vert))
+    endif
     allocate(this%cur_vertices(3*(next-2),max_cur)) ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
     allocate(this%cur_vert_sign(3*(next-2),max_cur))
     ! create a dictionary with all currents to be able to quickly find them in the list.
@@ -1531,6 +1541,18 @@ contains
                    call add_if_allowed_threevertex()
                 enddo
              enddo
+             if (decompose_4vert) cycle ! skip the 4-gluon vertex
+             do isplit2=isplit+1,isize-1
+                n2=isplit2-isplit
+                n3=isize-isplit2
+                do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
+                   do ic2=this%n_cur_start(n2),this%n_cur_end(n2) 
+                      do ic3=this%n_cur_start(n3),this%n_cur_end(n3)
+                         call add_if_allowed_fourvertex()
+                      enddo
+                   enddo
+                enddo
+             enddo
           enddo
        endif
        this%n_cur_end(isize)=n_cur
@@ -1547,6 +1569,25 @@ contains
     call cpu_time(tAfter)
     write (*,*) '... imap setup in ',tAfter-tBefore,'seconds'
   contains
+    subroutine add_if_allowed_fourvertex()
+      implicit none
+      integer :: i
+      ! only consider one ordering; the other will be obtained from symmetry:
+      if (maxval(cur_part(1:n1,ic1)).gt.maxval(cur_part(1:n3,ic3))) return
+      ! check that all particles are different in the three currents:
+      do i=1,n1
+         if (any(cur_part(i,ic1).eq.cur_part(1:n2,ic2))) return
+         if (any(cur_part(i,ic1).eq.cur_part(1:n3,ic3))) return
+      enddo
+      do i=1,n2
+         if (any(cur_part(i,ic2).eq.cur_part(1:n3,ic3))) return
+      enddo
+      ! check that types form a valid vertex. If so, add it to the list.
+      if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0 .and. this%cur_type(ic3).eq.0) then
+         call add_valid_vertex(99)
+         call add_all_4vert_to_currents()
+      endif
+    end subroutine add_if_allowed_fourvertex
     subroutine add_if_allowed_threevertex()
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list. Once the
@@ -1565,20 +1606,20 @@ contains
       if (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.0) then
          ! add a gluon-gluon to gluon vertex
          call add_valid_vertex(0)
-         call add_all_to_currents()
-         if (isize.ne.next-1) then
+         call add_all_3vert_to_currents()
+         if (isize.ne.next-1 .and. decompose_4vert) then
             ! add a gluon-gluon to tensor vertex
             call add_valid_vertex(1)
-            call add_all_to_currents()
+            call add_all_3vert_to_currents()
          endif
       elseif (this%cur_type(ic1).eq.-1 .and. this%cur_type(ic2).eq.0) then
          ! add a tensor-gluon to gluon vertex
          call add_valid_vertex(2)
-         call add_all_to_currents()
+         call add_all_3vert_to_currents()
       elseif (this%cur_type(ic1).eq.0 .and. this%cur_type(ic2).eq.-1) then
          ! add a gluon-tensor to gluon vertex
          call add_valid_vertex(3)
-         call add_all_to_currents()
+         call add_all_3vert_to_currents()
       endif
     end subroutine add_if_allowed_threevertex
     subroutine add_valid_vertex(itype)
@@ -1589,8 +1630,52 @@ contains
       this%vert_type(n_vert)=itype
       this%vert_cur(1,n_vert)=ic1
       this%vert_cur(2,n_vert)=ic2
+      if (.not.decompose_4vert) this%vert_cur(3,n_vert)=ic3
     end subroutine add_valid_vertex
-    subroutine add_all_to_currents()
+    subroutine add_all_4vert_to_currents()
+      implicit none
+      logical :: vertex_sign
+      integer,dimension(isize,16) :: ip
+      integer :: i
+      ! need to consider 16 possible permutations
+      ip(1:isize, 1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2),cur_part(1:n3   ,ic3)]
+      ip(1:isize, 2)=[cur_part(1:n3   ,ic3),cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
+      ip(1:isize, 3)=[cur_part(n1:1:-1,ic1),cur_part(1:n2   ,ic2),cur_part(1:n3   ,ic3)]
+      ip(1:isize, 4)=[cur_part(1:n3   ,ic3),cur_part(1:n2   ,ic2),cur_part(n1:1:-1,ic1)]
+      ip(1:isize, 5)=[cur_part(1:n1   ,ic1),cur_part(n2:1:-1,ic2),cur_part(1:n3   ,ic3)]
+      ip(1:isize, 6)=[cur_part(1:n3   ,ic3),cur_part(n2:1:-1,ic2),cur_part(1:n1   ,ic1)]
+      ip(1:isize, 7)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2),cur_part(n3:1:-1,ic3)]
+      ip(1:isize, 8)=[cur_part(n3:1:-1,ic3),cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
+      ip(1:isize, 9)=[cur_part(n1:1:-1,ic1),cur_part(n2:1:-1,ic2),cur_part(1:n3   ,ic3)]
+      ip(1:isize,10)=[cur_part(1:n3   ,ic3),cur_part(n2:1:-1,ic2),cur_part(n1:1:-1,ic1)]
+      ip(1:isize,11)=[cur_part(n1:1:-1,ic1),cur_part(1:n2   ,ic2),cur_part(n3:1:-1,ic3)]
+      ip(1:isize,12)=[cur_part(n3:1:-1,ic3),cur_part(1:n2   ,ic2),cur_part(n1:1:-1,ic1)]
+      ip(1:isize,13)=[cur_part(1:n1   ,ic1),cur_part(n2:1:-1,ic2),cur_part(n3:1:-1,ic3)]
+      ip(1:isize,14)=[cur_part(n3:1:-1,ic3),cur_part(n2:1:-1,ic2),cur_part(1:n1   ,ic1)]
+      ip(1:isize,15)=[cur_part(n1:1:-1,ic1),cur_part(n2:1:-1,ic2),cur_part(n3:1:-1,ic3)]
+      ip(1:isize,16)=[cur_part(n3:1:-1,ic3),cur_part(n2:1:-1,ic2),cur_part(n1:1:-1,ic1)]
+      do i=1,16
+         if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.9 .or. i.eq.10 .or. i.eq.11 .or. i.eq.12 .or. i.eq.15 .or. i.eq.16)) cycle
+         if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.9 .or. i.eq.10 .or. i.eq.13 .or. i.eq.14 .or. i.eq.15 .or. i.eq.16)) cycle
+         if (n3.eq.1 .and. (i.eq.7 .or. i.eq.8 .or. i.eq.11 .or. i.eq.12 .or. i.eq.13 .or. i.eq.14 .or. i.eq.15 .or. i.eq.16)) cycle
+         if (valid_current_order(ip(1:isize,i))) then
+            if (i.eq.1 .or. i.eq.2 .or. &
+                 (i.eq.3 .and. mod(n1,2).eq.1)    .or. (i.eq.4 .and. mod(n1,2).eq.1) .or. &
+                 (i.eq.5 .and. mod(n2,2).eq.1)    .or. (i.eq.6 .and. mod(n2,2).eq.1) .or. &
+                 (i.eq.7 .and. mod(n3,2).eq.1)    .or. (i.eq.8 .and. mod(n3,2).eq.1) .or. &
+                 (i.eq.9 .and. mod(n1+n2,2).eq.0) .or. (i.eq.10.and. mod(n1+n2,2).eq.0) .or. &
+                 (i.eq.11.and. mod(n1+n3,2).eq.0) .or. (i.eq.12.and. mod(n1+n3,2).eq.0) .or. &
+                 (i.eq.13.and. mod(n2+n3,2).eq.0) .or. (i.eq.14.and. mod(n2+n3,2).eq.0) .or. &
+                 (i.eq.15.and. mod(isize,2).eq.1) .or. (i.eq.16.and. mod(isize,2).eq.1) ) then
+               vertex_sign=.false. ! no extra sign needed
+            else
+               vertex_sign=.true.  ! permutation requires a minus sign
+            endif
+            call add_one_to_currents(vertex_sign,ip(1:isize,i))
+         endif
+      enddo
+    end subroutine add_all_4vert_to_currents
+    subroutine add_all_3vert_to_currents()
       ! Given the vertex, we have to check all the permutations and
       ! add them to the corresponding currents. That is, if a vertex
       ! permutation contributes to a valid current, add that to that
@@ -1624,7 +1709,7 @@ contains
             call add_one_to_currents(vertex_sign,ip(1:isize,i))
          endif
       enddo
-    end subroutine add_all_to_currents
+    end subroutine add_all_3vert_to_currents
     logical function valid_current_order(ip)
       ! Checks that ip(1:isize) is an order for a current to be considered:
       ! the smallest number needs to come before the largest number in this
@@ -1697,7 +1782,11 @@ contains
          if (i.eq.1) then
             max_cur=max_cur+ifact
          elseif (i.lt.next-1) then
-            max_cur=max_cur+ifact
+            if (decompose_4vert) then
+               max_cur=max_cur+ifact
+            else
+               max_cur=max_cur+ifact/2
+            endif
          else
             max_cur=max_cur+ifact/2
          endif
@@ -1725,7 +1814,7 @@ contains
                key=key+1
                call get_value(ips_in,0,val) ! add the gluon
                current_dict(key)=val
-               if (isize.ne.1 .and. isize.ne.next-1) then
+               if (isize.ne.1 .and. isize.ne.next-1 .and. decompose_4vert) then
                   key=key+1
                   call get_value(ips_in,-1,val) ! add the tensor
                   current_dict(key)=val
