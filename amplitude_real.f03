@@ -1520,10 +1520,12 @@ contains
        allocate(this%vert_cur(3,max_vert))
     endif
     if (decompose_4vert) then
-       allocate(this%cur_vertices(3*(next-2),max_cur)) ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
+       ! need 3*(next-2), since we can combine gluon-gluon, tensor-gluon, and gluon-tensor to a gluon 
+       allocate(this%cur_vertices(3*(next-2),max_cur)) 
        allocate(this%cur_vert_sign(3*(next-2),max_cur))
     else
-       allocate(this%cur_vertices((next-2)+(next-2)*(next-3)/2,max_cur)) ! need (next-2) for 3-gluon and (next-2)*(next-3)/2 for 4-gluon
+       ! need (next-2) for 3-gluon and another (next-2)*(next-3)/2 for 4-gluon
+       allocate(this%cur_vertices((next-2)+(next-2)*(next-3)/2,max_cur)) 
        allocate(this%cur_vert_sign((next-2)+(next-2)*(next-3)/2,max_cur))
     endif
     ! create a dictionary with all currents to be able to quickly find them in the list.
@@ -1646,7 +1648,7 @@ contains
       logical :: vertex_sign
       integer,dimension(isize,16) :: ip
       integer :: i,cur_bin
-      ! need to consider 16 possible permutations
+      ! need to consider 16 possible permutations (1, 2, 4, or 8 permutations will be a valid order)
       ip(1:isize, 1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2),cur_part(1:n3   ,ic3)]
       ip(1:isize, 2)=[cur_part(1:n3   ,ic3),cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
       ip(1:isize, 3)=[cur_part(n1:1:-1,ic1),cur_part(1:n2   ,ic2),cur_part(1:n3   ,ic3)]
@@ -1696,7 +1698,7 @@ contains
       logical :: vertex_sign
       integer,dimension(isize,8) :: ip
       integer :: i,cur_bin
-      ! Need to consider the 8 possible permutations (between 2 and 4 will actually be a valid order)
+      ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
       ip(1:isize,1)=[cur_part(1:n1   ,ic1),cur_part(1:n2   ,ic2)]
       ip(1:isize,2)=[cur_part(1:n2   ,ic2),cur_part(1:n1   ,ic1)]
       ip(1:isize,3)=[cur_part(n1:1:-1,ic1),cur_part(1:n2   ,ic2)]
