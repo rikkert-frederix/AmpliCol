@@ -1,5 +1,5 @@
 
-! gfortran -mcmodel=large -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 matrix_reweight.f03
+! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 matrix_reweight.f03
 
 module common
   use amplitude_mod
