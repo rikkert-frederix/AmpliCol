@@ -19,9 +19,9 @@ module amplitude_mod
      procedure :: init,evaluate,init_onlycol,evaluate_order,init_CSR,init_onlycol_CSR
   end type amplitude
   type amplitude_cache
-     integer :: next,nwave_tot,nperm,col_acc
-     integer,dimension(:),allocatable :: nw_start,nw_end,col_value_LC,col_value_NLC,col_value_full
-     integer,dimension(:,:),allocatable :: wave_n,col_index_LC,row_index_LC,col_index_NLC,row_index_NLC, &
+     integer :: next,nperm,col_acc
+     integer,dimension(:),allocatable :: col_value_LC,col_value_NLC,col_value_full
+     integer,dimension(:,:),allocatable :: perm,col_index_LC,row_index_LC,col_index_NLC,row_index_NLC, &
           col_index_full,row_index_full
      real(kind=8),dimension(:),allocatable :: amps
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,cur_type,cur_n_vert,vert_type,n_vert_start,n_vert_end,cur_bin
@@ -189,9 +189,7 @@ contains
     n=this%next
     allocate(iper(1:n))
     allocate(jper(1:n))
-
     nperm=factorial(n-1)
-    
     this%col_acc=col_acc
     if (col_acc.ge.2) allocate(this%col_value_full((n+1)/2))
     if (col_acc.ge.1) allocate(this%col_value_NLC(2))
@@ -216,19 +214,19 @@ contains
     ir=0
     do iperm=1,nperm
        if (iperm.le.nperm/2) then
-          nw=this%nw_start(this%next-1)-1+iperm
-          iper(1:n)=[this%wave_n(1:n-1,nw),n]
+          nw=iperm
+          iper(1:n)=[this%perm(1:n-1,nw),n]
        else
-          nw=this%nw_start(this%next-1)-1-nperm/2+iperm
-          iper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+          nw=iperm-nperm/2
+          iper(1:n)=[this%perm(n-1:1:-1,nw),n]
        endif
        do jperm=iperm,nperm
           if (jperm.le.nperm/2) then
-             nw=this%nw_start(this%next-1)-1+jperm
-             jper(1:n)=[this%wave_n(1:n-1,nw),n]
+             nw=jperm
+             jper(1:n)=[this%perm(1:n-1,nw),n]
           else
-             nw=this%nw_start(this%next-1)-1-nperm/2+jperm
-             jper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+             nw=jperm-nperm/2
+             jper(1:n)=[this%perm(n-1:1:-1,nw),n]
           endif
           call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
           if (col_fac.eq.0) cycle
@@ -278,9 +276,9 @@ contains
     implicit none
     class(amplitude_cache) :: this
     integer :: col_acc,n,i,jperm,iperm,col_fac,nperm,nw,Q1_start,Q1_end,Q2_start,Q2_end
-    integer,dimension(:),allocatable :: ic,ir,iper,jper
-    integer,dimension(0:611953-1) :: bucket_size
-    integer,dimension(10000,0:611953-1) :: bucket_val
+    integer,dimension(:),allocatable :: ic,ir,iper,jper,permutations_dict_ord
+    integer(kind=8),dimension(:),allocatable :: permutations_dict
+    integer(kind=8) :: val
     real(kind=4) :: tBefore,tAfter
 
     call cpu_time(tBefore)
@@ -290,17 +288,11 @@ contains
     allocate(jper(1:n))
 
     nperm=factorial(n-1)
-    call fill_ibuck(1,1,.true.)
-    do iperm=1,nperm
-       if (iperm.le.nperm/2) then
-          nw=this%nw_start(this%next-1)-1+iperm
-          iper(1:n)=[this%wave_n(1:n-1,nw),n]
-       else
-          nw=this%nw_start(this%next-1)-1-nperm/2+iperm
-          iper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
-       endif
-       call fill_ibuck(ibucket(n,iper),iperm,.false.)
-    enddo
+
+    allocate(permutations_dict(nperm))
+    allocate(permutations_dict_ord(nperm))
+    
+    call create_permutations_dict()
     
     this%col_acc=col_acc
     if (col_acc.ge.1) allocate(this%col_value_NLC(3))
@@ -308,6 +300,11 @@ contains
     allocate(ic(max((n+1)/2,2)))
     allocate(ir(max((n+1)/2,2)))
     if (col_acc.ge.1) allocate(this%col_index_NLC(nperm*500,2))
+    write (*,*) 'WARNING: FACTOR 500 NEEDS TO BE FIXED'
+    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
+    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
+    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
+    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
     if (col_acc.ge.1) allocate(this%row_index_NLC(0:nperm,2))
     allocate(this%col_index_LC(nperm,1))
     allocate(this%row_index_LC(0:nperm,1))
@@ -324,11 +321,11 @@ contains
     ir=0
     do iperm=1,nperm
        if (iperm.le.nperm/2) then
-          nw=this%nw_start(this%next-1)-1+iperm
-          iper(1:n)=[this%wave_n(1:n-1,nw),n]
+          nw=iperm
+          iper(1:n)=[this%perm(1:n-1,nw),n]
        else
-          nw=this%nw_start(this%next-1)-1-nperm/2+iperm
-          iper(1:n)=[this%wave_n(n-1:1:-1,nw),n]
+          nw=iperm-nperm/2
+          iper(1:n)=[this%perm(n-1:1:-1,nw),n]
        endif
        ! LC contribution:
        i=1
@@ -347,7 +344,8 @@ contains
                               iper(Q1_start:Q1_end),iper(Q2_end+1:n)]
                    call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
                    if (col_fac.eq.0) cycle
-                   call find_jperm(n,jper,jperm)
+                   call get_value(jper(1:n-1),val)
+                   call solve_dict(val,jperm)
                    if (jperm.gt.iperm) cycle
                    do i=1,2
                       if (col_acc.ge.1) then
@@ -371,52 +369,107 @@ contains
     call cpu_time(tAfter)
     write (*,*) '... colour setup in',tAfter-tBefore,'seconds'
   contains
-    subroutine find_jperm(n,jper,jperm)
+    subroutine create_permutations_dict()
       implicit none
-      integer :: n,jperm,i,ib
-      integer,dimension(n) :: jper
-      ib=ibucket(n,jper)
-      do i=1,bucket_size(ib)
-         jperm=bucket_val(i,ib)
-         if (jperm.le.nperm/2) then
-            nw=this%nw_start(this%next-1)-1+jperm
-            if (all(jper(1:n-1).eq.this%wave_n(1:n-1,nw))) then
-               return
-            endif
+      integer :: nw
+      do iperm=1,nperm
+         if (iperm.le.nperm/2) then
+            nw=iperm
+            call get_value(this%perm(1:n-1,nw),val)
          else
-            nw=this%nw_start(this%next-1)-1+jperm-nperm/2
-            if (all(jper(1:n-1).eq.this%wave_n(n-1:1:-1,nw))) then
-               return
+            nw=iperm-nperm/2
+            call get_value(this%perm(n-1:1:-1,nw),val)
+         endif
+         call find_dict_pos_and_insert()
+      enddo
+    end subroutine create_permutations_dict
+    subroutine find_dict_pos_and_insert()
+      ! find the location (i.e. 'key') in the permutations array (which should
+      ! be ordered in the val's) to where to insert the current val, and
+      ! insert it there. Also update the permutations_dict_ord, which has as
+      ! the same key, but its value is the current 'iperm' being considered.
+      implicit none
+      integer :: left,right,middle,key
+      if (iperm.eq.1) then
+         permutations_dict(iperm)=val
+         permutations_dict_ord(iperm)=iperm
+      elseif (iperm.eq.2) then
+         if (val.gt.permutations_dict(iperm-1)) then
+            permutations_dict(iperm)=val
+            permutations_dict_ord(iperm)=iperm
+         else
+            permutations_dict(iperm)=permutations_dict(iperm-1)
+            permutations_dict_ord(iperm)=permutations_dict_ord(iperm-1)
+            permutations_dict(iperm-1)=val
+            permutations_dict_ord(iperm-1)=iperm
+         endif
+      else
+         left=1
+         right=iperm-1
+         do
+            middle=(right+left)/2
+            if (permutations_dict(middle).lt.val) then
+               if (middle.eq.iperm-1) then
+                  ! add it at the final position
+                  key=middle+1
+                  permutations_dict(key)=val
+                  permutations_dict_ord(key)=iperm
+                  return
+               elseif (permutations_dict(middle+1).gt.val) then
+                  key=middle+1
+                  ! shift all above the key by one position
+                  permutations_dict(key+1:iperm)=permutations_dict(key:iperm-1)
+                  permutations_dict_ord(key+1:iperm)=permutations_dict_ord(key:iperm-1)
+                  ! add the value
+                  permutations_dict(key)=val
+                  permutations_dict_ord(key)=iperm
+                  return
+               endif
+               left=middle+1
+            else
+               right=middle
             endif
+         enddo
+      endif
+    end subroutine find_dict_pos_and_insert
+    subroutine get_value(ips,val)
+      ! Give every permutation 'ips' a unique value.
+      implicit none
+      integer,dimension(n-1) :: ips
+      integer :: j
+      integer(kind=8) :: val
+      val=0
+      ! Give a unique identifier based on colour order. Simply convert the
+      ! list to an integer with base equal to the number of external
+      ! particles.
+      do j=1,n-1
+         val=val+int(ips(n-j),kind=8)*int(n,kind=8)**int(j-1,kind=8)
+      enddo
+    end subroutine get_value
+    subroutine solve_dict(val,key)
+      ! Given the value 'val', find the corresponding key in the
+      ! 'permutations_dict' dictionary. Use a binary search
+      ! algorithm. (This only works if the dictionary values are
+      ! ordered, and all values only appear once).
+      implicit none
+      integer :: key,left,middle,right
+      integer(kind=8) :: val
+      left=1
+      right=nperm
+      do while (left.le.right)
+         middle=(right+left)/2
+         if (permutations_dict(middle).eq.val) then
+            key=permutations_dict_ord(middle)
+            return
+         elseif(permutations_dict(middle).gt.val) then
+            right=middle-1
+         else
+            left=middle+1
          endif
       enddo
-    end subroutine find_jperm
-    subroutine fill_ibuck(ibuck,ival,reset)
-      implicit none
-      logical :: reset
-      integer :: ibuck,ival
-      if (reset) then
-         bucket_size(:)=0
-         return
-      endif
-      bucket_size(ibuck)=bucket_size(ibuck)+1
-      if (bucket_size(ibuck).gt.10000) then
-         write (*,*) 'array bucket_val() out of bounds',ibuck,bucket_size(ibuck)
-         stop 1
-      endif
-      bucket_val(bucket_size(ibuck),ibuck)=ival
-    end subroutine fill_ibuck
-    integer function ibucket(n,ip)
-      implicit none
-      integer :: i,n
-      integer,dimension(n) :: ip
-      integer(kind=8) :: isum1
-      isum1=0
-      do i=1,n-1
-         isum1=isum1+int(ip(i),kind=8)*int(this%next,kind=8)**int((i-1),kind=8)
-      enddo
-      ibucket=int(mod(isum1,611953),kind=4)
-    end function ibucket
+      write (*,*) 'value not found in permutations dictionary',val
+      stop 1
+    end subroutine solve_dict
   end subroutine setup_colmap_cache_NLC
   
   subroutine evaluate_cache(this,p,hel)
@@ -1478,10 +1531,8 @@ contains
     
     call cpu_time(tAfter)
     write (*,*) '   isize',isize,tAfter-tBefore
-    allocate(this%nw_start(next-1:next-1))
-    this%nw_start(next-1)=1
-    allocate(this%wave_n(1:next-1,1:(this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)))
-    this%wave_n(1:next-1,1:this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)=&
+    allocate(this%perm(1:next-1,1:(this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)))
+    this%perm(1:next-1,1:this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)=&
          cur_part(1:next-1,this%n_cur_start(next-1):this%n_cur_end(next-1))
     write (*,*) '   total number of currents and vertices',n_cur,n_vert
     call cpu_time(tAfter)
@@ -1682,7 +1733,7 @@ contains
     end subroutine add_one_to_currents
     subroutine set_max_vert()
       ! computes the total number of needed vertices
-
+      !
       ! For example, for next=6, we have for the 3-gluon vertices. Note that
       ! the denominators, i.e., symmetry factors due to inversion of the order
       ! in the currents, reduces the amount by a factor 2*2*2 (due to
