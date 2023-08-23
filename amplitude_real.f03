@@ -276,8 +276,8 @@ contains
     implicit none
     class(amplitude_cache) :: this
     integer :: col_acc,n,i,jperm,iperm,col_fac,nperm,nw,Q1_start,Q1_end,Q2_start,Q2_end,max_col_index
-    integer,dimension(:),allocatable :: ic,ir,iper,jper,permutations_dict_ord
-    integer(kind=8),dimension(:),allocatable :: permutations_dict
+    integer,dimension(:),allocatable :: ic,ir,iper,jper,permutations_dict2
+    integer(kind=8),dimension(:),allocatable :: permutations_dict1
     integer(kind=8) :: val
     real(kind=4) :: tBefore,tAfter
 
@@ -286,19 +286,15 @@ contains
     n=this%next
     allocate(iper(1:n))
     allocate(jper(1:n))
-
     nperm=factorial(n-1)
-
-    allocate(permutations_dict(nperm))
-    allocate(permutations_dict_ord(nperm))
-    
+    allocate(permutations_dict1(nperm)) ! ordered dictionary of all the unique numbers for the permutations
+    allocate(permutations_dict2(nperm)) ! dictionary that relates the keys of permutations_dict1 to the iperm
     call create_permutations_dict()
-    
     this%col_acc=col_acc
-    if (col_acc.ge.1) allocate(this%col_value_NLC(3))
+    if (col_acc.ge.1) allocate(this%col_value_NLC(2))
     allocate(this%col_value_LC(1))
-    allocate(ic(max((n+1)/2,2)))
-    allocate(ir(max((n+1)/2,2)))
+    allocate(ic(2))
+    allocate(ir(2))
     ! max_col_index is equal to the number of NLC terms. This is
     ! therefore equal to the number of rows in the colour matrix times
     ! the number of non-zero NLC terms in each row. For the
@@ -313,12 +309,10 @@ contains
     allocate(this%row_index_LC(0:nperm,1))
     if (col_acc.ge.1) this%row_index_NLC(0,:)=0
     this%row_index_LC(0,:)=0
+    this%col_value_LC(1)= 3**n ! colour factor for the LC contributions
     if (col_acc.ge.1) then ! NLC
-       this%col_value_LC(1)= 3**n
-       this%col_value_NLC(1)=3**n
-       this%col_value_NLC(2)=3**(n-2)
-    else ! LC
-       this%col_value_LC(1)=3**n
+       this%col_value_NLC(1)=3**n ! colour factor for the LC contributions
+       this%col_value_NLC(2)=3**(n-2) ! colour factor for the NLC contributions
     endif
     ic=0
     ir=0
@@ -393,43 +387,43 @@ contains
     subroutine find_dict_pos_and_insert()
       ! find the location (i.e. 'key') in the permutations array (which should
       ! be ordered in the val's) to where to insert the current val, and
-      ! insert it there. Also update the permutations_dict_ord, which has as
+      ! insert it there. Also update the permutations_dict2, which has as
       ! the same key, but its value is the current 'iperm' being considered.
       implicit none
       integer :: left,right,middle,key
       if (iperm.eq.1) then
-         permutations_dict(iperm)=val
-         permutations_dict_ord(iperm)=iperm
+         permutations_dict1(iperm)=val
+         permutations_dict2(iperm)=iperm
       elseif (iperm.eq.2) then
-         if (val.gt.permutations_dict(iperm-1)) then
-            permutations_dict(iperm)=val
-            permutations_dict_ord(iperm)=iperm
+         if (val.gt.permutations_dict1(iperm-1)) then
+            permutations_dict1(iperm)=val
+            permutations_dict2(iperm)=iperm
          else
-            permutations_dict(iperm)=permutations_dict(iperm-1)
-            permutations_dict_ord(iperm)=permutations_dict_ord(iperm-1)
-            permutations_dict(iperm-1)=val
-            permutations_dict_ord(iperm-1)=iperm
+            permutations_dict1(iperm)=permutations_dict1(iperm-1)
+            permutations_dict2(iperm)=permutations_dict2(iperm-1)
+            permutations_dict1(iperm-1)=val
+            permutations_dict2(iperm-1)=iperm
          endif
       else
          left=1
          right=iperm-1
          do
             middle=(right+left)/2
-            if (permutations_dict(middle).lt.val) then
+            if (permutations_dict1(middle).lt.val) then
                if (middle.eq.iperm-1) then
                   ! add it at the final position
                   key=middle+1
-                  permutations_dict(key)=val
-                  permutations_dict_ord(key)=iperm
+                  permutations_dict1(key)=val
+                  permutations_dict2(key)=iperm
                   return
-               elseif (permutations_dict(middle+1).gt.val) then
+               elseif (permutations_dict1(middle+1).gt.val) then
                   key=middle+1
                   ! shift all above the key by one position
-                  permutations_dict(key+1:iperm)=permutations_dict(key:iperm-1)
-                  permutations_dict_ord(key+1:iperm)=permutations_dict_ord(key:iperm-1)
+                  permutations_dict1(key+1:iperm)=permutations_dict1(key:iperm-1)
+                  permutations_dict2(key+1:iperm)=permutations_dict2(key:iperm-1)
                   ! add the value
-                  permutations_dict(key)=val
-                  permutations_dict_ord(key)=iperm
+                  permutations_dict1(key)=val
+                  permutations_dict2(key)=iperm
                   return
                endif
                left=middle+1
@@ -455,9 +449,11 @@ contains
     end subroutine get_value
     subroutine solve_dict(val,key)
       ! Given the value 'val', find the corresponding key in the
-      ! 'permutations_dict' dictionary. Use a binary search
-      ! algorithm. (This only works if the dictionary values are
-      ! ordered, and all values only appear once).
+      ! 'permutations_dict1'. Use that key to return the val of the
+      ! 'permutations_dict2' dictionary, which corresponds to the
+      ! 'iperm' of the orderx. Use a binary search algorithm. (This
+      ! only works if the dictionary values are ordered, and all
+      ! values only appear once).
       implicit none
       integer :: key,left,middle,right
       integer(kind=8) :: val
@@ -465,10 +461,10 @@ contains
       right=nperm
       do while (left.le.right)
          middle=(right+left)/2
-         if (permutations_dict(middle).eq.val) then
-            key=permutations_dict_ord(middle)
+         if (permutations_dict1(middle).eq.val) then
+            key=permutations_dict2(middle)
             return
-         elseif(permutations_dict(middle).gt.val) then
+         elseif(permutations_dict1(middle).gt.val) then
             right=middle-1
          else
             left=middle+1
