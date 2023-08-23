@@ -69,7 +69,7 @@ program matrix_reweight
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8),dimension(:,:),allocatable :: icount
   real(kind=8),external :: ran2
-  logical :: done
+  logical :: done,decompose_4vert
 
   call get_run_arguments()
 
@@ -118,7 +118,8 @@ program matrix_reweight
      col_acc=20
      call amplitudes_full%init_onlycol_CSR(next,col_acc,sum_hel)
   elseif(reweight_mode.eq.16) then
-     call amplitudes_cache%setup_imap_cache(next)
+     decompose_4vert=.false.
+     call amplitudes_cache%setup_imap_cache(decompose_4vert,next)
      col_acc=1
      if (col_acc.le.1) then
         call amplitudes_cache%setup_colmap_cache_NLC(col_acc)
@@ -126,7 +127,8 @@ program matrix_reweight
         call amplitudes_cache%setup_colmap_cache(col_acc)
      endif
   elseif(reweight_mode.eq.17) then
-     call amplitudes_cache%setup_imap_3vert(next)
+     decompose_4vert=.true.
+     call amplitudes_cache%setup_imap_cache(decompose_4vert,next)
      col_acc=1
      if (col_acc.le.1) then
         call amplitudes_cache%setup_colmap_cache_NLC(col_acc)
@@ -180,10 +182,8 @@ program matrix_reweight
            enddo
            if ((reweight_mode.ge.0 .and. reweight_mode.le.9) .or. reweight_mode.eq.15) then
               call amplitudes_NLC%evaluate(p,hel)
-           elseif (reweight_mode.eq.16) then
+           elseif (reweight_mode.eq.16 .or. reweight_mode.eq.17) then
               call amplitudes_cache%evaluate_cache(p,hel)
-           elseif (reweight_mode.eq.17) then
-              call amplitudes_cache%evaluate_3vert(p,hel)
            endif
         endif
         call cpu_time(tAfter)
