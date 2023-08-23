@@ -1489,12 +1489,11 @@ contains
   subroutine setup_imap_3vert(this,next)
     implicit none
     class(amplitude_cache) :: this
-    integer :: n_cur,n_vert,nc,isize,next,n1,n2,n3,isplit,isplit2,ic1,ic2,ic3,max_cur,max_gluon_cur
-    integer,parameter :: max_vert=50000000
+    integer :: n_cur,n_vert,nc,isize,next,n1,n2,n3,isplit,isplit2,ic1,ic2,ic3,max_cur,max_vert
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: cur_part
     real(kind=4) :: tBefore,tAfter
-    logical,parameter :: decompose_4vert=.false.
+    logical,parameter :: decompose_4vert=.true.
     call cpu_time(tBefore)
     if (decompose_4vert) then
        write (*,*) 'setup imap with only 3-vertices...'
@@ -1507,6 +1506,7 @@ contains
     allocate(this%n_vert_start(next-1))
     allocate(this%n_vert_end(next-1))
     call set_max_cur()
+    call set_max_vert()
     allocate(current_dict(max_cur))
     allocate(cur_part(next-1,max_cur))
     allocate(this%cur_type(max_cur))
@@ -1573,6 +1573,15 @@ contains
        this%n_cur_end(isize)=n_cur
        this%n_vert_end(isize)=n_vert
     enddo
+
+    if (n_cur.ne.max_cur) then
+       write (*,*) 'ERROR: amount of currents not equal to the expect amount',n_cur,max_cur
+       stop 1
+    endif
+    if (n_vert.ne.max_vert) then
+       write (*,*) 'ERROR: amount of vertices not equal to the expect amount',n_vert,max_vert
+       stop 1
+    endif
     
     call cpu_time(tAfter)
     write (*,*) '   isize',isize,tAfter-tBefore
@@ -1781,6 +1790,83 @@ contains
       this%cur_vert_sign(this%cur_n_vert(ic),ic)=vertex_sign
 !!$      write (*,*) isize,ic,val,this%cur_n_vert(ic),ip,this%vert_type(n_vert),':',ic1,ic2
     end subroutine add_one_to_currents
+    subroutine set_max_vert()
+      ! computes the total number of needed vertices
+
+      ! For example, for next=6, we have for the 3-gluon vertices. Note that
+      ! the denominators, i.e., symmetry factors due to inversion of the order
+      ! in the currents, reduces the amount by a factor 2*2*2 (due to
+      ! inversion of the combined current, and inversion of the two incoming
+      ! currents separately, with the latter only applicable if the incoming
+      ! currents contain more than 1 particle):
+      ! - to compute the currents with 2 particles combined: (1+1)/2 ===> 5!/3! /2 = 10
+      ! - to compute the currents with 3 particles combined: (1+2)/4+(2+1)/4 ===> 5!/2! /4 + 5!/2! /4 = 30
+      ! - to compute the currents with 4 particles combined: (1+3)/4+(2+2)/8+(3+1)/4 ===> 5!/1! /4 + 5!/1! /8 + 5!/1! /4 = 75
+      ! - to compute the currents with 5 particles combined: (1+4)/4+(2+3)/8+(3+2)/8+(4+1)/4 ===> 5!/0! + 5!/0! + 5!/0! = 90
+      ! in total 205 3-gluon vertices.
+      !
+      ! To create the tensor particles, we need to double the amount of
+      ! vertices we have to compute for th 2-4 particles combined currents:
+      ! - 10+30+75 = 115 tensor creating currents.
+      !
+      ! To resolve the tensor particles we have more currents to choose from
+      ! when combining to 3-5 particles. Note that a single particle currents
+      ! cannot be a tensor currents and be careful not to include the
+      ! contributions for which *both* incoming currents are tensor particles:
+      ! - (1+2)/4+(2+1)/4 ===> 5!/2! /4 + 5!/2! /4 = 30
+      ! - (1+3)/4+2*(2+2)/8+(3+1)/4 ===> 5!/1! /4 + 2* 5!/1! /8 + 5!/1! /4 = 90
+      ! - (1+4)/4+2*(2+3)/8+2*(3+2)/8+(4+1)/4 ===> 5!/0! + 5!/0! + 5!/0! = 120
+      ! resulting into 240 tensor resolving vertices.
+      !
+      ! Hence a total of 205+115+240=560 3-vertices need to be computed for 6
+      ! gluon amplitudes.
+      !
+      ! If not decomposing the 4-gluon vertex into two three-vertices, a
+      ! similar counting applies to the 4-gluon vertices, resulting in a total
+      ! of 205+255=460 vertices to be computed.
+      implicit none
+      integer :: fact,fact2,fact3,iden,i,isplit,isplit2,itens
+      real(kind=8) :: mv
+      mv=0d0
+      fact=factorial(next-1)
+      do i=2,next-1
+         fact2=fact/factorial(next-1-i)
+         do isplit=1,i-1
+            iden=2
+            itens=1
+            if (isplit.gt.1) iden=iden*2
+            if (isplit.lt.i-1) iden=iden*2
+            if (decompose_4vert) then
+               if (i.ne.next-1) then
+                  itens=itens+1
+               endif
+               if (i.ne.2) then
+                  itens=itens+1
+                  if (isplit.gt.1 .and. isplit.lt.i-1) itens=itens+1
+               endif
+            endif
+            mv=mv+fact2/dble(iden)*itens
+         enddo
+      enddo
+      max_vert=nint(mv)
+      if (.not.decompose_4vert) then
+         ! add the 4-gluon interactions
+         mv=0d0
+         do i=3,next-1
+            fact2=fact/factorial(next-1-i)
+            do isplit=1,i-2
+               do isplit2=isplit+1,i-1
+                  iden=2
+                  if (isplit.gt.1) iden=iden*2
+                  if (isplit2.gt.isplit+1) iden=iden*2
+                  if (isplit2.lt.i-1) iden=iden*2
+                  mv=mv+fact2/dble(iden)
+               enddo
+            enddo
+         enddo
+         max_vert=max_vert+nint(mv)
+      endif
+    end subroutine set_max_vert
     subroutine set_max_cur()
       ! Computes the total number of needed currents
       ! - Number of gluon currents:
