@@ -275,7 +275,7 @@ contains
     use color_algebra
     implicit none
     class(amplitude_cache) :: this
-    integer :: col_acc,n,i,jperm,iperm,col_fac,nperm,nw,Q1_start,Q1_end,Q2_start,Q2_end
+    integer :: col_acc,n,i,jperm,iperm,col_fac,nperm,nw,Q1_start,Q1_end,Q2_start,Q2_end,max_col_index
     integer,dimension(:),allocatable :: ic,ir,iper,jper,permutations_dict_ord
     integer(kind=8),dimension(:),allocatable :: permutations_dict
     integer(kind=8) :: val
@@ -299,12 +299,15 @@ contains
     allocate(this%col_value_LC(1))
     allocate(ic(max((n+1)/2,2)))
     allocate(ir(max((n+1)/2,2)))
-    if (col_acc.ge.1) allocate(this%col_index_NLC(nperm*500,2))
-    write (*,*) 'WARNING: FACTOR 500 NEEDS TO BE FIXED'
-    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
-    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
-    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
-    write (*,*) '         FACTOR 500 NEEDS TO BE FIXED'
+    ! max_col_index is equal to the number of NLC terms. This is
+    ! therefore equal to the number of rows in the colour matrix times
+    ! the number of non-zero NLC terms in each row. For the
+    ! colour-flow basis (which is slightly less efficient than the
+    ! fundamental basis) this is equal to the polynomial below. In
+    ! fact, since we are only considering the upper-right triangle of
+    ! the colour matrix, we can devide the polynomial by two.
+    max_col_index=nperm*(n*(2-n-2*n**2+n**3)/24)/2
+    if (col_acc.ge.1) allocate(this%col_index_NLC(max_col_index,2))
     if (col_acc.ge.1) allocate(this%row_index_NLC(0:nperm,2))
     allocate(this%col_index_LC(nperm,1))
     allocate(this%row_index_LC(0:nperm,1))
@@ -366,6 +369,10 @@ contains
        if (col_acc.ge.1) this%row_index_NLC(iperm,1:2)=ir(1:2)
        this%row_index_LC(iperm,1)=ir(1)
     enddo
+    if (any(ic(:).gt.max_col_index)) then
+       write (*,*) 'ERROR: more NLC terms than expected',ic(:),max_col_index
+       stop 1
+    endif
     call cpu_time(tAfter)
     write (*,*) '... colour setup in',tAfter-tBefore,'seconds'
   contains
