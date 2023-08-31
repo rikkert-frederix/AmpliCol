@@ -252,7 +252,7 @@ contains
        this%row_index_LC(iperm,1)=ir(1)
     enddo
     
-    ! remove the largest one.
+    ! remove the one with the most entries.
     if (col_acc.ge.2) then
        imax=0
        max_val=0
@@ -476,13 +476,13 @@ contains
   end subroutine setup_colmap_cache_NLC
   
   subroutine evaluate_cache(this,p,hel)
+    ! computes the amplitudes for a single helicity configuration.
     implicit none
     class(amplitude_cache) :: this
     integer,dimension(this%next) :: hel
     real(kind=8),dimension(0:3,this%next) :: p
     integer :: isize,ic,ihel,ivert,iperm,ip,i
     real(kind=8),dimension(:,:),allocatable :: current,pp,current_out
-!!$    real(kind=8),dimension(:,:,:),allocatable :: 
     real(kind=8) :: propagator
 
     if (.not.allocated(current)) allocate(current(1:6,0:this%n_cur_end(this%next-1)))
@@ -1479,11 +1479,11 @@ contains
     endif
     ! create a dictionary with all currents to be able to quickly find them in the list.
     call create_current_dict()
+    call cpu_time(tAfter)
+    write (*,*) '   dictionary created ',tAfter-tBefore
     n_cur=0  ! number of currents
     n_vert=0 ! number of vertices
     do isize=1,next-1
-       call cpu_time(tAfter)
-       write (*,*) '   isize',isize,tAfter-tBefore
        this%n_cur_start(isize)=n_cur+1
        this%n_vert_start(isize)=n_vert+1
        if (isize.eq.1) then
@@ -1521,6 +1521,8 @@ contains
        endif
        this%n_cur_end(isize)=n_cur
        this%n_vert_end(isize)=n_vert
+       call cpu_time(tAfter)
+       write (*,*) '   created list of interactions and currents for combining',int(isize,kind=2),'particles',tAfter-tBefore
     enddo
 
     if (n_cur.ne.max_cur) then
@@ -1532,8 +1534,6 @@ contains
        stop 1
     endif
     
-    call cpu_time(tAfter)
-    write (*,*) '   isize',isize,tAfter-tBefore
     allocate(this%perm(1:next-1,1:(this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)))
     this%perm(1:next-1,1:this%n_cur_end(next-1)-this%n_cur_start(next-1)+1)=&
          cur_part(1:next-1,this%n_cur_start(next-1):this%n_cur_end(next-1))
@@ -1816,7 +1816,7 @@ contains
       ! - Number of gluon currents:
       !   (next-1) + ( (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ... )/2
       ! - Number of tensor currents: 
-      !   same as for the gluons except that the first and final terms are not present
+      !   same as for the gluons except that the first and final terms are absent
       implicit none
       integer :: i,j,ifact
       max_cur=0

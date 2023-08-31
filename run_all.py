@@ -11,9 +11,9 @@ def run_program(program, args, output_file):
 
 if __name__ == '__main__':
 
-    nexternal=['4','5','6','7','8','9']
+#    nexternal=['4','5','6','7','8','9']
 #    nexternal=['10','11','12']
-#    nexternal=['7']
+    nexternal=['12']
 
     for n in nexternal:
         color_orders=[str(i) for i in range(0,int((int(n))/2))]
@@ -34,20 +34,21 @@ if __name__ == '__main__':
             for process in processes:
                 process.join()
  
-        imodes=['2']
-        program='./matrix_reweight'
-            
-        for imode in imodes:
-            processes=[]
-            for color_order in color_orders:
-                output_file='log_'+n+'_'+imode+'_'+color_order+'_rwgt.txt'
-                args=[n,imode,color_order]
-                processes.append(multiprocessing.Process(target=run_program, args=(program, args, output_file)))
-        
-            # Start all processes
-            for process in processes:
-                process.start()
+#        imodes=['2']
+#        program='./matrix_reweight'
+#            
+#        for imode in imodes:
+#            processes=[]
+#            for color_order in color_orders:
+#                output_file='log_'+n+'_'+imode+'_'+color_order+'_rwgt.txt'
+#                args=[n,imode,color_order]
+#                processes.append(multiprocessing.Process(target=run_program, args=(program, args, output_file)))
+#
+#            # Start all processes
+#            for process in processes:
+#                process.start()
+#
+#            # Wait for all processes to finish
+#            for process in processes:
+#                process.join()
 
-            # Wait for all processes to finish
-            for process in processes:
-                process.join()

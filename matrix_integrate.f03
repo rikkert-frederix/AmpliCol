@@ -61,13 +61,13 @@ program matrix_integrate
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
-  accuracy=0.005d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+  accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
 !  integration=1
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=1000d0
+  sqrtshat=3000d0
 
   pt_min=-1d0
   DRjj_min=-1d0

@@ -8,8 +8,6 @@ module common
   type(amplitude) :: amplitudes_LC,amplitudes_NLC,amplitudes_full
   type(amplitude_cache) :: amplitudes_cache
   real(kind=8),dimension(:,:),allocatable :: p
-  type(col_amp) :: color_amp
-!!$  type(col_amp),dimension(:),allocatable :: col_amp_list
 end module common
 module rw_events
   implicit none
@@ -120,7 +118,7 @@ program matrix_reweight
   elseif(reweight_mode.eq.16) then
      decompose_4vert=.false.
      call amplitudes_cache%setup_imap_cache(decompose_4vert,next)
-     col_acc=1
+     col_acc=20
      if (col_acc.le.1) then
         call amplitudes_cache%setup_colmap_cache_NLC(col_acc)
      else
