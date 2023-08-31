@@ -1,5 +1,5 @@
 
-! gfortran -ffast-math -O3 -o matrix_integrate simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 color_algebra.f95 amplitude_real.f03 matrix_integrate.f03
+! gfortran -ffast-math -O3 -o matrix_integrate simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f  simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90  PhaseSpace_haag/haag.f90 color_algebra.f95 amplitude_real.f03 matrix_integrate.f03
 
 
 module common
@@ -14,6 +14,10 @@ module common
   real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
   real*8 :: amp2,weight
   real*8,dimension(:),allocatable :: amp2_hel
+  real(kind=8),dimension(:,:),allocatable,public :: p
+  real(kind=8),public :: jac
+!  integer(kind=4) :: integration
+
 end module common
 
 
@@ -21,6 +25,7 @@ program matrix_integrate
   use common
   use mint_module
   use phase_space_gen23
+  use haag
   implicit none
   integer :: col_acc,j,c_o,i
   integer(kind=8) :: sym_fac
@@ -31,6 +36,8 @@ program matrix_integrate
   logical :: t_chan
   character(len=18) :: filename
   real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
+  integer(kind=4) :: integration
+
 
   call get_run_arguments()
   call create_run_tag()
@@ -56,6 +63,7 @@ program matrix_integrate
 
   accuracy=0.005d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
+!  integration=1
 
 
 ! relevant physics input parameters and initialisation of amplitudes
@@ -84,7 +92,12 @@ program matrix_integrate
   t_chan=.false.
 
   call cpu_time(tBefore)
-  call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+  if (integration.eq.1) then
+        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+  elseif  (integration.eq.2) then
+        call haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
+  endif
+
   call cpu_time(tAfter)
 
   t_PS_init=t_PS_init+tAfter-tBefore
@@ -145,6 +158,7 @@ program matrix_integrate
      call gen(integrand,3,-1) ! print counters
   endif
      
+      
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
@@ -179,7 +193,12 @@ contains
     pass_cuts_check=.true.
 
     call cpu_time(tBefore)
-    call gen23_phase_space(x)
+    if (integration.eq.1)then
+        call gen23_phase_space(x)
+    elseif (integration.eq.2) then
+        call PS_haag(x)
+    endif
+    
     call cpu_time(tAfter)
     t_PS=t_PS+tAfter-tBefore
 
@@ -209,6 +228,7 @@ contains
     enddo
     amp2=sum(amp2_hel(0:amplitudes%nhel(amplitudes%isize+1)-1))
     ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
+    
     weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
     val=amp2*weight
 
@@ -355,17 +375,21 @@ contains
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
     if (argc.ne.3) then
-       write (*,*) 'Give number of gluons, imode and color'// &
-            ' ordering (number of gluons on first color line):'
-       read (*,*) next,imode,c_o
+       write (*,*) 'Give number of gluons,' 
+       write(*,*)  'imode'
+       write(*,*)  'color  ordering (number of gluons on first color line)'
+       write(*,*) 'integration mode (1 or 2):'
+       read (*,*) next,imode,c_o,integration
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) next
           if (i.eq.2) read(argv,*) imode
           if (i.eq.3) read(argv,*) c_o
+          if (i.eq.4) read(argv,*) integration
        enddo
     endif
+    write(*,*) 'integration',integration
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
@@ -376,6 +400,10 @@ contains
     endif
     if (c_o.lt.0 .or. c_o .gt. next-2) then
        write (*,*) 'inconsistent color-ordering',c_o
+       stop
+    endif
+    if (integration.ne.1 .and. integration.ne.2) then
+       write (*,*) 'Integration modes only 1 or 2',integration
        stop
     endif
   end subroutine get_run_arguments

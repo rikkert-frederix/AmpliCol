@@ -1,6 +1,7 @@
 module phase_space_gen23
+  use common
   private
-  integer(kind=4) :: next,ix,ndim
+  integer(kind=4) :: ix,ndim
   integer(kind=4),dimension(:),allocatable :: order
   real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x
   real(kind=8),dimension(:,:),allocatable :: pp
@@ -19,10 +20,10 @@ module phase_space_gen23
 
   ! OUTPUT
   ! phase-space point
-  real(kind=8),dimension(:,:),allocatable,public :: p
+!  real(kind=8),dimension(:,:),allocatable,public :: p
   ! phase-space weight for the phase-space point (includes all factors
   ! of 2*pi and flux factor)
-  real(kind=8),public :: jac
+!  real(kind=8),public :: jac
   
   public :: gen23_init,gen23_phase_space
 contains
@@ -186,6 +187,7 @@ contains
     integer(kind=4) :: i,j,inext,im1
     integer(kind=4),dimension(2) :: set
     logical,parameter :: use_t_channel_at_start=.true.
+
     ! incoming momenta
     pp(0,ibset(0,0))=sqrtshat/2d0
     pp(0,ibset(0,1))=sqrtshat/2d0
@@ -297,8 +299,7 @@ contains
     enddo
     if (verbose) call test_momenta
 
-    
-! Add factors of 2*pi`
+! Add factors of 2*pi
     jac=jac/((2d0*pi)**(3*(next-2)-4))
 ! Add flux factor
     jac=jac/(2d0*sqrtshat**2)
@@ -819,6 +820,17 @@ contains
   end subroutine gentcms2
 
 
+
+
+
+
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!c
+!c
+!c Functions not to be touched (basic functions)
+!c
+!cccccccccccccccccccccccccccccccccccccccccccccccccccc
+
   subroutine rotxxx(p,q,prot)
 ! This subroutine performs the spacial rotation of a four-momentum.
 ! the momentum p is assumed to be given in the frame where the spacial
@@ -826,7 +838,7 @@ contains
 ! rotated to the frame where q is given.
 ! input:
 !       real    p(0:3)         : four-momentum p in q(1)=q(2)=0 frame
-!       real    q(0:3)         : four-momentum q in the rotated frame
+!!       real    q(0:3)         : four-momentum q in the rotated frame
 ! output:
 !       real    prot(0:3)      : four-momentum p in the rotated frame
     implicit none
@@ -853,7 +865,7 @@ contains
   end subroutine rotxxx
 
 
-  subroutine rotxxx_inv(p,q,prot)
+ subroutine rotxxx_inv(p,q,prot)
     ! Same as rotxxx, but inverse. That is, first doing
     ! rotxxx(p,q,prot) and then rotxxx_inv(prot,q,p) should give you
     ! back the original p.
