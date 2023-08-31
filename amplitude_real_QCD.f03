@@ -81,9 +81,17 @@ contains
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
     ! All done. But there could be currents that are not needed. Filter them out
-    call filter_needed()
+    call filter_dead_trees()
   contains
-    subroutine filter_needed()
+    subroutine filter_dead_trees()
+      ! some currents can be removed, since the "tree" starting from some of
+      ! the initial state particles might lead to a dead end with no possible
+      ! interactions for that current and the remaining external
+      ! particles. Hence, they do not need to be computed since they can not
+      ! lead to a valid Feynman diagram. To filter them out, one starts at the
+      ! end, and goes backwards through the list and see if there are any
+      ! currents that were not needed (i.e., they are not the input to a
+      ! vertex that is used anywhere).
       implicit none
       logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
       integer,dimension(:),allocatable :: where_to_cur,where_to_ver
@@ -95,8 +103,14 @@ contains
       ! assume nothing is needed
       is_needed_cur(:)=.false.
       is_needed_ver(:)=.false.
-      ! loop through the list backward: the closing current is needed, hence
-      ! all currents that lead into that closing current are also needed. 
+      ! loop through the list backward: if we got to the end, i.e.,
+      ! nc.ge.this%n_cur_start(n-1), we now that it is a valid tree. This
+      ! means that all inputs to that final current are also needed. By moving
+      ! backwards through the list, we can filter out all the branches of the
+      ! tree that are needed. (The nc.le.this%n_cur_end(1) is needed only to
+      ! make sure that the current that corresponds to the n'th final state
+      ! particle is marked as needed, since that current does not enter any of
+      ! the trees: it is only needed to close the tree and get the amplitudes.)
       do nc=this%n_cur,1,-1
          if (is_needed_cur(nc) .or. nc.ge.this%n_cur_start(n-1) .or. nc.le.this%n_cur_end(1)) then
             is_needed_cur(nc)=.true.
@@ -155,8 +169,7 @@ contains
       deallocate(is_needed_cur)
       deallocate(where_to_ver)
       deallocate(where_to_cur)
-    end subroutine filter_needed
-    
+    end subroutine filter_dead_trees
     integer function anti_current(ctype)
       implicit none
       integer :: ctype
