@@ -3,20 +3,22 @@ module amplitude_mod
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
-     integer,dimension(:,:),allocatable :: val
+     real(kind=8),dimension(:,:),allocatable :: val
+     real(kind=8),dimension(0:3) :: pp
   end type current
   type interaction
      integer :: type
      integer,dimension(2) :: currents
+     real(kind=8),dimension(:,:),allocatable :: val
   end type interaction
   type amplitude
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
-     complex(kind=16),dimension(:),allocatable :: amps
+     real(kind=8),dimension(:),allocatable :: amps
      integer :: n_cur,n_vert
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end
    contains
-     procedure :: init_OneOrder
+     procedure :: init_OneOrder,evaluate_OneOrder
   end type amplitude
 contains
   subroutine init_OneOrder(this,n,part,order)
@@ -24,7 +26,7 @@ contains
     class(amplitude) :: this
     integer::n
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,ivert,i
+    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i
     ! consistency checks:
     ! - count number of qqbar pairs (should be even)
     ! - in colour order, make sure that first and last are quark and anti-quark
@@ -114,14 +116,14 @@ contains
       do nc=this%n_cur,1,-1
          if (is_needed_cur(nc) .or. nc.ge.this%n_cur_start(n-1) .or. nc.le.this%n_cur_end(1)) then
             is_needed_cur(nc)=.true.
-            do ivert=1,this%current_list(nc)%n_vert
-               is_needed_ver(this%current_list(nc)%vertices(ivert))=.true.
-               is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(ivert))%currents(1))=.true.
-               is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(ivert))%currents(2))=.true.
+            do iv=1,this%current_list(nc)%n_vert
+               is_needed_ver(this%current_list(nc)%vertices(iv))=.true.
+               is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(1))=.true.
+               is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(2))=.true.
             enddo
          endif
       enddo
-      ! now we know which ones we can skip. Determine where to move the remaining currents to
+      ! now we know which ones we can skip. Determine where to move the remaining currents
       to_skip=0
       do nc=1,this%n_cur
          if (.not. is_needed_cur(nc)) then
@@ -131,28 +133,28 @@ contains
          where_to_cur(nc)=nc-to_skip
       enddo
       to_skip=0
-      do ivert=1,this%n_vert
-         if (.not. is_needed_ver(ivert)) then
+      do iv=1,this%n_vert
+         if (.not. is_needed_ver(iv)) then
             to_skip=to_skip+1
             cycle
          endif
-         where_to_ver(ivert)=ivert-to_skip
+         where_to_ver(iv)=iv-to_skip
       enddo
       ! do the actual shifting of the currents in the list
       do nc=1,this%n_cur
          if (.not.is_needed_cur(nc)) cycle
          this%current_list(where_to_cur(nc))=this%current_list(nc)
-         do ivert=1,this%current_list(where_to_cur(nc))%n_vert
-            this%current_list(where_to_cur(nc))%vertices(ivert)= &
-                 where_to_ver(this%current_list(where_to_cur(nc))%vertices(ivert))
+         do iv=1,this%current_list(where_to_cur(nc))%n_vert
+            this%current_list(where_to_cur(nc))%vertices(iv)= &
+                 where_to_ver(this%current_list(where_to_cur(nc))%vertices(iv))
          enddo
       enddo
       ! do the actual shifting of the interactions in the list
-      do ivert=1,this%n_vert
-         if (.not.is_needed_ver(ivert)) cycle
-         this%interaction_list(where_to_ver(ivert))=this%interaction_list(ivert)
-         this%interaction_list(where_to_ver(ivert))%currents(1:2)= &
-              where_to_cur(this%interaction_list(where_to_ver(ivert))%currents(1:2))
+      do iv=1,this%n_vert
+         if (.not.is_needed_ver(iv)) cycle
+         this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+         this%interaction_list(where_to_ver(iv))%currents(1:2)= &
+              where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
       enddo
       ! and also the shifting of the auxiliary arrays and variables
       do isize=1,n-1
@@ -250,92 +252,118 @@ contains
       this%current_list(this%n_cur)%n_vert=1
     end subroutine add_current
   end subroutine init_OneOrder
-!!$  subroutine evaluate_OneOrder(this,n)
-!!$    implicit none
-!!$    class(amplitude) :: this
-!!$    integer :: n
-!!$    do isize=1,n-1
-!!$       if (isize.eq.1) then
-!!$          ! fill the external wave_functions
-!!$          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-!!$             do ihel=1,this%current_list(ic)%nhel
-!!$                if (this%current_list(ic)%type.eq.21) then
-!!$                   call ext_gluon(pp(0,this%current_list(ic)%bin),ihel,1,this%current_list(ic)%val(1:4,ihel))
-!!$                elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-!!$                   call ext_quark(pp(0,this%current_list(ic)%bin),ihel,1,this%current_list(ic)%val(1:4,ihel))
-!!$                elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-!!$                   call ext_antiquark(pp(0,this%current_list(ic)%bin),ihel,1,this%current_list(ic)%val(1:4,ihel))
-!!$                endif
-!!$             enddo
-!!$          enddo
-!!$          cycle
-!!$       endif
-!!$
-!!$
-!!$       
-!!$       do ivert=this%n_vert_start(isize),this%n_vert_end(isize)
-!!$          if (this%vert_type(ivert).eq.0) then
-!!$             call threeGluon(current(1:4,this%vert_cur(1,ivert)),pp(0:3,this%cur_bin(this%vert_cur(1,ivert))),&
-!!$                             current(1:4,this%vert_cur(2,ivert)),pp(0:3,this%cur_bin(this%vert_cur(2,ivert))),&
-!!$                             current_out(1:4,ivert))
-!!$          elseif(this%vert_type(ivert).eq.1) then
-!!$             call TwoGluonToTensor(current(1:4,this%vert_cur(1,ivert)),&
-!!$                                   current(1:4,this%vert_cur(2,ivert)),&
-!!$                                   current_out(1:6,ivert))
-!!$          elseif(this%vert_type(ivert).eq.2) then
-!!$             call TensorGluontoGluon(current(1:6,this%vert_cur(1,ivert)),&
-!!$                                     current(1:4,this%vert_cur(2,ivert)),&
-!!$                                     current_out(1:4,ivert))
-!!$          elseif(this%vert_type(ivert).eq.3) then
-!!$             call GluonTensortoGluon(current(1:4,this%vert_cur(1,ivert)),&
-!!$                                     current(1:6,this%vert_cur(2,ivert)),&
-!!$                                     current_out(1:4,ivert))
-!!$          elseif(this%vert_type(ivert).eq.99) then
-!!$             call FourGluon(current(1:4,this%vert_cur(1,ivert)),&
-!!$                            current(1:4,this%vert_cur(2,ivert)),&
-!!$                            current(1:4,this%vert_cur(3,ivert)),&
-!!$                            current_out(1:4,ivert))
-!!$          elseif()
-!!$             ...
-!!$
-!!$
-!!$             
-!!$          else
-!!$             write (*,*) 'Unknown vertex type',ivert,this%vert_type(ivert)
-!!$             stop 1
-!!$          endif
-!!$       enddo
-!!$       ! compute the currents by combining the interactions
-!!$       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-!!$          if (this%cur_type(ic).eq.0) then ! gluon current
-!!$             current(1:4,ic)=0d0
-!!$             do ivert=1,this%cur_n_vert(ic)
-!!$                if (.not.this%cur_vert_sign(ivert,ic)) then
-!!$                   current(1:4,ic)=current(1:4,ic)+current_out(1:4,this%cur_vertices(ivert,ic))
-!!$                else
-!!$                   current(1:4,ic)=current(1:4,ic)-current_out(1:4,this%cur_vertices(ivert,ic))
-!!$                endif
-!!$             enddo
-!!$             ! include the gluon propagator
-!!$             if (isize.ne.this%next-1)  then
-!!$                propagator=1d0/(pp(0,this%cur_bin(ic))**2-pp(1,this%cur_bin(ic))**2- &
-!!$                                pp(2,this%cur_bin(ic))**2-pp(3,this%cur_bin(ic))**2)
-!!$                current(1:4,ic)=current(1:4,ic)*propagator
-!!$             endif
-!!$          elseif (this%cur_type(ic).eq.-1) then ! tensor current
-!!$             current(1:6,ic)=0d0
-!!$             do ivert=1,this%cur_n_vert(ic)
-!!$                if (.not.this%cur_vert_sign(ivert,ic)) then
-!!$                   current(1:6,ic)=current(1:6,ic)+current_out(1:6,this%cur_vertices(ivert,ic))
-!!$                else
-!!$                   current(1:6,ic)=current(1:6,ic)-current_out(1:6,this%cur_vertices(ivert,ic))
-!!$                endif
-!!$             enddo
-!!$          else
-!!$             write (*,*) 'Unknown current type',ic,this%cur_type(ic)
-!!$             stop 1
-!!$          endif
-!!$       enddo
-!!$    enddo
-!!$  end subroutine evaluate_OneOrder
+  subroutine evaluate_OneOrder(this,n,p)
+    use FeynmanRules
+    implicit none
+    class(amplitude) :: this
+    integer :: n
+    real(kind=8),dimension(0:3,n) :: p
+    integer :: ic,iv,isize,ih1,ih2,ih
+    real(kind=8) :: propagator
+
+    if (.not. allocated(this%current_list(1)%val)) then
+       do ic=1,this%n_cur
+          if (this%current_list(ic)%type.eq.-21) then
+             allocate(this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel))
+          else
+             allocate(this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel))
+          endif
+       enddo
+       do iv=1,this%n_vert
+          if (this%interaction_list(iv)%type.eq.1) then
+             allocate(this%interaction_list(iv)%val(1:6,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
+                                                          this%current_list(this%interaction_list(iv)%currents(2))%nhel))
+          else
+             allocate(this%interaction_list(iv)%val(1:4,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
+                                                          this%current_list(this%interaction_list(iv)%currents(2))%nhel))
+          endif
+       enddo
+    endif
+
+
+    do isize=1,n-1
+       if (isize.eq.1) then
+          ! fill the external wave_functions
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+             this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
+             do ih=1,this%current_list(ic)%nhel
+                if (this%current_list(ic)%type.eq.21) then
+                   call ext_gluon(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
+                   call ext_quark(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
+                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                endif
+             enddo
+          enddo
+          cycle
+       endif
+       ! loop over the vertices required to create all the currents with isize
+       ! number of external particles combined
+       do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+          do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
+             do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
+                ih=(ih1-1)*this%current_list(this%interaction_list(iv)%currents(2))%nhel+ih2
+                if (this%interaction_list(iv)%type.eq.0) then
+                   call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
+                                        this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
+                                   this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
+                                        this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
+                                   this%interaction_list(iv)%val(1:4,ih))
+                elseif(this%interaction_list(iv)%type.eq.1) then
+                   call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
+                                         this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
+                                         this%interaction_list(iv)%val(1:6,ih))
+                elseif(this%interaction_list(iv)%type.eq.2) then
+                   call TensorGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:6,ih1),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
+                                           this%interaction_list(iv)%val(1:4,ih))
+                elseif(this%interaction_list(iv)%type.eq.3) then
+                   call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val(1:6,ih2),&
+                                           this%interaction_list(iv)%val(1:4,ih))
+                else
+                   write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
+                   stop 1
+                endif
+             enddo
+          enddo
+       enddo
+       ! compute the currents by combining the interactions
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          this%current_list(ic)%pp(0:3)=&
+               this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(1))%pp(0:3)+&
+               this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(2))%pp(0:3)
+          if (this%current_list(ic)%type.eq.21) then
+             this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=0d0
+             do iv=1,this%current_list(ic)%n_vert
+                this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=&
+                     this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)+&
+                     this%interaction_list(iv)%val(1:4,1:this%current_list(ic)%nhel)
+             enddo
+             ! include the gluon propagator
+             if (isize.ne.n-1)  then
+                propagator=1d0/(this%current_list(ic)%pp(0)**2-this%current_list(ic)%pp(1)**2- &
+                                this%current_list(ic)%pp(2)**2-this%current_list(ic)%pp(3)**2)
+                this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=&
+                     this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)*propagator
+             endif
+          elseif (this%current_list(ic)%type.eq.-21) then
+             this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel)=0d0
+             do iv=1,this%current_list(ic)%n_vert
+                this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel)=&
+                     this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel)+&
+                     this%interaction_list(iv)%val(1:6,1:this%current_list(ic)%nhel)
+             enddo
+          else
+             write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
+             stop 1
+          endif
+       enddo
+    enddo
+  end subroutine evaluate_OneOrder
+
+
+
+  
 end module amplitude_mod
