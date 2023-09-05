@@ -1,0 +1,250 @@
+module FeynmanRules
+contains
+  subroutine ext_gluon_real(p,ihel,ifinal,wf)
+    implicit none
+    integer ihel,ifinal
+    real(kind=8), dimension(0:3) :: p
+    real(kind=8), dimension(4) :: wf
+    complex*16,dimension(4) :: wf0,wf1
+    complex*16,parameter :: cImag=(0d0,1d0)
+    call ext_gluon_cmplx(p,1,ifinal,wf1)
+    call ext_gluon_cmplx(p,0,ifinal,wf0)
+    if (ihel.eq.1) then
+       wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqrt(0.5d0)
+    elseif (ihel.eq.0) then
+       wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqrt(0.5d0)
+    endif
+  end subroutine ext_gluon_real
+  subroutine ext_gluon_cmplx(p,ihel,ifinal,wf)
+    ! External gluon wavefunction. From HELAS.
+    implicit none
+    integer :: ihel,ifinal
+    real(kind=8), dimension(0:3) :: p
+    complex*16, dimension(4) :: wf
+    real(kind=8),parameter :: rzero=0d0,sqh=sqrt(0.5d0)
+    real(kind=8) :: hel,pp,pt,pzpt
+    hel = dble(2*ihel-1)
+    pp = p(0)
+    pt = sqrt(p(1)**2+p(2)**2)
+    wf(1) = dcmplx( rZero )
+    wf(4) = dcmplx( hel*pt/pp*sqh )
+    if ( pt.ne.rZero ) then
+       pzpt = p(3)/(pp*pt)*sqh*hel
+       wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
+       wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+    else
+       wf(2) = dcmplx( -hel*sqh )
+       wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+    endif
+  end subroutine ext_gluon_cmplx
+  subroutine ext_quark(p,ihel,ifinal,wf)
+  ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
+  ! state anti-quark (p(0)<0)
+    implicit none
+    integer :: ihel,ifinal
+    real(kind=8), dimension(0:3) :: p
+    complex(kind=8), dimension(4) :: wf
+    complex(kind=8), dimension(2) :: chi
+    real(kind=8),parameter :: rzero=0d0,rTwo=2d0
+    complex(kind=8),parameter :: cZero=(0d0,0d0)
+    real(kind=8) :: sqp0p3
+    integer :: nh
+    if (p(0).gt.0d0) then
+       ! outgoing final state momenta
+       nh = ihel
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*p(0))
+       else
+          chi(2) = dcmplx( nh*p(1), -p(2) )/sqp0p3
+       endif
+       if ( nh.eq.1 ) then
+          wf(1) = chi(1)
+          wf(2) = chi(2)
+          wf(3) = cZero
+          wf(4) = cZero
+       else
+          wf(1) = cZero
+          wf(2) = cZero
+          wf(3) = chi(2)
+          wf(4) = chi(1)
+       endif
+    else
+       ! "outgoing" initial state momenta
+       nh = -ihel
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*abs(p(0)))
+       else
+          chi(2) = dcmplx( nh*p(1), p(2) )/sqp0p3
+       endif
+       if ( nh.eq.1 ) then
+          wf(1) = cZero
+          wf(2) = cZero
+          wf(3) = chi(2)
+          wf(4) = chi(1)
+       else
+          wf(1) = chi(1)
+          wf(2) = chi(2)
+          wf(3) = cZero
+          wf(4) = cZero
+       endif
+    endif
+  end subroutine ext_quark
+  subroutine ext_antiquark(p,ihel,ifinal,wf)
+  ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
+  ! initial state quark (p(0)<0)
+    implicit none
+    integer :: ihel,ifinal
+    real(kind=8), dimension(0:3) :: p
+    complex(kind=8), dimension(4) :: wf
+    complex(kind=8), dimension(2) :: chi
+    real(kind=8),parameter :: rzero=0d0,rTwo=2d0
+    complex(kind=8),parameter :: cZero=(0d0,0d0)
+    real(kind=8) :: sqp0p3
+    integer :: nh
+    if(p(0).gt.0d0) then
+! outgoing final state momenta
+       nh = -ihel
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*p(0))
+       else
+          chi(2) = dcmplx( nh*p(1), p(2) )/sqp0p3
+       endif
+       if ( nh.eq.1 ) then
+          wf(1) = cZero
+          wf(2) = cZero
+          wf(3) = chi(1)
+          wf(4) = chi(2)
+       else
+          wf(1) = chi(2)
+          wf(2) = chi(1)
+          wf(3) = cZero
+          wf(4) = cZero
+       endif
+    else
+! "outgoing" initial state momenta
+       nh = ihel
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*abs(p(0)))
+       else
+          chi(2) = dcmplx( nh*p(1), -p(2) )/sqp0p3
+       endif
+       if ( nh.eq.1 ) then
+          wf(1) = chi(2)
+          wf(2) = chi(1)
+          wf(3) = cZero
+          wf(4) = cZero
+       else
+          wf(1) = cZero
+          wf(2) = cZero
+          wf(3) = chi(1)
+          wf(4) = chi(2)
+       endif
+    endif
+  end subroutine ext_antiquark
+  subroutine ThreeGluon(wf1,pwf1,wf2,pwf2,wf)
+    ! Colour-ordered three-gluon interaction
+    implicit none
+    complex(kind=8),dimension(4) :: wf1,wf2,wf
+    complex(kind=8),dimension(0:3) :: pwf1,pwf2
+    real(kind=8),parameter :: prefact=1d0/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3
+    TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
+    TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
+    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
+  end subroutine ThreeGluon
+  subroutine FourGluon(wf1,wf2,wf3,wf)
+    ! Colour-ordered four-gluon interaction
+    implicit none
+    complex(kind=8),dimension(4) :: wf1,wf2,wf3,wf
+    real(kind=8),parameter :: prefact=0.5d0
+    complex(kind=8) :: TMP1,TMP2,TMP3
+    TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    TMP2 = (wf1(1)*wf3(1)-wf1(2)*wf3(2)-wf1(3)*wf3(3)-wf1(4)*wf3(4))
+    TMP3 = (wf2(1)*wf3(1)-wf2(2)*wf3(2)-wf2(3)*wf3(3)-wf2(4)*wf3(4))
+    wf(1:4) = prefact*(2d0*wf2(1:4)*TMP2-wf1(1:4)*TMP3-wf3(1:4)*TMP1)
+  end subroutine FourGluon
+  subroutine TwoGluontoTensor(wfg1,wfg2,wfT)
+    ! This vertex includes the all factors such that the tensor "propagator"
+    ! is simply the identity
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg2
+    complex(kind=8),dimension(6) :: wfT
+    ! Since it is an anti-symmetric 4x4 tensor, take only the upper-right triangle.
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))
+!!$    do i=1,4
+!!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
+!!$    enddo
+  end subroutine TwoGluontoTensor
+  subroutine TensorGluontoGluon(wfT1,wfg2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(6) :: wfT1
+    real(kind=8),parameter :: prefact=0.5d0
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+!!$    do i=1,4
+!!$       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
+!!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.25d0
+!!$    enddo
+  end subroutine TensorGluontoGluon
+  subroutine GluonTensortoGluon(wfg1,wfT2,wfg)
+    implicit none 
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(6) :: wfT2
+    real(kind=8),parameter :: prefact=0.5d0
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+!!$    do i=1,4
+!!$       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
+!!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.25d0
+!!$    enddo
+  end subroutine GluonTensortoGluon
+  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq)
+    implicit none
+    complex*16,dimension(4) :: wfg1,wfq2,wfq
+    complex*16, parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex*16 :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    wfq(1)=prefact*(TMP1*wfq2(3)+TMP3*wfq2(4))
+    wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3))
+    wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2))
+    wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1))
+  end subroutine GluonQuarktoQuark
+end module FeynmanRules

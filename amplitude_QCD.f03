@@ -3,13 +3,13 @@ module amplitude_mod
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
-     real(kind=8),dimension(:,:),allocatable :: val
+     complex(kind=8),dimension(:,:),allocatable :: val
      real(kind=8),dimension(0:3) :: pp
   end type current
   type interaction
      integer :: type
      integer,dimension(2) :: currents
-     real(kind=8),dimension(:,:),allocatable :: val
+     complex(kind=8),dimension(:,:),allocatable :: val
   end type interaction
   type amplitude
      type(current),dimension(:),allocatable :: current_list
@@ -288,7 +288,7 @@ contains
              this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
              do ih=1,this%current_list(ic)%nhel
                 if (this%current_list(ic)%type.eq.21) then
-                   call ext_gluon(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
                    call ext_quark(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
@@ -362,8 +362,5 @@ contains
        enddo
     enddo
   end subroutine evaluate_OneOrder
-
-
-
   
 end module amplitude_mod
