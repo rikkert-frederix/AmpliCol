@@ -425,32 +425,11 @@ contains
     end subroutine combine_interactions
     subroutine include_gluon_propagator()
       implicit none
-      complex(kind=8) :: propagator
-      complex(kind=8),parameter :: cImag=(0d0,1d0)
-      propagator=-cImag/(this%current_list(ic)%pp(0)**2-this%current_list(ic)%pp(1)**2- &
-           this%current_list(ic)%pp(2)**2-this%current_list(ic)%pp(3)**2)
-      this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=&
-           this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)*propagator
+      call GluonPropagator(this%current_list(ic)%val,this%current_list(ic)%nhel,this%current_list(ic)%pp)
     end subroutine include_gluon_propagator
     subroutine include_quark_propagator()
       implicit none
-      complex(kind=8) :: propagator
-      complex(kind=8),dimension(1:4) :: tmp
-      complex(kind=8),dimension(1:4) :: tmp_val
-      complex(kind=8),parameter :: cImag=(0d0,1d0)
-      propagator=cImag/(this%current_list(ic)%pp(0)**2-this%current_list(ic)%pp(1)**2- &
-           this%current_list(ic)%pp(2)**2-this%current_list(ic)%pp(3)**2)
-      do ih=1,this%current_list(ic)%nhel
-         tmp_val(1:4)=this%current_list(ic)%val(1:4,ih)
-         tmp(1)=this%current_list(ic)%pp(0)+this%current_list(ic)%pp(3)
-         tmp(2)=this%current_list(ic)%pp(0)-this%current_list(ic)%pp(3)
-         tmp(3)=this%current_list(ic)%pp(1)+cImag*this%current_list(ic)%pp(2)
-         tmp(4)=this%current_list(ic)%pp(1)-cImag*this%current_list(ic)%pp(2)
-         this%current_list(ic)%val(1,ih)=(tmp(1)*tmp_val(3)+tmp(3)*tmp_val(4))*propagator
-         this%current_list(ic)%val(2,ih)=(tmp(2)*tmp_val(4)+tmp(4)*tmp_val(3))*propagator
-         this%current_list(ic)%val(3,ih)=(tmp(2)*tmp_val(1)-tmp(3)*tmp_val(2))*propagator
-         this%current_list(ic)%val(4,ih)=(tmp(1)*tmp_val(2)-tmp(4)*tmp_val(1))*propagator
-      enddo
+      call QuarkPropagator(this%current_list(ic)%val,this%current_list(ic)%nhel,this%current_list(ic)%pp)
     end subroutine include_quark_propagator
   end subroutine evaluate_OneOrder
   

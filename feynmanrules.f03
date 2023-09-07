@@ -5,8 +5,8 @@ contains
     integer ihel,ifinal
     real(kind=8), dimension(0:3) :: p
     real(kind=8), dimension(4) :: wf
-    complex*16,dimension(4) :: wf0,wf1
-    complex*16,parameter :: cImag=(0d0,1d0)
+    complex(kind=8),dimension(4) :: wf0,wf1
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
     call ext_gluon_cmplx(p,1,ifinal,wf1)
     call ext_gluon_cmplx(p,0,ifinal,wf0)
     if (ihel.eq.1) then
@@ -20,7 +20,7 @@ contains
     implicit none
     integer :: ihel,ifinal
     real(kind=8), dimension(0:3) :: p
-    complex*16, dimension(4) :: wf
+    complex(kind=8), dimension(4) :: wf
     real(kind=8),parameter :: rZero=0d0,sqh=sqrt(0.5d0)
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: hel,pp,pt,pzpt
@@ -239,9 +239,9 @@ contains
   end subroutine GluonTensortoGluon
   subroutine GluonQuarktoQuark(wfg1,wfq2,wfq)
     implicit none
-    complex*16,dimension(4) :: wfg1,wfq2,wfq
-    complex*16, parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex*16 :: TMP1,TMP2,TMP3,TMP4
+    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
@@ -253,9 +253,9 @@ contains
   end subroutine GluonQuarktoQuark
   subroutine QuarkGluontoQuark(wfq1,wfg2,wfq)
     implicit none
-    complex*16,dimension(4) :: wfq1,wfg2,wfq
-    complex*16, parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex*16 :: TMP1,TMP2,TMP3,TMP4
+    complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
@@ -265,4 +265,36 @@ contains
     wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2))
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))
   end subroutine QuarkGluontoQuark
+  subroutine GluonPropagator(wfg,nhel,p)
+    implicit none
+    integer,intent(in) :: nhel
+    complex(kind=8),dimension(1:4,nhel),intent(inout) :: wfg
+    real(kind=8),dimension(0:3),intent(in) :: p
+    complex(kind=8) :: propagator
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    wfg(1:4,1:nhel)=wfg(1:4,1:nhel)*propagator
+  end subroutine GluonPropagator
+  subroutine QuarkPropagator(wfq,nhel,p)
+    implicit none
+    integer,intent(in) :: nhel
+    complex(kind=8),dimension(1:4,nhel),intent(inout) :: wfq
+    real(kind=8),dimension(0:3),intent(in) :: p
+    complex(kind=8) :: prefact
+    complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    integer :: ih
+    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    do ih=1,nhel
+       tmp_val(1:4)=wfq(1:4,ih)
+       tmp_p(1)=p(0)+p(3)
+       tmp_p(2)=p(0)-p(3)
+       tmp_p(3)=p(1)+cImag*p(2)
+       tmp_p(4)=p(1)-cImag*p(2)
+       wfq(1,ih)=(tmp_p(1)*tmp_val(3)+tmp_p(3)*tmp_val(4))*prefact
+       wfq(2,ih)=(tmp_p(2)*tmp_val(4)+tmp_p(4)*tmp_val(3))*prefact
+       wfq(3,ih)=(tmp_p(2)*tmp_val(1)-tmp_p(3)*tmp_val(2))*prefact
+       wfq(4,ih)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1))*prefact
+    enddo
+  end subroutine QuarkPropagator
 end module FeynmanRules
