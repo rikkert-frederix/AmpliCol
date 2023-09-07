@@ -21,12 +21,13 @@ contains
     integer :: ihel,ifinal
     real(kind=8), dimension(0:3) :: p
     complex*16, dimension(4) :: wf
-    real(kind=8),parameter :: rzero=0d0,sqh=sqrt(0.5d0)
+    real(kind=8),parameter :: rZero=0d0,sqh=sqrt(0.5d0)
+    complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: hel,pp,pt,pzpt
     hel = dble(2*ihel-1)
     pp = p(0)
     pt = sqrt(p(1)**2+p(2)**2)
-    wf(1) = dcmplx( rZero )
+    wf(1) = cZero
     wf(4) = dcmplx( hel*pt/pp*sqh )
     if ( pt.ne.rZero ) then
        pzpt = p(3)/(pp*pt)*sqh*hel
@@ -169,8 +170,8 @@ contains
     ! Colour-ordered three-gluon interaction
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf
-    complex(kind=8),dimension(0:3) :: pwf1,pwf2
-    real(kind=8),parameter :: prefact=1d0/sqrt(2d0)
+    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3
     TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
@@ -181,7 +182,7 @@ contains
     ! Colour-ordered four-gluon interaction
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf3,wf
-    real(kind=8),parameter :: prefact=0.5d0
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     complex(kind=8) :: TMP1,TMP2,TMP3
     TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*wf3(1)-wf1(2)*wf3(2)-wf1(3)*wf3(3)-wf1(4)*wf3(4))
@@ -194,13 +195,14 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg2
     complex(kind=8),dimension(6) :: wfT
+    complex(kind=8),parameter :: prefact=(0d0,1d0)
     ! Since it is an anti-symmetric 4x4 tensor, take only the upper-right triangle.
-    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))
-    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))
-    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))
-    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))
-    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))
-    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))! * prefact
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))! * prefact
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))! * prefact
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))! * prefact
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))! * prefact
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))! * prefact
 !!$    do i=1,4
 !!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
 !!$    enddo
@@ -209,7 +211,8 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(6) :: wfT1
-    real(kind=8),parameter :: prefact=0.5d0
+!!$    complex(kind=8),parameter :: prefact=(-0.5d0,0d0)
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
@@ -223,7 +226,8 @@ contains
     implicit none 
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(6) :: wfT2
-    real(kind=8),parameter :: prefact=0.5d0
+!!$    complex(kind=8),parameter :: prefact=(-0.5d0,0d0)
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
@@ -247,4 +251,18 @@ contains
     wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2))
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1))
   end subroutine GluonQuarktoQuark
+  subroutine QuarkGluontoQuark(wfq1,wfg2,wfq)
+    implicit none
+    complex*16,dimension(4) :: wfq1,wfg2,wfq
+    complex*16, parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex*16 :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=wfg2(2)+cImag*wfg2(3)
+    TMP4=wfg2(2)-cImag*wfg2(3)
+    wfq(1)=prefact*(TMP1*wfq1(3)+TMP3*wfq1(4))
+    wfq(2)=prefact*(TMP2*wfq1(4)+TMP4*wfq1(3))
+    wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2))
+    wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))
+  end subroutine QuarkGluontoQuark
 end module FeynmanRules

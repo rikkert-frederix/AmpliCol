@@ -14,7 +14,7 @@ module amplitude_mod
   type amplitude
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
-     real(kind=8),dimension(:),allocatable :: amps
+     complex(kind=8),dimension(:),allocatable :: amps
      integer :: n_cur,n_vert
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end
    contains
@@ -158,15 +158,45 @@ contains
       enddo
       ! and also the shifting of the auxiliary arrays and variables
       do isize=1,n-1
-         this%n_cur_start(isize)=where_to_cur(this%n_cur_start(isize))
-         this%n_cur_end(isize)=where_to_cur(this%n_cur_end(isize))
+         do nc=this%n_cur_start(isize),this%n_cur
+            if (where_to_cur(nc).ne.0) then
+               this%n_cur_start(isize)=where_to_cur(nc)
+               exit
+            endif
+         enddo
+         do nc=this%n_cur_end(isize),1,-1
+            if (where_to_cur(nc).ne.0) then
+               this%n_cur_end(isize)=where_to_cur(nc)
+               exit
+            endif
+         enddo
          if (isize.ge.2) then
-            this%n_vert_start(isize)=where_to_ver(this%n_vert_start(isize))
-            this%n_vert_end(isize)=where_to_ver(this%n_vert_end(isize))
+            do iv=this%n_vert_start(isize),this%n_vert
+               if (where_to_ver(iv).ne.0) then
+                  this%n_vert_start(isize)=where_to_ver(iv)
+                  exit
+               endif
+            enddo
+            do iv=this%n_vert_end(isize),1,-1
+               if (where_to_ver(iv).ne.0) then
+                  this%n_vert_end(isize)=where_to_ver(iv)
+                  exit
+               endif
+            enddo
          endif
       enddo
-      this%n_cur=where_to_cur(this%n_cur)
-      this%n_vert=where_to_ver(this%n_vert)
+      do nc=this%n_cur,1,-1
+         if (where_to_cur(nc).ne.0) then
+            this%n_cur=where_to_cur(nc)
+            exit
+         endif
+      enddo
+      do iv=this%n_vert,1,-1
+         if (where_to_ver(iv).ne.0) then
+            this%n_vert=where_to_ver(iv)
+            exit
+         endif
+      enddo
       deallocate(is_needed_ver)
       deallocate(is_needed_cur)
       deallocate(where_to_ver)
@@ -259,8 +289,6 @@ contains
     integer :: n
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih
-    real(kind=8) :: propagator
-
     if (.not. allocated(this%current_list(1)%val)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -285,14 +313,18 @@ contains
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-             this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
+             if (this%current_list(ic)%order(1).le.2) then
+                this%current_list(ic)%pp(0:3)=-p(0:3,this%current_list(ic)%order(1))
+             else
+                this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
+             endif
              do ih=1,this%current_list(ic)%nhel
                 if (this%current_list(ic)%type.eq.21) then
-                   call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih-1,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                   call ext_quark(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_quark(this%current_list(ic)%pp(0:3),2*ih-3,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_antiquark(this%current_list(ic)%pp(0:3),2*ih-3,1,this%current_list(ic)%val(1:4,ih))
                 endif
              enddo
           enddo
@@ -309,7 +341,7 @@ contains
                                         this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
                                    this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
                                         this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
-                                   this%interaction_list(iv)%val(1:4,ih))
+                                        this%interaction_list(iv)%val(1:4,ih))
                 elseif(this%interaction_list(iv)%type.eq.1) then
                    call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
                                          this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
@@ -322,6 +354,10 @@ contains
                    call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val(1:6,ih2),&
                                            this%interaction_list(iv)%val(1:4,ih))
+                elseif(this%interaction_list(iv)%type.eq.6) then
+                   call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
+                                          this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
+                                          this%interaction_list(iv)%val(1:4,ih))
                 else
                    write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
                    stop 1
@@ -331,36 +367,91 @@ contains
        enddo
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          this%current_list(ic)%pp(0:3)=&
-               this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(1))%pp(0:3)+&
-               this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(2))%pp(0:3)
+          call compute_momentum_current()
           if (this%current_list(ic)%type.eq.21) then
-             this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=0d0
-             do iv=1,this%current_list(ic)%n_vert
-                this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=&
-                     this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)+&
-                     this%interaction_list(iv)%val(1:4,1:this%current_list(ic)%nhel)
-             enddo
-             ! include the gluon propagator
+             call combine_interactions(4)
+             ! a gluon current
              if (isize.ne.n-1)  then
-                propagator=1d0/(this%current_list(ic)%pp(0)**2-this%current_list(ic)%pp(1)**2- &
-                                this%current_list(ic)%pp(2)**2-this%current_list(ic)%pp(3)**2)
-                this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=&
-                     this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)*propagator
+                call include_gluon_propagator()
+             endif
+          elseif ((this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6)) then
+             ! a quark current
+             call combine_interactions(4)
+             if (isize.ne.n-1)  then
+                call include_quark_propagator()
              endif
           elseif (this%current_list(ic)%type.eq.-21) then
-             this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel)=0d0
-             do iv=1,this%current_list(ic)%n_vert
-                this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel)=&
-                     this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel)+&
-                     this%interaction_list(iv)%val(1:6,1:this%current_list(ic)%nhel)
-             enddo
+             ! the non-propagating tensor current
+             call combine_interactions(6)
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
              stop 1
           endif
        enddo
     enddo
+
+    if (.not.allocated(this%amps))allocate(this%amps(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
+    call compute_amps_from_currents
+
+    do ih=1,32
+       write (*,*) this%amps(ih)
+    enddo
+    
+  contains
+    subroutine compute_amps_from_currents
+      implicit none
+      do ih1=1,this%current_list(this%n_cur)%nhel
+         do ih2=1,this%current_list(n)%nhel
+            ih=(ih1-1)*this%current_list(n)%nhel+ih2
+            this%amps(ih)=sum(this%current_list(this%n_cur)%val(1:4,ih1)*this%current_list(n)%val(1:4,ih2))
+         enddo
+      enddo
+    end subroutine compute_amps_from_currents
+    subroutine compute_momentum_current()
+      implicit none
+      this%current_list(ic)%pp(0:3)=&
+           this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(1))%pp(0:3)+&
+           this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(2))%pp(0:3)
+    end subroutine compute_momentum_current
+    subroutine combine_interactions(dim)
+      implicit none
+      integer :: dim,iv
+      this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
+      do iv=1,this%current_list(ic)%n_vert
+         this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=&
+              this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)+&
+              this%interaction_list(this%current_list(ic)%vertices(iv))%val(1:dim,1:this%current_list(ic)%nhel)
+      enddo
+    end subroutine combine_interactions
+    subroutine include_gluon_propagator()
+      implicit none
+      complex(kind=8) :: propagator
+      complex(kind=8),parameter :: cImag=(0d0,1d0)
+      propagator=-cImag/(this%current_list(ic)%pp(0)**2-this%current_list(ic)%pp(1)**2- &
+           this%current_list(ic)%pp(2)**2-this%current_list(ic)%pp(3)**2)
+      this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)=&
+           this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel)*propagator
+    end subroutine include_gluon_propagator
+    subroutine include_quark_propagator()
+      implicit none
+      complex(kind=8) :: propagator
+      complex(kind=8),dimension(1:4) :: tmp
+      complex(kind=8),dimension(1:4) :: tmp_val
+      complex(kind=8),parameter :: cImag=(0d0,1d0)
+      propagator=cImag/(this%current_list(ic)%pp(0)**2-this%current_list(ic)%pp(1)**2- &
+           this%current_list(ic)%pp(2)**2-this%current_list(ic)%pp(3)**2)
+      do ih=1,this%current_list(ic)%nhel
+         tmp_val(1:4)=this%current_list(ic)%val(1:4,ih)
+         tmp(1)=this%current_list(ic)%pp(0)+this%current_list(ic)%pp(3)
+         tmp(2)=this%current_list(ic)%pp(0)-this%current_list(ic)%pp(3)
+         tmp(3)=this%current_list(ic)%pp(1)+cImag*this%current_list(ic)%pp(2)
+         tmp(4)=this%current_list(ic)%pp(1)-cImag*this%current_list(ic)%pp(2)
+         this%current_list(ic)%val(1,ih)=(tmp(1)*tmp_val(3)+tmp(3)*tmp_val(4))*propagator
+         this%current_list(ic)%val(2,ih)=(tmp(2)*tmp_val(4)+tmp(4)*tmp_val(3))*propagator
+         this%current_list(ic)%val(3,ih)=(tmp(2)*tmp_val(1)-tmp(3)*tmp_val(2))*propagator
+         this%current_list(ic)%val(4,ih)=(tmp(1)*tmp_val(2)-tmp(4)*tmp_val(1))*propagator
+      enddo
+    end subroutine include_quark_propagator
   end subroutine evaluate_OneOrder
   
 end module amplitude_mod
