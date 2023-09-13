@@ -48,12 +48,12 @@ contains
     do isize=1,n-1
        this%n_cur_start(isize)=this%n_cur+1
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
-       if(isize.eq.1) then
+       if (isize.eq.1) then
           ! external currents
           do nc=1,n
              this%n_cur=this%n_cur+1
              this%current_list(this%n_cur)%order(1)=order(nc)
-             if (nc.le.2 .and. abs(part(nc)).le.6) then
+             if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then
                 this%current_list(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
              else
                 this%current_list(this%n_cur)%type=part(order(nc))
@@ -326,6 +326,7 @@ contains
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                    call ext_antiquark(this%current_list(ic)%pp(0:3),2*ih-3,1,this%current_list(ic)%val(1:4,ih))
                 endif
+                write (*,*) ic,ih,this%current_list(ic)%val(1:4,ih),this%current_list(ic)%order(1)
              enddo
           enddo
           cycle
@@ -392,10 +393,6 @@ contains
 
     if (.not.allocated(this%amps))allocate(this%amps(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
     call compute_amps_from_currents
-
-    do ih=1,32
-       write (*,*) this%amps(ih)
-    enddo
     
   contains
     subroutine compute_amps_from_currents

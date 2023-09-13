@@ -24,19 +24,50 @@ contains
     real(kind=8),parameter :: rZero=0d0,sqh=sqrt(0.5d0)
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: hel,pp,pt,pzpt
-    hel = dble(2*ihel-1)
-    pp = p(0)
-    pt = sqrt(p(1)**2+p(2)**2)
-    wf(1) = cZero
-    wf(4) = dcmplx( hel*pt/pp*sqh )
-    if ( pt.ne.rZero ) then
-       pzpt = p(3)/(pp*pt)*sqh*hel
-       wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-       wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+!!$    hel = dble(2*ihel-1)
+!!$    pp = p(0)
+!!$    pt = sqrt(p(1)**2+p(2)**2)
+!!$    wf(1) = cZero
+!!$    wf(4) = dcmplx( hel*pt/pp*sqh )
+!!$    if ( pt.ne.rZero ) then
+!!$       pzpt = p(3)/(pp*pt)*sqh*hel
+!!$       wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
+!!$       wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+!!$    else
+!!$       wf(2) = dcmplx( -hel*sqh )
+!!$       wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+!!$    endif
+
+    if (p(0).gt.0d0) then
+       hel = dble(2*ihel-1)
+       pp = p(0)
+       pt = sqrt(p(1)**2+p(2)**2)
+       wf(1) = dcmplx( rZero )
+       wf(4) = dcmplx( hel*pt/pp*sqh )
+       if ( pt.ne.rZero ) then
+          pzpt = p(3)/(pp*pt)*sqh*hel
+          wf(2) = dcmplx( -p(1)*pzpt , -p(2)/pt*sqh )
+          wf(3) = dcmplx( -p(2)*pzpt ,  p(1)/pt*sqh )
+       else
+          wf(2) = dcmplx( -hel*sqh )
+          wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
+       endif
     else
-       wf(2) = dcmplx( -hel*sqh )
-       wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+       hel = -dble(2*ihel-1)
+       pp = -p(0)
+       pt = sqrt(p(1)**2+p(2)**2)
+       wf(1) = dcmplx( rZero )
+       wf(4) = dcmplx( hel*pt/pp*sqh )
+       if ( pt.ne.rZero ) then
+          pzpt = -p(3)/(pp*pt)*sqh*hel
+          wf(2) = dcmplx( p(1)*pzpt , -p(2)/pt*sqh )
+          wf(3) = dcmplx( p(2)*pzpt ,  p(1)/pt*sqh )
+       else
+          wf(2) = dcmplx( -hel*sqh )
+          wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
+       endif
     endif
+  
   end subroutine ext_gluon_cmplx
   subroutine ext_quark(p,ihel,ifinal,wf)
   ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
