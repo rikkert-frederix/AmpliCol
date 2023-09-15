@@ -20,9 +20,9 @@ program test_QCD
   allocate(order(n,6))
   allocate(helmap(2**n,6))
 
-  part(1:n)=[-1,21,21,21,-1]
-  order(1:n,1)=[1,2,3,4,5]
-
+!!$  part(1:n)=[-1,21,21,21,-1]
+!!$  order(1:n,1)=[1,2,3,4,5]
+!!$
 
 !!$  call amplitudes%init_OneOrder(n,part,order(1,1))
 !!$
@@ -53,14 +53,34 @@ program test_QCD
 
   
 
-  part(1:n)=[-1,21,21,21,-1]
+!!$  part(1:n)=[-1,21,21,21,-1]
+!!$  order(1:n,1)=[1,2,3,4,5]
+!!$  order(1:n,2)=[1,2,4,3,5]
+!!$  order(1:n,3)=[1,3,2,4,5]
+!!$  order(1:n,4)=[1,3,4,2,5]
+!!$  order(1:n,5)=[1,4,2,3,5]
+!!$  order(1:n,6)=[1,4,3,2,5]
+!!$  iden=3*8*2*2 ! initial status colours and helicities/polarisations
+!!$  iden=iden*2  ! final state identical particles
 
-  order(1:n,1)=[1,2,3,4,5]
-  order(1:n,2)=[1,2,4,3,5]
-  order(1:n,3)=[1,3,2,4,5]
-  order(1:n,4)=[1,3,4,2,5]
-  order(1:n,5)=[1,4,2,3,5]
-  order(1:n,6)=[1,4,3,2,5]
+!!$  part(1:n)=[21,21,1,-1,21]
+!!$  order(1:n,1)=[3,1,2,5,4]
+!!$  order(1:n,2)=[3,1,5,2,4]
+!!$  order(1:n,3)=[3,2,1,5,4]
+!!$  order(1:n,4)=[3,2,5,1,4]
+!!$  order(1:n,5)=[3,5,1,2,4]
+!!$  order(1:n,6)=[3,5,2,1,4]
+!!$  iden=8*8*2*2 ! initial status colours and helicities/polarisations
+
+  part(1:n)=[1,-1,21,21,21]
+  order(1:n,1)=[2,3,4,5,1]
+  order(1:n,2)=[2,3,5,4,1]
+  order(1:n,3)=[2,4,3,5,1]
+  order(1:n,4)=[2,4,5,3,1]
+  order(1:n,5)=[2,5,3,4,1]
+  order(1:n,6)=[2,5,4,3,1]
+  iden=3*3*2*2
+  iden=iden*6
 
   do iperm=1,6
      call amps(iperm)%init_OneOrder(n,part,order(1:n,iperm))
@@ -87,7 +107,7 @@ program test_QCD
 !!$        helmap(ih,iperm)=helmap(ih,iperm)+1
 !!$     enddo
      
-     write (*,*) helmap(:,iperm)
+!!$     write (*,*) helmap(:,iperm)
   enddo
 
   
@@ -98,12 +118,9 @@ program test_QCD
      enddo
   enddo
 
-
-  
-  do ih=1,32
-     write (*,*) (amps(iperm)%amps(helmap(ih,iperm)),iperm=1,6)
-  enddo
-
+!!$  do ih=1,32
+!!$     write (*,*) (amps(iperm)%amps(helmap(ih,iperm)),iperm=1,6)
+!!$  enddo
   
   amp2=0d0
   do ih=1,2**n
@@ -118,8 +135,6 @@ program test_QCD
   
 
   
-  iden=3*8*2*2 ! initial status colours and helicities/polarisations
-  iden=iden*2  ! final state identical particles
   amp2=amp2*(4*pi*alphas)**(n-2)/dble(iden)
 
   write (*,*) 'Matrix element =',amp2,'GeV^',-(2*n-8)
