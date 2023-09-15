@@ -32,10 +32,10 @@ contains
     ! - in colour order, make sure that first and last are quark and anti-quark
     ! - also, in the middle, anti-quark should become just before quark.
 
-    allocate(this%current_list(1000))
-    allocate(this%interaction_list(1000))
-    do nc=1,1000
-       allocate(this%current_list(nc)%vertices(100))
+    allocate(this%current_list(10000))
+    allocate(this%interaction_list(10000))
+    do nc=1,10000
+       allocate(this%current_list(nc)%vertices(1000))
        allocate(this%current_list(nc)%order(n-1))
     enddo
     allocate(this%n_cur_start(n-1))
