@@ -253,7 +253,7 @@ contains
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) return
+      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) return ! dead tree. Filter already here
       this%n_vert=this%n_vert+1
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
@@ -306,6 +306,7 @@ contains
                                                           this%current_list(this%interaction_list(iv)%currents(2))%nhel))
           endif
        enddo
+       allocate(this%amps(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
     endif
 
 
@@ -326,7 +327,7 @@ contains
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                    call ext_antiquark(this%current_list(ic)%pp(0:3),2*ih-3,1,this%current_list(ic)%val(1:4,ih))
                 endif
-                write (*,*) ic,ih,this%current_list(ic)%val(1:4,ih),this%current_list(ic)%order(1)
+!!$                write (*,*) ic,ih,this%current_list(ic)%val(1:4,ih),this%current_list(ic)%order(1),this%current_list(ic)%type
              enddo
           enddo
           cycle
@@ -336,7 +337,8 @@ contains
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
           do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
              do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
-                ih=(ih1-1)*this%current_list(this%interaction_list(iv)%currents(2))%nhel+ih2
+!!$                ih=(ih1-1)*this%current_list(this%interaction_list(iv)%currents(2))%nhel+ih2
+                ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
                 if (this%interaction_list(iv)%type.eq.0) then
                    call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
                                         this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
@@ -391,15 +393,15 @@ contains
        enddo
     enddo
 
-    if (.not.allocated(this%amps))allocate(this%amps(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
     call compute_amps_from_currents
     
   contains
     subroutine compute_amps_from_currents
       implicit none
-      do ih1=1,this%current_list(this%n_cur)%nhel
-         do ih2=1,this%current_list(n)%nhel
-            ih=(ih1-1)*this%current_list(n)%nhel+ih2
+      do ih1=1,this%current_list(this%n_cur)%nhel ! helicities for combined current of particles 1 to n-1 (in the colour order)
+         do ih2=1,this%current_list(n)%nhel       ! and for the current for particle n
+!!$            ih=(ih1-1)*this%current_list(n)%nhel+ih2
+            ih=(ih2-1)*this%current_list(this%n_cur)%nhel+ih1
             this%amps(ih)=sum(this%current_list(this%n_cur)%val(1:4,ih1)*this%current_list(n)%val(1:4,ih2))
          enddo
       enddo

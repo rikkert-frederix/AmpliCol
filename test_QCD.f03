@@ -66,24 +66,26 @@ program test_QCD
      call amps(iperm)%init_OneOrder(n,part,order(1:n,iperm))
      call amps(iperm)%evaluate_OneOrder(n,p)
 
-
      do ih=1,2**n
         helmap(ih,iperm)=0
         do i=1,n
-           if (btest(ih-1,i-1)) helmap(ih,iperm)=ibset(helmap(ih,iperm),order(i,iperm)-1)
+           if (btest(ih-1,order(i,iperm)-1)) helmap(ih,iperm)=ibset(helmap(ih,iperm),i-1)
         enddo
         helmap(ih,iperm)=helmap(ih,iperm)+1
      enddo
 
-     write (*,*) helmap(:,iperm)
-
-     do ih=1,2**n
-        helmap(ih,iperm)=0
-        do i=1,n
-           call mvbits(ih-1,order(i,iperm)-1,1,helmap(ih,iperm),i-1)
-        enddo
-        helmap(ih,iperm)=helmap(ih,iperm)+1
-     enddo
+!!$     write (*,*) helmap(:,iperm)
+!!$
+!!$     do ih=1,2**n
+!!$        helmap(ih,iperm)=0
+!!$        do i=1,n
+!!$           ! CALL MVBITS(FROM, FROMPOS, LEN, TO, TOPOS) moves LEN bits from
+!!$           ! positions FROMPOS through FROMPOS+LEN-1 of FROM to positions
+!!$           ! TOPOS through TOPOS+LEN-1 of TO.
+!!$           call mvbits(ih-1,order(i,iperm)-1,1,helmap(ih,iperm),i-1)
+!!$        enddo
+!!$        helmap(ih,iperm)=helmap(ih,iperm)+1
+!!$     enddo
      
      write (*,*) helmap(:,iperm)
   enddo
