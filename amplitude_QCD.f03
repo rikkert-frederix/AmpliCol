@@ -16,7 +16,7 @@ module amplitude_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      integer :: n_cur,n_vert
-     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end
+     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
    contains
      procedure :: init_OneOrder,evaluate_OneOrder
   end type amplitude
@@ -26,18 +26,13 @@ contains
     class(amplitude) :: this
     integer::n
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i
-    ! consistency checks:
-    ! - count number of qqbar pairs (should be even)
-    ! - in colour order, make sure that first and last are quark and anti-quark
-    ! - also, in the middle, anti-quark should become just before quark.
+    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert
+    call check_input_consistency()
 
-    allocate(this%current_list(10000))
-    allocate(this%interaction_list(10000))
-    do nc=1,10000
-       allocate(this%current_list(nc)%vertices(1000))
-       allocate(this%current_list(nc)%order(n-1))
-    enddo
+    call set_max_cur()
+    call set_max_vert()
+    allocate(this%current_list(max_cur))
+    allocate(this%interaction_list(max_vert))
     allocate(this%n_cur_start(n-1))
     allocate(this%n_cur_end(n-1))
     allocate(this%n_vert_start(2:n-1))
@@ -52,6 +47,7 @@ contains
           ! external currents
           do nc=1,n
              this%n_cur=this%n_cur+1
+             allocate(this%current_list(this%n_cur)%order(isize))
              this%current_list(this%n_cur)%order(1)=order(nc)
              if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then
                 this%current_list(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
@@ -82,9 +78,68 @@ contains
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
+    if (this%n_vert.gt.max_vert) then
+       write (*,*) 'ERROR: too many interactions: max_vert not set correctly',max_vert,this%n_vert
+       stop 1
+    endif
+    if (this%n_cur.gt.max_cur) then
+       write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
+       stop 1
+    endif
+    
     ! All done. But there could be currents that are not needed. Filter them out
     call filter_dead_trees()
+    ! create the helicity map
+    call create_helicity_map()
   contains
+    subroutine check_input_consistency()
+      implicit none
+      ! consistency checks (to implement):
+      ! - count number of qqbar pairs (should be even), also check their flavour!
+      ! - in colour order, make sure that first and last are quark and anti-quark
+      ! - also, in the middle (for more than 1 quark line), anti-quark should become just before quark.
+      ! - make sure that each element in the colour order appears only once.
+      ! - etc.
+      write (*,*) 'WARNING: consistency checks not implemented'
+    end subroutine check_input_consistency
+    subroutine set_max_cur()
+      ! rough upper bound for the maximum number of currents
+      implicit none
+      max_cur=0
+      do isize=1,n-1
+         if (isize.eq.1 .or. isize.eq.n-1) then
+            max_cur=max_cur+(n-isize)
+         else
+            max_cur=max_cur+(n-isize)*2
+         endif
+      enddo
+      max_cur=max_cur+1
+    end subroutine set_max_cur
+    subroutine set_max_vert()
+      ! rough upper bound on the maximum number of interactions
+      implicit none
+      max_vert=0
+      do isize=2,n-1
+         if (isize.eq.2) then
+            max_vert=max_vert+(n-isize)*2
+         else
+            max_vert=max_vert+isize*(n-isize)*2
+         endif
+      enddo
+    end subroutine set_max_vert
+    subroutine create_helicity_map()
+      implicit none
+      integer :: nhel,ih
+      nhel=product(this%current_list(1:n)%nhel)
+      allocate(this%helmap(nhel))
+      do ih=1,nhel
+         this%helmap(ih)=0
+         do i=1,n
+            if (btest(ih-1,order(i)-1)) this%helmap(ih)=ibset(this%helmap(ih),i-1)
+         enddo
+         this%helmap(ih)=this%helmap(ih)+1
+      enddo
+    end subroutine create_helicity_map
     subroutine filter_dead_trees()
       ! some currents can be removed, since the "tree" starting from some of
       ! the initial state particles might lead to a dead end with no possible
@@ -274,10 +329,18 @@ contains
       enddo
       ! Need a new current
       this%n_cur=this%n_cur+1
+      allocate(this%current_list(this%n_cur)%order(isize))
       this%current_list(this%n_cur)%order(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
       this%current_list(this%n_cur)%type=ctype
       this%current_list(this%n_cur)%bin=bin1+bin2
       this%current_list(this%n_cur)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
+      if (ctype.eq.21) then
+         allocate(this%current_list(this%n_cur)%vertices(5*(isize-1)))
+      elseif (ctype.eq.-21) then
+         allocate(this%current_list(this%n_cur)%vertices(isize-1))
+      else
+         allocate(this%current_list(this%n_cur)%vertices(2*(isize-1)))
+      endif
       this%current_list(this%n_cur)%vertices(1)=this%n_vert
       this%current_list(this%n_cur)%n_vert=1
     end subroutine add_current

@@ -135,31 +135,7 @@ program test_QCD
   do iperm=1,nperm
      call amps(iperm)%init_OneOrder(n,part,order(1:n,iperm))
      call amps(iperm)%evaluate_OneOrder(n,p)
-!!$
      write (*,*) 'iperm',iperm
-     
-     do ih=1,2**n
-        helmap(ih,iperm)=0
-        do i=1,n
-           if (btest(ih-1,order(i,iperm)-1)) helmap(ih,iperm)=ibset(helmap(ih,iperm),i-1)
-        enddo
-        helmap(ih,iperm)=helmap(ih,iperm)+1
-     enddo
-
-!!$     write (*,*) helmap(:,iperm)
-!!$
-!!$     do ih=1,2**n
-!!$        helmap(ih,iperm)=0
-!!$        do i=1,n
-!!$           ! CALL MVBITS(FROM, FROMPOS, LEN, TO, TOPOS) moves LEN bits from
-!!$           ! positions FROMPOS through FROMPOS+LEN-1 of FROM to positions
-!!$           ! TOPOS through TOPOS+LEN-1 of TO.
-!!$           call mvbits(ih-1,order(i,iperm)-1,1,helmap(ih,iperm),i-1)
-!!$        enddo
-!!$        helmap(ih,iperm)=helmap(ih,iperm)+1
-!!$     enddo
-     
-!!$     write (*,*) helmap(:,iperm)
   enddo
 
   
@@ -170,18 +146,15 @@ program test_QCD
      enddo
   enddo
 
-!!$  do ih=1,32
-!!$     write (*,*) (amps(iperm)%amps(helmap(ih,iperm)),iperm=1,6)
-!!$  enddo
   
   amp2=0d0
   do ih=1,2**n
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
-           ztemp=ztemp+amps(iperm)%amps(helmap(ih,iperm))*col_fac(iperm,jperm)
+           ztemp=ztemp+amps(iperm)%amps(amps(iperm)%helmap(ih))*col_fac(iperm,jperm)
         enddo
-        amp2=amp2+dble(ztemp*dconjg(amps(jperm)%amps(helmap(ih,jperm))))
+        amp2=amp2+dble(ztemp*dconjg(amps(jperm)%amps(amps(jperm)%helmap(ih))))
      enddo
   enddo
   
