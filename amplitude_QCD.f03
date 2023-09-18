@@ -121,9 +121,9 @@ contains
       max_vert=0
       do isize=2,n-1
          if (isize.eq.2) then
-            max_vert=max_vert+(n-isize)*2
+            max_vert=max_vert+(n-isize)*3
          else
-            max_vert=max_vert+isize*(n-isize)*2
+            max_vert=max_vert+isize*(n-isize)*3
          endif
       enddo
     end subroutine set_max_vert
@@ -386,9 +386,9 @@ contains
                 if (this%current_list(ic)%type.eq.21) then
                    call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih-1,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                   call ext_quark(this%current_list(ic)%pp(0:3),2*ih-3,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_quark(this%current_list(ic)%pp(0:3),ih-1,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   call ext_antiquark(this%current_list(ic)%pp(0:3),2*ih-3,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih-1,1,this%current_list(ic)%val(1:4,ih))
                 endif
 !!$                write (*,*) ic,ih,this%current_list(ic)%val(1:4,ih),this%current_list(ic)%order(1),this%current_list(ic)%type
              enddo

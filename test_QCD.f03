@@ -4,14 +4,13 @@ program test_QCD
   use amplitude_mod
   use color_algebra
   implicit none
-  type(amplitude) :: amplitudes
   type(amplitude),dimension(:),allocatable :: amps
   integer :: n
   integer,dimension(:),allocatable :: part
   integer,dimension(:,:),allocatable :: helmap,order
   integer :: i,ih,iden,iperm,jperm,nperm
   real(kind=8),dimension(:,:),allocatable :: p
-  real(kind=8) :: amp2
+  real(kind=8) :: amp2,t
   real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0
   real(kind=8),dimension(:,:),allocatable :: col_fac
   complex(kind=8) :: ztemp
@@ -20,8 +19,10 @@ program test_QCD
 
   if (n.eq.5) then
      nperm=6
+!!$     nperm=1
   elseif (n.eq.6) then
      nperm=24
+!!$     nperm=1
   endif
   allocate(order(n,nperm))
   allocate(helmap(2**n,nperm))
@@ -74,88 +75,106 @@ program test_QCD
      order(1:n,6)=[2,5,4,3,1]
      iden=3*3*2*2
      iden=iden*6
-  elseif (n.eq.6) then
-!!$     part(1:n)=[-1,21,21,21,21,-1]
-!!$     order(1:n,1)=[1,2,3,4,5,6]
-!!$     order(1:n,2)=[1,2,3,5,4,6]
-!!$     order(1:n,3)=[1,2,4,3,5,6]
-!!$     order(1:n,4)=[1,2,4,5,3,6]
-!!$     order(1:n,5)=[1,2,5,3,4,6]
-!!$     order(1:n,6)=[1,2,5,4,3,6]
-!!$     order(1:n,7)=[1,3,2,4,5,6]
-!!$     order(1:n,8)=[1,3,2,5,4,6]
-!!$     order(1:n,9)=[1,3,4,2,5,6]
-!!$     order(1:n,10)=[1,3,4,5,2,6]
-!!$     order(1:n,11)=[1,3,5,2,4,6]
-!!$     order(1:n,12)=[1,3,5,4,2,6]
-!!$     order(1:n,13)=[1,4,2,3,5,6]
-!!$     order(1:n,14)=[1,4,2,5,3,6]
-!!$     order(1:n,15)=[1,4,3,2,5,6]
-!!$     order(1:n,16)=[1,4,3,5,2,6]
-!!$     order(1:n,17)=[1,4,5,2,3,6]
-!!$     order(1:n,18)=[1,4,5,3,2,6]
-!!$     order(1:n,19)=[1,5,2,3,4,6]
-!!$     order(1:n,20)=[1,5,2,4,3,6]
-!!$     order(1:n,21)=[1,5,3,2,4,6]
-!!$     order(1:n,22)=[1,5,3,4,2,6]
-!!$     order(1:n,23)=[1,5,4,2,3,6]
-!!$     order(1:n,24)=[1,5,4,3,2,6]
-!!$     iden=3*8*2*2
-!!$     iden=iden*6
 
-     part(1:n)=[21,21,-1,21,1,21]
-     order(1:n,1)=[5,2,6,4,1,3]
-     order(1:n,2)=[5,2,6,1,4,3]
-     order(1:n,3)=[5,2,4,6,1,3]
-     order(1:n,4)=[5,2,4,1,6,3]
-     order(1:n,5)=[5,2,1,6,4,3]
-     order(1:n,6)=[5,2,1,4,6,3]
-     order(1:n,7)=[5,6,2,4,1,3]
-     order(1:n,8)=[5,6,2,1,4,3]
-     order(1:n,9)=[5,6,4,2,1,3]
-     order(1:n,10)=[5,6,4,1,2,3]
-     order(1:n,11)=[5,6,1,2,4,3]
-     order(1:n,12)=[5,6,1,4,2,3]
-     order(1:n,13)=[5,4,2,6,1,3]
-     order(1:n,14)=[5,4,2,1,6,3]
-     order(1:n,15)=[5,4,6,2,1,3]
-     order(1:n,16)=[5,4,6,1,2,3]
-     order(1:n,17)=[5,4,1,2,6,3]
-     order(1:n,18)=[5,4,1,6,2,3]
-     order(1:n,19)=[5,1,2,6,4,3]
-     order(1:n,20)=[5,1,2,4,6,3]
-     order(1:n,21)=[5,1,6,2,4,3]
-     order(1:n,22)=[5,1,6,4,2,3]
-     order(1:n,23)=[5,1,4,2,6,3]
-     order(1:n,24)=[5,1,4,6,2,3]
-     iden=8*8*2*2
-     iden=iden*2
+!!$     part(1:n)=[21,21,21,21,21]
+!!$     order(1:n,1)=[1,2,3,4,5]
+!!$     iden=1
+     
+  elseif (n.eq.6) then
+     part(1:n)=[-1,21,21,21,21,-1]
+     order(1:n,1)=[1,2,3,4,5,6]
+     order(1:n,2)=[1,2,3,5,4,6]
+     order(1:n,3)=[1,2,4,3,5,6]
+     order(1:n,4)=[1,2,4,5,3,6]
+     order(1:n,5)=[1,2,5,3,4,6]
+     order(1:n,6)=[1,2,5,4,3,6]
+     order(1:n,7)=[1,3,2,4,5,6]
+     order(1:n,8)=[1,3,2,5,4,6]
+     order(1:n,9)=[1,3,4,2,5,6]
+     order(1:n,10)=[1,3,4,5,2,6]
+     order(1:n,11)=[1,3,5,2,4,6]
+     order(1:n,12)=[1,3,5,4,2,6]
+     order(1:n,13)=[1,4,2,3,5,6]
+     order(1:n,14)=[1,4,2,5,3,6]
+     order(1:n,15)=[1,4,3,2,5,6]
+     order(1:n,16)=[1,4,3,5,2,6]
+     order(1:n,17)=[1,4,5,2,3,6]
+     order(1:n,18)=[1,4,5,3,2,6]
+     order(1:n,19)=[1,5,2,3,4,6]
+     order(1:n,20)=[1,5,2,4,3,6]
+     order(1:n,21)=[1,5,3,2,4,6]
+     order(1:n,22)=[1,5,3,4,2,6]
+     order(1:n,23)=[1,5,4,2,3,6]
+     order(1:n,24)=[1,5,4,3,2,6]
+     iden=3*8*2*2
+     iden=iden*6
+
+!!$     part(1:n)=[21,21,-1,21,1,21]
+!!$     order(1:n,1)=[5,2,6,4,1,3]
+!!$     order(1:n,2)=[5,2,6,1,4,3]
+!!$     order(1:n,3)=[5,2,4,6,1,3]
+!!$     order(1:n,4)=[5,2,4,1,6,3]
+!!$     order(1:n,5)=[5,2,1,6,4,3]
+!!$     order(1:n,6)=[5,2,1,4,6,3]
+!!$     order(1:n,7)=[5,6,2,4,1,3]
+!!$     order(1:n,8)=[5,6,2,1,4,3]
+!!$     order(1:n,9)=[5,6,4,2,1,3]
+!!$     order(1:n,10)=[5,6,4,1,2,3]
+!!$     order(1:n,11)=[5,6,1,2,4,3]
+!!$     order(1:n,12)=[5,6,1,4,2,3]
+!!$     order(1:n,13)=[5,4,2,6,1,3]
+!!$     order(1:n,14)=[5,4,2,1,6,3]
+!!$     order(1:n,15)=[5,4,6,2,1,3]
+!!$     order(1:n,16)=[5,4,6,1,2,3]
+!!$     order(1:n,17)=[5,4,1,2,6,3]
+!!$     order(1:n,18)=[5,4,1,6,2,3]
+!!$     order(1:n,19)=[5,1,2,6,4,3]
+!!$     order(1:n,20)=[5,1,2,4,6,3]
+!!$     order(1:n,21)=[5,1,6,2,4,3]
+!!$     order(1:n,22)=[5,1,6,4,2,3]
+!!$     order(1:n,23)=[5,1,4,2,6,3]
+!!$     order(1:n,24)=[5,1,4,6,2,3]
+!!$     iden=8*8*2*2
+!!$     iden=iden*2
+
+
+!!$     part(1:n)=[21,21,21,21,21,21]
+!!$     order(1:n,1)=[1,5,3,4,2,6]
+!!$     iden=1
+
   endif
   
   do iperm=1,nperm
      call amps(iperm)%init_OneOrder(n,part,order(1:n,iperm))
      call amps(iperm)%evaluate_OneOrder(n,p)
-     write (*,*) 'iperm',iperm
+!!$     call amps(iperm)%init(n,0,.true.,order)
+!!$     call amps(iperm)%evaluate(p)
   enddo
 
   
   call Tr_allocate(n)
   do jperm=1,nperm
      do iperm=1,nperm
-        col_fac(iperm,jperm)=color_factor(iperm,jperm)
+        col_fac(iperm,jperm)=color_factor(iperm,jperm) ! colour factor for qqbar+gluons
      enddo
   enddo
 
-  
   amp2=0d0
   do ih=1,2**n
+     t=0d0
+!!$  do ih=0,2**n-1
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
            ztemp=ztemp+amps(iperm)%amps(amps(iperm)%helmap(ih))*col_fac(iperm,jperm)
+!!$           ztemp=ztemp+amps(iperm)%amps(amps(iperm)%helmap(iperm,ih),iperm)*col_fac(iperm,jperm)
         enddo
-        amp2=amp2+dble(ztemp*dconjg(amps(jperm)%amps(amps(jperm)%helmap(ih))))
+        t=t+dble(ztemp*dconjg(amps(jperm)%amps(amps(jperm)%helmap(ih))))
+!!$        amp2=amp2+ztemp*amps(jperm)%amps(amps(jperm)%helmap(jperm,ih),jperm)
+!!$        write (*,*) ztemp*amps(jperm)%amps(amps(jperm)%helmap(jperm,ih),jperm)
      enddo
+     write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2),'for helicity',(ih-1)
+     amp2=amp2+t
   enddo
   
 
@@ -171,7 +190,7 @@ program test_QCD
 contains
   double precision function color_factor(iperm,jperm)
     ! Compute colour factor for permutation numbers 'iperm' and
-    ! 'jperm'
+    ! 'jperm', for qqbar+gluons
     use color_algebra
     implicit none
     integer :: iperm,jperm

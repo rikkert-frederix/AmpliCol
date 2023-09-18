@@ -53,7 +53,8 @@ contains
           wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
-       hel = -dble(2*ihel-1)
+!!$       hel = -dble(2*ihel-1)
+       hel = dble(2*ihel-1)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = dcmplx( rZero )
@@ -83,7 +84,7 @@ contains
     integer :: nh
     if (p(0).gt.0d0) then
        ! outgoing final state momenta
-       nh = ihel
+       nh = 2*ihel-1
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
        else
@@ -108,7 +109,8 @@ contains
        endif
     else
        ! "outgoing" initial state momenta
-       nh = -ihel
+!!$       nh = -(2*ihel-1)
+       nh = (2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
           sqp0p3 = 0d0
        else
@@ -147,7 +149,7 @@ contains
     integer :: nh
     if(p(0).gt.0d0) then
 ! outgoing final state momenta
-       nh = -ihel
+       nh = -(2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
        else
@@ -172,7 +174,8 @@ contains
        endif
     else
 ! "outgoing" initial state momenta
-       nh = ihel
+!!$       nh = 2*ihel-1
+       nh = -(2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
           sqp0p3 = 0d0
        else
