@@ -166,12 +166,9 @@ program test_QCD
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
-           ztemp=ztemp+amps(iperm)%amps(amps(iperm)%helmap(ih))*col_fac(iperm,jperm)
-!!$           ztemp=ztemp+amps(iperm)%amps(amps(iperm)%helmap(iperm,ih),iperm)*col_fac(iperm,jperm)
+           ztemp=ztemp+amps(iperm)%amps(ih)*col_fac(iperm,jperm)
         enddo
-        t=t+dble(ztemp*dconjg(amps(jperm)%amps(amps(jperm)%helmap(ih))))
-!!$        amp2=amp2+ztemp*amps(jperm)%amps(amps(jperm)%helmap(jperm,ih),jperm)
-!!$        write (*,*) ztemp*amps(jperm)%amps(amps(jperm)%helmap(jperm,ih),jperm)
+        t=t+dble(ztemp*dconjg(amps(jperm)%amps(ih)))
      enddo
      write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2),'for helicity',(ih-1)
      amp2=amp2+t

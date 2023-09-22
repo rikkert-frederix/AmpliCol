@@ -135,7 +135,7 @@ contains
       do ih=1,nhel
          this%helmap(ih)=0
          do i=1,n
-            if (btest(ih-1,order(i)-1)) this%helmap(ih)=ibset(this%helmap(ih),i-1)
+            if (btest(ih-1,i-1)) this%helmap(ih)=ibset(this%helmap(ih),order(i)-1)
          enddo
          this%helmap(ih)=this%helmap(ih)+1
       enddo
@@ -390,7 +390,6 @@ contains
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                    call ext_antiquark(this%current_list(ic)%pp(0:3),ih-1,1,this%current_list(ic)%val(1:4,ih))
                 endif
-!!$                write (*,*) ic,ih,this%current_list(ic)%val(1:4,ih),this%current_list(ic)%order(1),this%current_list(ic)%type
              enddo
           enddo
           cycle
@@ -400,7 +399,6 @@ contains
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
           do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
              do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
-!!$                ih=(ih1-1)*this%current_list(this%interaction_list(iv)%currents(2))%nhel+ih2
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
                 if (this%interaction_list(iv)%type.eq.0) then
                    call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
@@ -463,9 +461,8 @@ contains
       implicit none
       do ih1=1,this%current_list(this%n_cur)%nhel ! helicities for combined current of particles 1 to n-1 (in the colour order)
          do ih2=1,this%current_list(n)%nhel       ! and for the current for particle n
-!!$            ih=(ih1-1)*this%current_list(n)%nhel+ih2
             ih=(ih2-1)*this%current_list(this%n_cur)%nhel+ih1
-            this%amps(ih)=sum(this%current_list(this%n_cur)%val(1:4,ih1)*this%current_list(n)%val(1:4,ih2))
+            this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val(1:4,ih1)*this%current_list(n)%val(1:4,ih2))
          enddo
       enddo
     end subroutine compute_amps_from_currents
