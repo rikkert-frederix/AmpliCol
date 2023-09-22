@@ -94,13 +94,103 @@ contains
   contains
     subroutine check_input_consistency()
       implicit none
-      ! consistency checks (to implement):
-      ! - count number of qqbar pairs (should be even), also check their flavour!
-      ! - in colour order, make sure that first and last are quark and anti-quark
-      ! - also, in the middle (for more than 1 quark line), anti-quark should become just before quark.
-      ! - make sure that each element in the colour order appears only once.
-      ! - etc.
-      write (*,*) 'WARNING: consistency checks not implemented'
+      integer,dimension(6) :: quark_flav
+      integer :: n_qqbar
+      integer :: i,j
+      n_qqbar=0
+      quark_flav=0
+      do i=1,n
+         if (i.le.2) then
+            if (part(i).ne.21) then
+               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
+               if (part(i).lt.0) n_qqbar=n_qqbar+1
+            endif
+         else
+            if (part(i).ne.21) then
+               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
+               if (part(i).gt.0) n_qqbar=n_qqbar+1
+            endif
+         endif
+      enddo
+      if (any(quark_flav(:).ne.0)) then
+         write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
+         stop 1
+      endif
+      if (n_qqbar.gt.1) then
+         write (*,*) 'ERROR: code only working for 0, or 1 qqbar pairs',n_qqbar
+         write (*,*) part
+         stop 1
+      endif
+      if (any(order(:).gt.n) .or. any(order(:).lt.1)) then
+         write (*,*) 'ERROR: inconsistent colour order. An element is too large or too small',order
+         stop 1
+      endif
+      do i=1,n-1
+         do j=i+1,n
+            if (order(i).eq.order(j)) then
+               write (*,*) 'ERROR: inconsistent colour order. An element appears twice',order
+               stop 1
+            endif
+         enddo
+      enddo
+      if (n_qqbar.gt.0) then
+         if (order(1).le.2) then
+            if (.not.(part(order(1)).le.-1 .and. part(order(1)).ge.-6)) then
+               write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
+               write (*,*) order
+               write (*,*) part
+               stop 1
+            endif
+         else
+            if (.not.(part(order(1)).ge.1 .and. part(order(1)).le.6)) then
+               write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
+               write (*,*) order
+               write (*,*) part
+               stop 1
+            endif
+         endif
+         if (order(n).le.2) then
+            if (.not.(part(order(n)).ge.1 .and. part(order(n)).le.6)) then
+               write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
+               write (*,*) order
+               write (*,*) part
+               stop 1
+            endif
+         else
+            if (.not.(part(order(n)).le.-1 .and. part(order(n)).ge.-6)) then
+               write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
+               write (*,*) order
+               write (*,*) part
+               stop 1
+            endif
+         endif
+      endif
+      if (n_qqbar.ge.2) then
+         do i=1,n
+            if (order(i).eq.1 .or. order(i).eq.n) cycle
+            if (order(i).eq.2) then
+               if (part(order(i)).gt.1 .and. part(order(i)).lt.6) then
+                  ! next should be a quark
+                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
+                     write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quak'
+                     write (*,*) order
+                     write (*,*) part
+                     stop 1
+                  endif
+               endif
+            else
+               if (part(order(i)).lt.-1 .and. part(order(i)).gt.-6) then
+                  ! next should be a quark
+                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
+                     write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
+                     write (*,*) order
+                     write (*,*) part
+                     stop 1
+                  endif
+               endif
+            endif
+         enddo
+      endif
     end subroutine check_input_consistency
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
