@@ -18,10 +18,10 @@ module amplitude_mod
      integer :: n_cur,n_vert
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
    contains
-     procedure :: init_OneOrder,evaluate_OneOrder
+     procedure :: init_OneColOrder_HelSum,evaluate_OneColOrder_HelSum
   end type amplitude
 contains
-  subroutine init_OneOrder(this,n,part,order)
+  subroutine init_OneColOrder_HelSum(this,n,part,order)
     implicit none
     class(amplitude) :: this
     integer::n
@@ -434,8 +434,8 @@ contains
       this%current_list(this%n_cur)%vertices(1)=this%n_vert
       this%current_list(this%n_cur)%n_vert=1
     end subroutine add_current
-  end subroutine init_OneOrder
-  subroutine evaluate_OneOrder(this,n,p)
+  end subroutine init_OneColOrder_HelSum
+  subroutine evaluate_OneColOrder_helSum(this,n,p)
     use FeynmanRules
     implicit none
     class(amplitude) :: this
@@ -580,6 +580,6 @@ contains
       implicit none
       call QuarkPropagator(this%current_list(ic)%val,this%current_list(ic)%nhel,this%current_list(ic)%pp)
     end subroutine include_quark_propagator
-  end subroutine evaluate_OneOrder
+  end subroutine evaluate_OneColOrder_helSum
   
 end module amplitude_mod

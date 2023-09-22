@@ -145,8 +145,8 @@ program test_QCD
   endif
   
   do iperm=1,nperm
-     call amps(iperm)%init_OneOrder(n,part,order(1:n,iperm))
-     call amps(iperm)%evaluate_OneOrder(n,p)
+     call amps(iperm)%init_OneColOrder_HelSum(n,part,order(1:n,iperm))
+     call amps(iperm)%evaluate_OneColOrder_HelSum(n,p)
 !!$     call amps(iperm)%init(n,0,.true.,order)
 !!$     call amps(iperm)%evaluate(p)
   enddo
