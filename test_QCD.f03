@@ -14,12 +14,14 @@ program test_QCD
   real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0
   real(kind=8),dimension(:,:),allocatable :: col_fac
   complex(kind=8) :: ztemp
-  n=6
+  n=5
   allocate(part(n))
 
-  if (n.eq.5) then
-     nperm=6
-!!$     nperm=1
+  if (n.eq.4) then
+     nperm=1
+  elseif (n.eq.5) then
+!!$     nperm=6
+     nperm=1
   elseif (n.eq.6) then
 !!$     nperm=24
      nperm=1
@@ -28,6 +30,15 @@ program test_QCD
   allocate(helmap(2**n,nperm))
   allocate(amps(nperm))
   allocate(col_fac(nperm,nperm))
+
+
+  part(1:n)=21
+  part(1)=-1
+  part(n)=-1
+  call amps(1)%init_AllColOrder(n,part)
+
+  stop
+  
   
   allocate(p(0:3,n))
   
