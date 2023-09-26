@@ -3,12 +3,12 @@
 
 
 module common
-  use amplitude_mod
+  use amplitude_QCD_mod
   implicit none
   real*8,parameter  :: alphaS=0.12d0
   integer :: next,nfin,hel_picked
 
-  type(amplitude) :: amplitudes
+  type(amplitude_QCD) :: amplitudes
 
   ! timing
   real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.

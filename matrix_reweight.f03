@@ -1,12 +1,13 @@
-
-! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 matrix_reweight.f03
+! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 matrix_reweight.f03
 
 module common
   use amplitude_mod
+  use amplitude_QCD_mod
   implicit none
   integer :: next
   type(amplitude) :: amplitudes_LC,amplitudes_NLC,amplitudes_full
   type(amplitude_cache) :: amplitudes_cache
+  type(amplitude_QCD) :: amp_QCD
   real(kind=8),dimension(:,:),allocatable :: p
 end module common
 module rw_events
@@ -54,13 +55,14 @@ program matrix_reweight
   !15 : same as 0, but smarter summing over the colour matrix (using CSR format)
   !16 : same as 15, but with better caching of interactions
   !17 : same as 16, but with 4-gloun vertex replaced by two 3-vertices
+  !18 : same as 17, but using the new amplitude_QCD.f03 subroutines
   ! ...
   ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
   integer,parameter :: reweight_mode=17
   logical,parameter :: sum_hel=.false.
   integer,parameter :: n_rwgt=1   ! number of colour configurations to use average over per event (use n_rwgt=1 for reweight_mode<=1 or reweight_mode >=15)
   integer :: i,j,k,col_acc,icol,ih,iperm,jperm,ihel,iperm_ev,hel_picked,n_valid,irow,ic
-  integer,dimension(:),allocatable :: hel,list,list_valid_iperm,o
+  integer,dimension(:),allocatable :: hel,list,list_valid_iperm,o,part
   integer,dimension(:,:),allocatable :: list_orders
   real(kind=8) :: amp2_LC(n_rwgt),amp2_NLC(n_rwgt),amp2_full(n_rwgt),amp2_hel,color_wgt,amp,amp2,amp_col
   real(kind=8),dimension(2) :: ievt_count
@@ -133,6 +135,13 @@ program matrix_reweight
      else
         call amplitudes_cache%setup_colmap_cache(col_acc)
      endif
+  elseif(reweight_mode.eq.18) then
+     if (.not.allocated(part)) allocate(part(1:next))
+     part(1:next)=21
+     o(1:next)=0
+     call amp_QCD%init(2,next,part,o)
+     col_acc=20
+     call amp_QCD%init_col(next,col_acc)
   endif
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
@@ -182,6 +191,8 @@ program matrix_reweight
               call amplitudes_NLC%evaluate(p,hel)
            elseif (reweight_mode.eq.16 .or. reweight_mode.eq.17) then
               call amplitudes_cache%evaluate_cache(p,hel)
+           elseif (reweight_mode.eq.18) then
+              call amp_QCD%evaluate(next,p,ihel+1)
            endif
         endif
         call cpu_time(tAfter)
@@ -232,6 +243,19 @@ program matrix_reweight
                  amp_col=amp_col+amp2*amplitudes_cache%col_value_LC(i)
               enddo
               amp2_LC(k)=amp2_LC(k)+amp_col*amplitudes_cache%amps(irow)
+           enddo
+        elseif (reweight_mode.eq.18) then
+           do irow=1,factorial(next-1)
+              amp_col=0d0
+              do i=1,1
+                 amp2=0d0
+                 do ic=amp_QCD%row_index_LC(irow-1,i)+1,amp_QCD%row_index_LC(irow,i)
+                    icol=amp_QCD%col_index_LC(ic,i)
+                    amp2=amp2+amp_QCD%amps(icol)
+                 enddo
+                 amp_col=amp_col+amp2*amp_QCD%col_value_LC(i)
+              enddo
+              amp2_LC(k)=amp2_LC(k)+amp_col*amp_QCD%amps(irow)
            enddo
         elseif (reweight_mode.eq.8 .or. reweight_mode.eq.9) then
            do ih=0,amplitudes_NLC%nhel(amplitudes_NLC%isize+1)-1
@@ -338,6 +362,26 @@ program matrix_reweight
            enddo
            call cpu_time(tAfter)
            t_mat_NLC=t_mat_NLC+tAfter-tBefore
+        elseif (reweight_mode.eq.18) then
+           call cpu_time(tBefore)
+           do irow=1,factorial(next-1)
+              amp_col=0d0
+              do i=1,2
+                 amp2=0d0
+                 do ic=amp_QCD%row_index_NLC(irow-1,i)+1,amp_QCD%row_index_NLC(irow,i)
+                    icol=amp_QCD%col_index_NLC(ic,i)
+                    amp2=amp2+amp_QCD%amps(icol)
+                 enddo
+                 if (i.eq.1) then
+                    amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)
+                 else
+                    amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)*2d0
+                 endif
+              enddo
+              amp2_NLC(k)=amp2_NLC(k)+amp_col*amp_QCD%amps(irow)
+           enddo
+           call cpu_time(tAfter)
+           t_mat_NLC=t_mat_NLC+tAfter-tBefore
        endif
 
 
@@ -396,6 +440,26 @@ program matrix_reweight
                  endif
               enddo
               amp2_full(k)=amp2_full(k)+amp_col*amplitudes_cache%amps(irow)
+           enddo
+           call cpu_time(tAfter)
+           t_mat_full=t_mat_full+tAfter-tBefore
+        elseif (reweight_mode.eq.18 .and. col_acc.ge.2) then
+           call cpu_time(tBefore)
+           do irow=1,factorial(next-1)
+              amp_col=0d0
+              do i=1,(next+1)/2
+                 amp2=0d0
+                 do ic=amp_QCD%row_index_full(irow-1,i)+1,amp_QCD%row_index_full(irow,i)
+                    icol=amp_QCD%col_index_full(ic,i)
+                    amp2=amp2+amp_QCD%amps(icol)
+                 enddo
+                 if (i.eq.1) then
+                    amp_col=amp_col+amp2*amp_QCD%col_value_full(i)
+                 else
+                    amp_col=amp_col+amp2*amp_QCD%col_value_full(i)*2d0
+                 endif
+              enddo
+              amp2_full(k)=amp2_full(k)+amp_col*amp_QCD%amps(irow)
            enddo
            call cpu_time(tAfter)
            t_mat_full=t_mat_full+tAfter-tBefore

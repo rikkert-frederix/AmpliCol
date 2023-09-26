@@ -1,11 +1,11 @@
 ! gfortran -fbounds-check -o test_QCD math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 test_QCD.f03 
 
 program test_QCD
-  use amplitude_mod
+  use amplitude_QCD_mod
   use color_algebra
   implicit none
-  type(amplitude),dimension(:),allocatable :: amps
-  type(amplitude) :: amps_col
+  type(amplitude_QCD),dimension(:),allocatable :: amps
+  type(amplitude_QCD) :: amps_col
   integer :: n
   integer,dimension(:),allocatable :: part
   integer,dimension(:,:),allocatable :: helmap,order
