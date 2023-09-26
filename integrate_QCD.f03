@@ -1,5 +1,5 @@
 
-! gfortran -ffast-math -O3 -o integrate_QCD simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f  simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90  PhaseSpace_haag/haag.f90 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 integrate_QCD.f03
+! gfortran -ffast-math -O3 -o integrate_QCD simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f  simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90  PhaseSpace_haag/haag.f90 math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 integrate_QCD.f03
 
 
 module common
@@ -109,7 +109,7 @@ program matrix_integrate
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
-  call amplitudes%init_OneColOrder_HelSum(next,flavour,o)
+  call amplitudes%init(1,next,flavour,o)
   allocate(amp2_hel(1:2**next))
   if (c_o*2.eq.(next-2)) then
      sym_fac=factorial8(next-2)
@@ -214,7 +214,7 @@ contains
     iden=8*8*2*2 * factorial8(nfin)
     ! compute amplitudes
     call cpu_time(tBefore)
-    call amplitudes%evaluate_OneColOrder_HelSum(next,p)
+    call amplitudes%evaluate(next,p,0)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     call cpu_time(tBefore)

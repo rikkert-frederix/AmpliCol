@@ -1,10 +1,11 @@
-! gfortran -fbounds-check -o test_QCD color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 test_QCD.f03 
+! gfortran -fbounds-check -o test_QCD math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 test_QCD.f03 
 
 program test_QCD
   use amplitude_mod
   use color_algebra
   implicit none
   type(amplitude),dimension(:),allocatable :: amps
+  type(amplitude) :: amps_col
   integer :: n
   integer,dimension(:),allocatable :: part
   integer,dimension(:,:),allocatable :: helmap,order
@@ -14,17 +15,17 @@ program test_QCD
   real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0
   real(kind=8),dimension(:,:),allocatable :: col_fac
   complex(kind=8) :: ztemp
-  n=5
+  n=6
   allocate(part(n))
 
   if (n.eq.4) then
      nperm=1
   elseif (n.eq.5) then
-!!$     nperm=6
-     nperm=1
+     nperm=6
+!!$     nperm=1
   elseif (n.eq.6) then
-!!$     nperm=24
-     nperm=1
+     nperm=24
+!!$     nperm=1
   endif
   allocate(order(n,nperm))
   allocate(helmap(2**n,nperm))
@@ -32,12 +33,12 @@ program test_QCD
   allocate(col_fac(nperm,nperm))
 
 
-  part(1:n)=21
-  part(1)=-1
-  part(n)=-1
-  call amps(1)%init_AllColOrder(n,part)
-
-  stop
+!!$  part(1:n)=21
+!!$  part(1)=-1
+!!$  part(n)=-1
+!!$  call amps(1)%init_AllColOrder(n,part)
+!!$
+!!$  stop
   
   
   allocate(p(0:3,n))
@@ -92,33 +93,33 @@ program test_QCD
 !!$     iden=1
      
   elseif (n.eq.6) then
-!!$     part(1:n)=[-1,21,21,21,21,-1]
-!!$     order(1:n,1)=[1,2,3,4,5,6]
-!!$     order(1:n,2)=[1,2,3,5,4,6]
-!!$     order(1:n,3)=[1,2,4,3,5,6]
-!!$     order(1:n,4)=[1,2,4,5,3,6]
-!!$     order(1:n,5)=[1,2,5,3,4,6]
-!!$     order(1:n,6)=[1,2,5,4,3,6]
-!!$     order(1:n,7)=[1,3,2,4,5,6]
-!!$     order(1:n,8)=[1,3,2,5,4,6]
-!!$     order(1:n,9)=[1,3,4,2,5,6]
-!!$     order(1:n,10)=[1,3,4,5,2,6]
-!!$     order(1:n,11)=[1,3,5,2,4,6]
-!!$     order(1:n,12)=[1,3,5,4,2,6]
-!!$     order(1:n,13)=[1,4,2,3,5,6]
-!!$     order(1:n,14)=[1,4,2,5,3,6]
-!!$     order(1:n,15)=[1,4,3,2,5,6]
-!!$     order(1:n,16)=[1,4,3,5,2,6]
-!!$     order(1:n,17)=[1,4,5,2,3,6]
-!!$     order(1:n,18)=[1,4,5,3,2,6]
-!!$     order(1:n,19)=[1,5,2,3,4,6]
-!!$     order(1:n,20)=[1,5,2,4,3,6]
-!!$     order(1:n,21)=[1,5,3,2,4,6]
-!!$     order(1:n,22)=[1,5,3,4,2,6]
-!!$     order(1:n,23)=[1,5,4,2,3,6]
-!!$     order(1:n,24)=[1,5,4,3,2,6]
-!!$     iden=3*8*2*2
-!!$     iden=iden*6
+     part(1:n)=[-1,21,21,21,21,-1]
+     order(1:n,1)=[1,2,3,4,5,6]
+     order(1:n,2)=[1,2,3,5,4,6]
+     order(1:n,3)=[1,2,4,3,5,6]
+     order(1:n,4)=[1,2,4,5,3,6]
+     order(1:n,5)=[1,2,5,3,4,6]
+     order(1:n,6)=[1,2,5,4,3,6]
+     order(1:n,7)=[1,3,2,4,5,6]
+     order(1:n,8)=[1,3,2,5,4,6]
+     order(1:n,9)=[1,3,4,2,5,6]
+     order(1:n,10)=[1,3,4,5,2,6]
+     order(1:n,11)=[1,3,5,2,4,6]
+     order(1:n,12)=[1,3,5,4,2,6]
+     order(1:n,13)=[1,4,2,3,5,6]
+     order(1:n,14)=[1,4,2,5,3,6]
+     order(1:n,15)=[1,4,3,2,5,6]
+     order(1:n,16)=[1,4,3,5,2,6]
+     order(1:n,17)=[1,4,5,2,3,6]
+     order(1:n,18)=[1,4,5,3,2,6]
+     order(1:n,19)=[1,5,2,3,4,6]
+     order(1:n,20)=[1,5,2,4,3,6]
+     order(1:n,21)=[1,5,3,2,4,6]
+     order(1:n,22)=[1,5,3,4,2,6]
+     order(1:n,23)=[1,5,4,2,3,6]
+     order(1:n,24)=[1,5,4,3,2,6]
+     iden=3*8*2*2
+     iden=iden*6
 
 !!$     part(1:n)=[21,21,-1,21,1,21]
 !!$     order(1:n,1)=[5,2,6,4,1,3]
@@ -149,19 +150,21 @@ program test_QCD
 !!$     iden=iden*2
 
 
-     part(1:n)=[21,21,21,21,21,21]
-     order(1:n,1)=[1,5,3,4,2,6]
-     iden=1
+!!$     part(1:n)=[21,21,21,21,21,21]
+!!$     order(1:n,1)=[1,5,3,4,2,6]
+!!$     iden=1
 
   endif
   
   do iperm=1,nperm
-     call amps(iperm)%init_OneColOrder_HelSum(n,part,order(1:n,iperm))
-     call amps(iperm)%evaluate_OneColOrder_HelSum(n,p)
+     call amps(iperm)%init(1,n,part,order(1:n,iperm))
+     call amps(iperm)%evaluate(n,p,0)
 !!$     call amps(iperm)%init(n,0,.true.,order)
 !!$     call amps(iperm)%evaluate(p)
   enddo
 
+  call amps_col%init(2,n,part,order(1:n,1))
+  call amps_col%evaluate(n,p,5)
   
   call Tr_allocate(n)
   do jperm=1,nperm
@@ -186,6 +189,17 @@ program test_QCD
   enddo
   
 
+  t=0d0
+  do jperm=1,nperm    ! loop over permutations of conjugated amplitude
+     ztemp=(0d0,0d0)
+     do iperm=1,nperm ! loop over permutations of amplitude
+        ztemp=ztemp+amps_col%amps(iperm)*col_fac(iperm,jperm)
+     enddo
+     t=t+dble(ztemp*dconjg(amps_col%amps(jperm)))
+  enddo
+  write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2)
+
+  
   
   amp2=amp2*(4*pi*alphas)**(n-2)/dble(iden)
 
