@@ -133,10 +133,9 @@ contains
     
     ! All done. But there could be currents that are not needed. Filter them out
     call filter_dead_trees()
-    if (this%imode.eq.1) then
-       ! create the helicity map
-       call create_helicity_map()
-    endif
+    ! create the helicity map
+    if (this%imode.eq.1) call create_helicity_map()
+    ! allocate and fill the colour orders
     if (imode.eq.2) allocate(this%perm(1:n-1,1:this%n_cur_end(n-1)-this%n_cur_start(n-1)+1))
     do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
        this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
