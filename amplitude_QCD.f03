@@ -3,6 +3,7 @@ module amplitude_QCD_mod
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
+     logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:,:),allocatable :: val
      real(kind=8),dimension(0:3) :: pp
   end type current
@@ -31,7 +32,8 @@ contains
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,n_qqbar
+    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,n_qqbar,nperm
+    logical,parameter :: use_symmetry=.true.
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - all polarisation/helicity configurations'
@@ -133,13 +135,18 @@ contains
     
     ! All done. But there could be currents that are not needed. Filter them out
     call filter_dead_trees()
+    write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
     ! create the helicity map
     if (this%imode.eq.1) call create_helicity_map()
     ! allocate and fill the colour orders
     if (imode.eq.2) then
-       allocate(this%perm(1:n-1,1:this%n_cur_end(n-1)-this%n_cur_start(n-1)+1))
+       nperm=this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+       allocate(this%perm(1:n-1,1:nperm*2))
        do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
           this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
+       enddo
+       do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+          this%perm(1:n-1,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:1:-1)
        enddo
     endif
   contains
@@ -461,8 +468,10 @@ contains
             write (*,*) 'Only implemented for 0 or 1 qqbar pair',n_qqbar
             stop
          endif
-!!$         ! only consider one ordering; the other will be obtained from symmetry:
-!!$         if (maxval(cur_part(1:n1,ic1)).ge.maxval(cur_part(1:n2,ic2))) return
+         if (use_symmetry) then
+            ! only consider one ordering; the other will be obtained from symmetry:
+            if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
+         endif
          ! check that all particles are different in the two currents:
          if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
       endif
@@ -511,37 +520,104 @@ contains
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
       this%interaction_list(this%n_vert)%currents(2)=ic2
-      call add_current(ctype)
+      call add_all_currents(ctype)
     end subroutine add_vertex
-    subroutine add_current(ctype)
+    subroutine add_all_currents(ctype)
       implicit none
-      integer :: ctype
+      logical :: vertex_sign
+      integer,dimension(isize,8) :: ip
+      integer :: i,cur_bin,ctype
+      if (.not.use_symmetry) then
+         cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
+         call add_current(.false.,cur_bin,[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)],ctype)
+         return
+      endif
+      ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
+      ip(1:isize,1)=[this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(1:n2   )]
+      ip(1:isize,2)=[this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(1:n1   )]
+      ip(1:isize,3)=[this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(1:n2   )]
+      ip(1:isize,4)=[this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(n1:1:-1)]
+      ip(1:isize,5)=[this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(n2:1:-1)]
+      ip(1:isize,6)=[this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(1:n1   )]
+      ip(1:isize,7)=[this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(n2:1:-1)]
+      ip(1:isize,8)=[this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(n1:1:-1)]
+      do i=1,8
+         if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
+         if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
+         if (valid_current_order(ip(1:isize,i))) then
+            if (i.eq.1 .or. &
+                 (i.eq.3 .and. mod(n1,2).eq.1)    .or. (i.eq.4 .and. mod(n1,2).eq.0) .or. &
+                 (i.eq.5 .and. mod(n2,2).eq.1)    .or. (i.eq.6 .and. mod(n2,2).eq.0) .or. &
+                 (i.eq.7 .and. mod(isize,2).eq.0) .or. (i.eq.8 .and. mod(isize,2).eq.1)) then
+               vertex_sign=.false. ! no extra sign needed
+            else
+               vertex_sign=.true.  ! permutation requires a minus sign
+            endif
+            cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
+            call add_current(vertex_sign,cur_bin,ip(1:isize,i),ctype)
+         endif
+      enddo
+    end subroutine add_all_currents
+    logical function valid_current_order(ip)
+      ! Checks that ip(1:isize) is an order for a current to be considered:
+      ! the smallest number needs to come before the largest number in this
+      ! list.
+      implicit none
+      integer :: i,maxi,mini,min_loc,max_loc
+      integer,dimension(isize) :: ip
+      maxi=0
+      mini=100
+      do i=1,isize
+         if (ip(i).gt.maxi) then
+            maxi=ip(i)
+            max_loc=i
+         endif
+         if (ip(i).lt.mini) then
+            mini=ip(i)
+            min_loc=i
+         endif
+      enddo
+      if (min_loc.gt.max_loc) then
+         valid_current_order=.false.
+      else
+         valid_current_order=.true.
+      endif
+    end function valid_current_order
+    subroutine add_current(vertex_sign,cur_bin,ip,ctype)
+      implicit none
+      logical :: vertex_sign
+      integer,dimension(isize) :: ip
+      integer :: ctype,cur_bin
       integer :: i
       ! Check if this interaction can be added to an existing current
       do i=1,this%n_cur
          if (ctype.ne.this%current_list(i)%type) cycle
-         if (this%current_list(ic1)%bin+this%current_list(ic2)%bin.ne.this%current_list(i)%bin) cycle
-         if (any(this%current_list(i)%order(1:isize).ne. &
-              [this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)])) cycle
+         if (cur_bin.ne.this%current_list(i)%bin) cycle
+         if (any(this%current_list(i)%order(1:isize).ne.ip(1:isize))) cycle
          this%current_list(i)%n_vert=this%current_list(i)%n_vert+1
          this%current_list(i)%vertices(this%current_list(i)%n_vert)=this%n_vert
+         this%current_list(i)%vertex_sign(this%current_list(i)%n_vert)=vertex_sign
          return
       enddo
       ! Need a new current
       this%n_cur=this%n_cur+1
       allocate(this%current_list(this%n_cur)%order(isize))
-      this%current_list(this%n_cur)%order(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
+      this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
       this%current_list(this%n_cur)%type=ctype
-      this%current_list(this%n_cur)%bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
+      this%current_list(this%n_cur)%bin=cur_bin
       this%current_list(this%n_cur)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
       if (ctype.eq.21) then
          allocate(this%current_list(this%n_cur)%vertices(5*(isize-1)))
+         allocate(this%current_list(this%n_cur)%vertex_sign(5*(isize-1)))
       elseif (ctype.eq.-21) then
          allocate(this%current_list(this%n_cur)%vertices(isize-1))
+         allocate(this%current_list(this%n_cur)%vertex_sign(isize-1))
       else
          allocate(this%current_list(this%n_cur)%vertices(2*(isize-1)))
+         allocate(this%current_list(this%n_cur)%vertex_sign(2*(isize-1)))
       endif
       this%current_list(this%n_cur)%vertices(1)=this%n_vert
+      this%current_list(this%n_cur)%vertex_sign(1)=vertex_sign
       this%current_list(this%n_cur)%n_vert=1
     end subroutine add_current
   end subroutine init
@@ -551,7 +627,7 @@ contains
     class(amplitude_QCD) :: this
     integer :: n,hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih1,ih2,ih,ih_in
+    integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
     if (.not. allocated(this%current_list(1)%val)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -683,6 +759,14 @@ contains
          do ic=this%n_cur_start(n-1),this%n_cur_end(n-1)
             this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val(1:4,1)*this%current_list(n)%val(1:4,1))
          enddo
+         do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
+            ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
+            if (mod(n,2).eq.1) then
+               this%amps(ic)=-this%amps(ip)
+            else
+               this%amps(ic)=this%amps(ip)
+            endif
+         enddo
       endif
     end subroutine compute_amps_from_currents
     subroutine compute_momentum_current()
@@ -696,9 +780,15 @@ contains
       integer :: dim,iv
       this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
       do iv=1,this%current_list(ic)%n_vert
-         this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=&
-              this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)+&
-              this%interaction_list(this%current_list(ic)%vertices(iv))%val(1:dim,1:this%current_list(ic)%nhel)
+         if (this%current_list(ic)%vertex_sign(iv))then
+            this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=&
+                 this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)-&
+                 this%interaction_list(this%current_list(ic)%vertices(iv))%val(1:dim,1:this%current_list(ic)%nhel)
+         else
+            this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=&
+                 this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)+&
+                 this%interaction_list(this%current_list(ic)%vertices(iv))%val(1:dim,1:this%current_list(ic)%nhel)
+         endif
       enddo
     end subroutine combine_interactions
     subroutine include_gluon_propagator()
@@ -720,6 +810,12 @@ contains
     integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,nperm,nw
     integer,dimension(:),allocatable :: ic,ir,iper,jper
     real(kind=4) :: tBefore,tAfter
+
+    if (any(this%current_list(1:n)%type.ne.21)) then
+       write (*,*) 'ERROR: colour factor computation assumes all-gluon amplitudes',this%current_list(1:n)%type
+       stop 1
+    endif
+    
     call cpu_time(tBefore)
     write (*,'(a,i3,a)') ' Setting up colour factor (col_acc =',col_acc,')...'
     allocate(iper(1:n))
