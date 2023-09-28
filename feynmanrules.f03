@@ -7,12 +7,13 @@ contains
     real(kind=8), dimension(4) :: wf
     complex(kind=8),dimension(4) :: wf0,wf1
     complex(kind=8),parameter :: cImag=(0d0,1d0)
+    real(kind=8),parameter :: sqh=sqrt(0.5d0)
     call ext_gluon_cmplx(p,1,ifinal,wf1)
     call ext_gluon_cmplx(p,0,ifinal,wf0)
     if (ihel.eq.1) then
-       wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqrt(0.5d0)
+       wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqh
     elseif (ihel.eq.0) then
-       wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqrt(0.5d0)
+       wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
     endif
   end subroutine ext_gluon_real
   subroutine ext_gluon_cmplx(p,ihel,ifinal,wf)

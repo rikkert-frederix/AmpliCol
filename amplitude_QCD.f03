@@ -674,6 +674,7 @@ contains
                 endif
                 if (this%current_list(ic)%type.eq.21) then
                    call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
+!!$                   call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
                    call ext_quark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
@@ -744,7 +745,6 @@ contains
     enddo
 
     call compute_amps_from_currents
-    
   contains
     subroutine compute_amps_from_currents
       implicit none
@@ -843,21 +843,11 @@ contains
     ic=0
     ir=0
     do iperm=1,nperm
-!!$       if (iperm.le.nperm/2) then
-          nw=iperm
-          iper(1:n)=[this%perm(1:n-1,nw),n]
-!!$       else
-!!$          nw=iperm-nperm/2
-!!$          iper(1:n)=[this%perm(n-1:1:-1,nw),n]
-!!$       endif
+       nw=iperm
+       iper(1:n)=[this%perm(1:n-1,nw),n]
        do jperm=iperm,nperm
-!!$          if (jperm.le.nperm/2) then
-             nw=jperm
-             jper(1:n)=[this%perm(1:n-1,nw),n]
-!!$          else
-!!$             nw=jperm-nperm/2
-!!$             jper(1:n)=[this%perm(n-1:1:-1,nw),n]
-!!$          endif
+          nw=jperm
+          jper(1:n)=[this%perm(1:n-1,nw),n]
           call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
           if (col_fac.eq.0) cycle
           do i=1,(n+1)/2
