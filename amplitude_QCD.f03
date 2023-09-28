@@ -136,10 +136,12 @@ contains
     ! create the helicity map
     if (this%imode.eq.1) call create_helicity_map()
     ! allocate and fill the colour orders
-    if (imode.eq.2) allocate(this%perm(1:n-1,1:this%n_cur_end(n-1)-this%n_cur_start(n-1)+1))
-    do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-       this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
-    enddo
+    if (imode.eq.2) then
+       allocate(this%perm(1:n-1,1:this%n_cur_end(n-1)-this%n_cur_start(n-1)+1))
+       do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+          this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
+       enddo
+    endif
   contains
     subroutine define_canonical_color_order()
       use math_functions
