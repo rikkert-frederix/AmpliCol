@@ -213,6 +213,18 @@ contains
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
     wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
   end subroutine ThreeGluon
+  subroutine ThreeGluon_real(wf1,pwf1,wf2,pwf2,wf)
+    ! Colour-ordered three-gluon interaction
+    implicit none
+    real(kind=8),dimension(4) :: wf1,wf2,wf
+    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    real(kind=8),parameter :: prefact=1d0/sqrt(2d0)
+    real(kind=8) :: TMP1,TMP2,TMP3
+    TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
+    TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
+    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
+  end subroutine ThreeGluon_Real
   subroutine FourGluon(wf1,wf2,wf3,wf)
     ! Colour-ordered four-gluon interaction
     implicit none
@@ -242,6 +254,19 @@ contains
 !!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
 !!$    enddo
   end subroutine TwoGluontoTensor
+  subroutine TwoGluontoTensor_real(wfg1,wfg2,wfT)
+    ! This vertex includes the all factors such that the tensor "propagator"
+    ! is simply the identity
+    implicit none
+    real(kind=8),dimension(4) :: wfg1,wfg2
+    real(kind=8),dimension(6) :: wfT
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))
+  end subroutine TwoGluontoTensor_real
   subroutine TensorGluontoGluon(wfT1,wfg2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
@@ -257,6 +282,16 @@ contains
 !!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.25d0
 !!$    enddo
   end subroutine TensorGluontoGluon
+  subroutine TensorGluontoGluon_real(wfT1,wfg2,wfg)
+    implicit none
+    real(kind=8),dimension(4) :: wfg2,wfg
+    real(kind=8),dimension(6) :: wfT1
+    real(kind=8),parameter :: prefact=0.5d0
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+  end subroutine TensorGluontoGluon_Real
   subroutine GluonTensortoGluon(wfg1,wfT2,wfg)
     implicit none 
     complex(kind=8),dimension(4) :: wfg1,wfg
@@ -272,6 +307,16 @@ contains
 !!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.25d0
 !!$    enddo
   end subroutine GluonTensortoGluon
+  subroutine GluonTensortoGluon_real(wfg1,wfT2,wfg)
+    implicit none 
+    real(kind=8),dimension(4) :: wfg1,wfg
+    real(kind=8),dimension(6) :: wfT2
+    real(kind=8),parameter :: prefact=0.5d0
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+  end subroutine GluonTensortoGluon_Real
   subroutine GluonQuarktoQuark(wfg1,wfq2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
@@ -300,6 +345,22 @@ contains
     wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2))
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))
   end subroutine QuarkGluontoQuark
+  subroutine QuarkGluontoQuark_real(wfq1,wfg2,wfq)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq
+    real(kind=8),dimension(4) :: wfg2
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8) :: TMP1,TMP2
+    complex(kind=8) :: TMP3,TMP4
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=dcmplx(wfg2(2),wfg2(3))
+    TMP4=dcmplx(wfg2(2),-wfg2(3))
+    wfq(1)=prefact*(TMP1*wfq1(3)+TMP3*wfq1(4))
+    wfq(2)=prefact*(TMP2*wfq1(4)+TMP4*wfq1(3))
+    wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2))
+    wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))
+  end subroutine QuarkGluontoQuark_Real
   subroutine GluonPropagator(wfg,nhel,p)
     implicit none
     integer,intent(in) :: nhel
@@ -310,6 +371,15 @@ contains
     propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     wfg(1:4,1:nhel)=wfg(1:4,1:nhel)*propagator
   end subroutine GluonPropagator
+  subroutine GluonPropagator_real(wfg,nhel,p)
+    implicit none
+    integer,intent(in) :: nhel
+    real(kind=8),dimension(1:4,nhel),intent(inout) :: wfg
+    real(kind=8),dimension(0:3),intent(in) :: p
+    real(kind=8) :: propagator
+    propagator=1d0/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    wfg(1:4,1:nhel)=wfg(1:4,1:nhel)*propagator
+  end subroutine GluonPropagator_Real
   subroutine QuarkPropagator(wfq,nhel,p)
     implicit none
     integer,intent(in) :: nhel

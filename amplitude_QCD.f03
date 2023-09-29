@@ -1,22 +1,26 @@
 module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
+  logical,parameter :: use_real_gluons=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
      logical,dimension(:),allocatable :: vertex_sign
-     complex(kind=8),dimension(:,:),allocatable :: val
+     complex(kind=8),dimension(:,:),allocatable :: val_c
+     real(kind=8),dimension(:,:),allocatable :: val_r
      real(kind=8),dimension(0:3) :: pp
   end type current
   type interaction
      integer :: type
      integer,dimension(2) :: currents
-     complex(kind=8),dimension(:,:),allocatable :: val
+     complex(kind=8),dimension(:,:),allocatable :: val_c
+     real(kind=8),dimension(:,:),allocatable :: val_r
   end type interaction
   type amplitude_QCD
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
+     real(kind=8),dimension(:),allocatable :: amps_r
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
 
@@ -646,27 +650,51 @@ contains
     integer :: n,hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
-    if (.not. allocated(this%current_list(1)%val)) then
+    if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
-             allocate(this%current_list(ic)%val(1:6,1:this%current_list(ic)%nhel))
+             if (use_real_gluons) then
+                allocate(this%current_list(ic)%val_r(1:6,1:this%current_list(ic)%nhel))
+             else
+                allocate(this%current_list(ic)%val_c(1:6,1:this%current_list(ic)%nhel))
+             endif
+          elseif (this%current_list(ic)%type.eq.21 .and. use_real_gluons) then
+             allocate(this%current_list(ic)%val_r(1:4,1:this%current_list(ic)%nhel))
           else
-             allocate(this%current_list(ic)%val(1:4,1:this%current_list(ic)%nhel))
+             allocate(this%current_list(ic)%val_c(1:4,1:this%current_list(ic)%nhel))
           endif
        enddo
        do iv=1,this%n_vert
           if (this%interaction_list(iv)%type.eq.1) then
-             allocate(this%interaction_list(iv)%val(1:6,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
+             if (use_real_gluons) then
+                allocate(this%interaction_list(iv)%val_r(1:6,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
+                                                             this%current_list(this%interaction_list(iv)%currents(2))%nhel))
+             else
+                allocate(this%interaction_list(iv)%val_c(1:6,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
+                                                             this%current_list(this%interaction_list(iv)%currents(2))%nhel))
+             endif
+          elseif ((this%interaction_list(iv)%type.eq.0 .or. &
+                   this%interaction_list(iv)%type.eq.2 .or. &
+                   this%interaction_list(iv)%type.eq.3) .and. use_real_gluons  ) then
+             allocate(this%interaction_list(iv)%val_r(1:4,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
                                                           this%current_list(this%interaction_list(iv)%currents(2))%nhel))
           else
-             allocate(this%interaction_list(iv)%val(1:4,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
+             allocate(this%interaction_list(iv)%val_c(1:4,1:this%current_list(this%interaction_list(iv)%currents(1))%nhel* &
                                                           this%current_list(this%interaction_list(iv)%currents(2))%nhel))
           endif
        enddo
        if (this%imode.eq.1) then
-          allocate(this%amps(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
+          if (use_real_gluons .and. this%n_qqbar.eq.0) then
+             allocate(this%amps_r(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
+          else
+             allocate(this%amps(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
+          endif
        elseif (this%imode.eq.2) then
-          allocate(this%amps(1:this%nColOrd))
+          if (use_real_gluons .and. this%n_qqbar.eq.0) then
+             allocate(this%amps_r(1:this%nColOrd))
+          else
+             allocate(this%amps(1:this%nColOrd))
+          endif
        endif
     endif
 
@@ -691,12 +719,15 @@ contains
                    ih_in=ih
                 endif
                 if (this%current_list(ic)%type.eq.21) then
-                   call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
-!!$                   call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
+                   if (use_real_gluons) then
+                      call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_r(1:4,ih))
+                   else
+                      call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_c(1:4,ih))
+                   endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                   call ext_quark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_quark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_c(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val(1:4,ih))
+                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_c(1:4,ih))
                 endif
              enddo
           enddo
@@ -709,27 +740,59 @@ contains
              do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
                 if (this%interaction_list(iv)%type.eq.0) then
-                   call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
-                                        this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
-                                   this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
-                                        this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
-                                        this%interaction_list(iv)%val(1:4,ih))
+                   if (use_real_gluons) then
+                      call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
+                                                this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                                                this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
+                                                this%interaction_list(iv)%val_r(1:4,ih))
+                   else
+                      call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                           this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
+                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
+                                           this%interaction_list(iv)%val_c(1:4,ih))
+                   endif
                 elseif(this%interaction_list(iv)%type.eq.1) then
-                   call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
-                                         this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
-                                         this%interaction_list(iv)%val(1:6,ih))
+                   if (use_real_gluons) then
+                      call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
+                                                 this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                                                 this%interaction_list(iv)%val_r(1:6,ih))
+                   else
+                      call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                            this%interaction_list(iv)%val_c(1:6,ih))
+                   endif
                 elseif(this%interaction_list(iv)%type.eq.2) then
-                   call TensorGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:6,ih1),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
-                                           this%interaction_list(iv)%val(1:4,ih))
+                   if (use_real_gluons) then
+                      call TensorGluontoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:6,ih1),&
+                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                                                   this%interaction_list(iv)%val_r(1:4,ih))
+                   else
+                      call TensorGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+                   endif
                 elseif(this%interaction_list(iv)%type.eq.3) then
-                   call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val(1:6,ih2),&
-                                           this%interaction_list(iv)%val(1:4,ih))
-                elseif(this%interaction_list(iv)%type.eq.6) then
-                   call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val(1:4,ih1),&
-                                          this%current_list(this%interaction_list(iv)%currents(2))%val(1:4,ih2),&
-                                          this%interaction_list(iv)%val(1:4,ih))
+                   if (use_real_gluons) then
+                       call GluonTensortoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
+                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:6,ih2),&
+                                                    this%interaction_list(iv)%val_r(1:4,ih))
+                    else
+                       call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6,ih2),&
+                                               this%interaction_list(iv)%val_c(1:4,ih))
+                    endif
+                 elseif(this%interaction_list(iv)%type.eq.6) then
+                    if (use_real_gluons) then
+                       call QuarkGluontoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                                                   this%interaction_list(iv)%val_c(1:4,ih))
+                    else
+                       call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+                    endif
                 else
                    write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
                    stop 1
@@ -770,20 +833,36 @@ contains
          do ih1=1,this%current_list(this%n_cur)%nhel ! helicities for combined current of particles 1 to n-1 (in the colour order)
             do ih2=1,this%current_list(n)%nhel       ! and for the current for particle n
                ih=(ih2-1)*this%current_list(this%n_cur)%nhel+ih1
-               this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val(1:4,ih1)*this%current_list(n)%val(1:4,ih2))
+               if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
+                  this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_r(1:4,ih1)*this%current_list(n)%val_r(1:4,ih2))
+               else
+                  this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_c(1:4,ih1)*this%current_list(n)%val_c(1:4,ih2))
+               endif
             enddo
          enddo
       elseif (this%imode.eq.2) then
          do ic=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val(1:4,1)*this%current_list(n)%val(1:4,1))
+            if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
+               this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
+            else
+               this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+            endif
          enddo
          if (use_symmetry .and. this%n_qqbar.eq.0) then
             do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
                ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
-               if (mod(n,2).eq.1) then
-                  this%amps(ic)=-this%amps(ip)
+               if (use_real_gluons .and. this%n_qqbar.eq.0) then
+                  if (mod(n,2).eq.1) then
+                     this%amps_r(ic)=-this%amps_r(ip)
+                  else
+                     this%amps_r(ic)=this%amps_r(ip)
+                  endif
                else
-                  this%amps(ic)=this%amps(ip)
+                  if (mod(n,2).eq.1) then
+                     this%amps(ic)=-this%amps(ip)
+                  else
+                     this%amps(ic)=this%amps(ip)
+                  endif
                endif
             enddo
          endif
@@ -798,26 +877,45 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
-      this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
-      do iv=1,this%current_list(ic)%n_vert
-         if (this%current_list(ic)%vertex_sign(iv))then
-            this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=&
-                 this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)-&
-                 this%interaction_list(this%current_list(ic)%vertices(iv))%val(1:dim,1:this%current_list(ic)%nhel)
-         else
-            this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)=&
-                 this%current_list(ic)%val(1:dim,1:this%current_list(ic)%nhel)+&
-                 this%interaction_list(this%current_list(ic)%vertices(iv))%val(1:dim,1:this%current_list(ic)%nhel)
-         endif
-      enddo
+      if (use_real_gluons) then
+         this%current_list(ic)%val_r(1:dim,1:this%current_list(ic)%nhel)=0d0
+         do iv=1,this%current_list(ic)%n_vert
+            if (this%current_list(ic)%vertex_sign(iv))then
+               this%current_list(ic)%val_r(1:dim,1:this%current_list(ic)%nhel)=&
+                    this%current_list(ic)%val_r(1:dim,1:this%current_list(ic)%nhel)-&
+                    this%interaction_list(this%current_list(ic)%vertices(iv))%val_r(1:dim,1:this%current_list(ic)%nhel)
+            else
+               this%current_list(ic)%val_r(1:dim,1:this%current_list(ic)%nhel)=&
+                    this%current_list(ic)%val_r(1:dim,1:this%current_list(ic)%nhel)+&
+                    this%interaction_list(this%current_list(ic)%vertices(iv))%val_r(1:dim,1:this%current_list(ic)%nhel)
+            endif
+         enddo
+      else
+         this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
+         do iv=1,this%current_list(ic)%n_vert
+            if (this%current_list(ic)%vertex_sign(iv))then
+               this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
+                    this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)-&
+                    this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim,1:this%current_list(ic)%nhel)
+            else
+               this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
+                    this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)+&
+                    this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim,1:this%current_list(ic)%nhel)
+            endif
+         enddo
+      endif
     end subroutine combine_interactions
     subroutine include_gluon_propagator()
       implicit none
-      call GluonPropagator(this%current_list(ic)%val,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+      if (use_real_gluons) then
+         call GluonPropagator_real(this%current_list(ic)%val_r,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+      else
+         call GluonPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+      endif
     end subroutine include_gluon_propagator
     subroutine include_quark_propagator()
       implicit none
-      call QuarkPropagator(this%current_list(ic)%val,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+      call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
     end subroutine include_quark_propagator
   end subroutine evaluate
 
