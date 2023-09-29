@@ -1,5 +1,6 @@
 module amplitude_QCD_mod
   implicit none
+  logical,parameter :: use_symmetry=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -16,13 +17,12 @@ module amplitude_QCD_mod
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
-     integer :: n_cur,n_vert,imode,nColOrd
+     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
 
      integer,dimension(:),allocatable :: col_value_LC,col_value_NLC,col_value_full
      integer,dimension(:,:),allocatable :: perm,col_index_LC,row_index_LC,col_index_NLC,row_index_NLC, &
           col_index_full,row_index_full
-     
    contains
      procedure :: init,evaluate,init_col
   end type amplitude_QCD
@@ -32,8 +32,7 @@ contains
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,n_qqbar,nperm
-    logical,parameter :: use_symmetry=.true.
+    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,nperm
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - all polarisation/helicity configurations'
@@ -188,18 +187,18 @@ contains
       implicit none
       integer,dimension(6) :: quark_flav
       integer :: i,j
-      n_qqbar=0
+      this%n_qqbar=0
       quark_flav=0
       do i=1,n
          if (i.le.2) then
             if (part(i).ne.21) then
                quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
-               if (part(i).lt.0) n_qqbar=n_qqbar+1
+               if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
             endif
          else
             if (part(i).ne.21) then
                quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
-               if (part(i).gt.0) n_qqbar=n_qqbar+1
+               if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
          endif
       enddo
@@ -207,8 +206,8 @@ contains
          write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
          stop 1
       endif
-      if (n_qqbar.gt.1) then
-         write (*,*) 'ERROR: code only working for 0, or 1 qqbar pairs',n_qqbar
+      if (this%n_qqbar.gt.1) then
+         write (*,*) 'ERROR: code only working for 0, or 1 qqbar pairs',this%n_qqbar
          write (*,*) part
          stop 1
       endif
@@ -224,7 +223,7 @@ contains
             endif
          enddo
       enddo
-      if (n_qqbar.gt.0) then
+      if (this%n_qqbar.gt.0) then
          if (order(1).le.2) then
             if (.not.(part(order(1)).le.-1 .and. part(order(1)).ge.-6)) then
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
@@ -256,7 +255,7 @@ contains
             endif
          endif
       endif
-      if (n_qqbar.ge.2) then
+      if (this%n_qqbar.ge.2) then
          do i=1,n
             if (order(i).eq.1 .or. order(i).eq.n) cycle
             if (order(i).eq.2) then
@@ -452,7 +451,7 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       if (this%imode.eq.2) then
-         if (n_qqbar.eq.1) then
+         if (this%n_qqbar.eq.1) then
             ! if quark is in there, it should be the very first particle
             if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
                        this%current_list(ic1)%order(1).ne.order(1)) return
@@ -460,20 +459,23 @@ contains
             ! anti-quark should not be part of it, since it will close the current
             if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
             if (any(this%current_list(ic2)%order(1:n2).eq.order(n))) return
-         elseif (n_qqbar.eq.0) then
+         elseif (this%n_qqbar.eq.0) then
             ! final gluon should not be part of it, since it will close the current
             if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
             if (any(this%current_list(ic2)%order(1:n2).eq.order(n))) return
          else
-            write (*,*) 'Only implemented for 0 or 1 qqbar pair',n_qqbar
+            write (*,*) 'Only implemented for 0 or 1 qqbar pair',this%n_qqbar
             stop
-         endif
-         if (use_symmetry) then
-            ! only consider one ordering; the other will be obtained from symmetry:
-            if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
          endif
          ! check that all particles are different in the two currents:
          if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
+         if (use_symmetry) then
+            ! For the gluon (and tensor) currents only consider one ordering;
+            ! the other will be obtained from symmetry.
+            if (this%n_qqbar.eq.0 .or. (this%n_qqbar.eq.1 .and. this%current_list(ic1)%order(1).ne.order(1))) then
+               if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
+            endif
+         endif
       endif
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
@@ -565,6 +567,22 @@ contains
       implicit none
       integer :: i,maxi,mini,min_loc,max_loc
       integer,dimension(isize) :: ip
+      if (this%n_qqbar.eq.1 .and. (any(ip(2:isize).eq.order(1)))) then
+         ! if there is a quark, it can only be at the first position
+         valid_current_order=.false.
+         return
+      endif
+      if (this%n_qqbar.eq.1 .and. ip(1).eq.order(1)) then
+         ! if there is a quark, and it is part of the current (it must be at
+         ! position 1), then it is a valid order, since no symmetry can be
+         ! used.
+         valid_current_order=.true.
+         return
+      endif
+      ! This must be an all-gluon (or tensor) current. Here we take only one
+      ! single order. Define it such that smallest label comes before the
+      ! biggest. This must be compatible with what orders are skipped in
+      ! 'add_if_allowed_threevertex()'.
       maxi=0
       mini=100
       do i=1,isize
@@ -579,9 +597,9 @@ contains
       enddo
       if (min_loc.gt.max_loc) then
          valid_current_order=.false.
-      else
-         valid_current_order=.true.
+         return
       endif
+      valid_current_order=.true.
     end function valid_current_order
     subroutine add_current(vertex_sign,cur_bin,ip,ctype)
       implicit none
@@ -759,14 +777,16 @@ contains
          do ic=this%n_cur_start(n-1),this%n_cur_end(n-1)
             this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val(1:4,1)*this%current_list(n)%val(1:4,1))
          enddo
-         do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
-            ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
-            if (mod(n,2).eq.1) then
-               this%amps(ic)=-this%amps(ip)
-            else
-               this%amps(ic)=this%amps(ip)
-            endif
-         enddo
+         if (use_symmetry .and. this%n_qqbar.eq.0) then
+            do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
+               ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
+               if (mod(n,2).eq.1) then
+                  this%amps(ic)=-this%amps(ip)
+               else
+                  this%amps(ic)=this%amps(ip)
+               endif
+            enddo
+         endif
       endif
     end subroutine compute_amps_from_currents
     subroutine compute_momentum_current()

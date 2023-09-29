@@ -156,15 +156,19 @@ program test_QCD
 
   endif
   
-  do iperm=1,nperm
-     call amps(iperm)%init(1,n,part,order(1:n,iperm))
-     call amps(iperm)%evaluate(n,p,0)
-!!$     call amps(iperm)%init(n,0,.true.,order)
-!!$     call amps(iperm)%evaluate(p)
-  enddo
+!!$  do iperm=1,nperm
+!!$     call amps(iperm)%init(1,n,part,order(1:n,iperm))
+!!$     call amps(iperm)%evaluate(n,p,0)
+!!$  enddo
 
   call amps_col%init(2,n,part,order(1:n,1))
   call amps_col%evaluate(n,p,5)
+
+  do i = 1, amps_col%nColOrd
+     write (*,*) amps_col%amps(i),amps_col%perm(1:n-1,i)
+  enddo
+  
+  stop
   
   call Tr_allocate(n)
   do jperm=1,nperm
