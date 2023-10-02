@@ -16,8 +16,11 @@ module common
   real*8,dimension(:),allocatable :: amp2_hel
   real(kind=8),dimension(:,:),allocatable,public :: p
   real(kind=8),public :: jac
-!  integer(kind=4) :: integration
+  
 
+  ! counting events
+  integer(kind=4) :: passed=0
+  
 end module common
 
 
@@ -34,7 +37,7 @@ program matrix_integrate
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrtshat
   logical :: t_chan
-  character(len=18) :: filename
+  character(len=30) :: filename
   real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
   integer(kind=4) :: integration
 
@@ -45,6 +48,8 @@ program matrix_integrate
   allocate(o(next))
   allocate(mass(next))
   nfin=next-2
+
+  write(*,*) 'next',next
 
   
   call cpu_time(tTot_B)
@@ -63,11 +68,9 @@ program matrix_integrate
 
   accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
-!  integration=1
-
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=3000d0
+  sqrtshat=1000.d0
 
   pt_min=-1d0
   DRjj_min=-1d0
@@ -95,7 +98,7 @@ program matrix_integrate
   if (integration.eq.1) then
         call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
   elseif  (integration.eq.2) then
-        call haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call  haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
   endif
 
   call cpu_time(tAfter)
@@ -146,8 +149,8 @@ program matrix_integrate
      call mint(integrand)
   else
      call read_grids_from_file
-     call gen(integrand,0,-1) ! initialise counters
-     filename='events'//tag//'.lhe'
+     call gen(integrand,0,-1) ! initialise countersi
+     filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
@@ -167,6 +170,7 @@ program matrix_integrate
   write(*,*) 'Time spent in amplitude evaluation',t_Amp
   write(*,*) 'Time spent in squaring amplitudes',t_mat
   write(*,*) 'Total time:',t_all
+  write(*,*) 'Number passing cuts:',passed
  
 contains
   function integrand(x,vol,ifirst,f1)
@@ -200,13 +204,14 @@ contains
     endif
     
     call cpu_time(tAfter)
-    t_PS=t_PS+tAfter-tBefore
+    t_PS= t_PS +tAfter-tBefore
 
     if ((jac.lt.0d0) .or. (.not.pass_cuts(next,p))) then
        pass_cuts_check=.false.
        val=0d0
        return
     endif
+    passed = passed + 1
     ! colour, polarisation incoming gluons: 8*8, 2*2
     ! identical final state particle factor: nfin!
     iden=8*8*2*2 * factorial8(nfin)
@@ -217,9 +222,13 @@ contains
     t_amp=t_amp+tAfter-tBefore
     call cpu_time(tBefore)
     amp2_hel=0d0
+
     do icol=1,amplitudes%colmap(0,0)
+
        iperm=amplitudes%colmap(1,icol)
+
        jperm=amplitudes%colmap(2,icol)
+
        do ih=0,amplitudes%nhel(amplitudes%isize+1)-1
           amp2_hel(ih)=amp2_hel(ih)+amplitudes%amps(amplitudes%helmap(iperm,ih),iperm)* &
                amplitudes%colmap(0,icol)* &
@@ -374,13 +383,14 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.3) then
+    if (argc.ne.4) then
        write (*,*) 'Give number of gluons,' 
        write(*,*)  'imode'
        write(*,*)  'color  ordering (number of gluons on first color line)'
        write(*,*) 'integration mode (1 or 2):'
        read (*,*) next,imode,c_o,integration
     else
+
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) next
@@ -389,7 +399,6 @@ contains
           if (i.eq.4) read(argv,*) integration
        enddo
     endif
-    write(*,*) 'integration',integration
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1

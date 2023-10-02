@@ -5,18 +5,13 @@ module haag
   real(kind=8) :: ksi_m
 
   real(kind=8),parameter,public :: s0=900d0
-!  real(kind=8),parameter,public :: sqrts=1000d0
   logical,public :: debug=.false.,flat=.false.,open=.false.,schannel=.false.
   logical,public ::               flat_split=.false.
-!  integer(kind=4),parameter,public :: n=8
-!  integer,dimension(1:n+2),parameter,public :: perm=(/1,3,4,5,6,2,7,8,9,10/)
-  ! Note: this should be mass squared!
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
   integer(kind=4) :: mm
   integer(kind=4) :: ix, ndim
-!  real(kind=8),dimension(3*n-4),public :: x
 
   integer(kind=4),dimension(:),allocatable :: order
   real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x
@@ -28,8 +23,6 @@ module haag
   logical,parameter :: verbose=.false.
   real(kind=8),parameter :: ip=-1d0
   real(kind=8),parameter :: vtiny=1d-12
-!  real(kind=8),dimension(:,:),allocatable,public :: p
-!  real(kind=8),public :: jac
 
   integer(kind=4), public :: n
   public :: haag_init,PS_haag,dotty
@@ -57,7 +50,6 @@ contains
     call gen23_deallocate
     next=nn
     n=next-2
-    write(*,*) 'I AM N',n
     ndim=3*(next-2)-4
     allocate(order(next))
     allocate(invm(maskr(next)))
@@ -168,10 +160,7 @@ contains
   subroutine PS_haag(xx)
     implicit none
     real(kind=8),dimension(0:3,n+2) :: q, qk, qlab
-!    real(kind=8),dimension(0:3,n+2),intent(out) :: p
-!    real(kind=8),dimension(0:3,n+2)  :: p
     real(kind=8),dimension(99),intent(in) :: xx
-!    real(kind=8),intent(out) :: wgt
     real(kind=8) :: jaco
     real(kind=8),dimension(0:3) :: qtot,qtotm, tot, bst, bst_back, qin1,qin2
     real(kind=8) :: costheta,phi,sintheta,dum,scale,a_sum
@@ -236,15 +225,12 @@ if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
 
      mass_sum=0d0
      s_in=dotty(Qm,Qm)
-     !write(*,*) 's in',s_in
 
 ! Generate Q_{m} antenna
   if (mm .gt. 2) then
-      !write(*,*) 'here in first'
       call basic_antenna(q(0:3,subperm1(mm)),masses(subperm1(mm)),s_out,qk(0:3,mm-1),-1d0,&
          jaco,soft,s_in,Qm,q(0:3,2),q(0:3,1),0,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(mm))
-      !write(*,*) 's out',s_out
       s_in=s_out ! Doesn't acutally do anything
   else
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),s_out,qk(0:3,1),&
@@ -253,15 +239,12 @@ if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
       mass_sum=mass_sum+masses(subperm1(1))
   endif
   do i=1,mm-3
-      !write(*,*) 'in the do loop'
       call basic_antenna(q(0:3,subperm1(mm-i)),masses(subperm1(mm-i)),s_out,qk(0:3,mm-i-1),-1d0,&
            jaco,soft,s_in,qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),q(0:3,1),i,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(mm-i))
-      !write(*,*) 's out',s_out
       s_in=s_out ! Doesn't actually do anything
   enddo
   if (mm .gt. 2) then
-      !write(*,*) 'in last loop'
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),s_out,qk(0:3,1),masses(subperm1(1)),&
                jaco,soft,s_in,qk(0:3,2),q(0:3,subperm1(3)),q(0:3,1),mm-2,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(2))
@@ -270,8 +253,6 @@ if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
       q(0:3,subperm1(1)) = qk(0:3,1)
 
 ! Generate Q_{n-m} antenna
-  !write(*,*) ' '
-  !write(*,*) 'new Qnm'
   s_in=dotty(Qnm,Qnm)
   if (n-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(n-mm)),masses(subperm2(n-mm)),s_out,qk(0:3,n-1),-1d0,&
@@ -303,6 +284,7 @@ if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
 
 ! Do m=1 type splitting
 elseif ((mm .eq. 1) .or. (n-mm .eq. 1)) then 
+  !write(*,*) 'doing m=1 type splitting'
   m1 = .true.
   if (mm .eq. 1) then
      subperm=subperm1
@@ -356,6 +338,7 @@ elseif ((mm .eq. 1) .or. (n-mm .eq. 1)) then
 
 ! Do m=0 type splitting
 else  
+       !write(*,*) 'do m=0 type splitting'
        m1 = .false.
        mass_sum=0d0
 
@@ -502,6 +485,9 @@ endif
     ! Split into the long (L) decomposition of the q1
     beta = dsqrt(threedot(q1_cmf(1:3),q1_cmf(1:3)))/q1_cmf(0) ! needed only when massive
     q1_cmf(1:3) = q1_cmf(1:3)/beta ! if massless, beta=1
+    if (mass1 .eq. 0d0) then
+       beta=1.d0
+    endif
 
     !Generate s2
     if (m1 .and. (i .eq. 0) .and. (maxn .gt. 2)) then
@@ -678,7 +664,7 @@ endif
         pick = 4
      endif
 
-     flat_split = .true.
+     !flat_split = .true.
      if (.not. flat_split) then
        ix = ix + 1
        call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
