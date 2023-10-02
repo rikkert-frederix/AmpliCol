@@ -58,13 +58,15 @@ program matrix_reweight
   !18 : same as 17, but using the new amplitude_QCD.f03 subroutines
   ! ...
   ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
-  integer,parameter :: reweight_mode=18
+  integer,parameter :: reweight_mode=15
   logical,parameter :: sum_hel=.false.
-  integer,parameter :: n_rwgt=1   ! number of colour configurations to use average over per event (use n_rwgt=1 for reweight_mode<=1 or reweight_mode >=15)
+  integer n_rwgt
+!  integer,parameter :: n_rwgt=1   ! number of colour configurations to use average over per event (use n_rwgt=1 for reweight_mode<=1 or reweight_mode >=15)
   integer :: i,j,k,col_acc,icol,ih,iperm,jperm,ihel,iperm_ev,hel_picked,n_valid,irow,ic
   integer,dimension(:),allocatable :: hel,list,list_valid_iperm,o,part
   integer,dimension(:,:),allocatable :: list_orders
-  real(kind=8) :: amp2_LC(n_rwgt),amp2_NLC(n_rwgt),amp2_full(n_rwgt),amp2_hel,color_wgt,amp,amp2,amp_col
+  real(kind=8), dimension(:), allocatable :: amp2_LC,amp2_NLC,amp2_full
+  real(kind=8) :: amp2_hel,color_wgt,amp,amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c,tmp
   real(kind=8),dimension(2) :: ievt_count
   real(kind=8),dimension(:),allocatable :: mass
@@ -76,12 +78,18 @@ program matrix_reweight
   
   call get_run_arguments()
 
+  n_rwgt=(3**(next-1)-1)/2
+  n_rwgt = 1
+
   call cpu_time(tTot_B)
 
   allocate(o(next))
   allocate(hel(next))
   allocate(mass(next))
   allocate(p(0:3,next))
+  allocate(amp2_LC(n_rwgt))
+  allocate(amp2_NLC(n_rwgt))
+  allocate(amp2_full(n_rwgt))
 
   if (reweight_mode.ge.2 .and. reweight_mode.le.9) allocate(list(0:factorial(next-1)))
   if (reweight_mode.ge.10 .and. reweight_mode.le.14) allocate(list_orders(next,factorial(next-1)))
@@ -106,6 +114,7 @@ program matrix_reweight
   if (reweight_mode.eq.8 .or. reweight_mode.eq.9) then
      col_acc=0
      call amplitudes_NLC%init(next,col_acc,sum_hel)
+
   elseif (reweight_mode.ge.0 .and. reweight_mode.le.7) then
      col_acc=0
      call amplitudes_LC%init_onlycol(next,col_acc,sum_hel)
@@ -113,6 +122,7 @@ program matrix_reweight
      call amplitudes_NLC%init(next,col_acc,sum_hel)
      col_acc=20
      call amplitudes_full%init_onlycol(next,col_acc,sum_hel)
+
   elseif (reweight_mode.eq.15) then
      col_acc=0
      call amplitudes_LC%init_onlycol_CSR(next,col_acc,sum_hel)
@@ -120,6 +130,7 @@ program matrix_reweight
      call amplitudes_NLC%init_CSR(next,col_acc,sum_hel)
      col_acc=20
      call amplitudes_full%init_onlycol_CSR(next,col_acc,sum_hel)
+
   elseif(reweight_mode.eq.16) then
      decompose_4vert=.false.
      call amplitudes_cache%setup_imap_cache(decompose_4vert,next)
@@ -129,6 +140,7 @@ program matrix_reweight
      else
         call amplitudes_cache%setup_colmap_cache(col_acc)
      endif
+
   elseif(reweight_mode.eq.17) then
      decompose_4vert=.true.
      call amplitudes_cache%setup_imap_cache(decompose_4vert,next)
@@ -138,6 +150,7 @@ program matrix_reweight
      else
         call amplitudes_cache%setup_colmap_cache(col_acc)
      endif
+
   elseif(reweight_mode.eq.18) then
      if (.not.allocated(part)) allocate(part(1:next))
      part(1:next)=21
@@ -146,6 +159,7 @@ program matrix_reweight
      col_acc=1
      call amp_QCD%init_col(next,col_acc)
   endif
+
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
@@ -658,8 +672,8 @@ contains
           tag_read='___'//trim(adjustl(tag_read))
        endif
     endif
-    open(unit=11,file='events'//tag//'.lhe',status='old')
-    open(unit=12,file='events'//tag//'.lhe.rwgt',status='unknown')
+    open(unit=11,file='Outputs/events'//tag//'.lhe',status='old')
+    open(unit=12,file='Outputs/events'//tag//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
 
   subroutine read_event(iunit,done)
