@@ -1,8 +1,5 @@
-! with fastjet:
-      ! gfortran -o plot_LHE HwU.f plot_LHE.f analysis_HwU_scales.f fjcore.cc fastjetfortran_madfks_core.cc -lstdc++
-
 ! without fastjet:
-      ! gfortran -o plot_LHE HwU.f plot_LHE.f analysis_HwU_scales.f
+      ! gfortran -o compute_unw_eff compute_unw_eff.f plot_LHE.f
 
 
 program plot_events

@@ -39,7 +39,7 @@ program matrix_integrate
   logical :: t_chan
   character(len=30) :: filename
   real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
-  integer(kind=4) :: integration
+  integer(kind=4) :: integration, nquarks
 
 
   call get_run_arguments()
@@ -49,7 +49,6 @@ program matrix_integrate
   allocate(mass(next))
   nfin=next-2
 
-  write(*,*) 'next',next
 
   
   call cpu_time(tTot_B)
@@ -110,7 +109,9 @@ program matrix_integrate
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
+
   call amplitudes%init(next,col_acc,.true.,o)
+
   allocate(amp2_hel(0:amplitudes%nhel(amplitudes%isize+1)-1))
   if (c_o*2.eq.(next-2)) then
      sym_fac=factorial8(next-2)
@@ -185,6 +186,7 @@ contains
     real*8 :: vol
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
+
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
@@ -217,18 +219,18 @@ contains
     iden=8*8*2*2 * factorial8(nfin)
     ! compute amplitudes
     call cpu_time(tBefore)
+!    do i=1,next
+!      write(*,*) p(:,i)
+!    enddo
     call amplitudes%evaluate(p)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     call cpu_time(tBefore)
     amp2_hel=0d0
-
+ 
     do icol=1,amplitudes%colmap(0,0)
-
        iperm=amplitudes%colmap(1,icol)
-
        jperm=amplitudes%colmap(2,icol)
-
        do ih=0,amplitudes%nhel(amplitudes%isize+1)-1
           amp2_hel(ih)=amp2_hel(ih)+amplitudes%amps(amplitudes%helmap(iperm,ih),iperm)* &
                amplitudes%colmap(0,icol)* &
@@ -383,20 +385,21 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.4) then
-       write (*,*) 'Give number of gluons,' 
+    if (argc.ne.5) then
+       write (*,*) 'Give number of external particles,' 
+       write (*,*) 'Give number of external quarks,'
        write(*,*)  'imode'
        write(*,*)  'color  ordering (number of gluons on first color line)'
        write(*,*) 'integration mode (1 or 2):'
-       read (*,*) next,imode,c_o,integration
+       read (*,*) next,nquarks,imode,c_o,integration
     else
-
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) next
-          if (i.eq.2) read(argv,*) imode
-          if (i.eq.3) read(argv,*) c_o
-          if (i.eq.4) read(argv,*) integration
+          if (i.eq.2) read(argv,*) nquarks
+          if (i.eq.3) read(argv,*) imode
+          if (i.eq.4) read(argv,*) c_o
+          if (i.eq.5) read(argv,*) integration
        enddo
     endif
     if (next.lt.4) then
@@ -415,6 +418,11 @@ contains
        write (*,*) 'Integration modes only 1 or 2',integration
        stop
     endif
+    if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
+       write (*,*) 'Not consistent number of external quarks (up to 4)',nquarks
+       stop
+    endif
+
   end subroutine get_run_arguments
 
   subroutine create_run_tag()
