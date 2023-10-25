@@ -2,6 +2,7 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.false.
   logical,parameter :: use_real_gluons=.false.
+  logical,parameter :: use_mom_dict=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -21,6 +22,7 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
+     real(kind=8),dimension(:,:),allocatable :: mom_dict
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
 
@@ -40,7 +42,7 @@ contains
     integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,nperm
     integer,dimension(:),allocatable :: permutations_dict2
     integer(kind=8),dimension(:),allocatable :: permutations_dict1
-    integer(kind=8) :: val,max_val
+    integer(kind=8) :: val,max_val,max_cur_lab
     integer :: jperm,iperm
     logical decompose_4vert
     real(kind=8) :: tAfter,tBefore
@@ -85,13 +87,29 @@ contains
        write (*,*) '   dictionary created ',tAfter-tBefore
     elseif (this%imode.eq.2) then
        write (*,*) 'WARNING: need to set max_cur and max_vert'
+       if (n.lt.7) then
        max_cur=100000
        max_vert=100000
+       else
+       max_cur=1000000
+       max_vert=1000000
+       endif
        call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
+       write(*,*) 'max cur',max_cur
        call create_current_dict()
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
+       if (use_mom_dict) then
+          max_cur_lab=0
+          do i=1,n-1
+            max_order(i)=n-1-i+1
+         enddo
+         do i=1,n-1
+            max_cur_lab=max_cur_lab+int(max_order(n-1+1-i),kind=8)*int(n-1,kind=8)**int(i-1,kind=8)
+         enddo
+       allocate(this%mom_dict(max_cur_lab,0:3))
+       endif
     endif
 
     do i=1,n
@@ -715,6 +733,7 @@ contains
       this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
       this%current_list(this%n_cur)%type=ctype
       this%current_list(this%n_cur)%bin=cur_bin
+
       this%current_list(this%n_cur)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
       if (ctype.eq.21) then
          allocate(this%current_list(this%n_cur)%vertices(5*(isize-1)))
@@ -729,6 +748,8 @@ contains
       this%current_list(this%n_cur)%vertices(1)=this%n_vert
       this%current_list(this%n_cur)%vertex_sign(1)=vertex_sign
       this%current_list(this%n_cur)%n_vert=1
+
+
 
     end subroutine add_current
 
@@ -780,7 +801,7 @@ contains
          deallocate(ips)
       enddo
       do i=key+1,max_cur
-         current_dict(i)=100000
+         current_dict(i)=10000000
       enddo
       elseif (imode.eq.1) then
         do isize=1,n-1
@@ -912,7 +933,12 @@ contains
     class(amplitude_QCD) :: this
     integer :: n,hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
+    real(kind=8),dimension(:,:),allocatable :: mom_dict
+    integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip,i
+    integer :: max_cur_lab
+    integer :: count_ext,count_vert,count_comb
+    real :: tBefore,tAfter
+
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -961,19 +987,22 @@ contains
        endif
     endif
 
-
+    count_ext = 0
+    count_vert=0
+    count_comb=0
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
-          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize)   
              if (this%current_list(ic)%order(1).le.2) then
                 this%current_list(ic)%pp(0:3)=-p(0:3,this%current_list(ic)%order(1))
              else
                 this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
              endif
+
              do ih=1,this%current_list(ic)%nhel
+                count_ext = count_ext + 1
                 if (this%current_list(ic)%nhel.eq.1) then
-                   write(*,*) this%current_list(ic)%order
                    if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
                       ih_in=2
                    else
@@ -995,11 +1024,17 @@ contains
                 endif
              enddo
           enddo
+
+          if (use_mom_dict) then
+             call fill_mom_dict()
+          endif
           cycle
        endif
+
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+          count_vert = count_vert + 1
           do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
              do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
@@ -1064,15 +1099,23 @@ contains
              enddo
           enddo
        enddo
+
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          call compute_momentum_current()
+          count_comb = count_comb + 1
+          if (use_mom_dict) then
+            this%current_list(ic)%pp(0:3) = this%mom_dict(this%current_list(ic)%bin,0:3)
+          else
+            call compute_momentum_current()
+          endif
+
           if (this%current_list(ic)%type.eq.21) then
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
+
           elseif ((this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6)) then
              ! a quark current
              call combine_interactions(4)
@@ -1089,7 +1132,12 @@ contains
        enddo
     enddo
 
+    !write(*,*) 'count_ext',count_ext
+    !write(*,*) 'count_vert',count_vert
+    !write(*,*) 'count_comb',count_comb
+
     call compute_amps_from_currents
+
   contains
     subroutine compute_amps_from_currents
       implicit none
@@ -1185,6 +1233,21 @@ contains
       implicit none
       call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
     end subroutine include_quark_propagator
+    subroutine fill_mom_dict()
+      implicit none
+      integer ic
+      this%mom_dict=0d0
+      do ic=this%n_cur_start(2),this%n_cur_end(n-1)
+          if (.not.(all(this%mom_dict(this%current_list(ic)%bin,:).eq.0d0))) cycle
+          this%mom_dict(this%current_list(ic)%bin,0:3)=&
+          this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(1))%pp(0:3)+&
+          this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(2))%pp(0:3)
+          this%current_list(ic)%pp(0:3)=this%mom_dict(this%current_list(ic)%bin,0:3)
+      enddo
+
+   end subroutine fill_mom_dict
+
+     
   end subroutine evaluate
 
 
@@ -1197,10 +1260,10 @@ contains
     integer,dimension(:),allocatable :: ic,ir,iper,jper
     real(kind=4) :: tBefore,tAfter
 
-    if (any(this%current_list(1:n)%type.ne.21)) then
-       write (*,*) 'ERROR: colour factor computation assumes all-gluon amplitudes',this%current_list(1:n)%type
-       stop 1
-    endif
+    !if (any(this%current_list(1:n)%type.ne.21)) then
+    !   write (*,*) 'ERROR: colour factor computation assumes all-gluon amplitudes',this%current_list(1:n)%type
+    !   stop 1
+    !endif
     
     call cpu_time(tBefore)
     write (*,'(a,i3,a)') ' Setting up colour factor (col_acc =',col_acc,')...'
@@ -1226,6 +1289,7 @@ contains
        if (col_acc.ge.1 .and. i.le.2) this%col_value_NLC(i)=3**(n-2*(i-1))
        if (i.le.1) this%col_value_LC(i)=3**(n-2*(i-1))
     enddo
+
     ic=0
     ir=0
     do iperm=1,nperm
