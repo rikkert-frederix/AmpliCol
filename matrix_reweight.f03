@@ -8,6 +8,7 @@ module common
   type(amplitude) :: amplitudes_LC,amplitudes_NLC,amplitudes_full
   type(amplitude_cache) :: amplitudes_cache
   type(amplitude_QCD) :: amp_QCD
+  type(amplitude_QCD) :: amp_QCD_full
   real(kind=8),dimension(:,:),allocatable :: p
 end module common
 module rw_events
@@ -58,7 +59,7 @@ program matrix_reweight
   !18 : same as 17, but using the new amplitude_QCD.f03 subroutines
   ! ...
   ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
-  integer,parameter :: reweight_mode=15
+  integer,parameter :: reweight_mode=18
   logical,parameter :: sum_hel=.false.
   integer n_rwgt
 !  integer,parameter :: n_rwgt=1   ! number of colour configurations to use average over per event (use n_rwgt=1 for reweight_mode<=1 or reweight_mode >=15)
@@ -78,7 +79,7 @@ program matrix_reweight
   
   call get_run_arguments()
 
-  n_rwgt=(3**(next-1)-1)/2
+!  n_rwgt=(3**(next-1)-1)/2
   n_rwgt = 1
 
   call cpu_time(tTot_B)
@@ -152,11 +153,11 @@ program matrix_reweight
      endif
 
   elseif(reweight_mode.eq.18) then
-     if (.not.allocated(part)) allocate(part(1:next))
-     part(1:next)=21
+     call read_event(11,done)
+     rewind(11)
      o(1:next)=0
      call amp_QCD%init(2,next,part,o)
-     col_acc=1
+     col_acc=20
      call amp_QCD%init_col(next,col_acc)
   endif
 
@@ -399,7 +400,8 @@ program matrix_reweight
            enddo
            call cpu_time(tAfter)
            t_mat_NLC=t_mat_NLC+tAfter-tBefore
-        elseif (reweight_mode.eq.18) then
+
+       elseif (reweight_mode.eq.18) then
            call cpu_time(tBefore)
            do irow=1,factorial(next-1)
               if (use_real_gluons) then
@@ -688,7 +690,7 @@ contains
     read (iunit,*,err=99,end=99) dum,hel_picked,evt_wgt,wgt,amp2,weight
     read (iunit,*,err=99,end=99) o(1:next)
     do i=1,next
-       read (iunit,*,err=99,end=99) dum,p(1:3,i),p(0,i)
+       read (iunit,*,err=99,end=99) part(i),p(1:3,i),p(0,i)
     enddo
     read (iunit,*,err=99,end=99) dummy
     return

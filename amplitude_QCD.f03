@@ -100,7 +100,9 @@ contains
        call create_current_dict()
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
-       if (use_mom_dict) then
+    endif
+
+    if (use_mom_dict) then
           max_cur_lab=0
           do i=1,n-1
             max_order(i)=n-1-i+1
@@ -109,7 +111,6 @@ contains
             max_cur_lab=max_cur_lab+int(max_order(n-1+1-i),kind=8)*int(n-1,kind=8)**int(i-1,kind=8)
          enddo
        allocate(this%mom_dict(max_cur_lab,0:3))
-       endif
     endif
 
     do i=1,n
@@ -1031,6 +1032,7 @@ contains
           cycle
        endif
 
+
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
@@ -1182,6 +1184,7 @@ contains
       if (use_real_gluons) then
           this%amps = this%amps_r
       endif
+
     end subroutine compute_amps_from_currents
     subroutine compute_momentum_current()
       implicit none

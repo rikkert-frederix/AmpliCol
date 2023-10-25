@@ -1,5 +1,5 @@
 
-! gfortran -ffast-math -O3 -o matrix_integrate simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate.f03
+! gfortran -ffast-math -O3 -o matrix_integrate_QCD simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate_QCD.f03
 
 
 module common
@@ -10,7 +10,7 @@ module common
   integer :: next,nfin,hel_picked
 
   type(amplitude) :: amplitudes
-  type(amplitude_QCD) :: amps
+  type(amplitude_QCD)  :: amps
 
   ! timing
   real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
@@ -41,8 +41,7 @@ program matrix_integrate
   logical :: t_chan
   character(len=30) :: filename
   real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
-  integer(kind=4) :: integration
-
+  integer(kind=4) :: integration, nquarks
 
   call get_run_arguments()
   call create_run_tag()
@@ -50,14 +49,18 @@ program matrix_integrate
   allocate(o(next))
   allocate(part(next))
   allocate(mass(next))
-  nfin=next-2
 
 
-  
+!  nperm=3*2*1
+
+!  allocate(helmap(2**n,nperm))
+!  allocate(amps(nperm))
+!  allocate(col_fac(nperm,nperm))
+
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-1   ! Number of events to generate. (If negative, start
+  ncalls0=-5   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -113,15 +116,39 @@ program matrix_integrate
   ! colour factors, etc.)
   call cpu_time(tBefore)
 
-  call amplitudes%init(next,col_acc,.true.,o)
+  if (nquarks.gt.0) then
+    part(1)=-1
+    part(next)=-1
+    do i=2,next-1
+      part(i) = 21
+    enddo
+  else
+   do i=1,next
+      part(i)=21
+    enddo
+  endif
 
-  allocate(amp2_hel(0:amplitudes%nhel(amplitudes%isize+1)-1))
+  nfin=0
+  do i=3,next
+     if (part(i).eq.21) then
+        nfin=nfin+1
+      endif
+  enddo
 
+  call amps%init(1,next,part,o)
+!  call amps%init_col(next,0) ! LC colour factors only
+  allocate(amp2_hel(0:2**next))
+
+  write(*,*) 'hello?'
+
+
+  write(*,*) 'after alloc'
   if (c_o*2.eq.(next-2)) then
      sym_fac=factorial8(next-2)
   else
      sym_fac=2*factorial8(next-2)
   endif
+!  write(*,*) 'after symfac'
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
@@ -149,23 +176,33 @@ program matrix_integrate
   unc(1:nintegrals,0:maxchannels)=0d0
   only_virt=.false.
 
+  write(*,*) 'hullo'
+  
   if (imode.le.1) then
      call mint(integrand)
   else
-
+     write(*,*) 'in else'
      call read_grids_from_file
+     write(*,*) 'read done'
      call gen(integrand,0,-1) ! initialise countersi
+     write(*,*) 'done gen'
      filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
+     write(*,*) 'opening'
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
+        write(*,*) 'so so so '
         call unwgt_helicity
+        write(*,*) 'blipbip'
         call write_event(11,ans(1,0)*sym_fac)
+        write(*,*) 'hohoho'
      enddo
+     write(*,*) 'enddo'
      close(11)
      call gen(integrand,3,-1) ! print counters
   endif
      
+  write(*,*) 'buybuy'
       
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
@@ -190,6 +227,9 @@ contains
     real*8 :: vol
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
+    real(kind=8),dimension(2) :: ztemp
+    integer :: ih1, ih2
+    integer :: col_fac
 
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
@@ -218,35 +258,62 @@ contains
        return
     endif
     passed = passed + 1
+
     ! colour, polarisation incoming gluons: 8*8, 2*2
     ! identical final state particle factor: nfin!
-    iden=8*8*2*2 * factorial8(nfin)
+
+    iden=1
+    do i=1,2
+      if (part(i).eq.21) then
+         iden=iden*8*2
+      elseif (part(i).eq.-1) then
+         iden=iden*3*2
+      endif
+    enddo
+    iden=iden* factorial8(nfin)
+
+    write(*,*) 'nfin',nfin
+    write(*,*) iden
     ! compute amplitudes
     call cpu_time(tBefore)
-!    do i=1,next
-!      write(*,*) p(:,i)
-!    enddo
 
-    call amplitudes%evaluate(p)
+    write(*,*) 'BEFORE eval'
+    !do iperm=1,nperm
+    call amps%evaluate(next,p,0)
+    !enddo
+    write(*,*) 'after eval'
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     call cpu_time(tBefore)
     amp2_hel=0d0
 
-    do icol=1,amplitudes%colmap(0,0)
-       iperm=amplitudes%colmap(1,icol)
-       jperm=amplitudes%colmap(2,icol)
-       do ih=0,amplitudes%nhel(amplitudes%isize+1)-1
-          amp2_hel(ih)=amp2_hel(ih)+amplitudes%amps(amplitudes%helmap(iperm,ih),iperm)* &
-               amplitudes%colmap(0,icol)* &
-               amplitudes%amps(amplitudes%helmap(jperm,ih),jperm)
-       enddo
-    enddo
-
-    amp2=sum(amp2_hel(0:amplitudes%nhel(amplitudes%isize+1)-1))
-    ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
+!    do icol=1,amplitudes%colmap(0,0)
+!       iperm=amplitudes%colmap(1,icol)
+!       jperm=amplitudes%colmap(2,icol)
+!       do ih=0,amplitudes%nhel(amplitudes%isize+1)-1
+!          amp2_hel(ih)=amp2_hel(ih)+amplitudes%amps(amplitudes%helmap(iperm,ih),iperm)* &
+!               amplitudes%colmap(0,icol)* &
+!               amplitudes%amps(amplitudes%helmap(jperm,ih),jperm)
+!       enddo
+!    enddo
+ 
+    if (nquarks .gt.0) then
+      col_fac = 3**(next-1)
+    else
+      col_fac=3**next
+    endif
     
+    do ih1=1,amps%current_list(amps%n_cur)%nhel
+      do ih2=1,amps%current_list(next)%nhel
+        ih=(ih2-1)*amps%current_list(amps%n_cur)%nhel+ih1
+        amp2_hel(ih)=dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
+      enddo
+    enddo
+    amp2=sum(amp2_hel(1:2**next))
+
+    ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
+   
     weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
     val=amp2*weight
 
@@ -256,6 +323,8 @@ contains
     ! pass the result to the mint module
     f1(1)=abs(val)
     f1(2)=val
+
+    write(*,*) 'done here too'
   end function integrand
 
   logical function pass_cuts(n,p)
@@ -346,11 +415,12 @@ contains
     write (iunit,*) '<event>'
     write (iunit,*) next,hel_picked,wgt,amp2*weight,amp2,weight
     write (iunit,'(100i3)') o(1:next)
+    write(*,*) part
     do i=1,next
        if (i.le.2) then
-          write (iunit,*) ' 21',p(1:3,i),p(0,i)
+          write (iunit,*) part(i) ,p(1:3,i),p(0,i)
        else
-          write (iunit,*) ' 21',p(1:3,i),p(0,i)
+          write (iunit,*) part(i) ,p(1:3,i),p(0,i)
        endif
     enddo
     write (iunit,*) '</event>'
@@ -363,6 +433,7 @@ contains
     real*8,external :: ran2
     random=ran2()*amp2
     i=0
+    write(*,*) 'in unwgt'
     do
        if (amp2_hel(i).gt.random) then
           exit
@@ -371,15 +442,8 @@ contains
           amp2_hel(i)=amp2_hel(i)+amp2_hel(i-1)
        endif
     enddo
+    write(*,*) 'picked'
     hel_picked=i
-    i=0
-    do
-       if (amplitudes%helmap(1,i).eq.hel_picked) then
-          hel_picked=i
-          exit
-       endif
-       i=i+1
-    enddo
   end subroutine unwgt_helicity
   
   subroutine get_run_arguments()
@@ -392,19 +456,21 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.4) then
+    if (argc.ne.5) then
        write (*,*) 'Give number of external particles,' 
+       write (*,*) 'Give number of external quarks,'
        write(*,*)  'imode'
        write(*,*)  'color  ordering (number of gluons on first color line)'
        write(*,*) 'integration mode (1 or 2):'
-       read (*,*) next,imode,c_o,integration
+       read (*,*) next,nquarks,imode,c_o,integration
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) next
-          if (i.eq.2) read(argv,*) imode
-          if (i.eq.3) read(argv,*) c_o
-          if (i.eq.4) read(argv,*) integration
+          if (i.eq.2) read(argv,*) nquarks
+          if (i.eq.3) read(argv,*) imode
+          if (i.eq.4) read(argv,*) c_o
+          if (i.eq.5) read(argv,*) integration
        enddo
     endif
     if (next.lt.4) then
@@ -421,6 +487,10 @@ contains
     endif
     if (integration.ne.1 .and. integration.ne.2) then
        write (*,*) 'Integration modes only 1 or 2',integration
+       stop
+    endif
+    if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
+       write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
        stop
     endif
 
