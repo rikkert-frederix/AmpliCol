@@ -152,13 +152,18 @@ program matrix_reweight
         call amplitudes_cache%setup_colmap_cache(col_acc)
      endif
 
+!ccccccccccccccccccccccccccccccccccccccccccc
   elseif(reweight_mode.eq.18) then
+     if (.not.allocated(part)) allocate(part(1:next))
      call read_event(11,done)
      rewind(11)
      o(1:next)=0
      call amp_QCD%init(2,next,part,o)
-     col_acc=20
-     call amp_QCD%init_col(next,col_acc)
+     col_acc=1
+     write(*,*) 'part'
+     call amp_QCD%init_col(next,part,col_acc)
+!ccccccccccccccccccccccccccccccccccccccccccc
+
   endif
 
   call cpu_time(tAfter)
@@ -205,19 +210,24 @@ program matrix_reweight
                  hel(i)=0
               endif
            enddo
+
            if ((reweight_mode.ge.0 .and. reweight_mode.le.9) .or. reweight_mode.eq.15) then
               call amplitudes_NLC%evaluate(p,hel)
            elseif (reweight_mode.eq.16 .or. reweight_mode.eq.17) then
               call amplitudes_cache%evaluate_cache(p,hel)
+!cccccccccccccccccccccccccccccccccccccccccccccc
            elseif (reweight_mode.eq.18) then
-              call amp_QCD%evaluate(next,p,ihel+1)
+              call amp_QCD%evaluate(next,p,ihel)
            endif
+!cccccccccccccccccccccccccccccccccccccccccccccc
+
         endif
         call cpu_time(tAfter)
         t_amp=t_amp+tAfter-tBefore
 
         call cpu_time(tBefore)
-        ! Leading color matrix elements
+   ! Leading color matrix elements
+
         if (reweight_mode.le.7) then
            do icol=1,amplitudes_LC%colmap(0,0)
               iperm=amplitudes_LC%colmap(1,icol)
@@ -262,8 +272,13 @@ program matrix_reweight
               enddo
               amp2_LC(k)=amp2_LC(k)+amp_col*amplitudes_cache%amps(irow)
            enddo
+
+!cccccccc     LC      ccccccccccccccccccccccccccccccc
         elseif (reweight_mode.eq.18) then
-           do irow=1,factorial(next-1)
+
+           if (amp_QCD%n_qqbar.eq.0) then
+             do irow=1,factorial(next-1)
+              !write(*,*) 'irow',irow
               if (use_real_gluons) then
                  amp_col=0d0
               else
@@ -275,6 +290,44 @@ program matrix_reweight
                  else
                     amp2_c=(0d0,0d0)
                  endif
+
+                 do ic=amp_QCD%row_index_LC(irow-1,i)+1,amp_QCD%row_index_LC(irow,i)
+                    icol=amp_QCD%col_index_LC(ic,i)
+                    !write(*,*) 'icol',icol
+                    if (use_real_gluons) then
+                       amp2=amp2+amp_QCD%amps_r(icol)
+                    else
+                       amp2_c=amp2_c+amp_QCD%amps(icol)
+                    endif
+                 enddo
+                 if (use_real_gluons) then
+                    amp_col=amp_col+amp2*amp_QCD%col_value_LC(i)
+                 else
+                    !write(*,*) 'color factor',amp_QCD%col_value_LC(i)
+                    amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_LC(i)
+                 endif
+              enddo
+              if (use_real_gluons) then
+                 amp2_LC(k)=amp2_LC(k)+amp_col*amp_QCD%amps_r(irow)
+              else
+                 amp2_LC(k)=amp2_LC(k)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+              endif
+             enddo
+           else
+             do irow=1,factorial(next-2)
+              if (use_real_gluons) then
+                 amp_col=0d0
+              else
+                 amp_col_c=(0d0,0d0)
+              endif
+
+              do i=1,1
+                 if (use_real_gluons) then
+                    amp2=0d0
+                 else
+                    amp2_c=(0d0,0d0)
+                 endif
+
                  do ic=amp_QCD%row_index_LC(irow-1,i)+1,amp_QCD%row_index_LC(irow,i)
                     icol=amp_QCD%col_index_LC(ic,i)
                     if (use_real_gluons) then
@@ -294,7 +347,12 @@ program matrix_reweight
               else
                  amp2_LC(k)=amp2_LC(k)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
               endif
-           enddo
+             
+              !write(*,*) 'amp2',amp2_LC(k) 
+             enddo
+           endif
+!cccccccccccccccccccccccccccccccccccccccccccccccccc
+
         elseif (reweight_mode.eq.8 .or. reweight_mode.eq.9) then
            do ih=0,amplitudes_NLC%nhel(amplitudes_NLC%isize+1)-1
               amp2_hel=0d0
@@ -342,7 +400,7 @@ program matrix_reweight
         call cpu_time(tAfter)
         t_mat_LC=t_mat_LC+tAfter-tBefore
 
-        ! Next-to-leading color matrix elements
+   ! Next-to-leading color matrix elements
         if (reweight_mode.eq.0 .or. reweight_mode.eq.1) then
            call cpu_time(tBefore)
            do icol=1,amplitudes_NLC%colmap(0,0)
@@ -401,28 +459,35 @@ program matrix_reweight
            call cpu_time(tAfter)
            t_mat_NLC=t_mat_NLC+tAfter-tBefore
 
+!cccccccccc        NLC      cccccccccccccccccccccccccccc
        elseif (reweight_mode.eq.18) then
            call cpu_time(tBefore)
-           do irow=1,factorial(next-1)
+           if (amp_QCD%n_qqbar.eq.0) then
+             do irow=1,factorial(next-1)
+              !write(*,*) 'irow',irow
               if (use_real_gluons) then
                  amp_col=0d0
               else
                  amp_col_c=(0d0,0d0)
               endif
-              do i=1,1
+              do i=1,2   ! 1 for LC only, 2 for NLC as well
+                 !write(*,*) 'i',i
                  if (use_real_gluons) then
                     amp2=0d0
                  else
                     amp2_c=(0d0,0d0)
                  endif
+
                  do ic=amp_QCD%row_index_NLC(irow-1,i)+1,amp_QCD%row_index_NLC(irow,i)
                     icol=amp_QCD%col_index_NLC(ic,i)
+                    !write(*,*) 'icol',icol
                     if (use_real_gluons) then
                        amp2=amp2+amp_QCD%amps_r(icol)
                     else
                        amp2_c=amp2_c+amp_QCD%amps(icol)
                     endif
                  enddo
+
                  if (use_real_gluons) then
                     if (i.eq.1) then
                        amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)
@@ -430,9 +495,12 @@ program matrix_reweight
                        amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)*2
                     endif
                  else
+                    !write(*,*) 'else '
                     if (i.eq.1) then
+                       !write(*,*) 'color factor',amp_QCD%col_value_NLC(i)
                        amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)
                     else
+                       !write(*,*) 'color factor',amp_QCD%col_value_NLC(i)
                        amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)*2
                     endif
                  endif
@@ -442,11 +510,64 @@ program matrix_reweight
               else
                  amp2_NLC(k)=amp2_NLC(k)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
               endif
+             enddo
+           else 
+             do irow=1,factorial(next-2)
+              !write(*,*) ' '
+              !write(*,*) 'irow',irow
+              if (use_real_gluons) then
+                 amp_col=0d0
+              else
+                 amp_col_c=(0d0,0d0)
+              endif
+              do i=1,3
+                 !write(*,*) 'i',i
+                 if (use_real_gluons) then
+                    amp2=0d0
+                 else
+                    amp2_c=(0d0,0d0)
+                 endif
+                 !write(*,*) 'start,end',amp_QCD%row_index_NLC(irow-1,i)+1
+                 write(*,*) amp_QCD%row_index_NLC(irow,i)
+                 do ic=amp_QCD%row_index_NLC(irow-1,i)+1,amp_QCD%row_index_NLC(irow,i)
+                    icol=amp_QCD%col_index_NLC(ic,i)
+                    !write(*,*) 'icol',icol
+                    if (use_real_gluons) then
+                       amp2=amp2+amp_QCD%amps_r(icol)
+                    else
+                       amp2_c=amp2_c+amp_QCD%amps(icol)
+                    endif
+                 enddo
+
+                 if (use_real_gluons) then
+                    if (i.eq.1) then
+                       amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)
+                    else
+                       amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)*2
+                    endif
+                 else
+                    if (i.eq.1) then
+                       !write(*,*) 'col fac 1',amp_QCD%col_value_NLC(i)
+                       amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)
+                    else
+                       !write(*,*) 'col fac 2',amp_QCD%col_value_NLC(i)
+                       amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)*2
+                    endif
+                 endif
+                 !write(*,*) 'amp is now',amp_col_c
+              enddo
+
+              if (use_real_gluons) then
+                 amp2_NLC(k)=amp2_NLC(k)+amp_col*amp_QCD%amps_r(irow)
+              else
+                 amp2_NLC(k)=amp2_NLC(k)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+              endif
            enddo
+         endif
            call cpu_time(tAfter)
            t_mat_NLC=t_mat_NLC+tAfter-tBefore
         endif
-
+!ccccccccccccccccccccccccccccccccccccccccccc
 
         ! Full color matrix elements
         if (reweight_mode.eq.0 .or. reweight_mode.eq.1) then
@@ -506,20 +627,26 @@ program matrix_reweight
            enddo
            call cpu_time(tAfter)
            t_mat_full=t_mat_full+tAfter-tBefore
+
+!ccccccccc     full     cccccccccccccccccccccccccccccccccc
         elseif (reweight_mode.eq.18 .and. col_acc.ge.2) then
            call cpu_time(tBefore)
-           do irow=1,factorial(next-1)
+           if (amp_QCD%n_qqbar.eq.0) then
+
+             do irow=1,factorial(next-1)
               if (use_real_gluons) then
                  amp_col=0d0
               else
                  amp_col_c=(0d0,0d0)
               endif
+
               do i=1,1
                  if (use_real_gluons) then
                     amp2=0d0
                  else
                     amp2_c=(0d0,0d0)
                  endif
+
                  do ic=amp_QCD%row_index_full(irow-1,i)+1,amp_QCD%row_index_full(irow,i)
                     icol=amp_QCD%col_index_full(ic,i)
                     if (use_real_gluons) then
@@ -528,6 +655,7 @@ program matrix_reweight
                        amp2_c=amp2_c+amp_QCD%amps(icol)
                     endif
                  enddo
+
                  if (use_real_gluons) then
                     if (i.eq.1) then
                        amp_col=amp_col+amp2*amp_QCD%col_value_full(i)
@@ -542,14 +670,65 @@ program matrix_reweight
                     endif
                  endif
               enddo
+
               if (use_real_gluons) then
                  amp2_full(k)=amp2_full(k)+amp_col*amp_QCD%amps_r(irow)
               else
                  amp2_full(k)=amp2_full(k)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
               endif
-           enddo
+            enddo
+
+           else
+             do irow=1,factorial(next-2)
+              if (use_real_gluons) then
+                 amp_col=0d0
+              else
+                 amp_col_c=(0d0,0d0)
+              endif
+
+              do i=1,1
+                 if (use_real_gluons) then
+                    amp2=0d0
+                 else
+                    amp2_c=(0d0,0d0)
+                 endif
+                 do ic=amp_QCD%row_index_full(irow-1,i)+1,amp_QCD%row_index_full(irow,i)
+                    icol=amp_QCD%col_index_full(ic,i)
+                    if (use_real_gluons) then
+                       amp2=amp2+amp_QCD%amps_r(icol)
+                    else
+                       amp2_c=amp2_c+amp_QCD%amps(icol)
+                    endif
+                 enddo
+
+                 if (use_real_gluons) then
+                    if (i.eq.1) then
+                       amp_col=amp_col+amp2*amp_QCD%col_value_full(i)
+                    else
+                       amp_col=amp_col+amp2*amp_QCD%col_value_full(i)*2
+                    endif
+                 else
+                    if (i.eq.1) then
+                       amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_full(i)
+                    else
+                       amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_full(i)*2
+                    endif
+                 endif
+              enddo
+
+              if (use_real_gluons) then
+                 amp2_full(k)=amp2_full(k)+amp_col*amp_QCD%amps_r(irow)
+              else
+                 amp2_full(k)=amp2_full(k)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+              endif
+            enddo
+           endif
+
+           !write(*,*) 'amp2_full',amp2_full
            call cpu_time(tAfter)
            t_mat_full=t_mat_full+tAfter-tBefore
+!ccccccccccccccccccccccccccccccccccccccccccccccccccc
+
         elseif (reweight_mode.ge.2 .and. reweight_mode.le.9) then
            call cpu_time(tBefore)
            do ih=0,amplitudes_NLC%nhel(amplitudes_NLC%isize+1)-1
@@ -708,6 +887,7 @@ contains
 !!$    else
        rwgt_NLC=sum(amp2_NLC(1:n_rwgt)/amp2_LC(1:n_rwgt))/dble(n_rwgt)
        rwgt_full=sum(amp2_full(1:n_rwgt)/amp2_LC(1:n_rwgt))/dble(n_rwgt)
+       write(*,*) 'rwgt NLC',rwgt_NLC
 !!$    endif
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt,wgt,amp2,weight
@@ -721,9 +901,9 @@ contains
     endif
     do i=1,next
        if (i.le.2) then
-          write (iunit,*) ' 21',p(1:3,i),p(0,i)
+          write (iunit,*) part(i),p(1:3,i),p(0,i)
        else
-          write (iunit,*) ' 21',p(1:3,i),p(0,i)
+          write (iunit,*) part(i),p(1:3,i),p(0,i)
        endif
     enddo
     write (iunit,*) '</event>'

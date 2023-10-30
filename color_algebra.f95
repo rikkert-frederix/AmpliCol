@@ -46,7 +46,8 @@ module color_algebra
        & color_flow_factor,&    ! Compute color factor in color flow basis
        & ipnext,&               ! Helper function: get next permutation
        & get_next_iperm,&       ! Helper function: get next permutation (advanced)
-       & check_NLC
+       & check_NLC,&
+       & check_NLC_1qqbar
 contains
 
   subroutine Tr_allocate(n)
@@ -657,6 +658,66 @@ contains
        acc=sign
     endif
   end subroutine check_NLC
+
+  subroutine check_NLC_1qqbar(next,iper,jper,acc)
+    implicit none
+    integer :: next                 ! number of external particles
+
+    integer,dimension(next-2) :: iper ! order in amplitude
+    integer,dimension(next-2) :: jper ! order in conjugate amplitude
+    integer :: acc               ! is equal to 0,1,-1 or 99.
+                                 ! 99 : LC contributions (NLC coefficient of that term is '-n')
+                                 ! 1,-1 ; NLC contribution with positive/negative sign
+                                 ! 0 : not a NLC contribution, but NNLC or further suppressed.
+    integer :: i,i1,i2,i3,i4,i5,sign
+
+    integer,dimension(next-2) :: itemp
+
+    acc = 0
+          do i=1,next-2
+            if (jper(i).ne.iper(i)) exit
+          enddo
+          i1=i
+          if (i1 .gt. size(iper)) then
+                  acc = 99
+                  return
+          endif
+          do i=i1+1,next-2
+            if (jper(i).eq.iper(i1)) exit
+          enddo
+          i2=i
+          do i=1,next-2-i2
+             if (jper(i2+i).ne.iper(i1+i)) exit
+          enddo
+          i3=i2+i-1
+          i4=i1+i-1
+          do i=i1,next-2
+            if (jper(i).eq.iper(i4+1)) exit
+          enddo
+          i5=i
+           if (i5.gt.i3) return
+            sign=1
+            itemp(1:i1-1)=jper(1:i1-1)
+            itemp(i1:i4)=jper(i2:i3)
+            itemp(i4+1:i4+i2-i5)=jper(i5:i2-1)
+             if (i1.gt.i5-1) then
+               if (i4-i1.eq.0 .and. i2-1-i5.eq.0) then
+                   sign=-1
+                   continue
+               elseif (i4-i1.eq.0 .or. i2-1-i5.eq.0) then
+                   return
+               elseif (i4-i1 + i2-1-i5 .le. next-2-4) then
+                   continue
+               else
+                   sign = 1
+             endif
+           endif
+           itemp(i4+i2-i5+1:i4+i2-i1)=jper(i1:i5-1)
+           itemp(i4+i2-i1+1:next-2)=jper(i3+1:next-2)
+           if ((all(itemp.eq.iper))) then
+             acc=sign
+          endif
+    end subroutine check_NLC_1qqbar
 
 
 

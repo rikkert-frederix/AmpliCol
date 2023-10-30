@@ -26,7 +26,7 @@ module common
 end module common
 
 
-program matrix_integrate
+program matrix_integrate_QCD
   use common
   use mint_module
   use phase_space_gen23
@@ -60,7 +60,7 @@ program matrix_integrate
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-5   ! Number of events to generate. (If negative, start
+  ncalls0=-100   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -136,19 +136,15 @@ program matrix_integrate
   enddo
 
   call amps%init(1,next,part,o)
+
 !  call amps%init_col(next,0) ! LC colour factors only
   allocate(amp2_hel(0:2**next))
 
-  write(*,*) 'hello?'
-
-
-  write(*,*) 'after alloc'
   if (c_o*2.eq.(next-2)) then
      sym_fac=factorial8(next-2)
   else
      sym_fac=2*factorial8(next-2)
   endif
-!  write(*,*) 'after symfac'
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
@@ -176,34 +172,22 @@ program matrix_integrate
   unc(1:nintegrals,0:maxchannels)=0d0
   only_virt=.false.
 
-  write(*,*) 'hullo'
-  
   if (imode.le.1) then
      call mint(integrand)
   else
-     write(*,*) 'in else'
      call read_grids_from_file
-     write(*,*) 'read done'
      call gen(integrand,0,-1) ! initialise countersi
-     write(*,*) 'done gen'
      filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
-     write(*,*) 'opening'
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        write(*,*) 'so so so '
         call unwgt_helicity
-        write(*,*) 'blipbip'
         call write_event(11,ans(1,0)*sym_fac)
-        write(*,*) 'hohoho'
      enddo
-     write(*,*) 'enddo'
      close(11)
      call gen(integrand,3,-1) ! print counters
   endif
      
-  write(*,*) 'buybuy'
-      
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
@@ -272,16 +256,19 @@ contains
     enddo
     iden=iden* factorial8(nfin)
 
-    write(*,*) 'nfin',nfin
-    write(*,*) iden
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    write(*,*) 'BEFORE eval'
     !do iperm=1,nperm
+    !p(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !p(0:3,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !p(0:3,3)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
+    !p(0:3,4)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
+
     call amps%evaluate(next,p,0)
+
+!    write(*,*) 'amp eval',amps%amps(1)
     !enddo
-    write(*,*) 'after eval'
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -303,11 +290,11 @@ contains
     else
       col_fac=3**next
     endif
-    
+
     do ih1=1,amps%current_list(amps%n_cur)%nhel
       do ih2=1,amps%current_list(next)%nhel
         ih=(ih2-1)*amps%current_list(amps%n_cur)%nhel+ih1
-        amp2_hel(ih)=dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
+        amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
       enddo
     enddo
     amp2=sum(amp2_hel(1:2**next))
@@ -324,7 +311,6 @@ contains
     f1(1)=abs(val)
     f1(2)=val
 
-    write(*,*) 'done here too'
   end function integrand
 
   logical function pass_cuts(n,p)
@@ -415,7 +401,6 @@ contains
     write (iunit,*) '<event>'
     write (iunit,*) next,hel_picked,wgt,amp2*weight,amp2,weight
     write (iunit,'(100i3)') o(1:next)
-    write(*,*) part
     do i=1,next
        if (i.le.2) then
           write (iunit,*) part(i) ,p(1:3,i),p(0,i)
@@ -433,7 +418,6 @@ contains
     real*8,external :: ran2
     random=ran2()*amp2
     i=0
-    write(*,*) 'in unwgt'
     do
        if (amp2_hel(i).gt.random) then
           exit
@@ -442,7 +426,6 @@ contains
           amp2_hel(i)=amp2_hel(i)+amp2_hel(i-1)
        endif
     enddo
-    write(*,*) 'picked'
     hel_picked=i
   end subroutine unwgt_helicity
   
@@ -537,4 +520,4 @@ contains
     write (*,*) tag
   end subroutine create_run_tag
 
-end program matrix_integrate
+end program matrix_integrate_QCD

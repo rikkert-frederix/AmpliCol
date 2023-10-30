@@ -2,7 +2,7 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.false.
   logical,parameter :: use_real_gluons=.false.
-  logical,parameter :: use_mom_dict=.true.
+  logical,parameter :: use_mom_dict=.false.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -96,7 +96,6 @@ contains
        endif
        call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
-       write(*,*) 'max cur',max_cur
        call create_current_dict()
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
@@ -136,13 +135,13 @@ contains
           do nc=1,n
              this%n_cur=this%n_cur+1
              allocate(this%current_list(this%n_cur)%order(isize))
-             this%current_list(this%n_cur)%order(1)=stand_order(nc)
+             this%current_list(this%n_cur)%order(1)=order(nc)
              if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then ! initial quark states
                 this%current_list(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
              else
-                this%current_list(this%n_cur)%type=part(stand_order(nc))
+                this%current_list(this%n_cur)%type=part(order(nc))
              endif
-             this%current_list(this%n_cur)%bin=ibset(0,stand_order(nc)-1) ! give binary label
+             this%current_list(this%n_cur)%bin=ibset(0,order(nc)-1) ! give binary label
              if (this%imode.eq.1) then
                 this%current_list(this%n_cur)%nhel=2 ! all possible helicities !!! MASSLESS ONLY
              elseif (this%imode.eq.2) then
@@ -156,8 +155,8 @@ contains
                 do isplit=1,isize-1
                    n1=isplit
                    n2=isize-isplit
-                   bin1=0 ; do i=nc,nc+isplit-1       ; bin1=ibset(bin1,stand_order(i)-1) ; enddo
-                   bin2=0 ; do i=nc+isplit,nc+isize-1 ; bin2=ibset(bin2,stand_order(i)-1) ; enddo
+                   bin1=0 ; do i=nc,nc+isplit-1       ; bin1=ibset(bin1,order(i)-1) ; enddo
+                   bin2=0 ; do i=nc+isplit,nc+isize-1 ; bin2=ibset(bin2,order(i)-1) ; enddo
                    do ic1=1,this%n_cur
                       if (this%current_list(ic1)%bin.ne.bin1) cycle
                       do ic2=1,this%n_cur
@@ -203,13 +202,24 @@ contains
     ! allocate and fill the colour orders
     if (imode.eq.2) then
        nperm=this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
-       allocate(this%perm(1:n-1,1:nperm*2))
-       do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-          this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
-       enddo
-       do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-          this%perm(1:n-1,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:1:-1)
-       enddo
+       if (this%n_qqbar.eq.0) then
+         allocate(this%perm(1:n-1,1:nperm*2))
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+           this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)        =this%current_list(nc)%order(1:n-1)
+         enddo
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+           this%perm(1:n-1,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:1:-1)
+         enddo
+       elseif (this%n_qqbar.eq.1) then
+         allocate(this%perm(1:n-2,1:nperm*2))
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+           this%perm(1:n-2,nc-this%n_cur_start(n-1)+1)        =this%current_list(nc)%order(2:n-1)
+         enddo
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+           this%perm(1:n-2,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:2:-1)
+         enddo
+
+       endif
     endif
 
 !cc   re-label the colour-order according to the actual order
@@ -393,7 +403,7 @@ contains
       do ih=1,nhel
          this%helmap(ih)=0
          do i=1,n
-            if (btest(ih-1,i-1)) this%helmap(ih)=ibset(this%helmap(ih),stand_order(i)-1)
+            if (btest(ih-1,i-1)) this%helmap(ih)=ibset(this%helmap(ih),order(i)-1)
          enddo
          this%helmap(ih)=this%helmap(ih)+1
       enddo
@@ -682,10 +692,11 @@ contains
             min_loc=i
          endif
       enddo
-      if (min_loc.gt.max_loc) then
-         valid_current_order=.false.
-         return
-      endif
+      !write(*,*) 'min_loc,max',min_loc,max_loc
+      !if (min_loc.gt.max_loc) then
+      !   valid_current_order=.false.
+      !   return
+      !endif
       valid_current_order=.true.
     end function valid_current_order
 
@@ -708,14 +719,15 @@ contains
          call get_value(ip,1,val)
       endif
       call solve_dict(val,ic)
-      if (ic.le.this%n_cur) then
+
+      !if (ic.le.this%n_cur) then
       if ((this%current_list(ic)%n_vert.ne.0).and.(this%current_list(ic)%type.eq.ctype)) then
           this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
           this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
           this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
           return
       endif
-      endif
+      !endif
 
      ! Check if this interaction can be added to an existing current
 !      do i=1,this%n_cur
@@ -728,6 +740,8 @@ contains
 !         return
 !      enddo
       ! Need a new current
+      !write(*,*)'adding new current',ip(1:isize)
+      !write(*,*) 'of type',ctype
       this%n_cur=this%n_cur+1
   
       allocate(this%current_list(this%n_cur)%order(isize))
@@ -779,7 +793,7 @@ contains
          enddo
          allocate(ips(1:isize))
          do i=1,size
-!            if (.not. valid_current_order(ips_in)) cycle
+            if (valid_current_order(ips_in))then 
                if (any(ips_in==1) .and. this%n_qqbar.gt.0) then
                  key=key+1
                  call get_value(ips_in,1,val) ! add the quark
@@ -794,9 +808,14 @@ contains
                   current_dict(key)=val
                  endif
                endif
+  
+               endif
                if (isize.eq.1) call get_next_iperm(isize,ips_in,ips,n)
-               if (isize.gt.1) call get_next_iperm(isize,ips_in,ips,n-1)
-            ips_in=ips
+               if (isize.gt.1) then
+                 call get_next_iperm(isize,ips_in,ips,n-1)
+               endif
+               ips_in=ips
+
          enddo
          deallocate(ips_in)
          deallocate(ips)
@@ -804,6 +823,7 @@ contains
       do i=key+1,max_cur
          current_dict(i)=10000000
       enddo
+      !write(*,*) current_dict(1:20)
       elseif (imode.eq.1) then
         do isize=1,n-1
          if (isize.eq.1) then
@@ -940,6 +960,10 @@ contains
     integer :: count_ext,count_vert,count_comb
     real :: tBefore,tAfter
 
+    !do i=1,this%n_cur
+    !   write(*,*) 'order',this%current_list(i)%order
+    !   write(*,*) 'type',this%current_list(i)%type
+    !enddo
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -991,6 +1015,7 @@ contains
     count_ext = 0
     count_vert=0
     count_comb=0
+
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
@@ -1005,23 +1030,35 @@ contains
                 count_ext = count_ext + 1
                 if (this%current_list(ic)%nhel.eq.1) then
                    if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
-                      ih_in=2
+                      ih_in=1  ! + helicity  --->   2-1=1
                    else
-                      ih_in=1
+                      ih_in=0  ! - helicity  --->   1-1=0
                    endif
                 else
-                   ih_in=ih
+                   ih_in=ih-1
                 endif
                 if (this%current_list(ic)%type.eq.21) then
                    if (use_real_gluons) then
-                      call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_r(1:4,ih))
+                      call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_r(1:4,ih))
                    else
-                      call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_c(1:4,ih))
+                      call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_c(1:4,ih))
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                   call ext_quark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_c(1:4,ih))
+                   !write(*,*) '-------------------------------------'
+                   !write(*,*) 'ic is quark current',ic
+                   !write(*,*) 'momentum',this%current_list(ic)%pp(0:3)
+                   !write(*,*) 'hel in',ih_in
+                   call ext_quark(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_c(1:4,ih))
+                   !write(*,*) 'gets helicity and ic',ih,ic
+                   !write(*,*) 'gets value',this%current_list(ic)%val_c(1:4,ih)
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in-1,1,this%current_list(ic)%val_c(1:4,ih))
+                   !write(*,*) '-------------------------------------'
+                   !write(*,*) 'ic is anti-quark current',ic
+                   !write(*,*) 'momentum',this%current_list(ic)%pp(0:3)
+                   !write(*,*) 'hel',ih_in-1
+                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_c(1:4,ih))
+                   !write(*,*) 'gets helicity',ih
+                   !write(*,*) 'gets value',this%current_list(ic)%val_c(1:4,ih)
                 endif
              enddo
           enddo
@@ -1032,7 +1069,6 @@ contains
           cycle
        endif
 
-
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
@@ -1040,6 +1076,7 @@ contains
           do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
              do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
+
                 if (this%interaction_list(iv)%type.eq.0) then
                    if (use_real_gluons) then
                       call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1093,6 +1130,17 @@ contains
                        call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
+                       !if (ih.eq.1) then
+                       !write(*,*) '**********************'
+                       !write(*,*) 'quark-gluon-quark interaction'
+                       !write(*,*) 'iv',iv
+                       !write(*,*)  this%interaction_list(iv)%currents(1),ih1
+                       !write(*,*)  this%interaction_list(iv)%currents(2),ih2
+                       !write(*,*) 'going in',this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1)
+                       !write(*,*) 'going in 2',this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2)
+                       !write(*,*) 'coming out',this%interaction_list(iv)%val_c(1:4,ih)
+
+                       !endif
                     endif
                 else
                    write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
@@ -1112,6 +1160,8 @@ contains
           endif
 
           if (this%current_list(ic)%type.eq.21) then
+             !write(*,*) 'calling combine',ic
+             !write(*,*) this%current_list(ic)%order
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
@@ -1120,11 +1170,15 @@ contains
 
           elseif ((this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6)) then
              ! a quark current
+             !write(*,*) 'calling combine',ic
+             !write(*,*) this%current_list(ic)%order
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
           elseif (this%current_list(ic)%type.eq.-21) then
+             !write(*,*) 'calling combine',ic
+             !write(*,*) this%current_list(ic)%order
              ! the non-propagating tensor current
              call combine_interactions(6)
           else
@@ -1132,6 +1186,7 @@ contains
              stop 1
           endif
        enddo
+       !write(*,*) 'enddo, taking next loop'
     enddo
 
     !write(*,*) 'count_ext',count_ext
@@ -1154,14 +1209,27 @@ contains
                endif
             enddo
          enddo
+
       elseif (this%imode.eq.2) then
          do ic=this%n_cur_start(n-1),this%n_cur_end(n-1)
             if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
                this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
             else
+               !write(*,*) 'order which is contracted',this%current_list(ic)%order
+               !write(*,*) 'value of current',this%current_list(ic)%val_c(1:4,1)
+               !write(*,*) 'value of external particle current',this%current_list(n)%val_c(1:4,1)
                this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               !if (ic-this%n_cur_start(n-1)+1.eq.1) then
+                   !write(*,*) ' '
+                   !write(*,*) 'order',this%current_list(ic)%order
+                   !write(*,*) 'value of current',this%current_list(ic)%val_c(1:4,1) !! this is not the same!!!
+                   !write(*,*) 'amps',this%amps(ic-this%n_cur_start(n-1)+1)
+               !endif
+               !write(*,*) 'filled index',ic-this%n_cur_start(n-1)+1
+               !write(*,*) 'value filled with: ',this%amps(ic-this%n_cur_start(n-1)+1)
             endif
          enddo
+
          if (use_symmetry .and. this%n_qqbar.eq.0) then
             do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
                ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
@@ -1209,9 +1277,17 @@ contains
                     this%interaction_list(this%current_list(ic)%vertices(iv))%val_r(1:dim,1:this%current_list(ic)%nhel)
             endif
          enddo
+
       else
+         !if (isize.eq.n-1) then
+         !  write(*,*) 'ic is',ic,this%current_list(ic)%order
+         !  write(*,*) 'I am in combine, n_vert',this%current_list(ic)%n_vert
+         !endif
          this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
          do iv=1,this%current_list(ic)%n_vert
+            !if (isize.eq.n-1) then
+            !write(*,*) 'vertices contributing iv',iv,this%current_list(ic)%vertex_sign(iv)
+            !endif
             if (this%current_list(ic)%vertex_sign(iv))then
                this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
                     this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)-&
@@ -1220,7 +1296,12 @@ contains
                this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
                     this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)+&
                     this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim,1:this%current_list(ic)%nhel)
+            !if (isize.eq.n-1) then
+            !write(*,*) 'adding '
+   !write(*,*) this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim,1)
+            !endif
             endif
+
          enddo
       endif
     end subroutine combine_interactions
@@ -1232,10 +1313,12 @@ contains
          call GluonPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
       endif
     end subroutine include_gluon_propagator
+
     subroutine include_quark_propagator()
       implicit none
       call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
     end subroutine include_quark_propagator
+
     subroutine fill_mom_dict()
       implicit none
       integer ic
@@ -1254,77 +1337,131 @@ contains
   end subroutine evaluate
 
 
-  subroutine init_col(this,n,col_acc)
+  subroutine init_col(this,n,part,col_acc)
     use color_algebra
     use math_functions
     implicit none
     class(amplitude_qcd) :: this
     integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,nperm,nw
     integer,dimension(:),allocatable :: ic,ir,iper,jper
+    integer,dimension(n) :: part
     real(kind=4) :: tBefore,tAfter
+    integer :: n_nlc,add
 
     !if (any(this%current_list(1:n)%type.ne.21)) then
     !   write (*,*) 'ERROR: colour factor computation assumes all-gluon amplitudes',this%current_list(1:n)%type
     !   stop 1
     !endif
-    
+
     call cpu_time(tBefore)
     write (*,'(a,i3,a)') ' Setting up colour factor (col_acc =',col_acc,')...'
     allocate(iper(1:n))
     allocate(jper(1:n))
-    nperm=factorial(n-1)
+    
+    if (this%n_qqbar.eq.0) then
+      nperm=factorial(n-1)
+      n_nlc = 2 ! 1 for LC, 2 for NLC
+      add = 0
+    else
+      nperm=factorial(n-2)
+      n_nlc = 3 ! 1 for LC, 2 for +NLC, 3 for -NLC
+      add = 1
+    endif
+
     if (col_acc.ge.2) allocate(this%col_value_full((n+1)/2))
-    if (col_acc.ge.1) allocate(this%col_value_NLC(2))
     allocate(this%col_value_LC(1))
-    allocate(ic(max((n+1)/2,2)))
-    allocate(ir(max((n+1)/2,2)))
+    if (col_acc.ge.1) allocate(this%col_value_NLC(n_nlc))
+    allocate(ic(max((n+1)/2,n_nlc)))
+    allocate(ir(max((n+1)/2,n_nlc)))
     if (col_acc.ge.2) allocate(this%col_index_full(nperm**2,(n+1)/2))
     if (col_acc.ge.2) allocate(this%row_index_full(0:nperm,(n+1)/2))
-    if (col_acc.ge.1) allocate(this%col_index_NLC(nperm**2,2))
-    if (col_acc.ge.1) allocate(this%row_index_NLC(0:nperm,2))
+    if (col_acc.ge.1) allocate(this%col_index_NLC(nperm**2,n_nlc))
+    if (col_acc.ge.1) allocate(this%row_index_NLC(0:nperm,n_nlc))
     allocate(this%col_index_LC(nperm,1))
     allocate(this%row_index_LC(0:nperm,1))
     if (col_acc.ge.2) this%row_index_full(0,:)=0
     if (col_acc.ge.1) this%row_index_NLC(0,:)=0
     this%row_index_LC(0,:)=0
-    do i=1,(n+1)/2
-       if (col_acc.gt.2) this%col_value_full(i)=3**(n-2*(i-1))
+    
+    if (this%n_qqbar.eq.0) then
+    do i=1,(n+1)/2+add
+       if (col_acc.gt.2)              this%col_value_full(i)=3**(n-2*(i-1))
        if (col_acc.ge.1 .and. i.le.2) this%col_value_NLC(i)=3**(n-2*(i-1))
-       if (i.le.1) this%col_value_LC(i)=3**(n-2*(i-1))
+       if (i.le.1)                    this%col_value_LC(i)=3**(n-2*(i-1))
     enddo
+    elseif (this%n_qqbar.eq.1) then
+    do i=1,(n+1)/2+add
+       if (col_acc.gt.2)              this%col_value_full(i)=3**(n-1-2*(i-1))
+       if (col_acc.ge.1 .and. i.le.3) then
+          if (i.eq.1) this%col_value_NLC(i)=3**(n-1-2*(i-1))-(n-2)*3**(n-1-2*((i+1)-1))
+          if (i.eq.2) this%col_value_NLC(i)=3**(n-1-2*(i-1))   ! +NLC contributions
+          if (i.eq.3) this%col_value_NLC(i)=-3**(n-1-2*((i-1)-1))  ! -NLC contributions
+       endif
+       if (i.le.1)                    this%col_value_LC(i)=3**(n-1-2*(i-1))
+    enddo
+    endif
+
+    !write(*,*) 'LC',this%col_value_NLC(1)
+    !write(*,*) 'NLC',this%col_value_NLC(2)
+    !write(*,*) 'NLC',this%col_value_NLC(3)
 
     ic=0
     ir=0
     do iperm=1,nperm
+       !write(*,*) 'iperm',iperm
        nw=iperm
-       iper(1:n)=[this%perm(1:n-1,nw),n]
+       if (this%n_qqbar.eq.0) then
+         iper(1:n)=[this%perm(1:n-1,nw),n]
+       elseif (this%n_qqbar.eq.1) then
+         iper(1:n)=[1,this%perm(1:n-2,nw),n]
+       endif
+       !write(*,*) 'iper',iper
        do jperm=iperm,nperm
           nw=jperm
-          jper(1:n)=[this%perm(1:n-1,nw),n]
-          call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
+          if (this%n_qqbar.eq.0) then
+            jper(1:n)=[this%perm(1:n-1,nw),n]
+            !write(*,*) 'jper',jper
+            call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
+          elseif (this%n_qqbar.eq.1) then
+            jper(1:n)=[1,this%perm(1:n-2,nw),n]
+            !write(*,*) 'jper',jper
+            call compute_color_factor(col_acc,n,iper,jper,col_fac,.false.)
+          endif
+
           if (col_fac.eq.0) cycle
-          do i=1,(n+1)/2
+
+          do i=1,(n+1)/2+add
              if (col_acc.ge.2) then
                 if (this%col_value_full(i).eq.col_fac) exit
-             elseif (col_acc.ge.1 .and. i.le.2) then
+             elseif (col_acc.ge.1 .and. i.le.n_nlc) then
                 if (this%col_value_NLC(i).eq.col_fac) exit
              elseif (col_acc.ge.0 .and. i.le.1) then
                 if (this%col_value_LC(i).eq.col_fac) exit
              endif
           enddo
-          if (col_acc.eq.1 .and. i.gt.2) cycle
+
+          if (col_acc.eq.1 .and. i.gt.n_nlc) cycle
           if (col_acc.eq.0 .and. i.gt.1) cycle
+
           ic(i)=ic(i)+1
           ir(i)=ir(i)+1
-          if (col_acc.ge.2) this%col_index_full(ic(i),i)=jperm
-          if (col_acc.ge.1.and.i.le.2) this%col_index_NLC(ic(i),i)=jperm
-          if (i.le.1) this%col_index_LC(ic(i),i)=jperm
+
+          if (col_acc.ge.2)                this%col_index_full(ic(i),i)=jperm
+          if (col_acc.ge.1.and.i.le.n_nlc) this%col_index_NLC(ic(i),i)=jperm
+          if (i.le.1)                      this%col_index_LC(ic(i),i)=jperm
        enddo
+
+
+
        if (col_acc.ge.2) this%row_index_full(iperm,:)=ir(:)
-       if (col_acc.ge.1) this%row_index_NLC(iperm,1:2)=ir(1:2)
+       if (this%n_qqbar.eq.0) then
+            if (col_acc.ge.1) this%row_index_NLC(iperm,1:2)=ir(1:2)
+       elseif (this%n_qqbar.eq.1) then
+            if (col_acc.ge.1) this%row_index_NLC(iperm,1:3)=ir(1:3)
+       endif
        this%row_index_LC(iperm,1)=ir(1)
     enddo
-    
+
     ! remove the one with the most entries.
     if (col_acc.ge.2) then
        imax=0
@@ -1342,6 +1479,7 @@ contains
     endif
     call cpu_time(tAfter)
     write (*,*) '... colour setup in',tAfter-tBefore,'seconds'
+
   contains
     subroutine compute_color_factor(col_acc,n,iper,jper,col_fac,color_flow)
       use color_algebra
@@ -1359,37 +1497,75 @@ contains
          endif
       else
          if (col_acc.eq.0) then ! LC
+          if (this%n_qqbar.eq.0) then
             if (all(iper.eq.jper)) then
                col_fac=3**n
             else
                col_fac=0
             endif
+          elseif (this%n_qqbar.eq.1) then
+            if (all(iper.eq.jper)) then
+               col_fac=3**(n-1)
+            else
+               col_fac=0
+            endif
+          endif
          elseif (col_acc.eq.1) then ! NLC
+          if (this%n_qqbar.eq.0) then
             if (all(iper.eq.jper)) then
                col_fac = 3**n - n * 3**(n-2)
             else
                call check_NLC(n,jper,iper,acc)
                col_fac=acc*3**(n-2)
             endif
+
+          elseif (this%n_qqbar.eq.1) then
+            if (all(iper.eq.jper)) then
+               col_fac = 3**(n-1) - (n-2) * 3**(n-3)
+            else
+               call check_NLC_1qqbar(n,jper,iper,acc)
+               col_fac=acc*3**(n-3)
+            endif
+          endif
          else ! NNLC and beyond
-            Tr(0,0,0)=1 ! one term
-            Tr(0,0,1)=2 ! that term is a product of two terms
-            Tr(0,1,1)=n ! both terms in the product are a trace with next matrices
-            Tr(0,2,1)=n
-            Tr(1:n,1,1)=iper(1:n) ! the order of the matrices in each term
-            Tr(1:n,2,1)=jper(1:n)
-            call Tr_complex_conjugate(2,1) ! take the complex conjugate of the jperm term
-            coef(1)=(1d0,0d0)
-            coef_Nc(:,:)=0
-            coef_Nc(0,1)=1
-            ! compute the colour factor by simplifying the colour string
-            call Tr_full_simplify(col_factor) 
-            col_fac=0
-            do i=n,max(n-2*col_acc,0),-1 ! do not include any Nc
+          if (this%n_qqbar.eq.0) then
+             Tr(0,0,0)=1 ! one term
+             Tr(0,0,1)=2 ! that term is a product of two terms
+             Tr(0,1,1)=n ! both terms in the product are a trace with next matrices
+             Tr(0,2,1)=n
+             Tr(1:n,1,1)=iper(1:n) ! the order of the matrices in each term
+             Tr(1:n,2,1)=jper(1:n)
+             call Tr_complex_conjugate(2,1) ! take the complex conjugate of the jperm term
+             coef(1)=(1d0,0d0)
+             coef_Nc(:,:)=0
+             coef_Nc(0,1)=1
+             ! compute the colour factor by simplifying the colour string
+             call Tr_full_simplify(col_factor) 
+             col_fac=0
+             do i=n,max(n-2*col_acc,0),-1 ! do not include any Nc
                ! contributions with negative
                ! powers, since they must cancel.
                col_fac=col_fac+coef_nc(i,0)*3**i
-            enddo
+             enddo
+           elseif (this%n_qqbar.eq.1) then
+              call Tr_allocate(n)
+              Tr(0,0,0)=1 ! one term
+              Tr(0,0,1)=1 ! that term is single string of matrices
+              Tr(0,1,1)=2*(n-2)
+              Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
+              Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
+              coef(1)=(1d0,0d0)
+              coef_Nc(:,:)=0
+              coef_Nc(0,1)=1
+              call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+              !col_fac=0
+              !do i=n,max(n-2*col_acc,0),-1 ! do not include any Nc
+               ! contributions with negative
+               ! powers, since they must cancel.
+              ! col_fac=col_fac+coef_nc(i,0)*3**i
+              !enddo
+              col_fac=dble(col_factor)
+           endif
          endif
       endif
     end subroutine compute_color_factor
