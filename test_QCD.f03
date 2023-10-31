@@ -20,9 +20,9 @@ program test_QCD
   logical :: quarks, single_perm
   real(kind=8) :: tBefore,tAfter,t_eval,t_init
 
-  n=4
-  quarks=.false.
-  single_perm = .true.
+  n=5
+  quarks=.true.
+  single_perm = .false.
   
   allocate(part(n))
 
@@ -95,6 +95,22 @@ program test_QCD
          iden=iden*1
        endif
 
+       part(1:n)=[-1,1,21,21]
+       iden=3*3*2*2
+       order(1:n,1)= [1,3,4,2]
+       if (.not. single_perm) then
+         order(1:n,2)= [1,4,3,2]
+         iden=iden*2
+       endif
+
+       part(1:n)=[21,21,-1,1]
+       iden=8*8*2*2
+       order(1:n,1)= [4,1,2,3]
+       if (.not. single_perm) then
+         order(1:n,2)= [4,2,1,3]
+         iden=iden*1
+       endif
+
      else
        part(1:n)=[21,21,21,21]
        iden=8*8*2*2
@@ -111,36 +127,42 @@ program test_QCD
 
   elseif (n.eq.5) then
      if (quarks) then
-       part(1:n)=[1,21,21,21,1]
+       part(1:n)=[-1,21,-1,21,21]
        iden=3*8*2*2 ! initial status colours and helicities/polarisation
-       order(1:n,1)=[1,2,3,4,5]
+       order(1:n,1)=[1,2,5,4,3]
        if (.not.single_perm) then
-         order(1:n,2)=[1,2,4,3,5]
-         order(1:n,3)=[1,3,2,4,5]
-         order(1:n,4)=[1,3,4,2,5]
-         order(1:n,5)=[1,4,2,3,5]
-         order(1:n,6)=[1,4,3,2,5]
+         order(1:n,2)=[1,2,4,5,3]
+         order(1:n,3)=[1,5,2,4,3]
+         order(1:n,4)=[1,5,4,2,3]
+         order(1:n,5)=[1,4,2,5,3]
+         order(1:n,6)=[1,4,5,2,3]
          iden=iden*2  ! final state identical particles
        endif
 
-!!$  part(1:n)=[21,21,1,-1,21]
-!!$  order(1:n,1)=[3,1,2,5,4]
-!!$  order(1:n,2)=[3,1,5,2,4]
-!!$  order(1:n,3)=[3,2,1,5,4]
-!!$  order(1:n,4)=[3,2,5,1,4]
-!!$  order(1:n,5)=[3,5,1,2,4]
-!!$  order(1:n,6)=[3,5,2,1,4]
-!!$  iden=8*8*2*2 ! initial status colours and helicities/polarisations
+       part(1:n)=[-1,1,21,21,21]
+       iden=3*3*2*2 ! initial status colours and helicities/polarisation
+       order(1:n,1)=[1,3,4,5,2]
+       if (.not.single_perm) then
+         order(1:n,2)=[1,3,5,4,2]
+         order(1:n,3)=[1,4,3,5,2]
+         order(1:n,4)=[1,4,5,3,2]
+         order(1:n,5)=[1,5,3,4,2]
+         order(1:n,6)=[1,5,4,3,2]
+         iden=iden*3*2   ! final state identical particles
+       endif
 
-!     part(1:n)=[1,-1,21,21,21]
-!     order(1:n,1)=[2,3,4,5,1]
-!     order(1:n,2)=[2,3,5,4,1]
-!     order(1:n,3)=[2,4,3,5,1]
-!     order(1:n,4)=[2,4,5,3,1]
-!     order(1:n,5)=[2,5,3,4,1]
-!     order(1:n,6)=[2,5,4,3,1]
-!     iden=3*3*2*2
-!     iden=iden*6
+       part(1:n)=[21,21,1,-1,21]
+       iden=8*8*2*2
+         order(1:n,1)=[3,1,2,5,4]
+       if (.not.single_perm) then
+         order(1:n,2)=[3,1,5,2,4]
+         order(1:n,3)=[3,2,1,5,4]
+         order(1:n,4)=[3,2,5,1,4]
+         order(1:n,5)=[3,5,1,2,4]
+         order(1:n,6)=[3,5,2,1,4]
+         iden=iden*1 
+       endif
+
      else
        part(1:n)=[21,21,21,21,21]   
        iden=8*8*2*2  
@@ -377,23 +399,31 @@ program test_QCD
      enddo
   enddo
 
+  !write(*,*) col_fac(1,1)
+  !write(*,*) col_fac(1,2)
+  !write(*,*) col_fac(2,1)
+  !write(*,*) col_fac(2,2)
+
   amp2=0d0
   if (.not.single_perm)then
     do ih=1,2**n
+     
      t=0d0
 !!$  do ih=0,2**n-1
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
            ztemp=ztemp+amps(iperm)%amps(ih)*col_fac(iperm,jperm)
-           !write (*,*) amps(iperm)%amps(ih),'for helicity',(ih-1)
         enddo
+        !write(*,*) 'adding',dble(ztemp*dconjg(amps(jperm)%amps(ih)))
         t=t+dble(ztemp*dconjg(amps(jperm)%amps(ih)))
      enddo
 !     write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2),'for helicity',(ih-1)
      amp2=amp2+t
     enddo
   else
+
+
 
     t=0d0
     do jperm=1,nperm    ! loop over permutations of conjugated amplitude
@@ -406,9 +436,10 @@ program test_QCD
 !    write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2)
    amp2=t
   endif
-   
+  
   amp2=amp2*(4*pi*alphas)**(n-2)/dble(iden)
 
+  write(*,*) 'IDEN',iden
   write (*,*) 'Matrix element =',amp2,'GeV^',-(2*n-8)
   write(*,*) 'Init time: ',t_init
   write(*,*) 'Evaluation time: ',t_eval

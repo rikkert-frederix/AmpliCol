@@ -93,11 +93,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*p(0))
+          chi(2) = dcmplx(-nh )*dsqrt(rTwo*p(0))
        else
-          chi(2) = dcmplx( nh*p(1), -p(2) )/sqp0p3
+          chi(2) = dcmplx( ifinal*nh*p(1), -p(2) )/sqp0p3
        endif
-       if ( nh.eq.1 ) then
+       if ( ifinal*nh.eq.1 ) then
           wf(1) = chi(1)
           wf(2) = chi(2)
           wf(3) = cZero
@@ -110,7 +110,6 @@ contains
        endif
     else
        ! "outgoing" initial state momenta
-!!$       nh = -(2*ihel-1)
        nh = (2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
           sqp0p3 = 0d0
@@ -119,11 +118,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*abs(p(0)))
+          chi(2) = dcmplx(-nh )*dsqrt(rTwo*abs(p(0)))
        else
-          chi(2) = dcmplx( nh*p(1), p(2) )/sqp0p3
+          chi(2) = dcmplx( ifinal*nh*p(1), p(2) )/sqp0p3
        endif
-       if ( nh.eq.1 ) then
+       if ( ifinal*nh.eq.1 ) then
           wf(1) = cZero
           wf(2) = cZero
           wf(3) = chi(2)
@@ -150,7 +149,7 @@ contains
     integer :: nh
     if(p(0).gt.0d0) then
 ! outgoing final state momenta
-       nh = -(2*ihel-1)
+       nh = (2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
        else
@@ -158,11 +157,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*p(0))
+          chi(2) = dcmplx(-nh )*dsqrt(rTwo*p(0))
        else
-          chi(2) = dcmplx( nh*p(1), p(2) )/sqp0p3
+          chi(2) = dcmplx( ifinal*nh*p(1), p(2) )/sqp0p3
        endif
-       if ( nh.eq.1 ) then
+       if ( ifinal*nh.eq.1 ) then
           wf(1) = cZero
           wf(2) = cZero
           wf(3) = chi(1)
@@ -175,8 +174,8 @@ contains
        endif
     else
 ! "outgoing" initial state momenta
-!!$       nh = 2*ihel-1
-       nh = -(2*ihel-1)
+       nh = 2*ihel-1
+!       nh = -(2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
           sqp0p3 = 0d0
        else
@@ -184,11 +183,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-ihel )*dsqrt(rTwo*abs(p(0)))
+          chi(2) = dcmplx( -nh )*dsqrt(rTwo*abs(p(0)))
        else
-          chi(2) = dcmplx( nh*p(1), -p(2) )/sqp0p3
+          chi(2) = dcmplx( ifinal*nh*p(1), -p(2) )/sqp0p3
        endif
-       if ( nh.eq.1 ) then
+       if ( ifinal*nh.eq.1 ) then
           wf(1) = chi(2)
           wf(2) = chi(1)
           wf(3) = cZero

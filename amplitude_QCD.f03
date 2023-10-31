@@ -307,20 +307,21 @@ contains
             endif
          enddo
       enddo
+
       if (this%n_qqbar.gt.0) then
          if (order(1).le.2) then
             if (.not.(part(order(1)).le.-1 .and. part(order(1)).ge.-6)) then
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
-               stop 1
+               !stop 1
             endif
          else
             if (.not.(part(order(1)).ge.1 .and. part(order(1)).le.6)) then
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
-               stop 1
+               !stop 1
             endif
          endif
          if (order(n).le.2) then
@@ -328,17 +329,18 @@ contains
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
-               stop 1
+               !stop 1
             endif
          else
             if (.not.(part(order(n)).le.-1 .and. part(order(n)).ge.-6)) then
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
-               stop 1
+               !stop 1
             endif
          endif
       endif
+
       if (this%n_qqbar.ge.2) then
          do i=1,n
             if (order(i).eq.1 .or. order(i).eq.n) cycle
@@ -550,6 +552,7 @@ contains
             ! anti-quark should not be part of it, since it will close the current
             if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
             if (any(this%current_list(ic2)%order(1:n2).eq.order(n))) return
+
          elseif (this%n_qqbar.eq.0) then
             ! final gluon should not be part of it, since it will close the current
             if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
@@ -835,10 +838,10 @@ contains
          do i=1,size
             do j=1,isize
                ips_in(j)=order(i+j-1)
-               !ips_in(j)=i+j-1 ! for standarad order
+               !ips_in(j)=i+j-1 ! for standard order
             enddo
             !if (.not. valid_current_order(ips_in)) cycle
-            if (any(ips_in==1) .and. this%n_qqbar.gt.0) then
+            if (any(ips_in==order(1)) .and. this%n_qqbar.gt.0) then
                  key=key+1
                  call get_value(ips_in,1,val) ! add the quark
                  current_dict(key)=val
@@ -1037,6 +1040,7 @@ contains
                 else
                    ih_in=ih-1
                 endif
+
                 if (this%current_list(ic)%type.eq.21) then
                    if (use_real_gluons) then
                       call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_r(1:4,ih))
@@ -1056,7 +1060,7 @@ contains
                    !write(*,*) 'ic is anti-quark current',ic
                    !write(*,*) 'momentum',this%current_list(ic)%pp(0:3)
                    !write(*,*) 'hel',ih_in-1
-                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_c(1:4,ih))
+                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in,-1,this%current_list(ic)%val_c(1:4,ih))
                    !write(*,*) 'gets helicity',ih
                    !write(*,*) 'gets value',this%current_list(ic)%val_c(1:4,ih)
                 endif
