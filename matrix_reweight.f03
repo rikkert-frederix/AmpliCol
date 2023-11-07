@@ -157,11 +157,13 @@ program matrix_reweight
      if (.not.allocated(part)) allocate(part(1:next))
      call read_event(11,done)
      rewind(11)
-     o(1:next)=0
+     !o(1:next)=0 ! dummy value
+     !write(*,*) 'part',part
+     !write(*,*) 'order',o
      call amp_QCD%init(2,next,part,o)
+     !write(*,*) 'PASSED'
      col_acc=1
-     write(*,*) 'part'
-     call amp_QCD%init_col(next,part,col_acc)
+     call amp_QCD%init_col(next,part,o,col_acc)
 !ccccccccccccccccccccccccccccccccccccccccccc
 
   endif
@@ -528,7 +530,7 @@ program matrix_reweight
                     amp2_c=(0d0,0d0)
                  endif
                  !write(*,*) 'start,end',amp_QCD%row_index_NLC(irow-1,i)+1
-                 write(*,*) amp_QCD%row_index_NLC(irow,i)
+                 !write(*,*) amp_QCD%row_index_NLC(irow,i)
                  do ic=amp_QCD%row_index_NLC(irow-1,i)+1,amp_QCD%row_index_NLC(irow,i)
                     icol=amp_QCD%col_index_NLC(ic,i)
                     !write(*,*) 'icol',icol
@@ -887,7 +889,7 @@ contains
 !!$    else
        rwgt_NLC=sum(amp2_NLC(1:n_rwgt)/amp2_LC(1:n_rwgt))/dble(n_rwgt)
        rwgt_full=sum(amp2_full(1:n_rwgt)/amp2_LC(1:n_rwgt))/dble(n_rwgt)
-       write(*,*) 'rwgt NLC',rwgt_NLC
+       !!write(*,*) 'rwgt NLC',rwgt_NLC
 !!$    endif
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt,wgt,amp2,weight

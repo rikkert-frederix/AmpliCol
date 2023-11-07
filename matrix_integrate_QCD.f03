@@ -46,10 +46,7 @@ program matrix_integrate_QCD
   call get_run_arguments()
   call create_run_tag()
 
-  allocate(o(next))
-  allocate(part(next))
   allocate(mass(next))
-
 
 !  nperm=3*2*1
 
@@ -60,7 +57,7 @@ program matrix_integrate_QCD
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-100   ! Number of events to generate. (If negative, start
+  ncalls0=-10000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -86,17 +83,17 @@ program matrix_integrate_QCD
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
 
   mass(1:next)=0d0
-  do i=1,next
-     if (i.eq.1) then
-        o(i)=1
-     elseif (i.lt.2+c_o) then
-        o(i)=i+1
-     elseif (i.eq.2+c_o) then
-        o(i)=2
-     else
-        o(i)=i
-     endif
-  enddo
+  !do i=1,next
+  !   if (i.eq.1) then
+  !      o(i)=1
+  !   elseif (i.lt.2+c_o) then
+  !      o(i)=i+1
+  !   elseif (i.eq.2+c_o) then
+  !      o(i)=2
+  !   else
+  !      o(i)=i
+  !   endif
+  !enddo
   t_chan=.false.
 
   call cpu_time(tBefore)
@@ -116,17 +113,17 @@ program matrix_integrate_QCD
   ! colour factors, etc.)
   call cpu_time(tBefore)
 
-  if (nquarks.gt.0) then
-    part(1)=-1
-    part(next)=-1
-    do i=2,next-1
-      part(i) = 21
-    enddo
-  else
-   do i=1,next
-      part(i)=21
-    enddo
-  endif
+  !if (nquarks.gt.0) then
+  !  part(1)=-1
+  !  part(next)=-1
+  !  do i=2,next-1
+  !    part(i) = 21
+  !  enddo
+  !else
+  ! do i=1,next
+  !    part(i)=21
+  !  enddo
+  !endif
 
   nfin=0
   do i=3,next
@@ -215,6 +212,7 @@ contains
     integer :: ih1, ih2
     integer :: col_fac
 
+
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
@@ -256,6 +254,8 @@ contains
     enddo
     iden=iden* factorial8(nfin)
 
+
+
     ! compute amplitudes
     call cpu_time(tBefore)
 
@@ -291,10 +291,13 @@ contains
       col_fac=3**next
     endif
 
+    !write(*,*) 'nqruarks',nquarks
+
     do ih1=1,amps%current_list(amps%n_cur)%nhel
       do ih2=1,amps%current_list(next)%nhel
         ih=(ih2-1)*amps%current_list(amps%n_cur)%nhel+ih1
         amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
+        !write(*,*) col_fac
       enddo
     enddo
     amp2=sum(amp2_hel(1:2**next))
@@ -431,31 +434,78 @@ contains
   
   subroutine get_run_arguments()
     implicit none
-    integer :: argc
+    integer :: argc,start,end,glu
     character(len=256) :: argv
+    integer, dimension(:), allocatable :: process,ord
     ! integration steps:
     ! imode=0  (Setting up grids)
     ! imode=-1 (same as imode=0, but starting from existing grids)
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.5) then
-       write (*,*) 'Give number of external particles,' 
-       write (*,*) 'Give number of external quarks,'
+    if (argc.ne.2) then
        write(*,*)  'imode'
-       write(*,*)  'color  ordering (number of gluons on first color line)'
        write(*,*) 'integration mode (1 or 2):'
-       read (*,*) next,nquarks,imode,c_o,integration
+       read (*,*)  imode,integration
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) next
-          if (i.eq.2) read(argv,*) nquarks
-          if (i.eq.3) read(argv,*) imode
-          if (i.eq.4) read(argv,*) c_o
-          if (i.eq.5) read(argv,*) integration
+          if (i.eq.1) read(argv,*) imode
+          if (i.eq.2) read(argv,*) integration
        enddo
     endif
+
+    open (unit=99, file='process.txt', status='old', action='read')
+    read(99, *) next
+    allocate(process(next))
+    allocate(o(next))
+    allocate(part(next))
+    allocate(ord(next))
+    read(99, *) process
+    part=process
+    read(99, *) ord
+    nquarks = 0
+    do i=1,next
+       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
+           nquarks=nquarks+1
+       endif
+       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
+          process(i)=-process(i)
+       endif
+    enddo
+
+    if (nquarks.eq.0) then
+      do i=1,next
+        if (ord(i).eq.1) start=i
+        if (ord(i).eq.2) end=i
+      enddo
+      c_o=abs(end-start)-1
+    else
+      c_o=0 ! dummy value
+    endif
+
+    o=ord
+    glu=1
+    if (nquarks.eq.2) then
+      do i=1,next
+        if (process(i).lt.0) then
+        o(next)=i
+        end=i
+        endif
+        if (process(i).gt.0 .and. process(i).ne.21) then
+        o(1)=i
+        start=i
+        endif
+        if (process(i).eq.21) then
+            o(1+glu)=i
+            glu=glu+1
+        endif
+      enddo
+      if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
+        o=ord ! the input order was a valid one, use that instead
+      endif
+    endif
+
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1

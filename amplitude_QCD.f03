@@ -37,7 +37,7 @@ contains
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
-    integer::n,imode,j
+    integer::n,imode,j,ic
     integer,dimension(n)::part,order,stand_order,max_order
     integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,nperm
     integer,dimension(:),allocatable :: permutations_dict2
@@ -64,8 +64,10 @@ contains
     endif
     this%imode=imode
 
+    write(*,*) 'PART',part
     if (this%imode.eq.2) call define_canonical_color_order()
 
+    write(*,*) 'canonical order',order
     call check_input_consistency()
 
     if (this%imode.eq.1) then
@@ -123,7 +125,7 @@ contains
     allocate(this%n_cur_end(n-1))
     allocate(this%n_vert_start(2:n-1))
     allocate(this%n_vert_end(2:n-1))
-
+   
     this%n_cur=0
     this%n_vert=0
 
@@ -149,7 +151,10 @@ contains
              endif
              this%current_list(this%n_cur)%n_vert=0
           enddo
+       
        else
+
+
           if (this%imode.eq.1) then
              do nc=1,n-isize
                 do isplit=1,isize-1
@@ -167,6 +172,7 @@ contains
                 enddo
              enddo
 
+
           elseif (this%imode.eq.2) then
              do isplit=1,isize-1
                 n1=isplit
@@ -176,7 +182,7 @@ contains
                       call add_if_allowed_threevertex()
                    enddo
                 enddo
-             enddo
+             enddo            
           endif
 
        endif
@@ -218,18 +224,9 @@ contains
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
            this%perm(1:n-2,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:2:-1)
          enddo
-
        endif
     endif
 
-!cc   re-label the colour-order according to the actual order
-
-!    do i=1,this%n_cur
-!      do j=1,size(this%current_list(i)%order)
-!         this%current_list(i)%order(j)=order(this%current_list(i)%order(j))
-!      enddo
-!      write(*,*) this%current_list(i)%order
-!    enddo
   contains
 
     subroutine define_canonical_color_order()
@@ -251,16 +248,17 @@ contains
                 order(iord)=i
              elseif (i.gt.2 .and. part(i).ge.1 .and. part(i).le.6) then
                 order(1)=i
-             elseif (i.lt.2 .and. part(i).le.-1 .and. part(i).ge.-6) then
+             elseif (i.le.2 .and. part(i).le.-1 .and. part(i).ge.-6) then
                 order(1)=i
              elseif (i.gt.2 .and. part(i).le.-1 .and. part(i).ge.-6) then
                 order(n)=i
-             elseif (i.gt.2 .and. part(i).ge.1 .and. part(i).le.6) then
+             elseif (i.le.2 .and. part(i).ge.1 .and. part(i).le.6) then
                 order(n)=i
              endif
           enddo
           this%nColOrd=factorial(n-2)
        endif
+       write(*,*) 'order',order
        if (any(order(1:n).eq.0)) then
           write (*,*) 'ERROR: canonical order not found'
           stop 1
@@ -543,15 +541,24 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
+
       if (this%imode.eq.2) then
          if (this%n_qqbar.eq.1) then
             ! if quark is in there, it should be the very first particle
             if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
                        this%current_list(ic1)%order(1).ne.order(1)) return
-            if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) return
+            if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) then
+                    return
+            endif        
             ! anti-quark should not be part of it, since it will close the current
             if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
             if (any(this%current_list(ic2)%order(1:n2).eq.order(n))) return
+            if (abs(this%current_list(ic1)%type).ge.1 .and. abs(this%current_list(ic1)%type).le.6) then
+              if (this%current_list(ic2)%type.eq.-21) return
+            endif
+            if (abs(this%current_list(ic2)%type).ge.1 .and. abs(this%current_list(ic2)%type).le.6) then
+               if (this%current_list(ic1)%type.eq.-21) return
+            endif
 
          elseif (this%n_qqbar.eq.0) then
             ! final gluon should not be part of it, since it will close the current
@@ -561,6 +568,7 @@ contains
             write (*,*) 'Only implemented for 0 or 1 qqbar pair',this%n_qqbar
             stop
          endif
+
          ! check that all particles are different in the two currents:
          if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
          if (use_symmetry .and. imode.ne.1) then
@@ -571,7 +579,6 @@ contains
             endif
          endif
       endif
-
 
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
@@ -584,7 +591,6 @@ contains
       elseif (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.-21) then
          ! add a gluon-tensor to gluon vertex
          call add_vertex(3,21)
-
       elseif (this%current_list(ic1)%type.eq.21 .and. &
            (this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6)) then
          ! add a gluon-quark to quark vertex
@@ -707,7 +713,7 @@ contains
       implicit none
       logical :: vertex_sign
       integer,dimension(isize) :: ip ! permutation of the current
-      integer :: ctype,cur_bin, ic
+      integer :: ctype,cur_bin, ic,ik
       integer(kind=8) :: val
       integer :: i,check
 
@@ -722,15 +728,15 @@ contains
          call get_value(ip,1,val)
       endif
       call solve_dict(val,ic)
-
-      !if (ic.le.this%n_cur) then
+      
       if ((this%current_list(ic)%n_vert.ne.0).and.(this%current_list(ic)%type.eq.ctype)) then
+          if (all(this%current_list(ic)%order.eq.ip)) then
           this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
           this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
           this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
           return
+       endif
       endif
-      !endif
 
      ! Check if this interaction can be added to an existing current
 !      do i=1,this%n_cur
@@ -743,32 +749,33 @@ contains
 !         return
 !      enddo
       ! Need a new current
-      !write(*,*)'adding new current',ip(1:isize)
-      !write(*,*) 'of type',ctype
       this%n_cur=this%n_cur+1
   
-      allocate(this%current_list(this%n_cur)%order(isize))
-      this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
-      this%current_list(this%n_cur)%type=ctype
-      this%current_list(this%n_cur)%bin=cur_bin
-
-      this%current_list(this%n_cur)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
-      if (ctype.eq.21) then
-         allocate(this%current_list(this%n_cur)%vertices(5*(isize-1)))
-         allocate(this%current_list(this%n_cur)%vertex_sign(5*(isize-1)))
-      elseif (ctype.eq.-21) then
-         allocate(this%current_list(this%n_cur)%vertices(isize-1))
-         allocate(this%current_list(this%n_cur)%vertex_sign(isize-1))
-      else
-         allocate(this%current_list(this%n_cur)%vertices(2*(isize-1)))
-         allocate(this%current_list(this%n_cur)%vertex_sign(2*(isize-1)))
+      if (this%imode.eq.1) then  ! temporary hack
+              ik = this%n_cur
+      elseif (this%imode.eq.2) then
+              ik=ic
       endif
-      this%current_list(this%n_cur)%vertices(1)=this%n_vert
-      this%current_list(this%n_cur)%vertex_sign(1)=vertex_sign
-      this%current_list(this%n_cur)%n_vert=1
 
+      allocate(this%current_list(ik)%order(isize))
+      this%current_list(ik)%order(1:isize)=ip(1:isize)
+      this%current_list(ik)%type=ctype
+      this%current_list(ik)%bin=cur_bin
 
-
+      this%current_list(ik)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
+      if (ctype.eq.21) then
+         allocate(this%current_list(ik)%vertices(5*(isize-1)))
+         allocate(this%current_list(ik)%vertex_sign(5*(isize-1)))
+      elseif (ctype.eq.-21) then
+         allocate(this%current_list(ik)%vertices(isize-1))
+         allocate(this%current_list(ik)%vertex_sign(isize-1))
+      else
+         allocate(this%current_list(ik)%vertices(2*(isize-1)))
+         allocate(this%current_list(ik)%vertex_sign(2*(isize-1)))
+      endif
+      this%current_list(ik)%vertices(1)=this%n_vert
+      this%current_list(ik)%vertex_sign(1)=vertex_sign
+      this%current_list(ik)%n_vert=1
     end subroutine add_current
 
     subroutine create_current_dict()
@@ -778,7 +785,10 @@ contains
       implicit none
       integer :: size,i,key,j,factor
       integer(kind=8) :: val
-      integer,dimension(:),allocatable :: ips_in,ips
+      integer,dimension(:),allocatable :: ips_in,ips,ips_re
+      integer*2 compar
+      integer(kind=8),dimension(max_cur) :: temp
+
       key=0
       factor=1
       if (imode.eq.2) then
@@ -791,42 +801,61 @@ contains
            size=factor
          endif
          allocate(ips_in(1:isize))
+         allocate(ips_re(1:isize))
          do i=1,isize
             ips_in(i)=i
          enddo
          allocate(ips(1:isize))
          do i=1,size
-            if (valid_current_order(ips_in))then 
-               if (any(ips_in==1) .and. this%n_qqbar.gt.0) then
+
+          if (this%n_qqbar.eq.1) then
+           do j=1,isize
+            if (ips_in(j).eq.order(n)) then
+                    ips_re(j)=n
+            elseif (ips_in(j).eq.n) then
+                    ips_re(j)=order(n)
+            else 
+                    ips_re(j)=ips_in(j)
+            endif
+           enddo
+          else
+            ips_re=ips_in
+          endif
+            if (valid_current_order(ips_re))then 
+               if (any(ips_re==order(1)) .and. this%n_qqbar.ge.1) then
                  key=key+1
-                 call get_value(ips_in,1,val) ! add the quark
+                 call get_value(ips_re,1,val) ! add the quark
                  current_dict(key)=val
                else
                  key=key+1
-                 call get_value(ips_in,0,val) ! add the gluon
+                 call get_value(ips_re,0,val) ! add the gluon
                  current_dict(key)=val
                  if (isize.ne.1 .and. isize.ne.n-1 .and. decompose_4vert) then
                   key=key+1
-                  call get_value(ips_in,-1,val) ! add the tensor
+                  call get_value(ips_re,-1,val) ! add the tensor
                   current_dict(key)=val
                  endif
                endif
-  
                endif
                if (isize.eq.1) call get_next_iperm(isize,ips_in,ips,n)
                if (isize.gt.1) then
                  call get_next_iperm(isize,ips_in,ips,n-1)
                endif
                ips_in=ips
-
          enddo
          deallocate(ips_in)
+         deallocate(ips_re)
          deallocate(ips)
       enddo
       do i=key+1,max_cur
          current_dict(i)=10000000
       enddo
-      !write(*,*) current_dict(1:20)
+
+      !call bubble_test(current_dict,max_cur, temp)
+      !current_dict=temp
+      !write(*,*) current_dict(1:40)
+      !stop 1
+
       elseif (imode.eq.1) then
         do isize=1,n-1
          if (isize.eq.1) then
@@ -841,7 +870,7 @@ contains
                !ips_in(j)=i+j-1 ! for standard order
             enddo
             !if (.not. valid_current_order(ips_in)) cycle
-            if (any(ips_in==order(1)) .and. this%n_qqbar.gt.0) then
+            if (any(ips_in==order(1)) .and. this%n_qqbar.ge.1) then
                  key=key+1
                  call get_value(ips_in,1,val) ! add the quark
                  current_dict(key)=val
@@ -859,7 +888,32 @@ contains
          deallocate(ips_in)
         enddo
       endif
+
     end subroutine create_current_dict
+
+    subroutine bubble_test(vec,len,ret_vec)
+      implicit none
+      integer :: len
+      integer(kind=8), dimension(len) :: vec,ret_vec
+      integer(kind=8) :: temp, bubble, lsup, j
+
+      lsup=len
+      do while (lsup .gt. 1)
+         bubble = 0 !bubble in the greatest element out of order
+          do j = 1, (len-1)
+           if (vec(j).gt.vec(j+1)) then
+            temp = vec(j)
+            vec(j) = vec(j+1)
+            vec(j+1) = temp
+            bubble = j
+           endif
+          enddo
+         lsup = bubble
+       enddo
+
+       ret_vec=vec
+      
+    end subroutine
 
     subroutine get_next_iperm(ip,ips_in,ips,n)
      implicit none
@@ -923,7 +977,7 @@ contains
       left=1
       right=max_cur
      
-      if (imode.eq.2) then
+      if (imode.gt.2) then
       do while (left.le.right)
          middle=(right+left)/2
          if (current_dict(middle).eq.val) then
@@ -935,7 +989,8 @@ contains
             left=middle+1
          endif
       enddo
-      elseif (imode.eq.1) then
+
+      elseif (imode.le.2) then
       do i=1,max_cur
          if (current_dict(i) .eq. val) then
             key=i
@@ -962,11 +1017,8 @@ contains
     integer :: max_cur_lab
     integer :: count_ext,count_vert,count_comb
     real :: tBefore,tAfter
+    integer :: ifinal
 
-    !do i=1,this%n_cur
-    !   write(*,*) 'order',this%current_list(i)%order
-    !   write(*,*) 'type',this%current_list(i)%type
-    !enddo
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -1025,17 +1077,19 @@ contains
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)   
              if (this%current_list(ic)%order(1).le.2) then
                 this%current_list(ic)%pp(0:3)=-p(0:3,this%current_list(ic)%order(1))
+                ifinal=-1
              else
                 this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
+                ifinal=1
              endif
 
              do ih=1,this%current_list(ic)%nhel
                 count_ext = count_ext + 1
                 if (this%current_list(ic)%nhel.eq.1) then
                    if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
-                      ih_in=1  ! + helicity  --->   2-1=1
+                      ih_in=1  ! + helicity 
                    else
-                      ih_in=0  ! - helicity  --->   1-1=0
+                      ih_in=0  ! - helicity 
                    endif
                 else
                    ih_in=ih-1
@@ -1043,26 +1097,15 @@ contains
 
                 if (this%current_list(ic)%type.eq.21) then
                    if (use_real_gluons) then
-                      call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_r(1:4,ih))
+                           call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
                    else
-                      call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_c(1:4,ih))
+                           call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                      
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                   !write(*,*) '-------------------------------------'
-                   !write(*,*) 'ic is quark current',ic
-                   !write(*,*) 'momentum',this%current_list(ic)%pp(0:3)
-                   !write(*,*) 'hel in',ih_in
-                   call ext_quark(this%current_list(ic)%pp(0:3),ih_in,1,this%current_list(ic)%val_c(1:4,ih))
-                   !write(*,*) 'gets helicity and ic',ih,ic
-                   !write(*,*) 'gets value',this%current_list(ic)%val_c(1:4,ih)
+                        call ext_quark(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   !write(*,*) '-------------------------------------'
-                   !write(*,*) 'ic is anti-quark current',ic
-                   !write(*,*) 'momentum',this%current_list(ic)%pp(0:3)
-                   !write(*,*) 'hel',ih_in-1
-                   call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in,-1,this%current_list(ic)%val_c(1:4,ih))
-                   !write(*,*) 'gets helicity',ih
-                   !write(*,*) 'gets value',this%current_list(ic)%val_c(1:4,ih)
+                        call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
                 endif
              enddo
           enddo
@@ -1095,6 +1138,7 @@ contains
                                            this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
                                            this%interaction_list(iv)%val_c(1:4,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.1) then
                    if (use_real_gluons) then
                       call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1134,17 +1178,6 @@ contains
                        call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
-                       !if (ih.eq.1) then
-                       !write(*,*) '**********************'
-                       !write(*,*) 'quark-gluon-quark interaction'
-                       !write(*,*) 'iv',iv
-                       !write(*,*)  this%interaction_list(iv)%currents(1),ih1
-                       !write(*,*)  this%interaction_list(iv)%currents(2),ih2
-                       !write(*,*) 'going in',this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1)
-                       !write(*,*) 'going in 2',this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2)
-                       !write(*,*) 'coming out',this%interaction_list(iv)%val_c(1:4,ih)
-
-                       !endif
                     endif
                 else
                    write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
@@ -1164,8 +1197,6 @@ contains
           endif
 
           if (this%current_list(ic)%type.eq.21) then
-             !write(*,*) 'calling combine',ic
-             !write(*,*) this%current_list(ic)%order
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
@@ -1174,15 +1205,11 @@ contains
 
           elseif ((this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6)) then
              ! a quark current
-             !write(*,*) 'calling combine',ic
-             !write(*,*) this%current_list(ic)%order
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
           elseif (this%current_list(ic)%type.eq.-21) then
-             !write(*,*) 'calling combine',ic
-             !write(*,*) this%current_list(ic)%order
              ! the non-propagating tensor current
              call combine_interactions(6)
           else
@@ -1190,12 +1217,7 @@ contains
              stop 1
           endif
        enddo
-       !write(*,*) 'enddo, taking next loop'
     enddo
-
-    !write(*,*) 'count_ext',count_ext
-    !write(*,*) 'count_vert',count_vert
-    !write(*,*) 'count_comb',count_comb
 
     call compute_amps_from_currents
 
@@ -1219,18 +1241,7 @@ contains
             if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
                this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
             else
-               !write(*,*) 'order which is contracted',this%current_list(ic)%order
-               !write(*,*) 'value of current',this%current_list(ic)%val_c(1:4,1)
-               !write(*,*) 'value of external particle current',this%current_list(n)%val_c(1:4,1)
                this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
-               !if (ic-this%n_cur_start(n-1)+1.eq.1) then
-                   !write(*,*) ' '
-                   !write(*,*) 'order',this%current_list(ic)%order
-                   !write(*,*) 'value of current',this%current_list(ic)%val_c(1:4,1) !! this is not the same!!!
-                   !write(*,*) 'amps',this%amps(ic-this%n_cur_start(n-1)+1)
-               !endif
-               !write(*,*) 'filled index',ic-this%n_cur_start(n-1)+1
-               !write(*,*) 'value filled with: ',this%amps(ic-this%n_cur_start(n-1)+1)
             endif
          enddo
 
@@ -1283,15 +1294,8 @@ contains
          enddo
 
       else
-         !if (isize.eq.n-1) then
-         !  write(*,*) 'ic is',ic,this%current_list(ic)%order
-         !  write(*,*) 'I am in combine, n_vert',this%current_list(ic)%n_vert
-         !endif
          this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
          do iv=1,this%current_list(ic)%n_vert
-            !if (isize.eq.n-1) then
-            !write(*,*) 'vertices contributing iv',iv,this%current_list(ic)%vertex_sign(iv)
-            !endif
             if (this%current_list(ic)%vertex_sign(iv))then
                this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
                     this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)-&
@@ -1300,12 +1304,7 @@ contains
                this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
                     this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)+&
                     this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim,1:this%current_list(ic)%nhel)
-            !if (isize.eq.n-1) then
-            !write(*,*) 'adding '
-   !write(*,*) this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim,1)
-            !endif
             endif
-
          enddo
       endif
     end subroutine combine_interactions
@@ -1341,14 +1340,14 @@ contains
   end subroutine evaluate
 
 
-  subroutine init_col(this,n,part,col_acc)
+  subroutine init_col(this,n,part,order,col_acc)
     use color_algebra
     use math_functions
     implicit none
     class(amplitude_qcd) :: this
     integer :: col_acc,n,i,jperm,iperm,col_fac,imax,max_val,nperm,nw
     integer,dimension(:),allocatable :: ic,ir,iper,jper
-    integer,dimension(n) :: part
+    integer,dimension(n) :: part,order
     real(kind=4) :: tBefore,tAfter
     integer :: n_nlc,add
 
@@ -1414,11 +1413,13 @@ contains
     do iperm=1,nperm
        !write(*,*) 'iperm',iperm
        nw=iperm
+
        if (this%n_qqbar.eq.0) then
          iper(1:n)=[this%perm(1:n-1,nw),n]
        elseif (this%n_qqbar.eq.1) then
-         iper(1:n)=[1,this%perm(1:n-2,nw),n]
+         iper(1:n)=[order(1),this%perm(1:n-2,nw),order(n)]
        endif
+
        !write(*,*) 'iper',iper
        do jperm=iperm,nperm
           nw=jperm
@@ -1427,10 +1428,12 @@ contains
             !write(*,*) 'jper',jper
             call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
           elseif (this%n_qqbar.eq.1) then
-            jper(1:n)=[1,this%perm(1:n-2,nw),n]
+            jper(1:n)=[order(1),this%perm(1:n-2,nw),order(n)]
             !write(*,*) 'jper',jper
             call compute_color_factor(col_acc,n,iper,jper,col_fac,.false.)
           endif
+
+          !write(*,*) 'colfac',col_fac
 
           if (col_fac.eq.0) cycle
 

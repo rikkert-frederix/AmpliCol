@@ -47,11 +47,11 @@ contains
        wf(4) = dcmplx( hel*pt/pp*sqh )
        if ( pt.ne.rZero ) then
           pzpt = p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( -p(1)*pzpt , -p(2)/pt*sqh )
-          wf(3) = dcmplx( -p(2)*pzpt ,  p(1)/pt*sqh )
+          wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
+          wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
        endif
     else
 !!$       hel = -dble(2*ihel-1)
@@ -62,11 +62,11 @@ contains
        wf(4) = dcmplx( hel*pt/pp*sqh )
        if ( pt.ne.rZero ) then
           pzpt = -p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( p(1)*pzpt , -p(2)/pt*sqh )
-          wf(3) = dcmplx( p(2)*pzpt ,  p(1)/pt*sqh )
+          wf(2) = dcmplx( p(1)*pzpt , -ifinal*p(2)/pt*sqh )
+          wf(3) = dcmplx( p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
        endif
     endif
   
@@ -82,10 +82,10 @@ contains
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    integer :: nh
+    integer :: nhel
     if (p(0).gt.0d0) then
        ! outgoing final state momenta
-       nh = 2*ihel-1
+       nhel = 2*ihel-1
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
        else
@@ -93,11 +93,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-nh )*dsqrt(rTwo*p(0))
+          chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
        else
-          chi(2) = dcmplx( ifinal*nh*p(1), -p(2) )/sqp0p3
+          chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
        endif
-       if ( ifinal*nh.eq.1 ) then
+       if ( nhel.eq.1 ) then
           wf(1) = chi(1)
           wf(2) = chi(2)
           wf(3) = cZero
@@ -110,7 +110,7 @@ contains
        endif
     else
        ! "outgoing" initial state momenta
-       nh = (2*ihel-1)
+       nhel = (2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
           sqp0p3 = 0d0
        else
@@ -118,11 +118,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-nh )*dsqrt(rTwo*abs(p(0)))
+          chi(2) = dcmplx(-nhel )*dsqrt(rTwo*abs(p(0)))
        else
-          chi(2) = dcmplx( ifinal*nh*p(1), p(2) )/sqp0p3
+          chi(2) = dcmplx( -nhel*p(1), -p(2) )/sqp0p3
        endif
-       if ( ifinal*nh.eq.1 ) then
+       if ( -nhel.eq.1 ) then
           wf(1) = cZero
           wf(2) = cZero
           wf(3) = chi(2)
@@ -146,10 +146,10 @@ contains
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    integer :: nh
+    integer :: nhel
     if(p(0).gt.0d0) then
 ! outgoing final state momenta
-       nh = (2*ihel-1)
+       nhel = (2*ihel-1)
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
           sqp0p3 = 0d0
        else
@@ -157,11 +157,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx(-nh )*dsqrt(rTwo*p(0))
+          chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
        else
-          chi(2) = dcmplx( ifinal*nh*p(1), p(2) )/sqp0p3
+          chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
        endif
-       if ( ifinal*nh.eq.1 ) then
+       if ( -nhel.eq.1 ) then
           wf(1) = cZero
           wf(2) = cZero
           wf(3) = chi(1)
@@ -174,8 +174,7 @@ contains
        endif
     else
 ! "outgoing" initial state momenta
-       nh = 2*ihel-1
-!       nh = -(2*ihel-1)
+       nhel = 2*ihel-1
        if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
           sqp0p3 = 0d0
        else
@@ -183,11 +182,11 @@ contains
        end if
        chi(1) = dcmplx( sqp0p3 )
        if ( sqp0p3.eq.rZero ) then
-          chi(2) = dcmplx( -nh )*dsqrt(rTwo*abs(p(0)))
+          chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
        else
-          chi(2) = dcmplx( ifinal*nh*p(1), -p(2) )/sqp0p3
+          chi(2) = dcmplx( nhel*p(1), p(2) )/sqp0p3
        endif
-       if ( ifinal*nh.eq.1 ) then
+       if ( nhel.eq.1 ) then
           wf(1) = chi(2)
           wf(2) = chi(1)
           wf(3) = cZero
