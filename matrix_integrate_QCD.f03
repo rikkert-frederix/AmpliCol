@@ -136,12 +136,6 @@ program matrix_integrate_QCD
 
 !  call amps%init_col(next,0) ! LC colour factors only
   allocate(amp2_hel(0:2**next))
-
-  if (c_o*2.eq.(next-2)) then
-     sym_fac=factorial8(next-2)
-  else
-     sym_fac=2*factorial8(next-2)
-  endif
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
@@ -179,7 +173,7 @@ program matrix_integrate_QCD
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
         call unwgt_helicity
-        call write_event(11,ans(1,0)*sym_fac)
+        call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -303,9 +297,12 @@ contains
     amp2=sum(amp2_hel(1:2**next))
 
     ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
-   
     weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
     val=amp2*weight
+
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    val=val*sym_fac
 
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
@@ -506,6 +503,35 @@ contains
       endif
     endif
 
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    if (nquarks.eq.0) then
+       ! All gluon process. This assumes that the only channels we are
+       ! including are strictly different. We distinguish them by considering
+       ! how many (final state) gluons are attached to the two colour lines
+       ! that link the two incoming gluons. Hence, we only include
+       ! floor(next/2) channels, e.g., for next=6 we only consider:
+       ! i   --> 1,2,3,4,5,6   (0 and 4 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6   (1 and 3 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6   (2 and 2 gluons on the two lines)
+       ! And, e.g., for next=9, we only consider:
+       ! i   --> 1,2,3,4,5,6,7,8,9   (0 and 7 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6,7,8,9   (1 and 6 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6,7,8,9   (2 and 5 gluons on the two lines)
+       ! iv  --> 1,3,4,5,2,6,7,8,9   (3 and 4 gluons on the two lines)
+       ! This means that the sym_fac should be equal to the number of final
+       ! state gluon permutations, multiplied by 2 (except if we have an equal
+       ! number of gluons on both colour lines that attached the two incoming
+       ! gluons).
+       if (c_o*2.eq.(next-2)) then
+          sym_fac=factorial8(next-2)
+       else
+          sym_fac=2*factorial8(next-2)
+       endif
+    else
+       write (*,*) 'WARNING: symmetry factor missing'
+    endif
+    
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1

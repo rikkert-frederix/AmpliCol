@@ -57,7 +57,7 @@ program matrix_integrate
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-1   ! Number of events to generate. (If negative, start
+  ncalls0=-10000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -160,7 +160,7 @@ program matrix_integrate
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
         call unwgt_helicity
-        call write_event(11,ans(1,0)*sym_fac)
+        call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -250,6 +250,10 @@ contains
     weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
     val=amp2*weight
 
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    val=val*sym_fac
+    
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
 
