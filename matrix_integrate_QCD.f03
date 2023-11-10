@@ -1,12 +1,12 @@
 
-! gfortran -ffast-math -O3 -o matrix_integrate_QCD simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate_QCD.f03
+! gfortran -ffast-math -O3 -o matrix_integrate_QCD PDF/pdf.f PDF/NNPDFDriver.f simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate_QCD.f03
 
 
 module common
   use amplitude_mod
   use amplitude_QCD_mod
   implicit none
-  real*8,parameter  :: alphaS=0.12d0
+  real*8,parameter  :: alphaS=0.119d0
   integer :: next,nfin,hel_picked
 
   type(amplitude) :: amplitudes
@@ -17,7 +17,7 @@ module common
   real*8 :: amp2,weight
   real*8,dimension(:),allocatable :: amp2_hel
   real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac
+  real(kind=8),public :: jac,xbjrk(2)
   
 
   ! counting events
@@ -38,10 +38,11 @@ program matrix_integrate_QCD
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrtshat
-  logical :: t_chan
+  logical :: t_chan,include_pdf
   character(len=30) :: filename
   real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
   integer(kind=4) :: integration, nquarks
+  logical,dimension(-6:7,2) :: ipdgs=.false.
 
   call get_run_arguments()
   call create_run_tag()
@@ -72,12 +73,12 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=1000.d0
+  sqrtshat=14000.d0
 
-  pt_min=-1d0
-  DRjj_min=-1d0
-  eta_max=-1d0
-  sqrt_s_min=30d0
+  pt_min=30d0
+  DRjj_min=0.4d0
+  eta_max=6d0
+  sqrt_s_min=-1d0
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
@@ -96,9 +97,26 @@ program matrix_integrate_QCD
   !enddo
   t_chan=.false.
 
+  ! include pdfs?
+  include_pdf=.true.
+  if (include_pdf) then
+     call PDF_initialise
+     ndim=ndim+2
+     if (part(1).eq.21) then
+        ipdgs(0,1)=.true.
+     else
+        ipdgs(part(1),1)=.true.
+     endif
+     if (part(2).eq.21) then
+        ipdgs(0,2)=.true.
+     else
+        ipdgs(part(2),2)=.true.
+     endif
+  endif
+  
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
         call  haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
   endif
@@ -199,7 +217,8 @@ contains
     real*8, save :: val
     integer :: icol,iperm,jperm,ih
     integer*8 :: iden
-    real*8 :: vol
+    real*8 :: vol,xmu_fac
+    real*8, dimension(-6:7,2) :: PDF
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
     real(kind=8),dimension(2) :: ztemp
@@ -223,7 +242,7 @@ contains
         call gen23_phase_space(x)
     elseif (integration.eq.2) then
         call PS_haag(x)
-    endif
+     endif
     
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
@@ -303,6 +322,23 @@ contains
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     val=val*sym_fac
+
+    if (include_PDF) then
+       ! Include the PDFs
+       xmu_fac=91.188d0 ! factorisation scale
+       call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
+       call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+       if (part(1).eq.21) then
+          val=val*PDF(0,1)
+       else
+          val=val*PDF(part(1),1)
+       endif
+       if (part(2).eq.21) then
+          val=val*PDF(0,2)
+       else
+          val=val*PDF(part(2),2)
+       endif
+    endif
 
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore

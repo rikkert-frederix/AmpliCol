@@ -15,7 +15,7 @@ module common
   real*8 :: amp2,weight
   real*8,dimension(:),allocatable :: amp2_hel
   real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac
+  real(kind=8),public :: jac,xbjrk(2)
 !  integer(kind=4) :: integration
 
 end module common
@@ -95,7 +95,7 @@ program matrix_integrate
 
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan,.false.)
   elseif  (integration.eq.2) then
         call haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
   endif

@@ -7,14 +7,14 @@ module phase_space_gen23
   real(kind=8),dimension(:,:),allocatable :: pp
   integer(kind=4),dimension(:,:),allocatable :: sets
   real(kind=8),parameter :: pi=3.1415926535897932d0
-  logical :: t_channel
-  real(kind=8) :: sqrtshat
+  logical :: t_channel,includePDF
+  real(kind=8) :: sqrtshat,sqrts,tau,ycm
 
   ! TECHNIAL PARAMETERS
   ! vebose:
   logical,parameter :: verbose=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),parameter :: ip=-1d0
+  real(kind=8),parameter :: ip=-1d0,ip_shat=-2d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12
 
@@ -27,7 +27,7 @@ module phase_space_gen23
   
   public :: gen23_init,gen23_phase_space
 contains
-  subroutine gen23_init(sqrtsh,n,m,o,s_cut,t_chan)
+  subroutine gen23_init(sqrtsh,n,m,o,s_cut,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
     ! INPUT
@@ -55,8 +55,11 @@ contains
     ! parameter in the generate_momenta() subtroutine that allows one
     ! to choose between s-channel and t-channel.
     logical,intent(in) :: t_chan
+    ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
+    logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
     sqrtshat=sqrtsh
+    sqrts=sqrtsh
     t_channel=t_chan
     if (verbose) then
        write (*,*) 'Setting up',n,'particle phase-space'
@@ -64,9 +67,11 @@ contains
        write (*,*) 'Cut on invariants used in the phase-space generation: abs((p_i+p_j)^2) >=',s_cut
        write (*,*) 'Use the simple t-channel?',t_channel
     endif
+    includePDF=include_pdf
     call gen23_deallocate
     next=n
     ndim=3*(next-2)-4
+    if (includePDF) ndim=ndim+2 ! the two Bjorken x's
     allocate(order(next))
     allocate(invm(maskr(next)))
     allocate(invm_min(maskr(next)))
@@ -176,12 +181,43 @@ contains
     x(1:ndim)=xx(1:ndim)
     jac=1d0
     ix=0
+    if (includePDF) call generate_initial_state
     call generate_momenta
     do i=1,next
        p(0:3,i)=pp(0:3,ibset(0,i-1))
     enddo
   end subroutine gen23_phase_space
-    
+
+  subroutine generate_initial_state
+    implicit none
+    call generate_tau
+    call generate_y
+    sqrtshat=sqrt(tau)*sqrts
+    xbjrk(1)=sqrt(tau)*exp(ycm)
+    xbjrk(2)=sqrt(tau)*exp(-ycm)
+  end subroutine generate_initial_state
+
+  subroutine generate_tau
+    implicit none
+    integer :: i
+    real(kind=8) :: smin,smax,shat
+    smin=invm_min(maskr(next)-3)
+    smax=sqrts**2
+    ix=ix+1
+    call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
+    tau=shat/smax
+    jac=jac/smax
+  end subroutine generate_tau
+  
+  subroutine generate_y
+    implicit none
+    real(kind=8) ::  ymin,ymax
+    ymin= log(tau)/2d0
+    ymax=-log(tau)/2d0
+    ix=ix+1
+    call random_to_var(x(ix),0d0,ymin,ymax,ycm,jac)
+  end subroutine generate_y
+  
   subroutine generate_momenta
     implicit none
     integer(kind=4) :: i,j,inext,im1
