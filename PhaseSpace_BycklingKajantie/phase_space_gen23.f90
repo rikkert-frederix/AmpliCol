@@ -9,10 +9,11 @@ module phase_space_gen23
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: t_channel
   real(kind=8) :: sqrtshat
+  integer :: nquarks
 
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false.
+  logical,parameter :: verbose=.true.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
@@ -27,7 +28,7 @@ module phase_space_gen23
   
   public :: gen23_init,gen23_phase_space
 contains
-  subroutine gen23_init(sqrtsh,n,m,o,s_cut,t_chan)
+  subroutine gen23_init(sqrtsh,n,m,o,part,s_cut,t_chan)
     ! Phase-space initialisation routines.
     implicit none
     ! INPUT
@@ -56,6 +57,7 @@ contains
     ! to choose between s-channel and t-channel.
     logical,intent(in) :: t_chan
     integer(kind=4) :: i,j
+    integer(kind=4),dimension(n) :: part,process,temp_order,ord
     sqrtshat=sqrtsh
     t_channel=t_chan
     if (verbose) then
@@ -86,7 +88,7 @@ contains
        endif
        invm(ibset(0,i-1))=m(i)**2
     enddo
-    if (verbose) write (*,*) 'masses:',m(1:n)
+    !if (verbose) write (*,*) 'masses:',m(1:n)
     call setup_PS_cuts(s_cut)
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
@@ -98,23 +100,45 @@ contains
           exit
        endif
     enddo
+    ord=order
+    process=part
+    nquarks=0
+    do i=1,next
+       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
+           nquarks=nquarks+1
+       endif
+       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
+          process(i)=-process(i)
+       endif
+    enddo
     if (verbose) write (*,*) 'Canonical order',order
     ! Define the sets from the colour order. Set 1 contains all the
     ! particles between the first and second incoming particles. Set 2
     ! contains the particles between the second and first incoming
     ! particles.
+    call define_gen_order(next,process,o,order)
+    do i=1,next
+       if (order(i).eq.1) then
+          do j=0,next-1
+             temp_order(j+1)=order(1+mod(i+j-1,next))
+          enddo
+          exit
+       endif
+    enddo
+    temp_order=ord ! REMOVE comment for OLD
+    write(*,*) 'TEMP ORDER',temp_order
     sets=0
     i=0
     do i=2,next
-       if (order(i).eq.2) then
+       if (temp_order(i).eq.2) then
           do j=i+1,next
-             sets(0,2)=ibset(sets(0,2),order(j)-1)
+             sets(0,2)=ibset(sets(0,2),temp_order(j)-1)
           enddo
-          sets(1:i-2,1)=order(2:i-1)
-          sets(1:next-i,2)=order(i+1:next)
+          sets(1:i-2,1)=temp_order(2:i-1)
+          sets(1:next-i,2)=temp_order(i+1:next)
           exit
        endif
-       sets(0,1)=ibset(sets(0,1),order(i)-1)
+       sets(0,1)=ibset(sets(0,1),temp_order(i)-1)
     enddo
     if (verbose) then
        write (*,*) "set 1:",sets(:,1)
@@ -123,7 +147,94 @@ contains
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
     endif
+    !stop 1
   end subroutine gen23_init
+
+  subroutine define_gen_order(next,process,o,order)
+    implicit none
+    integer :: next,i,j,glu,quark,aquark
+    integer(kind=4),dimension(next) :: process,o,order
+
+    order=0
+    if (all(process.eq.21)) then
+       do i=1,next
+        if (o(i).eq.1) then
+          do j=0,next-1
+             order(j+1)=o(1+mod(i+j-1,next))
+          enddo
+          exit
+        endif
+       enddo
+    else
+      do i=1,next
+        if (process(i).ge.1.and.process(i).le.6)then
+            quark=i
+        elseif (-process(i).ge.1.and.-process(i).le.6)then
+            aquark=i
+        endif
+      enddo
+        if ((quark.le.2) .and. (aquark.le.2))then
+            order(1)=aquark
+            order(2)=quark
+            glu=0
+            do i=1,next
+               if (o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         elseif ((quark.le.2).and.(aquark.gt.2))then
+            write(*,*) 'one'
+            order(1)=quark
+            order(2)=mod(quark,2)+1
+            order(next)=aquark
+            glu=0
+            do i=1,next
+               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         elseif ((quark.gt.2).and.(aquark.le.2))then
+            write(*,*) 'two',quark,aquark
+            order(1)=aquark
+            order(2)=mod(aquark,2)+1
+            order(next)=quark
+            glu=0
+            do i=1,next
+               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         elseif ((quark.gt.2).and.(aquark.gt.2))then
+            write(*,*) 'both'
+            if (quark.lt.aquark) then
+              order(1)=2
+              order(2)=1
+              order(next-1)=aquark
+              order(next)=quark
+            else
+              order(1)=1
+              order(2)=2
+              order(next-1)=aquark
+              order(next)=quark
+            endif
+            glu=0
+            do i=1,next
+               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+            order(next-1)=quark
+            order(next)=aquark
+         endif
+    endif
+
+    order=o
+    write(*,*) 'new order',order
+  end subroutine define_gen_order
 
   subroutine setup_PS_cuts(s_cut)
     ! Given s_cut = abs((p_i+p_j)^2), fills the minimum (s-channel)
@@ -207,8 +318,8 @@ contains
 
     ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
     if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
-       if (verbose) write (*,*) 'two sets with at least two ',&
-            & 'particles',popcnt(sets(0,1)),popcnt(sets(0,2))
+       !if (verbose) write (*,*) 'two sets with at least two ',&
+       !     & 'particles',popcnt(sets(0,1)),popcnt(sets(0,2))
        if (use_t_channel_at_start) then
           call gent_one_step(set(2),set(1),1)
        else
@@ -218,22 +329,22 @@ contains
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
-       if (verbose) write (*,*) 'special double t-channel (1)'&
-            &,popcnt(sets(0,1)),popcnt(sets(0,2))
+       !if (verbose) write (*,*) 'special double t-channel (1)'&
+       !     &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call double_t(set(1),set(2),1,2)
        if (jac.le.0d0) return
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
-       if (verbose) write (*,*) 'special double t-channel (2)'&
-            &,popcnt(sets(0,1)),popcnt(sets(0,2))
+       !if (verbose) write (*,*) 'special double t-channel (2)'&
+       !     &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call double_t(set(2),set(1),1,2)
        if (jac.le.0d0) return
        pp(0:3,set(1)+1)=pp(0:3,2)-pp(0:3,set(2))
        invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
-       if (verbose) write (*,*) '2->2 scattering with one particle in each set'&
-            &,popcnt(sets(0,1)),popcnt(sets(0,2))
+       !if (verbose) write (*,*) '2->2 scattering with one particle in each set'&
+       !     &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call gens_one_step(set(2),set(1))
        if (jac.le.0d0) return
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
@@ -245,8 +356,8 @@ contains
        set(i)=set(i)-inext
        if (popcnt(set(i)).ge.2) then
           ! at least 3 particles in a set
-          if (verbose) write (*,*) 'At least 3 particles in a set',&
-               & popcnt(sets(0,i)),popcnt(sets(0,3-i))
+          !if (verbose) write (*,*) 'At least 3 particles in a set',&
+          !     & popcnt(sets(0,i)),popcnt(sets(0,3-i))
           call gent_one_step(set(i),inext,i)
           if (jac.le.0d0) return
           pp(0:3,(3-i)+set(i)+inext)=pp(0:3,i)-pp(0:3,sets(0,(3-i)))
@@ -267,9 +378,9 @@ contains
           enddo
        elseif (popcnt(set(i)).eq.1 .and. popcnt(sets(0,3-i)).ne.0) then
           ! Exactly 2 particles in a set (and the other set contains at least one)
-          if (verbose) write (*,*) 'Exactly 2 particles in a set (and ', &
-               & 'the other set contains at least one)', &
-               & popcnt(sets(0,i)),popcnt(sets(0,3-i))
+          !if (verbose) write (*,*) 'Exactly 2 particles in a set (and ', &
+          !     & 'the other set contains at least one)', &
+          !     & popcnt(sets(0,i)),popcnt(sets(0,3-i))
           im1=3-i
           pp(0:3,set(i)+inext+im1)=pp(0:3,set(i)+inext)-pp(0:3,im1)
           pp(0:3,set(i)+inext+i+im1)=pp(0:3,set(i)+inext+im1)-pp(0:3,i)
@@ -283,9 +394,9 @@ contains
           if (jac.le.0d0) return
        elseif (popcnt(set(i)).eq.1 .and. popcnt(sets(0,3-i)).eq.0) then
           ! Exactly 2 particles in a set (and the other set contains none)
-          if (verbose) write (*,*) 'Exactly 2 particles in a set (and ', &
-               & 'the other set contains none)', &
-               & popcnt(sets(0,i)),popcnt(sets(0,3-i))
+          !if (verbose) write (*,*) 'Exactly 2 particles in a set (and ', &
+          !     & 'the other set contains none)', &
+          !     & popcnt(sets(0,i)),popcnt(sets(0,3-i))
           call gent_one_step(set(i),inext,i)
           if (jac.le.0d0) return
        else
@@ -297,7 +408,7 @@ contains
        ! We need to get the momentum of the final particle of the set.
        pp(0:3,set(i))=pp(0:3,set(i)+inext+(3-i))+pp(0:3,(3-i))-pp(0:3,inext)
     enddo
-    if (verbose) call test_momenta
+    !if (verbose) call test_momenta
 
 ! Add factors of 2*pi
     jac=jac/((2d0*pi)**(3*(next-2)-4))
@@ -355,28 +466,28 @@ contains
     if (invm_min(i+ia).ne.0d0) tmin=max(tmin,invm_min(i+ia))
     if (tmin.ge.tmax) then
        jac=-1d0
-       if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       !if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(i+ia),jac)
-    if (verbose) then
-       write (*,*) 'dt- i+ia',i+ia,invm(i+ia),invm_min(i+ia),invm_max(i+ia)
-    endif
+    !if (verbose) then
+    !   write (*,*) 'dt- i+ia',i+ia,invm(i+ia),invm_min(i+ia),invm_max(i+ia)
+    !endif
     tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+invm_min(ir)
     tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
     if (invm_max(i+ib).ne.0d0) tmax=min(invm_max(i+ib),tmax)
     if (invm_min(i+ib).ne.0d0) tmin=max(tmin,invm_min(i+ib))
     if (tmin.ge.tmax) then
        jac=-2d0
-       if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       !if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(i+ib),jac)
-    if (verbose) then
-       write (*,*) 'dt- i+ib',i+ib,invm(i+ib),invm_min(i+ib),invm_max(i+ib)
-    endif
+    !if (verbose) then
+    !   write (*,*) 'dt- i+ib',i+ib,invm(i+ib),invm_min(i+ib),invm_max(i+ib)
+    !endif
     ix=ix+1
     call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
     pt2=invm(i+ia)*invm(i+ib)/invm(ia+ib)+ &
@@ -417,38 +528,38 @@ contains
     integer(kind=4),intent(in) :: im1,i,ir,ib
     real(kind=8) :: tmin,tmax,smin,smax,phi,gram4,V,sqrtGG
     call generate_masses(i,ir)
-    if (verbose) then
-       write (*,*) '23- i    ',i,invm(i)
-       write (*,*) '23- ir   ',ir,invm(ir)
-    endif
+    !if (verbose) then
+    !   write (*,*) '23- i    ',i,invm(i)
+    !   write (*,*) '23- ir   ',ir,invm(ir)
+    !endif
     if (jac.le.0d0) return
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
     if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
     if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     if (tmin.ge.tmax) then
        jac=-3d0
-       if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       !if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
-    if (verbose) then
-       write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib)
-    endif
+    !if (verbose) then
+    !   write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib)
+    !endif
     call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
          &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
     if (invm_min(i+im1).ne.0d0) smin=max(smin,invm_min(i+im1))
     if (invm_max(i+im1).ne.0d0) smax=min(smax,invm_max(i+im1))
     if (smin.ge.smax) then
        jac=-4d0
-       if (verbose) write (*,*) 'smin.ge.smax',smin,smax
+       !if (verbose) write (*,*) 'smin.ge.smax',smin,smax
        return
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,smin,smax,invm(i+im1),jac)
-    if (verbose) then
-       write (*,*) '23- i+im1',i+im1,invm(i+im1),invm_min(i+im1),invm_max(i+im1)
-    endif
+    !if (verbose) then
+    !   write (*,*) '23- i+im1',i+im1,invm(i+im1),invm_min(i+im1),invm_max(i+im1)
+    !endif
     phi=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
          &,invm(ir+i+ib),V,sqrtGG)
     call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi &
@@ -474,24 +585,24 @@ contains
     integer(kind=4),intent(in) :: i,ir,ib
     real(kind=8) :: tmin,tmax,phi
     call generate_masses(i,ir)
-    if (verbose) then
-       write (*,*) 't - i    ',i,invm(i)
-       write (*,*) 't - ir   ',ir,invm(ir)
-    endif
+    !if (verbose) then
+    !   write (*,*) 't - i    ',i,invm(i)
+    !   write (*,*) 't - ir   ',ir,invm(ir)
+    !endif
     if (jac.le.0d0) return
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
     if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
     if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     if (tmin.ge.tmax) then
        jac=-6d0
-       if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       !if (verbose) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
-    if (verbose) then
-       write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib)
-    endif
+    !if (verbose) then
+    !   write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib)
+    !endif
     ix=ix+1
     call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
     call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt(invm(i)) &
@@ -548,7 +659,7 @@ contains
           if (invm_max(j1).ne.0d0) shatmax=max(shatmax,invm_max(j1))
           if (shatmin.ge.shatmax) then
              jac=-7d0
-             if (verbose) write (*,*) 'shatmin.ge.shatmax',j,i,ir,shatmin,shatmax,invm(j2)
+             !if (verbose) write (*,*) 'shatmin.ge.shatmax',j,i,ir,shatmin,shatmax,invm(j2)
              return
           endif
           ix=ix+1

@@ -98,9 +98,10 @@ program matrix_integrate_QCD
 
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan)
   elseif  (integration.eq.2) then
-        call  haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        write(*,*) 'ORDER passed to HAAG!',o
+        call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan)
   endif
 
   call cpu_time(tAfter)
@@ -501,7 +502,10 @@ contains
             glu=glu+1
         endif
       enddo
+      write(*,*) 'end,start',end,start
+      write(*,*) ord
       if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
+        write(*,*) 'VALID ORDER!!!'
         o=ord ! the input order was a valid one, use that instead
       endif
     endif
