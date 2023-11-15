@@ -64,10 +64,8 @@ contains
     endif
     this%imode=imode
 
-    write(*,*) 'PART',part
     if (this%imode.eq.2) call define_canonical_color_order()
 
-    write(*,*) 'canonical order',order
     call check_input_consistency()
 
     if (this%imode.eq.1) then
@@ -258,7 +256,6 @@ contains
           enddo
           this%nColOrd=factorial(n-2)
        endif
-       write(*,*) 'order',order
        if (any(order(1:n).eq.0)) then
           write (*,*) 'ERROR: canonical order not found'
           stop 1

@@ -95,7 +95,7 @@ program matrix_integrate_QCD
         call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
         write(*,*) 'ORDER passed to HAAG!',o
-        call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan)
+        call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   endif
 
   call cpu_time(tAfter)

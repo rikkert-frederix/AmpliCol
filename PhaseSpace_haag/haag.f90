@@ -5,7 +5,7 @@ module haag
   real(kind=8) :: ksi_m
 
   real(kind=8),parameter,public :: s0=900d0
-  logical,public :: debug=.false.,flat=.false.,open=.false.,schannel=.false.
+  logical,public :: debug=.false.,  flat=.false.,  open=.true.,  schannel=.false.
   logical,public ::               flat_split=.false.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
@@ -17,11 +17,13 @@ module haag
   real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x
   real(kind=8),dimension(:,:),allocatable :: pp
   integer(kind=4),dimension(:,:),allocatable :: sets
-  logical :: t_channel
-  real(kind=8) :: sqrtshat
+  logical :: t_channel,includePDF
+  real(kind=8) :: sqrtshat,sqrts,tau,ycm
+  integer :: nquarks
 
-  logical,parameter :: verbose=.false.
-  real(kind=8),parameter :: ip=-1d0
+  logical,parameter :: verbose=.true.
+  logical,parameter :: exper=.false.
+  real(kind=8),parameter :: ip=-1d0,ip_shat=-2d0
   real(kind=8),parameter :: vtiny=1d-12
 
   integer(kind=4), public :: n
@@ -29,16 +31,20 @@ module haag
 
 contains
 
-  subroutine haag_init(sqrtsh,nn,m,o,s_cut,t_chan)
+  subroutine haag_init(sqrtsh,nn,m,o,part,s_cut,t_chan,include_pdf)
     implicit none
     real(kind=8),intent(in) :: sqrtsh
     integer(kind=4),intent(in) :: nn
-    integer(kind=4),dimension(nn),intent(in) :: o
+    integer(kind=4),dimension(nn),intent(in) :: o,part
+    integer(kind=4),dimension(nn) :: process,ord,temp_order
+    integer(kind=4) :: glu,end,start
     real(kind=8),intent(in) :: s_cut(2)
     real(kind=8),dimension(nn),intent(in) :: m
     logical,intent(in) :: t_chan
+    ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
+    logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
-
+    sqrts=sqrtsh
     sqrtshat=sqrtsh
     t_channel=t_chan
     if (verbose) then
@@ -47,10 +53,12 @@ contains
        write (*,*) 'Cut on invariants used in the phase-space generation: abs((p_i+p_j)^2) >=',s_cut
        write (*,*) 'Use the simple t-channel?',t_channel
     endif
+    includePDF=include_pdf
     call gen23_deallocate
     next=nn
     n=next-2
     ndim=3*(next-2)-4
+    if (includePDF) ndim=ndim+2 ! the two Bjorken x's
     allocate(order(next))
     allocate(invm(maskr(next)))
     allocate(invm_min(maskr(next)))
@@ -75,6 +83,9 @@ contains
     tot_mass=sum(masses)
     if (verbose) write (*,*) 'masses:',m(1:n)
     call setup_PS_cuts(s_cut)
+
+    write(*,*) 'order in haag',o
+
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
     do i=1,next
@@ -85,34 +96,176 @@ contains
           exit
        endif
     enddo
+    ord=order
+    process=part
+    nquarks=0
+    do i=1,next
+       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
+           nquarks=nquarks+1
+       endif
+       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
+          process(i)=-process(i)
+       endif
+    enddo
     if (verbose) write (*,*) 'Canonical order',order
     ! Define the sets from the colour order. Set 1 contains all the
     ! particles between the first and second incoming particles. Set 2
     ! contains the particles between the second and first incoming
     ! particles.
+    call define_gen_order(next,process,o,order)
+    do i=1,next
+       if (order(i).eq.1) then
+          do j=0,next-1
+             temp_order(j+1)=order(1+mod(i+j-1,next))
+          enddo
+          exit
+       endif
+    enddo
+
+    temp_order=ord ! REMOVE comment for OLD
+    write(*,*) 'TEMP ORDER',temp_order
     sets=0
     i=0
     do i=2,next
-       if (order(i).eq.2) then
+       if (temp_order(i).eq.2) then
           do j=i+1,next
-             sets(0,2)=ibset(sets(0,2),order(j)-1)
+             sets(0,2)=ibset(sets(0,2),temp_order(j)-1)
           enddo
-          sets(1:i-2,1)=order(2:i-1)
-          sets(1:next-i,2)=order(i+1:next)
+          sets(1:i-2,1)=temp_order(2:i-1)
+          sets(1:next-i,2)=temp_order(i+1:next)
           exit
        endif
-       sets(0,1)=ibset(sets(0,1),order(i)-1)
+       sets(0,1)=ibset(sets(0,1),temp_order(i)-1)
     enddo
+
+    !sets(:,2)=(/8,3,4,5,6/)
+    !sets(:,1)=(/32,0,0,0,0/)
+   
+
+    !if (exper) then
+    !   if (nquarks.eq.2) then
+    !         sets(1:next,1)=0
+    !         sets(1:next-2,2)=order(2:next-1)
+    !   endif
+    !endif
+
     if (verbose) then
        write (*,*) "set 1:",sets(:,1)
        write (*,*) "set 2:",sets(:,2)
     endif
+    !stop 1
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
     endif
   end subroutine haag_init
 
-    subroutine setup_PS_cuts(s_cut)
+  subroutine define_gen_order(next,process,o,order)
+    implicit none
+    integer :: next,i,j,glu,quark,aquark
+    integer(kind=4),dimension(next) :: process,o,order
+    integer :: in1,in2
+
+    order=0
+    if (all(process.eq.21)) then
+       do i=1,next
+        if (o(i).eq.1) then
+          do j=0,next-1
+             order(j+1)=o(1+mod(i+j-1,next))
+          enddo
+          exit
+        endif
+       enddo
+    else
+
+      do i=1,next
+        if (process(i).ge.1.and.process(i).le.6)then
+            quark=i
+        elseif (-process(i).ge.1.and.-process(i).le.6)then
+            aquark=i
+        endif
+      enddo
+        if ((quark.le.2) .and. (aquark.le.2))then
+            order(1)=aquark
+            order(2)=quark
+            glu=0
+            do i=1,next
+               if (o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         elseif ((quark.le.2).and.(aquark.gt.2))then
+            order(1)=quark
+            order(2)=mod(quark,2)+1
+            order(next)=aquark
+            glu=0
+            do i=1,next
+               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         elseif ((quark.gt.2).and.(aquark.le.2))then
+            order(1)=aquark
+            order(2)=mod(aquark,2)+1
+            order(next)=quark
+            glu=0
+            do i=1,next
+               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         elseif ((quark.gt.2).and.(aquark.gt.2))then
+            if (quark.lt.aquark) then
+              order(1)=2
+              order(2)=1
+              order(next-1)=aquark
+              order(next)=quark
+            else
+              order(1)=1
+              order(2)=2
+              order(next-1)=aquark
+              order(next)=quark
+            endif
+            glu=0
+            do i=1,next
+               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
+                  order(3+glu)=o(i)
+                  glu=glu+1
+                endif
+            enddo
+         endif
+
+         do i=1,next
+            if (o(i).eq.1) in1=i
+            if (o(i).eq.2) in2=i
+         enddo
+         if (in1.lt.in2) then
+            order(1)=2
+            order(2)=1
+         elseif (in1 .gt. in2) then
+            order(1)=1
+            order(2)=2
+         endif
+         glu=0
+         do i=1,next
+            if (o(i).eq.quark.and.o(i).gt.2) then
+               order(next-1)=quark
+            elseif (o(i).eq.aquark.and.o(i).gt.2) then
+               order(next)=aquark
+            elseif (o(i).gt.2) then
+               order(3+glu)=o(i)
+               glu=glu+1
+            endif
+         enddo
+
+    endif
+
+    order=o
+  end subroutine define_gen_order
+
+  subroutine setup_PS_cuts(s_cut)
     ! Given s_cut = abs((p_i+p_j)^2), fills the minimum (s-channel)
     ! and/or maximum (t-channel) values the invariants can be in the
     ! phase-space generation. Does not apply these cuts on invariants
@@ -180,6 +333,7 @@ contains
     x(1:ndim)=xx(1:ndim)
     jac=1d0
     ix=0
+    if (includePDF) call generate_initial_state
 
     if(.not.allocated(subperm1)) allocate(subperm1(0:next-2))
     if(.not.allocated(subperm2)) allocate(subperm2(0:next-2))
@@ -204,15 +358,24 @@ contains
     q(:,1) = qin1
     q(:,2) = qin2
 
+!    if (exper) then
+!       q(:,order(1)) = qin1
+!       q(:,order(2)) = qin2
+!    endif
+
     ! Total momentum P=p_1+p_2
-    qk(:,n) = q(:,1) + q(:,2)
+    qk(:,n) = qin1 + qin2
 
     jaco = 1d0
     soft = 1d0
 
 ! First split the antenna to two subantennae: Q_m and Q_{n-m}
-if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
+if ((mm .gt. 1).and.(n-mm .gt. 1)) then ! Do m>1 type splitting
      !write(*,*) 'do m>1 type splitting'
+     !if (nquarks.eq.2) then
+     !     write(*,*) 'ERROR: doing m>1 splitting with one quark line!'
+          !stop 1
+     !endif
      mass1=0d0
      do i=1,mm
        mass1=mass1+masses(subperm1(i))
@@ -229,24 +392,24 @@ if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
 ! Generate Q_{m} antenna
   if (mm .gt. 2) then
       call basic_antenna(q(0:3,subperm1(mm)),masses(subperm1(mm)),s_out,qk(0:3,mm-1),-1d0,&
-         jaco,soft,s_in,Qm,q(0:3,2),q(0:3,1),0,.false.,mm)
+         jaco,soft,s_in,Qm,qin2,qin1,0,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(mm))
       s_in=s_out ! Doesn't acutally do anything
   else
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),s_out,qk(0:3,1),&
-           masses(subperm1(1)),jaco,soft,s_in,Qm,q(0:3,2),q(0:3,1),0,.false.,mm)
+           masses(subperm1(1)),jaco,soft,s_in,Qm,qin2,qin1,0,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
   do i=1,mm-3
       call basic_antenna(q(0:3,subperm1(mm-i)),masses(subperm1(mm-i)),s_out,qk(0:3,mm-i-1),-1d0,&
-           jaco,soft,s_in,qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),q(0:3,1),i,.false.,mm)
+           jaco,soft,s_in,qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),qin1,i,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(mm-i))
       s_in=s_out ! Doesn't actually do anything
   enddo
   if (mm .gt. 2) then
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),s_out,qk(0:3,1),masses(subperm1(1)),&
-               jaco,soft,s_in,qk(0:3,2),q(0:3,subperm1(3)),q(0:3,1),mm-2,.false.,mm)
+               jaco,soft,s_in,qk(0:3,2),q(0:3,subperm1(3)),qin1,mm-2,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
@@ -256,46 +419,48 @@ if ((mm .gt. 1) .and. (n-mm .gt. 1)) then ! Do m>1 type splitting
   s_in=dotty(Qnm,Qnm)
   if (n-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(n-mm)),masses(subperm2(n-mm)),s_out,qk(0:3,n-1),-1d0,&
-           jaco,soft,s_in,Qnm,q(0:3,1),q(0:3,2),0,.false.,n-mm)
+           jaco,soft,s_in,Qnm,qin1,qin2,0,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(n-mm))
     s_in=s_out
   else
     call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),s_out,qk(0:3,n-1),&
-        masses(subperm2(1)),jaco,soft,s_in,Qnm,q(0:3,1),q(0:3,2),0,.false.,n-mm)
+        masses(subperm2(1)),jaco,soft,s_in,Qnm,qin1,qin2,0,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(1))
     mass_sum=mass_sum+masses(subperm2(2))
   endif
   do i=1,(n-mm)-3
     call basic_antenna(q(0:3,subperm2(n-mm-i)),masses(subperm2(n-mm-i)),s_out,qk(0:3,n-1-i),-1d0,&
-               jaco,soft,s_in,qk(0:3,n-i),q(0:3,subperm2(n-mm-i+1)),q(0:3,2),i,.false.,n-mm)
+               jaco,soft,s_in,qk(0:3,n-i),q(0:3,subperm2(n-mm-i+1)),qin2,i,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(n-mm-i))
     s_in=s_out
   enddo
   if (n-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),s_out,qk(0:3,mm+1),masses(subperm2(1)),&
-               jaco,soft,s_in,qk(0:3,mm+2),q(0:3,subperm2(3)),q(0:3,2),n-mm-2,.false.,n-mm)
+               jaco,soft,s_in,qk(0:3,mm+2),q(0:3,subperm2(3)),qin2,n-mm-2,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(2))
     mass_sum=mass_sum+masses(subperm2(1))
   endif
     q(0:3,subperm2(1)) = qk(0:3,mm+1)
 
 
-
-
 ! Do m=1 type splitting
-elseif ((mm .eq. 1) .or. (n-mm .eq. 1)) then 
+elseif (((mm .eq. 1).or.(n-mm .eq. 1))) then 
   !write(*,*) 'doing m=1 type splitting'
+  !if (nquarks.eq.2) then
+  !   write(*,*) 'ERROR: doing m=1 splitting with one quark line!'
+     !stop 1
+  !endif
   m1 = .true.
   if (mm .eq. 1) then
      subperm=subperm1
      subperm_rest=subperm2
-     q1_ref = q(0:3,2)
-     q2_ref = q(0:3,1)
+     q1_ref = qin2
+     q2_ref = qin1
   elseif (n-mm .eq. 1) then
      subperm = subperm2
      subperm_rest=subperm1
-     q1_ref = q(0:3,1)
-     q2_ref = q(0:3,2)
+     q1_ref = qin1
+     q2_ref = qin2
   endif
 
   mass_sum=0d0
@@ -368,20 +533,25 @@ else
 
        if (mm .eq. 0) then
           perm_final=subperm2
-          q1_ref = q(:,1)
-          q2_ref = q(:,2)
+          q1_ref = qin1
+          q2_ref = qin2
        elseif (n-mm .eq. 0) then
           perm_final=subperm1
-          q1_ref = q(:,2)
-          q2_ref = q(:,1)
+          q1_ref = qin2
+          q2_ref = qin1
        endif
-       s_in=dotty(q(0:3,1)+q(0:3,2),q(0:3,1)+q(0:3,2))
+
+       !write(*,*) 'perm_final',perm_final
+
+       s_in=dotty(qin1+qin2,qin1+qin2)
+
        if (n .gt. 2) then
          if (schannel) then
           mass_in = schan_ran_sorted(n-2)
          else
           mass_in = -1d0
          endif
+
          call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),s_out,qk(0:3,n-1),mass_in,&
                 jaco,soft,s_in,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
          s_in=s_out
@@ -414,15 +584,22 @@ else
      q(0:3,perm_final(1)) = qk(0:3,1)
 
 endif
- 
+
     do i=1,n+2
       p(0:3,i) = q(0:3,i)
     enddo
+
+!    if (exper) then
+!    p(0:3,2)=q(0:3,3)
+!    p(0:3,3)=q(0:3,2)
+!    endif
+
+     !write(*,*) ' '
+     !do i=1,n+2
+     ! write(*,*) p(0:3,i)
+     !enddo
+     !stop 1
         
-!    write(*,*) ' '
-!    do i=1,next
-!        write(*,*) p(0:3,i)
-!    enddo
     call check_momenta(p,masses)
 
         
@@ -437,6 +614,37 @@ endif
             stop 3
     endif
   end subroutine PS_haag
+
+  subroutine generate_initial_state
+    implicit none
+    call generate_tau
+    call generate_y
+    sqrtshat=sqrt(tau)*sqrts
+    xbjrk(1)=sqrt(tau)*exp(ycm)
+    xbjrk(2)=sqrt(tau)*exp(-ycm)
+  end subroutine generate_initial_state
+
+  subroutine generate_tau
+    implicit none
+    integer :: i
+    real(kind=8) :: smin,smax,shat
+    smin=invm_min(maskr(next)-3)
+    smax=sqrts**2
+    ix=ix+1
+    call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
+    tau=shat/smax
+    jac=jac/smax
+  end subroutine generate_tau
+
+  subroutine generate_y
+    implicit none
+    real(kind=8) ::  ymin,ymax
+    ymin= log(tau)/2d0
+    ymax=-log(tau)/2d0
+    ix=ix+1
+    call random_to_var(x(ix),0d0,ymin,ymax,ycm,jac)
+  end subroutine generate_y
+
 
   subroutine basic_antenna(p1,mass1,s_out,p2,mass2,jaco,soft,s_in,P,q1,q2,i,m1,maxn)
     implicit none
@@ -1495,7 +1703,8 @@ end function solver
        prot(3) =          -qt/qq*p(1)               +q(3)/qq*p(3)
     endif
   end subroutine rotxxx
-  
+
+
   real(kind=8) function dotty(p1,p2)
     ! Inner product between two 4-vectors
     implicit none

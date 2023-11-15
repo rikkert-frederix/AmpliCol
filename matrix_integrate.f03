@@ -75,9 +75,9 @@ program matrix_integrate
 
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan,.false.)
+        call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,.false.)
   elseif  (integration.eq.2) then
-        call  haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan,.false.)
   endif
 
   call cpu_time(tAfter)
