@@ -475,10 +475,10 @@ contains
     read(99, *) ord
     nquarks = 0
     do i=1,next
-       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
+       if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
            nquarks=nquarks+1
        endif
-       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
+       if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
           process(i)=-process(i)
        endif
     enddo
@@ -540,8 +540,44 @@ contains
        else
           sym_fac=2*factorial8(next-2)
        endif
+    elseif (nquarks.eq.2) then
+       if ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .and. &
+           (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          ! quark and anti-quark are incoming. Only 1 channel needed,
+          ! which would result in the following symmetry factor:
+          sym_fac=factorial8(next-2)
+       elseif ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .or. &
+               (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          ! one incoming quark (or anti-quark). There are ngluons
+          ! channels needed: they correspond to having the incoming
+          ! gluon at all possible positions between the quark and
+          ! anti-quark in the colour order. Hence, each channel comes
+          ! with an (ngluons-1)! symmetry factor:
+          sym_fac=factorial8(next-3)
+       else
+          ! both quark and anti-quark are final state. This is similar
+          ! to the all-gluon case above, treating the q-qbar pair as
+          ! another gluon. This special gluon is identifiable! So, for
+          ! next=6 (and assuming that the qqbar pair are particles 5
+          ! and 6) one has the following possibilities:
+          !
+          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
+          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
+          ! ic   --> 1,2,(5,6),3,4  -/
+          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
+          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
+          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
+          !
+          ! Furthermore all these can have the quark and anti-quark
+          ! order reversed, so there are in total 12 truly different
+          ! colour orders to consider.
+          !
+          ! All these come with a symmetry factor of (ngluon-2)! =
+          ! 2!. Hence we have:
+          sym_fac=factorial8(next-4)
+       endif
     else
-       write (*,*) 'WARNING: symmetry factor missing'
+       write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
     
     if (next.lt.4) then
