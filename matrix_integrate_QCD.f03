@@ -1,29 +1,5 @@
 
-! gfortran -ffast-math -O3 -o matrix_integrate_QCD simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate_QCD.f03
-
-
-module common
-  use amplitude_mod
-  use amplitude_QCD_mod
-  implicit none
-  real*8,parameter  :: alphaS=0.12d0
-  integer :: next,nfin,hel_picked
-
-  type(amplitude) :: amplitudes
-  type(amplitude_QCD)  :: amps
-
-  ! timing
-  real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
-  real*8 :: amp2,weight
-  real*8,dimension(:),allocatable :: amp2_hel
-  real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac
-  
-
-  ! counting events
-  integer(kind=4) :: passed=0
-  
-end module common
+! gfortran -ffast-math -O3 -o matrix_integrate_QCD PDF/pdf.f PDF/NNPDFDriver.f simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate_QCD.f03
 
 
 program matrix_integrate_QCD
@@ -38,10 +14,11 @@ program matrix_integrate_QCD
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrtshat
-  logical :: t_chan
+  logical :: t_chan,include_pdf
   character(len=30) :: filename
   real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
   integer(kind=4) :: integration, nquarks
+  logical,dimension(-6:7,2) :: ipdgs=.false.
 
   call get_run_arguments()
   call create_run_tag()
@@ -72,12 +49,12 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=1000.d0
+  sqrtshat=14000.d0
 
-  pt_min=-1d0
-  DRjj_min=-1d0
-  eta_max=-1d0
-  sqrt_s_min=30d0
+  pt_min=30d0
+  DRjj_min=0.4d0
+  eta_max=6d0
+  sqrt_s_min=-1d0
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
@@ -96,9 +73,26 @@ program matrix_integrate_QCD
   !enddo
   t_chan=.false.
 
+  ! include pdfs?
+  include_pdf=.true.
+  if (include_pdf) then
+     call PDF_initialise
+     ndim=ndim+2
+     if (part(1).eq.21) then
+        ipdgs(0,1)=.true.
+     else
+        ipdgs(part(1),1)=.true.
+     endif
+     if (part(2).eq.21) then
+        ipdgs(0,2)=.true.
+     else
+        ipdgs(part(2),2)=.true.
+     endif
+  endif
+  
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan)
+        call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
         write(*,*) 'ORDER passed to HAAG!',o
         call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan)
@@ -137,12 +131,6 @@ program matrix_integrate_QCD
 
 !  call amps%init_col(next,0) ! LC colour factors only
   allocate(amp2_hel(0:2**next))
-
-  if (c_o*2.eq.(next-2)) then
-     sym_fac=factorial8(next-2)
-  else
-     sym_fac=2*factorial8(next-2)
-  endif
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
@@ -180,7 +168,7 @@ program matrix_integrate_QCD
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
         call unwgt_helicity
-        call write_event(11,ans(1,0)*sym_fac)
+        call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -206,7 +194,8 @@ contains
     real*8, save :: val
     integer :: icol,iperm,jperm,ih
     integer*8 :: iden
-    real*8 :: vol
+    real*8 :: vol,xmu_fac
+    real*8, dimension(-6:7,2) :: PDF
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
     real(kind=8),dimension(2) :: ztemp
@@ -230,7 +219,7 @@ contains
         call gen23_phase_space(x)
     elseif (integration.eq.2) then
         call PS_haag(x)
-    endif
+     endif
     
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
@@ -304,9 +293,29 @@ contains
     amp2=sum(amp2_hel(1:2**next))
 
     ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
-   
     weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
     val=amp2*weight
+
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    val=val*sym_fac
+
+    if (include_PDF) then
+       ! Include the PDFs
+       xmu_fac=91.188d0 ! factorisation scale
+       call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
+       call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+       if (part(1).eq.21) then
+          val=val*PDF(0,1)
+       else
+          val=val*PDF(part(1),1)
+       endif
+       if (part(2).eq.21) then
+          val=val*PDF(0,2)
+       else
+          val=val*PDF(part(2),2)
+       endif
+    endif
 
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
@@ -467,10 +476,10 @@ contains
     read(99, *) ord
     nquarks = 0
     do i=1,next
-       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
+       if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
            nquarks=nquarks+1
        endif
-       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
+       if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
           process(i)=-process(i)
        endif
     enddo
@@ -510,6 +519,71 @@ contains
       endif
     endif
 
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    if (nquarks.eq.0) then
+       ! All gluon process. This assumes that the only channels we are
+       ! including are strictly different. We distinguish them by considering
+       ! how many (final state) gluons are attached to the two colour lines
+       ! that link the two incoming gluons. Hence, we only include
+       ! floor(next/2) channels, e.g., for next=6 we only consider:
+       ! i   --> 1,2,3,4,5,6   (0 and 4 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6   (1 and 3 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6   (2 and 2 gluons on the two lines)
+       ! And, e.g., for next=9, we only consider:
+       ! i   --> 1,2,3,4,5,6,7,8,9   (0 and 7 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6,7,8,9   (1 and 6 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6,7,8,9   (2 and 5 gluons on the two lines)
+       ! iv  --> 1,3,4,5,2,6,7,8,9   (3 and 4 gluons on the two lines)
+       ! This means that the sym_fac should be equal to the number of final
+       ! state gluon permutations, multiplied by 2 (except if we have an equal
+       ! number of gluons on both colour lines that attached the two incoming
+       ! gluons).
+       if (c_o*2.eq.(next-2)) then
+          sym_fac=factorial8(next-2)
+       else
+          sym_fac=2*factorial8(next-2)
+       endif
+    elseif (nquarks.eq.2) then
+       if ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .and. &
+           (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          ! quark and anti-quark are incoming. Only 1 channel needed,
+          ! which would result in the following symmetry factor:
+          sym_fac=factorial8(next-2)
+       elseif ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .or. &
+               (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          ! one incoming quark (or anti-quark). There are ngluons
+          ! channels needed: they correspond to having the incoming
+          ! gluon at all possible positions between the quark and
+          ! anti-quark in the colour order. Hence, each channel comes
+          ! with an (ngluons-1)! symmetry factor:
+          sym_fac=factorial8(next-3)
+       else
+          ! both quark and anti-quark are final state. This is similar
+          ! to the all-gluon case above, treating the q-qbar pair as
+          ! another gluon. This special gluon is identifiable! So, for
+          ! next=6 (and assuming that the qqbar pair are particles 5
+          ! and 6) one has the following possibilities:
+          !
+          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
+          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
+          ! ic   --> 1,2,(5,6),3,4  -/
+          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
+          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
+          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
+          !
+          ! Furthermore all these can have the quark and anti-quark
+          ! order reversed, so there are in total 12 truly different
+          ! colour orders to consider.
+          !
+          ! All these come with a symmetry factor of (ngluon-2)! =
+          ! 2!. Hence we have:
+          sym_fac=factorial8(next-4)
+       endif
+    else
+       write (*,*) 'WARNING: symmetry factor missing',nquarks
+    endif
+    
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1

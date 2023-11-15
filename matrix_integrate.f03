@@ -2,29 +2,6 @@
 ! gfortran -ffast-math -O3 -o matrix_integrate simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate.f03
 
 
-module common
-  use amplitude_mod
-  use amplitude_QCD_mod
-  implicit none
-  real*8,parameter  :: alphaS=0.12d0
-  integer :: next,nfin,hel_picked
-
-  type(amplitude) :: amplitudes
-  type(amplitude_QCD) :: amps
-
-  ! timing
-  real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
-  real*8 :: amp2,weight
-  real*8,dimension(:),allocatable :: amp2_hel
-  real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac
-  
-
-  ! counting events
-  integer(kind=4) :: passed=0
-  
-end module common
-
 
 program matrix_integrate
   use common
@@ -57,7 +34,7 @@ program matrix_integrate
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-1   ! Number of events to generate. (If negative, start
+  ncalls0=-10000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -98,7 +75,7 @@ program matrix_integrate
 
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan,.false.)
   elseif  (integration.eq.2) then
         call  haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
   endif
@@ -160,7 +137,7 @@ program matrix_integrate
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
         call unwgt_helicity
-        call write_event(11,ans(1,0)*sym_fac)
+        call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -250,6 +227,10 @@ contains
     weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
     val=amp2*weight
 
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    val=val*sym_fac
+    
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
 

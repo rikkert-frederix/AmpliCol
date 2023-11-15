@@ -2,25 +2,6 @@
 ! gfortran -ffast-math -O3 -o integrate_QCD simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f  simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90  PhaseSpace_haag/haag.f90 math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 integrate_QCD.f03
 
 
-module common
-  use amplitude_QCD_mod
-  implicit none
-  real*8,parameter  :: alphaS=0.12d0
-  integer :: next,nfin,hel_picked
-
-  type(amplitude_QCD) :: amplitudes
-
-  ! timing
-  real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
-  real*8 :: amp2,weight
-  real*8,dimension(:),allocatable :: amp2_hel
-  real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac
-!  integer(kind=4) :: integration
-
-end module common
-
-
 program matrix_integrate
   use common
   use mint_module
@@ -95,7 +76,7 @@ program matrix_integrate
 
   call cpu_time(tBefore)
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan)
+        call gen23_init(sqrtshat,next,mass,o,s_cut,t_chan,.false.)
   elseif  (integration.eq.2) then
         call haag_init(sqrtshat,next,mass,o,s_cut,t_chan)
   endif
