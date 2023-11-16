@@ -224,7 +224,11 @@ contains
     call cpu_time(tBefore)
     amp2_hel(1:nhel)=0d0
     do ih=1,nhel
-       amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
+       if (use_real_gluons .and. amps%n_qqbar.eq.0) then
+          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(amps%helmap(ih))*col_fac*amps%amps_r(amps%helmap(ih))
+       else
+          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
+       endif
     enddo
     amp2=sum(amp2_hel(1:nhel))
 

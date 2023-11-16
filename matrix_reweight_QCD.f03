@@ -1,0 +1,454 @@
+! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 matrix_reweight.f03
+
+module common
+  use amplitude_QCD_mod
+  implicit none
+  integer :: next
+  type(amplitude_QCD) :: amp_QCD
+  real(kind=8),dimension(:,:),allocatable :: p
+end module common
+module rw_events
+  implicit none
+  real(kind=8) :: wgt,evt_wgt,weight,amp2,rwgt_NLC,rwgt_full
+end module rw_events
+module timings
+  implicit none
+  real(kind=4) :: tBefore,tAfter,tTot_A=0.,tTot_B=0.,t_amp=0.,t_amp_init=0.,&
+       t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
+end module timings
+module arguments
+  implicit none
+  integer :: c_o,imode
+end module arguments
+module random_colours
+  implicit none
+  integer :: n_col
+  integer,dimension(:,:),allocatable :: n_cols,col_labels
+  integer,dimension(:,:,:),allocatable :: color_labels
+  real(kind=8) :: factor_wgt
+  real(kind=8),dimension(:),allocatable :: accum_color_probs
+end module random_colours
+
+program matrix_reweight
+  use math_functions
+  use common
+  use timings
+  implicit none
+  ! allowed reweight modes
+  ! 0 : reweight with matrix elements summed over colors
+  ! 1 : reweight with matrix elements limited to the color row used to generate the LC event
+  ! 2 : reweight with random color assignment (3**(2*n) random assignments)
+  ! 3 : same as reweight_mode=2, but with zero's cycled over
+  ! 4 : same as reweight_mode=2, but improved color assigments (e.g., making sure that the number of colors is equal to anti-colors)
+  ! 5 : same as reweight_mode=4, but with zero's cycled over)  -- this gives equivalent results to reweight_mode=3
+  ! 6 : same as reweight_mode=4, but making unlikely assigments (e.g., all the same color) more likely but with smaller weight
+  ! 7 : same as reweight_mode=6, but with zero's cycled over
+  ! 8 : pick color assignment compatible with color order used to generate the LC event, and reweight that
+  ! 9 : same as reweight_mode=8, but checking compatible colours event-by-event (requires less memory and is faster if n is large).
+  !10 : same as reweight_mode=9, but using new code to evaluate amplitudes
+  !11 : same as reweight_mode=10, but with new way of assigning random colours
+  !12 : same as reweight_mode=11, but with re-using wavefunctions
+  !13 : same as reweight_mode=11, but allows for setting number of colours
+  !14 : same as reweight_mode=11, but looping over colours
+  !15 : same as 0, but smarter summing over the colour matrix (using CSR format)
+  !16 : same as 15, but with better caching of interactions
+  !17 : same as 16, but with 4-gloun vertex replaced by two 3-vertices
+  !18 : same as 17, but using the new amplitude_QCD.f03 subroutines
+  ! ...
+  ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
+  integer,parameter :: reweight_mode=18
+  logical,parameter :: sum_hel=.false.
+  integer :: i,j,k,col_acc,icol,ih,iperm,jperm,ihel,iperm_ev,hel_picked,n_valid,irow,ic
+  integer,dimension(:),allocatable :: hel,list,list_valid_iperm,o,part
+  integer,dimension(:,:),allocatable :: list_orders
+  real(kind=8) :: amp2_LC,amp2_NLC,amp2_full
+  real(kind=8) :: amp2_hel,color_wgt,amp,amp2,amp_col
+  complex(kind=8) :: amp2_c,amp_col_c,tmp
+  real(kind=8),dimension(2) :: ievt_count
+  real(kind=8),dimension(:),allocatable :: mass
+  real(kind=8),dimension(:,:),allocatable :: icount
+  real(kind=8),external :: ran2
+  logical :: done,decompose_4vert
+
+  write (*,*) "Using reweight mode equal to",reweight_mode
+  
+  call get_run_arguments()
+
+  call cpu_time(tTot_B)
+
+  allocate(o(next))
+  allocate(hel(next))
+  allocate(mass(next))
+  allocate(p(0:3,next))
+
+
+  mass(1:next)=0d0
+  call create_run_tag_and_open_files()
+
+  ievt_count(1:2)=0d0
+
+  call cpu_time(tBefore)
+
+  if (.not.allocated(part)) allocate(part(1:next))
+  call read_event(11,done)
+  rewind(11)
+  call amp_QCD%init(2,next,part,o)
+  col_acc=1
+  call amp_QCD%init_col(next,part,o,col_acc)
+
+  call cpu_time(tAfter)
+  t_amp_init=t_amp_init+tAfter-tBefore
+
+  do 
+     call read_event(11,done)
+     if (done) exit
+     amp2_LC=0d0
+     amp2_NLC=0d0
+     amp2_full=0d0
+
+     call cpu_time(tBefore)
+     ! read helicity from event file
+     ihel=hel_picked
+     do i=1,next
+        if (btest(ihel-1,i-1)) then
+           hel(i)=1
+        else
+           hel(i)=0
+        endif
+     enddo
+     call amp_QCD%evaluate(next,p,ihel)
+     call cpu_time(tAfter)
+     t_amp=t_amp+tAfter-tBefore
+
+     call cpu_time(tBefore)
+   ! Leading color matrix elements
+     if (amp_QCD%n_qqbar.eq.0) then
+        do irow=1,factorial(next-1)
+           if (use_real_gluons) then
+              amp_col=0d0
+           else
+              amp_col_c=(0d0,0d0)
+           endif
+           do i=1,1
+              if (use_real_gluons) then
+                 amp2=0d0
+              else
+                 amp2_c=(0d0,0d0)
+              endif
+              do ic=amp_QCD%row_index_LC(irow-1,i)+1,amp_QCD%row_index_LC(irow,i)
+                 icol=amp_QCD%col_index_LC(ic,i)
+                 if (use_real_gluons) then
+                    amp2=amp2+amp_QCD%amps_r(icol)
+                 else
+                    amp2_c=amp2_c+amp_QCD%amps(icol)
+                 endif
+              enddo
+              if (use_real_gluons) then
+                 amp_col=amp_col+amp2*amp_QCD%col_value_LC(i)
+              else
+                 amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_LC(i)
+              endif
+           enddo
+           if (use_real_gluons) then
+              amp2_LC=amp2_LC+amp_col*amp_QCD%amps_r(irow)
+           else
+              amp2_LC=amp2_LC+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+           endif
+        enddo
+     else
+        do irow=1,factorial(next-2)
+           amp_col_c=(0d0,0d0)
+           do i=1,1
+              amp2_c=(0d0,0d0)
+              do ic=amp_QCD%row_index_LC(irow-1,i)+1,amp_QCD%row_index_LC(irow,i)
+                 icol=amp_QCD%col_index_LC(ic,i)
+                 amp2_c=amp2_c+amp_QCD%amps(icol)
+              enddo
+              amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_LC(i)
+           enddo
+           amp2_LC=amp2_LC+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+        enddo
+     endif
+     
+     ! Next-to-leading color matrix elements
+     call cpu_time(tBefore)
+     if (amp_QCD%n_qqbar.eq.0) then
+        do irow=1,factorial(next-1)
+           if (use_real_gluons) then
+              amp_col=0d0
+           else
+              amp_col_c=(0d0,0d0)
+           endif
+           do i=1,2   ! 1 for LC only, 2 for NLC as well
+              if (use_real_gluons) then
+                 amp2=0d0
+              else
+                 amp2_c=(0d0,0d0)
+              endif
+              do ic=amp_QCD%row_index_NLC(irow-1,i)+1,amp_QCD%row_index_NLC(irow,i)
+                 icol=amp_QCD%col_index_NLC(ic,i)
+                 if (use_real_gluons) then
+                    amp2=amp2+amp_QCD%amps_r(icol)
+                 else
+                    amp2_c=amp2_c+amp_QCD%amps(icol)
+                 endif
+              enddo
+              
+              if (use_real_gluons) then
+                 if (i.eq.1) then
+                    amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)
+                 else
+                    amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)*2
+                 endif
+              else
+                 if (i.eq.1) then
+                    amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)
+                 else
+                    amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)*2
+                 endif
+              endif
+           enddo
+           if (use_real_gluons) then
+              amp2_NLC=amp2_NLC+amp_col*amp_QCD%amps_r(irow)
+           else
+              amp2_NLC=amp2_NLC+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+           endif
+        enddo
+     else 
+        do irow=1,factorial(next-2)
+           amp_col_c=(0d0,0d0)
+           do i=1,3
+              amp2_c=(0d0,0d0)
+              do ic=amp_QCD%row_index_NLC(irow-1,i)+1,amp_QCD%row_index_NLC(irow,i)
+                 icol=amp_QCD%col_index_NLC(ic,i)
+                 amp2_c=amp2_c+amp_QCD%amps(icol)
+              enddo
+              if (i.eq.1) then
+                 amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)
+              else
+                 amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_NLC(i)*2
+              endif
+           enddo
+           amp2_NLC=amp2_NLC+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+        enddo
+     endif
+     call cpu_time(tAfter)
+     t_mat_NLC=t_mat_NLC+tAfter-tBefore
+
+     ! Full color matrix elements
+     if (col_acc.ge.2) then
+        call cpu_time(tBefore)
+        if (amp_QCD%n_qqbar.eq.0) then
+           do irow=1,factorial(next-1)
+              if (use_real_gluons) then
+                 amp_col=0d0
+              else
+                 amp_col_c=(0d0,0d0)
+              endif
+              
+              do i=1,1
+                 if (use_real_gluons) then
+                    amp2=0d0
+                 else
+                    amp2_c=(0d0,0d0)
+                 endif
+                 
+                 do ic=amp_QCD%row_index_full(irow-1,i)+1,amp_QCD%row_index_full(irow,i)
+                    icol=amp_QCD%col_index_full(ic,i)
+                    if (use_real_gluons) then
+                       amp2=amp2+amp_QCD%amps_r(icol)
+                    else
+                       amp2_c=amp2_c+amp_QCD%amps(icol)
+                    endif
+                 enddo
+                 
+                 if (use_real_gluons) then
+                    if (i.eq.1) then
+                       amp_col=amp_col+amp2*amp_QCD%col_value_full(i)
+                    else
+                       amp_col=amp_col+amp2*amp_QCD%col_value_full(i)*2
+                    endif
+                 else
+                    if (i.eq.1) then
+                       amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_full(i)
+                    else
+                       amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_full(i)*2
+                    endif
+                 endif
+              enddo
+              
+              if (use_real_gluons) then
+                 amp2_full=amp2_full+amp_col*amp_QCD%amps_r(irow)
+              else
+                 amp2_full=amp2_full+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+              endif
+           enddo
+           
+        else
+           do irow=1,factorial(next-2)
+              amp_col_c=(0d0,0d0)
+              do i=1,1
+                 amp2_c=(0d0,0d0)
+                 do ic=amp_QCD%row_index_full(irow-1,i)+1,amp_QCD%row_index_full(irow,i)
+                    icol=amp_QCD%col_index_full(ic,i)
+                    amp2_c=amp2_c+amp_QCD%amps(icol)
+                 enddo
+                 if (i.eq.1) then
+                    amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_full(i)
+                 else
+                    amp_col_c=amp_col_c+amp2_c*amp_QCD%col_value_full(i)*2
+                 endif
+              enddo
+              amp2_full=amp2_full+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+           enddo
+        endif
+        
+        call cpu_time(tAfter)
+        t_mat_full=t_mat_full+tAfter-tBefore
+     endif
+     
+     call write_event(12)
+  enddo
+
+  close(11)
+  close(12)
+  call cpu_time(tTot_a)
+  t_all=tTot_a-tTot_b
+
+  write(*,*) 'Time spent in amplitude initialisation',t_Amp_init
+  write(*,*) 'Time spent in amplitude evaluation',t_Amp
+  write(*,*) 'Time spent in squaring amplitudes (LC)',t_mat_LC
+  write(*,*) 'Time spent in squaring amplitudes (NLC)',t_mat_NLC
+  write(*,*) 'Time spent in squaring amplitudes (full)',t_mat_full
+  write(*,*) 'Time spent in picking random colors',t_ran
+  write(*,*) 'Total time:',t_all
+contains  
+  subroutine get_run_arguments()
+    use arguments
+    implicit none
+    integer :: argc
+    character(len=256) :: argv
+    ! integration steps:
+    ! imode=0  (Setting up grids)
+    ! imode=-1 (same as imode=0, but starting from existing grids)
+    ! imode=1  (computing bounding envelope)
+    ! imode=2  (event generation)
+    argc = COMMAND_ARGUMENT_COUNT()
+    if (argc.ne.3) then
+       write (*,*) 'Give number of gluons, imode and color'// &
+            ' ordering (number of gluons on first color line):'
+       read (*,*) next,imode,c_o
+    else
+       do i = 1, argc
+          CALL GET_COMMAND_ARGUMENT(i, argv)
+          if (i.eq.1) read(argv,*) next
+          if (i.eq.2) read(argv,*) imode
+          if (i.eq.3) read(argv,*) c_o
+       enddo
+    endif
+    if (next.lt.4) then
+       write (*,*) 'Not enough external particles',next
+       stop 1
+    endif
+    if (imode.ne.2) then
+       write (*,*) 'Incorrect imode',imode, ' (should be 2)'
+       stop
+    endif
+    if (c_o.lt.0 .or. c_o .gt. next-2) then
+       write (*,*) 'inconsistent color-ordering',c_o
+       stop
+    endif
+  end subroutine get_run_arguments
+
+  subroutine create_run_tag_and_open_files()
+    use arguments
+    implicit none
+    character(len=1) :: s1
+    character(len=2) :: s2
+    character(len=8) :: tag,tag_read
+    if (next.le.9) then
+       write(s1,'(i1)') next
+       tag=trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') next
+       tag=trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(s2))//'_'
+    endif
+    write(s1,'(i1)') imode
+    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+    if (imode.gt.0) write(s1,'(i1)') imode-1
+    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    if (c_o.le.9) then
+       write(s1,'(i1)') c_o
+       tag=trim(adjustl(tag))//trim(adjustl(s1))
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
+    else
+       write(s2,'(i2)') c_o
+       tag=trim(adjustl(tag))//trim(adjustl(s2))
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
+    endif
+    if (len(trim(tag_read)).lt.8) then
+       if (8-len(trim(tag)).eq.1) then
+          tag='_'//trim(adjustl(tag))
+          tag_read='_'//trim(adjustl(tag_read))
+       elseif(8-len(trim(tag)).eq.2) then
+          tag='__'//trim(adjustl(tag))
+          tag_read='__'//trim(adjustl(tag_read))
+       elseif(8-len(trim(tag)).eq.3) then
+          tag='___'//trim(adjustl(tag))
+          tag_read='___'//trim(adjustl(tag_read))
+       endif
+    endif
+    open(unit=11,file='Outputs/events'//tag//'.lhe',status='old')
+    open(unit=12,file='Outputs/events'//tag//'.lhe.rwgt',status='unknown')
+  end subroutine create_run_tag_and_open_files
+
+  subroutine read_event(iunit,done)
+    use rw_events
+    implicit none
+    integer :: i,iunit
+    logical :: done
+    character :: dummy
+    real(kind=8) :: dum
+    done=.false.
+    read (iunit,*,err=99,end=99) dummy
+    read (iunit,*,err=99,end=99) dum,hel_picked,evt_wgt,wgt,amp2,weight
+    read (iunit,*,err=99,end=99) o(1:next)
+    do i=1,next
+       read (iunit,*,err=99,end=99) part(i),p(1:3,i),p(0,i)
+    enddo
+    read (iunit,*,err=99,end=99) dummy
+    return
+99  done=.true.
+  end subroutine read_event
+
+
+  subroutine write_event(iunit)
+    use rw_events
+    implicit none
+    integer :: i,iunit
+    rwgt_NLC=amp2_NLC/amp2_LC
+    rwgt_full=amp2_full/amp2_LC
+    write (iunit,*) '<event>'
+    write (iunit,*) next,evt_wgt,wgt,amp2,weight
+    write (iunit,'(100i3)') o(1:next)
+    write (iunit,*) rwgt_full,amp2_LC,amp2_full
+    write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
+    if (sum_hel) then
+       write (iunit,'(i3)') 99
+    else
+       write (iunit,'(100i3)') hel(1:next)
+    endif
+    do i=1,next
+       if (i.le.2) then
+          write (iunit,*) part(i),p(1:3,i),p(0,i)
+       else
+          write (iunit,*) part(i),p(1:3,i),p(0,i)
+       endif
+    enddo
+    write (iunit,*) '</event>'
+  end subroutine write_event
+
+
+end program matrix_reweight

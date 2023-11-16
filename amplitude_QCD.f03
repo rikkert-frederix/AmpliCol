@@ -740,11 +740,11 @@ contains
       ! Need a new current
       this%n_cur=this%n_cur+1
   
-      if (this%imode.eq.1) then  ! temporary hack
+!!$      if (this%imode.eq.1) then  ! temporary hack
               ik = this%n_cur
-      elseif (this%imode.eq.2) then
-              ik=ic
-      endif
+!!$      elseif (this%imode.eq.2) then
+!!$              ik=ic
+!!$      endif
 
       allocate(this%current_list(ik)%order(isize))
       this%current_list(ik)%order(1:isize)=ip(1:isize)
@@ -1256,9 +1256,6 @@ contains
             enddo
          endif
       endif
-      if (use_real_gluons) then
-          this%amps = this%amps_r
-      endif
 
     end subroutine compute_amps_from_currents
     subroutine compute_momentum_current()
@@ -1354,13 +1351,13 @@ contains
     allocate(jper(1:n))
     
     if (this%n_qqbar.eq.0) then
-      nperm=factorial(n-1)
-      n_nlc = 2 ! 1 for LC, 2 for NLC
-      add = 0
+       nperm=factorial(n-1)
+       n_nlc = 2 ! 1 for LC, 2 for NLC
+       add = 0
     else
-      nperm=factorial(n-2)
-      n_nlc = 3 ! 1 for LC, 2 for +NLC, 3 for -NLC
-      add = 1
+       nperm=factorial(n-2)
+       n_nlc = 3 ! 1 for LC, 2 for +NLC, 3 for -NLC
+       add = 1
     endif
 
     if (col_acc.ge.2) allocate(this%col_value_full((n+1)/2))
@@ -1379,21 +1376,21 @@ contains
     this%row_index_LC(0,:)=0
     
     if (this%n_qqbar.eq.0) then
-    do i=1,(n+1)/2+add
-       if (col_acc.gt.2)              this%col_value_full(i)=3**(n-2*(i-1))
-       if (col_acc.ge.1 .and. i.le.2) this%col_value_NLC(i)=3**(n-2*(i-1))
-       if (i.le.1)                    this%col_value_LC(i)=3**(n-2*(i-1))
-    enddo
+       do i=1,(n+1)/2+add
+          if (col_acc.gt.2)              this%col_value_full(i)=3**(n-2*(i-1))
+          if (col_acc.ge.1 .and. i.le.2) this%col_value_NLC(i)=3**(n-2*(i-1))
+          if (i.le.1)                    this%col_value_LC(i)=3**(n-2*(i-1))
+       enddo
     elseif (this%n_qqbar.eq.1) then
-    do i=1,(n+1)/2+add
-       if (col_acc.gt.2)              this%col_value_full(i)=3**(n-1-2*(i-1))
-       if (col_acc.ge.1 .and. i.le.3) then
-          if (i.eq.1) this%col_value_NLC(i)=3**(n-1-2*(i-1))-(n-2)*3**(n-1-2*((i+1)-1))
-          if (i.eq.2) this%col_value_NLC(i)=3**(n-1-2*(i-1))   ! +NLC contributions
-          if (i.eq.3) this%col_value_NLC(i)=-3**(n-1-2*((i-1)-1))  ! -NLC contributions
-       endif
-       if (i.le.1)                    this%col_value_LC(i)=3**(n-1-2*(i-1))
-    enddo
+       do i=1,(n+1)/2+add
+          if (col_acc.gt.2)              this%col_value_full(i)=3**(n-1-2*(i-1))
+          if (col_acc.ge.1 .and. i.le.3) then
+             if (i.eq.1) this%col_value_NLC(i)=3**(n-1-2*(i-1))-(n-2)*3**(n-1-2*((i+1)-1))
+             if (i.eq.2) this%col_value_NLC(i)=3**(n-1-2*(i-1))   ! +NLC contributions
+             if (i.eq.3) this%col_value_NLC(i)=-3**(n-1-2*((i-1)-1))  ! -NLC contributions
+          endif
+          if (i.le.1) this%col_value_LC(i)=3**(n-1-2*(i-1))
+       enddo
     endif
 
     !write(*,*) 'LC',this%col_value_NLC(1)
@@ -1407,22 +1404,22 @@ contains
        nw=iperm
 
        if (this%n_qqbar.eq.0) then
-         iper(1:n)=[this%perm(1:n-1,nw),n]
+          iper(1:n)=[this%perm(1:n-1,nw),n]
        elseif (this%n_qqbar.eq.1) then
-         iper(1:n)=[order(1),this%perm(1:n-2,nw),order(n)]
+          iper(1:n)=[order(1),this%perm(1:n-2,nw),order(n)]
        endif
 
        !write(*,*) 'iper',iper
        do jperm=iperm,nperm
           nw=jperm
           if (this%n_qqbar.eq.0) then
-            jper(1:n)=[this%perm(1:n-1,nw),n]
+             jper(1:n)=[this%perm(1:n-1,nw),n]
             !write(*,*) 'jper',jper
-            call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
+             call compute_color_factor(col_acc,n,iper,jper,col_fac,.true.)
           elseif (this%n_qqbar.eq.1) then
-            jper(1:n)=[order(1),this%perm(1:n-2,nw),order(n)]
-            !write(*,*) 'jper',jper
-            call compute_color_factor(col_acc,n,iper,jper,col_fac,.false.)
+             jper(1:n)=[order(1),this%perm(1:n-2,nw),order(n)]
+             !write(*,*) 'jper',jper
+             call compute_color_factor(col_acc,n,iper,jper,col_fac,.false.)
           endif
 
           !write(*,*) 'colfac',col_fac
@@ -1522,7 +1519,7 @@ contains
             if (all(iper.eq.jper)) then
                col_fac = 3**(n-1) - (n-2) * 3**(n-3)
             else
-               call check_NLC_1qqbar(n,jper,iper,acc)
+               call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
                col_fac=acc*3**(n-3)
             endif
           endif
