@@ -43,7 +43,6 @@ program matrix_reweight
   allocate(mass(next))
   allocate(p(0:3,next))
 
-
   mass(1:next)=0d0
   call create_run_tag_and_open_files()
 
@@ -53,7 +52,7 @@ program matrix_reweight
   call read_event(11,done)
   rewind(11)
   call amp_QCD%init(2,next,part,o)
-  col_acc=1
+  col_acc=20
   call amp_QCD%init_col(next,part,o,col_acc)
 
   call cpu_time(tAfter)
@@ -153,7 +152,6 @@ program matrix_reweight
                     amp2_c=amp2_c+amp_QCD%amps(icol)
                  endif
               enddo
-              
               if (use_real_gluons) then
                  if (i.eq.1) then
                     amp_col=amp_col+amp2*amp_QCD%col_value_NLC(i)
@@ -206,7 +204,7 @@ program matrix_reweight
                  amp_col_c=(0d0,0d0)
               endif
               
-              do i=1,1
+              do i=1,(next+1)/2
                  if (use_real_gluons) then
                     amp2=0d0
                  else
@@ -247,7 +245,7 @@ program matrix_reweight
         else
            do irow=1,factorial(next-2)
               amp_col_c=(0d0,0d0)
-              do i=1,1
+              do i=1,(next+1)/2 ! fix this: there are more than (next+1)/2
                  amp2_c=(0d0,0d0)
                  do ic=amp_QCD%row_index_full(irow-1,i)+1,amp_QCD%row_index_full(irow,i)
                     icol=amp_QCD%col_index_full(ic,i)
