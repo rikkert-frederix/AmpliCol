@@ -1476,7 +1476,7 @@ contains
     enddo
 
     ! remove the one with the most entries.
-    if (col_acc.ge.2) then
+    if (col_acc.ge.2 .and. this%n_qqbar.eq.0) then
        imax=0
        max_val=0
        do i=1,(n+1)/2
@@ -1556,8 +1556,8 @@ contains
              call Tr_full_simplify(col_factor) 
              col_fac=0
              do i=n,max(n-2*col_acc,0),-1 ! do not include any Nc
-               ! contributions with negative
-               ! powers, since they must cancel.
+                                          ! contributions with negative
+                                          ! powers, since they must cancel.
                col_fac=col_fac+coef_nc(i,0)*3**i
              enddo
            elseif (this%n_qqbar.eq.1) then
