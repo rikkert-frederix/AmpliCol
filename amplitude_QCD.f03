@@ -69,14 +69,6 @@ contains
     call check_input_consistency()
 
     if (this%imode.eq.1) then
-       max_val=0d0
-       do i=1,n
-          max_order(i)=n-i+1
-       enddo
-       do j=1,n
-         max_val=max_val+int(max_order(n+1-j),kind=8)*int(n,kind=8)**int(j-1,kind=8)
-       enddo
-       max_val=max_val*2+1
        call cpu_time(tBefore)
        call set_max_cur()
        call set_max_vert()
@@ -714,37 +706,37 @@ contains
       integer(kind=8) :: val
       integer :: i,check
 
-      if (ctype.eq.21) then
-        ! gluon current
-         call get_value(ip,0,val)
-      elseif (ctype.eq.-21) then
-        ! tensor current
-         call get_value(ip,-1,val)
-      elseif (ctype.eq.1) then
-        ! quark current
-         call get_value(ip,1,val)
-      endif
-      call solve_dict(val,ic)
-      
-      if ((this%current_list(ic)%n_vert.ne.0).and.(this%current_list(ic)%type.eq.ctype)) then
-          if (all(this%current_list(ic)%order.eq.ip)) then
-          this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
-          this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
-          this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
-          return
-       endif
-      endif
+!!$      if (ctype.eq.21) then
+!!$        ! gluon current
+!!$         call get_value(ip,0,val)
+!!$      elseif (ctype.eq.-21) then
+!!$        ! tensor current
+!!$         call get_value(ip,-1,val)
+!!$      elseif (ctype.ge.1 .and. ctype.le.6) then
+!!$        ! quark current
+!!$         call get_value(ip,1,val)
+!!$      endif
+!!$      call solve_dict(val,ic)
+
+!!$      if ((this%current_list(ic)%n_vert.ne.0).and.(this%current_list(ic)%type.eq.ctype)) then
+!!$          if (all(this%current_list(ic)%order(1:isize).eq.ip)) then
+!!$          this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
+!!$          this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
+!!$          this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
+!!$          return
+!!$       endif
+!!$      endif
 
      ! Check if this interaction can be added to an existing current
-!      do i=1,this%n_cur
-!         if (ctype.ne.this%current_list(i)%type) cycle
-!         if (cur_bin.ne.this%current_list(i)%bin) cycle
-!         if (any(this%current_list(i)%order(1:isize).ne.ip(1:isize))) cycle
-!         this%current_list(i)%n_vert=this%current_list(i)%n_vert+1
-!         this%current_list(i)%vertices(this%current_list(i)%n_vert)=this%n_vert
-!         this%current_list(i)%vertex_sign(this%current_list(i)%n_vert)=vertex_sign
-!         return
-!      enddo
+      do i=1,this%n_cur
+         if (ctype.ne.this%current_list(i)%type) cycle
+         if (cur_bin.ne.this%current_list(i)%bin) cycle
+         if (any(this%current_list(i)%order(1:isize).ne.ip(1:isize))) cycle
+         this%current_list(i)%n_vert=this%current_list(i)%n_vert+1
+         this%current_list(i)%vertices(this%current_list(i)%n_vert)=this%n_vert
+         this%current_list(i)%vertex_sign(this%current_list(i)%n_vert)=vertex_sign
+         return
+      enddo
       ! Need a new current
       this%n_cur=this%n_cur+1
   
@@ -787,8 +779,8 @@ contains
       integer(kind=8),dimension(max_cur) :: temp
 
       key=0
-      factor=1
       if (imode.eq.2) then
+      factor=1
       do isize=1,n-1
          if (isize.eq.1) then
            size=n-isize+1
@@ -854,38 +846,37 @@ contains
       !stop 1
 
       elseif (imode.eq.1) then
-        do isize=1,n-1
-         if (isize.eq.1) then
-         size=n-isize+1 ! also include the external closing current in the dictionary
-         else
-         size=n-isize
-         endif
-         allocate(ips_in(1:isize))
-         do i=1,size
-            do j=1,isize
-               ips_in(j)=order(i+j-1)
-               !ips_in(j)=i+j-1 ! for standard order
-            enddo
-            !if (.not. valid_current_order(ips_in)) cycle
-            if (any(ips_in==order(1)) .and. this%n_qqbar.ge.1) then
-                 key=key+1
-                 call get_value(ips_in,1,val) ! add the quark
-                 current_dict(key)=val
+         do isize=1,n-1
+            if (isize.eq.1) then
+               size=n-isize+1 ! also include the external closing current in the dictionary
             else
-                 key=key+1
-                 call get_value(ips_in,0,val) ! add the gluon
-                 current_dict(key)=val
-                 if (isize.ne.1 .and. isize.ne.n-1 .and. decompose_4vert) then
+               size=n-isize
+            endif
+            allocate(ips_in(1:isize))
+            do i=1,size
+               do j=1,isize
+                  ips_in(j)=order(i+j-1)
+                  !ips_in(j)=i+j-1 ! for standard order
+               enddo
+               !if (.not. valid_current_order(ips_in)) cycle
+               if (any(ips_in==order(1)) .and. this%n_qqbar.ge.1) then
                   key=key+1
-                  call get_value(ips_in,-1,val) ! add the tensor
+                  call get_value(ips_in,1,val) ! add the quark
                   current_dict(key)=val
-                 endif
-             endif
+               else
+                  key=key+1
+                  call get_value(ips_in,0,val) ! add the gluon
+                  current_dict(key)=val
+                  if (isize.ne.1 .and. isize.ne.n-1) then
+                     key=key+1
+                     call get_value(ips_in,-1,val) ! add the tensor
+                     current_dict(key)=val
+                  endif
+               endif
+            enddo
+            deallocate(ips_in)
          enddo
-         deallocate(ips_in)
-        enddo
       endif
-
     end subroutine create_current_dict
 
     subroutine bubble_test(vec,len,ret_vec)
@@ -955,11 +946,15 @@ contains
       do j=1,isize
          val=val+int(ips(isize+1-j),kind=8)*int(n,kind=8)**int(j-1,kind=8)
       enddo
-      ! Take the types into account (we have only 2 types (gluon and
-      ! tensor), so multiply by two (and add one for the tensor))
-      val=val*int(2,kind=8) ! gluon
+      ! Take the types into account (we have only 3 types (gluon,
+      ! tensor and quark), so multiply by three (and add one for the
+      ! tensor and two for quark))
+      val=val*int(3,kind=8) ! gluon
       if (itype.eq.-1) then
          val=val+int(1,kind=8) ! tensor
+      endif
+      if (itype.eq.1) then
+         val=val+int(2,kind=8) ! quark
       endif
     end subroutine get_value
 

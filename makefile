@@ -17,6 +17,7 @@ feynmanrules.o amplitude_QCD.o matrix_reweight.o
 
 FC=gfortran
 FFLAGS=-ffast-math -O3
+#FFLAGS=-fbounds-check
 
 # Files for all executables
 
@@ -50,6 +51,8 @@ integrate_QCD: $(FILES_INT_QCD)
 matrix_reweight: $(FILES_M_RWGT)
 	$(FC) $(FFLAGS) -o matrix_reweight $(FILES_M_RWGT)
 
+clean:
+	rm *.o *.mod
 
 matrix_reweight.o : amplitude_real.o amplitude_QCD.o
 ranmar.o : mint_module.o
