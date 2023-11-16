@@ -34,43 +34,13 @@ program matrix_reweight
   use common
   use timings
   implicit none
-  ! allowed reweight modes
-  ! 0 : reweight with matrix elements summed over colors
-  ! 1 : reweight with matrix elements limited to the color row used to generate the LC event
-  ! 2 : reweight with random color assignment (3**(2*n) random assignments)
-  ! 3 : same as reweight_mode=2, but with zero's cycled over
-  ! 4 : same as reweight_mode=2, but improved color assigments (e.g., making sure that the number of colors is equal to anti-colors)
-  ! 5 : same as reweight_mode=4, but with zero's cycled over)  -- this gives equivalent results to reweight_mode=3
-  ! 6 : same as reweight_mode=4, but making unlikely assigments (e.g., all the same color) more likely but with smaller weight
-  ! 7 : same as reweight_mode=6, but with zero's cycled over
-  ! 8 : pick color assignment compatible with color order used to generate the LC event, and reweight that
-  ! 9 : same as reweight_mode=8, but checking compatible colours event-by-event (requires less memory and is faster if n is large).
-  !10 : same as reweight_mode=9, but using new code to evaluate amplitudes
-  !11 : same as reweight_mode=10, but with new way of assigning random colours
-  !12 : same as reweight_mode=11, but with re-using wavefunctions
-  !13 : same as reweight_mode=11, but allows for setting number of colours
-  !14 : same as reweight_mode=11, but looping over colours
-  !15 : same as 0, but smarter summing over the colour matrix (using CSR format)
-  !16 : same as 15, but with better caching of interactions
-  !17 : same as 16, but with 4-gloun vertex replaced by two 3-vertices
-  !18 : same as 17, but using the new amplitude_QCD.f03 subroutines
-  ! ...
-  ! All reweight_modes<=9 can be run for random helicity assignments, or summed over helicities
-  integer,parameter :: reweight_mode=18
-  logical,parameter :: sum_hel=.false.
-  integer :: i,j,k,col_acc,icol,ih,iperm,jperm,ihel,iperm_ev,hel_picked,n_valid,irow,ic
-  integer,dimension(:),allocatable :: hel,list,list_valid_iperm,o,part
-  integer,dimension(:,:),allocatable :: list_orders
+  integer :: i,j,col_acc,icol,ihel,hel_picked,irow,ic
+  integer,dimension(:),allocatable :: hel,o,part
   real(kind=8) :: amp2_LC,amp2_NLC,amp2_full
   real(kind=8) :: amp2_hel,color_wgt,amp,amp2,amp_col
-  complex(kind=8) :: amp2_c,amp_col_c,tmp
-  real(kind=8),dimension(2) :: ievt_count
+  complex(kind=8) :: amp2_c,amp_col_c
   real(kind=8),dimension(:),allocatable :: mass
-  real(kind=8),dimension(:,:),allocatable :: icount
-  real(kind=8),external :: ran2
-  logical :: done,decompose_4vert
-
-  write (*,*) "Using reweight mode equal to",reweight_mode
+  logical :: done
   
   call get_run_arguments()
 
@@ -84,8 +54,6 @@ program matrix_reweight
 
   mass(1:next)=0d0
   call create_run_tag_and_open_files()
-
-  ievt_count(1:2)=0d0
 
   call cpu_time(tBefore)
 
@@ -435,11 +403,7 @@ contains
     write (iunit,'(100i3)') o(1:next)
     write (iunit,*) rwgt_full,amp2_LC,amp2_full
     write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
-    if (sum_hel) then
-       write (iunit,'(i3)') 99
-    else
-       write (iunit,'(100i3)') hel(1:next)
-    endif
+    write (iunit,'(100i3)') hel(1:next)
     do i=1,next
        if (i.le.2) then
           write (iunit,*) part(i),p(1:3,i),p(0,i)
