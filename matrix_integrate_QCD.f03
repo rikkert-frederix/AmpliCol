@@ -225,9 +225,9 @@ contains
     amp2_hel(1:nhel)=0d0
     do ih=1,nhel
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
-          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(amps%helmap(ih))*col_fac*amps%amps_r(amps%helmap(ih))
+          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
        else
-          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
+          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
        endif
     enddo
     amp2=sum(amp2_hel(1:nhel))

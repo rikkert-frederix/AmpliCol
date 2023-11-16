@@ -385,6 +385,24 @@ contains
     end subroutine set_max_vert
 
     subroutine create_helicity_map()
+      ! For imode.eq.1 (summing over helicities), the
+      ! this%amps(1:nhel) array contains the helicities (in binary
+      ! format) of the external particles. That means for element
+      ! 'ihel', the helicities of the external particles are:
+      !
+      ! do i=1,next
+      !    if (btest(ihel-1,i-1)) then
+      !       hel(i)=1   <--- positive helicity
+      !    else
+      !       hel(i)=0   <--- negative helicity
+      !    endif
+      ! enddo
+      !
+      ! However, in the way the this%amps() are constructed, the
+      ! labeling is according to the colour order, i.e., in the above
+      ! loop the i's are over the colour order positions. The helmap
+      ! compensates for this, such that this%amps(this%helmap(1:nhel))
+      ! contains the order according to the external particle labels.
       implicit none
       integer :: nhel,ih
       nhel=product(this%current_list(1:n)%nhel)
@@ -1086,7 +1104,6 @@ contains
                 else
                    ih_in=ih-1
                 endif
-
                 if (this%current_list(ic)%type.eq.21) then
                    if (use_real_gluons) then
                            call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
