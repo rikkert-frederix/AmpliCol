@@ -20,14 +20,6 @@ module arguments
   implicit none
   integer :: c_o,imode
 end module arguments
-module random_colours
-  implicit none
-  integer :: n_col
-  integer,dimension(:,:),allocatable :: n_cols,col_labels
-  integer,dimension(:,:,:),allocatable :: color_labels
-  real(kind=8) :: factor_wgt
-  real(kind=8),dimension(:),allocatable :: accum_color_probs
-end module random_colours
 
 program matrix_reweight
   use math_functions
