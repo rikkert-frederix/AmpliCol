@@ -1,6 +1,6 @@
 module amplitude_QCD_mod
   implicit none
-  logical,parameter :: use_symmetry=.false.
+  logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_mom_dict=.false.
   type current
@@ -29,8 +29,11 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: col_value_LC,col_value_NLC,col_value_full
      integer,dimension(:,:),allocatable :: perm,col_index_LC,row_index_LC,col_index_NLC,row_index_NLC, &
           col_index_full,row_index_full
+     integer,dimension(:,:,:),allocatable :: row_index,col_index
+     integer,dimension(:),allocatable :: n_col_vals
+     integer,dimension(:,:),allocatable :: diff_col_vals
    contains
-     procedure :: init,evaluate,init_col
+     procedure :: init,evaluate,init_col,init_col2
   end type amplitude_QCD
 contains
   subroutine init(this,imode,n,part,order)
@@ -199,24 +202,26 @@ contains
     if (imode.eq.2) then
        nperm=this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
        if (this%n_qqbar.eq.0) then
-         allocate(this%perm(1:n-1,1:nperm*2))
-         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-           this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)        =this%current_list(nc)%order(1:n-1)
-         enddo
-         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-           this%perm(1:n-1,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:1:-1)
-         enddo
+          if (use_symmetry) then
+             allocate(this%perm(1:n-1,1:nperm*2))
+          else
+             allocate(this%perm(1:n-1,1:nperm*2))
+          endif
+          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+             this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
+          enddo
+          if (use_symmetry) then
+             do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+                this%perm(1:n-1,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:1:-1)
+             enddo
+          endif
        elseif (this%n_qqbar.eq.1) then
-         allocate(this%perm(1:n-2,1:nperm*2))
-         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-           this%perm(1:n-2,nc-this%n_cur_start(n-1)+1)        =this%current_list(nc)%order(2:n-1)
-         enddo
-         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-           this%perm(1:n-2,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:2:-1)
-         enddo
+          allocate(this%perm(1:n-2,1:nperm))
+          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+             this%perm(1:n-2,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(2:n-1)
+          enddo
        endif
     endif
-
   contains
 
     subroutine define_canonical_color_order()
@@ -708,11 +713,10 @@ contains
             min_loc=i
          endif
       enddo
-      !write(*,*) 'min_loc,max',min_loc,max_loc
-      !if (min_loc.gt.max_loc) then
-      !   valid_current_order=.false.
-      !   return
-      !endif
+      if (min_loc.gt.max_loc) then
+         valid_current_order=.false.
+         return
+      endif
       valid_current_order=.true.
     end function valid_current_order
 
@@ -1273,7 +1277,6 @@ contains
             enddo
          endif
       endif
-
     end subroutine compute_amps_from_currents
     subroutine compute_momentum_current()
       implicit none
@@ -1345,6 +1348,216 @@ contains
      
   end subroutine evaluate
 
+  subroutine init_col2(this,n,part,order,col_acc)
+    use color_algebra
+    use math_functions
+    implicit none
+    class(amplitude_qcd) :: this
+    integer :: col_acc,n
+    integer,dimension(n) :: part,order,iper,jper
+    integer :: iperm,jperm,nperm,ival,iacc
+    integer,dimension(1:3) :: n_vals
+    integer,parameter :: max_vals=100
+    real(kind=8),dimension(1:3) :: col_fac
+    real(kind=8),dimension(max_vals,1:3) :: diff_vals
+    integer,dimension(:,:),allocatable :: ic,ir
+    logical colour_flow
+    if (this%n_qqbar.eq.0) then
+       nperm=factorial(n-1)
+    else
+       nperm=factorial(n-2)
+    endif
+    if (this%n_qqbar.eq.0) then
+       colour_flow=.true.
+    elseif (this%n_qqbar.eq.1) then
+       colour_flow=.false.
+    endif
+! first check a single row in the colour matrix to determine how many
+! different colour factors there are
+    n_vals(1:3)=0
+    iperm=1
+    if (this%n_qqbar.eq.0) then
+       iper(1:n)=[this%perm(1:n-1,iperm),n]
+    elseif (this%n_qqbar.eq.1) then
+       iper(1:n)=[order(1),this%perm(1:n-2,iperm),order(n)]
+    endif
+    do jperm=iperm,nperm
+       if (this%n_qqbar.eq.0) then
+          jper(1:n)=[this%perm(1:n-1,jperm),n]
+       elseif (this%n_qqbar.eq.1) then
+          jper(1:n)=[order(1),this%perm(1:n-2,jperm),order(n)]
+       endif
+       call compute_color_factor(col_acc,n,iper,jper,col_fac,colour_flow)
+       if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+       do iacc=1,3
+          if (col_fac(iacc).eq.0d0) cycle
+          do ival=1,n_vals(iacc)
+             if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
+          enddo
+          if (ival.ge.max_vals) then
+             write (*,*) 'Too many different colour factors. Increase max_vals',&
+                  ival,n_vals(1:3),max_vals
+             stop 1
+          elseif (ival.eq.n_vals(iacc)+1) then
+             ! new colour factor
+             n_vals(iacc)=n_vals(iacc)+1
+             diff_vals(n_vals(iacc),iacc)=col_fac(iacc)
+          endif
+       enddo
+    enddo
+    write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
+         ' different colour factors at LC, NLC and full colour, respectively'
+    
+! Allocate the arrays now that we now their sizes
+    allocate(ic(1:maxval(n_vals(1:3)),1:3))
+    allocate(ir(1:maxval(n_vals(1:3)),1:3))
+    allocate(this%col_index(1:nperm**2,1:maxval(n_vals(1:3)),1:3))
+    allocate(this%row_index(0:nperm,1:maxval(n_vals(1:3)),1:3))
+    this%row_index(0,1:maxval(n_vals(1:3)),1:3)=0
+    allocate(this%n_col_vals(1:3))
+    this%n_col_vals(1:3)=n_vals(1:3)
+    allocate(this%diff_col_vals(1:maxval(n_vals(1:3)),1:3))
+    do iacc=1,3
+       this%diff_col_vals(1:n_vals(iacc),iacc)=diff_vals(1:n_vals(iacc),iacc)
+    enddo
+    
+! Compute all the colour factors and fill the col_index and row_index arrays
+    ic=0
+    ir=0
+    do iperm=1,nperm
+       if (this%n_qqbar.eq.0) then
+          iper(1:n)=[this%perm(1:n-1,iperm),n]
+       elseif (this%n_qqbar.eq.1) then
+          iper(1:n)=[order(1),this%perm(1:n-2,iperm),order(n)]
+       endif
+       do jperm=iperm,nperm ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+          if (this%n_qqbar.eq.0) then
+             jper(1:n)=[this%perm(1:n-1,jperm),n]
+          elseif (this%n_qqbar.eq.1) then
+             jper(1:n)=[order(1),this%perm(1:n-2,jperm),order(n)]
+          endif
+          call compute_color_factor(col_acc,n,iper,jper,col_fac,colour_flow)
+          if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+          do iacc=1,3
+             if (col_fac(iacc).eq.0d0) cycle
+             do ival=1,n_vals(iacc)
+                if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
+             enddo
+             ic(ival,iacc)=ic(ival,iacc)+1
+             ir(ival,iacc)=ir(ival,iacc)+1
+             this%col_index(ic(ival,iacc),ival,iacc)=jperm
+          enddo
+       enddo
+       do iacc=1,3
+          this%row_index(iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
+       enddo
+    enddo
+  contains
+    subroutine compute_color_factor(col_acc,n,iper,jper,col_fac,color_flow)
+      use color_algebra
+      implicit none
+      integer :: i,n,acc,col_acc,color_fac
+      real(kind=8),dimension(1:3) :: col_fac
+      integer,dimension(n) :: iper,jper
+      logical :: color_flow
+      real(kind=16) :: col_factor
+      if (color_flow) then
+         if (this%n_qqbar.ne.0) then
+            write (*,*) 'Can only compute color-flow colour factor for all-gluon processes'
+            stop 1
+         endif
+         col_fac=0d0
+         call color_flow_factor(n,jper,iper,color_fac)
+         if (color_fac.ge.n-2*min(col_acc,0)) then
+            col_fac(1)=dble(3**color_fac)
+         endif
+         if(color_fac.ge.n-2*min(col_acc,1)) then
+            col_fac(2)=dble(3**color_fac)
+         endif
+         if(color_fac.ge.n-2*col_acc) then
+            col_fac(3)=dble(3**color_fac)
+         endif
+      else
+         col_fac(1:3)=0d0
+         if (col_acc.ge.0) then ! LC
+            if (this%n_qqbar.eq.0) then
+               if (all(iper.eq.jper)) then
+                  col_fac(1)=dble(3**n)
+               endif
+            elseif (this%n_qqbar.eq.1) then
+               if (all(iper.eq.jper)) then
+                  col_fac(1)=dble(3**(n-1))
+               endif
+            endif
+         endif
+         if (col_acc.ge.1) then ! NLC
+            if (this%n_qqbar.eq.0) then
+               if (all(iper.eq.jper)) then
+                  col_fac(2) = dble(3**n - n * 3**(n-2))
+               else
+                  call check_NLC(n,jper,iper,acc)
+                  col_fac(2)=dble(acc*3**(n-2))
+               endif
+            elseif (this%n_qqbar.eq.1) then
+               if (all(iper.eq.jper)) then
+                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
+               else
+                  call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
+                  col_fac(2)=dble(acc*3**(n-3))
+               endif
+            endif
+         endif
+         if (col_acc.ge.2) then
+            call Tr_allocate(n)
+            if (this%n_qqbar.eq.0) then
+               Tr(0,0,0)=1 ! one term
+               Tr(0,0,1)=2 ! that term is a product of two terms
+               Tr(0,1,1)=n ! both terms in the product are a trace with next matrices
+               Tr(0,2,1)=n
+               Tr(1:n,1,1)=iper(1:n) ! the order of the matrices in each term
+               Tr(1:n,2,1)=jper(1:n)
+               call Tr_complex_conjugate(2,1) ! take the complex conjugate of the jperm term
+               coef(1)=(1d0,0d0)
+               coef_Nc(:,:)=0
+               coef_Nc(0,1)=1
+               ! compute the colour factor by simplifying the colour string
+               call Tr_full_simplify(col_factor) 
+               col_fac(3)=0d0
+!!$               do i=n,n-2*min(col_acc,n),-1 
+!!$               do i=-1,n-2*min(col_acc,n),-1 
+               do i=n,max(n-2*col_acc,0),-1  ! do not include any Nc
+                                             ! contributions with negative
+                                             ! powers, since they must cancel.
+                  if (i.ge.0) then
+                     col_fac(3)=col_fac(3)+dble(coef_nc(i,0)*3**i)
+                  else
+                     col_fac(3)=col_fac(3)+coef_nc(i,0)*3d0**i
+                  endif
+               enddo
+            elseif (this%n_qqbar.eq.1) then
+               Tr(0,0,0)=1 ! one term
+               Tr(0,0,1)=1 ! that term is single string of matrices
+               Tr(0,1,1)=2*(n-2)
+               Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
+               Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
+               coef(1)=(1d0,0d0)
+               coef_Nc(:,:)=0
+               coef_Nc(0,1)=1
+               call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+               col_fac(3)=0d0
+               do i=n,n-2*min(col_acc,n),-1
+                  if (i.ge.0) then
+                     col_fac(3)=col_fac(3)+dble(coef_nc(i,0)*3**i)
+                  else
+                     col_fac(3)=col_fac(3)+coef_nc(i,0)*3d0**i
+                  endif
+               enddo
+            endif
+            call Tr_deallocate
+         endif
+      endif
+    end subroutine compute_color_factor
+  end subroutine init_col2
 
   subroutine init_col(this,n,part,order,col_acc)
     use color_algebra

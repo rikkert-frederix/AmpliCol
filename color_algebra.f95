@@ -39,6 +39,7 @@ module color_algebra
   integer,parameter :: Nc=3
   public &
        & Tr_allocate, &         ! allocate memory for lambda matrices (and F-string)
+       & Tr_deallocate, &       ! deallocate memory for lambda matrices (and F-string)
        & Tr_full_simplify,&     ! recursively simply the lambda matrices to get colour factor
        & Tr_complex_conjugate,& ! Take the complex conjugate of a string of lambda matrices
        & Tr_print_string,&      ! Print the colour string in human readable format
@@ -56,10 +57,7 @@ contains
 ! to cover the maximum possible size in all intermediate steps.
     implicit none
     integer :: n
-    if (allocated(Tr)) deallocate(Tr)
-    if (allocated(coef)) deallocate(coef)
-    if (allocated(coef_Nc)) deallocate(coef_Nc)
-    if (allocated(F)) deallocate(F)
+    call Tr_deallocate
     allocate(coef(2**n))
     allocate(coef_Nc(-n:n,0:2**n))
     allocate(Tr(0:2*(n-1),0:n,0:2**n))
@@ -67,6 +65,14 @@ contains
     coef_Nc(:,:)=0
   end subroutine Tr_allocate
 
+  subroutine Tr_deallocate
+    implicit none
+    if (allocated(Tr)) deallocate(Tr)
+    if (allocated(coef)) deallocate(coef)
+    if (allocated(coef_Nc)) deallocate(coef_Nc)
+    if (allocated(F)) deallocate(F)
+  end subroutine Tr_deallocate
+  
   subroutine Tr_full_simplify(res)
 ! Calls Tr_simplify repeatedly until no traces left. Returns the colour
 ! factor. Note there is no fail-safe, so might go into an infinite loop if
