@@ -12,7 +12,7 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrtshat
   logical :: t_chan
-  logical,parameter :: include_pdf=.false.
+  logical,parameter :: include_pdf=.true.
   character(len=30) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs=.false.
@@ -47,6 +47,7 @@ program matrix_integrate_QCD
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
 
+  write(*,*) s_cut
   mass(1:next)=0d0
 
   ! include pdfs?
@@ -180,8 +181,7 @@ contains
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
     real(kind=8),dimension(2) :: ztemp
-    integer :: ih1, ih2
-    integer :: col_fac
+    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
