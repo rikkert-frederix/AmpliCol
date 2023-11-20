@@ -4,8 +4,8 @@ module haag
   real(kind=8),parameter :: pi=3.1415926535897932d0
   real(kind=8) :: ksi_m
 
-  real(kind=8),parameter,public :: s0=900d0
-  logical,public :: debug=.false.,  flat=.false.,  open=.true.,  schannel=.false.
+  real(kind=8),public :: s0
+  logical,public :: debug=.false.,  flat=.false.,  open=.false.,  schannel
   logical,public ::               flat_split=.false.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
@@ -27,11 +27,11 @@ module haag
   real(kind=8),parameter :: vtiny=1d-12
 
   integer(kind=4), public :: n
-  public :: haag_init,PS_haag,dotty
+  public :: haag_init,PS_haag
 
 contains
 
-  subroutine haag_init(sqrtsh,nn,m,o,part,s_cut,t_chan,include_pdf)
+  subroutine haag_init(sqrtsh,nn,m,o,part,s_cut,s_chan,include_pdf)
     implicit none
     real(kind=8),intent(in) :: sqrtsh
     integer(kind=4),intent(in) :: nn
@@ -40,23 +40,23 @@ contains
     integer(kind=4) :: glu,end,start
     real(kind=8),intent(in) :: s_cut(2)
     real(kind=8),dimension(nn),intent(in) :: m
-    logical,intent(in) :: t_chan
+    logical,intent(in) :: s_chan
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
-    sqrts=sqrtsh
     sqrtshat=sqrtsh
-    t_channel=t_chan
+    sqrts=sqrtsh
+    schannel=s_chan
     if (verbose) then
        write (*,*) 'Setting up',n,'particle phase-space'
        write (*,*) 'Total available energy, sqrt(s-hat) =',sqrtshat
        write (*,*) 'Cut on invariants used in the phase-space generation: abs((p_i+p_j)^2) >=',s_cut
-       write (*,*) 'Use the simple t-channel?',t_channel
+       write (*,*) 'Use the simple s-channel?',schannel
     endif
     includePDF=include_pdf
     call gen23_deallocate
     next=nn
-    n=next-2
+    n=nn-2
     ndim=3*(next-2)-4
     if (includePDF) ndim=ndim+2 ! the two Bjorken x's
     allocate(order(next))
@@ -84,7 +84,8 @@ contains
     if (verbose) write (*,*) 'masses:',m(1:n)
     call setup_PS_cuts(s_cut)
 
-    write(*,*) 'order in haag',o
+    s0=sqrt_s_min
+    write(*,*) 's0 cut is now:',s0
 
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
@@ -138,17 +139,6 @@ contains
        sets(0,1)=ibset(sets(0,1),temp_order(i)-1)
     enddo
 
-    !sets(:,2)=(/8,3,4,5,6/)
-    !sets(:,1)=(/32,0,0,0,0/)
-   
-
-    !if (exper) then
-    !   if (nquarks.eq.2) then
-    !         sets(1:next,1)=0
-    !         sets(1:next-2,2)=order(2:next-1)
-    !   endif
-    !endif
-
     if (verbose) then
        write (*,*) "set 1:",sets(:,1)
        write (*,*) "set 2:",sets(:,2)
@@ -164,7 +154,6 @@ contains
     integer :: next,i,j,glu,quark,aquark
     integer(kind=4),dimension(next) :: process,o,order
     integer :: in1,in2
-
     order=0
     if (all(process.eq.21)) then
        do i=1,next
@@ -176,7 +165,6 @@ contains
         endif
        enddo
     else
-
       do i=1,next
         if (process(i).ge.1.and.process(i).le.6)then
             quark=i
@@ -236,7 +224,6 @@ contains
                 endif
             enddo
          endif
-
          do i=1,next
             if (o(i).eq.1) in1=i
             if (o(i).eq.2) in2=i
@@ -259,9 +246,7 @@ contains
                glu=glu+1
             endif
          enddo
-
     endif
-
     order=o
   end subroutine define_gen_order
 
@@ -308,33 +293,40 @@ contains
     if (allocated(sets)) deallocate(sets)
   end subroutine gen23_deallocate
 
-
-
   subroutine PS_haag(xx)
+    ! Wrapper for the routine that generates the momenta.
     implicit none
-    real(kind=8),dimension(0:3,n+2) :: q, qk, qlab
     real(kind=8),dimension(99),intent(in) :: xx
+    integer(kind=4) :: i
+    x(1:ndim)=xx(1:ndim)
+    jac=1d0
+    ix=0
+    if (includePDF) call generate_initial_state
+    call generate_momenta
+    do i=1,next
+       p(0:3,i)=pp(0:3,i)
+    enddo
+  end subroutine PS_haag
+
+
+  subroutine generate_momenta
+    implicit none
+    real(kind=8),dimension(0:3,next) :: q, qk, qlab
     real(kind=8) :: jaco
     real(kind=8),dimension(0:3) :: qtot,qtotm, tot, bst, bst_back, qin1,qin2
     real(kind=8) :: costheta,phi,sintheta,dum,scale,a_sum
     integer(kind=4):: i, t,j,k,m,first,second
-    real(kind=8) :: sk, E, pz, pT, xy,kappa,Atilde,wsq,v,esum,R,s_in,s_out,min
+    real(kind=8) :: sk, E, pz, pT, xy,kappa,Atilde,wsq,v,esum,R,min
     real(kind=8),dimension(0:3) :: Qm,Qnm
     real(kind=8) :: Qz,E1,E2,s1,s2,s,Qt,soft,antenna,test,mass1,mass2,mass_in
     logical :: m1
     integer(kind=8),allocatable :: subperm1(:), subperm2(:)
     integer(kind=8),dimension(1) :: subperm
-    integer(kind=8),dimension(n-1) :: subperm_rest
-    integer(kind=8),dimension(n) :: perm_final
-    real(kind=8),dimension(n-2) :: schan_ran,schan_ran_sorted
+    integer(kind=8),dimension(next-3) :: subperm_rest
+    integer(kind=8),dimension(next-1) :: perm_final
+    real(kind=8),dimension(next-2) :: schan_ran,schan_ran_sorted
     real(kind=8),dimension(0:3) :: q1_ref,q2_ref
-
-    ix=0
-    x(1:ndim)=xx(1:ndim)
-    jac=1d0
-    ix=0
-    if (includePDF) call generate_initial_state
-
+    
     if(.not.allocated(subperm1)) allocate(subperm1(0:next-2))
     if(.not.allocated(subperm2)) allocate(subperm2(0:next-2))
     mm = 0
@@ -348,34 +340,22 @@ contains
 
     !! Initial momenta in lab frame
     qin1(0) = sqrtshat/2d0
-    qin1(1) = 0d0
-    qin1(2) = 0D0
-    qin1(3) = sqrt(qin1(0)**2-qin1(1)**2-qin1(2)**2)
+    qin1(1:2) = 0d0
+    qin1(3) = qin1(0)
     qin2(0) = sqrtshat/2d0
-    qin2(1) = 0d0
-    qin2(2) = 0d0
-    qin2(3) = -sqrt(qin2(0)**2-qin2(1)**2-qin2(2)**2)
+    qin2(1:2) = 0d0
+    qin2(3) = -qin2(0)
     q(:,1) = qin1
     q(:,2) = qin2
 
-!    if (exper) then
-!       q(:,order(1)) = qin1
-!       q(:,order(2)) = qin2
-!    endif
-
     ! Total momentum P=p_1+p_2
     qk(:,n) = qin1 + qin2
-
-    jaco = 1d0
+    jaco = 1d0 ! jacobian only for the antenna part
     soft = 1d0
 
 ! First split the antenna to two subantennae: Q_m and Q_{n-m}
 if ((mm .gt. 1).and.(n-mm .gt. 1)) then ! Do m>1 type splitting
      !write(*,*) 'do m>1 type splitting'
-     !if (nquarks.eq.2) then
-     !     write(*,*) 'ERROR: doing m>1 splitting with one quark line!'
-          !stop 1
-     !endif
      mass1=0d0
      do i=1,mm
        mass1=mass1+masses(subperm1(i))
@@ -387,56 +367,50 @@ if ((mm .gt. 1).and.(n-mm .gt. 1)) then ! Do m>1 type splitting
      call generate_split_Qm_Qnm(sqrtshat**2,mass1,mass2,mm,soft,jaco,Qm,Qnm)
 
      mass_sum=0d0
-     s_in=dotty(Qm,Qm)
 
 ! Generate Q_{m} antenna
   if (mm .gt. 2) then
-      call basic_antenna(q(0:3,subperm1(mm)),masses(subperm1(mm)),s_out,qk(0:3,mm-1),-1d0,&
-         jaco,soft,s_in,Qm,qin2,qin1,0,.false.,mm)
+      call basic_antenna(q(0:3,subperm1(mm)),masses(subperm1(mm)),qk(0:3,mm-1),-1d0,&
+         jaco,soft,Qm,qin2,qin1,0,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(mm))
-      s_in=s_out ! Doesn't acutally do anything
   else
-      call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),s_out,qk(0:3,1),&
-           masses(subperm1(1)),jaco,soft,s_in,Qm,qin2,qin1,0,.false.,mm)
+      call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),qk(0:3,1),&
+           masses(subperm1(1)),jaco,soft,Qm,qin2,qin1,0,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
   do i=1,mm-3
-      call basic_antenna(q(0:3,subperm1(mm-i)),masses(subperm1(mm-i)),s_out,qk(0:3,mm-i-1),-1d0,&
-           jaco,soft,s_in,qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),qin1,i,.false.,mm)
+      call basic_antenna(q(0:3,subperm1(mm-i)),masses(subperm1(mm-i)),qk(0:3,mm-i-1),-1d0,&
+           jaco,soft,qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),qin1,i,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(mm-i))
-      s_in=s_out ! Doesn't actually do anything
   enddo
   if (mm .gt. 2) then
-      call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),s_out,qk(0:3,1),masses(subperm1(1)),&
-               jaco,soft,s_in,qk(0:3,2),q(0:3,subperm1(3)),qin1,mm-2,.false.,mm)
+      call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),qk(0:3,1),masses(subperm1(1)),&
+               jaco,soft,qk(0:3,2),q(0:3,subperm1(3)),qin1,mm-2,.false.,mm)
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
       q(0:3,subperm1(1)) = qk(0:3,1)
 
 ! Generate Q_{n-m} antenna
-  s_in=dotty(Qnm,Qnm)
   if (n-mm .gt. 2) then
-    call basic_antenna(q(0:3,subperm2(n-mm)),masses(subperm2(n-mm)),s_out,qk(0:3,n-1),-1d0,&
-           jaco,soft,s_in,Qnm,qin1,qin2,0,.false.,n-mm)
+    call basic_antenna(q(0:3,subperm2(n-mm)),masses(subperm2(n-mm)),qk(0:3,n-1),-1d0,&
+           jaco,soft,Qnm,qin1,qin2,0,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(n-mm))
-    s_in=s_out
   else
-    call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),s_out,qk(0:3,n-1),&
-        masses(subperm2(1)),jaco,soft,s_in,Qnm,qin1,qin2,0,.false.,n-mm)
+    call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),qk(0:3,n-1),&
+        masses(subperm2(1)),jaco,soft,Qnm,qin1,qin2,0,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(1))
     mass_sum=mass_sum+masses(subperm2(2))
   endif
   do i=1,(n-mm)-3
-    call basic_antenna(q(0:3,subperm2(n-mm-i)),masses(subperm2(n-mm-i)),s_out,qk(0:3,n-1-i),-1d0,&
-               jaco,soft,s_in,qk(0:3,n-i),q(0:3,subperm2(n-mm-i+1)),qin2,i,.false.,n-mm)
+    call basic_antenna(q(0:3,subperm2(n-mm-i)),masses(subperm2(n-mm-i)),qk(0:3,n-1-i),-1d0,&
+               jaco,soft,qk(0:3,n-i),q(0:3,subperm2(n-mm-i+1)),qin2,i,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(n-mm-i))
-    s_in=s_out
   enddo
   if (n-mm .gt. 2) then
-    call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),s_out,qk(0:3,mm+1),masses(subperm2(1)),&
-               jaco,soft,s_in,qk(0:3,mm+2),q(0:3,subperm2(3)),qin2,n-mm-2,.false.,n-mm)
+    call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),qk(0:3,mm+1),masses(subperm2(1)),&
+               jaco,soft,qk(0:3,mm+2),q(0:3,subperm2(3)),qin2,n-mm-2,.false.,n-mm)
     mass_sum=mass_sum+masses(subperm2(2))
     mass_sum=mass_sum+masses(subperm2(1))
   endif
@@ -446,17 +420,13 @@ if ((mm .gt. 1).and.(n-mm .gt. 1)) then ! Do m>1 type splitting
 ! Do m=1 type splitting
 elseif (((mm .eq. 1).or.(n-mm .eq. 1))) then 
   !write(*,*) 'doing m=1 type splitting'
-  !if (nquarks.eq.2) then
-  !   write(*,*) 'ERROR: doing m=1 splitting with one quark line!'
-     !stop 1
-  !endif
   m1 = .true.
   if (mm .eq. 1) then
      subperm=subperm1
      subperm_rest=subperm2
      q1_ref = qin2
      q2_ref = qin1
-  elseif (n-mm .eq. 1) then
+  elseif (next-2-mm .eq. 1) then
      subperm = subperm2
      subperm_rest=subperm1
      q1_ref = qin1
@@ -465,48 +435,44 @@ elseif (((mm .eq. 1).or.(n-mm .eq. 1))) then
 
   mass_sum=0d0
   if (n .gt. 2) then
-     call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),s_out,qk(0:3,n-1),-1d0,&
-                  jaco,soft,s_in,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
+     call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),qk(0:3,n-1),-1d0,&
+                  jaco,soft,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
      mass_sum=mass_sum+masses(subperm(1))
   else
-     call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),s_out,qk(0:3,n-1),&
-                 masses(subperm_rest(1)),jaco,soft,s_in,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
+     call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),qk(0:3,n-1),&
+                 masses(subperm_rest(1)),jaco,soft,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
      mass_sum=mass_sum+masses(subperm(1))
      mass_sum=mass_sum+masses(subperm_rest(1))
   endif
   if (n .gt. 3) then
-       call basic_antenna(q(0:3,subperm_rest(n-1)),masses(subperm_rest(n-1)),s_out,qk(0:3,n-1-1),&
-                 -1d0,jaco,soft,s_in,qk(0:3,n-1),q2_ref,q1_ref,1,m1,n)
+       call basic_antenna(q(0:3,subperm_rest(n-1)),masses(subperm_rest(n-1)),qk(0:3,n-1-1),&
+                 -1d0,jaco,soft,qk(0:3,n-1),q2_ref,q1_ref,1,m1,n)
        mass_sum=mass_sum+masses(subperm_rest(n-1))
   elseif (n .eq. 3) then 
-       call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),s_out,qk(0:3,n-2),&
-         masses(subperm_rest(1)),jaco,soft,s_in,qk(0:3,n-1),q2_ref,q1_ref,1,.false.,n)
+       call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),qk(0:3,n-2),&
+         masses(subperm_rest(1)),jaco,soft,qk(0:3,n-1),q2_ref,q1_ref,1,.false.,n)
        mass_sum=mass_sum+masses(subperm_rest(2))
        mass_sum=mass_sum+masses(subperm_rest(1))
   endif
   do i=2,n-3
-   call basic_antenna(q(0:3,subperm_rest(n-i)),masses(subperm_rest(n-i)),s_out,qk(0:3,n-i-1),-1d0,&
-                  jaco,soft,s_in,qk(0:3,n-i),q(0:3,subperm_rest(n-i+1)),q1_ref,i,.false.,n)
+   call basic_antenna(q(0:3,subperm_rest(n-i)),masses(subperm_rest(n-i)),qk(0:3,n-i-1),-1d0,&
+                  jaco,soft,qk(0:3,n-i),q(0:3,subperm_rest(n-i+1)),q1_ref,i,.false.,n)
    mass_sum=mass_sum+masses(subperm_rest(n-i))
   enddo
   if (n .gt. 3) then
-          call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),s_out,qk(0:3,1),&
-               masses(subperm_rest(1)),jaco,soft,s_in,qk(0:3,2),&
+          call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),qk(0:3,1),&
+               masses(subperm_rest(1)),jaco,soft,qk(0:3,2),&
                q(0:3,subperm_rest(3)),q1_ref,n-2,.false.,n)
      mass_sum=mass_sum+masses(subperm_rest(2))
      mass_sum=mass_sum+masses(subperm_rest(1))
   endif
      q(0:3,subperm_rest(1)) = qk(0:3,1)
-   
-
-
 
 ! Do m=0 type splitting
 else  
-       !write(*,*) 'do m=0 type splitting'
+       !write(*,*) 'doing m=0 type splitting'
        m1 = .false.
        mass_sum=0d0
-
        if (schannel) then
        do j=1,n-2
            ix = ix +1
@@ -540,26 +506,18 @@ else
           q1_ref = qin2
           q2_ref = qin1
        endif
-
-       !write(*,*) 'perm_final',perm_final
-
-       s_in=dotty(qin1+qin2,qin1+qin2)
-
        if (n .gt. 2) then
          if (schannel) then
           mass_in = schan_ran_sorted(n-2)
          else
           mass_in = -1d0
          endif
-
-         call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),s_out,qk(0:3,n-1),mass_in,&
-                jaco,soft,s_in,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
-         s_in=s_out
+         call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),qk(0:3,n-1),mass_in,&
+                jaco,soft,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
          mass_sum=mass_sum+masses(perm_final(n))
        else
-         call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),s_out,qk(0:3,n-1),&
-               masses(perm_final(1)),jaco,soft,s_in,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
-         s_in=s_out
+         call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),qk(0:3,n-1),&
+               masses(perm_final(1)),jaco,soft,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
        mass_sum=mass_sum+masses(perm_final(n))
        endif
        do i=1,n-3
@@ -568,52 +526,40 @@ else
          else
           mass_in = -1d0
          endif
-         call basic_antenna(q(0:3,perm_final(n-i)),masses(perm_final(n-i)),s_out,qk(0:3,n-i-1),&
-               mass_in,jaco,soft,s_in,qk(0:3,n-i),q(0:3,perm_final(n-i+1)),q2_ref,i,.false.,n)
-       s_in=s_out
+         call basic_antenna(q(0:3,perm_final(n-i)),masses(perm_final(n-i)),qk(0:3,n-i-1),&
+               mass_in,jaco,soft,qk(0:3,n-i),q(0:3,perm_final(n-i+1)),q2_ref,i,.false.,n)
        mass_sum=mass_sum+masses(perm_final(n-i))
        enddo
      if (n .gt. 2) then
-        call basic_antenna(q(0:3,perm_final(2)),masses(perm_final(2)),s_out,qk(0:3,1),&
-        masses(perm_final(1)),jaco,soft,s_in,qk(0:3,2),q(0:3,perm_final(3)),q2_ref,n-2,.false.,n)
-       s_in=s_out
+        call basic_antenna(q(0:3,perm_final(2)),masses(perm_final(2)),qk(0:3,1),&
+        masses(perm_final(1)),jaco,soft,qk(0:3,2),q(0:3,perm_final(3)),q2_ref,n-2,.false.,n)
      endif
-
      mass_sum=mass_sum+masses(perm_final(2))
      mass_sum=mass_sum+masses(perm_final(1))
      q(0:3,perm_final(1)) = qk(0:3,1)
-
 endif
 
     do i=1,n+2
-      p(0:3,i) = q(0:3,i)
+      pp(0:3,i) = q(0:3,i)
     enddo
 
-!    if (exper) then
-!    p(0:3,2)=q(0:3,3)
-!    p(0:3,3)=q(0:3,2)
-!    endif
+    !write(*,*) ' '
+    !do i=1,n+2
+    !   write(*,*) pp(0:3,i)
+    !enddo
 
-     !write(*,*) ' '
-     !do i=1,n+2
-     ! write(*,*) p(0:3,i)
-     !enddo
-     !stop 1
-        
-    call check_momenta(p,masses)
-
-        
+    !call check_momenta(p,masses)
 
     ! Compute the weight (i.e. jacobian)
     ! The usual 2*pi factors for the phase-space
-    jac=jaco*soft/((2d0*pi)**(3*n-4)) !wgt
+    jac=jac*jaco*soft/((2d0*pi)**(3*n-4)) !wgt
     jac=jac/(2d0*sqrtshat**2)
     if (jac .ne. jac) then ! wgt
             write(*,*) 'error jaco: ',jaco
             write(*,*) 'error soft: ',soft
             stop 3
     endif
-  end subroutine PS_haag
+  end subroutine generate_momenta
 
   subroutine generate_initial_state
     implicit none
@@ -646,15 +592,17 @@ endif
   end subroutine generate_y
 
 
-  subroutine basic_antenna(p1,mass1,s_out,p2,mass2,jaco,soft,s_in,P,q1,q2,i,m1,maxn)
+  subroutine basic_antenna(p1,mass1,p2,mass2,jaco,soft,P,q1,q2,i,m1,maxn)
+    ! Incoming momentum: P
+    ! Reference momenta: q1,q2
+    ! Outgoing momenta: p1, p2
     implicit none
     real(kind=8),dimension(0:3),intent(in) :: P, q1,q2
     real(kind=8),dimension(0:3),intent(out) :: p1, p2
-    real(kind=8),intent(out) :: s_out
-    real(kind=8),intent(in) :: s_in
     real(kind=8),intent(inout) :: jaco,soft
     real(kind=8),intent(in) :: mass1,mass2
     real(kind=8),dimension(0:3) :: qtot,qtotm,q1_cmf,q2_cmf,p1_cmf, p2_cmf,Pm,P_cmf
+    real(kind=8),dimension(0:3) :: qmir_cmf,qmir
     real(kind=8),dimension(0:3) :: test1,test2,test_out
     real(kind=8) :: esum,dum,costheta,sintheta,phi
     real(kind=8) :: s1, s2, a1, a2, s, gs, a1max,a1min
@@ -667,22 +615,14 @@ endif
     real(kind=8) :: schan_ran
     real(kind=8) z_sign
     real(kind=8),dimension(2) :: buff,min_point1,min_point2
-    
-    ! Incoming momentum: P
-    ! Reference momenta: q1,q2
-    ! Outgoing momenta: p1, p2
-    
+     
     k = maxn - i  !!  k is the number of particles remaining to generate
     s1 = mass1 ! mass of the final state particle to be generated
-
     z_sign=sign(1d0,q2(3))
-    
-    ! Ingoing inv mass
-    s = (dotty(P,P))
-    !write(*,*) 'incoming inv mass',s
+    s = (dot(P,P)) ! Ingoing inv mass
 
     ! boost qi to CMF (P rest frame)
-    esum=dsqrt(dotty(P,P))
+    esum=dsqrt(dot(P,P))
     Pm(0)=P(0)
     Pm(1:3)=-P(1:3)
     P_cmf(0)=esum
@@ -690,7 +630,7 @@ endif
     call boostm(q1,Pm,esum,q1_cmf)
     call boostm(q2,Pm,esum,q2_cmf)
 
-    ! Split into the long (L) decomposition of the q1
+    ! Split into the long (L) decomposition of the q1 (relevant for massive)
     beta = dsqrt(threedot(q1_cmf(1:3),q1_cmf(1:3)))/q1_cmf(0) ! needed only when massive
     q1_cmf(1:3) = q1_cmf(1:3)/beta ! if massless, beta=1
     if (mass1 .eq. 0d0) then
@@ -705,7 +645,6 @@ endif
          goto 20
     else
        if (k .ge. 3) then
-         !write(*,*) 'k ge 3'
          call generate_s2(k,s,s1,s2,q1_cmf,P_cmf,soft,jaco)
        else
          s2 = mass2
@@ -721,18 +660,18 @@ endif
     sintheta = dsqrt(1D0-costheta**2)
 
     ! cuts on a1 and a2 (~h) 
-    a2cut = (k+1)*(s0/2d0)/(dotty(q2_cmf,P_cmf)) ! k or k+1 ??
+    a2cut = (k+1)*(s0/2d0)/(dot(q2_cmf,P_cmf))  ! should be (k+1) dont change! 
+    a2cut = ((k+1)*max(dsqrt(s0),pt_min)**2/2d0)/(dot(q2_cmf,P_cmf))
     h = 0.0000001d0
     if (h .gt. get_min_a2_bound(s,s1,s2,costheta)) then
         h = get_min_a2_bound(s,s1,s2,costheta)
     elseif (h .gt. a2cut) then
         h = a2cut
     endif
+    
+    a1cut = (s0/2d0)/(dot(q1_cmf,P_cmf))
+    a1cut = (max(dsqrt(s0),pt_min*DRjj_min)**2/2d0)/(dot(q1_cmf,P_cmf))
 
-    !h = get_min_a2_bound(s,s1,s2,costheta) !+0.01d0
-    
-    a1cut = (s0/2d0)/(dotty(q1_cmf,P_cmf))
-    
     ! Generate a1
     call generate_a1(i,m1,maxn,s,s1,s2,costheta,a1cut,beta,h,a1,soft,jaco)
     ! Generate a2: 
@@ -748,11 +687,14 @@ endif
     p2_cmf(0) = sqrt(s) - p1_cmf(0)
     p2_cmf(1:3) = -p1_cmf(1:3)
 
-    s_out = s2
+    qmir_cmf(0)=q2_cmf(0)
+    qmir_cmf(1:3)=-q2_cmf(0)
 
     ! Boost back to lab frame
     call boostm(p1_cmf,P,esum,p1)
     call boostm(p2_cmf,P,esum,p2)
+    qmir(0)=q2(0)
+    qmir(1:3)=-q2(0)
 
     if (jaco .ne. jaco) then
             write(*,*) 'jaco',jaco
@@ -960,9 +902,9 @@ endif
          a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
          a1max = a1max-0.00001d0
          a1min = 0.5d0*(1d0+(s1-s2)/(s)-dsqrt(kallen(1d0,s1/s,s2/s)))
-         if ((a1min .lt. (s0/2d0)/(dotty(q1_cmf,P_cmf)) ) .and.&
-              a1max .gt. (s0/2d0)/(dotty(q1_cmf,P_cmf))) then
-              a1min = (s0/2d0)/(dotty(q1_cmf,P_cmf))
+         if ((a1min .lt. (s0/2d0)/(dot(q1_cmf,P_cmf)) ) .and.&
+              a1max .gt. (s0/2d0)/(dot(q1_cmf,P_cmf))) then
+              a1min = (s0/2d0)/(dot(q1_cmf,P_cmf))
          endif
          ix = ix +1
          call random_to_var(x(ix),0d0,a1min,a1max,a1,dum)
@@ -980,12 +922,15 @@ endif
     real(kind=8),dimension(0:3) :: q1_cmf,P_cmf
     real(kind=8) :: s,s1,A,B,C,dum,R,gs
     real(kind=8) :: Lambda,Delta,Sigma,sigmak,Sigmaold,smin,smax,smax_force
+    double precision :: scut
 
     ! Include also initial momenta in the limits!
-    Lambda = mass_sum+(k-1)*(k-2)*s0/2D0
+    
+    scut=max(s0,pT_min*DRjj_min)**2
+    Lambda = mass_sum+(k-1)*(k-2)*scut/2D0
     Sigma = mass_sum    !always just a sum of particle masses
     Sigmaold = mass_sum-s1
-    Delta = s1+2d0*(k-1)*s0/2D0
+    Delta = s1+2d0*(k-1)*scut/2D0
     sigmak =  s1   !always just the previous particle mass
     ! NOTE: added extra upper limit for massive case!
     if (Delta .lt. (2d0*dsqrt(s1*s)-s1)) then
@@ -993,10 +938,17 @@ endif
     endif
     smin = Lambda
     smax = s - Delta
-    smax_force = s*(1-(s0/2d0)/dotty(q1_cmf,P_cmf))
+    smax_force = s*(1-(s0/2d0)/dot(q1_cmf,P_cmf))
     if (smax .gt. smax_force) then
         smax = smax_force
     endif
+
+    !if (pT_min.gt.0d0) then
+    !if ((s+s1-2d0*dsqrt(s)*pT_min.lt.smax).and.(s+s1-2d0*dsqrt(s)*pT_min.gt.smin)) then
+    !    smax = s+s1-2d0*dsqrt(s)*pT_min
+    !endif
+    !endif
+
     A = Sigma
     B = s - sigmak
    
@@ -1056,17 +1008,39 @@ endif
     real(kind=8) :: h1,h,a1min,a1max,f_h1,beta,dum
     real(kind=8),dimension(2) :: buff
     real(kind=8) :: Amin,Amax,Atilde,R,v,wsq,kappa
+    double precision :: low,upp,E
 
     h1 = ((1d0-beta)/(2d0*beta))*(1d0+(s1-s2)/s)
     a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
     a1min = 0.5d0*(1d0+(s1-s2)/(s)-dsqrt(kallen(1d0,s1/s,s2/s)))
-    if (a1min .lt. 0d0) then
+
+    !write(*,*) 'a1 min max',a1min,a1max
+
+    E=(s+s1-s2)/(2D0*sqrt(s))
+    !if (E.lt.pT_cut) write(*,*) 'TOO LITTLE ENERGY'
+    low = sqrt(s)/s*(E-dsqrt(E**2-pT_min**2))
+    upp = sqrt(s)/s*(E+dsqrt(E**2-pT_min**2))
+    !write(*,*) 'lower upper',low,upp
+
+    if (a1min .lt. 0d0) then ! just for numerical stability!
         a1min = 0d0
     endif
     if ((a1min .lt. a1cut ) .and.& 
         a1max .gt. a1cut) then
         a1min = a1cut
+        !write(*,*) 'setting a1 cut!'
     endif
+
+    !if (E.lt.pT_min) then
+    !if ((upp.lt.a1max).and.(upp.gt.a1min)) then
+    !   a1max=upp
+      !write(*,*) 'changed upper!'
+    !endif
+    !if ((low.lt.a1max).and.(low.gt.a1min)) then
+    !   a1min=low
+      !write(*,*) 'changed lower!'
+    !endif
+    !endif
 
     buff = f_func(-h1,cos,s,s1,s2,h)
     f_h1 = buff(2)
@@ -1077,6 +1051,7 @@ endif
     Amax= (a1max + h1 + buff(2)-f_h1) &
           /(a1max + h1 + buff(2) +f_h1)
 
+    !write(*,*) 'actual a1 cuts',a1min,a1max
     ! Now generate a1, depending on which distribution
     if ((.not. open) .and. (.not. schannel) .and. (.not. flat)) then
       if (( ((i .ne. 0) .and. (.not. m1)) .or. (maxn .ne. n))) then
@@ -1151,6 +1126,13 @@ endif
     real(kind=8) :: a2plusbar,a2minusbar,R,xy,a2plus,a2minus,dum
 
     a2pm = a2_pm(a1,s,s1,s2,cos)
+
+    if ((a2cut.lt.a2pm(1)).and.(a2cut.gt.a2pm(2)))  then
+       a2plusbar = a2cut + h
+    else
+       a2plusbar = a2pm(1) + h
+    endif
+
     a2plusbar = a2pm(1) + h
     a2minusbar = a2pm(2) + h
     a2plus = a2pm(1)
@@ -1230,12 +1212,7 @@ endif
 
   end subroutine generate_a2
 
-
-
-
-
-
-    function f_func(a1,cos,s,s1,s2,h)
+  function f_func(a1,cos,s,s1,s2,h)
     implicit none
     real(kind=8),dimension(2) :: f_func
     real(kind=8) :: beta, a1,cos,sin,s,s1,s2,b,lin_coeff,con_term,h
@@ -1244,9 +1221,9 @@ endif
     lin_coeff = -cos*beta-sin**2+sin**2*(s2-s1)/s-2d0*h*cos
     con_term = 1d0/4d0*(beta**2)+h*beta+h**2+(sin**2)*s1/s
     f_func = (/lin_coeff,dsqrt(a1**2 + lin_coeff*a1 + con_term)/)
- end function f_func
+  end function f_func
 
- function a2_pm(a1,s,s1,s2,c)
+  function a2_pm(a1,s,s1,s2,c)
     implicit none
     real(kind=8) :: comm,s1,s2,s,a1,a2plus,a2minus,c
     real(kind=8), dimension(2) :: a2_pm
@@ -1256,15 +1233,15 @@ endif
     a2minus = comm - dsqrt(1.-c**2)*dsqrt(a1*(1.-a1-(s2-s1)/s)-s1/s)
     
     a2_pm = (/a2plus,a2minus/)
-end function a2_pm
+  end function a2_pm
 
- real(kind=8) function pi_func(a1,a2,s1,s2,s,cos)
+  real(kind=8) function pi_func(a1,a2,s1,s2,s,cos)
       implicit none
       real(kind=8) :: a1,a2,s1,s2,s,cos,sin
       sin=dsqrt(1.-cos**2)
       pi_func = 4.*sin**2*((1.-a2+s2/s-s1/s)*a2 - s2/s)- &
       (1.-2.*a1-s1/s+s2/s + cos*(1.-2.*a2-s1/s+s2/s))**2
- end function pi_func
+  end function pi_func
 
   function solver(s,s1,s2,q1_cmf,q2_cmf,z_sign,a1,a2,E,P_cmf,co)
     implicit none
@@ -1305,20 +1282,26 @@ end function a2_pm
         else
              xxx = sgn*dsqrt(E**2-s1-y**2-z**2)
         endif
+
         p1 = (/E,xxx,y,z/)
         p2 = (/sqrt(s)-E,-xxx,-y,-z/)
+        !write(*,*) 'pT before rotation',dsqrt(xxx**2+y**2)
         e_cmf = dsqrt(s)/2d0
-        r1 = dotty(P_cmf,P_cmf)/(2d0*dotty(P_cmf,q1_cmf))
-        r2 = dotty(P_cmf,P_cmf)/(2d0*dotty(P_cmf,q2_cmf))
+        r1 = dot(P_cmf,P_cmf)/(2d0*dot(P_cmf,q1_cmf))
+        r2 = dot(P_cmf,P_cmf)/(2d0*dot(P_cmf,q2_cmf))
         ! q1,q2 in the frame in which p1,p2 given above
         q1_rot = (/e_cmf/r1,0d0,0d0,e_cmf/r1/)
         q2_rot_x0=(/e_cmf/r2,0d0,e_cmf/r2*dsqrt(1d0-co**2),e_cmf/r2*co/) ! temporary
         call rot_to_z(q1_cmf,q2_cmf,q2_rot,1d0)
         call rot_xy_plane(q2_rot,q2_rot,q2_rot_x0,q2_rot_x0_new,-1d0)
+
         call rot_xy_plane(p1,q2_rot,q2_rot_x0_new,p1_xy_rot,1d0)
         call rot_xy_plane(p2,q2_rot,q2_rot_x0_new,p2_xy_rot,1d0)
+        !write(*,*) 'after 1 first rot:',dsqrt(p1_xy_rot(1)**2+p1_xy_rot(2)**2)
+        !write(*,*) 'after 2 first rot:',dsqrt(p2_xy_rot(1)**2+p2_xy_rot(2)**2)
         call rot_to_z(q1_cmf,p1_xy_rot,p1_rot,-1d0)
         call rot_to_z(q1_cmf,p2_xy_rot,p2_rot,-1d0)
+        !write(*,*) 'pt after:',dsqrt(p1_rot(1)**2+p1_rot(2)**2)
     endif
     endif
 
@@ -1382,9 +1365,9 @@ end function a2_pm
     endif
     
     solver = (/p1_rot(1),p1_rot(2),p1_rot(3)/)
-end function solver
+  end function solver
 
- subroutine rot_to_z(q1,q2,q2_rot,sgnin)
+  subroutine rot_to_z(q1,q2,q2_rot,sgnin)
          implicit none
          real(kind=8),dimension(0:3) :: q1,q2
          real(kind=8),dimension(0:3),intent(out) :: q2_rot
@@ -1426,11 +1409,9 @@ end function solver
 
          q2_rot(1:3) = threedot(n,q2_s)*n + t_pz_p(1)*p + t_pz_p(2)*z ! Rotated q2
          q2_rot(0) = q2(0)
+  end subroutine rot_to_z
 
- end subroutine rot_to_z
-
-
- function a1_m1(s,s1,s2,soft,q1,P)
+  function a1_m1(s,s1,s2,soft,q1,P)
     implicit none
     real(kind=8) :: s,s1,s2,RHS
     real(kind=8),intent(inout) :: soft
@@ -1444,9 +1425,9 @@ end function solver
     a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
     a1max = a1max-0.00001d0
     a1min = 0.5d0*(1d0+(s1-s2)/(s)-dsqrt(kallen(1d0,s1/s,s2/s)))
-    if ((a1min .lt. (s0/2d0)/(dotty(q1,P)) ) .and.&
-        a1max .gt. (s0/2d0)/(dotty(q1,P))) then
-        a1min = (s0/2d0)/(dotty(q1,P))
+    if ((a1min .lt. (s0/2d0)/(dot(q1,P)) ) .and.&
+        a1max .gt. (s0/2d0)/(dot(q1,P))) then
+        a1min = (s0/2d0)/(dot(q1,P))
     endif
     g1 = (/1d0,1d0,1d0,-1d0/)
     g2 = (/1d0,-1d0,-1d0,-1d0/)
@@ -1484,11 +1465,9 @@ end function solver
     a1_m1 = (e(pick)*RHS-d(pick))/(g1(pick)- RHS*g2(pick))
     soft = soft*sum_w
     if (debug) write(*,*) 'soft added 27:',sum_w
- end function a1_m1
+  end function a1_m1
 
-
-
- function polylog(x,n)
+  function polylog(x,n)
     implicit none
     real(kind=8) :: x,polylog
     integer :: i,n
@@ -1496,7 +1475,7 @@ end function solver
     do i=1,n
       polylog = polylog + ((1d0-x)**i)/(i**2)
     enddo
- end function polylog
+  end function polylog
 
   function threecross(a,b)
        implicit none
@@ -1506,9 +1485,9 @@ end function solver
        c(2) = a(3)*b(1)-a(1)*b(3)
        c(3) = a(1)*b(2)-a(2)*b(1)
        threecross=c
- end function
+  end function
 
-       FUNCTION DDILOG(X)
+  FUNCTION DDILOG(X)
 !*
 !* $Id: imp64.inc,v 1.1.1.1 1996/04/01 15:02:59 mclareni Exp $
 !*
@@ -1589,8 +1568,7 @@ end function solver
       ENDIF
       DDILOG=H
       RETURN
-      END
-
+  END
 
   subroutine  rot_xy_plane(p,q,q_x0,p_rot,sgnin)
 !     input:
@@ -1645,22 +1623,23 @@ end function solver
 
   subroutine check_momenta(p,mass)
      implicit none
-     real(kind=8), dimension(0:3,n+2) :: p
+     real(kind=8), dimension(0:3,next) :: p
      real(kind=8), dimension(0:3) :: tot_mom
-     real(kind=8), dimension(n+2) :: mass
+     real(kind=8), dimension(next) :: mass
      integer i 
      real(kind=8) :: curr_mass
 
      tot_mom = (/0d0,0d0,0d0,0d0/)
-     do i=1,n+2
-       curr_mass = dsqrt(dotty(p(0:3,i),p(0:3,i)))
-       if (abs(curr_mass - masses(i)) .gt. 0.0001d0) then
-          write(*,*) 'ERROR in mass!',curr_mass
+     do i=1,next
+       curr_mass = dot(p(0:3,i),p(0:3,i))
+       if (abs(curr_mass - masses(i)**2) .gt. 10d0**(-9d0)) then
+          write(*,*) 'ERROR in mass!',abs(curr_mass - masses(i)**2)
+          write(*,*) abs(curr_mass - masses(i)**2) .gt. 10d0**(-9d0)
        endif
        tot_mom = tot_mom+p(:,i)
      enddo
 
-     if (abs(tot_mom(0)-2d0*sqrtshat).gt.0.0001d0) then
+     if (abs(tot_mom(0)-2d0*sqrtshat)/2d0*sqrtshat .gt.0.0001d0) then
         write(*,*) 'ERROR in energy conservation!'
      endif
      do i=1,3
@@ -1669,7 +1648,6 @@ end function solver
         endif
      enddo
   end subroutine check_momenta
-
 
   subroutine rotxxx(p,q,prot)  ! from HELAS library
 ! This subroutine performs the spacial rotation of a four-momentum.
@@ -1704,13 +1682,12 @@ end function solver
     endif
   end subroutine rotxxx
 
-
-  real(kind=8) function dotty(p1,p2)
+  real(kind=8) function dot(p1,p2)
     ! Inner product between two 4-vectors
     implicit none
     real(kind=8),intent(in),dimension(0:3) :: p1,p2
-    dotty=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
-  end function dotty
+    dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
+  end function dot
 
   real(kind=8) function threedot(p1,p2)
     ! Inner product between two 3-vectors
@@ -1718,7 +1695,6 @@ end function solver
     real(kind=8),intent(in),dimension(1:3) :: p1,p2
     threedot=p1(1)*p2(1)+p1(2)*p2(2)+p1(3)*p2(3)
   end function threedot
-
 
   subroutine boostm(p,q,m,pboost)  ! from HELAS library
 ! This subroutine performs the Lorentz boost of a four-momentum.  The

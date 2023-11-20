@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := matrix_integrate_QCD
 
 FILES_M_INT=mint_module.o MC_integer.o ranmar.o HwU.o LUPdecompose.o		\
 phase_space_gen23.o haag.o color_algebra.o math_functions.o feynmanrules.o	\

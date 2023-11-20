@@ -16,7 +16,6 @@ program matrix_integrate_QCD
   real(kind=8) :: s_cut(2),sqrtshat
   logical :: t_chan,include_pdf
   character(len=30) :: filename
-  real(kind=8) :: sqrt_s_min,pt_min,drjj_min,eta_max
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs=.false.
 
@@ -49,17 +48,19 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=14000.d0
-
-  pt_min=30d0
-  DRjj_min=0.4d0
-  eta_max=6d0
-  sqrt_s_min=-1d0
+  sqrtshat=1000.d0
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
 
   mass(1:next)=0d0
+  nfin=0
+  do i=3,next
+     if (part(i).eq.21) then
+        nfin=nfin+1
+      endif
+  enddo
+
   !do i=1,next
   !   if (i.eq.1) then
   !      o(i)=1
@@ -94,46 +95,19 @@ program matrix_integrate_QCD
   if (integration.eq.1) then
         call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
-        write(*,*) 'ORDER passed to HAAG!',o
         call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   endif
 
+
   call cpu_time(tAfter)
-
   t_PS_init=t_PS_init+tAfter-tBefore
-  
-  col_acc=0 ! Leading colour
-
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
-
-  !if (nquarks.gt.0) then
-  !  part(1)=-1
-  !  part(next)=-1
-  !  do i=2,next-1
-  !    part(i) = 21
-  !  enddo
-  !else
-  ! do i=1,next
-  !    part(i)=21
-  !  enddo
-  !endif
-
-  nfin=0
-  do i=3,next
-     if (part(i).eq.21) then
-        nfin=nfin+1
-      endif
-  enddo
-
   call amps%init(1,next,part,o)
-
-!  call amps%init_col(next,0) ! LC colour factors only
   allocate(amp2_hel(0:2**next))
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
-
 
 ! Not so relevant mint-module parameters: only used in special cases.
   fixed_order=.false.
@@ -182,7 +156,9 @@ program matrix_integrate_QCD
   write(*,*) 'Time spent in amplitude evaluation',t_Amp
   write(*,*) 'Time spent in squaring amplitudes',t_mat
   write(*,*) 'Total time:',t_all
+  write(*,*) 'Number of events:',all_evt
   write(*,*) 'Number passing cuts:',passed
+  write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
  
 contains
   function integrand(x,vol,ifirst,f1)
@@ -201,8 +177,7 @@ contains
     real(kind=8),dimension(2) :: ztemp
     integer :: ih1, ih2
     integer :: col_fac
-
-
+    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
@@ -219,11 +194,12 @@ contains
         call gen23_phase_space(x)
     elseif (integration.eq.2) then
         call PS_haag(x)
-     endif
-    
+    endif
+
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
+    all_evt=all_evt+1
     if ((jac.lt.0d0) .or. (.not.pass_cuts(next,p))) then
        pass_cuts_check=.false.
        val=0d0
@@ -280,8 +256,6 @@ contains
     else
       col_fac=3**next
     endif
-
-    !write(*,*) 'nqruarks',nquarks
 
     do ih1=1,amps%current_list(amps%n_cur)%nhel
       do ih2=1,amps%current_list(next)%nhel
