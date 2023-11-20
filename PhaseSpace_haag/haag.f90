@@ -84,7 +84,7 @@ contains
     if (verbose) write (*,*) 'masses:',m(1:n)
     call setup_PS_cuts(s_cut)
 
-    s0=sqrt_s_min
+    s0=sqrt_s_min**2
     write(*,*) 's0 cut is now:',s0
 
     ! Bring the colour order to a canonical order (first in the list
@@ -926,7 +926,7 @@ endif
 
     ! Include also initial momenta in the limits!
     
-    scut=max(s0,pT_min*DRjj_min)**2
+    scut=max(dsqrt(s0),pT_min*DRjj_min)**2
     Lambda = mass_sum+(k-1)*(k-2)*scut/2D0
     Sigma = mass_sum    !always just a sum of particle masses
     Sigmaold = mass_sum-s1
