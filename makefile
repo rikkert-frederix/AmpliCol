@@ -16,8 +16,12 @@ amplitude_QCD.o amplitude_real.o integrate_QCD.o common.o
 FILES_M_RWGT=random.o color_algebra.o amplitude_real.o math_functions.o	\
 feynmanrules.o amplitude_QCD.o matrix_reweight.o
 
+FILES_M_RWGT_QCD=random.o color_algebra.o math_functions.o	\
+feynmanrules.o amplitude_QCD.o matrix_reweight_QCD.o
+
 FC=gfortran
 FFLAGS=-ffast-math -O3
+#FFLAGS=-fbounds-check
 
 # Files for all executables
 
@@ -51,8 +55,14 @@ integrate_QCD: $(FILES_INT_QCD)
 matrix_reweight: $(FILES_M_RWGT)
 	$(FC) $(FFLAGS) -o matrix_reweight $(FILES_M_RWGT)
 
+matrix_reweight_QCD: $(FILES_M_RWGT_QCD)
+	$(FC) $(FFLAGS) -o matrix_reweight_QCD $(FILES_M_RWGT_QCD)
+
+clean:
+	rm *.o *.mod
 
 matrix_reweight.o : amplitude_real.o amplitude_QCD.o
+matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o
 ranmar.o : mint_module.o
 phase_space_gen23.o : common.o
 haag.o : common.o

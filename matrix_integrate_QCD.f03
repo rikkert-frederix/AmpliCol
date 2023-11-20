@@ -1,34 +1,28 @@
 
-! gfortran -ffast-math -O3 -o matrix_integrate_QCD PDF/pdf.f PDF/NNPDFDriver.f simple_mint/mint_module.f90 simple_mint/MC_integer.f simple_mint/ranmar.f simple_mint/HwU.f PhaseSpace_BycklingKajantie/LUPdecompose.f90 PhaseSpace_BycklingKajantie/phase_space_gen23.f90 PhaseSpace_haag/haag.f90 color_algebra.f95 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 matrix_integrate_QCD.f03
-
-
 program matrix_integrate_QCD
   use common
   use mint_module
   use phase_space_gen23
   use haag
   implicit none
-  integer :: col_acc,j,c_o,i
+  integer :: j,c_o,i
   integer(kind=8) :: sym_fac
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrtshat
-  logical :: t_chan,include_pdf
+  logical :: t_chan
+  logical,parameter :: include_pdf=.false.
   character(len=30) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs=.false.
+  integer :: col_fac,nhel
+  integer*8 :: iden
 
   call get_run_arguments()
   call create_run_tag()
 
   allocate(mass(next))
-
-!  nperm=3*2*1
-
-!  allocate(helmap(2**n,nperm))
-!  allocate(amps(nperm))
-!  allocate(col_fac(nperm,nperm))
 
   call cpu_time(tTot_B)
 
@@ -48,34 +42,14 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=1000.d0
+  sqrtshat=14000.d0
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
 
   mass(1:next)=0d0
-  nfin=0
-  do i=3,next
-     if (part(i).eq.21) then
-        nfin=nfin+1
-      endif
-  enddo
-
-  !do i=1,next
-  !   if (i.eq.1) then
-  !      o(i)=1
-  !   elseif (i.lt.2+c_o) then
-  !      o(i)=i+1
-  !   elseif (i.eq.2+c_o) then
-  !      o(i)=2
-  !   else
-  !      o(i)=i
-  !   endif
-  !enddo
-  t_chan=.false.
 
   ! include pdfs?
-  include_pdf=.true.
   if (include_pdf) then
      call PDF_initialise
      ndim=ndim+2
@@ -92,22 +66,54 @@ program matrix_integrate_QCD
   endif
   
   call cpu_time(tBefore)
+  t_chan=.false.
   if (integration.eq.1) then
-        call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
-        call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
   endif
-
-
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
+
+
+  ! colour, polarisation incoming gluons: 8, 2
+  ! colour, polarisation incoming quarks: 3, 2
+  ! identical final state particle factor (gluons): nfin_glu!
+  nfin_glu=0
+  do i=3,next
+     if (part(i).eq.21) then
+        nfin_glu=nfin_glu+1
+     endif
+  enddo
+  iden=1
+  do i=1,2
+     if (part(i).eq.21) then
+        iden=iden*8*2
+     elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+        iden=iden*3*2
+     endif
+  enddo
+  iden=iden*factorial8(nfin_glu)
+
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
   call amps%init(1,next,part,o)
-  allocate(amp2_hel(0:2**next))
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
+
+  ! Compute the leading colour factor
+  if (nquarks.eq.0) then
+     col_fac=3**next
+  elseif (nquarks.eq.2) then
+     col_fac=3**(next-1)
+  else
+     write (*,*) 'Leading colour factor not implemented'
+  endif
+
+  ! number of helicities to sum over
+  nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
+  allocate(amp2_hel(1:nhel))
 
 ! Not so relevant mint-module parameters: only used in special cases.
   fixed_order=.false.
@@ -169,7 +175,6 @@ contains
     real*8, dimension(nintegrals) :: f1
     real*8, save :: val
     integer :: icol,iperm,jperm,ih
-    integer*8 :: iden
     real*8 :: vol,xmu_fac
     real*8, dimension(-6:7,2) :: PDF
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
@@ -177,7 +182,6 @@ contains
     real(kind=8),dimension(2) :: ztemp
     integer :: ih1, ih2
     integer :: col_fac
-    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
@@ -207,73 +211,35 @@ contains
     endif
     passed = passed + 1
 
-    ! colour, polarisation incoming gluons: 8*8, 2*2
-    ! identical final state particle factor: nfin!
-
-    iden=1
-    do i=1,2
-      if (part(i).eq.21) then
-         iden=iden*8*2
-      elseif (part(i).eq.-1) then
-         iden=iden*3*2
-      endif
-    enddo
-    iden=iden* factorial8(nfin)
-
-
-
     ! compute amplitudes
     call cpu_time(tBefore)
-
-    !do iperm=1,nperm
-    !p(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-    !p(0:3,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-    !p(0:3,3)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
-    !p(0:3,4)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
-
     call amps%evaluate(next,p,0)
-
-!    write(*,*) 'amp eval',amps%amps(1)
-    !enddo
-
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
+
     call cpu_time(tBefore)
-    amp2_hel=0d0
-
-!    do icol=1,amplitudes%colmap(0,0)
-!       iperm=amplitudes%colmap(1,icol)
-!       jperm=amplitudes%colmap(2,icol)
-!       do ih=0,amplitudes%nhel(amplitudes%isize+1)-1
-!          amp2_hel(ih)=amp2_hel(ih)+amplitudes%amps(amplitudes%helmap(iperm,ih),iperm)* &
-!               amplitudes%colmap(0,icol)* &
-!               amplitudes%amps(amplitudes%helmap(jperm,ih),jperm)
-!       enddo
-!    enddo
- 
-    if (nquarks .gt.0) then
-      col_fac = 3**(next-1)
-    else
-      col_fac=3**next
-    endif
-
-    do ih1=1,amps%current_list(amps%n_cur)%nhel
-      do ih2=1,amps%current_list(next)%nhel
-        ih=(ih2-1)*amps%current_list(amps%n_cur)%nhel+ih1
-        amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(amps%helmap(ih))*col_fac*dconjg(amps%amps(amps%helmap(ih))))
-        !write(*,*) col_fac
-      enddo
+    amp2_hel(1:nhel)=0d0
+    do ih=1,nhel
+       if (use_real_gluons .and. amps%n_qqbar.eq.0) then
+          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
+       else
+          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
+       endif
     enddo
-    amp2=sum(amp2_hel(1:2**next))
+    amp2=sum(amp2_hel(1:nhel))
 
     ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
-    weight=vol*jac*(4*pi*alphas)**nfin/dble(iden)*conv
+    weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     val=val*sym_fac
 
+    call cpu_time(tAfter)
+    t_mat=t_mat+tAfter-tBefore
+
+    
     if (include_PDF) then
        ! Include the PDFs
        xmu_fac=91.188d0 ! factorisation scale
@@ -290,9 +256,6 @@ contains
           val=val*PDF(part(2),2)
        endif
     endif
-
-    call cpu_time(tAfter)
-    t_mat=t_mat+tAfter-tBefore
 
     ! pass the result to the mint module
     f1(1)=abs(val)
@@ -404,7 +367,7 @@ contains
     real*8 :: random
     real*8,external :: ran2
     random=ran2()*amp2
-    i=0
+    i=1
     do
        if (amp2_hel(i).gt.random) then
           exit
@@ -414,6 +377,10 @@ contains
        endif
     enddo
     hel_picked=i
+    if (hel_picked.gt.nhel) then
+       write (*,*) 'Could not unweight helicity',hel_picked,nhel
+       stop 1
+    endif
   end subroutine unwgt_helicity
   
   subroutine get_run_arguments()
