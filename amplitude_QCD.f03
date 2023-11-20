@@ -31,7 +31,7 @@ module amplitude_QCD_mod
           col_index_full,row_index_full
      integer,dimension(:,:,:),allocatable :: row_index,col_index
      integer,dimension(:),allocatable :: n_col_vals
-     integer,dimension(:,:),allocatable :: diff_col_vals
+     real(kind=8),dimension(:,:),allocatable :: diff_col_vals
    contains
      procedure :: init,evaluate,init_col,init_col2
   end type amplitude_QCD
