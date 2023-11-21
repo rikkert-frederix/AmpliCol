@@ -763,6 +763,7 @@ contains
       enddo
       ! Need a new current
       this%n_cur=this%n_cur+1
+  
 !!$      if (this%imode.eq.1) then  ! temporary hack
               ik = this%n_cur
 !!$      elseif (this%imode.eq.2) then
@@ -1501,10 +1502,38 @@ contains
                endif
             elseif (this%n_qqbar.eq.1) then
                if (all(iper.eq.jper)) then
-                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
+!!$                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
+                  ! include the full expansion
+                  call Tr_allocate(n)
+                  Tr(0,0,0)=1 ! one term
+                  Tr(0,0,1)=1 ! that term is single string of matrices
+                  Tr(0,1,1)=2*(n-2)
+                  Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
+                  Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
+                  coef(1)=(1d0,0d0)
+                  coef_Nc(:,:)=0
+                  coef_Nc(0,1)=1
+                  call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+                  col_fac(2)=dble(col_factor)
+                  call Tr_deallocate
                else
                   call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
-                  col_fac(2)=dble(acc*3**(n-3))
+!!$                  col_fac(2)=dble(acc*(3)**(n-3))
+                  ! include the full expansion
+                  if (acc.ne.0) then
+                     call Tr_allocate(n)
+                     Tr(0,0,0)=1 ! one term
+                     Tr(0,0,1)=1 ! that term is single string of matrices
+                     Tr(0,1,1)=2*(n-2)
+                     Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
+                     Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
+                     coef(1)=(1d0,0d0)
+                     coef_Nc(:,:)=0
+                     coef_Nc(0,1)=1
+                     call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+                     col_fac(2)=dble(col_factor)
+                     call Tr_deallocate
+                  endif
                endif
             endif
          endif
@@ -1545,14 +1574,7 @@ contains
                coef_Nc(:,:)=0
                coef_Nc(0,1)=1
                call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-               col_fac(3)=0d0
-               do i=n,n-2*min(col_acc,n),-1
-                  if (i.ge.0) then
-                     col_fac(3)=col_fac(3)+dble(coef_nc(i,0)*3**i)
-                  else
-                     col_fac(3)=col_fac(3)+coef_nc(i,0)*3d0**i
-                  endif
-               enddo
+               col_fac(3)=dble(col_factor)
             endif
             call Tr_deallocate
          endif
