@@ -47,7 +47,6 @@ program matrix_integrate_QCD
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
 
-  write(*,*) s_cut
   mass(1:next)=0d0
 
   ! include pdfs?
@@ -227,7 +226,7 @@ contains
        endif
     enddo
     amp2=sum(amp2_hel(1:nhel))
-
+    
     ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
