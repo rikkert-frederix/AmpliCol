@@ -26,10 +26,10 @@ program matrix_reweight
   use common
   use timings
   implicit none
-  integer :: i,j,col_acc,icol,ihel,hel_picked,irow,ic,iacc
+  integer :: i,col_acc,icol,ihel,hel_picked,irow,ic,iacc
   integer,dimension(:),allocatable :: hel,o,part
   real(kind=8),dimension(3) :: matrix2
-  real(kind=8) :: color_wgt,amp,amp2,amp_col
+  real(kind=8) :: amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c
   real(kind=8),dimension(:),allocatable :: mass
   logical :: done
@@ -53,7 +53,7 @@ program matrix_reweight
   rewind(11)
   call amp_QCD%init(2,next,part,o)
   col_acc=20
-  call amp_QCD%init_col2(next,part,o,col_acc)
+  call amp_QCD%init_col2(next,o,col_acc)
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
