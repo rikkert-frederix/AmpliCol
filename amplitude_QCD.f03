@@ -433,6 +433,8 @@ contains
       ! assume nothing is needed
       is_needed_cur(:)=.false.
       is_needed_ver(:)=.false.
+      where_to_cur=0
+      where_to_ver=0
       ! loop through the list backward: if we got to the end, i.e.,
       ! nc.ge.this%n_cur_start(n-1), we now that it is a valid tree. This
       ! means that all inputs to that final current are also needed. By moving
