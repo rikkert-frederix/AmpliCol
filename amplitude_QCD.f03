@@ -2,14 +2,12 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
-  logical,parameter :: use_mom_dict=.false.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:,:),allocatable :: val_c
      real(kind=8),dimension(:,:),allocatable :: val_r
-     real(kind=8),dimension(0:3) :: pp
   end type current
   type interaction
      integer :: type
@@ -22,16 +20,13 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
-     real(kind=8),dimension(:,:),allocatable :: mom_dict
-     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar
+     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
-
-     integer,dimension(:),allocatable :: col_value_LC,col_value_NLC,col_value_full
-     integer,dimension(:,:),allocatable :: perm,col_index_LC,row_index_LC,col_index_NLC,row_index_NLC, &
-          col_index_full,row_index_full
+     integer,dimension(:,:),allocatable :: perm
      integer,dimension(:,:,:),allocatable :: row_index,col_index
-     integer,dimension(:),allocatable :: n_col_vals
+     integer,dimension(:),allocatable :: n_col_vals,pp_bin_to_i,pp_i_to_bin
      real(kind=8),dimension(:,:),allocatable :: diff_col_vals
+     real(kind=8),dimension(:,:),allocatable :: pp
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
@@ -41,9 +36,8 @@ contains
     implicit none
     class(amplitude_QCD) :: this
     integer::n,imode
-    integer,dimension(n)::part,order,max_order
+    integer,dimension(n)::part,order
     integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,nperm
-    integer(kind=8) :: max_cur_lab
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
@@ -91,17 +85,6 @@ contains
        write (*,*) '   dictionary created ',tAfter-tBefore
     endif
 
-    if (use_mom_dict) then
-          max_cur_lab=0
-          do i=1,n-1
-            max_order(i)=n-1-i+1
-         enddo
-         do i=1,n-1
-            max_cur_lab=max_cur_lab+int(max_order(n-1+1-i),kind=8)*int(n-1,kind=8)**int(i-1,kind=8)
-         enddo
-       allocate(this%mom_dict(max_cur_lab,0:3))
-    endif
-
     allocate(this%current_list(max_cur))
     allocate(this%interaction_list(max_vert))
     allocate(this%n_cur_start(n-1))
@@ -134,10 +117,7 @@ contains
              endif
              this%current_list(this%n_cur)%n_vert=0
           enddo
-       
        else
-
-
           if (this%imode.eq.1) then
              do nc=1,n-isize
                 do isplit=1,isize-1
@@ -154,8 +134,6 @@ contains
                    enddo
                 enddo
              enddo
-
-
           elseif (this%imode.eq.2) then
              do isplit=1,isize-1
                 n1=isplit
@@ -167,7 +145,6 @@ contains
                 enddo
              enddo            
           endif
-
        endif
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
@@ -212,8 +189,27 @@ contains
           enddo
        endif
     endif
+    call setup_momentum_array()
   contains
-
+    subroutine setup_momentum_array()
+      implicit none
+      integer :: ic
+      integer,dimension(1:maskr(n)) :: pp_i_to_bin
+      allocate(this%pp_bin_to_i(1:maskr(n)))
+      this%pp_bin_to_i(1:maskr(n))=0
+      this%max_pp=0
+      do ic=1,this%n_cur
+         if (this%pp_bin_to_i(this%current_list(ic)%bin).eq.0) then
+            this%max_pp=this%max_pp+1
+            this%pp_bin_to_i(this%current_list(ic)%bin)=this%max_pp
+            pp_i_to_bin(this%max_pp)=this%current_list(ic)%bin
+         endif
+      enddo
+      allocate(this%pp(0:3,1:this%max_pp))
+      allocate(this%pp_i_to_bin(this%max_pp))
+      this%pp_i_to_bin(1:this%max_pp)=pp_i_to_bin(1:this%max_pp)
+    end subroutine setup_momentum_array
+    
     subroutine define_canonical_color_order()
       use math_functions
       implicit none
@@ -960,7 +956,6 @@ contains
     integer :: n,hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
-    integer :: count_ext,count_vert,count_comb
     integer :: ifinal
 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
@@ -1011,24 +1006,19 @@ contains
        endif
     endif
 
-    count_ext = 0
-    count_vert=0
-    count_comb=0
-
+    call fill_momentum_array()
+    
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)   
              if (this%current_list(ic)%order(1).le.2) then
-                this%current_list(ic)%pp(0:3)=-p(0:3,this%current_list(ic)%order(1))
                 ifinal=-1
              else
-                this%current_list(ic)%pp(0:3)=p(0:3,this%current_list(ic)%order(1))
                 ifinal=1
              endif
 
              do ih=1,this%current_list(ic)%nhel
-                count_ext = count_ext + 1
                 if (this%current_list(ic)%nhel.eq.1) then
                    if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
                       ih_in=1  ! + helicity 
@@ -1040,29 +1030,27 @@ contains
                 endif
                 if (this%current_list(ic)%type.eq.21) then
                    if (use_real_gluons) then
-                           call ext_gluon_real(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
+                      call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                           ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
                    else
-                           call ext_gluon_cmplx(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
-                      
+                      call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                           ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                        call ext_quark(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                   call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                        call ext_antiquark(this%current_list(ic)%pp(0:3),ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                   call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
                 endif
              enddo
           enddo
-
-          if (use_mom_dict) then
-             call fill_mom_dict()
-          endif
           cycle
        endif
 
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
-          count_vert = count_vert + 1
           do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
              do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
@@ -1070,15 +1058,15 @@ contains
                 if (this%interaction_list(iv)%type.eq.0) then
                    if (use_real_gluons) then
                       call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
-                                                this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
+                           this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
-                                                this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
+                           this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                                                 this%interaction_list(iv)%val_r(1:4,ih))
                    else
                       call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
-                                           this%current_list(this%interaction_list(iv)%currents(1))%pp(0:3),&
+                           this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%pp(0:3),&
+                           this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                                            this%interaction_list(iv)%val_c(1:4,ih))
                    endif
 
@@ -1132,20 +1120,12 @@ contains
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          count_comb = count_comb + 1
-          if (use_mom_dict) then
-            this%current_list(ic)%pp(0:3) = this%mom_dict(this%current_list(ic)%bin,0:3)
-          else
-            call compute_momentum_current()
-          endif
-
           if (this%current_list(ic)%type.eq.21) then
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-
           elseif ((this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6)) then
              ! a quark current
              call combine_interactions(4)
@@ -1165,6 +1145,20 @@ contains
     call compute_amps_from_currents
 
   contains
+    subroutine fill_momentum_array
+      implicit none
+      integer :: ip,ibin,i
+      do ip=1,this%max_pp
+         ibin=this%pp_i_to_bin(ip)
+         this%pp(0:3,ip)=0d0
+         do i=1,2 ! treat incoming momenta as out-going
+            if (btest(ibin,i-1)) this%pp(0:3,ip)=this%pp(0:3,ip)-p(0:3,i)
+         enddo
+         do i=3,n
+            if (btest(ibin,i-1)) this%pp(0:3,ip)=this%pp(0:3,ip)+p(0:3,i)
+         enddo
+      enddo
+    end subroutine fill_momentum_array
     subroutine compute_amps_from_currents
       implicit none
       if (this%imode.eq.1) then
@@ -1208,12 +1202,6 @@ contains
          endif
       endif
     end subroutine compute_amps_from_currents
-    subroutine compute_momentum_current()
-      implicit none
-      this%current_list(ic)%pp(0:3)=&
-           this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(1))%pp(0:3)+&
-           this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(2))%pp(0:3)
-    end subroutine compute_momentum_current
 
     subroutine combine_interactions(dim)
       implicit none
@@ -1250,32 +1238,19 @@ contains
     subroutine include_gluon_propagator()
       implicit none
       if (use_real_gluons) then
-         call GluonPropagator_real(this%current_list(ic)%val_r,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+         call GluonPropagator_real(this%current_list(ic)%val_r,this%current_list(ic)%nhel, &
+              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
       else
-         call GluonPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+         call GluonPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
+              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
       endif
     end subroutine include_gluon_propagator
 
     subroutine include_quark_propagator()
       implicit none
-      call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel,this%current_list(ic)%pp)
+      call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
     end subroutine include_quark_propagator
-
-    subroutine fill_mom_dict()
-      implicit none
-      integer ic
-      this%mom_dict=0d0
-      do ic=this%n_cur_start(2),this%n_cur_end(n-1)
-          if (.not.(all(this%mom_dict(this%current_list(ic)%bin,:).eq.0d0))) cycle
-          this%mom_dict(this%current_list(ic)%bin,0:3)=&
-          this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(1))%pp(0:3)+&
-          this%current_list(this%interaction_list(this%current_list(ic)%vertices(1))%currents(2))%pp(0:3)
-          this%current_list(ic)%pp(0:3)=this%mom_dict(this%current_list(ic)%bin,0:3)
-      enddo
-
-   end subroutine fill_mom_dict
-
-     
   end subroutine evaluate
 
   subroutine init_col2(this,n,order,col_acc)
