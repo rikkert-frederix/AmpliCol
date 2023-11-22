@@ -65,8 +65,7 @@ contains
 
     call set_max_cur()
     call set_max_vert()
-    max_cur=max_cur
-    max_vert=max_vert
+
     if (this%imode.eq.2) then
        call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
