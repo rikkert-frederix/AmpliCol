@@ -20,13 +20,12 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
+     real(kind=8),dimension(:,:),allocatable :: diff_col_vals,pp
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp
-     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap
+     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap,n_col_vals, &
+          pp_bin_to_i,pp_i_to_bin
      integer,dimension(:,:),allocatable :: perm
      integer,dimension(:,:,:),allocatable :: row_index,col_index
-     integer,dimension(:),allocatable :: n_col_vals,pp_bin_to_i,pp_i_to_bin
-     real(kind=8),dimension(:,:),allocatable :: diff_col_vals
-     real(kind=8),dimension(:,:),allocatable :: pp
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
@@ -37,11 +36,10 @@ contains
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert
+    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,max_key
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
-    integer :: max_key
 
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
