@@ -79,7 +79,6 @@ contains
        call create_current_dict()
        allocate(key_to_current(max_key)) 
        key_to_current(1:max_key)=0
-       
        max_cur=max_key
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
@@ -210,12 +209,12 @@ contains
       endif
       if (((this%imode.eq.1) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
            ((this%imode.eq.2) .and. (this%n_qqbar.ne.0) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
-           ((this%imode.eq.2) .and. (this%n_qqbar.eq.1) .and. use_symmetry .and. &
+           ((this%imode.eq.2) .and. (this%n_qqbar.eq.0) .and. use_symmetry .and. &
            (this%nColOrd.ne.2*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)))) &
            then
          write (*,*) 'The total number of colour orders to consider should be equal to the '// &
               'number of max-size currents (except for all-gluon and using symmetry)', &
-              this%nColOrd,this%n_cur_start(n-1),this%n_cur_end(n-1)
+              this%nColOrd,this%n_cur_start(n-1),this%n_cur_end(n-1),this%n_qqbar,use_symmetry
          stop 1
       endif
     end subroutine simple_consistency_checks
