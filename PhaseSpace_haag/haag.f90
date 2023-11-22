@@ -85,7 +85,6 @@ contains
     call setup_PS_cuts(s_cut)
 
     s0=sqrt_s_min**2
-    write(*,*) 's0 cut is now:',s0
 
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
@@ -559,6 +558,7 @@ endif
             write(*,*) 'error soft: ',soft
             stop 3
     endif
+
   end subroutine generate_momenta
 
   subroutine generate_initial_state
@@ -574,7 +574,7 @@ endif
     implicit none
     integer :: i
     real(kind=8) :: smin,smax,shat
-    smin=invm_min(maskr(next)-3)
+    smin=(next-2)*(next-3)*s0
     smax=sqrts**2
     ix=ix+1
     call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
@@ -615,7 +615,8 @@ endif
     real(kind=8) :: schan_ran
     real(kind=8) z_sign
     real(kind=8),dimension(2) :: buff,min_point1,min_point2
-     
+    double precision inv 
+
     k = maxn - i  !!  k is the number of particles remaining to generate
     s1 = mass1 ! mass of the final state particle to be generated
     z_sign=sign(1d0,q2(3))
@@ -661,7 +662,7 @@ endif
 
     ! cuts on a1 and a2 (~h) 
     a2cut = (k+1)*(s0/2d0)/(dot(q2_cmf,P_cmf))  ! should be (k+1) dont change! 
-    a2cut = ((k+1)*max(dsqrt(s0),pt_min)**2/2d0)/(dot(q2_cmf,P_cmf))
+
     h = 0.0000001d0
     if (h .gt. get_min_a2_bound(s,s1,s2,costheta)) then
         h = get_min_a2_bound(s,s1,s2,costheta)
@@ -670,7 +671,6 @@ endif
     endif
     
     a1cut = (s0/2d0)/(dot(q1_cmf,P_cmf))
-    a1cut = (max(dsqrt(s0),pt_min*DRjj_min)**2/2d0)/(dot(q1_cmf,P_cmf))
 
     ! Generate a1
     call generate_a1(i,m1,maxn,s,s1,s2,costheta,a1cut,beta,h,a1,soft,jaco)
@@ -704,7 +704,6 @@ endif
     endif
 
   end subroutine basic_antenna
-
 
   real(kind=8) function kallen(a,b,c)
           implicit none
@@ -922,11 +921,11 @@ endif
     real(kind=8),dimension(0:3) :: q1_cmf,P_cmf
     real(kind=8) :: s,s1,A,B,C,dum,R,gs
     real(kind=8) :: Lambda,Delta,Sigma,sigmak,Sigmaold,smin,smax,smax_force
-    double precision :: scut
+    double precision :: scut,inv
 
     ! Include also initial momenta in the limits!
-    
-    scut=max(dsqrt(s0),pT_min*DRjj_min)**2
+   
+    scut = s0
     Lambda = mass_sum+(k-1)*(k-2)*scut/2D0
     Sigma = mass_sum    !always just a sum of particle masses
     Sigmaold = mass_sum-s1
@@ -943,11 +942,11 @@ endif
         smax = smax_force
     endif
 
-    !if (pT_min.gt.0d0) then
-    !if ((s+s1-2d0*dsqrt(s)*pT_min.lt.smax).and.(s+s1-2d0*dsqrt(s)*pT_min.gt.smin)) then
-    !    smax = s+s1-2d0*dsqrt(s)*pT_min
-    !endif
-    !endif
+    if (pT_min.gt.0d0) then
+    if ((s+s1-2d0*dsqrt(s)*pT_min.lt.smax).and.(s+s1-2d0*dsqrt(s)*pT_min.gt.smin)) then
+        smax = s+s1-2d0*dsqrt(s)*pT_min
+    endif
+    endif
 
     A = Sigma
     B = s - sigmak
@@ -1014,33 +1013,14 @@ endif
     a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
     a1min = 0.5d0*(1d0+(s1-s2)/(s)-dsqrt(kallen(1d0,s1/s,s2/s)))
 
-    !write(*,*) 'a1 min max',a1min,a1max
-
     E=(s+s1-s2)/(2D0*sqrt(s))
-    !if (E.lt.pT_cut) write(*,*) 'TOO LITTLE ENERGY'
-    low = sqrt(s)/s*(E-dsqrt(E**2-pT_min**2))
-    upp = sqrt(s)/s*(E+dsqrt(E**2-pT_min**2))
-    !write(*,*) 'lower upper',low,upp
-
     if (a1min .lt. 0d0) then ! just for numerical stability!
         a1min = 0d0
     endif
     if ((a1min .lt. a1cut ) .and.& 
         a1max .gt. a1cut) then
         a1min = a1cut
-        !write(*,*) 'setting a1 cut!'
     endif
-
-    !if (E.lt.pT_min) then
-    !if ((upp.lt.a1max).and.(upp.gt.a1min)) then
-    !   a1max=upp
-      !write(*,*) 'changed upper!'
-    !endif
-    !if ((low.lt.a1max).and.(low.gt.a1min)) then
-    !   a1min=low
-      !write(*,*) 'changed lower!'
-    !endif
-    !endif
 
     buff = f_func(-h1,cos,s,s1,s2,h)
     f_h1 = buff(2)
@@ -1051,7 +1031,6 @@ endif
     Amax= (a1max + h1 + buff(2)-f_h1) &
           /(a1max + h1 + buff(2) +f_h1)
 
-    !write(*,*) 'actual a1 cuts',a1min,a1max
     ! Now generate a1, depending on which distribution
     if ((.not. open) .and. (.not. schannel) .and. (.not. flat)) then
       if (( ((i .ne. 0) .and. (.not. m1)) .or. (maxn .ne. n))) then
