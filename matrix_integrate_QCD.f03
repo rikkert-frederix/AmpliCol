@@ -18,6 +18,8 @@ program matrix_integrate_QCD
   logical,dimension(-6:7,2) :: ipdgs=.false.
   integer :: col_fac,nhel
   integer*8 :: iden
+  integer(kind=4) :: n_events
+ 
 
   call get_run_arguments()
   call create_run_tag()
@@ -138,6 +140,7 @@ program matrix_integrate_QCD
   unc(1:nintegrals,0:maxchannels)=0d0
   only_virt=.false.
 
+  open(unit=14,file='pt_list.txt',status='replace')
   if (imode.le.1) then
      call mint(integrand)
   else
@@ -145,15 +148,22 @@ program matrix_integrate_QCD
      call gen(integrand,0,-1) ! initialise countersi
      filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
+     n_events=0
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        call unwgt_helicity
-        call write_event(11,ans(1,0))
+        !if (pass_cuts(next,p).gt.0d0) then
+          call unwgt_helicity
+          call write_event(11,ans(1,0))
+          n_events=n_events+1
+        !else
+          !write(*,*)pass_cuts(next,p)
+        !endif
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
   endif
      
+  close(14)
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
@@ -180,7 +190,7 @@ contains
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
     real(kind=8),dimension(2) :: ztemp
-    
+   
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
@@ -203,11 +213,26 @@ contains
     t_PS= t_PS +tAfter-tBefore
 
     all_evt=all_evt+1
-    if ((jac.lt.0d0) .or. (.not.pass_cuts(next,p))) then
+    !if ((jac.lt.0d0) .or. (.not.pass_cuts(next,p,0))) then
+    !   pass_cuts_check=.false.
+    !   val=0d0
+    !   return
+    !endif
+
+    !do i=1,next
+    !  write(14,*) pt(p(0,i))
+    !enddo
+
+    if ((jac.lt.0d0) .or. (pass_cuts(next,p).lt.0d0)) then
        pass_cuts_check=.false.
        val=0d0
        return
     endif
+
+    do i=3,next
+      write(14,*) pt(p(0,i))
+    enddo
+
     passed = passed + 1
 
     ! compute amplitudes
@@ -226,14 +251,17 @@ contains
        endif
     enddo
     amp2=sum(amp2_hel(1:nhel))
-    
+
     ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
 
+    val=val*pass_cuts(next,p)
+
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     val=val*sym_fac
+
 
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
@@ -262,17 +290,20 @@ contains
 
   end function integrand
 
-  logical function pass_cuts(n,p)
+  double precision function pass_cuts(n,p)
     ! Cuts on the phase-space point.
     implicit none
     integer :: i,j,n
     real*8,dimension(0:3,n) :: p
-    pass_cuts=.true.
+    double precision :: frac,y
+
+    frac=0.1d0
+    pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
        do i=1,n-1
           do j=i+1,n
              if (abs(2d0*dot(p(0,i),p(0,j))).lt.sqrt_s_min**2) then
-                pass_cuts=.false.
+                pass_cuts=-1d0
                 return
              endif
           enddo
@@ -280,14 +311,23 @@ contains
     endif
     do i=3,n
        if (pt_min.gt.0d0) then
-          if (pt(p(0,i)).lt.pt_min) then
-             pass_cuts=.false.
+          if (pt(p(0,i)).lt.frac*pt_min) then
+             pass_cuts=-1d0
+             return
+          endif
+          if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
+             y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
+             if (imode.le.0) then
+               pass_cuts=pass_cuts*(6d0*(y**5)-15d0*(y**4)+10d0*(y**3))
+             else
+               pass_cuts=-1d0
+             endif
              return
           endif
        endif
        if (eta_max.gt.0d0) then
           if (abs(eta(p(0,i))).gt.eta_max) then
-             pass_cuts=.false.
+             pass_cuts=-1d0
              return
           endif
        endif
@@ -295,7 +335,7 @@ contains
           if (i.ne.n) then
              do j=i+1,n
                 if (DeltaR(p(0,i),p(0,j)).lt.drjj_min) then
-                   pass_cuts=.false.
+                   pass_cuts=-1d0
                    return
                 endif
              enddo
