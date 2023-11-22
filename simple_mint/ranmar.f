@@ -4,18 +4,17 @@
 !     Wrapper for the random numbers; needed for the NLO stuff
       implicit none
       double precision ran2,x,a,b
-      integer ii,jconfig
+      integer jconfig
       a=0d0                     ! min allowed value for x
       b=1d0                     ! max allowed value for x
-      ii=0                      ! dummy argument of ntuple
       jconfig=iconfig           ! integration channel (for off-set)
-      call ntuple(x,a,b,ii,jconfig)
+      call ntuple(x,a,b,jconfig)
       ran2=x
       return
       end function ran2
 
 
-      subroutine ntuple(x,a,b,ii,jconfig)
+      subroutine ntuple(x,a,b,jconfig)
 c-------------------------------------------------------
 c     Front to ranmar which allows user to easily
 c     choose the seed.
@@ -25,12 +24,12 @@ c
 c     Arguments
 c
       double precision x,a,b
-      integer ii,jconfig
+      integer jconfig
 c
 c     Local
 c
       integer init, ioffset, joffset
-      integer     ij, kl, iseed1,iseed2
+      integer ij, kl
 
 c
 c     Global
@@ -129,7 +128,7 @@ c-----
          open(unit=lun,file=fname,status='old',err=15)
          done = .true.
  15      level = level+1
-         fname = '../' // fname
+         fname = '../' // fname(1:57)
          i=index(fname,' ')
          if (i .gt. 0) fname=fname(1:i-1)
       enddo
@@ -259,7 +258,7 @@ c
      $     kl .lt. 0 .or. kl .gt. 30081) then
          filename='../../error'
          INQUIRE(FILE="../../RunWeb", EXIST=file_exists)
-         if(.not.file_exists) filename = '../' // filename
+         if(.not.file_exists) filename = '../' // filename(1:27)
          open(unit=26,file=filename,status='unknown')
          if (ij .lt. 0 .or. ij .gt. 31328) then
             write(26,*) 'Bad initialization value of ij in rmarin ', ij

@@ -205,7 +205,7 @@ c iteration.
       implicit none
       logical inclde
       integer nPSpoints,label,i,j
-      double precision nPSinv,etot,niter,y_squared,values(2)
+      double precision nPSinv,niter,values(2)
       data niter /0d0/
       nPSinv = 1d0/dble(nPSpoints)
       if (inclde) niter = niter+1d0
@@ -406,7 +406,6 @@ c output by 'xnorm'
       use HwU_variables
       implicit none
       integer unit,i,j,label
-      integer max_length
       character(len=:), allocatable :: buffer
       character*4 str_nbin
       double precision xnorm

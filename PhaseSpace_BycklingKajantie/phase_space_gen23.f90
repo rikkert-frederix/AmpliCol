@@ -310,7 +310,6 @@ contains
 
   subroutine generate_tau
     implicit none
-    integer :: i
     real(kind=8) :: smin,smax,shat
     smin=invm_min(maskr(next)-3)
     smax=sqrts**2

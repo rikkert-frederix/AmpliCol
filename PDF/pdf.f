@@ -11,7 +11,7 @@
 !
       implicit none
       DOUBLE  PRECISION x,xmu,pdfs(-6:7)
-      INTEGER IH,ipdg,ipart
+      INTEGER IH
       logical ipdgs(-6:7)
       if (ih.eq.0) then
 c     Lepton collisions (no PDF). 
@@ -38,7 +38,6 @@ c The actual call to the PDFs
       
       subroutine fdist(ipdgs,x,xmu,fx)
       implicit none
-      integer ih
       double precision fx(-6:7),x,xmu,nnfx(-6:7)
       logical ipdgs(-6:7)
       fx(-6:7)=0d0
@@ -89,18 +88,15 @@ C     *****************************************************************
 C     ***
       IMPLICIT NONE
 C     
-      CHARACTER TABLEFILE*(*),UP*3,LIB*4,DIR*4,TEMPNAME*100
+      CHARACTER TABLEFILE*(*),DIR*4,TEMPNAME*100
       DATA DIR/'PDF/'/
-      INTEGER IU,NEXTUNOPEN,I
+      INTEGER IU,NEXTUNOPEN
       EXTERNAL NEXTUNOPEN
       COMMON/IU/IU
-      CHARACTER*300 TEMPNAME2, PATH
-      CHARACTER*25 UPBUFF
-      INTEGER POS, FINE2
 
       IU=NEXTUNOPEN()
 C     Try in the current directory (for cluster use)
- 5    TEMPNAME=TABLEFILE
+      TEMPNAME=TABLEFILE
       OPEN(IU,FILE=TEMPNAME,STATUS='old',ERR=10)
       RETURN
 C     then try PDF directory
