@@ -57,31 +57,31 @@ contains
     endif
     this%imode=imode
 
-    if (this%imode.eq.2) call define_canonical_color_order()
+    if (this%imode.eq.2) then
+       call define_canonical_color_order()
+    else
+       this%nColOrd=1
+    endif
 
     call check_input_consistency()
 
-    if (this%imode.eq.1) then
-       call set_max_cur()
-       call set_max_vert()
-       this%nColOrd=1
-    elseif (this%imode.eq.2) then
-       write (*,*) 'WARNING: need to set max_cur and max_vert'
-       if (n.lt.7) then
-       max_cur=100000
-       max_vert=100000
-       else
-       max_cur=1000000
-       max_vert=1000000
-       endif
+    call set_max_cur()
+    call set_max_vert()
+    max_cur=max_cur
+    max_vert=max_vert
+    if (this%imode.eq.2) then
        call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
        call create_current_dict()
        allocate(key_to_current(max_key)) 
        key_to_current(1:max_key)=0
-       max_cur=max_key
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
+       if (max_key.ne.max_cur) then
+          write (*,*) 'Number of dictionary keys is expected to be identical to the maximum number of currents',&
+               max_key,max_cur
+          stop 1
+       endif
     endif
 
     allocate(this%current_list(max_cur))
@@ -359,29 +359,167 @@ contains
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
       implicit none
-      max_cur=0
-      do isize=1,n-1
-         if (isize.eq.1 .or. isize.eq.n-1) then
-            max_cur=max_cur+(n-isize)
-         else
-            if (this%n_qqbar.eq.0) max_cur=max_cur+(n-isize)*2
-            if (this%n_qqbar.eq.1) max_cur=max_cur+((n-isize-1)*2+1)
+      integer :: isize,j,ifact
+      if (this%imode.eq.1) then
+         max_cur=0
+         do isize=1,n-1
+            if (isize.eq.1 .or. isize.eq.n-1) then
+               max_cur=max_cur+(n-isize)
+            else
+               if (this%n_qqbar.eq.0) max_cur=max_cur+(n-isize)*2
+               if (this%n_qqbar.eq.1) max_cur=max_cur+((n-isize-1)*2+1)
+            endif
+         enddo
+         max_cur=max_cur+1
+      elseif(this%imode.eq.2) then
+         if (this%n_qqbar.eq.0) then
+            ! for increasing isize:
+            ! - Number of gluon currents (remove the '/2' if use_symmetry=.false.):
+            !   (next-1) + ( (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ... )/2
+            ! - Number of tensor currents: 
+            !   same as for the gluons except that the first and final terms are absent
+            max_cur=0
+            do isize=1,n-1
+               ifact=n-1
+               do j=1,isize-1
+                  ifact=ifact*(n-1-j)
+               enddo
+               if (isize.eq.1) then
+                  max_cur=max_cur+ifact
+               elseif (isize.lt.n-1) then
+                  if (use_symmetry) then
+                     max_cur=max_cur+ifact
+                  else 
+                     max_cur=max_cur+ifact*2
+                  endif
+               else
+                  if (use_symmetry) then
+                     max_cur=max_cur+ifact/2
+                  else
+                     max_cur=max_cur+ifact
+                  endif
+               endif
+            enddo
+            max_cur=max_cur+1
+         elseif(this%n_qqbar.eq.1) then
+            ! for increasing isize:
+            ! - Number of gluon currents (remove the '/2' if use_symmetry=.false.):
+            !   (next-2) + ( (next-2)*(next-3) + (next-2)*(next-3)*(next-4) + ... )/2
+            ! - Number of tensor currents: 
+            !   same as for the gluons except that the first term is absent
+            !   (final is absent as well, but we only know that after the dead
+            !   tree-filtering)
+            ! - Number of quark currents:
+            !   1 + (next-1) + (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ...
+            max_cur=0
+            do isize=1,n-1
+               ! gluons and tensors
+               ifact=n-2
+               do j=1,isize-1
+                  ifact=ifact*(n-2-j)
+               enddo
+               if (isize.eq.1) then
+                  max_cur=max_cur+ifact
+               else
+                  if (use_symmetry) then
+                     max_cur=max_cur+ifact
+                  else 
+                     max_cur=max_cur+ifact*2
+                  endif
+               endif
+               ! quarks
+               ifact=1
+               do j=1,isize-1
+                  ifact=ifact*(n-1-j)
+               enddo
+               max_cur=max_cur+ifact
+            enddo
+            max_cur=max_cur+1
          endif
-      enddo
-      max_cur=max_cur+1
+      endif
     end subroutine set_max_cur
 
     subroutine set_max_vert()
       ! rough upper bound on the maximum number of interactions
       implicit none
-      max_vert=0
-      do isize=2,n-1
-         if (isize.eq.2) then
-            max_vert=max_vert+(n-isize)*3
-         else
-            max_vert=max_vert+isize*(n-isize)*3
+      integer :: isize,fact,iden,isplit,itens,fact2,next
+      real(kind=8) :: mv
+      if (this%imode.eq.1) then
+         max_vert=0
+         do isize=2,n-1
+            if (isize.eq.2) then
+               max_vert=max_vert+(n-isize)*3
+            else
+               max_vert=max_vert+isize*(n-isize)*3
+            endif
+         enddo
+      elseif(this%imode.eq.2) then
+         ! gluon and tensor vertices
+         !
+         ! For example, for next=6, we have for the 3-gluon vertices. Note that
+         ! the denominators, i.e., symmetry factors due to inversion of the order
+         ! in the currents, reduces the amount by a factor 2*2*2 (due to
+         ! inversion of the combined current, and inversion of the two incoming
+         ! currents separately, with the latter only applicable if the incoming
+         ! currents contain more than 1 particle):
+         ! - to compute the currents with 2 particles combined: (1+1)/2 ===> 5!/3! /2 = 10
+         ! - to compute the currents with 3 particles combined: (1+2)/4+(2+1)/4 ===> 5!/2! /4 + 5!/2! /4 = 30
+         ! - to compute the currents with 4 particles combined: (1+3)/4+(2+2)/8+(3+1)/4 ===> 5!/1! /4 + 5!/1! /8 + 5!/1! /4 = 75
+         ! - to compute the currents with 5 particles combined: (1+4)/4+(2+3)/8+(3+2)/8+(4+1)/4 ===> 5!/0! /4 + 5!/0! /8 + 5!/0! /8 5!/0! /4 = 90
+         ! in total 205 3-gluon vertices.
+         !
+         ! To create the tensor particles, we need to double the amount of
+         ! vertices we have to compute for th 2-4 particles combined currents:
+         ! - 10+30+75 = 115 tensor creating currents.
+         !
+         ! To resolve the tensor particles we have more currents to choose from
+         ! when combining to 3-5 particles. Note that a single particle currents
+         ! cannot be a tensor currents and be careful not to include the
+         ! contributions for which *both* incoming currents are tensor particles:
+         ! - (1+2)/4+(2+1)/4 ===> 5!/2! /4 + 5!/2! /4 = 30
+         ! - (1+3)/4+2*(2+2)/8+(3+1)/4 ===> 5!/1! /4 + 2* 5!/1! /8 + 5!/1! /4 = 90
+         ! - (1+4)/4+2*(2+3)/8+2*(3+2)/8+(4+1)/4 ===> 5!/0! + 5!/0! + 5!/0! = 120
+         ! resulting into 240 tensor resolving vertices.
+         !
+         ! Hence a total of 205+115+240=560 3-vertices need to be computed for 6
+         ! gluon amplitudes.
+         if (this%n_qqbar.eq.0) then
+            next=n-1
+         elseif(this%n_qqbar.eq.1) then
+            next=n-2
          endif
-      enddo
+         mv=0d0
+         fact=factorial(next)
+         do isize=2,next
+            fact2=fact/factorial(next-isize)
+            do isplit=1,isize-1
+               iden=2
+               itens=1
+               if (isplit.gt.1) iden=iden*2
+               if (isplit.lt.isize-1) iden=iden*2
+               if (isize.ne.n-1) then
+                  itens=itens+1
+               endif
+               if (isize.ne.2) then
+                  itens=itens+1
+                  if (isplit.gt.1 .and. isplit.lt.isize-1) itens=itens+1
+               endif
+               if (.not.use_symmetry) iden=1
+               mv=mv+fact2/dble(iden)*itens
+            enddo
+         enddo
+         ! add the quark vertices
+         if (this%n_qqbar.eq.1) then
+            do isize=2,n-1
+               do isplit=1,isize-1
+                  iden=1
+                  if (isplit.gt.1 .and. use_symmetry) iden=iden*2
+                  mv=mv+fact/(factorial(n-isize-1))/dble(iden)
+               enddo
+            enddo
+         endif
+         max_vert=nint(mv)
+      endif
     end subroutine set_max_vert
 
     subroutine create_helicity_map()
@@ -804,7 +942,7 @@ contains
       ! element to the dictionary for all possible val's. Hence, better to
       ! create a larger dictionary than strictly needed.
       implicit none
-      integer :: size,i,key
+      integer :: size,i,j,key
       integer(kind=8) :: val
       integer,dimension(:),allocatable :: ips_in,ips
       key=n  ! skip the external currents.
@@ -813,28 +951,35 @@ contains
          size=size*(n-isize+1)
          allocate(ips_in(1:isize))
          allocate(ips(1:isize))
-         do i=1,isize
-            ips_in(i)=i
-         enddo
          ! simply add all possible permutations
          do i=1,size
+            if (i.eq.1) then
+               do j=1,isize
+                  ips_in(j)=j
+               enddo
+            else
+               call get_next_iperm(isize,ips_in,ips,n)
+               ips_in=ips
+            endif
             if ((.not.use_symmetry) .or. valid_current_order(ips_in)) then
-               key=key+1
-               call get_value(ips_in,0,val) ! add the gluon
-               current_dict(key)=val
-               if (isize.ne.1 .and. isize.ne.n-1) then
+               if (any(ips_in(1:isize).eq.order(n))) cycle
+               if (this%n_qqbar.eq.0 .or. &
+                    (this%n_qqbar.eq.1 .and. all(ips_in(1:isize).ne.order(1)))) then
                   key=key+1
-                  call get_value(ips_in,-1,val)
+                  call get_value(ips_in,0,val) ! add the gluon
                   current_dict(key)=val
+                  if (isize.ne.1 .and. isize.ne.n-1) then
+                     key=key+1
+                     call get_value(ips_in,-1,val)
+                     current_dict(key)=val
+                  endif
                endif
-               if (ips_in(1).eq.order(1)) then
+               if (this%n_qqbar.eq.1 .and. ips_in(1).eq.order(1)) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
             endif
-            call get_next_iperm(isize,ips_in,ips,n)
-            ips_in=ips
          enddo
          deallocate(ips_in)
          deallocate(ips)
