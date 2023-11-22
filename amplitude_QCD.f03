@@ -819,7 +819,7 @@ contains
          enddo
          ! simply add all possible permutations
          do i=1,size
-            if (valid_current_order(ips_in)) then
+            if ((.not.use_symmetry) .or. valid_current_order(ips_in)) then
                key=key+1
                call get_value(ips_in,0,val) ! add the gluon
                current_dict(key)=val
