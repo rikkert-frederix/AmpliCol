@@ -37,7 +37,7 @@ contains
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,nperm
+    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
@@ -150,47 +150,35 @@ contains
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
 
-    if (this%n_vert.gt.max_vert) then
-       write (*,*) 'ERROR: too many interactions: max_vert not set correctly',max_vert,this%n_vert
-       stop 1
-    endif
-
-    if (this%n_cur.gt.max_cur) then
-       write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
-       stop 1
-    endif
+    call simple_consistency_checks()
 
     ! All done. But there could be currents that are not needed. Filter them out
     call filter_dead_trees()
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
-    ! create the helicity map
     if (this%imode.eq.1) call create_helicity_map()
-    ! allocate and fill the colour orders
-    if (imode.eq.2) then
-       nperm=this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
-       if (this%n_qqbar.eq.0) then
-          if (use_symmetry) then
-             allocate(this%perm(1:n-1,1:nperm*2))
-          else
-             allocate(this%perm(1:n-1,1:nperm*2))
-          endif
-          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-             this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
-          enddo
-          if (use_symmetry) then
-             do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-                this%perm(1:n-1,nperm+(nc-this%n_cur_start(n-1)+1))=this%current_list(nc)%order(n-1:1:-1)
-             enddo
-          endif
-       elseif (this%n_qqbar.eq.1) then
-          allocate(this%perm(1:n-2,1:nperm))
-          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-             this%perm(1:n-2,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(2:n-1)
-          enddo
-       endif
-    endif
+    if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
   contains
+    subroutine allocate_and_fill_colour_permutations()
+      implicit none
+      ! allocate and fill the colour orders
+      if (this%n_qqbar.eq.0) then
+         allocate(this%perm(1:n-1,1:this%nColOrd))
+         do nc=1,this%nColOrd
+            if ((.not.use_symmetry) .or. &
+                 (use_symmetry .and. nc.le.this%nColOrd/2)) then
+               this%perm(1:n-1,nc)=this%current_list(this%n_cur_start(n-1)-1+nc)%order(1:n-1)
+            elseif (use_symmetry .and. nc.gt.this%nColOrd/2) then
+               this%perm(1:n-1,nc)=this%current_list(this%n_cur_start(n-1)-1+nc-this%nColOrd/2)%order(n-1:1:-1)
+            endif
+         enddo
+      elseif (this%n_qqbar.eq.1) then
+         allocate(this%perm(1:n-2,1:this%nColOrd))
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+            this%perm(1:n-2,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(2:n-1)
+         enddo
+      endif
+    end subroutine allocate_and_fill_colour_permutations
     subroutine setup_momentum_array()
       implicit none
       integer :: ic
@@ -210,6 +198,28 @@ contains
       this%pp_i_to_bin(1:this%max_pp)=pp_i_to_bin(1:this%max_pp)
     end subroutine setup_momentum_array
     
+    subroutine simple_consistency_checks()
+      implicit none
+      if (this%n_vert.gt.max_vert) then
+         write (*,*) 'ERROR: too many interactions: max_vert not set correctly',max_vert,this%n_vert
+         stop 1
+      endif
+      if (this%n_cur.gt.max_cur) then
+         write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
+         stop 1
+      endif
+      if (((this%imode.eq.1) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
+           ((this%imode.eq.2) .and. (this%n_qqbar.ne.0) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
+           ((this%imode.eq.2) .and. (this%n_qqbar.eq.1) .and. use_symmetry .and. &
+           (this%nColOrd.ne.2*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)))) &
+           then
+         write (*,*) 'The total number of colour orders to consider should be equal to the '// &
+              'number of max-size currents (except for all-gluon and using symmetry)', &
+              this%nColOrd,this%n_cur_start(n-1),this%n_cur_end(n-1)
+         stop 1
+      endif
+    end subroutine simple_consistency_checks
+  
     subroutine define_canonical_color_order()
       use math_functions
       implicit none
@@ -1260,18 +1270,13 @@ contains
     class(amplitude_qcd) :: this
     integer :: col_acc,n
     integer,dimension(n) :: order,iper,jper
-    integer :: iperm,jperm,nperm,ival,iacc
+    integer :: iperm,jperm,ival,iacc
     integer,dimension(1:3) :: n_vals
     integer,parameter :: max_vals=100
     real(kind=8),dimension(1:3) :: col_fac
     real(kind=8),dimension(max_vals,1:3) :: diff_vals
     integer,dimension(:,:),allocatable :: ic,ir
     logical colour_flow
-    if (this%n_qqbar.eq.0) then
-       nperm=factorial(n-1)
-    else
-       nperm=factorial(n-2)
-    endif
     if (this%n_qqbar.eq.0) then
        colour_flow=.true.
     elseif (this%n_qqbar.eq.1) then
@@ -1286,7 +1291,7 @@ contains
     elseif (this%n_qqbar.eq.1) then
        iper(1:n)=[order(1),this%perm(1:n-2,iperm),order(n)]
     endif
-    do jperm=iperm,nperm
+    do jperm=iperm,this%nColOrd
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
@@ -1316,8 +1321,8 @@ contains
 ! Allocate the arrays now that we now their sizes
     allocate(ic(1:maxval(n_vals(1:3)),1:3))
     allocate(ir(1:maxval(n_vals(1:3)),1:3))
-    allocate(this%col_index(1:nperm**2,1:maxval(n_vals(1:3)),1:3))
-    allocate(this%row_index(0:nperm,1:maxval(n_vals(1:3)),1:3))
+    allocate(this%col_index(1:this%nColOrd**2,1:maxval(n_vals(1:3)),1:3))
+    allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3)),1:3))
     this%row_index(0,1:maxval(n_vals(1:3)),1:3)=0
     allocate(this%n_col_vals(1:3))
     this%n_col_vals(1:3)=n_vals(1:3)
@@ -1329,13 +1334,13 @@ contains
 ! Compute all the colour factors and fill the col_index and row_index arrays
     ic=0
     ir=0
-    do iperm=1,nperm
+    do iperm=1,this%nColOrd
        if (this%n_qqbar.eq.0) then
           iper(1:n)=[this%perm(1:n-1,iperm),n]
        elseif (this%n_qqbar.eq.1) then
           iper(1:n)=[order(1),this%perm(1:n-2,iperm),order(n)]
        endif
-       do jperm=iperm,nperm ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+       do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
           if (this%n_qqbar.eq.0) then
              jper(1:n)=[this%perm(1:n-1,jperm),n]
           elseif (this%n_qqbar.eq.1) then
