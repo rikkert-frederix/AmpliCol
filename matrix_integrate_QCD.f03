@@ -4,6 +4,7 @@ program matrix_integrate_QCD
   use mint_module
   use phase_space_gen23
   use haag
+  use math_functions
   implicit none
   integer :: j,c_o,i
   integer(kind=8) :: sym_fac
@@ -12,7 +13,6 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrtshat
   logical :: t_chan
-  logical,parameter :: include_pdf=.true.
   character(len=30) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs=.false.
@@ -185,11 +185,10 @@ contains
     real*8, dimension(nintegrals) :: f1
     real*8, save :: val
     integer :: icol,iperm,jperm,ih
-    real*8 :: vol,xmu_fac
+    real*8 :: vol,xmu_fac,cuts_wgt
     real*8, dimension(-6:7,2) :: PDF
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
-    real(kind=8),dimension(2) :: ztemp
    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
@@ -213,25 +212,13 @@ contains
     t_PS= t_PS +tAfter-tBefore
 
     all_evt=all_evt+1
-    !if ((jac.lt.0d0) .or. (.not.pass_cuts(next,p,0))) then
-    !   pass_cuts_check=.false.
-    !   val=0d0
-    !   return
-    !endif
 
-    !do i=1,next
-    !  write(14,*) pt(p(0,i))
-    !enddo
-
-    if ((jac.lt.0d0) .or. (pass_cuts(next,p).lt.0d0)) then
+    cuts_wgt=pass_cuts(next,p)
+    if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
        val=0d0
        return
     endif
-
-    do i=3,next
-      write(14,*) pt(p(0,i))
-    enddo
 
     passed = passed + 1
 
@@ -256,7 +243,8 @@ contains
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
 
-    val=val*pass_cuts(next,p)
+    ! Apply the weight from the cuts
+    if (smooth_cuts) val=val*cuts_wgt
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
