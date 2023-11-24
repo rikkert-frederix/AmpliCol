@@ -22,11 +22,11 @@ module common
   integer(kind=4) :: passed=0
   integer(kind=4) :: all_evt=0
 
-  ! setup
-  real*8,parameter :: pT_min     = -1d0
-  real*8,parameter :: DRjj_min   = -1d0
+  ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
+  real*8,parameter :: pT_min     = 30d0
+  real*8,parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
   real*8,parameter :: eta_max    = -1d0
-  real*8,parameter :: sqrt_s_min = 30d0
+  real*8,parameter :: sqrt_s_min = -1d0
   
 end module common
 

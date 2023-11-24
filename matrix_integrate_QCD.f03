@@ -11,7 +11,7 @@ program matrix_integrate_QCD
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
-  real(kind=8) :: s_cut(2),sqrtshat
+  real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
   character(len=30) :: filename
   integer(kind=4) :: integration, nquarks
@@ -44,10 +44,10 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrtshat=14000.d0
+  sqrts=14000.d0
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
-  s_cut(2)=max(sqrt_s_min,pt_min*DRjj_min)**2
+  s_cut(2)=max(sqrt_s_min**2,pt_min**2*cos(DRjj_min))
 
   mass(1:next)=0d0
 
@@ -70,9 +70,9 @@ program matrix_integrate_QCD
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
-     call gen23_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call gen23_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
-     call  haag_init(sqrtshat,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call  haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
