@@ -10,7 +10,7 @@ module amplitude_QCD_mod
      real(kind=8),dimension(:,:),allocatable :: val_r
   end type current
   type interaction
-     integer :: type
+     integer :: type,singlet_move
      integer,dimension(2) :: currents
      complex(kind=8),dimension(:,:),allocatable :: val_c
      real(kind=8),dimension(:,:),allocatable :: val_r
@@ -838,27 +838,31 @@ contains
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
       this%interaction_list(this%n_vert)%currents(2)=ic2
+      this%interaction_list(this%n_vert)%singlet_move=0
       call add_all_currents(ctype)
     end subroutine add_vertex
 
-    function combined_currents(ip)
+    function combined_currents()
       implicit none
-      integer,dimension(isize) :: ip,combined_currents
-      integer :: i,ii,iii
-      ii=0
-      iii=isize+1
-      do i=1,isize
-         if (part(ip(i)).eq.22) then
-            ! add the colour singlets at the end
-            iii=iii-1
-            combined_currents(iii)=ip(i)
+      integer,dimension(isize) :: combined_currents
+      integer :: i
+      do i=n1,1,-1
+         if (part(this%current_list(ic1)%order(i)).eq.22) then
+            this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+1
          else
-            ii=ii+1
-            combined_currents(ii)=ip(i)
+            exit
          endif
       enddo
+      if (i.eq.n1) then
+         combined_currents(1:isize)=[this%current_list(ic1)%order(1:n1),&
+                                     this%current_list(ic2)%order(1:n2)]
+      else
+         combined_currents(1:isize)=[this%current_list(ic1)%order(1:i),&
+                                     this%current_list(ic2)%order(1:n2),&
+                                     this%current_list(ic1)%order(i+1:n1)]
+      endif
     end function combined_currents
-    
+
     subroutine add_all_currents(ctype)
       implicit none
       logical :: vertex_sign
@@ -866,7 +870,7 @@ contains
       integer :: i,cur_bin,ctype
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-         ip(1:isize,1)=combined_currents([this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)])
+         ip(1:isize,1)=combined_currents()
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
@@ -1195,7 +1199,8 @@ contains
     integer :: n,hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
-    integer :: ifinal
+    integer :: ifinal,ihm1
+    logical :: ls,le
 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
@@ -1301,10 +1306,9 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
-          do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
-             do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
+          do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
+             do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
-
                 if (this%interaction_list(iv)%type.eq.0) then
                    if (use_real_gluons) then
                       call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1319,7 +1323,6 @@ contains
                            this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                                            this%interaction_list(iv)%val_c(1:4,ih))
                    endif
-
                 elseif(this%interaction_list(iv)%type.eq.1) then
                    if (use_real_gluons) then
                       call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1351,6 +1354,25 @@ contains
                                                this%interaction_list(iv)%val_c(1:4,ih))
                     endif
                  elseif(this%interaction_list(iv)%type.eq.6) then
+                    ! MESSY CODE: IMPROVE
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       ls=btest(ih-1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1)
+                       ihm1=ih-1
+                       call mvbits(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin), &
+                            popcnt(this%current_list(this%interaction_list(iv)%currents(2))%bin), &
+                            ihm1,&
+                            popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1)
+                       if (ls) then
+                          ih=1+ibset(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
+                                                 this%current_list(this%interaction_list(iv)%currents(2))%bin)-1)
+                       else
+                          ih=1+ibclr(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
+                                                 this%current_list(this%interaction_list(iv)%currents(2))%bin)-1)
+                       endif
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
                     if (use_real_gluons) then
                        call QuarkGluontoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
