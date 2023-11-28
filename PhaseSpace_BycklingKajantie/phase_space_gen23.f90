@@ -1103,8 +1103,9 @@ contains
     implicit none
     real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG
     real(kind=8) :: cosphi,x
+    real(kind=8),external :: ran2
     cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
-    call random_number(x)
+    x=ran2()
     if (x.gt.0.5d0) then
        getphifroms=acos(cosphi)
     else
