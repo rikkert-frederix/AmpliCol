@@ -49,6 +49,10 @@ contains
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - a single polarisation/helicity configuration'
        write (*,*) '   - all colour orders'
+    elseif (imode.eq.3) then
+       write (*,*) 'Initialising amplitude for:'
+       write (*,*) '   - a single polarisation/helicity configuration'
+       write (*,*) '   - a single colour order'
     else
        write (*,*) 'ERROR unknown operation mode',imode
        stop 1
@@ -108,39 +112,21 @@ contains
              this%current_list(this%n_cur)%bin=ibset(0,order(nc)-1) ! give binary label
              if (this%imode.eq.1) then
                 this%current_list(this%n_cur)%nhel=2 ! all possible helicities !!! MASSLESS ONLY
-             elseif (this%imode.eq.2) then
+             elseif (this%imode.eq.2 .or. this%imode.eq.3) then
                 this%current_list(this%n_cur)%nhel=1 ! only one helicity
              endif
              this%current_list(this%n_cur)%n_vert=0
           enddo
        else
-          if (this%imode.eq.1) then
-             do nc=1,n-isize
-                do isplit=1,isize-1
-                   n1=isplit
-                   n2=isize-isplit
-                   bin1=0 ; do i=nc,nc+isplit-1       ; bin1=ibset(bin1,order(i)-1) ; enddo
-                   bin2=0 ; do i=nc+isplit,nc+isize-1 ; bin2=ibset(bin2,order(i)-1) ; enddo
-                   do ic1=1,this%n_cur
-                      if (this%current_list(ic1)%bin.ne.bin1) cycle
-                      do ic2=1,this%n_cur
-                         if (this%current_list(ic2)%bin.ne.bin2) cycle
-                         call add_if_allowed_threevertex()
-                      enddo
-                   enddo
+          do isplit=1,isize-1
+             n1=isplit
+             n2=isize-isplit
+             do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
+                do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
+                   call add_if_allowed_threevertex()
                 enddo
              enddo
-          elseif (this%imode.eq.2) then
-             do isplit=1,isize-1
-                n1=isplit
-                n2=isize-isplit
-                do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
-                   do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
-                      call add_if_allowed_threevertex()
-                   enddo
-                enddo
-             enddo            
-          endif
+          enddo
        endif
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
@@ -204,7 +190,7 @@ contains
          write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
          stop 1
       endif
-      if (((this%imode.eq.1) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
+      if (((this%imode.eq.1 .or. this%imode.eq.3) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
            ((this%imode.eq.2) .and. (this%n_qqbar.ne.0) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
            ((this%imode.eq.2) .and. (this%n_qqbar.eq.0) .and. use_symmetry .and. &
            (this%nColOrd.ne.2*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)))) &
@@ -217,38 +203,75 @@ contains
     end subroutine simple_consistency_checks
   
     subroutine define_canonical_color_order()
+      ! canonical order: (q,glu,glu,glu,singlet,singlet,qbar,q,qbar)
       use math_functions
       implicit none
       integer :: iord,i
-      ! define a canonical colour order
-       order(1:n)=0
-       if (all(part(1:n).eq.21)) then
-          do i=1,n
-             order(i)=i
-          enddo
-          this%nColOrd=factorial(n-1)
-       else
-          iord=1
-          do i=1,n
-             if (part(i).eq.21) then
-                iord=iord+1
-                order(iord)=i
-             elseif (i.gt.2 .and. part(i).ge.1 .and. part(i).le.6) then
-                order(1)=i
-             elseif (i.le.2 .and. part(i).le.-1 .and. part(i).ge.-6) then
-                order(1)=i
-             elseif (i.gt.2 .and. part(i).le.-1 .and. part(i).ge.-6) then
-                order(n)=i
-             elseif (i.le.2 .and. part(i).ge.1 .and. part(i).le.6) then
-                order(n)=i
-             endif
-          enddo
-          this%nColOrd=factorial(n-2)
-       endif
-       if (any(order(1:n).eq.0)) then
-          write (*,*) 'ERROR: canonical order not found'
-          stop 1
-       endif
+      integer :: nq,naq,nglu,nsing,iq,iaq,iglu,ising
+      nq=0; naq=0 ; nglu=0 ; nsing=0
+      do i=1,n
+         if (part(i).eq.21) nglu=nglu+1
+         if ((i.gt.2 .and. (part(i).ge.1 .and. part(i).le.6)) .or. &
+             (i.le.2 .and. (part(i).le.-1 .and. part(i).ge.-6))) nq=nq+1
+         if ((i.gt.2 .and. (part(i).le.-1 .and. part(i).ge.-6) ).or. &
+             (i.le.2 .and. (part(i).ge.1 .and. part(i).le.6))) naq=naq+1
+         if (part(i).eq.22) nsing=nsing+1
+      enddo
+      if (nq.ne.naq) then
+         write (*,*) 'not the same number of quarks and anti-quarks',nq,naq
+         stop 1
+      endif
+      if (nq.gt.2) then
+         write (*,*) 'more than two quarks',nq
+         stop 1
+      endif
+      if (nq+naq+nsing+nglu.ne.n) then
+         write (*,*) 'particle types do not add up',nq,naq,nsing,nglu,':',n
+         stop 1
+      endif
+      iq=0; iaq=0 ; iglu=0 ; ising=0
+      do i=1,n
+         if (part(i).eq.21) then
+            iglu=iglu+1
+            if (nq.ge.1) then
+               order(iglu+1)=i
+            else
+               order(iglu)=i
+            endif
+         elseif((i.gt.2 .and. (part(i).ge.1 .and. part(i).le.6)) .or. &
+              (i.le.2 .and. (part(i).le.-1 .and. part(i).ge.-6))) then
+            iq=iq+1
+            if (iq.eq.1) then
+               order(1)=i
+            else
+               order(n-1)=i
+            endif
+         elseif ((i.gt.2 .and. (part(i).le.-1 .and. part(i).ge.-6) ).or. &
+              (i.le.2 .and. (part(i).ge.1 .and. part(i).le.6))) then
+            iaq=iaq+1
+            if (iaq.eq.1) then
+               order(n)=i
+            else
+               order(n-2)=i
+            endif
+         elseif (part(i).eq.22) then
+            ising=ising+1
+            if(nq.ne.0) then
+               order(1+nglu+ising)=i
+            else
+               order(nglu+ising)=i
+            endif
+         endif
+      enddo
+
+      if (nq.eq.0) then
+         this%nColOrd=factorial(nglu-1)
+      elseif (nq.eq.1) then
+         this%nColOrd=factorial(nglu)
+      else
+         write (*,*) 'Number of colour orders unknown',nq
+         stop 1
+      endif
      end subroutine define_canonical_color_order
 
     subroutine check_input_consistency()
@@ -259,12 +282,12 @@ contains
       quark_flav=0
       do i=1,n
          if (i.le.2) then
-            if (part(i).ne.21) then
+            if (part(i).ne.21 .and. part(i).ne.22) then
                quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
                if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
             endif
          else
-            if (part(i).ne.21) then
+            if (part(i).ne.21 .and. part(i).ne.22) then
                quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
                if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
@@ -357,7 +380,7 @@ contains
       ! rough upper bound for the maximum number of currents
       implicit none
       integer :: isize,j,ifact
-      if (this%imode.eq.1) then
+      if (this%imode.eq.1 .or. this%imode.eq.3) then
          max_cur=0
          do isize=1,n-1
             if (isize.eq.1 .or. isize.eq.n-1) then
@@ -441,7 +464,7 @@ contains
       implicit none
       integer :: isize,fact,iden,isplit,itens,fact2,next
       real(kind=8) :: mv
-      if (this%imode.eq.1) then
+      if (this%imode.eq.1 .or. this%imode.eq.3) then
          max_vert=0
          do isize=2,n-1
             if (isize.eq.2) then
@@ -685,45 +708,7 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-
-      if (this%imode.eq.2) then
-         if (this%n_qqbar.eq.1) then
-            ! if quark is in there, it should be the very first particle
-            if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
-                       this%current_list(ic1)%order(1).ne.order(1)) return
-            if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) then
-                    return
-            endif        
-            ! anti-quark should not be part of it, since it will close the current
-            if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
-            if (any(this%current_list(ic2)%order(1:n2).eq.order(n))) return
-            if (abs(this%current_list(ic1)%type).ge.1 .and. abs(this%current_list(ic1)%type).le.6) then
-              if (this%current_list(ic2)%type.eq.-21) return
-            endif
-            if (abs(this%current_list(ic2)%type).ge.1 .and. abs(this%current_list(ic2)%type).le.6) then
-               if (this%current_list(ic1)%type.eq.-21) return
-            endif
-
-         elseif (this%n_qqbar.eq.0) then
-            ! final gluon should not be part of it, since it will close the current
-            if (any(this%current_list(ic1)%order(1:n1).eq.order(n))) return
-            if (any(this%current_list(ic2)%order(1:n2).eq.order(n))) return
-         else
-            write (*,*) 'Only implemented for 0 or 1 qqbar pair',this%n_qqbar
-            stop
-         endif
-
-         ! check that all particles are different in the two currents:
-         if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
-         if (use_symmetry .and. imode.ne.1) then
-            ! For the gluon (and tensor) currents only consider one ordering;
-            ! the other will be obtained from symmetry.
-            if (this%n_qqbar.eq.0 .or. (this%n_qqbar.eq.1 .and. this%current_list(ic1)%order(1).ne.order(1))) then
-               if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
-            endif
-         endif
-      endif
-
+      if (.not.valid_current_combination()) return
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -759,9 +744,92 @@ contains
            (this%current_list(ic2)%type.eq.anti_current(this%current_list(ic1)%type))) then
          ! add a antiquark-quark to gluon vertex
          call add_vertex(9,21)
+      elseif (this%current_list(ic1)%type.eq.22 .and. &
+           (this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6)) then
+         ! add a photon-quark to quark vertex
+         call add_vertex(4,this%current_list(ic2)%type)
+      elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
+           this%current_list(ic2)%type.eq.22) then
+         ! add a quark-photon to quark vertex
+         call add_vertex(6,this%current_list(ic1)%type)
       endif
     end subroutine add_if_allowed_threevertex
 
+
+    logical function all_gluon_current(bin)
+      ! returns .true. only if all external particles related to the binary
+      ! label 'bin' are gluons
+      implicit none
+      integer :: bin,i,j
+      all_gluon_current=.true.
+      do i=1,n
+         if (btest(bin,i-1) .and. part(i).ne.21) then
+            all_gluon_current=.false.
+            return
+         endif
+      enddo
+    end function all_gluon_current
+      
+    logical function valid_current_combination()
+      implicit none
+      integer :: i,j,k
+      logical :: gluon_current
+      integer,dimension(isize) :: ip
+      valid_current_combination=.false.
+      ! check that all particles are different in the two currents:
+      if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
+
+      ! final particle should never be part of any combined currents: it will
+      ! be used to close the amplitude instead
+      if (n1.eq.1) then
+         if (this%current_list(ic1)%order(n1).eq.order(n)) return
+      endif
+      if (n2.eq.1) then
+         if (this%current_list(ic2)%order(n2).eq.order(n)) return
+      endif
+
+      ip(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
+      if (this%imode.eq.1 .or. this%imode.eq.3) then
+         ! check that current combination is compatible with the input colour
+         ! order. Skip colour singlets
+         do i=1,isize
+            if (part(ip(i)).ne.22) exit
+         enddo
+         do j=1,n
+            if (order(j).eq.ip(i)) exit
+         enddo
+         do k=1,isize-1
+            if (i+k.gt.isize) exit            ! they are compatible
+            if (part(ip(i+k)).eq.22) i=i+1
+            if (part(order(j+k)).eq.22) j=j+1
+            if (i+k.gt.isize) exit            ! they are compatible
+            if (j+k.gt.n) return              ! incompatible: passed end of the order() array
+            if (ip(i+k).ne.order(j+k)) return ! incompatible: order is different
+         enddo
+      endif
+
+      ! If using symmetry and the current is a combination of all external
+      ! gluons, take only one of the two possible orders
+      gluon_current=all_gluon_current(this%current_list(ic1)%bin+this%current_list(ic2)%bin)
+      if (use_symmetry .and. this%imode.eq.2 .and. gluon_current) then
+         if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
+      endif
+
+!!$      write (*,*) any(this%current_list(ic1)%order(1:n1).eq.order(1)) &
+!!$           ,this%current_list(ic1)%order(1).ne.order(1),any(this%current_list(ic2)%order(1:n2).eq.order(1)),&
+!!$           gluon_current,this%current_list(ic1)%bin,this%current_list(ic2)%bin
+
+      if (.not. gluon_current) then
+         ! if quark is in there, it should be the very first particle
+         if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
+              this%current_list(ic1)%order(1).ne.order(1)) return
+         if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) then
+            return
+         endif
+      endif
+      valid_current_combination=.true.
+    end function valid_current_combination
+    
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
@@ -773,14 +841,33 @@ contains
       call add_all_currents(ctype)
     end subroutine add_vertex
 
+    function combined_currents(ip)
+      implicit none
+      integer,dimension(isize) :: ip,combined_currents
+      integer :: i,ii,iii
+      ii=0
+      iii=isize+1
+      do i=1,isize
+         if (part(ip(i)).eq.22) then
+            ! add the colour singlets at the end
+            iii=iii-1
+            combined_currents(iii)=ip(i)
+         else
+            ii=ii+1
+            combined_currents(ii)=ip(i)
+         endif
+      enddo
+    end function combined_currents
+    
     subroutine add_all_currents(ctype)
       implicit none
       logical :: vertex_sign
       integer,dimension(isize,8) :: ip
       integer :: i,cur_bin,ctype
-      if (.not.use_symmetry .or. imode.eq.1) then
+      if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-         call add_current(.false.,cur_bin,[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)],ctype)
+         ip(1:isize,1)=combined_currents([this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)])
+         call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
       ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
@@ -858,7 +945,8 @@ contains
       integer,dimension(isize) :: ip ! permutation of the current
       integer :: ctype,cur_bin,ic,key
       integer(kind=8) :: val
-      if (imode.eq.1) then
+      if (this%imode.eq.1 .or. this%imode.eq.3) then
+         write (*,*) 'add_current',ctype,':',ip,':',this%current_list(ic1)%order(1:n1),':',this%current_list(ic2)%order(1:n2)
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
             if (ctype.ne.this%current_list(ic)%type) cycle
@@ -889,7 +977,7 @@ contains
          this%current_list(this%n_cur)%vertices(1)=this%n_vert
          this%current_list(this%n_cur)%vertex_sign(1)=vertex_sign
          this%current_list(this%n_cur)%n_vert=1
-      elseif (imode.eq.2) then
+      elseif (this%imode.eq.2) then
          if (ctype.eq.21) then
             ! gluon current
             call get_value(ip,0,val)
@@ -1142,7 +1230,7 @@ contains
                                                           this%current_list(this%interaction_list(iv)%currents(2))%nhel))
           endif
        enddo
-       if (this%imode.eq.1) then
+       if (this%imode.eq.1 .or. this%imode.eq.3) then
           if (use_real_gluons .and. this%n_qqbar.eq.0) then
              allocate(this%amps_r(1:this%current_list(this%n_cur)%nhel*this%current_list(n)%nhel))
           else
@@ -1193,6 +1281,17 @@ contains
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                    call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                elseif (this%current_list(ic)%type.eq.22) then
+                   if (use_real_gluons) then
+                      call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                           ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
+                   else
+                      call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                           ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                   endif
+                else
+                   write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih
+                   stop 1
                 endif
              enddo
           enddo
@@ -1350,6 +1449,12 @@ contains
                   endif
                endif
             enddo
+         endif
+      elseif (this%imode.eq.3) then
+         if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
+            this%amps_r(1)=sum(this%current_list(this%n_cur)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,2))
+         else
+            this%amps(1)=sum(this%current_list(this%n_cur)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
          endif
       endif
     end subroutine compute_amps_from_currents
