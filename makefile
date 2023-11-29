@@ -4,12 +4,12 @@ FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o MC_integer.o ranmar.o HwU.o	\
 LUPdecompose.o phase_space_gen23.o haag.o color_algebra.o math_functions.o	\
 feynmanrules.o amplitude_QCD.o matrix_integrate_QCD.o common.o
 
-FILES_M_RWGT_QCD=random.o color_algebra.o math_functions.o feynmanrules.o	\
+FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
 
 FC=gfortran
 FFLAGS=-ffast-math -O3
-#FFLAGS=-fbounds-check -Wall
+#FFLAGS=-fbounds-check 
 
 # Files for all executables
 
