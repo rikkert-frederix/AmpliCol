@@ -148,16 +148,10 @@ program matrix_integrate_QCD
      call gen(integrand,0,-1) ! initialise countersi
      filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
-     n_events=0
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        !if (pass_cuts(next,p).gt.0d0) then
-          call unwgt_helicity
-          call write_event(11,ans(1,0))
-          n_events=n_events+1
-        !else
-          !write(*,*)pass_cuts(next,p)
-        !endif
+        call unwgt_helicity
+        call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -175,6 +169,7 @@ program matrix_integrate_QCD
   write(*,*) 'Number of events:',all_evt
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
+  write(*,*) 'Number of numerical errors:',num_error
  
 contains
   function integrand(x,vol,ifirst,f1)
@@ -283,9 +278,10 @@ contains
     implicit none
     integer :: i,j,n
     real*8,dimension(0:3,n) :: p
-    double precision :: frac,y
+    double precision :: frac,y,steep
 
-    frac=0.1d0
+    frac=0.8d0
+    steep=1.8d0
     pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
        do i=1,n-1
@@ -297,6 +293,7 @@ contains
           enddo
        enddo
     endif
+
     do i=3,n
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then
@@ -306,7 +303,8 @@ contains
           if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
              y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
              if (imode.le.0) then
-               pass_cuts=pass_cuts*(6d0*(y**5)-15d0*(y**4)+10d0*(y**3))
+               !pass_cuts=pass_cuts*(6d0*(y**5)-15d0*(y**4)+10d0*(y**3)) ! smooth step function
+               pass_cuts=pass_cuts*((steep-1d0)*y/(steep-y)) ! 1/x damping function
              else
                pass_cuts=-1d0
              endif
