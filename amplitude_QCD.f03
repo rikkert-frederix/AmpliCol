@@ -862,8 +862,8 @@ contains
       endif
       ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
       call check_all_permutations(nperm,ip,vertex_sign)
+      cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
       do i=1,nperm
-         cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
          call add_current(vertex_sign(i),cur_bin,ip(1:isize,i),ctype)
       enddo
 
