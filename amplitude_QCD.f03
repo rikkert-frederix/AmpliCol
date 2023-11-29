@@ -1,6 +1,6 @@
 module amplitude_QCD_mod
   implicit none
-  logical,parameter :: use_symmetry=.true.
+  logical,parameter :: use_symmetry=.false.
   logical,parameter :: use_real_gluons=.false.
   type current
      integer :: type,bin,nhel,n_vert
@@ -756,20 +756,6 @@ contains
     end subroutine add_if_allowed_threevertex
 
 
-    logical function all_gluon_current(bin)
-      ! returns .true. only if all external particles related to the binary
-      ! label 'bin' are gluons
-      implicit none
-      integer :: bin,i,j
-      all_gluon_current=.true.
-      do i=1,n
-         if (btest(bin,i-1) .and. part(i).ne.21) then
-            all_gluon_current=.false.
-            return
-         endif
-      enddo
-    end function all_gluon_current
-      
     logical function valid_current_combination()
       implicit none
       integer :: i,j,k
@@ -838,66 +824,119 @@ contains
       call add_all_currents(ctype)
     end subroutine add_vertex
 
-    function combined_currents(n1,n2,ip1,ip2)
+    function combined_currents(n1,n2,ip1,ip2,singlet_move)
       ! just concatenate the two colour orders, except if there is a colour
       ! singlet. Move the singlet to the end of the combined current order.
       implicit none
       integer,dimension(isize) :: combined_currents
       integer :: i,n1,n2
+      integer,intent(out) :: singlet_move
       integer,dimension(n1) :: ip1
       integer,dimension(n2) :: ip2
+      singlet_move=0
       do i=n1,1,-1
          if (part(ip1(i)).eq.22) then
-            this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+1
+            singlet_move=singlet_move+1
          else
             exit
          endif
       enddo
-      if (i.eq.n1) then
+      if (i.eq.n1) then ! no colour singlets
          combined_currents(1:isize)=[ip1(1:n1),ip2(1:n2)]
-      else
+      else              ! n1-i colour singlets
          combined_currents(1:isize)=[ip1(1:i),ip2(1:n2),ip1(i+1:n1)]
       endif
     end function combined_currents
 
     subroutine add_all_currents(ctype)
       implicit none
-      logical :: vertex_sign
+      logical,dimension(8) :: vertex_sign
       integer,dimension(isize,8) :: ip
-      integer :: i,cur_bin,ctype
+      integer :: i,cur_bin,ctype,nperm,singlet_move
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-         ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2))
+         ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2),singlet_move)
+         this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+singlet_move
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
       ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
-      ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(1:n2   ))
-      ip(1:isize,2)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(1:n1   ))
-      ip(1:isize,3)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(1:n2   ))
-      ip(1:isize,4)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(n1:1:-1))
-      ip(1:isize,5)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(n2:1:-1))
-      ip(1:isize,6)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(1:n1   ))
-      ip(1:isize,7)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(n2:1:-1))
-      ip(1:isize,8)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(n1:1:-1))
-      do i=1,8
-         if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
-         if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
-         if (valid_current_order(ip(1:isize,i))) then
-            if (i.eq.1 .or. &
-                 (i.eq.3 .and. mod(n1,2).eq.1)    .or. (i.eq.4 .and. mod(n1,2).eq.0) .or. &
-                 (i.eq.5 .and. mod(n2,2).eq.1)    .or. (i.eq.6 .and. mod(n2,2).eq.0) .or. &
-                 (i.eq.7 .and. mod(isize,2).eq.0) .or. (i.eq.8 .and. mod(isize,2).eq.1)) then
-               vertex_sign=.false. ! no extra sign needed
-            else
-               vertex_sign=.true.  ! permutation requires a minus sign
-            endif
-            cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-            call add_current(vertex_sign,cur_bin,ip(1:isize,i),ctype)
-         endif
+      call check_all_permutations(nperm,ip,vertex_sign)
+      do i=1,nperm
+         cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
+         call add_current(vertex_sign(i),cur_bin,ip(1:isize,i),ctype)
       enddo
+
+!!$      ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(1:n2   ))
+!!$      ip(1:isize,2)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(1:n1   ))
+!!$      ip(1:isize,3)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(1:n2   ))
+!!$      ip(1:isize,4)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(n1:1:-1))
+!!$      ip(1:isize,5)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(n2:1:-1))
+!!$      ip(1:isize,6)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(1:n1   ))
+!!$      ip(1:isize,7)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(n2:1:-1))
+!!$      ip(1:isize,8)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(n1:1:-1))
+!!$      do i=1,8
+!!$         if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
+!!$         if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
+!!$         if (valid_current_order(ip(1:isize,i))) then
+!!$            if (i.eq.1 .or. &
+!!$                 (i.eq.3 .and. mod(n1,2).eq.1)    .or. (i.eq.4 .and. mod(n1,2).eq.0) .or. &
+!!$                 (i.eq.5 .and. mod(n2,2).eq.1)    .or. (i.eq.6 .and. mod(n2,2).eq.0) .or. &
+!!$                 (i.eq.7 .and. mod(isize,2).eq.0) .or. (i.eq.8 .and. mod(isize,2).eq.1)) then
+!!$               vertex_sign=.false. ! no extra sign needed
+!!$            else
+!!$               vertex_sign=.true.  ! permutation requires a minus sign
+!!$            endif
+!!$            cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
+!!$            call add_current(vertex_sign,cur_bin,ip(1:isize,i),ctype)
+!!$         endif
+!!$      enddo
     end subroutine add_all_currents
 
+    subroutine check_all_permutations(nperm,ip,vertex_sign)
+      implicit none
+      integer,intent(out) :: nperm
+      integer,intent(out),dimension(isize,8) :: ip
+      logical,intent(out),dimension(8) :: vertex_sign
+      integer,dimension(1:n1,2) :: ip1
+      integer,dimension(1:n2,2) :: ip2
+      logical :: ag1,ag2
+      integer,dimension(3) :: switch
+      integer :: i,j,k
+      integer,dimension(8) :: singlet_move
+      switch(1:3)=1
+      ag1=all_gluon_current(this%current_list(ic1)%bin)
+      ag2=all_gluon_current(this%current_list(ic2)%bin)
+      if (n1.ge.2 .and. ag1) switch(1)=2
+      if (n2.ge.2 .and. ag2) switch(2)=2
+      if (ag1 .and. ag2) switch(3)=2
+      ip1(1:n1,1)=this%current_list(ic1)%order(1:n1)
+      ip1(1:n1,2)=this%current_list(ic1)%order(n1:1:-1)
+      ip2(1:n2,1)=this%current_list(ic2)%order(1:n2)
+      ip2(1:n2,2)=this%current_list(ic2)%order(n2:1:-1)
+      nperm=0
+      do i=1,switch(1)
+         do j=1,switch(2)
+            do k=1,switch(3)
+               nperm=nperm+1
+               if (k.eq.1) then
+                  ip(1:isize,nperm)=combined_currents(n1,n2,ip1(1:n1,i),ip2(1:n2,j),singlet_move(nperm))
+               else
+                  ip(1:isize,nperm)=combined_currents(n2,n1,ip2(1:n2,j),ip1(1:n1,i),singlet_move(nperm))
+               endif
+               vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.1 .and. mod(n1,2).eq.0))
+               if (.not.valid_current_order(ip(1:isize,nperm))) nperm=nperm-1
+            enddo
+         enddo
+      enddo
+      if (all(singlet_move(1:nperm).eq.singlet_move(1))) then
+         this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+singlet_move(1)
+      else
+         write (*,*) 'Singlet move not identical for all permutations',nperm,':',singlet_move(1:nperm)
+         stop 1
+      endif
+    end subroutine check_all_permutations
+    
     logical function valid_current_order(ip)
       ! Checks that ip(1:isize) is an order for a current to be considered:
       ! the smallest number needs to come before the largest number in this
@@ -1160,32 +1199,45 @@ contains
     ! Note that when giving non-sensical inputs (e.g., the last one in the
     ! list above), the code either goes into an infinite loop, or returns some
     ! bogus result. There is no check on the consistency of the input.
-     implicit none
-     integer :: ip,n,i_up,i,j
-     integer,dimension(ip) :: ips,ips_in
-     logical :: found
-     found=.false.
-     ips(1:ip)=ips_in(1:ip)
-     do i_up=ip,1,-1
-       do while (ips(i_up).lt.n)
-          ips(i_up)=ips(i_up)+1
-          if (any(ips(1:i_up-1).eq.ips(i_up))) cycle
-          found=.true.
-          exit
-       enddo
-       if (found) exit
-     enddo
-     do i=i_up+1,ip
-       do j=1,n
-          if (any(ips(1:i).eq.j)) then
-             continue
-          else
-             ips(i)=j
-             exit
-          endif
-       enddo
-     enddo
+      implicit none
+      integer :: ip,n,i_up,i,j
+      integer,dimension(ip) :: ips,ips_in
+      logical :: found
+      found=.false.
+      ips(1:ip)=ips_in(1:ip)
+      do i_up=ip,1,-1
+         do while (ips(i_up).lt.n)
+            ips(i_up)=ips(i_up)+1
+            if (any(ips(1:i_up-1).eq.ips(i_up))) cycle
+            found=.true.
+            exit
+         enddo
+         if (found) exit
+      enddo
+      do i=i_up+1,ip
+         do j=1,n
+            if (any(ips(1:i).eq.j)) then
+               continue
+            else
+               ips(i)=j
+               exit
+            endif
+         enddo
+      enddo
     end subroutine get_next_iperm
+    logical function all_gluon_current(bin)
+      ! returns .true. only if all external particles related to the binary
+      ! label 'bin' are gluons
+      implicit none
+      integer :: bin,i,j
+      all_gluon_current=.true.
+      do i=1,n
+         if (btest(bin,i-1) .and. part(i).ne.21) then
+            all_gluon_current=.false.
+            return
+         endif
+      enddo
+    end function all_gluon_current
   end subroutine init
 
 
@@ -1417,7 +1469,6 @@ contains
       ! ising will contain the helicity bit of the colour singlet that has
       ! been moved towards the end: this is the bit that needs to be put at
       ! the end of 'ih'
-      ising=0
       call mvbits(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1,1,ising,0)
       ! move all the other bits one step towards the beginning
       call mvbits(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin), &
