@@ -1,6 +1,6 @@
 module amplitude_QCD_mod
   implicit none
-  logical,parameter :: use_symmetry=.false.
+  logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
   type current
      integer :: type,bin,nhel,n_vert
