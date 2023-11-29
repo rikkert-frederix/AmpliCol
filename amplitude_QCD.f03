@@ -815,10 +815,6 @@ contains
          if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
       endif
 
-!!$      write (*,*) any(this%current_list(ic1)%order(1:n1).eq.order(1)) &
-!!$           ,this%current_list(ic1)%order(1).ne.order(1),any(this%current_list(ic2)%order(1:n2).eq.order(1)),&
-!!$           gluon_current,this%current_list(ic1)%bin,this%current_list(ic2)%bin
-
       if (.not. gluon_current) then
          ! if quark is in there, it should be the very first particle
          if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
@@ -842,24 +838,25 @@ contains
       call add_all_currents(ctype)
     end subroutine add_vertex
 
-    function combined_currents()
+    function combined_currents(n1,n2,ip1,ip2)
+      ! just concatenate the two colour orders, except if there is a colour
+      ! singlet. Move the singlet to the end of the combined current order.
       implicit none
       integer,dimension(isize) :: combined_currents
-      integer :: i
+      integer :: i,n1,n2
+      integer,dimension(n1) :: ip1
+      integer,dimension(n2) :: ip2
       do i=n1,1,-1
-         if (part(this%current_list(ic1)%order(i)).eq.22) then
+         if (part(ip1(i)).eq.22) then
             this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+1
          else
             exit
          endif
       enddo
       if (i.eq.n1) then
-         combined_currents(1:isize)=[this%current_list(ic1)%order(1:n1),&
-                                     this%current_list(ic2)%order(1:n2)]
+         combined_currents(1:isize)=[ip1(1:n1),ip2(1:n2)]
       else
-         combined_currents(1:isize)=[this%current_list(ic1)%order(1:i),&
-                                     this%current_list(ic2)%order(1:n2),&
-                                     this%current_list(ic1)%order(i+1:n1)]
+         combined_currents(1:isize)=[ip1(1:i),ip2(1:n2),ip1(i+1:n1)]
       endif
     end function combined_currents
 
@@ -870,19 +867,19 @@ contains
       integer :: i,cur_bin,ctype
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-         ip(1:isize,1)=combined_currents()
+         ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2))
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
       ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
-      ip(1:isize,1)=[this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(1:n2   )]
-      ip(1:isize,2)=[this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(1:n1   )]
-      ip(1:isize,3)=[this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(1:n2   )]
-      ip(1:isize,4)=[this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(n1:1:-1)]
-      ip(1:isize,5)=[this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(n2:1:-1)]
-      ip(1:isize,6)=[this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(1:n1   )]
-      ip(1:isize,7)=[this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(n2:1:-1)]
-      ip(1:isize,8)=[this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(n1:1:-1)]
+      ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(1:n2   ))
+      ip(1:isize,2)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(1:n1   ))
+      ip(1:isize,3)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(1:n2   ))
+      ip(1:isize,4)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(n1:1:-1))
+      ip(1:isize,5)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(n2:1:-1))
+      ip(1:isize,6)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(1:n1   ))
+      ip(1:isize,7)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(n2:1:-1))
+      ip(1:isize,8)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(n1:1:-1))
       do i=1,8
          if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
          if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
@@ -950,7 +947,7 @@ contains
       integer :: ctype,cur_bin,ic,key
       integer(kind=8) :: val
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-         write (*,*) 'add_current',ctype,':',ip,':',this%current_list(ic1)%order(1:n1),':',this%current_list(ic2)%order(1:n2)
+!!$         write (*,*) 'add_current',ctype,':',ip,':',this%current_list(ic1)%order(1:n1),':',this%current_list(ic2)%order(1:n2)
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
             if (ctype.ne.this%current_list(ic)%type) cycle
