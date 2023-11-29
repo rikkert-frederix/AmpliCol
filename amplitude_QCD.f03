@@ -1196,8 +1196,7 @@ contains
     integer :: n,hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
-    integer :: ifinal,ihm1
-    logical :: ls,le
+    integer :: ifinal
 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
@@ -1351,21 +1350,8 @@ contains
                                                this%interaction_list(iv)%val_c(1:4,ih))
                     endif
                  elseif(this%interaction_list(iv)%type.eq.6) then
-                    ! MESSY CODE: IMPROVE
                     if (this%interaction_list(iv)%singlet_move.eq.1) then
-                       ls=btest(ih-1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1)
-                       ihm1=ih-1
-                       call mvbits(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin), &
-                            popcnt(this%current_list(this%interaction_list(iv)%currents(2))%bin), &
-                            ihm1,&
-                            popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1)
-                       if (ls) then
-                          ih=1+ibset(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
-                                                 this%current_list(this%interaction_list(iv)%currents(2))%bin)-1)
-                       else
-                          ih=1+ibclr(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
-                                                 this%current_list(this%interaction_list(iv)%currents(2))%bin)-1)
-                       endif
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
                     elseif (this%interaction_list(iv)%singlet_move.gt.1) then
                        write (*,*) 'Cannot do more than one singlet move at once'
                        stop 1
@@ -1414,6 +1400,35 @@ contains
     call compute_amps_from_currents
 
   contains
+    subroutine move_ih(ih)
+      ! If there is a colour singlet, we need to be careful, since it is
+      ! always moved to the end of the color order. This might mess up the
+      ! helicity assignment when summing over helicities. Hence, we need to
+      ! move the helicity bit of the colour singlet to the end of 'ih' and
+      ! move all the other bits one step towards the beginning.
+      implicit none
+      integer,intent(inout) :: ih
+      integer :: ihm1
+      integer :: ising
+      ! when not summing over helicities (or when ih=1 (i.e. all bits are
+      ! equal to zero)), there is nothing to do.
+      if (ih.eq.1) return
+      ihm1=ih-1
+      ! ising will contain the helicity bit of the colour singlet that has
+      ! been moved towards the end: this is the bit that needs to be put at
+      ! the end of 'ih'
+      ising=0
+      call mvbits(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1,1,ising,0)
+      ! move all the other bits one step towards the beginning
+      call mvbits(ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin), &
+                       popcnt(this%current_list(this%interaction_list(iv)%currents(2))%bin), &
+                       ihm1,&
+                       popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)-1)
+      ! place the colour singlet at the end
+      call mvbits(ising,0,1,ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
+           this%current_list(this%interaction_list(iv)%currents(2))%bin)-1)
+      ih=ihm1+1
+    end subroutine move_ih
     subroutine fill_momentum_array
       implicit none
       integer :: ip,ibin,i
