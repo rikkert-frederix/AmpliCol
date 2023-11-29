@@ -860,7 +860,7 @@ contains
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
-      ! Need to consider the 8 possible permutations (1, 2 or 4 permutations will actually be a valid order)
+      ! Need to consider all the possible permutations
       call check_all_permutations(nperm,ip,vertex_sign)
       cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
       do i=1,nperm
@@ -869,6 +869,10 @@ contains
     end subroutine add_all_currents
 
     subroutine check_all_permutations(nperm,ip,vertex_sign)
+      ! If a current only contains (external) gluons, we can use symmetry to
+      ! relate them to eachother. This subroutine checks all permutations,
+      ! and, if they give a valid current order, adds that current to the list
+      ! that should be included.
       implicit none
       integer,intent(out) :: nperm
       integer,intent(out),dimension(isize,8) :: ip
