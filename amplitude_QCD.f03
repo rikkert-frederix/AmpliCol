@@ -866,31 +866,6 @@ contains
       do i=1,nperm
          call add_current(vertex_sign(i),cur_bin,ip(1:isize,i),ctype)
       enddo
-
-!!$      ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(1:n2   ))
-!!$      ip(1:isize,2)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(1:n1   ))
-!!$      ip(1:isize,3)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(1:n2   ))
-!!$      ip(1:isize,4)=combined_currents(n2,n1,this%current_list(ic2)%order(1:n2   ),this%current_list(ic1)%order(n1:1:-1))
-!!$      ip(1:isize,5)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1   ),this%current_list(ic2)%order(n2:1:-1))
-!!$      ip(1:isize,6)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(1:n1   ))
-!!$      ip(1:isize,7)=combined_currents(n1,n2,this%current_list(ic1)%order(n1:1:-1),this%current_list(ic2)%order(n2:1:-1))
-!!$      ip(1:isize,8)=combined_currents(n2,n1,this%current_list(ic2)%order(n2:1:-1),this%current_list(ic1)%order(n1:1:-1))
-!!$      do i=1,8
-!!$         if (n1.eq.1 .and. (i.eq.3 .or. i.eq.4 .or. i.eq.7 .or. i.eq.8)) cycle
-!!$         if (n2.eq.1 .and. (i.eq.5 .or. i.eq.6 .or. i.eq.7 .or. i.eq.8)) cycle
-!!$         if (valid_current_order(ip(1:isize,i))) then
-!!$            if (i.eq.1 .or. &
-!!$                 (i.eq.3 .and. mod(n1,2).eq.1)    .or. (i.eq.4 .and. mod(n1,2).eq.0) .or. &
-!!$                 (i.eq.5 .and. mod(n2,2).eq.1)    .or. (i.eq.6 .and. mod(n2,2).eq.0) .or. &
-!!$                 (i.eq.7 .and. mod(isize,2).eq.0) .or. (i.eq.8 .and. mod(isize,2).eq.1)) then
-!!$               vertex_sign=.false. ! no extra sign needed
-!!$            else
-!!$               vertex_sign=.true.  ! permutation requires a minus sign
-!!$            endif
-!!$            cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-!!$            call add_current(vertex_sign,cur_bin,ip(1:isize,i),ctype)
-!!$         endif
-!!$      enddo
     end subroutine add_all_currents
 
     subroutine check_all_permutations(nperm,ip,vertex_sign)
@@ -924,7 +899,7 @@ contains
                else
                   ip(1:isize,nperm)=combined_currents(n2,n1,ip2(1:n2,j),ip1(1:n1,i),singlet_move(nperm))
                endif
-               vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.1 .and. mod(n1,2).eq.0))
+               vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.2 .and. mod(n1,2).eq.0))
                if (.not.valid_current_order(ip(1:isize,nperm))) nperm=nperm-1
             enddo
          enddo
