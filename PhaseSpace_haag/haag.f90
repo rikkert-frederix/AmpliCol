@@ -319,15 +319,15 @@ contains
     real(kind=8),dimension(0:3) :: Qm,Qnm
     real(kind=8) :: Qz,E1,E2,s1,s2,s,Qt,soft,antenna,test,mass1,mass2,mass_in
     logical :: m1
-    integer(kind=8),allocatable :: subperm1(:), subperm2(:)
-    integer(kind=8),dimension(1) :: subperm
-    integer(kind=8),dimension(next-3) :: subperm_rest
+    integer(kind=8),dimension(:),allocatable :: subperm1(:), subperm2(:),subperm,subperm_rest
     integer(kind=8),dimension(next-1) :: perm_final
     real(kind=8),dimension(next-2) :: schan_ran,schan_ran_sorted
     real(kind=8),dimension(0:3) :: q1_ref,q2_ref
     
-    if(.not.allocated(subperm1)) allocate(subperm1(0:next-2))
-    if(.not.allocated(subperm2)) allocate(subperm2(0:next-2))
+    if(.not.allocated(subperm1)) allocate(subperm1(1:next-2))
+    if(.not.allocated(subperm2)) allocate(subperm2(1:next-2))
+    if(.not.allocated(subperm)) allocate(subperm(1:next-2))
+    if(.not.allocated(subperm_rest)) allocate(subperm_rest(1:next-2))
     mm = 0
     do i=1,next-2
        if (sets(i,1) .ne. 0) then
@@ -743,6 +743,7 @@ endif
           real(kind=8) :: RHS,max,min,sum_w,R
           real(kind=8),dimension(4) :: g1,g2,g3,d,e,w    
           integer :: i,pick
+          real(kind=8),external :: ran2
 
           ! Generate s1,s2 invariants
           m=dsqrt(s)
@@ -799,7 +800,7 @@ endif
      !w(3) = (1d0/(4d0*E1*E2))*1d0/(E1+E2)*((-log(E1-max)+log(E2+max))-(-log(E1-min)+log(E2+min)))
      !w(4) = (1d0/(4d0*E1*E2))*1d0/(E1-E2)*((-log(E1-max)+log(E2-max))-(-log(E1-min)+log(E2-min)))
      sum_w = sum(w)
-     R = rn(2)
+     R = ran2()
      !ix = ix + 1
      !call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
      
@@ -1233,7 +1234,8 @@ endif
     real(kind=8) :: a_1,a_2,b_1,b_2,c_1,c_2,e_cmf,r1,r2,pmag
     real(kind=8) :: A,B,P,R,T,Q,t1,t2,t3,xxx,y,z,dum,phi,sgn
     logical,parameter :: old_mapping=.false.
-
+    real(kind=8),external :: ran2
+          
     if (.not. schannel) then
     if (a2 .gt. 100d0) then
         z = E - dsqrt(s)*a1
@@ -1250,7 +1252,7 @@ endif
     else
         z = E - dsqrt(s)*a1
         y = (-dsqrt(s)+E+dsqrt(s)*a2-co*z)/dsqrt(1d0-co**2)
-        R = RN(14)
+        R = RAN2()
         if (R .lt. 0.5d0) then
                 sgn = 1d0
         else
@@ -1337,7 +1339,7 @@ endif
     endif
     else
         z = E-dsqrt(s)*a1
-        R = 2d0*pi*RN(10)
+        R = 2d0*pi*RAN2()
         xxx =  dsqrt(E**2 - s1 - z**2)*cos(R)
         y = dsqrt(E**2 - s1 - z**2)*sin(R)
     endif 
@@ -1399,6 +1401,7 @@ endif
     real(kind=8),dimension(0:3) :: q1,P
     real(kind=8) :: a1_m1
     integer :: i,pick
+    real(kind=8),external :: ran2
 
     mu=(s2-s1)/s
     a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
@@ -1423,7 +1426,7 @@ endif
     w(3) = -w(3)
     sum_w = sum(w)
     
-    R = rn(20)
+    R = ran2()
     if (R .lt. w(1)/sum_w) then
        pick = 1
     elseif ((R .lt. (w(1)+w(2))/sum_w) .and. (R .gt. w(1)/sum_w)) then
@@ -1752,81 +1755,81 @@ endif
   end subroutine random_to_var
 
 
-  FUNCTION RN(IDUMMY)
-      REAL*8 RN,RAN
-      SAVE INIT
-      DATA INIT /1/
-      IF (INIT.EQ.1) THEN
-        INIT=0
-        CALL RMARIN(1802,9373)
-      END IF
-!*
-  10  CALL RANMAR(RAN)
-      IF (RAN.LT.1D-16) GOTO 10
-      RN=RAN
-!*
-   END
-
-   SUBROUTINE RANMAR(RVEC)
-!*     -----------------
-!* Universal random number generator proposed by Marsaglia and Zaman
-!* in report FSU-SCRI-87-50
-!* In this version RVEC is a double precision variable.
-      IMPLICIT REAL*8(A-H,O-Z)
-      COMMON/ RASET1 / RANU(97),RANC,RANCD,RANCM
-      COMMON/ RASET2 / IRANMR,JRANMR
-      SAVE /RASET1/,/RASET2/
-      UNI = RANU(IRANMR) - RANU(JRANMR)
-      IF(UNI .LT. 0D0) UNI = UNI + 1D0
-      RANU(IRANMR) = UNI
-      IRANMR = IRANMR - 1
-      JRANMR = JRANMR - 1
-      IF(IRANMR .EQ. 0) IRANMR = 97
-      IF(JRANMR .EQ. 0) JRANMR = 97
-      RANC = RANC - RANCD
-      IF(RANC .LT. 0D0) RANC = RANC + RANCM
-      UNI = UNI - RANC
-      IF(UNI .LT. 0D0) UNI = UNI + 1D0
-      RVEC = UNI
-   END
-
-   SUBROUTINE RMARIN(IJ,KL)
-!*     -----------------
-!* Initializing routine for RANMAR, must be called before generating
-!* any pseudorandom numbers with RANMAR. The input values should be in
-!* the ranges 0<=ij<=31328 ; 0<=kl<=30081
-      IMPLICIT REAL*8(A-H,O-Z)
-      COMMON/ RASET1 / RANU(97),RANC,RANCD,RANCM
-      COMMON/ RASET2 / IRANMR,JRANMR
-      SAVE /RASET1/,/RASET2/
-!* This shows correspondence between the simplified input seeds IJ, KL
-!* and the original Marsaglia-Zaman seeds I,J,K,L.
-!* To get the standard values in the Marsaglia-Zaman paper (i=12,j=34
-!* k=56,l=78) put ij=1802, kl=9373
-      I = MOD( IJ/177 , 177 ) + 2
-      J = MOD( IJ     , 177 ) + 2
-      K = MOD( KL/169 , 178 ) + 1
-      L = MOD( KL     , 169 )
-      DO 300 II = 1 , 97
-        S =  0D0
-        T = .5D0
-        DO 200 JJ = 1 , 24
-          M = MOD( MOD(I*J,179)*K , 179 )
-          I = J
-          J = K
-          K = M
-          L = MOD( 53*L+1 , 169 )
-          IF(MOD(L*M,64) .GE. 32) S = S + T
-          T = .5D0*T
-  200   CONTINUE
-        RANU(II) = S
-  300 CONTINUE
-      RANC  =   362436D0 / 16777216D0
-      RANCD =  7654321D0 / 16777216D0
-      RANCM = 16777213D0 / 16777216D0
-      IRANMR = 97
-      JRANMR = 33
-      END
+!!$  FUNCTION RN(IDUMMY)
+!!$      REAL*8 RN,RAN
+!!$      SAVE INIT
+!!$      DATA INIT /1/
+!!$      IF (INIT.EQ.1) THEN
+!!$        INIT=0
+!!$        CALL RMARIN(1802,9373)
+!!$      END IF
+!!$!*
+!!$  10  CALL RANMAR(RAN)
+!!$      IF (RAN.LT.1D-16) GOTO 10
+!!$      RN=RAN
+!!$!*
+!!$   END
+!!$
+!!$   SUBROUTINE RANMAR(RVEC)
+!!$!*     -----------------
+!!$!* Universal random number generator proposed by Marsaglia and Zaman
+!!$!* in report FSU-SCRI-87-50
+!!$!* In this version RVEC is a double precision variable.
+!!$      IMPLICIT REAL*8(A-H,O-Z)
+!!$      COMMON/ RASET1 / RANU(97),RANC,RANCD,RANCM
+!!$      COMMON/ RASET2 / IRANMR,JRANMR
+!!$      SAVE /RASET1/,/RASET2/
+!!$      UNI = RANU(IRANMR) - RANU(JRANMR)
+!!$      IF(UNI .LT. 0D0) UNI = UNI + 1D0
+!!$      RANU(IRANMR) = UNI
+!!$      IRANMR = IRANMR - 1
+!!$      JRANMR = JRANMR - 1
+!!$      IF(IRANMR .EQ. 0) IRANMR = 97
+!!$      IF(JRANMR .EQ. 0) JRANMR = 97
+!!$      RANC = RANC - RANCD
+!!$      IF(RANC .LT. 0D0) RANC = RANC + RANCM
+!!$      UNI = UNI - RANC
+!!$      IF(UNI .LT. 0D0) UNI = UNI + 1D0
+!!$      RVEC = UNI
+!!$   END
+!!$
+!!$   SUBROUTINE RMARIN(IJ,KL)
+!!$!*     -----------------
+!!$!* Initializing routine for RANMAR, must be called before generating
+!!$!* any pseudorandom numbers with RANMAR. The input values should be in
+!!$!* the ranges 0<=ij<=31328 ; 0<=kl<=30081
+!!$      IMPLICIT REAL*8(A-H,O-Z)
+!!$      COMMON/ RASET1 / RANU(97),RANC,RANCD,RANCM
+!!$      COMMON/ RASET2 / IRANMR,JRANMR
+!!$      SAVE /RASET1/,/RASET2/
+!!$!* This shows correspondence between the simplified input seeds IJ, KL
+!!$!* and the original Marsaglia-Zaman seeds I,J,K,L.
+!!$!* To get the standard values in the Marsaglia-Zaman paper (i=12,j=34
+!!$!* k=56,l=78) put ij=1802, kl=9373
+!!$      I = MOD( IJ/177 , 177 ) + 2
+!!$      J = MOD( IJ     , 177 ) + 2
+!!$      K = MOD( KL/169 , 178 ) + 1
+!!$      L = MOD( KL     , 169 )
+!!$      DO 300 II = 1 , 97
+!!$        S =  0D0
+!!$        T = .5D0
+!!$        DO 200 JJ = 1 , 24
+!!$          M = MOD( MOD(I*J,179)*K , 179 )
+!!$          I = J
+!!$          J = K
+!!$          K = M
+!!$          L = MOD( 53*L+1 , 169 )
+!!$          IF(MOD(L*M,64) .GE. 32) S = S + T
+!!$          T = .5D0*T
+!!$  200   CONTINUE
+!!$        RANU(II) = S
+!!$  300 CONTINUE
+!!$      RANC  =   362436D0 / 16777216D0
+!!$      RANCD =  7654321D0 / 16777216D0
+!!$      RANCM = 16777213D0 / 16777216D0
+!!$      IRANMR = 97
+!!$      JRANMR = 33
+!!$      END
 
 
 
