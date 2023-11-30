@@ -634,6 +634,7 @@ endif
     double precision :: inv,w1,w2,w,R
     integer :: term 
     double precision,dimension(2) :: a2pm,a1pm
+    real(kind=8),external :: ran2
 
     k = maxn - i  !!  k is the number of particles remaining to generate
     s1 = mass1 ! mass of the final state particle to be generated
@@ -692,7 +693,7 @@ endif
     !h = 0d0  ! for using the partial decomposition
     !h = -1d0  ! for using actually h=0
 
-    R = rn(4)
+    R = ran2()
     call get_partial_weights(w1,w2,s,s1,s2,a1cut,a2cut,h,costheta)
     w=w1+w2
     if (R.lt.w1/w) then
