@@ -6,7 +6,7 @@ module haag
 
   real(kind=8),public :: s0
   logical,public :: debug=.false.,  flat=.false.,  open=.false.,  schannel
-  logical,public ::               flat_split=.false.
+  logical,public :: flat_split=.false., a1_split=.true.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
@@ -81,10 +81,8 @@ contains
     enddo
     masses=m
     tot_mass=sum(masses)
-    if (verbose) write (*,*) 'masses:',m(1:n)
     call get_approx_s0()
 
-    write(*,*) 's0 used:',s0
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
     do i=1,next
@@ -313,7 +311,6 @@ contains
     jac=1d0
     ix=0
     if (includePDF) call generate_initial_state
-    !write(*,*) '************************'
     call generate_momenta
     do i=1,next
        p(0:3,i)=pp(0:3,i)
@@ -523,8 +520,6 @@ else
          else
           mass_in = -1d0
          endif
-         !write(*,*) ' ****************************** '
-         !write(*,*) 'filling particle',perm_final(n)
          call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),qk(0:3,n-1),mass_in,&
                 jaco,soft,qk(0:3,n),q1_ref,q2_ref,0,m1,n)
          mass_sum=mass_sum+masses(perm_final(n))
@@ -539,13 +534,11 @@ else
          else
           mass_in = -1d0
          endif
-         !write(*,*) 'filling particle',perm_final(n-i)
          call basic_antenna(q(0:3,perm_final(n-i)),masses(perm_final(n-i)),qk(0:3,n-i-1),&
                mass_in,jaco,soft,qk(0:3,n-i),q(0:3,perm_final(n-i+1)),q2_ref,i,.false.,n)
        mass_sum=mass_sum+masses(perm_final(n-i))
        enddo
      if (n .gt. 2) then
-        !write(*,*) 'filling particle',perm_final(2)
         call basic_antenna(q(0:3,perm_final(2)),masses(perm_final(2)),qk(0:3,1),&
         masses(perm_final(1)),jaco,soft,qk(0:3,2),q(0:3,perm_final(3)),q2_ref,n-2,.false.,n)
      endif
@@ -558,22 +551,12 @@ endif
       pp(0:3,i) = q(0:3,i)
     enddo
 
-    !write(*,*) ' '
-    !do i=1,n+2
-    !   write(*,*) pp(0:3,i)
-    !enddo
-
     !call check_momenta(p,masses)
 
     ! Compute the weight (i.e. jacobian)
     ! The usual 2*pi factors for the phase-space
     jac=jac*jaco*soft/((2d0*pi)**(3*n-4)) !wgt
     jac=jac/(2d0*sqrtshat**2)
-    if (jac .ne. jac) then ! wgt
-            write(*,*) 'error jaco: ',jaco
-            write(*,*) 'error soft: ',soft
-            stop 3
-    endif
 
   end subroutine generate_momenta
 
@@ -606,7 +589,6 @@ endif
     ix=ix+1
     call random_to_var(x(ix),0d0,ymin,ymax,ycm,jac)
   end subroutine generate_y
-
 
   subroutine basic_antenna(p1,mass1,p2,mass2,jaco,soft,P,q1,q2,i,m1,maxn)
     ! Incoming momentum: P
@@ -789,143 +771,155 @@ endif
   end subroutine get_partial_weights
 
   real(kind=8) function kallen(a,b,c)
-          implicit none
-          real(kind=8) :: a,b,c
-          kallen=a**2d0+b**2d0+c**2d0-2d0*a*b-2d0*a*c-2d0*b*c
-          if (c.eq.0d0) then
-                  kallen=(a-b)**2
-          endif
+    implicit none
+    real(kind=8) :: a,b,c
+    kallen=a**2d0+b**2d0+c**2d0-2d0*a*b-2d0*a*c-2d0*b*c
+    if (c.eq.0d0) then
+       kallen=(a-b)**2
+    endif
   end function kallen
 
   real(kind=8) function get_min_a2_bound(s,s1,s2,cos)
-        implicit none
-        real(kind=8),dimension(2) :: min_point1,min_point2
-        real(kind=8) :: a1,s,s1,s2,cos,sin,r,A
-        real(kind=8) :: p,q,a1plus,a1minus
+    implicit none
+    real(kind=8),dimension(2) :: min_point1,min_point2
+    real(kind=8) :: a1,s,s1,s2,cos,sin,r,A
+    real(kind=8) :: p,q,a1plus,a1minus
 
-        sin = dsqrt(1d0-cos**2)
-        r = (s2-s1)/s
-        A = 1d0 - r
-        p = -A
-        q = (A**2*sin**2 + 4d0*cos**2*s1/s)/(4d0)
-        a1minus = -0.5d0*p + dsqrt((0.5d0*p)**2-q)
-        a1plus =  -0.5d0*p - dsqrt((0.5d0*p)**2-q)
-        min_point1 = a2_pm(a1minus,s,s1,s2,cos)
-        min_point2 = a2_pm(a1plus,s,s1,s2,cos)
-        get_min_a2_bound = max(min_point1(2),min_point2(2))
+    sin = dsqrt(1d0-cos**2)
+    r = (s2-s1)/s
+    A = 1d0 - r
+    p = -A
+    q = (A**2*sin**2 + 4d0*cos**2*s1/s)/(4d0)
+    a1minus = -0.5d0*p + dsqrt((0.5d0*p)**2-q)
+    a1plus =  -0.5d0*p - dsqrt((0.5d0*p)**2-q)
+    min_point1 = a2_pm(a1minus,s,s1,s2,cos)
+    min_point2 = a2_pm(a1plus,s,s1,s2,cos)
+    get_min_a2_bound = max(min_point1(2),min_point2(2))
   end function get_min_a2_bound
 
   subroutine generate_split_Qm_Qnm(s,mass1,mass2,mn,soft,jaco,Qm,Qnm)
-          implicit none
-          real(kind=8),dimension(0:3),intent(out) :: Qm,Qnm
-          real(kind=8),intent(inout) :: soft,jaco
-          integer :: mn
-          real(kind=8) :: mass1,mass2
-          real(kind=8) :: c1,c2,m,dum,s,s1,s2,E1,E2,phi,Qt,Qz
-          real(kind=8) :: RHS,max,min,sum_w,R
-          real(kind=8),dimension(4) :: g1,g2,g3,d,e,w    
-          integer :: i,pick
-          real(kind=8),external :: ran2
+    implicit none
+    real(kind=8),dimension(0:3),intent(out) :: Qm,Qnm
+    real(kind=8),dimension(0:3) :: dummy
+    real(kind=8),intent(inout) :: soft,jaco
+    integer :: mn
+    real(kind=8) :: mass1,mass2
+    real(kind=8) :: c1,c2,m,dum,s,s1,s2,E1,E2,phi,Qt,Qz
+    real(kind=8) :: RHS,max,min,sum_w,R
+    real(kind=8),dimension(4) :: g1,g2,g3,d,e,w    
+    integer :: i,pick
+    real(kind=8),external :: ran2
+    real(kind=8) :: dm,a1,a1min,a1max,a2,comm,root,a1cut
+    real(kind=8),dimension(3) :: solution
 
-          ! Generate s1,s2 invariants
-          m=dsqrt(s)
-          c1 = dsqrt(mass1 + mn*(mn-1)*s0/2d0)
-          c2 = dsqrt(mass2 + (n-mn)*(n-mn-1)*s0/2d0)
+    ! Generate s1,s2 invariants
+    m=dsqrt(s)
+    c1 = dsqrt(mass1 + mn*(mn-1)*s0/2d0)
+    c2 = dsqrt(mass2 + (n-mn)*(n-mn-1)*s0/2d0)
 
-          if (.not. flat_split) then
-                  ix = ix +1
-                  call random_to_var(x(ix),-1d0,c1**2,(m-c2)**2,s1,dum)
-                  ix = ix +1
-                  call random_to_var(x(ix),-1d0,c2**2,(m-dsqrt(s1))**2,s2,dum)
-                  soft = soft*(log((m-sqrt(s1))**2)-log(c2**2))
-                  if (debug) write(*,*) 'soft added 1:',(log((m-sqrt(s1))**2)-log(c2**2))
-                  soft = soft*log((m-c2)**2/(c1**2))
-                  if (debug) write(*,*) 'soft added 2:',log((m-c2)**2/(c1**2))
-                  jaco = jaco*s1*s2
-                  if (debug) write(*,*) 'jaco added 2:',s1*s2
-          endif
+    if (.not. flat_split) then
+      ix = ix +1
+      call random_to_var(x(ix),-1d0,c1**2,(m-c2)**2,s1,dum)
+      ix = ix +1
+      call random_to_var(x(ix),-1d0,c2**2,(m-dsqrt(s1))**2,s2,dum)
+      soft = soft*(log((m-sqrt(s1))**2)-log(c2**2))
+      soft = soft*log((m-c2)**2/(c1**2))
+      jaco = jaco*s1*s2
+    endif
 
-          if (flat_split) then
-                  ! Flat generation
-                  ix = ix + 1
-                  call random_to_var(x(ix),0d0,c1**2,(m-c2)**2,s1,dum)
-                  soft = soft*((m-c2)**2-c1**2)
-                  if (debug) write(*,*) 'soft added 3:',((m-c2)**2-c1**2)
-                  ix = ix + 1
-                  call random_to_var(x(ix),0d0,c2**2,(m-dsqrt(s1))**2,s2,dum)
-                  soft = soft*((m-dsqrt(s1))**2-c2**2)
-                  if (debug) write(*,*) 'soft added 4:',((m-dsqrt(s1))**2-c2**2)
-          endif
+    if (flat_split) then
+      ix = ix + 1
+      call random_to_var(x(ix),0d0,c1**2,(m-c2)**2,s1,dum)
+      soft = soft*((m-c2)**2-c1**2)
+      ix = ix + 1
+      call random_to_var(x(ix),0d0,c2**2,(m-dsqrt(s1))**2,s2,dum)
+      soft = soft*((m-dsqrt(s1))**2-c2**2)
+    endif
 
-          ix = ix + 1
-          call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,dum)
-          soft = soft*2d0*pi
-          if (debug) write(*,*) 'soft added 5:',2d0*pi
+    if (.not.a1_split) then
+      E1 = (s+s1-s2)/(2d0*dsqrt(s))
+      E2 = dsqrt(s) - E1
 
-          E1 = (s+s1-s2)/(2d0*dsqrt(s))
-          E2 = dsqrt(s) - E1
+      ix = ix + 1
+      call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,dum)
+      soft = soft*2d0*pi
 
-          ! Not the same input as from paper!!! 
-          g1 = (/-1d0,+1d0,+1d0,-1d0/)
-          g2 = (/1d0,1d0,-1d0,-1d0/)
-          g3 = (/1d0,-1d0,1d0,-1d0/)
-          max = dsqrt(E1**2-s1)
-          min = -dsqrt(E1**2-s1)
+      ! multichanneling for Qz sampling
+      ! Not the same input as from paper!!! 
+      g1 = (/-1d0,+1d0,+1d0,-1d0/)
+      g2 = (/1d0,1d0,-1d0,-1d0/)
+      g3 = (/1d0,-1d0,1d0,-1d0/)
+      max = dsqrt(E1**2-s1)
+      min = -dsqrt(E1**2-s1)
 
-          do i=1,4
-            w(i) = (1d0/(4d0*E1*E2))*1d0/(E2+g1(i)*E1)&
+      do i=1,4
+         w(i) = (1d0/(4d0*E1*E2))*1d0/(E2+g1(i)*E1)&
                   *((g2(i)*log(E1+g2(i)*max)-g2(i)*log(E2+g3(i)*max))&
                    -(g2(i)*log(E1+g2(i)*min)-g2(i)*log(E2+g3(i)*min)))
-          enddo
-     !w(1) = (1d0/(4d0*E1*E2))*1d0/(E1-E2)*((log(E1+max)-log(E2+max))-(log(E1+min)-log(E2+min)))
-     !w(2) = (1d0/(4d0*E1*E2))*1d0/(E1+E2)*((log(E1+max)-log(E2-max))-(log(E1+min)-log(E2-min)))
-     !w(3) = (1d0/(4d0*E1*E2))*1d0/(E1+E2)*((-log(E1-max)+log(E2+max))-(-log(E1-min)+log(E2+min)))
-     !w(4) = (1d0/(4d0*E1*E2))*1d0/(E1-E2)*((-log(E1-max)+log(E2-max))-(-log(E1-min)+log(E2-min)))
-     sum_w = sum(w)
-     R = ran2()
-     !ix = ix + 1
-     !call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
+      enddo
+      !w(1) = (1d0/(4d0*E1*E2))*1d0/(E1-E2)*((log(E1+max)-log(E2+max))-(log(E1+min)-log(E2+min)))
+      !w(2) = (1d0/(4d0*E1*E2))*1d0/(E1+E2)*((log(E1+max)-log(E2-max))-(log(E1+min)-log(E2-min)))
+      !w(3) = (1d0/(4d0*E1*E2))*1d0/(E1+E2)*((-log(E1-max)+log(E2+max))-(-log(E1-min)+log(E2+min)))
+      !w(4) = (1d0/(4d0*E1*E2))*1d0/(E1-E2)*((-log(E1-max)+log(E2-max))-(-log(E1-min)+log(E2-min)))
+      sum_w = sum(w)
+      R = ran2()
      
-     if (R .lt. w(1)/sum_w) then
+      if (R .lt. w(1)/sum_w) then
         pick = 1
-     elseif ((R .lt. (w(2)+w(1))/sum_w) .and. (R .gt. w(1)/sum_w)) then
+      elseif ((R .lt. (w(2)+w(1))/sum_w) .and. (R .gt. w(1)/sum_w)) then
         pick = 2
-     elseif ((R .lt. (w(3)+w(2)+w(1))/sum_w) .and. (R .gt. (w(2)+w(1))/sum_w)) then 
+      elseif ((R .lt. (w(3)+w(2)+w(1))/sum_w) .and. (R .gt. (w(2)+w(1))/sum_w)) then 
         pick = 3
-     elseif (R .gt. (w(3)+w(2)+w(1))/sum_w) then
+      elseif (R .gt. (w(3)+w(2)+w(1))/sum_w) then
         pick = 4
-     endif
+      endif
 
-     !flat_split = .true.
-     if (.not. flat_split) then
-       ix = ix + 1
-       call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
-       RHS = ((E1+g2(pick)*min)/(E2+g3(pick)*min))&
+      if (.not. flat_split) then
+        ix = ix + 1
+        call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
+        RHS = ((E1+g2(pick)*min)/(E2+g3(pick)*min))&
            *exp(R*w(pick)*4d0*E1*E2*(E2+g1(pick)*E1)/g2(pick))
-       Qz = (E1-E2*RHS)/(g3(pick)*RHS-g2(pick))
-       soft = soft*sum_w
-       if (debug) write(*,*) 'soft added 6:',sum_w
-       jaco = jaco*(E1**2-Qz**2)*(E2**2-Qz**2)
-       if ((Qz .gt. max) .or. (Qz .lt. min)) then 
-               write(*,*) 'ERROR in Qz:', Qz, min, max
-       endif
-       if (debug) write(*,*) 'jaco added 3:',(E1**2-Qz**2)*(E2**2-Qz**2)
-     endif
+        Qz = (E1-E2*RHS)/(g3(pick)*RHS-g2(pick))
+        soft = soft*sum_w
+        jaco = jaco*(E1**2-Qz**2)*(E2**2-Qz**2)
+      endif
 
-     if (flat_split) then
-       ix = ix + 1
-       call random_to_var(x(ix),0d0,min,max,Qz,dum)
-       soft = soft*(max-min)
-       if (debug) write(*,*) 'soft added 7:',(max-min)
-     endif
+      if (flat_split) then
+        ix = ix + 1
+        call random_to_var(x(ix),0d0,min,max,Qz,dum)
+        soft = soft*(max-min)
+      endif
 
-     soft = soft/(4d0*dsqrt(s)) !! Double check where this comes from???
-     if (debug) write(*,*) 'soft added 8:',1d0/(4d0*dsqrt(s))
+      soft = soft/(4d0*dsqrt(s)) !! Double check where this comes from???
+      Qt = dsqrt(E1**2-s1-Qz**2)
+      Qm = (/E1,Qt*cos(phi),Qt*sin(phi),Qz/)
+      Qnm = (/E2,-Qt*cos(phi),-Qt*sin(phi),-Qz/)
+    else 
+      ! do a1 sampling
+      comm = 0.5d0*(s+s1-s2)/s
+      root = dsqrt(comm**2-s1/s)
+      a1min = comm - root
+      a1cut = 0.5d0*s0*mn/(s/2d0)
+      if ((a1cut.gt.a1min).and.(a1cut.lt.a1max)) a1min=a1cut
+      a1max = comm + root
+      a1cut = 1d0-0.5d0*s0*(n-mn)/(s/2d0)
+      if ((a1cut.gt.a1min).and.(a1cut.lt.a1max)) a1max=a1cut
+      ix = ix + 1
+      call random_to_var(x(ix),-1d0,a1min,a1max,a1,dum)
+      jaco = jaco*a1
+      soft = soft*log(a1max/a1min)
 
-     Qt = dsqrt(E1**2-s1-Qz**2)
-     Qm = (/E1,Qt*cos(phi),Qt*sin(phi),Qz/)
-     Qnm = (/E2,-Qt*cos(phi),-Qt*sin(phi),-Qz/)
+      dummy=(/0d0,0d0,0d0,0d0/)
+      dm=1d0
+      a2=300d0
+      E1 = (s+s1-s2)/(2d0*dsqrt(s))
+      E2 = dsqrt(s) - E1
+      solution = solver(s,s1,s2,dummy,dummy,dm,a1,a2,E1,dummy,dm) ! use same solver 
+      soft = soft*(pi/2d0)
 
+      Qm = (/E1,solution(1),solution(2),solution(3)/)
+      Qnm = (/E2,-solution(1),-solution(2),-solution(3)/)
+    endif
   end subroutine generate_split_Qm_Qnm
 
 
@@ -957,29 +951,23 @@ endif
       C = ((smax-A)/(smin-A))**R
       s2 = (smin-A)*C + A
       soft = soft*(log(smax-A)-log(smin-A))
-      if (debug) write(*,*) 'soft added 9:',(log(smax-A)-log(smin-A))
       gs = 1d0/(s2-Sigma)
     endif
     if (flat) then
       ix = ix +1
       call random_to_var(x(ix),0d0,smax,smin,s2,dum)
       soft = soft*(smax-smin)
-      if (debug) write(*,*) 'soft added 10:',(smax-smin)
       gs = 1d0
     endif
       jaco = jaco/gs
-      if (debug) write(*,*) 'jaco added 4:',1d0/gs
       ! Generate a1, and pass to a2-> phi integration (done later)
       soft = soft*2d0*pi
-      if (debug) write(*,*) 'soft added 11:',2d0*pi
       soft = soft*(1d0/4d0)
-      if (debug) write(*,*) 'soft added 12:',1d0/4d0
       if (.not. flat) then
          a1 = a1_m1(s,s1,s2,soft,q1_cmf,P_cmf)
          mu = (s2-s1)/s
          a2 = a1 + mu
          jaco = jaco*a1*(1d0-a1)*(1d0-a2)*a2
-         if (debug) write(*,*) 'jaco added 5:',a1*(1d0-a1)*(1d0-a2)*a2
       elseif (flat) then
          a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
          a1max = a1max-0.00001d0
@@ -991,7 +979,6 @@ endif
          ix = ix +1
          call random_to_var(x(ix),0d0,a1min,a1max,a1,dum)
          soft = soft*(a1max-a1min)
-         if (debug) write(*,*) 'soft added 13:',(a1max-a1min)
       endif
    
   end subroutine generate_first_single
@@ -1400,8 +1387,6 @@ endif
         call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,dum)
         xxx =  dsqrt(E**2 - s1 - z**2)*cos(phi)
         y = dsqrt(E**2 - s1 - z**2)*sin(phi)
-        !p1_rot=(/E,xxx,y,z/)
-        !p2_rot=(/dsqrt(s)-E,-xxx,-y,-z/)
         p1=(/E,xxx,y,z/)
         p2=(/dsqrt(s)-E,-xxx,-y,-z/)
         call rotxxx(p1,q1_cmf,p1_rot)
@@ -1411,14 +1396,14 @@ endif
         y = (-dsqrt(s)+E+dsqrt(s)*a2-co*z)/dsqrt(1d0-co**2)
         R = RAN2()
         if (R .lt. 0.5d0) then
-                sgn = 1d0
+           sgn = 1d0
         else
-                sgn=-1d0
+           sgn=-1d0
         endif
         if (E**2-s1-y**2-z**2 .le. 0d0) then
-             xxx = 0d0
+           xxx = 0d0
         else
-             xxx = sgn*dsqrt(E**2-s1-y**2-z**2)
+           xxx = sgn*dsqrt(E**2-s1-y**2-z**2)
         endif
         p1 = (/E,xxx,y,z/)
         p2 = (/sqrt(s)-E,-xxx,-y,-z/)
@@ -1445,57 +1430,6 @@ endif
        p1_rot(3) = pmag*a1
     endif        
 
-    if (old_mapping) then
-    A = q1_cmf(0)*(E-sqrt(s)*a1)
-    B = q2_cmf(0)*(sqrt(s)*a2+E-sqrt(s))
-    a_1 = q1_cmf(1)
-    b_1 = q1_cmf(2)
-    c_1 = q1_cmf(3)
-    a_2 = q2_cmf(1)
-    b_2 = q2_cmf(2)
-    c_2 = q2_cmf(3)
-    P = (A*a_2-B*a_1)/(b_1*a_2-a_1*b_2)
-    R = (c_2*a_1-c_1*a_2)/(b_1*a_2-a_1*b_2)
-    Q = B - b_2*P
-    T = b_2*R+c_2
-    t1 = T**2 + (a_2**2)*((R**2)+1d0)
-    t2 = -2.*Q*T + 2.*(a_2**2)*P*R
-    t3 = Q**2 - (a_2**2)*(E**2)+(a_2**2)*(P**2)+(a_2**2)*s1
-    z = (-t2/2. + dsqrt(max(0d0, (t2/2.)**2 -  t1*t3)))/t1
-    y = P + R*z
-    xxx = dsqrt(max(0d0,E**2 - y**2 - z**2 - s1))
-    p1 = (/E,xxx,y,z/)
-    p2 = (/sqrt(s)-E,-xxx,-y,-z/)
-    if (z .eq. z) then
-    if (abs((a_1*xxx + b_1*y + c_1*z - A)/A) .ge. 0.0001d0) then
-        z = (-t2/2. - dsqrt(max(0d0,(t2/2.)**2 -  t1*t3)))/t1
-        y = P + R*z
-        xxx = dsqrt(max(0d0,E**2 - y**2 - z**2 - s1))
-        p1 = (/E,xxx,y,z/)
-        p2 = (/sqrt(s)-E,-xxx,-y,-z/)
-    endif
-    if (abs((a_1*xxx + b_1*y + c_1*z - A)/A) .ge. 0.0001d0) then
-        z = (-t2/2. + dsqrt(max(0d0,(t2/2.)**2 -  t1*t3)))/t1
-        y = P + R*z
-        xxx = -dsqrt(max(0d0,E**2 - y**2 - z**2 - s1))
-        p1 = (/E,xxx,y,z/)
-        p2 = (/sqrt(s)-E,-xxx,-y,-z/)
-    endif
-    if (abs((a_1*xxx + b_1*y + c_1*z - A)/A) .ge. 0.0001d0) then
-        z = (-t2/2. - dsqrt(max(0d0,(t2/2.)**2 -  t1*t3)))/t1
-        y = P + R*z
-        xxx = -dsqrt(max(0d0,E**2 - y**2 - z**2 - s1))
-        p1 = (/E,xxx,y,z/)
-        p2 = (/sqrt(s)-E,-xxx,-y,-z/)
-    endif
-    else
-        z = E-dsqrt(s)*a1
-        R = 2d0*pi*RAN2()
-        xxx =  dsqrt(E**2 - s1 - z**2)*cos(R)
-        y = dsqrt(E**2 - s1 - z**2)*sin(R)
-    endif 
-    endif
-    
     solver = (/p1_rot(1),p1_rot(2),p1_rot(3)/)
   end function solver
 
@@ -1597,7 +1531,6 @@ endif
             (g1(pick)*a1min+d(pick))/(g2(pick)*a1min+e(pick))
     a1_m1 = (e(pick)*RHS-d(pick))/(g1(pick)- RHS*g2(pick))
     soft = soft*sum_w
-    if (debug) write(*,*) 'soft added 27:',sum_w
   end function a1_m1
 
   function polylog(x,n)
