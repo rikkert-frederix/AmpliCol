@@ -7,7 +7,7 @@ program matrix_integrate_QCD
   use math_functions
   implicit none
   integer :: j,c_o,i
-  integer(kind=8) :: sym_fac
+  integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
@@ -15,13 +15,11 @@ program matrix_integrate_QCD
   logical :: t_chan
   character(len=30) :: filename
   integer(kind=4) :: integration, nquarks
-  logical,dimension(-6:7,2) :: ipdgs=.false.
+  logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
-  integer*8 :: iden
-  integer(kind=4) :: n_events
  
-
   call get_run_arguments()
+  call compute_mutlichannel_symmetry_factor()
   call create_run_tag()
 
   allocate(mass(next))
@@ -44,27 +42,17 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrts=14000.d0
+  sqrts=1000.d0
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min**2,pt_min**2*(1d0-cos(DRjj_min)))
 
   mass(1:next)=0d0
 
-  ! include pdfs?
   if (include_pdf) then
-     call PDF_initialise
      ndim=ndim+2
-     if (part(1).eq.21) then
-        ipdgs(0,1)=.true.
-     else
-        ipdgs(part(1),1)=.true.
-     endif
-     if (part(2).eq.21) then
-        ipdgs(0,2)=.true.
-     else
-        ipdgs(part(2),2)=.true.
-     endif
+     call PDF_initialise
+     call set_ipdgs_for_PDF(ipdgs)
   endif
   
   call cpu_time(tBefore)
@@ -77,25 +65,9 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
 
-
-  ! colour, polarisation incoming gluons: 8, 2
-  ! colour, polarisation incoming quarks: 3, 2
-  ! identical final state particle factor (gluons): nfin_glu!
-  nfin_glu=0
-  do i=3,next
-     if (part(i).eq.21) then
-        nfin_glu=nfin_glu+1
-     endif
-  enddo
   iden=1
-  do i=1,2
-     if (part(i).eq.21) then
-        iden=iden*8*2
-     elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
-        iden=iden*3*2
-     endif
-  enddo
-  iden=iden*factorial8(nfin_glu)
+  call set_final_state_identical_particle_factor(iden)
+  call set_initial_state_average_factor(iden)
 
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
@@ -105,65 +77,33 @@ program matrix_integrate_QCD
   t_amp_init=t_amp_init+tAfter-tBefore
 
   ! Compute the leading colour factor
-  if (nquarks.eq.0) then
-     col_fac=3**next
-  elseif (nquarks.eq.2) then
-     col_fac=3**(next-1)
-  else
-     write (*,*) 'Leading colour factor not implemented'
-  endif
+  call compute_LC_colour_factor(col_fac)
 
   ! number of helicities to sum over
   nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
   allocate(amp2_hel(1:nhel))
 
-! Not so relevant mint-module parameters: only used in special cases.
-  fixed_order=.false.
-  nlo_ps=.true.
-  n_ord_virt=1
-  nchans=1
-  iconfig=1
-  ichan=1
-  ifold_energy=1
-  ifold_yij=1
-  ifold_phi=1
-  ifold(1:ndimmax)=1
-  iconfigs(1:maxchannels)=1
-  min_virt_fraction_mint=1d0
-  virt_fraction=1d0
-  wgt_mult=1d0
-  average_virtual(0:n_ave_virt,maxchannels)=0d0
-  virt_wgt_mint(0:n_ave_virt)=0d0
-  born_wgt_mint(0:n_ave_virt)=0d0
-  virtual_fraction(1:maxchannels)=1d0
-  ans(1:nintegrals,0:maxchannels)=0d0
-  unc(1:nintegrals,0:maxchannels)=0d0
-  only_virt=.false.
+  ! Not so relevant mint-module parameters: only used in special cases.
+  call set_mint_module_special_parameters()
 
-  open(unit=14,file='pt_list.txt',status='replace')
   if (imode.le.1) then
+     ! grid setup, or computation of upper bounding envelope
      call mint(integrand)
   else
+     ! actual (unweighted) event generation
      call read_grids_from_file
-     call gen(integrand,0,-1) ! initialise countersi
+     call gen(integrand,0,-1) ! initialise counters
      filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
-     n_events=0
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        !if (pass_cuts(next,p).gt.0d0) then
-          call unwgt_helicity
-          call write_event(11,ans(1,0))
-          n_events=n_events+1
-        !else
-          !write(*,*)pass_cuts(next,p)
-        !endif
+        call unwgt_helicity     ! pick a random helicity
+        call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
   endif
      
-  close(14)
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
@@ -185,8 +125,7 @@ contains
     real*8, dimension(nintegrals) :: f1
     real*8, save :: val
     integer :: icol,iperm,jperm,ih
-    real*8 :: vol,xmu_fac,cuts_wgt
-    real*8, dimension(-6:7,2) :: PDF
+    real*8 :: vol,cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
    
@@ -201,13 +140,13 @@ contains
     new_point=.true.
     pass_cuts_check=.true.
 
-    call cpu_time(tBefore)
+    ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (integration.eq.1)then
-        call gen23_phase_space(x)
+       call gen23_phase_space(x)
     elseif (integration.eq.2) then
-        call PS_haag(x)
+       call PS_haag(x)
     endif
-
+    
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
@@ -239,7 +178,7 @@ contains
     enddo
     amp2=sum(amp2_hel(1:nhel))
 
-    ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
+    ! include the jacobian from mint ('vol') and the wgt from the phase-space ('jac') and other overal factors
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
 
@@ -250,26 +189,11 @@ contains
     ! need to compensate with a symmetry factor
     val=val*sym_fac
 
-
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
-
     
     if (include_PDF) then
-       ! Include the PDFs
-       xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
-       if (part(1).eq.21) then
-          val=val*PDF(0,1)
-       else
-          val=val*PDF(part(1),1)
-       endif
-       if (part(2).eq.21) then
-          val=val*PDF(0,2)
-       else
-          val=val*PDF(part(2),2)
-       endif
+       call multiply_by_PDF_value(val)
     endif
 
     ! pass the result to the mint module
@@ -412,9 +336,8 @@ contains
   
   subroutine get_run_arguments()
     implicit none
-    integer :: argc,start,end,glu
+    integer :: argc,start,end,i
     character(len=256) :: argv
-    integer, dimension(:), allocatable :: process,ord
     ! integration steps:
     ! imode=0  (Setting up grids)
     ! imode=-1 (same as imode=0, but starting from existing grids)
@@ -435,123 +358,44 @@ contains
 
     open (unit=99, file='process.txt', status='old', action='read')
     read(99, *) next
-    allocate(process(next))
     allocate(o(next))
     allocate(part(next))
-    allocate(ord(next))
-    read(99, *) process
-    part=process
-    read(99, *) ord
+    read(99, *) part
+    read(99, *) o
     nquarks = 0
     do i=1,next
-       if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
-           nquarks=nquarks+1
-       endif
-       if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
-          process(i)=-process(i)
+       if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          nquarks=nquarks+1
+          if (i.le.2) then
+             part(i)=-part(i)
+          endif
        endif
     enddo
 
     if (nquarks.eq.0) then
-      do i=1,next
-        if (ord(i).eq.1) start=i
-        if (ord(i).eq.2) end=i
-      enddo
-      c_o=abs(end-start)-1
+       do i=1,next
+          if (o(i).eq.1) start=i
+          if (o(i).eq.2) end=i
+       enddo
+       c_o=abs(end-start)-1
+       c_o=min(c_o,next-2-c_o)
     else
-      c_o=0 ! dummy value
+       c_o=0 ! dummy value
     endif
 
-    o=ord
-    glu=1
     if (nquarks.eq.2) then
-      do i=1,next
-        if (process(i).lt.0) then
-        o(next)=i
-        end=i
-        endif
-        if (process(i).gt.0 .and. process(i).ne.21) then
-        o(1)=i
-        start=i
-        endif
-        if (process(i).eq.21) then
-            o(1+glu)=i
-            glu=glu+1
-        endif
-      enddo
-      write(*,*) 'end,start',end,start
-      write(*,*) ord
-      if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
-        write(*,*) 'VALID ORDER!!!'
-        o=ord ! the input order was a valid one, use that instead
-      endif
-    endif
-
-    ! Since we only need to include a subset of all the colour-orderings, we
-    ! need to compensate with a symmetry factor
-    if (nquarks.eq.0) then
-       ! All gluon process. This assumes that the only channels we are
-       ! including are strictly different. We distinguish them by considering
-       ! how many (final state) gluons are attached to the two colour lines
-       ! that link the two incoming gluons. Hence, we only include
-       ! floor(next/2) channels, e.g., for next=6 we only consider:
-       ! i   --> 1,2,3,4,5,6   (0 and 4 gluons on the two lines)
-       ! ii  --> 1,3,2,4,5,6   (1 and 3 gluons on the two lines)
-       ! iii --> 1,3,4,2,5,6   (2 and 2 gluons on the two lines)
-       ! And, e.g., for next=9, we only consider:
-       ! i   --> 1,2,3,4,5,6,7,8,9   (0 and 7 gluons on the two lines)
-       ! ii  --> 1,3,2,4,5,6,7,8,9   (1 and 6 gluons on the two lines)
-       ! iii --> 1,3,4,2,5,6,7,8,9   (2 and 5 gluons on the two lines)
-       ! iv  --> 1,3,4,5,2,6,7,8,9   (3 and 4 gluons on the two lines)
-       ! This means that the sym_fac should be equal to the number of final
-       ! state gluon permutations, multiplied by 2 (except if we have an equal
-       ! number of gluons on both colour lines that attached the two incoming
-       ! gluons).
-       if (c_o*2.eq.(next-2)) then
-          sym_fac=factorial8(next-2)
-       else
-          sym_fac=2*factorial8(next-2)
-       endif
-    elseif (nquarks.eq.2) then
-       if ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .and. &
-           (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
-          ! quark and anti-quark are incoming. Only 1 channel needed,
-          ! which would result in the following symmetry factor:
-          sym_fac=factorial8(next-2)
-       elseif ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .or. &
-               (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
-          ! one incoming quark (or anti-quark). There are ngluons
-          ! channels needed: they correspond to having the incoming
-          ! gluon at all possible positions between the quark and
-          ! anti-quark in the colour order. Hence, each channel comes
-          ! with an (ngluons-1)! symmetry factor:
-          sym_fac=factorial8(next-3)
-       else
-          ! both quark and anti-quark are final state. This is similar
-          ! to the all-gluon case above, treating the q-qbar pair as
-          ! another gluon. This special gluon is identifiable! So, for
-          ! next=6 (and assuming that the qqbar pair are particles 5
-          ! and 6) one has the following possibilities:
-          !
-          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
-          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
-          ! ic   --> 1,2,(5,6),3,4  -/
-          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
-          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
-          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
-          !
-          ! Furthermore all these can have the quark and anti-quark
-          ! order reversed, so there are in total 12 truly different
-          ! colour orders to consider.
-          !
-          ! All these come with a symmetry factor of (ngluon-2)! =
-          ! 2!. Hence we have:
-          sym_fac=factorial8(next-4)
+       if (part(o(1)).ge.1 .and. part(o(1)).le.6) then
+          write (*,*) 'Quark should come first in colour order',o
+          stop 1
+       elseif (part(o(next)).le.-1 .and. part(o(next)).ge.-6) then
+          write (*,*) 'Anti-quark should come last in colour order',o
+          stop 1
        endif
     else
-       write (*,*) 'WARNING: symmetry factor missing',nquarks
+       write (*,*) 'Not yet implemented',nquarks
+       stop 1
     endif
-    
+
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
@@ -616,4 +460,209 @@ contains
     write (*,*) tag
   end subroutine create_run_tag
 
+  subroutine set_initial_state_average_factor(iden)
+    implicit none
+    integer(kind=8),intent(inout) :: iden
+    integer :: i
+    do i=1,2
+       if (part(i).eq.21) then
+          ! gluon: two polarisations and 8 colours
+          iden=iden*2*8
+       elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          ! (anti-)quark: two helicities and 3 colours
+          iden=iden*2*3
+       else
+          ! assume two helicities:
+          iden=iden*2
+       endif
+    enddo
+  end subroutine set_initial_state_average_factor
+  subroutine set_final_state_identical_particle_factor(iden)
+    implicit none
+    integer(kind=8),intent(inout) :: iden
+    integer :: i,j,ni=0
+    integer,dimension(:,:),allocatable :: iden_part
+    allocate(iden_part(1:next,2))
+    do i=1,next
+       do j=1,ni
+          if (iden_part(j,1).eq.part(i)) then
+             iden_part(j,2)=iden_part(j,2)+1
+             exit
+          endif
+          if (j.eq.ni+1) then
+             ni=ni+1
+             iden_part(j,1)=part(i)
+             iden_part(j,2)=1
+          endif
+       enddo
+    enddo
+    do i=1,ni
+       iden=iden*factorial8(iden_part(i,2))
+    enddo
+    deallocate(iden_part)
+  end subroutine set_final_state_identical_particle_factor
+
+  subroutine compute_LC_colour_factor(col_fac)
+    implicit none
+    integer,intent(inout) :: col_fac
+    integer :: i,ifac
+    real(kind=8) :: fac
+    do i=1,next
+       if (part(i).eq.21) then
+          fac=fac+1d0
+       elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          fac=fac+0.5d0
+       endif
+    enddo
+    ifac=nint(fac)
+    if (dble(ifac).ne.fac) then
+       write (*,*) 'There is some issue with the LC colour factor computation',ifac,fac
+       stop 1
+    endif
+    col_fac=3**ifac
+  end subroutine compute_LC_colour_factor
+  
+  subroutine set_mint_module_special_parameters()
+    ! these parameters need to be set for the mint-module to work correctly,
+    ! but are irrelevant for any LO process
+    implicit none
+    fixed_order=.false.
+    nlo_ps=.true.
+    n_ord_virt=1
+    nchans=1
+    iconfig=1
+    ichan=1
+    ifold_energy=1
+    ifold_yij=1
+    ifold_phi=1
+    ifold(1:ndimmax)=1
+    iconfigs(1:maxchannels)=1
+    min_virt_fraction_mint=1d0
+    virt_fraction=1d0
+    wgt_mult=1d0
+    average_virtual(0:n_ave_virt,maxchannels)=0d0
+    virt_wgt_mint(0:n_ave_virt)=0d0
+    born_wgt_mint(0:n_ave_virt)=0d0
+    virtual_fraction(1:maxchannels)=1d0
+    ans(1:nintegrals,0:maxchannels)=0d0
+    unc(1:nintegrals,0:maxchannels)=0d0
+    only_virt=.false.
+  end subroutine set_mint_module_special_parameters
+  subroutine set_ipdgs_for_PDF(ipdgs)
+    implicit none
+    logical,dimension(-6:7,2) :: ipdgs
+    ipdgs(-6:7,1:2)=.false.
+    if (part(1).eq.21) then
+       ipdgs(0,1)=.true.    ! gluon is '0'
+    elseif (part(1).eq.22) then
+       ipdgs(7,1)=.true.    ! photon is '7'
+    elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+       ipdgs(part(1),1)=.true.
+    else
+       write (*,*) 'unknown PDF 1',part(1)
+       stop 1
+    endif
+    if (part(2).eq.21) then
+       ipdgs(0,2)=.true.    ! gluon is '0'
+    elseif (part(2).eq.22) then
+       ipdgs(7,2)=.true.    ! photon is '7'
+    elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+       ipdgs(part(2),2)=.true.
+    else
+       write (*,*) 'unknown PDF 2',part(2)
+       stop 1
+    endif
+  end subroutine set_ipdgs_for_PDF
+  subroutine multiply_by_PDF_value(val)
+    implicit none
+    real(kind=8),intent(inout) :: val
+    real(kind=8) :: xmu_fac
+    real*8, dimension(-6:7,2) :: PDF
+    ! Include the PDFs
+    xmu_fac=91.188d0 ! factorisation scale
+    call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
+    call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+    if (part(1).eq.21) then
+       val=val*PDF(0,1)
+    elseif (part(1).eq.22) then
+       val=val*PDF(7,1)
+    else
+       val=val*PDF(part(1),1)
+    endif
+    if (part(2).eq.21) then
+       val=val*PDF(0,2)
+    elseif (part(2).eq.22) then
+       val=val*PDF(7,2)
+    else
+       val=val*PDF(part(2),2)
+    endif
+  end subroutine multiply_by_PDF_value
+  subroutine compute_mutlichannel_symmetry_factor()
+    implicit none
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    if (nquarks.eq.0) then
+       ! All gluon process. This assumes that the only channels we are
+       ! including are strictly different. We distinguish them by considering
+       ! how many (final state) gluons are attached to the two colour lines
+       ! that link the two incoming gluons. Hence, we only include
+       ! floor(next/2) channels, e.g., for next=6 we only consider:
+       ! i   --> 1,2,3,4,5,6   (0 and 4 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6   (1 and 3 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6   (2 and 2 gluons on the two lines)
+       ! And, e.g., for next=9, we only consider:
+       ! i   --> 1,2,3,4,5,6,7,8,9   (0 and 7 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6,7,8,9   (1 and 6 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6,7,8,9   (2 and 5 gluons on the two lines)
+       ! iv  --> 1,3,4,5,2,6,7,8,9   (3 and 4 gluons on the two lines)
+       ! This means that the sym_fac should be equal to the number of final
+       ! state gluon permutations, multiplied by 2 (except if we have an equal
+       ! number of gluons on both colour lines that attached the two incoming
+       ! gluons).
+       if (c_o*2.eq.(next-2)) then
+          sym_fac=factorial8(next-2)
+       else
+          sym_fac=2*factorial8(next-2)
+       endif
+    elseif (nquarks.eq.2) then
+       if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
+           (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+          ! quark and anti-quark are incoming. Only 1 channel needed,
+          ! which would result in the following symmetry factor:
+          sym_fac=factorial8(next-2)
+       elseif ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .or. &
+               (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+          ! one incoming quark (or anti-quark). There are ngluons
+          ! channels needed: they correspond to having the incoming
+          ! gluon at all possible positions between the quark and
+          ! anti-quark in the colour order. Hence, each channel comes
+          ! with an (ngluons-1)! symmetry factor:
+          sym_fac=factorial8(next-3)
+       else
+          ! both quark and anti-quark are final state. This is similar
+          ! to the all-gluon case above, treating the q-qbar pair as
+          ! another gluon. This special gluon is identifiable! So, for
+          ! next=6 (and assuming that the qqbar pair are particles 5
+          ! and 6) one has the following possibilities:
+          !
+          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
+          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
+          ! ic   --> 1,2,(5,6),3,4  -/
+          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
+          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
+          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
+          !
+          ! Furthermore all these can have the quark and anti-quark
+          ! order reversed, so there are in total 12 truly different
+          ! colour orders to consider.
+          !
+          ! All these come with a symmetry factor of (ngluon-2)! =
+          ! 2!. Hence we have:
+          sym_fac=factorial8(next-4)
+       endif
+    else
+       write (*,*) 'WARNING: symmetry factor missing',nquarks
+    endif
+  end subroutine compute_mutlichannel_symmetry_factor
+    
 end program matrix_integrate_QCD
