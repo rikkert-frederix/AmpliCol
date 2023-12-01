@@ -1587,6 +1587,7 @@ contains
     real(kind=8),dimension(max_vals,1:3) :: diff_vals
     integer,dimension(:,:),allocatable :: ic,ir
     logical colour_flow
+    write (*,*) 'Initialising colour matrix ...'
     if (this%n_qqbar.eq.0) then
        colour_flow=.true.
     elseif (this%n_qqbar.eq.1) then
@@ -1672,6 +1673,7 @@ contains
           this%row_index(iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
        enddo
     enddo
+    write (*,*) '... colour matrix initialised'
   contains
     subroutine compute_color_factor(col_acc,n,iper,jper,col_fac,color_flow)
       use color_algebra
