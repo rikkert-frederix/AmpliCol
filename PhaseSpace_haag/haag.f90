@@ -1105,11 +1105,17 @@ endif
         Atilde = (Amin**(1d0-R))*(Amax)**R
         kappa = - h1 + f_h1*(1d0+Atilde)/(1d0-Atilde)
         buff = f_func_term1(a1,cos,s,s1,s2,h)
-        a1 = ((kappa**2) - wsq)/(2d0*(v+kappa))
-        if ((a1min-a1)/a1min.le.1d-8.and.a1min-a1.gt.0d0) a1=a1min 
+        if (v+kappa.eq.0d0) then
+           a1=a1max
+        else
+           a1 = ((kappa**2) - wsq)/(2d0*(v+kappa))
+        endif
+        if ((a1min-a1)/a1min.le.1d-6.and.a1min-a1.gt.0d0) a1=a1min 
+        if ((a1-a1max)/a1max.le.1d-6.and.a1-a1max.gt.0d0) a1=a1max
         soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
         jaco = jaco*a1
         jaco = jaco*beta
+
       elseif (((i .eq. 0) .or. (m1 .and. (i .le. 1)))) then
         ! Sample with 1/x 
         ix = ix + 1
@@ -1166,6 +1172,7 @@ endif
     xy = tan(-pi/2d0 * R)**2
     a1 = a1maxbar*a1minbar*(1d0+xy)/(a1minbar + xy*a1maxbar) - h
     if ((a1min-a1)/a1min.le.1d-8.and.a1min-a1.gt.0d0) a1=a1min
+    if ((a1-a1max)/a1max.le.1d-8.and.a1-a1max.gt.0d0) a1=a1max
     jaco = jaco*a1
   end subroutine generate_a1_term2  
 
@@ -1218,6 +1225,7 @@ endif
         xy = tan(-pi/2d0 * R)**2
         a2 = a2maxbar*a2minbar*(1d0+xy)/(a2minbar + xy*a2maxbar) - h
         if ((a2min-a2)/a2min.le.1d-8.and.a2min-a2.gt.0d0) a2=a2min
+        if ((a2-a2max)/a2max.le.1d-8.and.a2-a2max.gt.0d0) a1=a2max
         jaco = jaco*a2
         soft = soft*(pi/2d0)
     elseif( ((i .eq. 0) .and. (maxn .eq. n)) .or. ((m1 .and. (i .le. 1)))) then
@@ -1294,6 +1302,7 @@ endif
     buff = f_func_term2(a2,cos,s,s1,s2)
     a2 = ((kappa**2) - wsq)/(1d0*buff(1)+2d0*kappa)
     if ((a2min-a2)/a2min.le.1d-8.and.a2min-a2.gt.0d0) a2=a2min
+    if ((a2-a2max)/a2max.le.1d-8.and.a2-a2max.gt.0d0) a2=a2max
     soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
     jaco = jaco*a2
     jaco = jaco*beta
@@ -1404,6 +1413,7 @@ endif
            xxx = sgn*dsqrt(E**2-s1-y**2-z**2)
         endif
         p1 = (/E,xxx,y,z/)
+
         p2 = (/sqrt(s)-E,-xxx,-y,-z/)
         e_cmf = dsqrt(s)/2d0
         r1 = dot(P_cmf,P_cmf)/(2d0*dot(P_cmf,q1_cmf))
@@ -1417,6 +1427,7 @@ endif
         call rot_xy_plane(p2,q2_rot,q2_rot_x0_new,p2_xy_rot,1d0)
         call rot_to_z(q1_cmf,p1_xy_rot,p1_rot,-1d0)
         call rot_to_z(q1_cmf,p2_xy_rot,p2_rot,-1d0)
+
     endif
     endif
 
@@ -1538,6 +1549,7 @@ endif
             (g1(pick)*a1min+d(pick))/(g2(pick)*a1min+e(pick))
       a1_m1 = (e(pick)*RHS-d(pick))/(g1(pick)- RHS*g2(pick))
       if ((a1min-a1_m1)/a1min.le.1d-8.and.a1min-a1_m1.gt.0d0) a1_m1=a1min
+      if ((a1_m1-a1max)/a1max.le.1d-8.and.a1_m1-a1max.gt.0d0) a1_m1=a1max
       soft = soft*sum_w
 
     elseif (k.eq.2) then
@@ -1559,11 +1571,13 @@ endif
          call random_to_var(x(ix),-1d0,a1min,a1max,a1,dum)
          a1_m1 = a1
          if ((a1min-a1_m1)/a1min.le.1d-8.and.a1min-a1_m1.gt.0d0) a1_m1=a1min
+         if ((a1_m1-a1max)/a1max.le.1d-8.and.a1_m1-a1max.gt.0d0) a1_m1=a1max
       elseif (pick.eq.2) then
          ix = ix +1
          call random_to_var(x(ix),-1d0,1d0-a1max,1d0-a1min,a1,dum)
          a1_m1 = a1
          if ((a1min-a1_m1)/a1min.le.1d-8.and.a1min-a1_m1.gt.0d0) a1_m1=a1min
+         if ((a1_m1-a1max)/a1max.le.1d-8.and.a1_m1-a1max.gt.0d0) a1_m1=a1max
       endif
       soft = soft*w_tot
 
