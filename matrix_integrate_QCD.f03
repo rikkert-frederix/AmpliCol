@@ -6,7 +6,7 @@ program matrix_integrate_QCD
   use haag
   use math_functions
   implicit none
-  integer :: j,c_o,i
+  integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
   integer(kind=8) :: sym_fac
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part
@@ -44,7 +44,9 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrts=14000.d0
+  sqrts=10000.d0
+  ! setting energy
+
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min**2,pt_min**2*(1d0-cos(DRjj_min)))
@@ -140,7 +142,7 @@ program matrix_integrate_QCD
   unc(1:nintegrals,0:maxchannels)=0d0
   only_virt=.false.
 
-  open(unit=14,file='pt_list.txt',status='replace')
+  open(unit=14,file='a1_list.txt',status='replace')
   if (imode.le.1) then
      call mint(integrand)
   else
@@ -216,6 +218,8 @@ contains
     endif
 
     passed = passed + 1
+
+
 
     ! compute amplitudes
     call cpu_time(tBefore)
@@ -450,23 +454,24 @@ contains
        endif
     enddo
 
+    o=ord
     if (nquarks.eq.0) then
       do i=1,next
         if (ord(i).eq.1) start=i
         if (ord(i).eq.2) end=i
       enddo
       c_o=abs(end-start)-1
-    else
+      c_o_t=0
+      c_o_k=0
+      c_o_i=abs(end-start)-1
+      c_o_j=next-2-c_o_i
+    elseif (nquarks.eq.2) then
       c_o=0 ! dummy value
-    endif
-
-    o=ord
-    glu=1
-    if (nquarks.eq.2) then
+      glu=1
       do i=1,next
         if (process(i).lt.0) then
-        o(next)=i
-        end=i
+          o(next)=i
+          end=i
         endif
         if (process(i).gt.0 .and. process(i).ne.21) then
         o(1)=i
@@ -477,14 +482,32 @@ contains
             glu=glu+1
         endif
       enddo
-      write(*,*) 'end,start',end,start
-      write(*,*) ord
       if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
         write(*,*) 'VALID ORDER!!!'
         o=ord ! the input order was a valid one, use that instead
       endif
-    endif
 
+      do i=1,next
+        if (o(i).eq.1) start=i
+        if (o(i).eq.2) end=i
+      enddo
+      if (start.lt.end) then
+         c_o_t=1
+         if (start.ne.1) c_o_i=abs(start-1)-1
+         if (start.eq.1) c_o_i=abs(start-1)
+         if (end.ne.next) c_o_k=abs(next-end)-1
+         if (end.eq.next) c_o_k=abs(next-end)
+      endif
+      if (start.gt.end) then
+         c_o_t=2
+         if (end.ne.1) c_o_i=abs(end-1)-1
+         if (end.eq.1) c_o_i=abs(end-1)
+         if (start.ne.next) c_o_k=abs(next-start)-1
+         if (start.eq.next) c_o_k=abs(next-start)
+      endif
+      c_o_j=abs(start-end)-1
+    endif
+    
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
@@ -590,23 +613,45 @@ contains
     tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
     if (imode.gt.0) write(s1,'(i1)') imode-1
     tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    if (c_o.le.9) then
-       write(s1,'(i1)') c_o
+    write(s1,'(i1)') c_o_t
+    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    if (c_o_i.le.9) then
+       write(s1,'(i1)') c_o_i
+       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') c_o_i
+       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
+    endif
+    if (c_o_j.le.9) then
+       write(s1,'(i1)') c_o_j
+       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') c_o_j
+       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
+    endif
+    if (c_o_k.le.9) then
+       write(s1,'(i1)') c_o_k
        tag=trim(adjustl(tag))//trim(adjustl(s1))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
     else
-       write(s2,'(i2)') c_o
+       write(s2,'(i2)') c_o_k
        tag=trim(adjustl(tag))//trim(adjustl(s2))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
     endif
-    if (len(trim(tag_read)).lt.8) then
-       if (8-len(trim(tag)).eq.1) then
+    write(*,*) len(trim(tag_read))
+    if (len(trim(tag_read)).lt.13) then
+       if (13-len(trim(tag)).eq.1) then
           tag='_'//trim(adjustl(tag))
           tag_read='_'//trim(adjustl(tag_read))
-       elseif(8-len(trim(tag)).eq.2) then
+       elseif(13-len(trim(tag)).eq.2) then
           tag='__'//trim(adjustl(tag))
           tag_read='__'//trim(adjustl(tag_read))
-       elseif(8-len(trim(tag)).eq.3) then
+       elseif(13-len(trim(tag)).eq.3) then
           tag='___'//trim(adjustl(tag))
           tag_read='___'//trim(adjustl(tag_read))
        endif
