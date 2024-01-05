@@ -142,7 +142,7 @@ program matrix_integrate_QCD
   unc(1:nintegrals,0:maxchannels)=0d0
   only_virt=.false.
 
-  open(unit=14,file='a1_list.txt',status='replace')
+  open(unit=14,file='pt_list.txt',status='replace')
   if (imode.le.1) then
      call mint(integrand)
   else
@@ -186,6 +186,8 @@ contains
     real*8, dimension(-6:7,2) :: PDF
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
+
+    double precision :: y,frac,steep,cuts_wgt_1
    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
@@ -242,6 +244,22 @@ contains
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
 
+    frac=0.8d0
+    steep=0.01d0
+    i=5
+    y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
+    if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
+      cuts_wgt_1=((steep)*y/(steep+1d0-y))
+    elseif (pt(p(0,i)).gt.pt_min) then
+      cuts_wgt_1 = 1d0
+    elseif (pt(p(0,i)).lt.frac*pt_min) then
+      cuts_wgt_1 = 0d0
+    endif
+    !if (pt(p(0,3)).lt.pt_min) then
+    !   if (cuts_wgt_1.gt.0d0) write(*,*) 'STOP'
+    !endif
+    write(14,*) pt(p(0,i)),cuts_wgt_1
+
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
 
@@ -285,7 +303,7 @@ contains
     double precision :: frac,y,steep
 
     frac=0.8d0
-    steep=1.8d0
+    steep=0.1d0
     pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
        do i=1,n-1
@@ -307,8 +325,7 @@ contains
           if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
              y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
              if (imode.le.0) then
-               !pass_cuts=pass_cuts*(6d0*(y**5)-15d0*(y**4)+10d0*(y**3)) ! smooth step function
-               pass_cuts=pass_cuts*((steep-1d0)*y/(steep-y)) ! 1/x damping function
+               pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
              else
                pass_cuts=-1d0
              endif
@@ -487,6 +504,7 @@ contains
         o=ord ! the input order was a valid one, use that instead
       endif
 
+      write(*,*) o
       do i=1,next
         if (o(i).eq.1) start=i
         if (o(i).eq.2) end=i
@@ -494,16 +512,16 @@ contains
       if (start.lt.end) then
          c_o_t=1
          if (start.ne.1) c_o_i=abs(start-1)-1
-         if (start.eq.1) c_o_i=abs(start-1)
+         if (start.eq.1) c_o_i=next+1
          if (end.ne.next) c_o_k=abs(next-end)-1
-         if (end.eq.next) c_o_k=abs(next-end)
+         if (end.eq.next) c_o_k=next+1
       endif
       if (start.gt.end) then
          c_o_t=2
-         if (end.ne.1) c_o_i=abs(end-1)-1
-         if (end.eq.1) c_o_i=abs(end-1)
-         if (start.ne.next) c_o_k=abs(next-start)-1
-         if (start.eq.next) c_o_k=abs(next-start)
+         if (end.ne.1) c_o_k=abs(end-1)-1
+         if (end.eq.1) c_o_k=next+1
+         if (start.ne.next) c_o_i=abs(next-start)-1
+         if (start.eq.next) c_o_i=next+1
       endif
       c_o_j=abs(start-end)-1
     endif
