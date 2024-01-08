@@ -44,7 +44,7 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrts=10000.d0
+  sqrts=14000.d0
   ! setting energy
 
 
@@ -75,6 +75,8 @@ program matrix_integrate_QCD
      call gen23_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif  (integration.eq.2) then
      call  haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+  elseif (integration.eq.3) then
+     call genpt_init(sqrts,next,mass,pt_min,eta_max,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
@@ -205,8 +207,10 @@ contains
         call gen23_phase_space(x)
     elseif (integration.eq.2) then
         call PS_haag(x)
+    elseif (integration.eq.3) then
+        call genpt_phase_space(x)
     endif
-
+    
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
@@ -218,7 +222,7 @@ contains
        val=0d0
        return
     endif
-
+    
     passed = passed + 1
 
 
@@ -442,7 +446,7 @@ contains
     argc = COMMAND_ARGUMENT_COUNT()
     if (argc.ne.2) then
        write(*,*)  'imode'
-       write(*,*) 'integration mode (1 or 2):'
+       write(*,*) 'integration mode (1, 2 or 3):'
        read (*,*)  imode,integration
     else
        do i = 1, argc
@@ -603,8 +607,8 @@ contains
        write (*,*) 'inconsistent color-ordering',c_o
        stop
     endif
-    if (integration.ne.1 .and. integration.ne.2) then
-       write (*,*) 'Integration modes only 1 or 2',integration
+    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3) then
+       write (*,*) 'Integration modes only 1, 2 or 3',integration
        stop
     endif
     if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then

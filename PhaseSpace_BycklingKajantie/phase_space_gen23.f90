@@ -8,7 +8,7 @@ module phase_space_gen23
   integer(kind=4),dimension(:,:),allocatable :: sets
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: t_channel,includePDF
-  real(kind=8) :: sqrtshat,sqrts,tau,ycm
+  real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,ycut
   integer :: nquarks
 
   ! TECHNIAL PARAMETERS
@@ -26,8 +26,118 @@ module phase_space_gen23
   ! of 2*pi and flux factor)
 !  real(kind=8),public :: jac
   
-  public :: gen23_init,gen23_phase_space
+  public :: gen23_init,gen23_phase_space,genpt_init,genpt_phase_space
 contains
+  subroutine genpt_phase_space(xx)
+    implicit none
+    real(kind=8),dimension(99),intent(in) :: xx
+    real(kind=8) :: pt2min,pt2max,pt2,ymin,ymax,y,phimin,phimax,phi,ycm,pt
+    integer(kind=4) :: i,ix
+    real(kind=8),dimension(0:3) :: ptot
+    ix=0
+    jac=1d0
+    do i=3,next-1
+       ! generate pT^2
+       pt2min=ptcut**2
+       pt2max=sqrts**2/4d0
+       ix=ix+1
+       call random_to_var(xx(ix),-1d0,pt2min,pt2max,pt2,jac)
+       ! generate rapidity
+       ymin=-ycut
+       ymax=+ycut
+       ix=ix+1
+       call random_to_var(xx(ix),0d0,ymin,ymax,y,jac)
+       ! generate phi
+       phimin=0d0
+       phimax=2d0*pi
+       ix=ix+1
+       call random_to_var(xx(ix),0d0,phimin,phimax,phi,jac)
+       ! fill momentum
+       call fill_momentum_pt2yphi(pt2,y,phi,p(0,i))
+    enddo
+! final particle: generate rapidity
+    ymin=-ycut
+    ymax=+ycut
+    ix=ix+1
+    call random_to_var(xx(ix),0d0,ymin,ymax,y,jac)
+! final particle: fill momentum
+    p(1,next)=-sum(p(1,3:next-1))
+    p(2,next)=-sum(p(2,3:next-1))
+    pt=sqrt(p(1,next)**2+p(2,next)**2)
+    p(3,next)=pt*sinh(y)
+    p(0,next)=pt*cosh(y)
+
+! initial states
+    ptot(0:3)=sum(p(0:3,3:next),dim=2)
+    tau=dot(ptot,ptot)/sqrts**2
+    ycm=log((ptot(0)+ptot(3))/(ptot(0)-ptot(3)))/2d0
+    xbjrk(1)=sqrt(tau)*exp(ycm)
+    xbjrk(2)=sqrt(tau)*exp(-ycm)
+    if (xbjrk(1).ge.1d0 .or. xbjrk(2).ge.1d0) then
+       jac=-1d0
+       return
+    endif
+    p(0,1)=xbjrk(1)*sqrts/2d0
+    p(1,1)=0d0
+    p(2,1)=0d0
+    p(3,1)=+xbjrk(1)*sqrts/2d0
+    p(0,2)=xbjrk(2)*sqrts/2d0
+    p(1,2)=0d0
+    p(2,2)=0d0
+    p(3,2)=-xbjrk(2)*sqrts/2d0
+! Jacobian factor
+    jac=jac/(sqrts**2*dble(4**(next-3)))
+! Add factors of 2*pi
+    jac=jac/((2d0*pi)**(3*(next-2)-4))
+! Add flux factor
+    jac=jac/(2d0*tau*sqrts**2)
+  end subroutine genpt_phase_space
+  subroutine fill_momentum_pt2yphi(pt2,y,phi,p)
+    implicit none
+    real(kind=8) :: pt2,y,phi,pt
+    real(kind=8),dimension(0:3) :: p
+    pt=sqrt(pt2)
+    p(1)=pt*cos(phi)
+    p(2)=pt*sin(phi)
+    p(3)=pt*sinh(y)
+    p(0)=pt*cosh(y)
+  end subroutine fill_momentum_pt2yphi
+  subroutine genpt_init(sqrtsh,n,m,ptmin,rapcut,include_pdf)
+    implicit none
+    ! INPUT
+    ! Sqrt(s-hat), i.e, the collision energy
+    real(kind=8),intent(in) :: sqrtsh
+    ! number of particles (initial state + final state)
+    integer(kind=4),intent(in) :: n
+    ! rapidity and pT cut on all final state particles
+    real(kind=8),intent(in) :: rapcut,ptmin
+    ! masses of all the particles. The two incoming particles must be
+    ! massless.
+    real(kind=8),dimension(n),intent(in) :: m
+    logical,intent(in) :: include_pdf
+    ptcut=ptmin
+    ycut=rapcut
+    sqrts=sqrtsh
+    if (.not.include_pdf) then
+       write (*,*) 'genpt phase-space only with include_pdf=.true.'
+       stop 1
+    endif
+    if (any(m(1:n).ne.0d0)) then
+       write (*,*) 'genpt phase-space only for all massless particles'
+       stop 1
+    endif
+    if (rapcut.le.0d0) then
+       write (*,*) 'genpt phase-space must have rapidity cut'
+       stop 1
+    endif
+    if (ptcut.le.0d0) then
+       write (*,*) 'genpt phase-space must have pT cut'
+       stop 1
+    endif
+    next=n
+    ndim=3*(next-2)-2
+    allocate(p(0:3,next))
+  end subroutine genpt_init
   subroutine gen23_init(sqrtsh,n,m,o,part,s_cut,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
