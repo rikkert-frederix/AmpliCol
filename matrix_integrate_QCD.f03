@@ -13,7 +13,7 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
-  character(len=30) :: filename
+  character(len=31) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs=.false.
   integer :: col_fac,nhel

@@ -96,7 +96,7 @@ module mint_module
   double precision, dimension(maxchannels), public :: virtual_fraction
   double precision, dimension(nintegrals,0:maxchannels), public :: ans,unc
   logical :: only_virt,new_point,pass_cuts_check
-  character(len=8) :: tag,tag_read
+  character(len=13) :: tag,tag_read
 
 ! private variables
   character(len=13), parameter, dimension(nintegrals), private :: title=(/ &
