@@ -3,6 +3,7 @@ program matrix_integrate_QCD
   use common
   use mint_module
   use phase_space_gen23
+  use phase_space_genpt
   use haag
   use math_functions
   implicit none
@@ -76,11 +77,10 @@ program matrix_integrate_QCD
   elseif  (integration.eq.2) then
      call  haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif (integration.eq.3) then
-     call genpt_init(sqrts,next,mass,pt_min,eta_max,include_pdf)
+     call genpt_init(sqrts,next,mass,pt_min,eta_max,DRjj_min,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
-
 
   ! colour, polarisation incoming gluons: 8, 2
   ! colour, polarisation incoming quarks: 3, 2
