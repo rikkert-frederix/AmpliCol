@@ -18,7 +18,7 @@ module timings
 end module timings
 module arguments
   implicit none
-  integer :: c_o,imode
+  integer :: c_o,c_o_t,c_o_i,c_o_j,c_o_k,imode
 end module arguments
 
 program matrix_reweight
@@ -160,7 +160,7 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.3) then
+    if (argc.ne.6) then
        write (*,*) 'Give number of gluons, imode and color'// &
             ' ordering (number of gluons on first color line):'
        read (*,*) next,imode,c_o
@@ -169,7 +169,10 @@ contains
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) next
           if (i.eq.2) read(argv,*) imode
-          if (i.eq.3) read(argv,*) c_o
+          if (i.eq.3) read(argv,*) c_o_t
+          if (i.eq.4) read(argv,*) c_o_i
+          if (i.eq.5) read(argv,*) c_o_j
+          if (i.eq.6) read(argv,*) c_o_k
        enddo
     endif
     if (next.lt.4) then
@@ -180,8 +183,20 @@ contains
        write (*,*) 'Incorrect imode',imode, ' (should be 2)'
        stop
     endif
-    if (c_o.lt.0 .or. c_o .gt. next-2) then
-       write (*,*) 'inconsistent color-ordering',c_o
+    if (c_o_t.lt.0 .or. c_o_t .gt.2) then
+       write (*,*) 'inconsistent color-ordering type',c_o_t
+       stop
+    endif
+    if (c_o_i.lt.0 .or. c_o_i .gt.next+1) then
+       write (*,*) 'inconsistent color-ordering i',c_o_i
+       stop
+    endif
+    if (c_o_j.lt.0 .or. c_o_j .gt.next) then
+       write (*,*) 'inconsistent color-ordering j',c_o_j
+       stop
+    endif
+    if (c_o_k.lt.0 .or. c_o_k .gt.next+1) then
+       write (*,*) 'inconsistent color-ordering k',c_o_k
        stop
     endif
   end subroutine get_run_arguments
@@ -191,7 +206,7 @@ contains
     implicit none
     character(len=1) :: s1
     character(len=2) :: s2
-    character(len=8) :: tag,tag_read
+    character(len=13) :: tag,tag_read
     if (next.le.9) then
        write(s1,'(i1)') next
        tag=trim(adjustl(s1))//'_'
@@ -205,27 +220,50 @@ contains
     tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
     if (imode.gt.0) write(s1,'(i1)') imode-1
     tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    if (c_o.le.9) then
-       write(s1,'(i1)') c_o
+    write(s1,'(i1)') c_o_t
+    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    if (c_o_i.le.9) then
+       write(s1,'(i1)') c_o_i
+       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') c_o_i
+       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
+    endif
+    if (c_o_j.le.9) then
+       write(s1,'(i1)') c_o_j
+       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') c_o_j
+       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
+    endif
+    if (c_o_k.le.9) then
+       write(s1,'(i1)') c_o_k
        tag=trim(adjustl(tag))//trim(adjustl(s1))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
     else
-       write(s2,'(i2)') c_o
+       write(s2,'(i2)') c_o_k
        tag=trim(adjustl(tag))//trim(adjustl(s2))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
     endif
-    if (len(trim(tag_read)).lt.8) then
-       if (8-len(trim(tag)).eq.1) then
+    write(*,*) len(trim(tag_read))
+    if (len(trim(tag_read)).lt.13) then
+       if (13-len(trim(tag)).eq.1) then
           tag='_'//trim(adjustl(tag))
           tag_read='_'//trim(adjustl(tag_read))
-       elseif(8-len(trim(tag)).eq.2) then
+       elseif(13-len(trim(tag)).eq.2) then
           tag='__'//trim(adjustl(tag))
           tag_read='__'//trim(adjustl(tag_read))
-       elseif(8-len(trim(tag)).eq.3) then
+       elseif(13-len(trim(tag)).eq.3) then
           tag='___'//trim(adjustl(tag))
           tag_read='___'//trim(adjustl(tag_read))
        endif
     endif
+    write (*,*) tag
     open(unit=11,file='Outputs/events'//tag//'.lhe',status='old')
     open(unit=12,file='Outputs/events'//tag//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
