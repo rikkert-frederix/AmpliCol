@@ -13,7 +13,7 @@ contains
     implicit none
     real(kind=8),dimension(99),intent(in) :: xx
     real(kind=8) :: pt2min,pt2max,pt2,ymin,ymax,y,phimin,phimax,phi&
-         &,ycm,pt,drmin,drmax,dr
+         &,ycm,pt,drmin,drmax,dr,phi2
     integer(kind=4) :: i,ix
     real(kind=8),dimension(0:3) :: ptot,pb
     real(kind=8),external :: ran2
@@ -42,7 +42,7 @@ contains
           ! generate deltaR w.r.t. previously generated particle
           y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
           drmin=max(drcut,abs(phi))
-          drmax=sqrt((ycut+abs(y))**2+pi**2)
+          drmax=sqrt((ycut+abs(y))**2+phi**2)
           ix=ix+1
           call random_to_var(xx(ix),0d0,drmin,drmax,dr,jac)
           ! fill momentum, assuming that previous particle is along the x-axis.
@@ -55,17 +55,49 @@ contains
           call rotz(pb,phi,p(0,i))
        endif
     enddo
+!!$    if (.true.) then
+    if (use_rapidity) then
 ! final particle: generate rapidity
-    ymin=-ycut
-    ymax=+ycut
-    ix=ix+1
-    call random_to_var(xx(ix),0d0,ymin,ymax,y,jac)
-    ! final particle: fill momentum
-    p(1,next)=-sum(p(1,3:next-1))
-    p(2,next)=-sum(p(2,3:next-1))
-    pt=sqrt(p(1,next)**2+p(2,next)**2)
-    p(3,next)=pt*sinh(y)
-    p(0,next)=pt*cosh(y)
+       ymin=-ycut
+       ymax=+ycut
+       ix=ix+1
+       call random_to_var(xx(ix),0d0,ymin,ymax,y,jac)
+       ! final particle: fill momentum
+       p(1,next)=-sum(p(1,3:next-1))
+       p(2,next)=-sum(p(2,3:next-1))
+       pt=sqrt(p(1,next)**2+p(2,next)**2)
+       p(3,next)=pt*sinh(y)
+       p(0,next)=pt*cosh(y)
+    else
+       p(1,next)=-sum(p(1,3:next-1))
+       p(2,next)=-sum(p(2,3:next-1))
+       pt=sqrt(p(1,next)**2+p(2,next)**2)
+       phi=atan(p(2,next-1)/p(1,next-1))
+       if(p(1,next-1).lt.0d0) phi=phi+pi
+       if (phi.gt.pi) phi=phi-2d0*pi
+       phi2=atan(p(2,next)/p(1,next))
+       if(p(1,next).lt.0d0) phi2=phi2+pi
+       if (phi2.gt.pi) phi2=phi2-2d0*pi
+       phi=phi2-phi
+       ! generate deltaR w.r.t. previously generated particle
+       y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
+       drmin=max(drcut,abs(phi))
+       drmax=sqrt((ycut+abs(y))**2+phi**2)
+       ix=ix+1
+       call random_to_var(xx(ix),0d0,drmin,drmax,dr,jac)
+       y=sqrt(dr**2-phi**2)
+       if (ran2().gt.0.5d0) y=-y
+       jac=jac*2d0
+       p(3,next)=pt*sinh(y)
+       p(0,next)=pt*cosh(y)
+       jac=jac*abs(dr/y)
+       ! boost along the z-axis
+       y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
+       call boostz(p(0,next),-y,pb)
+       p(0:3,next)=pb(0:3)
+    endif
+    
+    
 ! initial states
     ptot(0:3)=sum(p(0:3,3:next),dim=2)
     tau=dot(ptot,ptot)/sqrts**2
