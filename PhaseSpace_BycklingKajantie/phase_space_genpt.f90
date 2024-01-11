@@ -5,7 +5,10 @@ module phase_space_genpt
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: includePDF
   real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,ycut,DRcut
-  logical,parameter :: use_rapidity=.false.
+  integer,parameter :: use_mode=3 ! all modes use pT^2 and phi, but
+                                  ! 1 = uses rapidity (original chili)
+                                  ! 2 = uses DeltaR with previous particle
+                                  ! 3 = uses invariant mass with previous particle
   
   public :: genpt_init,genpt_phase_space
 contains
@@ -13,7 +16,7 @@ contains
     implicit none
     real(kind=8),dimension(99),intent(in) :: xx
     real(kind=8) :: pt2min,pt2max,pt2,ymin,ymax,y,phimin,phimax,phi&
-         &,ycm,pt,drmin,drmax,dr,phi2
+         &,ycm,pt,drmin,drmax,dr,phi2,invmmin,invmmax,invm
     integer(kind=4) :: i,ix
     real(kind=8),dimension(0:3) :: ptot,pb
     real(kind=8),external :: ran2
@@ -30,7 +33,7 @@ contains
        phimax=pi
        ix=ix+1
        call random_to_var(xx(ix),0d0,phimin,phimax,phi,jac)
-       if (use_rapidity .or. i.eq.3) then
+       if (use_mode.eq.1 .or. i.eq.3) then
           ! generate rapidity
           ymin=-ycut
           ymax=+ycut
@@ -38,7 +41,7 @@ contains
           call random_to_var(xx(ix),0d0,ymin,ymax,y,jac)
           ! fill momentum
           call fill_momentum_pt2yphi(pt2,y,phi,p(0,i))
-       else
+       elseif (use_mode.eq.2) then
           ! generate deltaR w.r.t. previously generated particle
           y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
           drmin=max(drcut,abs(phi))
@@ -53,10 +56,27 @@ contains
           phi=atan(p(2,i-1)/p(1,i-1))
           if(p(1,i-1).lt.0d0) phi=phi+pi
           call rotz(pb,phi,p(0,i))
+       elseif (use_mode.eq.3) then
+          ! get the energy in the frame where p(:,i-1) has p_z=0.
+          y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
+          call boostz(p(0,i-1),y,pb)
+          invmmin=ptcut**2*(1d0-cos(drcut))
+          invmmax=sqrts**2
+          ix=ix+1
+          call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,jac)
+          ! fill momentum, assuming that previous particle is along the x-axis.
+          call fill_momentum_pt2invmphi(pt2,invm,phi,pb(0),p(0,i),jac)
+          if (jac.lt.0d0) return
+          ! boost along the z-axis
+          call boostz(p(0,i),-y,pb)
+          ! rotate about the z-axis
+          phi=atan(p(2,i-1)/p(1,i-1))
+          if(p(1,i-1).lt.0d0) phi=phi+pi
+          call rotz(pb,phi,p(0,i))
        endif
     enddo
 !!$    if (.true.) then
-    if (use_rapidity) then
+    if (use_mode.eq.1) then
 ! final particle: generate rapidity
        ymin=-ycut
        ymax=+ycut
@@ -68,7 +88,7 @@ contains
        pt=sqrt(p(1,next)**2+p(2,next)**2)
        p(3,next)=pt*sinh(y)
        p(0,next)=pt*cosh(y)
-    else
+    elseif(use_mode.eq.2) then
        p(1,next)=-sum(p(1,3:next-1))
        p(2,next)=-sum(p(2,3:next-1))
        pt=sqrt(p(1,next)**2+p(2,next)**2)
@@ -95,6 +115,37 @@ contains
        y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
        call boostz(p(0,next),-y,pb)
        p(0:3,next)=pb(0:3)
+    elseif(use_mode.eq.3) then
+       p(1,next)=-sum(p(1,3:next-1))
+       p(2,next)=-sum(p(2,3:next-1))
+       pt=sqrt(p(1,next)**2+p(2,next)**2)
+       phi=atan(p(2,next-1)/p(1,next-1))
+       if(p(1,next-1).lt.0d0) phi=phi+pi
+       if (phi.gt.pi) phi=phi-2d0*pi
+       phi2=atan(p(2,next)/p(1,next))
+       if(p(1,next).lt.0d0) phi2=phi2+pi
+       if (phi2.gt.pi) phi2=phi2-2d0*pi
+       phi=phi2-phi
+       invmmin=ptcut**2*(1d0-cos(drcut))
+       invmmax=sqrts**2
+       ix=ix+1
+       call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,jac)
+       y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
+       call boostz(p(0,i-1),y,pb)
+       p(0,next)=invm/(2d0*pb(0))+p(1,next)
+       ! There are two values of the pz that correspond to a single
+       ! invm. Take one of the two at random.
+       if (p(0,next).lt.pt) then
+          jac=-1d0
+          return
+       endif
+       p(3,next)=sqrt(p(0,next)**2-pt**2)
+       if (ran2().gt.0.5d0) p(3,next)=-p(3,next)
+       jac=jac*2d0
+       jac=jac/abs(2d0*pb(0)*p(3,next))
+       ! boost along the z-axis
+       call boostz(p(0,next),-y,pb)
+       p(0:3,next)=pb(0:3)
     endif
     
     
@@ -116,17 +167,35 @@ contains
     p(1,2)=0d0
     p(2,2)=0d0
     p(3,2)=-xbjrk(2)*sqrts/2d0
-! Jacobian factor
-    if (use_rapidity) then
-       jac=jac/(sqrts**2*dble(4**(next-3)))
-    else
-       jac=jac/(sqrts**2*dble(4**(next-3)))
-    endif
+! Jacobian factor (corresponds to the full jacobian for
+! use_mode=1. The other use_modes already have a partially computed
+! jacobian above
+    jac=jac/(sqrts**2*dble(4**(next-3)))
 ! Add factors of 2*pi
     jac=jac/((2d0*pi)**(3*(next-2)-4))
 ! Add flux factor
     jac=jac/(2d0*tau*sqrts**2)
   end subroutine genpt_phase_space
+  subroutine fill_momentum_pt2invmphi(pt2,invm,phi,Eref,p,jac)
+    implicit none
+    real(kind=8) :: pt2,invm,phi,jac,pt,Eref
+    real(kind=8),dimension(0:3) :: p
+    real(kind=8),external :: ran2
+    pt=sqrt(pt2)
+    p(1)=pt*cos(phi)
+    p(2)=pt*sin(phi)
+    p(0)=invm/(2d0*Eref)+p(1)
+    ! There are two values of the pz that correspond to a single
+    ! invm. Take one of the two at random.
+    if (p(0).lt.sqrt(pt2)) then
+       jac=-1d0
+       return
+    endif
+    p(3)=sqrt(p(0)**2-pt2)
+    if (ran2().gt.0.5d0) p(3)=-p(3)
+    jac=jac*2d0
+    jac=jac*abs(1d0/(2d0*Eref*p(3)))
+  end subroutine fill_momentum_pt2invmphi
   subroutine fill_momentum_pt2drphi(pt2,dr,phi,p,jac)
     implicit none
     real(kind=8) :: pt2,dr,phi,jac,pt,y
@@ -180,11 +249,11 @@ contains
        write (*,*) 'genpt phase-space only for all massless particles'
        stop 1
     endif
-    if (use_rapidity .and. rapcut.le.0d0) then
+    if (use_mode.eq.1 .and. rapcut.le.0d0) then
        write (*,*) 'genpt phase-space must have rapidity cut'
        stop 1
     endif
-    if ((.not.use_rapidity) .and. DRcut.le.0d0) then
+    if (use_mode.ne.1 .and. DRcut.le.0d0) then
        write (*,*) 'genpt phase-space must have DeltaR cut'
        stop 1
     endif
