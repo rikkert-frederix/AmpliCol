@@ -50,7 +50,7 @@ program matrix_integrate_QCD
 
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
-  s_cut(2)=max(sqrt_s_min**2,pt_min**2*(1d0-cos(DRjj_min)))
+  s_cut(2)=max(sqrt_s_min**2,2d0*pt_min**2*(1d0-cos(DRjj_min)))
 
   mass(1:next)=0d0
 
