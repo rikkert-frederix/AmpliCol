@@ -9,7 +9,6 @@ module phase_space_genpt
                                   ! 1 = uses rapidity (original chili)
                                   ! 2 = uses DeltaR with previous particle
                                   ! 3 = uses invariant mass with previous particle
-  
   public :: genpt_init,genpt_phase_space
 contains
   subroutine genpt_phase_space(xx)
@@ -60,7 +59,7 @@ contains
           ! get the energy in the frame where p(:,i-1) has p_z=0.
           y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
           call boostz(p(0,i-1),y,pb)
-          invmmin=ptcut**2*(1d0-cos(drcut))
+          invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(drcut,abs(phi))))
           invmmax=sqrts**2
           ix=ix+1
           call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,jac)
@@ -126,12 +125,12 @@ contains
        if(p(1,next).lt.0d0) phi2=phi2+pi
        if (phi2.gt.pi) phi2=phi2-2d0*pi
        phi=phi2-phi
-       invmmin=ptcut**2*(1d0-cos(drcut))
+       y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
+       call boostz(p(0,i-1),y,pb)
+       invmmin=2d0*pt*pb(0)*(1d0-cos(max(drcut,abs(phi))))
        invmmax=sqrts**2
        ix=ix+1
        call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,jac)
-       y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
-       call boostz(p(0,i-1),y,pb)
        p(0,next)=invm/(2d0*pb(0))+p(1,next)
        ! There are two values of the pz that correspond to a single
        ! invm. Take one of the two at random.
@@ -187,10 +186,6 @@ contains
     p(0)=invm/(2d0*Eref)+p(1)
     ! There are two values of the pz that correspond to a single
     ! invm. Take one of the two at random.
-    if (p(0).lt.sqrt(pt2)) then
-       jac=-1d0
-       return
-    endif
     p(3)=sqrt(p(0)**2-pt2)
     if (ran2().gt.0.5d0) p(3)=-p(3)
     jac=jac*2d0
