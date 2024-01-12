@@ -97,7 +97,7 @@ contains
        phi2=atan(p(2,next)/p(1,next))
        if(p(1,next).lt.0d0) phi2=phi2+pi
        if (phi2.gt.pi) phi2=phi2-2d0*pi
-       phi=phi2-phi
+       phi=phi2-phi ! aximuthal separation particle 'next' and 'next-1'
        ! generate deltaR w.r.t. previously generated particle
        y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
        drmin=max(drcut,abs(phi))
@@ -118,26 +118,24 @@ contains
        p(1,next)=-sum(p(1,3:next-1))
        p(2,next)=-sum(p(2,3:next-1))
        pt=sqrt(p(1,next)**2+p(2,next)**2)
-       phi=atan(p(2,next-1)/p(1,next-1))
-       if(p(1,next-1).lt.0d0) phi=phi+pi
-       if (phi.gt.pi) phi=phi-2d0*pi
-       phi2=atan(p(2,next)/p(1,next))
-       if(p(1,next).lt.0d0) phi2=phi2+pi
-       if (phi2.gt.pi) phi2=phi2-2d0*pi
-       phi=phi2-phi
        y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
-       call boostz(p(0,i-1),y,pb)
-       invmmin=2d0*pt*pb(0)*(1d0-cos(max(drcut,abs(phi))))
+       call boostz(p(0,next-1),y,pb)
+       phi=delta_phi(p(0,next),p(0,next-1))
+       invmmin=2d0*pt*pb(0)*(1d0-cos(max(drcut,phi)))
        invmmax=sqrts**2
-       ix=ix+1
-       call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,jac)
-       p(0,next)=invm/(2d0*pb(0))+p(1,next)
-       ! There are two values of the pz that correspond to a single
-       ! invm. Take one of the two at random.
-       if (p(0,next).lt.pt) then
+       if(invmmin.ge.invmmax) then
           jac=-1d0
           return
        endif
+       ix=ix+1
+       call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,jac)
+       p(0,next)=(invm/2d0+pb(1)*p(1,next)+pb(2)*p(2,next))/pb(0)
+       ! There are two values of the pz that correspond to a single
+       ! invm. Take one of the two at random.
+!!$       if (p(0,next).lt.pt) then
+!!$          jac=-1d0
+!!$          return
+!!$       endif
        p(3,next)=sqrt(p(0,next)**2-pt**2)
        if (ran2().gt.0.5d0) p(3,next)=-p(3,next)
        jac=jac*2d0
@@ -168,7 +166,7 @@ contains
     p(3,2)=-xbjrk(2)*sqrts/2d0
 ! Jacobian factor (corresponds to the full jacobian for
 ! use_mode=1. The other use_modes already have a partially computed
-! jacobian above
+! jacobian above)
     jac=jac/(sqrts**2*dble(4**(next-3)))
 ! Add factors of 2*pi
     jac=jac/((2d0*pi)**(3*(next-2)-4))
