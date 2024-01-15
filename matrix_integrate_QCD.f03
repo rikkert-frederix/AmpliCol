@@ -404,7 +404,7 @@ contains
        write (*,*) 'Incorrect imode',imode
        stop
     endif
-    if (c_o.lt.0 .or. c_o .gt. next-2) then
+    if (c_o.lt.0 .or. c_o .gt. int((next-2)/2)) then
        write (*,*) 'inconsistent color-ordering',c_o
        stop
     endif
@@ -489,12 +489,12 @@ contains
              iden_part(j,2)=iden_part(j,2)+1
              exit
           endif
-          if (j.eq.ni+1) then
-             ni=ni+1
-             iden_part(j,1)=part(i)
-             iden_part(j,2)=1
-          endif
        enddo
+       if (j.eq.ni+1) then
+          ni=ni+1
+          iden_part(j,1)=part(i)
+          iden_part(j,2)=1
+       endif
     enddo
     do i=1,ni
        iden=iden*factorial8(iden_part(i,2))
@@ -516,7 +516,8 @@ contains
     enddo
     ifac=nint(fac)
     if (dble(ifac).ne.fac) then
-       write (*,*) 'There is some issue with the LC colour factor computation',ifac,fac
+       write (*,*) 'There is some issue with the LC colour factor computation: '// &
+            'colour factor is not an integer',ifac,fac
        stop 1
     endif
     col_fac=3**ifac
