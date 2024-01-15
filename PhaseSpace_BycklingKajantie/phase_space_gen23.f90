@@ -1137,7 +1137,7 @@ contains
        call LUPdeterminant(a,p,n,deter)
        computeV=-deter/8d0
     else
-       computeV=-1d0
+       computeV=-99d99
     endif
   end function computeV
   
@@ -1167,10 +1167,11 @@ contains
     V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
     GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
       & *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
-    if (GG.le.0d0) then
-       write (*,*) 'No allowed range for s: smin=smax',GG
+    if (GG.le.0d0 .or. V.eq.-99d99) then
+       write (*,*) 'No allowed range for s: smin=smax',GG,V
 !!$       stop 1
        GG=0d0
+       V=0d0
     endif
     sqrtGG=sqrt(GG)
     s1=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V + sqrtGG)
