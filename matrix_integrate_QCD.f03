@@ -440,91 +440,176 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.2) then
-       write(*,*)  'imode'
+    if (argc.ne.7) then
        write(*,*) 'integration mode (1 or 2):'
-       read (*,*)  imode,integration
+       write(*,*)  'next'
+       write(*,*)  'imode'
+       write(*,*)  'type'
+       write(*,*)  'c_o_i'
+       write(*,*)  'c_o_j'
+       write(*,*)  'c_o_k'
+       read (*,*)  integration,next,imode,c_o_t,c_o_i,c_o_j,c_o_k
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) imode
-          if (i.eq.2) read(argv,*) integration
+          if (i.eq.1) read(argv,*) integration
+          if (i.eq.2) read(argv,*) next
+          if (i.eq.3) read(argv,*) imode
+          if (i.eq.4) read(argv,*) c_o_t
+          if (i.eq.5) read(argv,*) c_o_i
+          if (i.eq.6) read(argv,*) c_o_j
+          if (i.eq.7) read(argv,*) c_o_k
        enddo
     endif
 
-    open (unit=99, file='process.txt', status='old', action='read')
-    read(99, *) next
-    allocate(process(next))
-    allocate(o(next))
-    allocate(part(next))
-    allocate(ord(next))
-    read(99, *) process
-    part=process
-    read(99, *) ord
-    nquarks = 0
-    do i=1,next
-       if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
+    if (read_from_file) then
+      open (unit=99, file='process.txt', status='old', action='read')
+      read(99, *) next
+      allocate(process(next))
+      allocate(o(next))
+      allocate(part(next))
+      allocate(ord(next))
+      read(99, *) process
+      part=process
+      read(99, *) ord
+      nquarks = 0
+      do i=1,next
+         if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
            nquarks=nquarks+1
-       endif
-       if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
+         endif
+         if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
           process(i)=-process(i)
-       endif
-    enddo
-
-    o=ord
-    if (nquarks.eq.0) then
-      do i=1,next
-        if (ord(i).eq.1) start=i
-        if (ord(i).eq.2) end=i
+         endif
       enddo
-      c_o=abs(end-start)-1
-      c_o_t=0
-      c_o_k=0
-      c_o_i=abs(end-start)-1
-      c_o_j=next-2-c_o_i
-    elseif (nquarks.eq.2) then
-      c_o=0 ! dummy value
-      glu=1
-      do i=1,next
-        if (process(i).lt.0) then
-          o(next)=i
-          end=i
-        endif
-        if (process(i).gt.0 .and. process(i).ne.21) then
-        o(1)=i
-        start=i
-        endif
-        if (process(i).eq.21) then
+
+      o=ord
+      if (nquarks.eq.0) then
+        do i=1,next
+          if (ord(i).eq.1) start=i
+          if (ord(i).eq.2) end=i
+        enddo
+        c_o=abs(end-start)-1
+        c_o_t=0
+        c_o_k=0
+        c_o_i=abs(end-start)-1
+        c_o_j=next-2-c_o_i
+      elseif (nquarks.eq.2) then
+        c_o=0 ! dummy value
+        glu=1
+        do i=1,next
+          if (process(i).lt.0) then
+            o(next)=i
+            end=i
+          endif
+          if (process(i).gt.0 .and. process(i).ne.21) then
+            o(1)=i
+            start=i
+          endif
+          if (process(i).eq.21) then
             o(1+glu)=i
             glu=glu+1
+          endif
+        enddo
+        if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
+          write(*,*) 'VALID ORDER!!!'
+          o=ord ! the input order was a valid one, use that instead
         endif
-      enddo
-      if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
-        write(*,*) 'VALID ORDER!!!'
-        o=ord ! the input order was a valid one, use that instead
-      endif
 
-      write(*,*) o
-      do i=1,next
-        if (o(i).eq.1) start=i
-        if (o(i).eq.2) end=i
-      enddo
-      if (start.lt.end) then
-         c_o_t=1
-         if (start.ne.1) c_o_i=abs(start-1)-1
-         if (start.eq.1) c_o_i=next+1
-         if (end.ne.next) c_o_k=abs(next-end)-1
-         if (end.eq.next) c_o_k=next+1
+        write(*,*) o
+        do i=1,next
+          if (o(i).eq.1) start=i
+          if (o(i).eq.2) end=i
+        enddo
+        if (start.lt.end) then
+          c_o_t=1
+          if (start.ne.1) c_o_i=abs(start-1)-1
+          if (start.eq.1) c_o_i=next+1
+          if (end.ne.next) c_o_k=abs(next-end)-1
+          if (end.eq.next) c_o_k=next+1
+        endif
+        if (start.gt.end) then
+          c_o_t=2
+          if (end.ne.1) c_o_k=abs(end-1)-1
+          if (end.eq.1) c_o_k=next+1
+          if (start.ne.next) c_o_i=abs(next-start)-1
+          if (start.eq.next) c_o_i=next+1
+        endif
+        c_o_j=abs(start-end)-1
       endif
-      if (start.gt.end) then
-         c_o_t=2
-         if (end.ne.1) c_o_k=abs(end-1)-1
-         if (end.eq.1) c_o_k=next+1
-         if (start.ne.next) c_o_i=abs(next-start)-1
-         if (start.eq.next) c_o_i=next+1
-      endif
-      c_o_j=abs(start-end)-1
     endif
+!ccccccccccccccccccccc
+
+    if (c_o_t.eq.0) then
+       nquarks=0       
+    elseif (c_o_t.le.2) then
+       nquarks=2
+    endif
+
+    allocate(process(next))
+    allocate(o(next))
+    allocate(ord(next))
+    if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
+       process(1)=-1
+       process(2)=1
+       do i=3,next
+          process(i)=21
+       enddo
+       ord(1)=1
+       ord(next)=2
+       do i=2,next-1
+          ord(i)=i+1
+       enddo
+       o=ord
+    elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
+       process(1)=-1
+       process(2)=21
+       process(3)=-1
+       do i=4,next
+          process(i)=21
+       enddo
+       ord(1)=1
+       ord(next)=3
+       ord(2)=2
+       do i=3,next-1
+          ord(i)=i+1
+       enddo
+       o=ord
+    elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
+       process(1)=21
+       process(2)=-1
+       process(3)=-1
+       do i=4,next
+          process(i)=21
+       enddo
+       ord(1)=2
+       ord(next)=3
+       ord(2)=1
+       do i=3,next-1
+          ord(i)=i+1
+       enddo
+       o=ord
+    elseif (c_o_i+c_o_j+c_o_k.eq.next-4) then
+       process(1)=21
+       process(2)=21
+       process(3)=1
+       process(4)=-1
+       do i=5,next
+          process(i)=21
+       enddo
+       ord(1)=3
+       ord(next)=4
+       ord(2)=1
+       ord(3)=2
+       do i=4,next-1
+          ord(i)=i+1
+       enddo
+       o=ord
+    else 
+       write(*,*) 'Incorrect colour order labels: does not give physical process'
+       stop 
+    endif
+    part=process
+    write(*,*) o
     
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
@@ -590,7 +675,7 @@ contains
     else
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
-    
+
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
@@ -599,10 +684,11 @@ contains
        write (*,*) 'Incorrect imode',imode
        stop
     endif
-    if (c_o.lt.0 .or. c_o .gt. next-2) then
-       write (*,*) 'inconsistent color-ordering',c_o
+    if (c_o_i .gt.next+1.or.c_o_k.gt.next+1.or.c_o_j.gt.next-2) then
+       write (*,*) 'inconsistent color-ordering c_o_i,c_o_j,c_o_k',c_o_i,c_o_j,c_o_k
        stop
     endif
+
     if (integration.ne.1 .and. integration.ne.2) then
        write (*,*) 'Integration modes only 1 or 2',integration
        stop

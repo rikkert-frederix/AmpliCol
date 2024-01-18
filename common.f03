@@ -16,7 +16,8 @@ module common
 
   ! technical
   logical,parameter :: smooth_cuts=.false.
-  logical,parameter :: include_pdf=.false.
+  logical,parameter :: include_pdf=.true.
+  logical,parameter :: read_from_file=.false.
   
   ! counting events
   integer(kind=4) :: passed=0
@@ -26,7 +27,7 @@ module common
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   real*8,parameter :: pT_min     = 30d0
   real*8,parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
-  real*8,parameter :: eta_max    = -1d0
+  real*8,parameter :: eta_max    = 6d0
   real*8,parameter :: sqrt_s_min = -1d0
   
 end module common
