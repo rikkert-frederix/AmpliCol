@@ -7,6 +7,8 @@ module haag
   real(kind=8),public :: s0
   logical,public :: debug=.false.,  flat=.false.,  open=.false.,  schannel
   logical,public :: flat_split=.false., a1_split=.true.
+  logical,public :: haag_style=.true.
+  logical,public :: one_pt=.true.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
@@ -558,6 +560,14 @@ endif
     jac=jac*jaco*soft/((2d0*pi)**(3*n-4)) !wgt
     jac=jac/(2d0*sqrtshat**2)
 
+    !write(*,*) ' '
+    !do i=1,next
+    !   write(*,*) pp(:,i)
+    !enddo
+    !write(*,*) pp(:,1)+pp(:,2)
+    !write(*,*) pp(:,3)+pp(:,4)+pp(:,5)+pp(:,6)+pp(:,7)
+
+
   end subroutine generate_momenta
 
   subroutine generate_initial_state
@@ -617,6 +627,10 @@ endif
     double precision,dimension(2) :: a2pm,a1pm
     real(kind=8),external :: ran2
 
+    real(kind=8) :: tmin,tmax,t1,t2,yr,pt2
+    real(kind=8),dimension(0:3) :: pass1,pass2
+    real(kind=8) :: pt2min,pt2max,pt,y
+
     k = maxn - i   !  k is the number of particles remaining to generate
     s1 = mass1     ! mass of the final state particle to be generated
     z_sign=sign(1d0,q2(3))
@@ -647,10 +661,78 @@ endif
     !Generate s2
     if (m1 .and. (i .eq. 0)) then 
         ! If m=1 type first splitting -> do also a1,phi sampling here!
-         call generate_first_single(k,s,s1,q1_cmf,P_cmf,a1,s2)
-         if (k.eq.2) s2=0d0
-         a2 = 300d0
-         goto 20
+         if (haag_style.and..not.one_pt) then
+            call generate_first_single(k,s,s1,q1_cmf,P_cmf,a1,s2)
+            if (k.eq.2) s2=0d0
+            a2 = 300d0
+            goto 20
+         elseif(.not.haag_style.and. .not.one_pt) then
+            yr = dsqrt(kallen(sqrtshat**2,0d0,(next-3)*(next-4)/2d0*s0))
+            tmin=(-sqrtshat**2+(next-3)*(next-4)/2d0*s0-yr)/2d0
+            tmax=(-sqrtshat**2+(next-3)*(next-4)/2d0*s0+yr)/2d0
+            if (-s0.ne.0d0) tmax=min(-s0,tmax)
+            if (0d0.ne.0d0) tmin=max(tmin,0d0)
+            ix=ix+1
+            call random_to_var(x(ix),-1d0,tmin,tmax,t1,jac)
+            if (tmin.ge.tmax) then
+                jac=-2d0
+                return
+            endif
+            tmin=-sqrtshat**2-t1+(next-3)*(next-4)/2d0*s0
+            tmax=0d0*(0d0-sqrtshat-t1)/(0d0-t1)
+
+            if (-s0.ne.0d0) tmax=min(-s0,tmax)
+            if (0d0.ne.0d0) tmin=max(tmin,0d0)
+
+            if (tmin.ge.tmax) then
+                jac=-2d0
+                return
+            endif
+            ix=ix+1
+            call random_to_var(x(ix),-1d0,tmin,tmax,t2,jac)
+            ix=ix+1
+            call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
+            pt2=t1*t2/sqrtshat**2+ &
+               & 0d0**2/sqrtshat**2-(t1+t2)*0d0/sqrtshat**2-0d0
+            pass1(0) =(-t1-t2+2d0*0d0)/(2d0*sqrtshat)
+            pass1(1)=sqrt(pt2)*cos(phi)
+            pass1(2)=sqrt(pt2)*sin(phi)
+            pass1(3)=(t1-t2)/(2d0*sqrtshat)
+
+            pass2(0)=sqrtshat-pass1(0)
+            pass2(1:3)=-pass1(1:3)
+
+            
+            jac = jac/(4d0*sqrt(kallen(sqrtshat**2,0d0,0d0)))
+            p1 = pass1
+            p2 = pass2
+            return
+         elseif (one_pt) then
+            pt2min=pt_min**2
+            pt2max=sqrts**2/4d0
+            ix=ix+1
+            call random_to_var(x(ix),-1d0,pt2min,pt2max,pt2,jac)
+            ! generate phi
+            ix=ix+1
+            call random_to_var(x(ix),0d0,-pi,pi,phi,jac)
+            ! generate rapidity
+            ix=ix+1
+            call random_to_var(x(ix),0d0,-eta_max,eta_max,y,jac)
+            ! fill momentum
+            pt=sqrt(pt2)
+            pass1(1)=pt*cos(phi)
+            pass1(2)=pt*sin(phi)
+            pass1(3)=pt*sinh(y)
+            pass1(0)=pt*cosh(y)
+
+            pass2(0)=sqrtshat-pass1(0)
+            pass2(1:3)=-pass1(1:3)
+
+            p1 = pass1
+            p2 = pass2
+            return
+
+         endif
     else
        if (k .ge. 3) then
          call generate_s2(k,s,s1,s2,q1_cmf,P_cmf)

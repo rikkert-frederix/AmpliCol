@@ -432,6 +432,7 @@ contains
   subroutine get_run_arguments()
     implicit none
     integer :: argc,start,end,glu
+    integer :: i,k
     character(len=256) :: argv
     integer, dimension(:), allocatable :: process,ord
     ! integration steps:
@@ -548,46 +549,101 @@ contains
     allocate(process(next))
     allocate(o(next))
     allocate(ord(next))
+    if (nquarks.eq.2) then
     if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
-       process(1)=-1
-       process(2)=1
+       if (c_o_t.eq.1) then
+         process(1)=-1
+         process(2)=1
+         ord(1)=1
+         ord(next)=2
+       elseif (c_o_t.eq.2) then
+         process(1)=1
+         process(2)=-1
+         ord(1)=2
+         ord(next)=1
+       endif
        do i=3,next
           process(i)=21
        enddo
-       ord(1)=1
-       ord(next)=2
        do i=2,next-1
           ord(i)=i+1
        enddo
-       o=ord
     elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
-       process(1)=-1
-       process(2)=21
-       process(3)=-1
+       if (c_o_t.eq.1) then
+         process(1)=-1
+         process(2)=21
+         process(3)=-1
+         ord(1)=1
+         ord(next)=3
+         ord(2+c_o_j)=2
+         k=4
+         do i=2,2+c_o_j-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_j+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       elseif (c_o_t.eq.2) then
+         process(1)=1
+         process(2)=21
+         process(3)=1
+         ord(1)=3
+         ord(next)=1
+         ord(2+c_o_k)=2
+         k=4
+         do i=2,2+c_o_k-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_k+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       endif
        do i=4,next
           process(i)=21
        enddo
-       ord(1)=1
-       ord(next)=3
-       ord(2)=2
-       do i=3,next-1
-          ord(i)=i+1
-       enddo
-       o=ord
     elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
-       process(1)=21
-       process(2)=-1
-       process(3)=-1
+      if (c_o_t.eq.1) then
+         process(1)=21
+         process(2)=1
+         process(3)=1
+         ord(1)=3
+         ord(next)=2
+         ord(2+c_o_i)=1
+         k=4
+         do i=2,2+c_o_i-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_i+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       elseif (c_o_t.eq.2) then
+         process(1)=21
+         process(2)=-1
+         process(3)=-1
+         ord(1)=2
+         ord(next)=3
+         ord(2+c_o_j)=1
+         k=4
+         do i=2,2+c_o_j-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_j+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       endif
        do i=4,next
           process(i)=21
        enddo
-       ord(1)=2
-       ord(next)=3
-       ord(2)=1
-       do i=3,next-1
-          ord(i)=i+1
-       enddo
-       o=ord
+    
+
     elseif (c_o_i+c_o_j+c_o_k.eq.next-4) then
        process(1)=21
        process(2)=21
@@ -598,16 +654,52 @@ contains
        enddo
        ord(1)=3
        ord(next)=4
-       ord(2)=1
-       ord(3)=2
-       do i=4,next-1
-          ord(i)=i+1
+       ord(2+c_o_i)=1
+       ord(3+c_o_i+c_o_j)=2
+       k=5
+       do i=2,2+c_o_i-1
+          ord(i)=k
+          k=k+1
        enddo
-       o=ord
+       do i=2+c_o_i+1,3+c_o_i+c_o_j-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=3+c_o_i+c_o_j+1,next-1
+          ord(i)=k
+          k=k+1
+       enddo
     else 
-       write(*,*) 'Incorrect colour order labels: does not give physical process'
+       write(*,*) 'Incorrect colour order: does not give physical process'
        stop 
     endif
+
+    elseif (nquarks.eq.0) then
+       do i=1,next
+          process(i)=21
+       enddo
+       ord(1)=1
+       ord(2+c_o_j)=2
+       k=3
+       do i=2,2+c_o_j-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=2+c_o_j+1,next
+          ord(i)=k
+          k=k+1
+       enddo
+
+       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
+          write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
+          stop
+       elseif (c_o_i.gt.0 .or. c_o_k.gt.0) then
+          write(*,*) 'Incorrect colour order for all gluons (c_i and c_k must be 0): ',c_o_i,c_o_k
+          stop
+       endif
+
+    endif
+    o=ord
     part=process
     write(*,*) o
     
