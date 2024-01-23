@@ -30,7 +30,8 @@ program matrix_integrate_QCD
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-10000   ! Number of events to generate. (If negative, start
+!!$  ncalls0=-10000   ! Number of events to generate. (If negative, start
+  ncalls0=1000000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -73,9 +74,9 @@ program matrix_integrate_QCD
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
-     call gen23_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,t_chan,include_pdf)
   elseif  (integration.eq.2) then
-     call  haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif (integration.eq.3) then
      call genpt_init(sqrts,next,mass,pt_min,eta_max,DRjj_min,include_pdf)
   endif
@@ -144,7 +145,7 @@ program matrix_integrate_QCD
   unc(1:nintegrals,0:maxchannels)=0d0
   only_virt=.false.
 
-  open(unit=14,file='pt_list.txt',status='replace')
+!!$  open(unit=14,file='pt_list.txt',status='replace')
   if (imode.le.1) then
      call mint(integrand)
   else
@@ -161,7 +162,7 @@ program matrix_integrate_QCD
      call gen(integrand,3,-1) ! print counters
   endif
      
-  close(14)
+!!$  close(14)
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
@@ -248,21 +249,21 @@ contains
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
 
-    frac=0.8d0
-    steep=0.01d0
-    i=5
-    y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
-    if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
-      cuts_wgt_1=((steep)*y/(steep+1d0-y))
-    elseif (pt(p(0,i)).gt.pt_min) then
-      cuts_wgt_1 = 1d0
-    elseif (pt(p(0,i)).lt.frac*pt_min) then
-      cuts_wgt_1 = 0d0
-    endif
-    !if (pt(p(0,3)).lt.pt_min) then
-    !   if (cuts_wgt_1.gt.0d0) write(*,*) 'STOP'
-    !endif
-    write(14,*) pt(p(0,i)),cuts_wgt_1
+!!$    frac=0.8d0
+!!$    steep=0.01d0
+!!$    i=5
+!!$    y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
+!!$    if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
+!!$      cuts_wgt_1=((steep)*y/(steep+1d0-y))
+!!$    elseif (pt(p(0,i)).gt.pt_min) then
+!!$      cuts_wgt_1 = 1d0
+!!$    elseif (pt(p(0,i)).lt.frac*pt_min) then
+!!$      cuts_wgt_1 = 0d0
+!!$    endif
+!!$    !if (pt(p(0,3)).lt.pt_min) then
+!!$    !   if (cuts_wgt_1.gt.0d0) write(*,*) 'STOP'
+!!$    !endif
+!!$    write(14,*) pt(p(0,i)),cuts_wgt_1
 
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
