@@ -17,7 +17,6 @@ program matrix_integrate_QCD
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
-  integer(kind=4) :: n_events
  
   call get_run_arguments()
   call compute_mutlichannel_symmetry_factor()
@@ -127,7 +126,7 @@ contains
     real*8, dimension(ndim) :: x
     real*8, dimension(nintegrals) :: f1
     real*8, save :: val
-    integer :: icol,iperm,jperm,ih
+    integer :: iperm,ih
     real*8 :: vol,cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter

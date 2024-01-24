@@ -36,7 +36,7 @@ contains
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,order
-    integer :: isize,nc,isplit,n1,n2,bin1,bin2,ic1,ic2,iv,i,max_cur,max_vert,max_key
+    integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
@@ -206,7 +206,7 @@ contains
       ! canonical order: (q,glu,glu,glu,singlet,singlet,qbar,q,qbar)
       use math_functions
       implicit none
-      integer :: iord,i
+      integer :: i
       integer :: nq,naq,nglu,nsing,iq,iaq,iglu,ising
       nq=0; naq=0 ; nglu=0 ; nsing=0
       do i=1,n
@@ -1208,7 +1208,7 @@ contains
       ! returns .true. only if all external particles related to the binary
       ! label 'bin' are gluons
       implicit none
-      integer :: bin,i,j
+      integer :: bin,i
       all_gluon_current=.true.
       do i=1,n
          if (btest(bin,i-1) .and. part(i).ne.21) then
