@@ -165,8 +165,6 @@ contains
 
     passed = passed + 1
 
-
-
     ! compute amplitudes
     call cpu_time(tBefore)
     call amps%evaluate(next,p,0)
@@ -187,22 +185,6 @@ contains
     ! include the jacobian from mint ('vol') and the wgt from the phase-space ('jac') and other overal factors
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
-
-    frac=0.8d0
-    steep=0.01d0
-    i=5
-    y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
-    if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
-      cuts_wgt_1=((steep)*y/(steep+1d0-y))
-    elseif (pt(p(0,i)).gt.pt_min) then
-      cuts_wgt_1 = 1d0
-    elseif (pt(p(0,i)).lt.frac*pt_min) then
-      cuts_wgt_1 = 0d0
-    endif
-    !if (pt(p(0,3)).lt.pt_min) then
-    !   if (cuts_wgt_1.gt.0d0) write(*,*) 'STOP'
-    !endif
-    write(14,*) pt(p(0,i)),cuts_wgt_1
 
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
@@ -466,7 +448,6 @@ contains
        tag=trim(adjustl(tag))//trim(adjustl(s2))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
     endif
-    write(*,*) len(trim(tag_read))
     if (len(trim(tag_read)).lt.13) then
        if (13-len(trim(tag)).eq.1) then
           tag='_'//trim(adjustl(tag))
@@ -479,7 +460,7 @@ contains
           tag_read='___'//trim(adjustl(tag_read))
        endif
     endif
-    write (*,*) tag
+    write (*,*) 'File tag is',tag
   end subroutine create_run_tag
 
   subroutine set_initial_state_average_factor(iden)
@@ -528,7 +509,7 @@ contains
     implicit none
     integer,intent(inout) :: col_fac
     integer :: i,ifac
-    real(kind=8) :: fac
+    real(kind=8) :: fac=0d0
     do i=1,next
        if (part(i).eq.21) then
           fac=fac+1d0
@@ -703,9 +684,7 @@ contains
     do i=1,next
        if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
           nquarks=nquarks+1
-       endif
-       if ((i.le.2) .and. (abs(part(i)).ge.1 .and. abs(part(i)).le.6))  then
-          part(i)=-part(i)
+          if (i.le.2) part(i)=-part(i)
        endif
     enddo
     
@@ -716,31 +695,12 @@ contains
           if (ord(i).eq.2) end=i
        enddo
        c_o=abs(end-start)-1
+       c_o=min(c_o,next-2-c_o)
        c_o_t=0
        c_o_k=0
        c_o_i=abs(end-start)-1
        c_o_j=next-2-c_o_i
     elseif (nquarks.eq.2) then
-       c_o=0 ! dummy value
-       glu=1
-       do i=1,next
-          if (part(i).lt.0) then
-             o(next)=i
-             end=i
-          endif
-          if (part(i).gt.0 .and. part(i).ne.21) then
-             o(1)=i
-             start=i
-          endif
-          if (part(i).eq.21) then
-             o(1+glu)=i
-             glu=glu+1
-          endif
-       enddo
-       if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
-          write(*,*) 'Found valid order:',ord
-          o=ord ! the input order was a valid one, use that instead
-       endif
        do i=1,next
           if (o(i).eq.1) start=i
           if (o(i).eq.2) end=i
@@ -922,7 +882,10 @@ contains
        endif
     endif
     o=ord
+    write (*,*) '******************************************'
+    write (*,*) 'Process is',part
     write (*,*) 'Colour order is',o
+    write (*,*) '******************************************'
   end subroutine get_process_from_arguments
   
 end program matrix_integrate_QCD
