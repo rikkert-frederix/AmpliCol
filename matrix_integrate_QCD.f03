@@ -17,6 +17,7 @@ program matrix_integrate_QCD
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
+  integer(kind=4) :: n_events
  
   call get_run_arguments()
   call compute_mutlichannel_symmetry_factor()
@@ -360,8 +361,8 @@ contains
   
   subroutine get_run_arguments()
     implicit none
-    integer :: argc,start,end,glu
-    integer :: i,k
+    integer :: argc
+    integer :: i
     character(len=256) :: argv
     ! integration steps:
     ! imode=0  (Setting up grids)
@@ -391,311 +392,11 @@ contains
        enddo
     endif
     if (read_from_file) then
-      open (unit=99, file='process.txt', status='old', action='read')
-      read(99, *) next
-      allocate(process(next))
-      allocate(o(next))
-      allocate(part(next))
-      allocate(ord(next))
-      read(99, *) process
-      part=process
-      read(99, *) ord
-      nquarks = 0
-      do i=1,next
-         if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
-           nquarks=nquarks+1
-         endif
-         if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
-          process(i)=-process(i)
-         endif
-      enddo
-
-      o=ord
-      if (nquarks.eq.0) then
-        do i=1,next
-          if (ord(i).eq.1) start=i
-          if (ord(i).eq.2) end=i
-        enddo
-        c_o=abs(end-start)-1
-        c_o_t=0
-        c_o_k=0
-        c_o_i=abs(end-start)-1
-        c_o_j=next-2-c_o_i
-      elseif (nquarks.eq.2) then
-        c_o=0 ! dummy value
-        glu=1
-        do i=1,next
-          if (process(i).lt.0) then
-            o(next)=i
-            end=i
-          endif
-          if (process(i).gt.0 .and. process(i).ne.21) then
-            o(1)=i
-            start=i
-          endif
-          if (process(i).eq.21) then
-            o(1+glu)=i
-            glu=glu+1
-          endif
-        enddo
-        if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
-          write(*,*) 'VALID ORDER!!!'
-          o=ord ! the input order was a valid one, use that instead
-        endif
-
-        write(*,*) o
-        do i=1,next
-          if (o(i).eq.1) start=i
-          if (o(i).eq.2) end=i
-        enddo
-        if (start.lt.end) then
-          c_o_t=1
-          if (start.ne.1) c_o_i=abs(start-1)-1
-          if (start.eq.1) c_o_i=next+1
-          if (end.ne.next) c_o_k=abs(next-end)-1
-          if (end.eq.next) c_o_k=next+1
-        endif
-        if (start.gt.end) then
-          c_o_t=2
-          if (end.ne.1) c_o_k=abs(end-1)-1
-          if (end.eq.1) c_o_k=next+1
-          if (start.ne.next) c_o_i=abs(next-start)-1
-          if (start.eq.next) c_o_i=next+1
-        endif
-        c_o_j=abs(start-end)-1
-      endif
-    endif
-!ccccccccccccccccccccc
-
-    if (c_o_t.eq.0) then
-       nquarks=0       
-    elseif (c_o_t.le.2) then
-       nquarks=2
-    endif
-
-    allocate(process(next))
-    allocate(o(next))
-    allocate(ord(next))
-    if (nquarks.eq.2) then
-    if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
-       if (c_o_t.eq.1) then
-         process(1)=-1
-         process(2)=1
-         ord(1)=1
-         ord(next)=2
-       elseif (c_o_t.eq.2) then
-         process(1)=1
-         process(2)=-1
-         ord(1)=2
-         ord(next)=1
-       endif
-       do i=3,next
-          process(i)=21
-       enddo
-       do i=2,next-1
-          ord(i)=i+1
-       enddo
-    elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
-       if (c_o_t.eq.1) then
-         process(1)=-1
-         process(2)=21
-         process(3)=-1
-         ord(1)=1
-         ord(next)=3
-         ord(2+c_o_j)=2
-         k=4
-         do i=2,2+c_o_j-1
-           ord(i)=k
-           k=k+1
-         enddo
-         do i=2+c_o_j+1,next-1
-           ord(i)=k
-           k=k+1
-         enddo
-       elseif (c_o_t.eq.2) then
-         process(1)=1
-         process(2)=21
-         process(3)=1
-         ord(1)=3
-         ord(next)=1
-         ord(2+c_o_k)=2
-         k=4
-         do i=2,2+c_o_k-1
-           ord(i)=k
-           k=k+1
-         enddo
-         do i=2+c_o_k+1,next-1
-           ord(i)=k
-           k=k+1
-         enddo
-       endif
-       do i=4,next
-          process(i)=21
-       enddo
-    elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
-      if (c_o_t.eq.1) then
-         process(1)=21
-         process(2)=1
-         process(3)=1
-         ord(1)=3
-         ord(next)=2
-         ord(2+c_o_i)=1
-         k=4
-         do i=2,2+c_o_i-1
-           ord(i)=k
-           k=k+1
-         enddo
-         do i=2+c_o_i+1,next-1
-           ord(i)=k
-           k=k+1
-         enddo
-       elseif (c_o_t.eq.2) then
-         process(1)=21
-         process(2)=-1
-         process(3)=-1
-         ord(1)=2
-         ord(next)=3
-         ord(2+c_o_j)=1
-         k=4
-         do i=2,2+c_o_j-1
-           ord(i)=k
-           k=k+1
-         enddo
-         do i=2+c_o_j+1,next-1
-           ord(i)=k
-           k=k+1
-         enddo
-       endif
-       do i=4,next
-          process(i)=21
-       enddo
-    
-
-    elseif (c_o_i+c_o_j+c_o_k.eq.next-4) then
-       process(1)=21
-       process(2)=21
-       process(3)=1
-       process(4)=-1
-       do i=5,next
-          process(i)=21
-       enddo
-       ord(1)=3
-       ord(next)=4
-       ord(2+c_o_i)=1
-       ord(3+c_o_i+c_o_j)=2
-       k=5
-       do i=2,2+c_o_i-1
-          ord(i)=k
-          k=k+1
-       enddo
-       do i=2+c_o_i+1,3+c_o_i+c_o_j-1
-          ord(i)=k
-          k=k+1
-       enddo
-       do i=3+c_o_i+c_o_j+1,next-1
-          ord(i)=k
-          k=k+1
-       enddo
-    else 
-       write(*,*) 'Incorrect colour order: does not give physical process'
-       stop 
-    endif
-
-    elseif (nquarks.eq.0) then
-       do i=1,next
-          process(i)=21
-       enddo
-       ord(1)=1
-       ord(2+c_o_j)=2
-       k=3
-       do i=2,2+c_o_j-1
-          ord(i)=k
-          k=k+1
-       enddo
-       do i=2+c_o_j+1,next
-          ord(i)=k
-          k=k+1
-       enddo
-
-       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
-          write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
-          stop
-       elseif (c_o_i.gt.0 .or. c_o_k.gt.0) then
-          write(*,*) 'Incorrect colour order for all gluons (c_i and c_k must be 0): ',c_o_i,c_o_k
-          stop
-       endif
-
-    endif
-    o=ord
-    part=process
-    write(*,*) o
-    
-    ! Since we only need to include a subset of all the colour-orderings, we
-    ! need to compensate with a symmetry factor
-    if (nquarks.eq.0) then
-       ! All gluon process. This assumes that the only channels we are
-       ! including are strictly different. We distinguish them by considering
-       ! how many (final state) gluons are attached to the two colour lines
-       ! that link the two incoming gluons. Hence, we only include
-       ! floor(next/2) channels, e.g., for next=6 we only consider:
-       ! i   --> 1,2,3,4,5,6   (0 and 4 gluons on the two lines)
-       ! ii  --> 1,3,2,4,5,6   (1 and 3 gluons on the two lines)
-       ! iii --> 1,3,4,2,5,6   (2 and 2 gluons on the two lines)
-       ! And, e.g., for next=9, we only consider:
-       ! i   --> 1,2,3,4,5,6,7,8,9   (0 and 7 gluons on the two lines)
-       ! ii  --> 1,3,2,4,5,6,7,8,9   (1 and 6 gluons on the two lines)
-       ! iii --> 1,3,4,2,5,6,7,8,9   (2 and 5 gluons on the two lines)
-       ! iv  --> 1,3,4,5,2,6,7,8,9   (3 and 4 gluons on the two lines)
-       ! This means that the sym_fac should be equal to the number of final
-       ! state gluon permutations, multiplied by 2 (except if we have an equal
-       ! number of gluons on both colour lines that attached the two incoming
-       ! gluons).
-       if (c_o*2.eq.(next-2)) then
-          sym_fac=factorial8(next-2)
-       else
-          sym_fac=2*factorial8(next-2)
-       endif
-    elseif (nquarks.eq.2) then
-       if ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .and. &
-           (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
-          ! quark and anti-quark are incoming. Only 1 channel needed,
-          ! which would result in the following symmetry factor:
-          sym_fac=factorial8(next-2)
-       elseif ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .or. &
-               (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
-          ! one incoming quark (or anti-quark). There are ngluons
-          ! channels needed: they correspond to having the incoming
-          ! gluon at all possible positions between the quark and
-          ! anti-quark in the colour order. Hence, each channel comes
-          ! with an (ngluons-1)! symmetry factor:
-          sym_fac=factorial8(next-3)
-       else
-          ! both quark and anti-quark are final state. This is similar
-          ! to the all-gluon case above, treating the q-qbar pair as
-          ! another gluon. This special gluon is identifiable! So, for
-          ! next=6 (and assuming that the qqbar pair are particles 5
-          ! and 6) one has the following possibilities:
-          !
-          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
-          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
-          ! ic   --> 1,2,(5,6),3,4  -/
-          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
-          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
-          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
-          !
-          ! Furthermore all these can have the quark and anti-quark
-          ! order reversed, so there are in total 12 truly different
-          ! colour orders to consider.
-          !
-          ! All these come with a symmetry factor of (ngluon-2)! =
-          ! 2!. Hence we have:
-          sym_fac=factorial8(next-4)
-       endif
+       call read_process_from_file
     else
-       write (*,*) 'Not yet implemented',nquarks
-       stop 1
+       call get_process_from_arguments
     endif
-
+    ! basic checks:
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
@@ -717,7 +418,6 @@ contains
        write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
        stop
     endif
-
   end subroutine get_run_arguments
 
   subroutine create_run_tag()
@@ -988,5 +688,242 @@ contains
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
   end subroutine compute_mutlichannel_symmetry_factor
+
+  subroutine read_process_from_file
+    implicit none
+    integer :: i,end,start,glu
+    integer,dimension(:),allocatable :: ord
+    open (unit=99, file='process.txt', status='old', action='read')
+    read(99, *) next
+    allocate(part(next))
+    allocate(ord(next))
+    allocate(o(next))
+    read(99, *) part
+    read(99, *) ord
+    nquarks = 0
+    do i=1,next
+       if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          nquarks=nquarks+1
+       endif
+       if ((i.le.2) .and. (abs(part(i)).ge.1 .and. abs(part(i)).le.6))  then
+          part(i)=-part(i)
+       endif
+    enddo
     
+    o=ord
+    if (nquarks.eq.0) then
+       do i=1,next
+          if (ord(i).eq.1) start=i
+          if (ord(i).eq.2) end=i
+       enddo
+       c_o=abs(end-start)-1
+       c_o_t=0
+       c_o_k=0
+       c_o_i=abs(end-start)-1
+       c_o_j=next-2-c_o_i
+    elseif (nquarks.eq.2) then
+       c_o=0 ! dummy value
+       glu=1
+       do i=1,next
+          if (part(i).lt.0) then
+             o(next)=i
+             end=i
+          endif
+          if (part(i).gt.0 .and. part(i).ne.21) then
+             o(1)=i
+             start=i
+          endif
+          if (part(i).eq.21) then
+             o(1+glu)=i
+             glu=glu+1
+          endif
+       enddo
+       if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
+          write(*,*) 'Found valid order:',ord
+          o=ord ! the input order was a valid one, use that instead
+       endif
+       do i=1,next
+          if (o(i).eq.1) start=i
+          if (o(i).eq.2) end=i
+       enddo
+       if (start.lt.end) then
+          c_o_t=1
+          if (start.ne.1) c_o_i=abs(start-1)-1
+          if (start.eq.1) c_o_i=next+1
+          if (end.ne.next) c_o_k=abs(next-end)-1
+          if (end.eq.next) c_o_k=next+1
+       endif
+       if (start.gt.end) then
+          c_o_t=2
+          if (end.ne.1) c_o_k=abs(end-1)-1
+          if (end.eq.1) c_o_k=next+1
+          if (start.ne.next) c_o_i=abs(next-start)-1
+          if (start.eq.next) c_o_i=next+1
+       endif
+       c_o_j=abs(start-end)-1
+    endif
+  end subroutine read_process_from_file
+
+  subroutine get_process_from_arguments
+    implicit none
+    integer :: i,k
+    integer,dimension(:),allocatable :: ord
+    if (c_o_t.eq.0) then
+       nquarks=0       
+    elseif (c_o_t.le.2) then
+       nquarks=2
+    endif
+    allocate(part(next))
+    allocate(o(next))
+    allocate(ord(next))
+    if (nquarks.eq.2) then
+       if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
+          if (c_o_t.eq.1) then
+             part(1)=-1
+             part(2)=1
+             ord(1)=1
+             ord(next)=2
+          elseif (c_o_t.eq.2) then
+             part(1)=1
+             part(2)=-1
+             ord(1)=2
+             ord(next)=1
+          endif
+          do i=3,next
+             part(i)=21
+          enddo
+          do i=2,next-1
+             ord(i)=i+1
+          enddo
+       elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
+          if (c_o_t.eq.1) then
+             part(1)=-1
+             part(2)=21
+             part(3)=-1
+             ord(1)=1
+             ord(next)=3
+             ord(2+c_o_j)=2
+             k=4
+             do i=2,2+c_o_j-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_j+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          elseif (c_o_t.eq.2) then
+             part(1)=1
+             part(2)=21
+             part(3)=1
+             ord(1)=3
+             ord(next)=1
+             ord(2+c_o_k)=2
+             k=4
+             do i=2,2+c_o_k-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_k+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          endif
+          do i=4,next
+             part(i)=21
+          enddo
+       elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
+          if (c_o_t.eq.1) then
+             part(1)=21
+             part(2)=1
+             part(3)=1
+             ord(1)=3
+             ord(next)=2
+             ord(2+c_o_i)=1
+             k=4
+             do i=2,2+c_o_i-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_i+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          elseif (c_o_t.eq.2) then
+             part(1)=21
+             part(2)=-1
+             part(3)=-1
+             ord(1)=2
+             ord(next)=3
+             ord(2+c_o_j)=1
+             k=4
+             do i=2,2+c_o_j-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_j+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          endif
+          do i=4,next
+             part(i)=21
+          enddo
+       elseif (c_o_i+c_o_j+c_o_k.eq.next-4) then
+          part(1)=21
+          part(2)=21
+          part(3)=1
+          part(4)=-1
+          do i=5,next
+             part(i)=21
+          enddo
+          ord(1)=3
+          ord(next)=4
+          ord(2+c_o_i)=1
+          ord(3+c_o_i+c_o_j)=2
+          k=5
+          do i=2,2+c_o_i-1
+             ord(i)=k
+             k=k+1
+          enddo
+          do i=2+c_o_i+1,3+c_o_i+c_o_j-1
+             ord(i)=k
+             k=k+1
+          enddo
+          do i=3+c_o_i+c_o_j+1,next-1
+             ord(i)=k
+             k=k+1
+          enddo
+       else 
+          write(*,*) 'Incorrect colour order: does not give physical process'
+          stop 
+       endif
+    elseif (nquarks.eq.0) then
+       do i=1,next
+          part(i)=21
+       enddo
+       ord(1)=1
+       ord(2+c_o_j)=2
+       k=3
+       do i=2,2+c_o_j-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=2+c_o_j+1,next
+          ord(i)=k
+          k=k+1
+       enddo
+       
+       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
+          write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
+          stop
+       elseif (c_o_i.gt.0 .or. c_o_k.gt.0) then
+          write(*,*) 'Incorrect colour order for all gluons (c_i and c_k must be 0): ',c_o_i,c_o_k
+          stop
+       endif
+    endif
+    o=ord
+    write (*,*) 'Colour order is',o
+  end subroutine get_process_from_arguments
+  
 end program matrix_integrate_QCD
