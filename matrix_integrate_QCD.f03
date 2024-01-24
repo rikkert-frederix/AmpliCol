@@ -6,14 +6,14 @@ program matrix_integrate_QCD
   use haag
   use math_functions
   implicit none
-  integer :: j,c_o,i
+  integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
   integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
-  character(len=30) :: filename
+  character(len=31) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
@@ -42,7 +42,8 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrts=1000.d0
+  sqrts=10000.d0
+  ! setting energy
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min**2,pt_min**2*(1d0-cos(DRjj_min)))
@@ -115,6 +116,7 @@ program matrix_integrate_QCD
   write(*,*) 'Number of events:',all_evt
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
+  write(*,*) 'Number of numerical errors:',num_error
  
 contains
   function integrand(x,vol,ifirst,f1)
@@ -128,6 +130,8 @@ contains
     real*8 :: vol,cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
+
+    double precision :: y,frac,steep,cuts_wgt_1
    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
@@ -161,6 +165,8 @@ contains
 
     passed = passed + 1
 
+
+
     ! compute amplitudes
     call cpu_time(tBefore)
     call amps%evaluate(next,p,0)
@@ -181,6 +187,22 @@ contains
     ! include the jacobian from mint ('vol') and the wgt from the phase-space ('jac') and other overal factors
     weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
     val=amp2*weight
+
+    frac=0.8d0
+    steep=0.01d0
+    i=5
+    y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
+    if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
+      cuts_wgt_1=((steep)*y/(steep+1d0-y))
+    elseif (pt(p(0,i)).gt.pt_min) then
+      cuts_wgt_1 = 1d0
+    elseif (pt(p(0,i)).lt.frac*pt_min) then
+      cuts_wgt_1 = 0d0
+    endif
+    !if (pt(p(0,3)).lt.pt_min) then
+    !   if (cuts_wgt_1.gt.0d0) write(*,*) 'STOP'
+    !endif
+    write(14,*) pt(p(0,i)),cuts_wgt_1
 
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
@@ -207,9 +229,10 @@ contains
     implicit none
     integer :: i,j,n
     real*8,dimension(0:3,n) :: p
-    double precision :: frac,y
+    double precision :: frac,y,steep
 
-    frac=0.1d0
+    frac=0.8d0
+    steep=0.1d0
     pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
        do i=1,n-1
@@ -221,6 +244,7 @@ contains
           enddo
        enddo
     endif
+
     do i=3,n
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then
@@ -230,7 +254,7 @@ contains
           if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
              y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
              if (imode.le.0) then
-               pass_cuts=pass_cuts*(6d0*(y**5)-15d0*(y**4)+10d0*(y**3))
+               pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
              else
                pass_cuts=-1d0
              endif
@@ -336,7 +360,8 @@ contains
   
   subroutine get_run_arguments()
     implicit none
-    integer :: argc,start,end,i
+    integer :: argc,start,end,glu
+    integer :: i,k
     character(len=256) :: argv
     ! integration steps:
     ! imode=0  (Setting up grids)
@@ -344,52 +369,327 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.2) then
-       write(*,*)  'imode'
+    if (argc.ne.7) then
        write(*,*) 'integration mode (1 or 2):'
-       read (*,*)  imode,integration
+       write(*,*)  'next'
+       write(*,*)  'imode'
+       write(*,*)  'type'
+       write(*,*)  'c_o_i'
+       write(*,*)  'c_o_j'
+       write(*,*)  'c_o_k'
+       read (*,*)  integration,next,imode,c_o_t,c_o_i,c_o_j,c_o_k
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) imode
-          if (i.eq.2) read(argv,*) integration
+          if (i.eq.1) read(argv,*) integration
+          if (i.eq.2) read(argv,*) next
+          if (i.eq.3) read(argv,*) imode
+          if (i.eq.4) read(argv,*) c_o_t
+          if (i.eq.5) read(argv,*) c_o_i
+          if (i.eq.6) read(argv,*) c_o_j
+          if (i.eq.7) read(argv,*) c_o_k
        enddo
     endif
+    if (read_from_file) then
+      open (unit=99, file='process.txt', status='old', action='read')
+      read(99, *) next
+      allocate(process(next))
+      allocate(o(next))
+      allocate(part(next))
+      allocate(ord(next))
+      read(99, *) process
+      part=process
+      read(99, *) ord
+      nquarks = 0
+      do i=1,next
+         if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
+           nquarks=nquarks+1
+         endif
+         if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
+          process(i)=-process(i)
+         endif
+      enddo
 
-    open (unit=99, file='process.txt', status='old', action='read')
-    read(99, *) next
-    allocate(o(next))
-    allocate(part(next))
-    read(99, *) part
-    read(99, *) o
-    nquarks = 0
-    do i=1,next
-       if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
-          nquarks=nquarks+1
-          if (i.le.2) then
-             part(i)=-part(i)
+      o=ord
+      if (nquarks.eq.0) then
+        do i=1,next
+          if (ord(i).eq.1) start=i
+          if (ord(i).eq.2) end=i
+        enddo
+        c_o=abs(end-start)-1
+        c_o_t=0
+        c_o_k=0
+        c_o_i=abs(end-start)-1
+        c_o_j=next-2-c_o_i
+      elseif (nquarks.eq.2) then
+        c_o=0 ! dummy value
+        glu=1
+        do i=1,next
+          if (process(i).lt.0) then
+            o(next)=i
+            end=i
           endif
-       endif
-    enddo
+          if (process(i).gt.0 .and. process(i).ne.21) then
+            o(1)=i
+            start=i
+          endif
+          if (process(i).eq.21) then
+            o(1+glu)=i
+            glu=glu+1
+          endif
+        enddo
+        if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
+          write(*,*) 'VALID ORDER!!!'
+          o=ord ! the input order was a valid one, use that instead
+        endif
 
-    if (nquarks.eq.0) then
-       do i=1,next
+        write(*,*) o
+        do i=1,next
           if (o(i).eq.1) start=i
           if (o(i).eq.2) end=i
-       enddo
-       c_o=abs(end-start)-1
-       c_o=min(c_o,next-2-c_o)
-    else
-       c_o=0 ! dummy value
+        enddo
+        if (start.lt.end) then
+          c_o_t=1
+          if (start.ne.1) c_o_i=abs(start-1)-1
+          if (start.eq.1) c_o_i=next+1
+          if (end.ne.next) c_o_k=abs(next-end)-1
+          if (end.eq.next) c_o_k=next+1
+        endif
+        if (start.gt.end) then
+          c_o_t=2
+          if (end.ne.1) c_o_k=abs(end-1)-1
+          if (end.eq.1) c_o_k=next+1
+          if (start.ne.next) c_o_i=abs(next-start)-1
+          if (start.eq.next) c_o_i=next+1
+        endif
+        c_o_j=abs(start-end)-1
+      endif
+    endif
+!ccccccccccccccccccccc
+
+    if (c_o_t.eq.0) then
+       nquarks=0       
+    elseif (c_o_t.le.2) then
+       nquarks=2
     endif
 
+    allocate(process(next))
+    allocate(o(next))
+    allocate(ord(next))
     if (nquarks.eq.2) then
-       if (part(o(1)).ge.1 .and. part(o(1)).le.6) then
-          write (*,*) 'Quark should come first in colour order',o
-          stop 1
-       elseif (part(o(next)).le.-1 .and. part(o(next)).ge.-6) then
-          write (*,*) 'Anti-quark should come last in colour order',o
-          stop 1
+    if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
+       if (c_o_t.eq.1) then
+         process(1)=-1
+         process(2)=1
+         ord(1)=1
+         ord(next)=2
+       elseif (c_o_t.eq.2) then
+         process(1)=1
+         process(2)=-1
+         ord(1)=2
+         ord(next)=1
+       endif
+       do i=3,next
+          process(i)=21
+       enddo
+       do i=2,next-1
+          ord(i)=i+1
+       enddo
+    elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
+       if (c_o_t.eq.1) then
+         process(1)=-1
+         process(2)=21
+         process(3)=-1
+         ord(1)=1
+         ord(next)=3
+         ord(2+c_o_j)=2
+         k=4
+         do i=2,2+c_o_j-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_j+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       elseif (c_o_t.eq.2) then
+         process(1)=1
+         process(2)=21
+         process(3)=1
+         ord(1)=3
+         ord(next)=1
+         ord(2+c_o_k)=2
+         k=4
+         do i=2,2+c_o_k-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_k+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       endif
+       do i=4,next
+          process(i)=21
+       enddo
+    elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
+      if (c_o_t.eq.1) then
+         process(1)=21
+         process(2)=1
+         process(3)=1
+         ord(1)=3
+         ord(next)=2
+         ord(2+c_o_i)=1
+         k=4
+         do i=2,2+c_o_i-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_i+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       elseif (c_o_t.eq.2) then
+         process(1)=21
+         process(2)=-1
+         process(3)=-1
+         ord(1)=2
+         ord(next)=3
+         ord(2+c_o_j)=1
+         k=4
+         do i=2,2+c_o_j-1
+           ord(i)=k
+           k=k+1
+         enddo
+         do i=2+c_o_j+1,next-1
+           ord(i)=k
+           k=k+1
+         enddo
+       endif
+       do i=4,next
+          process(i)=21
+       enddo
+    
+
+    elseif (c_o_i+c_o_j+c_o_k.eq.next-4) then
+       process(1)=21
+       process(2)=21
+       process(3)=1
+       process(4)=-1
+       do i=5,next
+          process(i)=21
+       enddo
+       ord(1)=3
+       ord(next)=4
+       ord(2+c_o_i)=1
+       ord(3+c_o_i+c_o_j)=2
+       k=5
+       do i=2,2+c_o_i-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=2+c_o_i+1,3+c_o_i+c_o_j-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=3+c_o_i+c_o_j+1,next-1
+          ord(i)=k
+          k=k+1
+       enddo
+    else 
+       write(*,*) 'Incorrect colour order: does not give physical process'
+       stop 
+    endif
+
+    elseif (nquarks.eq.0) then
+       do i=1,next
+          process(i)=21
+       enddo
+       ord(1)=1
+       ord(2+c_o_j)=2
+       k=3
+       do i=2,2+c_o_j-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=2+c_o_j+1,next
+          ord(i)=k
+          k=k+1
+       enddo
+
+       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
+          write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
+          stop
+       elseif (c_o_i.gt.0 .or. c_o_k.gt.0) then
+          write(*,*) 'Incorrect colour order for all gluons (c_i and c_k must be 0): ',c_o_i,c_o_k
+          stop
+       endif
+
+    endif
+    o=ord
+    part=process
+    write(*,*) o
+    
+    ! Since we only need to include a subset of all the colour-orderings, we
+    ! need to compensate with a symmetry factor
+    if (nquarks.eq.0) then
+       ! All gluon process. This assumes that the only channels we are
+       ! including are strictly different. We distinguish them by considering
+       ! how many (final state) gluons are attached to the two colour lines
+       ! that link the two incoming gluons. Hence, we only include
+       ! floor(next/2) channels, e.g., for next=6 we only consider:
+       ! i   --> 1,2,3,4,5,6   (0 and 4 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6   (1 and 3 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6   (2 and 2 gluons on the two lines)
+       ! And, e.g., for next=9, we only consider:
+       ! i   --> 1,2,3,4,5,6,7,8,9   (0 and 7 gluons on the two lines)
+       ! ii  --> 1,3,2,4,5,6,7,8,9   (1 and 6 gluons on the two lines)
+       ! iii --> 1,3,4,2,5,6,7,8,9   (2 and 5 gluons on the two lines)
+       ! iv  --> 1,3,4,5,2,6,7,8,9   (3 and 4 gluons on the two lines)
+       ! This means that the sym_fac should be equal to the number of final
+       ! state gluon permutations, multiplied by 2 (except if we have an equal
+       ! number of gluons on both colour lines that attached the two incoming
+       ! gluons).
+       if (c_o*2.eq.(next-2)) then
+          sym_fac=factorial8(next-2)
+       else
+          sym_fac=2*factorial8(next-2)
+       endif
+    elseif (nquarks.eq.2) then
+       if ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .and. &
+           (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          ! quark and anti-quark are incoming. Only 1 channel needed,
+          ! which would result in the following symmetry factor:
+          sym_fac=factorial8(next-2)
+       elseif ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .or. &
+               (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          ! one incoming quark (or anti-quark). There are ngluons
+          ! channels needed: they correspond to having the incoming
+          ! gluon at all possible positions between the quark and
+          ! anti-quark in the colour order. Hence, each channel comes
+          ! with an (ngluons-1)! symmetry factor:
+          sym_fac=factorial8(next-3)
+       else
+          ! both quark and anti-quark are final state. This is similar
+          ! to the all-gluon case above, treating the q-qbar pair as
+          ! another gluon. This special gluon is identifiable! So, for
+          ! next=6 (and assuming that the qqbar pair are particles 5
+          ! and 6) one has the following possibilities:
+          !
+          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
+          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
+          ! ic   --> 1,2,(5,6),3,4  -/
+          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
+          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
+          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
+          !
+          ! Furthermore all these can have the quark and anti-quark
+          ! order reversed, so there are in total 12 truly different
+          ! colour orders to consider.
+          !
+          ! All these come with a symmetry factor of (ngluon-2)! =
+          ! 2!. Hence we have:
+          sym_fac=factorial8(next-4)
        endif
     else
        write (*,*) 'Not yet implemented',nquarks
@@ -404,10 +704,11 @@ contains
        write (*,*) 'Incorrect imode',imode
        stop
     endif
-    if (c_o.lt.0 .or. c_o .gt. int((next-2)/2)) then
-       write (*,*) 'inconsistent color-ordering',c_o
+    if (c_o_i .gt.next+1.or.c_o_k.gt.next+1.or.c_o_j.gt.next-2) then
+       write (*,*) 'inconsistent color-ordering c_o_i,c_o_j,c_o_k',c_o_i,c_o_j,c_o_k
        stop
     endif
+
     if (integration.ne.1 .and. integration.ne.2) then
        write (*,*) 'Integration modes only 1 or 2',integration
        stop
@@ -436,23 +737,45 @@ contains
     tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
     if (imode.gt.0) write(s1,'(i1)') imode-1
     tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    if (c_o.le.9) then
-       write(s1,'(i1)') c_o
+    write(s1,'(i1)') c_o_t
+    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    if (c_o_i.le.9) then
+       write(s1,'(i1)') c_o_i
+       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') c_o_i
+       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
+    endif
+    if (c_o_j.le.9) then
+       write(s1,'(i1)') c_o_j
+       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
+    else
+       write(s2,'(i2)') c_o_j
+       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
+       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
+    endif
+    if (c_o_k.le.9) then
+       write(s1,'(i1)') c_o_k
        tag=trim(adjustl(tag))//trim(adjustl(s1))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
     else
-       write(s2,'(i2)') c_o
+       write(s2,'(i2)') c_o_k
        tag=trim(adjustl(tag))//trim(adjustl(s2))
        tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
     endif
-    if (len(trim(tag_read)).lt.8) then
-       if (8-len(trim(tag)).eq.1) then
+    write(*,*) len(trim(tag_read))
+    if (len(trim(tag_read)).lt.13) then
+       if (13-len(trim(tag)).eq.1) then
           tag='_'//trim(adjustl(tag))
           tag_read='_'//trim(adjustl(tag_read))
-       elseif(8-len(trim(tag)).eq.2) then
+       elseif(13-len(trim(tag)).eq.2) then
           tag='__'//trim(adjustl(tag))
           tag_read='__'//trim(adjustl(tag_read))
-       elseif(8-len(trim(tag)).eq.3) then
+       elseif(13-len(trim(tag)).eq.3) then
           tag='___'//trim(adjustl(tag))
           tag_read='___'//trim(adjustl(tag_read))
        endif
