@@ -9,11 +9,10 @@ module phase_space_gen23
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: t_channel,includePDF
   real(kind=8) :: sqrtshat,sqrts,tau,ycm
-  integer :: nquarks
 
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.true., debug=.false.
+  logical,parameter :: verbose=.false., debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-2d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
@@ -59,7 +58,7 @@ contains
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
-    integer(kind=4),dimension(n) :: part,process,temp_order,ord
+    integer(kind=4),dimension(n) :: part,process
     sqrtshat=sqrtsh
     sqrts=sqrtsh
     t_channel=t_chan
@@ -105,45 +104,18 @@ contains
           exit
        endif
     enddo
-    ord=order
-    process=part
-    nquarks=0
-    do i=1,next
-       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
-           nquarks=nquarks+1
-       endif
-       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
-          process(i)=-process(i)
-       endif
-    enddo
-    if (verbose) write (*,*) 'Canonical order',order
-    ! Define the sets from the colour order. Set 1 contains all the
-    ! particles between the first and second incoming particles. Set 2
-    ! contains the particles between the second and first incoming
-    ! particles.
-    call define_gen_order(next,process,o,order)
-    do i=1,next
-       if (order(i).eq.1) then
-          do j=0,next-1
-             temp_order(j+1)=order(1+mod(i+j-1,next))
-          enddo
-          exit
-       endif
-    enddo
-    temp_order=ord ! REMOVE comment for OLD
-    write(*,*) 'TEMP ORDER',temp_order
     sets=0
     i=0
     do i=2,next
-       if (temp_order(i).eq.2) then
+       if (order(i).eq.2) then
           do j=i+1,next
-             sets(0,2)=ibset(sets(0,2),temp_order(j)-1)
+             sets(0,2)=ibset(sets(0,2),order(j)-1)
           enddo
-          sets(1:i-2,1)=temp_order(2:i-1)
-          sets(1:next-i,2)=temp_order(i+1:next)
+          sets(1:i-2,1)=order(2:i-1)
+          sets(1:next-i,2)=order(i+1:next)
           exit
        endif
-       sets(0,1)=ibset(sets(0,1),temp_order(i)-1)
+       sets(0,1)=ibset(sets(0,1),order(i)-1)
     enddo
     if (verbose) then
        write (*,*) "set 1:",sets(:,1)
@@ -152,94 +124,7 @@ contains
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
     endif
-    !stop 1
   end subroutine gen23_init
-
-  subroutine define_gen_order(next,process,o,order)
-    implicit none
-    integer :: next,i,j,glu,quark,aquark
-    integer(kind=4),dimension(next) :: process,o,order
-
-    order=0
-    if (all(process.eq.21)) then
-       do i=1,next
-        if (o(i).eq.1) then
-          do j=0,next-1
-             order(j+1)=o(1+mod(i+j-1,next))
-          enddo
-          exit
-        endif
-       enddo
-    else
-      do i=1,next
-        if (process(i).ge.1.and.process(i).le.6)then
-            quark=i
-        elseif (-process(i).ge.1.and.-process(i).le.6)then
-            aquark=i
-        endif
-      enddo
-        if ((quark.le.2) .and. (aquark.le.2))then
-            order(1)=aquark
-            order(2)=quark
-            glu=0
-            do i=1,next
-               if (o(i).gt.2) then
-                  order(3+glu)=o(i)
-                  glu=glu+1
-                endif
-            enddo
-         elseif ((quark.le.2).and.(aquark.gt.2))then
-            write(*,*) 'one'
-            order(1)=quark
-            order(2)=mod(quark,2)+1
-            order(next)=aquark
-            glu=0
-            do i=1,next
-               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
-                  order(3+glu)=o(i)
-                  glu=glu+1
-                endif
-            enddo
-         elseif ((quark.gt.2).and.(aquark.le.2))then
-            write(*,*) 'two',quark,aquark
-            order(1)=aquark
-            order(2)=mod(aquark,2)+1
-            order(next)=quark
-            glu=0
-            do i=1,next
-               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
-                  order(3+glu)=o(i)
-                  glu=glu+1
-                endif
-            enddo
-         elseif ((quark.gt.2).and.(aquark.gt.2))then
-            write(*,*) 'both'
-            if (quark.lt.aquark) then
-              order(1)=2
-              order(2)=1
-              order(next-1)=aquark
-              order(next)=quark
-            else
-              order(1)=1
-              order(2)=2
-              order(next-1)=aquark
-              order(next)=quark
-            endif
-            glu=0
-            do i=1,next
-               if (o(i).ne.quark .and. o(i).ne.aquark.and.o(i).gt.2) then
-                  order(3+glu)=o(i)
-                  glu=glu+1
-                endif
-            enddo
-            order(next-1)=quark
-            order(next)=aquark
-         endif
-    endif
-
-    order=o
-    write(*,*) 'new order',order
-  end subroutine define_gen_order
 
   subroutine setup_PS_cuts(s_cut)
     ! Given s_cut = abs((p_i+p_j)^2), fills the minimum (s-channel)
