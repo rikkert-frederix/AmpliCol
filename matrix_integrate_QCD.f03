@@ -403,66 +403,71 @@ contains
 
   subroutine create_run_tag()
     implicit none
-    character(len=1) :: s1
-    character(len=2) :: s2
-    if (next.le.9) then
-       write(s1,'(i1)') next
-       tag=trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(s1))//'_'
+    tag=''       ! tag of current run
+    tag_read=''  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
+    call add_to_string(tag,next,.true.)
+    call add_to_string(tag_read,next,.true.)
+    call add_to_string(tag,imode,.true.)
+    if(imode.gt.0) then
+       call add_to_string(tag_read,imode-1,.true.)
     else
-       write(s2,'(i2)') next
-       tag=trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(s2))//'_'
+       call add_to_string(tag_read,imode,.true.)
     endif
-    write(s1,'(i1)') imode
-    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-    if (imode.gt.0) write(s1,'(i1)') imode-1
-    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    write(s1,'(i1)') c_o_t
-    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    if (c_o_i.le.9) then
-       write(s1,'(i1)') c_o_i
-       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') c_o_i
-       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
-    endif
-    if (c_o_j.le.9) then
-       write(s1,'(i1)') c_o_j
-       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') c_o_j
-       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
-    endif
-    if (c_o_k.le.9) then
-       write(s1,'(i1)') c_o_k
-       tag=trim(adjustl(tag))//trim(adjustl(s1))
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
-    else
-       write(s2,'(i2)') c_o_k
-       tag=trim(adjustl(tag))//trim(adjustl(s2))
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
-    endif
-    if (len(trim(tag_read)).lt.13) then
-       if (13-len(trim(tag)).eq.1) then
-          tag='_'//trim(adjustl(tag))
-          tag_read='_'//trim(adjustl(tag_read))
-       elseif(13-len(trim(tag)).eq.2) then
-          tag='__'//trim(adjustl(tag))
-          tag_read='__'//trim(adjustl(tag_read))
-       elseif(13-len(trim(tag)).eq.3) then
-          tag='___'//trim(adjustl(tag))
-          tag_read='___'//trim(adjustl(tag_read))
-       endif
-    endif
-    write (*,*) 'File tag is',tag
+    call add_to_string(tag,c_o_t,.true.)
+    call add_to_string(tag_read,c_o_t,.true.)
+    call add_to_string(tag,c_o_i,.true.)
+    call add_to_string(tag_read,c_o_i,.true.)
+    call add_to_string(tag,c_o_j,.true.)
+    call add_to_string(tag_read,c_o_j,.true.)
+    call add_to_string(tag,c_o_k,.false.)
+    call add_to_string(tag_read,c_o_k,.false.)
+    call fill_string(tag,13)
+    call fill_string(tag_read,13)
+    write (*,*) 'File tag is: ',tag
   end subroutine create_run_tag
 
+  subroutine add_to_string(string,inter,add_underscore)
+    ! Adds an integer 'inter' to the end of the string 'string' (followed by
+    ! an underscore if 'add_underscore=.true.')
+    implicit none
+    character(len=13) :: string
+    integer :: inter
+    logical :: add_underscore
+    character(len=1) :: s1
+    character(len=2) :: s2
+    character(len=3) :: s3
+    if (inter.ge.0 .and. inter.le.9) then
+       write(s1,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s1))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-9 .and. inter.le.99) then
+       write(s2,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s2))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-99 .and. inter.le.999) then
+       write(s3,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s3))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    else
+       write (*,*) 'value too large to add to the run tag',inter
+    endif
+  end subroutine add_to_string
+  subroutine fill_string(string,size)
+    ! Fills the string 'string' with leading underscores until the string has
+    ! size 'size'. The declaration of the string must be at least size 'size'.
+    implicit none
+    character(len=13) :: string
+    integer :: size,n_to_add
+    if (size.gt.len(string)) then
+       write (*,*) 'Size greater than string',size,string
+       stop 1
+    endif
+    n_to_add=13-len(trim(string))
+    do i=1,n_to_add
+       string='_'//trim(adjustl(string))
+    enddo
+  end subroutine fill_string
+  
   subroutine set_initial_state_average_factor(iden)
     implicit none
     integer(kind=8),intent(inout) :: iden
@@ -676,10 +681,9 @@ contains
     open (unit=99, file='process.txt', status='old', action='read')
     read(99, *) next
     allocate(part(next))
-    allocate(ord(next))
     allocate(o(next))
     read(99, *) part
-    read(99, *) ord
+    read(99, *) o
     nquarks = 0
     do i=1,next
        if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
@@ -688,18 +692,16 @@ contains
        endif
     enddo
     
-    o=ord
     if (nquarks.eq.0) then
        do i=1,next
-          if (ord(i).eq.1) start=i
-          if (ord(i).eq.2) end=i
+          if (o(i).eq.1) start=i
+          if (o(i).eq.2) end=i
        enddo
-       c_o=abs(end-start)-1
-       c_o=min(c_o,next-2-c_o)
        c_o_t=0
        c_o_k=0
        c_o_i=abs(end-start)-1
        c_o_j=next-2-c_o_i
+       c_o=min(c_o_i,c_o_j)
     elseif (nquarks.eq.2) then
        do i=1,next
           if (o(i).eq.1) start=i
