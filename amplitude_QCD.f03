@@ -321,14 +321,14 @@ contains
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          else
             if (.not.(part(order(1)).ge.1 .and. part(order(1)).le.6)) then
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          endif
          if (order(n).le.2) then
@@ -336,14 +336,14 @@ contains
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          else
             if (.not.(part(order(n)).le.-1 .and. part(order(n)).ge.-6)) then
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          endif
       endif
