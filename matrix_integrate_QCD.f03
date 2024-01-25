@@ -654,16 +654,17 @@ contains
           ! next=6 (and assuming that the qqbar pair are particles 5
           ! and 6) one has the following possibilities:
           !
-          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
-          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
-          ! ic   --> 1,2,(5,6),3,4  -/
-          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
-          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
-          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
+          ! ia   --> 1,2,3,4,(5,6) = 5,4,3,2,1,6 ---- : both gluons on the same
+          ! ib   --> 1,2,3,(5,6),4 = 5,3,2,1,4,6 --/         line as the qqbar pair
+          ! ic   --> 1,2,(5,6),3,4 = 5,2,1,4,3,6 -/
+          ! iia  --> 1,3,2,4,(5,6) = 5,4,2,3,1,6 ---- : one gluon on the same 
+          ! iib  --> 1,3,2,(5,6),4 = 5,2,3,1,4,6 -/          line as the qqbar pair
+          ! iii  --> 1,3,4,2,(5,6) = 5,2,4,3,1,6 ---- : both gluons on the other quark line
           !
-          ! Furthermore all these can have the quark and anti-quark
-          ! order reversed, so there are in total 12 truly different
-          ! colour orders to consider.
+          ! Furthermore all these can have the quark and anti-quark order
+          ! reversed (or, equivalently, the two incoming particles
+          ! interchanged in the colour order), so there are in total 12 truly
+          ! different colour orders to consider.
           !
           ! All these come with a symmetry factor of (ngluon-2)! =
           ! 2!. Hence we have:
@@ -725,15 +726,149 @@ contains
     endif
   end subroutine read_process_from_file
 
+  subroutine check_input_colour_order_consistency
+    ! Checks that the c_o_t, c_o_i, c_o_j, and c_o_k are in their correct
+    ! ranges.
+    implicit none
+    if (c_o_t.eq.0 .and. (c_o_j.gt.int((next-2)/2) .or. c_o_j.lt.0)) then
+       write (*,*) 'Inconsistent colour order #1', c_o_t,c_o_i,c_o_j,c_o_k
+       stop 1
+    elseif (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
+       if (c_o_t.ne.1 .and. c_o_t.ne.2) then
+          write (*,*) 'Inconsistent colour order #2a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
+          write (*,*) 'Inconsistent colour order #2b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    elseif (c_o_i.eq.next+1) then
+       if (c_o_t.lt.1 .or. c_o_t.gt.4) then
+          write (*,*) 'Inconsistent colour order #3a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_k.gt.next-3 .or. c_o_k.lt.0) then
+          write (*,*) 'Inconsistent colour order #3b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.gt.next-3 .or. c_o_j.lt.0) then
+          write (*,*) 'Inconsistent colour order #3c', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_k+c_o_j.gt.next-3) then
+          write (*,*) 'Inconsistent colour order #3d', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    elseif (c_o_k.eq.next+1) then
+       if (c_o_t.lt.1 .or. c_o_t.gt.4) then
+          write (*,*) 'Inconsistent colour order #4a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i.gt.next-3 .or. c_o_i.lt.0) then
+          write (*,*) 'Inconsistent colour order #4b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.gt.next-3 .or. c_o_j.lt.0) then
+          write (*,*) 'Inconsistent colour order #4c', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i+c_o_j.gt.next-3) then
+          write (*,*) 'Inconsistent colour order #4d', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    elseif (c_o_t.ge.1) then
+       if (c_o_t.lt.1 .or. c_o_t.gt.8) then
+          write (*,*) 'Inconsistent colour order #5a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i.gt.next-4 .or. c_o_i.lt.0) then
+          write (*,*) 'Inconsistent colour order #5b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.gt.next-4 .or. c_o_j.lt.0) then
+          write (*,*) 'Inconsistent colour order #5c', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_k.gt.next-4 .or. c_o_k.lt.0) then
+          write (*,*) 'Inconsistent colour order #5d', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i+c_o_j+c_o_k.gt.next-4) then
+          write (*,*) 'Inconsistent colour order #5e', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    endif
+  end subroutine check_input_colour_order_consistency
+  
   subroutine get_process_from_arguments
     implicit none
+    ! c_o_t == 0 --> all gluon process; c_o_j is the minimum between the
+    !                numbers of gluons on each of the two colour lines that
+    !                connect the two incoming gluons
+    !
+    ! c_o_t > 0 --> there is 1 qqbar particle:
+    !      c_o_i == n+1 && c_o_k == n+1 --> the two quarks are in the initial
+    !                state. (c_o_t==1 or 2 defines if it is qqbar->ngluons or
+    !                qbarq->ngluons). c_o_j defines the number of gluons that
+    !                are colour-ordered; hence if this is less than the number
+    !                of gluons in the process, the remaining ones are photons.
+    !
+    !      c_o_i == n+1 && c_o_k < n-2 --> left incoming particle is a quark
+    !                (if c_o_t==2) or anti-quark (if c_o_t==1) and the other
+    !                incoming particle a gluon (add 2 to c_o_t to make this a
+    !                photon). c_o_j defines the number of gluons between the
+    !                incoming (anti-)quark and the incoming gluon in the
+    !                colour order; c_o_k is the number of gluons between the
+    !                incoming gluon and the final state anti-quark.
+    !
+    !      c_o_i < n-2 && c_o_k == n+1 --> Same as previous, but with the
+    !                right-incoming particle the (anti-quark), and the
+    !                left-incoming the gluon.
+    !
+    !      c_o_i < n-2 && c_o_k < n-2 --> Both the quark and anti-quark are
+    !                final state. As before, c_o_i is the number of gluons in
+    !                the colour order between the left-incoming gluon and the
+    !                quark; c_o_k between the right-incoming gluon and the
+    !                anti-quark; and c_o_j the number of gluons between the
+    !                two incoming gluons. If c_o_t==2, the role of
+    !                left-incoming and right-incoming is interchanged. If
+    !                c_o_i+c_o_j+c_o_k < n-4, the remaining particles are
+    !                photons. Add 2 to c_o_t to make the left incoming initial
+    !                state particle a photon; Add 4 to c_o_t to make the right
+    !                incoming initial state particle a photon; add 6 to c_o_t
+    !                to make both incoming particles photons.
+    !
+    ! NOTE: for qqbar process, the colour order is such that the first
+    ! particle should be a quark (if final state) or anti-quark (if initial
+    ! state), while the last particle is that anti-quark (if final state) or
+    ! quark (if initial state). This is even true when there are photons
+    ! around: these photons are always put just before the final particle in
+    ! the colour (i.e., just before the anti-quark (if final state) or quark
+    ! (if initial state)). THE LATTER IS SOMEWHAT COUNTER-INTUITIVE, since the
+    ! photons shouldn't be part of the colour order whatsoever...
     integer :: i,k
     integer,dimension(:),allocatable :: ord
+    integer :: nsing
+    call check_input_colour_order_consistency
     if (c_o_t.eq.0) then
        nquarks=0       
-    elseif (c_o_t.le.2) then
+    else
        nquarks=2
+       if (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
+          ! We gave next-2 final state gluons, of which c_o_j are colour-ordered
+          nsing=(next-2)-c_o_j
+       elseif(c_o_i.eq.next+1 .and. c_o_k.ne.next+1) then
+          ! We have next-3 final state gluons, of which (c_o_j+c_o_k) are colour-ordered
+          nsing=(next-3)-(c_o_j+c_o_k)
+       elseif(c_o_i.ne.next+1 .and. c_o_k.eq.next+1) then
+          ! We have next-3 final state gluons, of which (c_o_i+c_o_j) are colour-ordered
+          nsing=(next-3)-(c_o_i+c_o_j)
+       else
+          ! We have next-4 final state gluons, of which (c_o_i+c_o_j+c_o_k) are colour ordered
+          nsing=(next-4)-(c_o_i+c_o_j+c_o_k)
+       endif
     endif
+       
     allocate(part(next))
     allocate(o(next))
     allocate(ord(next))
@@ -751,15 +886,23 @@ contains
              ord(next)=1
           endif
           do i=3,next
-             part(i)=21
+             if (i.le.c_o_j+2) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
           enddo
           do i=2,next-1
              ord(i)=i+1
           enddo
        elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
-          if (c_o_t.eq.1) then
+          if (mod(c_o_t,2).eq.1) then
              part(1)=-1
-             part(2)=21
+             if (c_o_t.eq.1) then
+                part(2)=21
+             else
+                part(2)=22
+             endif
              part(3)=-1
              ord(1)=1
              ord(next)=3
@@ -773,9 +916,13 @@ contains
                 ord(i)=k
                 k=k+1
              enddo
-          elseif (c_o_t.eq.2) then
+          elseif (mod(c_o_t,2).eq.0) then
              part(1)=1
-             part(2)=21
+             if (c_o_t.eq.2) then
+                part(2)=21
+             else
+                part(2)=22
+             endif
              part(3)=1
              ord(1)=3
              ord(next)=1
@@ -791,11 +938,19 @@ contains
              enddo
           endif
           do i=4,next
-             part(i)=21
+             if (i.le.c_o_j+c_o_k+3) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
           enddo
        elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
-          if (c_o_t.eq.1) then
-             part(1)=21
+          if (mod(c_o_t,2).eq.1) then
+             if (c_o_t.eq.1) then
+                part(1)=21
+             else
+                part(1)=22
+             endif
              part(2)=1
              part(3)=1
              ord(1)=3
@@ -810,8 +965,12 @@ contains
                 ord(i)=k
                 k=k+1
              enddo
-          elseif (c_o_t.eq.2) then
-             part(1)=21
+          elseif (mod(c_o_t,2).eq.0) then
+             if (c_o_t.eq.2) then
+                part(1)=21
+             else
+                part(1)=22
+             endif
              part(2)=-1
              part(3)=-1
              ord(1)=2
@@ -828,20 +987,44 @@ contains
              enddo
           endif
           do i=4,next
-             part(i)=21
+             if (i.le.c_o_j+c_o_k+3) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
           enddo
-       elseif (c_o_i+c_o_j+c_o_k.eq.next-4) then
-          part(1)=21
-          part(2)=21
+       else
+          if (c_o_t.le.2) then
+             part(1)=21
+             part(2)=21
+          elseif (c_o_t.le.4) then
+             part(1)=22
+             part(2)=21
+          elseif (c_o_t.le.6) then
+             part(1)=21
+             part(2)=22
+          elseif (c_o_t.le.8) then
+             part(1)=22
+             part(2)=22
+          endif
           part(3)=1
           part(4)=-1
           do i=5,next
-             part(i)=21
+             if (i.le.c_o_i+c_o_j+c_o_k+4) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
           enddo
           ord(1)=3
           ord(next)=4
-          ord(2+c_o_i)=1
-          ord(3+c_o_i+c_o_j)=2
+          if (mod(c_o_t,2).eq.1) then
+             ord(2+c_o_i)=1
+             ord(3+c_o_i+c_o_j)=2
+          else
+             ord(2+c_o_i)=2
+             ord(3+c_o_i+c_o_j)=1
+          endif
           k=5
           do i=2,2+c_o_i-1
              ord(i)=k
@@ -855,9 +1038,6 @@ contains
              ord(i)=k
              k=k+1
           enddo
-       else 
-          write(*,*) 'Incorrect colour order: does not give physical process'
-          stop 
        endif
     elseif (nquarks.eq.0) then
        do i=1,next
@@ -885,7 +1065,7 @@ contains
     endif
     o=ord
     write (*,*) '******************************************'
-    write (*,*) 'Process is',part
+    write (*,*) 'Process is     ',part
     write (*,*) 'Colour order is',o
     write (*,*) '******************************************'
   end subroutine get_process_from_arguments
