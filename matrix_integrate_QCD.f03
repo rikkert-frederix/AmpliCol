@@ -608,6 +608,13 @@ contains
   end subroutine multiply_by_PDF_value
   subroutine compute_mutlichannel_symmetry_factor()
     implicit none
+    integer :: ngl=0
+    ! count the number of final state gluons
+    do i=3,next
+       if (part(i).eq.21) then
+          ngl=ngl+1
+       endif
+    enddo
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
@@ -628,17 +635,17 @@ contains
        ! state gluon permutations, multiplied by 2 (except if we have an equal
        ! number of gluons on both colour lines that attached the two incoming
        ! gluons).
-       if (c_o*2.eq.(next-2)) then
-          sym_fac=factorial8(next-2)
+       if (c_o*2.eq.(ngl)) then
+          sym_fac=factorial8(ngl)
        else
-          sym_fac=2*factorial8(next-2)
+          sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
           ! which would result in the following symmetry factor:
-          sym_fac=factorial8(next-2)
+          sym_fac=factorial8(ngl)
        elseif ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .or. &
                (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! one incoming quark (or anti-quark). There are ngluons
@@ -646,7 +653,7 @@ contains
           ! gluon at all possible positions between the quark and
           ! anti-quark in the colour order. Hence, each channel comes
           ! with an (ngluons-1)! symmetry factor:
-          sym_fac=factorial8(next-3)
+          sym_fac=factorial8(ngl)
        else
           ! both quark and anti-quark are final state. This is similar
           ! to the all-gluon case above, treating the q-qbar pair as
@@ -668,7 +675,7 @@ contains
           !
           ! All these come with a symmetry factor of (ngluon-2)! =
           ! 2!. Hence we have:
-          sym_fac=factorial8(next-4)
+          sym_fac=factorial8(ngl)
        endif
     else
        write (*,*) 'WARNING: symmetry factor missing',nquarks
