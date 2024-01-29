@@ -163,7 +163,7 @@ contains
     if (argc.ne.6) then
        write (*,*) 'Give number of gluons, imode and color'// &
             ' ordering (number of gluons on first color line):'
-       read (*,*) next,imode,c_o
+       read (*,*) next,imode,c_o_t,c_o_i,c_o_j,c_o_k
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
