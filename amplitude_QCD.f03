@@ -21,7 +21,7 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
      real(kind=8),dimension(:,:),allocatable :: diff_col_vals,pp
-     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp
+     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap,n_col_vals, &
           pp_bin_to_i,pp_i_to_bin
      integer,dimension(:,:),allocatable :: perm
@@ -279,6 +279,7 @@ contains
       integer,dimension(6) :: quark_flav
       integer :: i,j
       this%n_qqbar=0
+      this%n_sing=0
       quark_flav=0
       do i=1,n
          if (i.le.2) then
@@ -292,6 +293,7 @@ contains
                if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
          endif
+         if (part(i).ne.21 .and. abs(part(i)).gt.6) this%n_sing=this%n_sing+1
       enddo
       if (any(quark_flav(:).ne.0)) then
          write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
@@ -1600,15 +1602,15 @@ contains
     if (this%n_qqbar.eq.0) then
        iper(1:n)=[this%perm(1:n-1,iperm),n]
     elseif (this%n_qqbar.eq.1) then
-       iper(1:n)=[order(1),this%perm(1:n-2,iperm),order(n)]
+       iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
     endif
     do jperm=iperm,this%nColOrd
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
-          jper(1:n)=[order(1),this%perm(1:n-2,jperm),order(n)]
+          jper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
        endif
-       call compute_color_factor(col_acc,n,iper,jper,col_fac,colour_flow)
+       call compute_color_factor(col_acc,n-this%n_sing,iper,jper,col_fac,colour_flow)
        if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
        do iacc=1,3
           if (col_fac(iacc).eq.0d0) cycle
@@ -1649,15 +1651,15 @@ contains
        if (this%n_qqbar.eq.0) then
           iper(1:n)=[this%perm(1:n-1,iperm),n]
        elseif (this%n_qqbar.eq.1) then
-          iper(1:n)=[order(1),this%perm(1:n-2,iperm),order(n)]
+          iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
        endif
        do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
           if (this%n_qqbar.eq.0) then
              jper(1:n)=[this%perm(1:n-1,jperm),n]
           elseif (this%n_qqbar.eq.1) then
-             jper(1:n)=[order(1),this%perm(1:n-2,jperm),order(n)]
+             jper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
           endif
-          call compute_color_factor(col_acc,n,iper,jper,col_fac,colour_flow)
+          call compute_color_factor(col_acc,n-this%n_sing,iper,jper,col_fac,colour_flow)
           if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           do iacc=1,3
              if (col_fac(iacc).eq.0d0) cycle
