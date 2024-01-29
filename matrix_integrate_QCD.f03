@@ -557,6 +557,7 @@ contains
     unc(1:nintegrals,0:maxchannels)=0d0
     only_virt=.false.
   end subroutine set_mint_module_special_parameters
+  
   subroutine set_ipdgs_for_PDF(ipdgs)
     implicit none
     logical,dimension(-6:7,2) :: ipdgs
@@ -582,6 +583,7 @@ contains
        stop 1
     endif
   end subroutine set_ipdgs_for_PDF
+  
   subroutine multiply_by_PDF_value(val)
     implicit none
     real(kind=8),intent(inout) :: val
@@ -606,6 +608,7 @@ contains
        val=val*PDF(part(2),2)
     endif
   end subroutine multiply_by_PDF_value
+  
   subroutine compute_mutlichannel_symmetry_factor()
     implicit none
     integer :: ngl=0
@@ -699,7 +702,6 @@ contains
           if (i.le.2) part(i)=-part(i)
        endif
     enddo
-    
     if (nquarks.eq.0) then
        do i=1,next
           if (o(i).eq.1) start=i
@@ -861,6 +863,7 @@ contains
        nquarks=0       
     else
        nquarks=2
+       ! count the number of colour-singlets:
        if (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
           ! We gave next-2 final state gluons, of which c_o_j are colour-ordered
           nsing=(next-2)-c_o_j
@@ -1061,7 +1064,6 @@ contains
           ord(i)=k
           k=k+1
        enddo
-       
        if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
           write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
           stop
