@@ -565,7 +565,7 @@ contains
        ipdgs(0,1)=.true.    ! gluon is '0'
     elseif (part(1).eq.22) then
        ipdgs(7,1)=.true.    ! photon is '7'
-    elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+    elseif (abs(part(1)).ge.1 .and. abs(part(1)).le.6) then
        ipdgs(part(1),1)=.true.
     else
        write (*,*) 'unknown PDF 1',part(1)
@@ -575,7 +575,7 @@ contains
        ipdgs(0,2)=.true.    ! gluon is '0'
     elseif (part(2).eq.22) then
        ipdgs(7,2)=.true.    ! photon is '7'
-    elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+    elseif (abs(part(2)).ge.1 .and. abs(part(2)).le.6) then
        ipdgs(part(2),2)=.true.
     else
        write (*,*) 'unknown PDF 2',part(2)
