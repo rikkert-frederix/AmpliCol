@@ -82,7 +82,7 @@ program matrix_reweight
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
         if (amp_QCD%n_qqbar.eq.0) then
-           do irow=1,factorial(next-1)
+           do irow=1,amp_QCD%nColOrd
               if (use_real_gluons) then
                  amp_col=0d0
               else
@@ -115,7 +115,7 @@ program matrix_reweight
               endif
            enddo
         else
-           do irow=1,factorial(next-2)
+           do irow=1,amp_QCD%nColOrd
               amp_col_c=(0d0,0d0)
               do i=1,amp_QCD%n_col_vals(iacc)
                  amp2_c=(0d0,0d0)
