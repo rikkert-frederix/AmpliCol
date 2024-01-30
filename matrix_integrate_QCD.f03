@@ -175,6 +175,7 @@ program matrix_integrate_QCD
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
   write(*,*) 'Number of numerical errors:',num_error
+  write(*,*) 'Number of x_Bj > 1:',count_xbj
  
 contains
   function integrand(x,vol,ifirst,f1)
