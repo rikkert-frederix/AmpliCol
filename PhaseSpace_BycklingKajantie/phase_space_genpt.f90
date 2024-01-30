@@ -5,10 +5,11 @@ module phase_space_genpt
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: includePDF
   real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,ycut,DRcut
-  integer,parameter :: use_mode=3 ! all modes use pT^2 and phi, but
+  integer,parameter :: use_mode=2 ! all modes use pT^2 and phi, but
                                   ! 1 = uses rapidity (original chili)
                                   ! 2 = uses DeltaR with previous particle
                                   ! 3 = uses invariant mass with previous particle
+                                  ! 4 = uses cos(theta) with previous particle
   public :: genpt_init,genpt_phase_space
 contains
   subroutine genpt_phase_space(xx)
@@ -16,6 +17,7 @@ contains
     real(kind=8),dimension(99),intent(in) :: xx
     real(kind=8) :: pt2min,pt2max,pt2,ymin,ymax,y,phimin,phimax,phi&
          &,ycm,pt,drmin,drmax,dr,phi2,invmmin,invmmax,invm
+    real(kind=8) :: costheta,costhetamin,costhetamax,theta,pzmax
     integer(kind=4) :: i,ix
     real(kind=8),dimension(0:3) :: ptot,pb
     real(kind=8),external :: ran2
@@ -32,7 +34,7 @@ contains
        phimax=pi
        ix=ix+1
        call random_to_var(xx(ix),0d0,phimin,phimax,phi,jac)
-       if (use_mode.eq.1 .or. i.eq.3) then
+       if (use_mode.eq.1 .or.i.eq.3) then
           ! generate rapidity
           ymin=-ycut
           ymax=+ycut
@@ -40,6 +42,7 @@ contains
           call random_to_var(xx(ix),0d0,ymin,ymax,y,jac)
           ! fill momentum
           call fill_momentum_pt2yphi(pt2,y,phi,p(0,i))
+
        elseif (use_mode.eq.2) then
           ! generate deltaR w.r.t. previously generated particle
           y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
@@ -55,6 +58,7 @@ contains
           phi=atan(p(2,i-1)/p(1,i-1))
           if(p(1,i-1).lt.0d0) phi=phi+pi
           call rotz(pb,phi,p(0,i))
+
        elseif (use_mode.eq.3) then
           ! get the energy in the frame where p(:,i-1) has p_z=0.
           y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
@@ -72,10 +76,27 @@ contains
           phi=atan(p(2,i-1)/p(1,i-1))
           if(p(1,i-1).lt.0d0) phi=phi+pi
           call rotz(pb,phi,p(0,i))
+
+       elseif (use_mode.eq.4) then
+          y=log((p(0,i-1)+p(3,i-1))/(p(0,i-1)-p(3,i-1)))/2d0
+          costhetamin=-1d0 
+          costhetamax=cos(drcut)
+          ix=ix+1
+          call random_to_var(xx(ix),0d0,costhetamin,costhetamax,costheta,jac)
+          call fill_momentum_pt2cosphi(pt2,costheta,phi,p(0,i),jac)
+          if (jac.lt.0d0) return
+          call boostz(p(0,i),-y,pb)
+          ! rotate about the z-axis
+          phi=atan(p(2,i-1)/p(1,i-1))
+          if(p(1,i-1).lt.0d0) phi=phi+pi
+          call rotz(pb,phi,p(0,i))
+
        endif
     enddo
+
+
 !!$    if (.true.) then
-    if (use_mode.eq.1) then
+    if (use_mode.eq.1.or.use_mode.eq.4) then
 ! final particle: generate rapidity
        ymin=-ycut
        ymax=+ycut
@@ -87,6 +108,7 @@ contains
        pt=sqrt(p(1,next)**2+p(2,next)**2)
        p(3,next)=pt*sinh(y)
        p(0,next)=pt*cosh(y)
+
     elseif(use_mode.eq.2) then
        p(1,next)=-sum(p(1,3:next-1))
        p(2,next)=-sum(p(2,3:next-1))
@@ -114,6 +136,7 @@ contains
        y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
        call boostz(p(0,next),-y,pb)
        p(0:3,next)=pb(0:3)
+
     elseif(use_mode.eq.3) then
        p(1,next)=-sum(p(1,3:next-1))
        p(2,next)=-sum(p(2,3:next-1))
@@ -143,8 +166,66 @@ contains
        ! boost along the z-axis
        call boostz(p(0,next),-y,pb)
        p(0:3,next)=pb(0:3)
+
+   elseif (use_mode.eq.4) then
+       p(1,next)=-sum(p(1,3:next-1))
+       p(2,next)=-sum(p(2,3:next-1))
+       p(0,next)=1d0 ! dummy value
+       p(3,next)=1d0 ! dummy value
+
+       phi =atan(p(2,next-1)/p(1,next-1))
+       if(p(1,next-1).lt.0d0) phi=phi+pi
+       phi2 =atan(p(2,next)/p(1,next))
+       if(p(1,next).lt.0d0) phi2=phi2+pi
+
+       call rotz(p(0,next),-phi,pb)
+       p(:,next)=pb
+
+       phi =atan(p(2,next-1)/p(1,next-1))
+       if(p(1,next-1).lt.0d0) phi=phi+pi
+       phi2 =atan(p(2,next)/p(1,next))
+       if(p(1,next).lt.0d0) phi2=phi2+pi
+
+       pt=sqrt(p(1,next)**2+p(2,next)**2)
+       y=log((p(0,next-1)+p(3,next-1))/(p(0,next-1)-p(3,next-1)))/2d0
+       ymax=ycut+abs(y)
+       pzmax = pt/tan(2d0*atan(exp(-ymax)))
+
+       costhetamin= abs(p(1,next))/(dsqrt(pt**2+pzmax**2))
+       costhetamax= cos(max(abs(phi2),drcut))
+       
+       if (abs(phi2).ge.pi/2d0) then
+           costhetamin= cos(max(abs(phi2),drcut))
+           costhetamax = cos(pi-acos(abs(p(1,next))/(dsqrt(pt**2+pzmax**2))))
+       endif
+       if (costhetamin.gt.costhetamax) return
+
+       ix=ix+1
+       call random_to_var(xx(ix),0d0,costhetamin,costhetamax,costheta,jac)
+       
+       p(0,next) = abs(p(1,next)/costheta)
+       if (costheta.lt.0d0) then
+           theta=acos(costheta)
+           theta = pi-theta
+           phi = acos(p(2,next)/(p(0,next)*dsqrt(1d0-cos(theta)**2)))
+           p(3,next) = dsqrt((p(1,next)**2/costheta**2)-pt**2)
+       else
+           theta=acos(costheta)
+           phi = acos(p(2,next)/(p(0,next)*dsqrt(1d0-costheta**2)))
+           p(3,next) = dsqrt((p(1,next)**2/costheta**2)-pt**2)
+       endif
+       if (ran2().gt.0.5d0) p(3,next)=-p(3,next)
+       jac=jac*2d0
+       jac = jac/(1+costheta**2-(costheta**2-1d0)*cos(2d0*phi))
+       !jac = jac*p(1,next)/pt*0.5d0/(sin(2d0*atan(exp(-ymax)))**2)/((1d0+tan)**1.5d0)
+       !jac = jac*cosh(y)
+       call boostz(p(0,next),-y,pb)
+       phi=atan(p(2,next-1)/p(1,next-1))
+       if(p(1,next-1).lt.0d0) phi=phi+pi
+       call  rotz(pb,phi,p(0,next))
+
     endif
-    
+
     
 ! initial states
     ptot(0:3)=sum(p(0:3,3:next),dim=2)
@@ -153,6 +234,7 @@ contains
     xbjrk(1)=sqrt(tau)*exp(ycm)
     xbjrk(2)=sqrt(tau)*exp(-ycm)
     if (xbjrk(1).ge.1d0 .or. xbjrk(2).ge.1d0) then
+       count_xbj = count_xbj + 1
        jac=-1d0
        return
     endif
@@ -164,6 +246,7 @@ contains
     p(1,2)=0d0
     p(2,2)=0d0
     p(3,2)=-xbjrk(2)*sqrts/2d0
+
 ! Jacobian factor (corresponds to the full jacobian for
 ! use_mode=1. The other use_modes already have a partially computed
 ! jacobian above)
@@ -173,6 +256,22 @@ contains
 ! Add flux factor
     jac=jac/(2d0*tau*sqrts**2)
   end subroutine genpt_phase_space
+
+  subroutine fill_momentum_pt2cosphi(pt2,costheta,phi,p,jac)
+   implicit none
+    real(kind=8) :: pt2,costheta,phi,jac,pt
+    real(kind=8),dimension(0:3) :: p
+    real(kind=8),external :: ran2
+  
+    pt=dsqrt(pt2)
+    p(0) = pt/(dsqrt(costheta**2+(1d0-costheta**2)*cos(phi)**2))
+    p(1) = p(0)*costheta
+    p(2)= p(0)*dsqrt(1d0-costheta**2)*cos(phi)
+    p(3) = p(0)*dsqrt(1d0-costheta**2)*sin(phi)
+    jac=jac*2d0 ! left-over factor from the overall jacobian of pi's and 2's
+    jac = jac/(1+costheta**2-(costheta**2-1d0)*cos(2d0*phi))
+  end subroutine fill_momentum_pt2cosphi
+
   subroutine fill_momentum_pt2invmphi(pt2,invm,phi,Eref,p,jac)
     implicit none
     real(kind=8) :: pt2,invm,phi,jac,pt,Eref
