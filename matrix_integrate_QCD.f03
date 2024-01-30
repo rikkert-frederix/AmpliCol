@@ -467,7 +467,7 @@ contains
        string='_'//trim(adjustl(string))
     enddo
   end subroutine fill_string
-  
+
   subroutine set_initial_state_average_factor(iden)
     implicit none
     integer(kind=8),intent(inout) :: iden
@@ -491,7 +491,7 @@ contains
     integer :: i,j,ni=0
     integer,dimension(:,:),allocatable :: iden_part
     allocate(iden_part(1:next,2))
-    do i=1,next
+    do i=3,next
        do j=1,ni
           if (iden_part(j,1).eq.part(i)) then
              iden_part(j,2)=iden_part(j,2)+1
