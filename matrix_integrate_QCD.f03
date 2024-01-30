@@ -42,7 +42,7 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrts=10000.d0
+  sqrts=14000.d0
   ! setting energy
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
@@ -1064,6 +1064,7 @@ contains
           ord(i)=k
           k=k+1
        enddo
+       c_o=min(next-2-c_o_j,c_o_j)
        if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
           write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
           stop
