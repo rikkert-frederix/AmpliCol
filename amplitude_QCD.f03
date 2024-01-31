@@ -766,7 +766,6 @@ contains
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
-
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
@@ -775,8 +774,8 @@ contains
       if (n2.eq.1) then
          if (this%current_list(ic2)%order(n2).eq.order(n)) return
       endif
-
       ip(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
+      write (*,*) ip
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order. Skip colour singlets
@@ -786,11 +785,29 @@ contains
          do j=1,n
             if (order(j).eq.ip(i)) exit
          enddo
+         write (*,*) i,j
          do k=1,isize-1
             if (i+k.gt.isize) exit            ! they are compatible
-            if (part(ip(i+k)).eq.22) i=i+1
-            if (part(order(j+k)).eq.22) j=j+1
+            do
+               if (part(ip(i+k)).eq.22) then
+                  i=i+1
+                  if (i+k.gt.isize) exit
+               else
+                  exit
+               endif
+            enddo
+!!$            if (part(ip(i+k)).eq.22) i=i+1
             if (i+k.gt.isize) exit            ! they are compatible
+!!$            if (part(order(j+k)).eq.22) j=j+1
+            do
+               if (part(order(j+k)).eq.22) then
+                  j=j+1
+                  if (j+k.gt.n) return
+               else
+                  exit
+               endif
+            enddo
+            write (*,*) k,i,j
             if (j+k.gt.n) return              ! incompatible: passed end of the order() array
             if (ip(i+k).ne.order(j+k)) return ! incompatible: order is different
          enddo
@@ -919,14 +936,14 @@ contains
     end subroutine check_all_permutations
     
     logical function valid_current_order(ip)
-      ! Checks that ip(1:isize) is an order for a current to be considered:
-      ! the smallest number needs to come before the largest number in this
-      ! list.
+      ! Checks that ip(1:isize) is an order for a current to be considered
+      ! when use_symmetry=.true. --> the smallest number needs to come before
+      ! the largest number in this list.
       implicit none
       integer :: i,maxi,mini,min_loc,max_loc
       integer,dimension(isize) :: ip
       if (this%n_qqbar.eq.1 .and. (any(ip(2:isize).eq.order(1)))) then
-         ! if there is a quark, it can only be at the first position
+         ! if there is a quark, it needs to be in the first position
          valid_current_order=.false.
          return
       endif
@@ -976,10 +993,12 @@ contains
             this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
             this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
             this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
+            write (*,*) 'add to existing current',isize,n
             return
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
+         write (*,*) 'need a new current',isize,n,':',this%n_cur
          allocate(this%current_list(this%n_cur)%order(isize))
          this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
          this%current_list(this%n_cur)%type=ctype
