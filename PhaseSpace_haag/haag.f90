@@ -5,10 +5,10 @@ module haag
   real(kind=8) :: ksi_m
 
   real(kind=8),public :: s0
-  logical,public :: debug=.false.,  flat=.false.,  open=.false.,  schannel
+  logical,public :: debug=.false.,  flat=.false.,  open=.false.
   logical,public :: flat_split=.false., a1_split=.true.
   logical,public :: haag_style=.true.
-  logical,public :: one_pt=.true.
+  logical,public :: one_pt=.false.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
@@ -49,12 +49,10 @@ contains
     integer(kind=4) :: i,j
     sqrtshat=sqrtsh
     sqrts=sqrtsh
-    schannel=s_chan
     if (verbose) then
        write (*,*) 'Setting up',nn,'particle phase-space'
        write (*,*) 'Total available energy, sqrt(s-hat) =',sqrtshat
        write (*,*) 'Cut on invariants used in the phase-space generation: abs((p_i+p_j)^2) >=',s_cut
-       write (*,*) 'Use the simple s-channel?',schannel
     endif
     includePDF=include_pdf
     call gen23_deallocate
@@ -331,7 +329,7 @@ contains
     real(kind=8) :: Qz,E1,E2,s1,s2,s,Qt,antenna,test,mass1,mass2,mass_in
     logical :: m1
     integer(kind=8),dimension(:),allocatable :: subperm1(:), subperm2(:),subperm,subperm_rest
-    integer(kind=8),dimension(next-1) :: perm_final
+    integer(kind=8),dimension(next-2) :: perm_final
     real(kind=8),dimension(next-2) :: schan_ran,schan_ran_sorted
     real(kind=8),dimension(0:3) :: q1_ref,q2_ref
     
@@ -483,29 +481,6 @@ else
   !write(*,*) 'doing m=0 type splitting'
   m1 = .false.
   mass_sum=0d0
-  if (schannel) then
-   do j=1,n-2
-     ix = ix +1
-     call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
-     schan_ran(j) = R
-   enddo
-   do m=1,n-2
-    min = 1d0
-    do j=1,n-2
-     if (m .eq. 1) then
-        if ((schan_ran(j) .lt. min)) then
-           min = schan_ran(j)
-           schan_ran_sorted(m)=min
-        endif
-     else
-        if ((schan_ran(j) .lt. min) .and. (schan_ran(j) .gt. schan_ran_sorted(m-1))) then
-           min = schan_ran(j)
-           schan_ran_sorted(m)=min
-        endif
-     endif
-    enddo
-   enddo
-  endif
 
   if (mm .eq. 0) then
      perm_final=subperm2
@@ -517,11 +492,6 @@ else
      q2_ref = qin1
   endif
   if (n .gt. 2) then
-     if (schannel) then
-       mass_in = schan_ran_sorted(n-2)
-     else
-       mass_in = -1d0
-     endif
      call basic_antenna(q(0:3,perm_final(n)),masses(perm_final(n)),qk(0:3,n-1),mass_in,&
                 qk(0:3,n),q1_ref,q2_ref,0,m1,n)
      mass_sum=mass_sum+masses(perm_final(n))
@@ -531,11 +501,6 @@ else
      mass_sum=mass_sum+masses(perm_final(n))
   endif
   do i=1,n-3
-     if (schannel) then
-       mass_in = schan_ran_sorted(n-2-i)
-     else
-       mass_in = -1d0
-     endif
      call basic_antenna(q(0:3,perm_final(n-i)),masses(perm_final(n-i)),qk(0:3,n-i-1),&
                mass_in,qk(0:3,n-i),q(0:3,perm_final(n-i+1)),q2_ref,i,.false.,n)
      mass_sum=mass_sum+masses(perm_final(n-i))
@@ -564,8 +529,6 @@ endif
     !do i=1,next
     !   write(*,*) pp(:,i)
     !enddo
-    !write(*,*) pp(:,1)+pp(:,2)
-    !write(*,*) pp(:,3)+pp(:,4)+pp(:,5)+pp(:,6)+pp(:,7)
 
 
   end subroutine generate_momenta
@@ -629,7 +592,7 @@ endif
 
     real(kind=8) :: tmin,tmax,t1,t2,yr,pt2
     real(kind=8),dimension(0:3) :: pass1,pass2
-    real(kind=8) :: pt2min,pt2max,pt,y
+    real(kind=8) :: pt2min,pt2max,pt,y,ymin,ymax
 
     k = maxn - i   !  k is the number of particles remaining to generate
     s1 = mass1     ! mass of the final state particle to be generated
@@ -637,6 +600,7 @@ endif
     s = (dot(P,P)) ! Ingoing inv mass
 
     ! boost qi to CMF (P rest frame)
+    if (dot(P,P).le.0d0) return
     esum=dsqrt(dot(P,P))
     Pm(0)=P(0)
     Pm(1:3)=-P(1:3)
@@ -653,6 +617,7 @@ endif
        beta=1.d0
     endif
 
+    if (threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3)).eq.0d0) return
     ! angles between q1,q2 in CMF_k frame
     costheta = threedot(q1_cmf(1:3),q2_cmf(1:3))/ &
             (sqrt(threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3))))
@@ -706,20 +671,23 @@ endif
             jac = jac/(4d0*sqrt(kallen(sqrtshat**2,0d0,0d0)))
             p1 = pass1
             p2 = pass2
+            
             return
          elseif (one_pt) then
             pt2min=pt_min**2
-            pt2max=sqrts**2/4d0
+            pt2max=sqrtshat**2/4d0
             ix=ix+1
             call random_to_var(x(ix),-1d0,pt2min,pt2max,pt2,jac)
+            pt=sqrt(pt2)
             ! generate phi
             ix=ix+1
             call random_to_var(x(ix),0d0,-pi,pi,phi,jac)
             ! generate rapidity
             ix=ix+1
-            call random_to_var(x(ix),0d0,-eta_max,eta_max,y,jac)
+            ymin=-min(eta_max,acosh(sqrtshat/pt))
+            ymax=min(eta_max,acosh(sqrtshat/pt))
+            call random_to_var(x(ix),0d0,ymin,ymax,y,jac)
             ! fill momentum
-            pt=sqrt(pt2)
             pass1(1)=pt*cos(phi)
             pass1(2)=pt*sin(phi)
             pass1(3)=pt*sinh(y)
@@ -728,8 +696,11 @@ endif
             pass2(0)=sqrtshat-pass1(0)
             pass2(1:3)=-pass1(1:3)
 
+            if (dot(pass2,pass2).lt.0d0) return
+
             p1 = pass1
             p2 = pass2
+            jac=jac/(32d0*pi*pi*pi)
             return
 
          endif
@@ -743,6 +714,9 @@ endif
        endif
     endif
      
+
+
+
     ! cuts on a1 and a2
     a2cut = (k-1)*(s0/2d0)/(dot(q2_cmf,P_cmf))  ! should be (k+1) dont change!
     a1cut = (s0/2d0)/(dot(q1_cmf,P_cmf))
@@ -1099,7 +1073,8 @@ endif
 
     ! S limits exactly same as in COMIX! 
 
-    if ((.not.open) .and. (.not.schannel) .and. (.not. flat)) then
+    if (smin.gt.smax) return
+    if ((.not.open) .and. (.not. flat)) then
        ix = ix +1
        call random_to_var(x(ix),0d0,0d0,1d0,R,dum)
        C = ((smax - A)*(B-smin)/((B-smax) * (smin - A)))**R
@@ -1122,13 +1097,6 @@ endif
        call random_to_var(x(ix),-1d0,smin,smax,s2,dum)
        soft = soft*log(smax/smin)
        jaco = jaco*s2
-    endif
-    if (schannel) then
-       smin = 0
-       smax = s
-       ix = ix +1
-       call random_to_var(x(ix),0d0,smin,smax,s2,dum)
-       soft = soft*(smax-smin)
     endif
   end subroutine generate_s2
 
@@ -1172,7 +1140,7 @@ endif
           /(a1max + h1 + buff(2) +f_h1)
 
     ! Now generate a1, depending on which distribution
-    if ((.not. open) .and. (.not. schannel) .and. (.not. flat)) then
+    if ((.not. open) .and. (.not. flat)) then
       if (( ((i .ne. 0) .and. (.not. m1)) .or. (maxn .ne. n))) then
         ! Sample with Pi^{-1/2} factor
         ix = ix + 1
@@ -1197,7 +1165,6 @@ endif
         soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
         jaco = jaco*a1
         jaco = jaco*beta
-
       elseif (((i .eq. 0) .or. (m1 .and. (i .le. 1)))) then
         ! Sample with 1/x 
         ix = ix + 1
@@ -1209,7 +1176,7 @@ endif
               num_error = num_error+1
       endif
     endif
-   
+
     if ((flat)) then
       ix = ix +1
       call random_to_var(x(ix),0d0,a1min,a1max,a1,dum)
@@ -1220,12 +1187,6 @@ endif
         call random_to_var(x(ix),-1d0,a1min,a1max,a1,dum)
         soft = soft*log(a1max/a1min)
         jaco = jaco*a1
-    endif
-    if (schannel) then
-        ! a1 here is actually cos(theta) in spherical coord
-        ix = ix + 1
-        call random_to_var(x(ix),0d0,-1d0,1d0,a1,dum)
-        soft = soft*(1d0-(-1d0))
     endif
   end subroutine generate_a1_term1
 
@@ -1298,7 +1259,7 @@ endif
     ! Pretty much same as COMIX, except h stuff
 
     ! Now generate a2
-    if ((.not. open) .and. (.not. schannel) .and. (.not. flat)) then
+    if ((.not. open) .and. (.not. flat)) then
     if ((m1 .and. (i .ge. 2)) .or.&
             ((.not. m1) .and. (maxn .eq. n) .and. (i .ge. 1))&
             .or. (maxn .ne. n))  then
@@ -1332,13 +1293,7 @@ endif
     if (open) then
       a2 = 300d0          ! dummy value to do phi-integration
     endif
-    if (schannel) then
-      ! a2 is really phi here
-      ix = ix +1
-      call random_to_var(x(ix),0d0,0d0,2d0*pi,a2,dum)
-      soft = soft*2d0
-      jaco = jaco*dsqrt(kallen(s,s2,0d0))/(8d0*s)
-    endif
+
   end subroutine generate_a2_term1
 
   subroutine generate_a2_term2(i,m1,maxn,s,s1,s2,cos,a2cut,beta,a2)
@@ -1467,7 +1422,6 @@ endif
     logical,parameter :: old_mapping=.false.
     real(kind=8),external :: ran2
           
-    if (.not. schannel) then
     if (a2 .gt. 100d0) then
         z = E - dsqrt(s)*a1
         ix = ix + 1
@@ -1511,15 +1465,6 @@ endif
         call rot_to_z(q1_cmf,p2_xy_rot,p2_rot,-1d0)
 
     endif
-    endif
-
-    if (schannel) then
-       ! Keep in mind that a1 = costheta and a2 = phi here
-       pmag = dsqrt(kallen(s,s2,0d0)/(4d0*s))
-       p1_rot(1) = pmag*dsqrt(1d0-a1**2)*cos(a2)
-       p1_rot(2) = pmag*dsqrt(1d0-a1**2)*sin(a2)
-       p1_rot(3) = pmag*a1
-    endif        
 
     solver = (/p1_rot(1),p1_rot(2),p1_rot(3)/)
   end function solver

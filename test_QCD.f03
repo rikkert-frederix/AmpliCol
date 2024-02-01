@@ -14,14 +14,17 @@ program test_QCD
   integer :: i,ih,iden,iperm,jperm,nperm
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8) :: amp2,t
-  real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0
+  real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0,alphaEW=7.547E-003
   real(kind=8),dimension(:,:),allocatable :: col_fac
   complex(kind=8) :: ztemp
-  logical :: quarks, single_perm
+  logical :: quarks, single_perm,photon
   real(kind=8) :: tBefore,tAfter,t_eval,t_init
+  real(kind=8) :: Q
 
-  n=5
+  n=4
   quarks=.true.
+  photon=.true.
+  if (.not.quarks) photon=.false.
   single_perm = .false.
   
   allocate(part(n))
@@ -29,6 +32,7 @@ program test_QCD
   if (n.eq.4) then
      if (quarks) then
         nperm = 2
+        if (photon) nperm = 1 
      else
         nperm = 3*2
      endif
@@ -36,6 +40,7 @@ program test_QCD
   elseif (n.eq.5) then
      if (quarks) then
         nperm = 3*2   
+        if (photon) nperm = 2
      else
         nperm = 4*3*2
      endif
@@ -87,14 +92,15 @@ program test_QCD
 
   if (n.eq.4) then
      if (quarks) then
-       part(1:n)=[-1,21,21,-1]
-       iden=3*8*2*2
-       order(1:n,1)= [1,2,3,4]
-       if (.not. single_perm) then
-         order(1:n,2)= [1,3,2,4]
-         iden=iden*1
-       endif
+       !part(1:n)=[-1,21,21,-1]
+       !iden=3*8*2*2
+       !order(1:n,1)= [1,2,3,4]
+       !if (.not. single_perm) then
+       !  order(1:n,2)= [1,3,2,4]
+       !  iden=iden*1
+       !endif
 
+       if (.not.photon) then
        part(1:n)=[-1,1,21,21]
        iden=3*3*2*2
        order(1:n,1)= [1,3,4,2]
@@ -102,13 +108,30 @@ program test_QCD
          order(1:n,2)= [1,4,3,2]
          iden=iden*2
        endif
+       endif
 
-       part(1:n)=[21,21,-1,1]
-       iden=8*8*2*2
-       order(1:n,1)= [4,1,2,3]
+       !part(1:n)=[21,21,-1,1]
+       !iden=8*8*2*2
+       !order(1:n,1)= [4,1,2,3]
+       !if (.not. single_perm) then
+       !  order(1:n,2)= [4,2,1,3]
+       !  iden=iden*1
+       !endif
+
+       if (photon) then
+       part(1:n)=[-1,21,-1,22]
+       iden=3*8*2*2
+       order(1:n,1)= [1,2,4,3]
        if (.not. single_perm) then
-         order(1:n,2)= [4,2,1,3]
          iden=iden*1
+       endif
+
+       !part(1:n)=[-1,21,-1,22]
+       !iden=3*7*2*2
+       !order(1:n,1)= [1,2,4,3]
+       !if (.not. single_perm) then
+       !  iden=iden*1
+       !endif
        endif
 
      else
@@ -126,42 +149,55 @@ program test_QCD
      endif
 
   elseif (n.eq.5) then
-     if (quarks) then
-       part(1:n)=[-1,21,-1,21,21]
-       iden=3*8*2*2 ! initial status colours and helicities/polarisation
-       order(1:n,1)=[1,2,5,4,3]
-       if (.not.single_perm) then
-         order(1:n,2)=[1,2,4,5,3]
-         order(1:n,3)=[1,5,2,4,3]
-         order(1:n,4)=[1,5,4,2,3]
-         order(1:n,5)=[1,4,2,5,3]
-         order(1:n,6)=[1,4,5,2,3]
-         iden=iden*2  ! final state identical particles
+
+    if (quarks) then
+     if (photon) then
+       part(1:n)=[-1,1,21,21,22]
+       iden=3*3*2*2
+       order(1:n,1)= [1,3,4,5,2]
+       if (.not. single_perm) then
+         order(1:n,2)= [1,4,3,5,2]
+         iden=iden*2
        endif
 
+     else
        part(1:n)=[-1,1,21,21,21]
-       iden=3*3*2*2 ! initial status colours and helicities/polarisation
-       order(1:n,1)=[1,3,4,5,2]
+       iden=3*8*2*2 ! initial status colours and helicities/polarisation
+       order(1:n,1)=  [1,3,4,5,2]
        if (.not.single_perm) then
          order(1:n,2)=[1,3,5,4,2]
          order(1:n,3)=[1,4,3,5,2]
          order(1:n,4)=[1,4,5,3,2]
          order(1:n,5)=[1,5,3,4,2]
          order(1:n,6)=[1,5,4,3,2]
-         iden=iden*3*2   ! final state identical particles
+         iden=iden*2  ! final state identical particles
        endif
 
-       part(1:n)=[21,21,1,-1,21]
-       iden=8*8*2*2
-         order(1:n,1)=[3,1,2,5,4]
-       if (.not.single_perm) then
-         order(1:n,2)=[3,1,5,2,4]
-         order(1:n,3)=[3,2,1,5,4]
-         order(1:n,4)=[3,2,5,1,4]
-         order(1:n,5)=[3,5,1,2,4]
-         order(1:n,6)=[3,5,2,1,4]
-         iden=iden*1 
-       endif
+       !part(1:n)=[-1,1,21,21,21]
+       !iden=3*3*2*2 ! initial status colours and helicities/polarisation
+       !order(1:n,1)=[1,3,4,5,2]
+       !if (.not.single_perm) then
+       !  order(1:n,2)=[1,3,5,4,2]
+       !  order(1:n,3)=[1,4,3,5,2]
+       !  order(1:n,4)=[1,4,5,3,2]
+       !  order(1:n,5)=[1,5,3,4,2]
+       !  order(1:n,6)=[1,5,4,3,2]
+       !  iden=iden*3*2   ! final state identical particles
+       !endif
+
+       !part(1:n)=[21,21,1,-1,21]
+       !iden=8*8*2*2
+       !  order(1:n,1)=[3,1,2,5,4]
+       !if (.not.single_perm) then
+       !  order(1:n,2)=[3,1,5,2,4]
+       !  order(1:n,3)=[3,2,1,5,4]
+       !  order(1:n,4)=[3,2,5,1,4]
+       !  order(1:n,5)=[3,5,1,2,4]
+       !  order(1:n,6)=[3,5,2,1,4]
+       !  iden=iden*1 
+       !endif
+
+      endif
 
      else
        part(1:n)=[21,21,21,21,21]   
@@ -393,38 +429,27 @@ program test_QCD
      do iperm=1,nperm
         if (quarks) then
           col_fac(iperm,jperm)=color_factor(iperm,jperm) ! colour factor for qqbar+gluons
+          if (photon) col_fac(iperm,jperm)=color_factor_photon(iperm,jperm)
         else
           col_fac(iperm,jperm)=color_factor_gluons(iperm,jperm) ! colour factor for all-gluons
         endif
      enddo
   enddo
 
-  !write(*,*) col_fac(1,1)
-  !write(*,*) col_fac(1,2)
-  !write(*,*) col_fac(2,1)
-  !write(*,*) col_fac(2,2)
-
   amp2=0d0
   if (.not.single_perm)then
     do ih=1,2**n
-     
      t=0d0
-!!$  do ih=0,2**n-1
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
            ztemp=ztemp+amps(iperm)%amps(ih)*col_fac(iperm,jperm)
         enddo
-        !write(*,*) 'adding',dble(ztemp*dconjg(amps(jperm)%amps(ih)))
         t=t+dble(ztemp*dconjg(amps(jperm)%amps(ih)))
      enddo
-!     write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2),'for helicity',(ih-1)
      amp2=amp2+t
     enddo
   else
-
-
-
     t=0d0
     do jperm=1,nperm    ! loop over permutations of conjugated amplitude
        ztemp=(0d0,0d0)
@@ -433,11 +458,27 @@ program test_QCD
        enddo
        t=t+dble(ztemp*dconjg(amps_col%amps(jperm)))
     enddo
-!    write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2)
+    !write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2)
    amp2=t
   endif
-  
-  amp2=amp2*(4*pi*alphas)**(n-2)/dble(iden)
+
+  if (photon) then
+  do i=1,n
+     if (abs(part(i)).le.6) then
+        if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
+        if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
+     endif
+  enddo
+  endif
+
+
+  if (photon) then 
+       amp2=amp2*(4*pi*alphas)**(n-3)/dble(iden)
+       amp2=amp2*(Q*dsqrt(4*pi*alphaEW))**2 
+       amp2=amp2*dsqrt(2d0)*dsqrt(2d0) ! do to normalization of fund. matrices
+  else
+       amp2=amp2*(4*pi*alphas)**(n-2)/dble(iden)
+  endif
 
   write(*,*) 'IDEN',iden
   write (*,*) 'Matrix element =',amp2,'GeV^',-(2*n-8)
@@ -465,8 +506,8 @@ contains
     Tr(n-1:2*(n-2),1,1)=jper(n-2:1:-1)
     coef(1)=1
     call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-!!$    if (jperm.ne.iperm) col_factor=col_factor*2d0 ! add factor 2 for off-diagonal terms
     color_factor=dble(col_factor)
+    if (.not.photon) write(*,*) color_factor
   end function color_factor
 
   double precision function color_factor_gluons(iperm,jperm)
@@ -490,5 +531,25 @@ contains
     color_factor_gluons=dble(col_factor)
   end function color_factor_gluons
 
+    double precision function color_factor_photon(iperm,jperm)
+    ! Compute colour factor for permutation numbers 'iperm' and
+    ! 'jperm', for qqbar+gluons
+    use color_algebra
+    implicit none
+    integer :: iperm,jperm
+    integer, dimension(n) :: iper,jper
+    real*16 :: col_factor
+
+    iper(1:n-3)=order(2:n-2,iperm)
+    jper(1:n-3)=order(2:n-2,jperm)
+    Tr(0,0,0)=1 ! one term
+    Tr(0,0,1)=1 ! that term is single string of matrices
+    Tr(0,1,1)=2*(n-3)
+    Tr(1:n-3,1,1)=iper(1:n-3) ! the order of the matrices in each term
+    Tr(n-2:2*(n-3),1,1)=jper(n-3:1:-1)
+    coef(1)=1
+    call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+    color_factor_photon=dble(col_factor)
+  end function color_factor_photon
   
 end program test_QCD
