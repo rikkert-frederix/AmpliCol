@@ -2,6 +2,7 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
+  logical,parameter :: color_flow=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -272,6 +273,7 @@ contains
          write (*,*) 'Number of colour orders unknown',nq
          stop 1
       endif
+
      end subroutine define_canonical_color_order
 
     subroutine check_input_consistency()
@@ -835,7 +837,9 @@ contains
       integer,intent(out) :: singlet_move
       integer,dimension(n1) :: ip1
       integer,dimension(n2) :: ip2
+
       singlet_move=0
+
       do i=n1,1,-1
          if (part(ip1(i)).eq.22) then
             singlet_move=singlet_move+1
@@ -843,6 +847,8 @@ contains
             exit
          endif
       enddo
+
+
       if (i.eq.n1) then ! no colour singlets
          combined_currents(1:isize)=[ip1(1:n1),ip2(1:n2)]
       else              ! n1-i colour singlets
@@ -1284,7 +1290,8 @@ contains
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
-          do ic=this%n_cur_start(isize),this%n_cur_end(isize)   
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+             !write(*,*) 'ic',ic  
              if (this%current_list(ic)%order(1).le.2) then
                 ifinal=-1
              else
@@ -1302,26 +1309,46 @@ contains
                    ih_in=ih-1
                 endif
                 if (this%current_list(ic)%type.eq.21) then
+                   !write(*,*) 'gluon'
+                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
+                   !write(*,*) ih_in,ifinal
                    if (use_real_gluons) then
                       call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
                    else
                       call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                      !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
+                   !write(*,*) 'quark'
+                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
+                   !write(*,*) ih_in,ifinal
                    call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                   !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
+                   !write(*,*) 'anti-quark'
+                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
+                   !write(*,*) ih_in,ifinal
                    call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                   !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                 elseif (this%current_list(ic)%type.eq.22) then
+                   !write(*,*) 'photon'
+                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
+                   !write(*,*) ih_in,ifinal
                    if (use_real_gluons) then
                       call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
                    else
                       call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                      !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                    endif
                 else
                    write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih
@@ -1474,6 +1501,11 @@ contains
             if (btest(ibin,i-1)) this%pp(0:3,ip)=this%pp(0:3,ip)+p(0:3,i)
          enddo
       enddo
+         !this%pp(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+         !this%pp(0:3,4)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+         !this%pp(0:3,2)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
+         !this%pp(0:3,3)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
+
     end subroutine fill_momentum_array
     subroutine compute_amps_from_currents
       implicit none
@@ -1516,6 +1548,7 @@ contains
                endif
             enddo
          endif
+
       elseif (this%imode.eq.3) then
          if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
             this%amps_r(1)=sum(this%current_list(this%n_cur)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,2))
@@ -1588,13 +1621,16 @@ contains
     real(kind=8),dimension(1:3) :: col_fac
     real(kind=8),dimension(max_vals,1:3) :: diff_vals
     integer,dimension(:,:),allocatable :: ic,ir
-    logical colour_flow
+    integer :: ri,rj,lim,y,t
+
     write (*,*) 'Initialising colour matrix ...'
     if (this%n_qqbar.eq.0) then
-       colour_flow=.true.
+       lim=0
     elseif (this%n_qqbar.eq.1) then
-       colour_flow=.false.
+       lim=0
+       if (color_flow) lim=1 ! for NLC only
     endif
+
 ! first check a single row in the colour matrix to determine how many
 ! different colour factors there are
     n_vals(1:3)=0
@@ -1604,30 +1640,45 @@ contains
     elseif (this%n_qqbar.eq.1) then
        iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
     endif
+
+    do ri=0,lim ! number of U(1) gluons in amp
     do jperm=iperm,this%nColOrd
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
           jper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
        endif
-       call compute_color_factor(col_acc,n-this%n_sing,iper,jper,col_fac,colour_flow)
-       if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-       do iacc=1,3
-          if (col_fac(iacc).eq.0d0) cycle
-          do ival=1,n_vals(iacc)
-             if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
-          enddo
-          if (ival.ge.max_vals) then
-             write (*,*) 'Too many different colour factors. Increase max_vals',&
-                  ival,n_vals(1:3),max_vals
-             stop 1
-          elseif (ival.eq.n_vals(iacc)+1) then
-             ! new colour factor
-             n_vals(iacc)=n_vals(iacc)+1
-             diff_vals(n_vals(iacc),iacc)=col_fac(iacc)
+
+       do rj=0,lim
+          call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,col_fac,color_flow)
+          if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
+          if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           endif
+          write(*,*) iper
+            write(*,*) ri
+            write(*,*) jper
+            write(*,*) rj
+            write(*,*) col_fac
+          do iacc=1,3
+            if (col_fac(iacc).eq.0d0) cycle
+             do ival=1,n_vals(iacc)
+               if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
+             enddo
+             if (ival.ge.max_vals) then
+               write (*,*) 'Too many different colour factors. Increase max_vals',&
+                  ival,n_vals(1:3),max_vals
+               stop 1
+             elseif (ival.eq.n_vals(iacc)+1) then
+               ! new colour factor
+               n_vals(iacc)=n_vals(iacc)+1
+               diff_vals(n_vals(iacc),iacc)=col_fac(iacc)
+             endif
+          enddo
        enddo
+     enddo
     enddo
+
+
     write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
          ' different colour factors at LC, NLC and full colour, respectively'
     
@@ -1635,7 +1686,7 @@ contains
     allocate(ic(1:maxval(n_vals(1:3)),1:3))
     allocate(ir(1:maxval(n_vals(1:3)),1:3))
     allocate(this%col_index(1:this%nColOrd**2,1:maxval(n_vals(1:3)),1:3))
-    allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3)),1:3))
+    allocate(this%row_index(0:this%nColOrd*2,1:maxval(n_vals(1:3)),1:3)) ! for colopur flow *2
     this%row_index(0,1:maxval(n_vals(1:3)),1:3)=0
     allocate(this%n_col_vals(1:3))
     this%n_col_vals(1:3)=n_vals(1:3)
@@ -1647,59 +1698,105 @@ contains
 ! Compute all the colour factors and fill the col_index and row_index arrays
     ic=0
     ir=0
+
+    do ri=0,lim
     do iperm=1,this%nColOrd
        if (this%n_qqbar.eq.0) then
           iper(1:n)=[this%perm(1:n-1,iperm),n]
        elseif (this%n_qqbar.eq.1) then
           iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
        endif
-       do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+
+        ! for now, include all matrix
+        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
           if (this%n_qqbar.eq.0) then
              jper(1:n)=[this%perm(1:n-1,jperm),n]
           elseif (this%n_qqbar.eq.1) then
              jper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
           endif
-          call compute_color_factor(col_acc,n-this%n_sing,iper,jper,col_fac,colour_flow)
-          if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          do iacc=1,3
-             if (col_fac(iacc).eq.0d0) cycle
-             do ival=1,n_vals(iacc)
-                if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
-             enddo
-             ic(ival,iacc)=ic(ival,iacc)+1
-             ir(ival,iacc)=ir(ival,iacc)+1
-             this%col_index(ic(ival,iacc),ival,iacc)=jperm
+
+          do rj=0,lim
+            call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,col_fac,color_flow)
+            if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
+              if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+            endif
+            write(*,*) iper
+            write(*,*) ri
+            write(*,*) jper 
+            write(*,*) rj
+            write(*,*) col_fac
+
+            do iacc=1,3
+              if (col_fac(iacc).eq.0d0) cycle
+               do ival=1,n_vals(iacc)
+                 if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
+               enddo   
+               !write(*,*) 'ival',ival
+               ic(ival,iacc)=ic(ival,iacc)+1
+               ir(ival,iacc)=ir(ival,iacc)+1
+               this%col_index(ic(ival,iacc),ival,iacc)=(rj*this%nColOrd)+jperm
+               write(*,*) 'ic',ic(ival,iacc)
+               write(*,*) 'filled COL',this%col_index(ic(ival,iacc),ival,iacc)
+            enddo
           enddo
-       enddo
-       do iacc=1,3
-          this%row_index(iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
-       enddo
+        enddo
+
+
+        do iacc=1,3
+          write(*,*) 'irow',(ri*this%nColOrd)+iperm
+          this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
+        enddo
+      enddo
     enddo
     write (*,*) '... colour matrix initialised'
   contains
-    subroutine compute_color_factor(col_acc,n,iper,jper,col_fac,color_flow)
+    subroutine compute_color_factor(col_acc,n,iper,jper,ri,rj,col_fac,color_flow)
       use color_algebra
       implicit none
       integer :: i,n,acc,col_acc,color_fac
       real(kind=8),dimension(1:3) :: col_fac
       integer,dimension(n) :: iper,jper
+      integer,dimension(n) :: iper_red, jper_red
       logical :: color_flow
       real(kind=16) :: col_factor
+      integer :: ri,rj
+
       if (color_flow) then
          if (this%n_qqbar.ne.0) then
-            write (*,*) 'Can only compute color-flow colour factor for all-gluon processes'
-            stop 1
-         endif
-         col_fac=0d0
-         call color_flow_factor(n,jper,iper,color_fac)
-         if (color_fac.ge.n-2*min(col_acc,0)) then
-            col_fac(1)=dble(3**color_fac)
-         endif
-         if(color_fac.ge.n-2*min(col_acc,1)) then
-            col_fac(2)=dble(3**color_fac)
-         endif
-         if(color_fac.ge.n-2*col_acc) then
-            col_fac(3)=dble(3**color_fac)
+            col_fac=0d0
+            call convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
+            call color_flow_factor_1qqbar(n,iper_red,jper_red,ri,rj,color_fac)
+            if (col_acc.ge.0) then
+              if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
+                    col_fac(1)=dble(3**color_fac) ! U(3)xU(3) LC
+              endif
+            endif
+            if (col_acc.ge.1) then
+            if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
+                    col_fac(2)=dble(3**color_fac) ! U(3)xU(3) LC
+            elseif (ri.eq.rj.and.ri.eq.0.and..not.all(iper.eq.jper)) then
+                    col_fac(2)=dble(3**color_fac) ! U(3)xU(3) NLC
+            elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.all(iper.eq.jper)) then
+                    col_fac(2)=-(n-2)*dble(3**color_fac)  ! U(1)xU(3) NLC
+            elseif (ri.eq.rj.and.ri.eq.1.and.all(iper.eq.jper)) then 
+                    col_fac(2)=dble(3**color_fac) ! U(1)xU(1) NLC
+            endif
+            endif
+            if (col_acc.ge.2) then
+            col_fac(3)=0d0 ! no full colour for now
+            endif
+         else
+           col_fac=0d0
+           call color_flow_factor(n,jper,iper,color_fac)
+           if (color_fac.ge.n-2*min(col_acc,0)) then
+             col_fac(1)=dble(3**color_fac)
+           endif
+           if(color_fac.ge.n-2*min(col_acc,1)) then
+             col_fac(2)=dble(3**color_fac)
+           endif
+           if(color_fac.ge.n-2*col_acc) then
+             col_fac(3)=dble(3**color_fac)
+           endif
          endif
       else
          col_fac(1:3)=0d0
@@ -1802,6 +1899,57 @@ contains
          endif
       endif
     end subroutine compute_color_factor
+
+
+    subroutine convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
+       implicit none
+       integer :: n,i,j,maxval,minval,low,upp,min_x,max_x
+       integer,dimension(n) :: iper,jper,iper_red,jper_red
+       integer,dimension(2,n) :: dual,dual_red
+
+       minval=100
+       maxval=-1
+       iper_red=0
+       jper_red=0
+       dual(1,1:n)=iper(1:n)
+       dual(2,1:n)=jper(1:n)
+       dual_red(1,:)=iper_red
+       dual_red(2,:)=jper_red
+       dual(1:2,1)=0
+       dual(1:2,n)=0
+
+       do j=1,2
+         minval=100
+         maxval=-1
+         low=1
+         upp=n-2
+         do
+         minval=100
+         maxval=-1
+         do i=2,n-1
+           if (dual(j,i).lt.minval.and.dual(j,i).ne.0) then
+               minval=dual(j,i)
+               min_x = i
+           endif
+           if (dual(j,i).gt.maxval.and.dual(j,i).ne.0) then
+              maxval=dual(j,i)
+              max_x = i
+           endif
+         enddo
+         dual_red(j,min_x)=low
+         dual_red(j,max_x)=upp
+         low=low+1
+         upp=upp-1
+         dual(j,min_x)=0
+         dual(j,max_x)=0
+         if (all(dual(j,:).eq.0)) exit
+         enddo
+       enddo
+
+       iper_red(1:n) = dual_red(1,1:n)
+       jper_red(1:n) = dual_red(2,1:n)
+    end subroutine convert_perm_color_flow
+
   end subroutine init_col2
   
 end module amplitude_QCD_mod

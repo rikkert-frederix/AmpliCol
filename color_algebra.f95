@@ -45,6 +45,7 @@ module color_algebra
        & Tr_print_string,&      ! Print the colour string in human readable format
        & convert_Fs_to_Tr,&     ! Convert a string of F-matrices to lambda matrices
        & color_flow_factor,&    ! Compute color factor in color flow basis
+       & color_flow_factor_1qqbar,&    ! Compute color factor in color flow basis for 1qq+gluons
        & ipnext,&               ! Helper function: get next permutation
        & get_next_iperm,&       ! Helper function: get next permutation (advanced)
        & check_NLC,&
@@ -581,6 +582,93 @@ contains
 !!$    col_fac=Nc**(-colfac)
     col_fac=-colfac
   end subroutine color_flow_factor
+
+    subroutine color_flow_factor_1qqbar(n,iper,jper,ri,rj,col_fac)
+    ! Given two permutations (iper and jper) compute corresponding
+    ! colour factor using the color flow decomposition (i.e., string
+    ! of kronecker delta's -- eq.3 of hep-ph/0209271 [Maltoni, Paul,
+    ! Stelzer & Willenbrock]).
+    ! It sets up the string of delta's, contracts all the indices,
+    ! counts the closed loops ('colfac'), and set the color factor
+    ! equal to Nc**colfac.
+    !
+    ! by Timea Vitos
+    !
+    implicit none
+    integer :: n                 ! number of external particles
+    integer,dimension(n) :: iper ! order in amplitude
+    integer,dimension(n) :: jper ! order in conjugate amplitude
+    integer,dimension(n-1) :: iper_q_up,iper_q_down,iper_q ! Krnecker delta string
+    integer,dimension(n-1) :: jper_q_up,jper_q_down,jper_q
+    integer :: col_fac           ! color factor
+    integer :: index,colfac,i,flip,m,k
+    integer, dimension(n-1) :: it,jt
+    integer :: ri,rj ! number of U(1) gluons
+    integer, dimension(ri+1) :: it_1,iper_q_1
+    integer, dimension(rj+1) :: jt_1,jper_q_1
+    integer, dimension(n-1) :: itemp
+
+    iper_q_up(1) = n-1
+    iper_q_up(2:n-1) = iper(2:n-1)
+
+    jper_q_up(1) = n-1
+    jper_q_up(2:n-1) = jper(2:n-1)
+
+    iper_q_down(1:n-2-ri) = iper(2:n-2-ri+1)
+    iper_q_down(n-2-ri+1) = n-1
+    iper_q_down(n-2-ri+2:n-1) = iper(n-2-ri+2:n-1)
+
+    jper_q_down(1:n-2-rj) = jper(2:n-2-rj+1)
+    jper_q_down(n-2-rj+1) = n-1
+    jper_q_down(n-2-rj+2:n-1) = jper(n-2-rj+2:n-1)
+    itemp = jper_q_down
+    jper_q_down = jper_q_up
+    jper_q_up = itemp
+
+    !write(*,*) iper_q_up
+    !write(*,*) iper_q_down
+    !write(*,*) jper_q_up
+    !write(*,*) jper_q_down
+
+    do i=1,size(iper_q_down)
+       if (iper_q_down(i) .eq. i) then
+               iper_q(i) = iper_q_up(i)
+       else
+          iper_q(iper_q_down(i)) = iper_q_up(i)
+       endif
+    enddo
+
+    do i=1,size(jper_q_down)
+       if (jper_q_down(i) .eq. i) then
+               jper_q(i) = jper_q_up(i)
+       else
+          jper_q(jper_q_down(i)) = jper_q_up(i)
+       endif
+    enddo
+
+    index=1
+    colfac=-1
+    flip=0
+    do
+       do
+          if (index.gt.n-1) exit
+          if (iper_q(index).ge.1) exit
+          index=index+1
+       enddo
+       if (index .ge. n-1) exit
+       k=index
+       do while (iper_q(k) .ge. 1)
+          m=k
+          k=jper_q(iper_q(k))
+          iper_q(m)=colfac
+          flip=flip+1
+       enddo
+       if (flip.lt.n-1) colfac=colfac-1
+    enddo
+!!$    col_fac=Nc**(-colfac)
+    col_fac=-colfac
+    col_fac = col_fac - (ri) - (rj)
+  end subroutine color_flow_factor_1qqbar
 
 
 

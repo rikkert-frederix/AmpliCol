@@ -27,6 +27,7 @@ program matrix_reweight
   use timings
   implicit none
   integer :: i,col_acc,icol,ihel,hel_picked,irow,ic,iacc
+  integer :: icol_mat,irow_mat,ri,ri_end ! TV
   integer,dimension(:),allocatable :: hel,o,part
   real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: amp2,amp_col
@@ -77,7 +78,6 @@ program matrix_reweight
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
-
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
@@ -115,19 +115,44 @@ program matrix_reweight
               endif
            enddo
         else
+           write(*,*) '*********************'
+           if (color_flow) ri_end=1
+           if (.not.color_flow) ri_end=0
+           do ri=0,ri_end ! loop over no U(1) and one U(1) in the rows
            do irow=1,amp_QCD%nColOrd
               amp_col_c=(0d0,0d0)
+              if (ri.eq.0) irow_mat = irow
+              if (ri.eq.1) irow_mat = irow+amp_QCD%nColOrd
+              write(*,*)
+              write(*,*) 'irow_mat',irow_mat
+              write(*,*) 'amp col c',amp_col_c
+
               do i=1,amp_QCD%n_col_vals(iacc)
                  amp2_c=(0d0,0d0)
-                 do ic=amp_QCD%row_index(irow-1,i,iacc)+1,amp_QCD%row_index(irow,i,iacc)
+                 !write(*,*) 'between',amp_QCD%row_index(irow_mat-1,i,iacc)+1,amp_QCD%row_index(irow_mat,i,iacc)
+                 do ic=amp_QCD%row_index(irow_mat-1,i,iacc)+1,amp_QCD%row_index(irow_mat,i,iacc)
                     icol=amp_QCD%col_index(ic,i,iacc)
-                    amp2_c=amp2_c+amp_QCD%amps(icol)
+                    write(*,*) 'ICOL',icol
+                    if (icol.gt.amp_QCD%nColOrd) icol_mat = icol-amp_QCD%nColOrd
+                    if (icol.le.amp_QCD%nColOrd) icol_mat = icol
+                    amp2_c=amp2_c+amp_QCD%amps(icol_mat)
                  enddo
-                 amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc)
+                 write(*,*) 'added now with colour fac',amp_QCD%diff_col_vals(i,iacc)
+              amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc)
               enddo
               matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+              write(*,*) 'matrix',matrix2(iacc)
+           enddo
            enddo
         endif
+        matrix2(3)=matrix2(2)
+        write(*,*) 'matrix LC',matrix2(1)
+        write(*,*) 'matrix NLC',matrix2(2)
+
+        !do i=1,next
+        !   write(*,*) p(0:3,i)
+        !enddo
+        !stop 13
         call cpu_time(tAfter)
         if (iacc.eq.1) t_mat_LC=t_mat_LC+tAfter-tBefore
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
@@ -293,7 +318,7 @@ contains
     implicit none
     integer :: i,iunit
     rwgt_NLC=matrix2(2)/matrix2(1)
-    rwgt_full=matrix2(3)/matrix2(1)
+    rwgt_full=matrix2(2)/matrix2(1)
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt,wgt,matrix2,weight
     write (iunit,'(100i3)') o(1:next)
