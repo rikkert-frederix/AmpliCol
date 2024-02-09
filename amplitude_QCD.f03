@@ -27,6 +27,7 @@ module amplitude_QCD_mod
           pp_bin_to_i,pp_i_to_bin
      integer,dimension(:,:),allocatable :: perm
      integer,dimension(:,:,:),allocatable :: row_index,col_index
+     integer,dimension(:,:),allocatable :: u1_lin_comb
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
@@ -1628,7 +1629,11 @@ contains
        lim=0
     elseif (this%n_qqbar.eq.1) then
        lim=0
-       if (color_flow) lim=1 ! for NLC only
+       if (color_flow) then
+          lim=1 ! for NLC only
+          allocate(this%u1_lin_comb(1:this%nColOrd,1:(n-2)))
+          call get_u1_lin_comb
+       endif
     endif
 
 ! first check a single row in the colour matrix to determine how many
@@ -1642,7 +1647,7 @@ contains
     endif
 
     do ri=0,lim ! number of U(1) gluons in amp
-    do jperm=iperm,this%nColOrd
+    do jperm=1,this%nColOrd
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
@@ -1654,11 +1659,6 @@ contains
           if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
           if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           endif
-          write(*,*) iper
-            write(*,*) ri
-            write(*,*) jper
-            write(*,*) rj
-            write(*,*) col_fac
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc)
@@ -1678,16 +1678,18 @@ contains
      enddo
     enddo
 
-
     write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
          ' different colour factors at LC, NLC and full colour, respectively'
     
 ! Allocate the arrays now that we now their sizes
     allocate(ic(1:maxval(n_vals(1:3)),1:3))
     allocate(ir(1:maxval(n_vals(1:3)),1:3))
-    allocate(this%col_index(1:this%nColOrd**2,1:maxval(n_vals(1:3)),1:3))
+
+    allocate(this%col_index(1:2*this%nColOrd**2,1:maxval(n_vals(1:3)),1:3))
+
     allocate(this%row_index(0:this%nColOrd*2,1:maxval(n_vals(1:3)),1:3)) ! for colopur flow *2
     this%row_index(0,1:maxval(n_vals(1:3)),1:3)=0
+    this%col_index(0,1:maxval(n_vals(1:3)),1:3)=0
     allocate(this%n_col_vals(1:3))
     this%n_col_vals(1:3)=n_vals(1:3)
     allocate(this%diff_col_vals(1:maxval(n_vals(1:3)),1:3))
@@ -1720,30 +1722,21 @@ contains
             if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
               if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
             endif
-            write(*,*) iper
-            write(*,*) ri
-            write(*,*) jper 
-            write(*,*) rj
-            write(*,*) col_fac
 
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
                do ival=1,n_vals(iacc)
                  if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
                enddo   
-               !write(*,*) 'ival',ival
                ic(ival,iacc)=ic(ival,iacc)+1
                ir(ival,iacc)=ir(ival,iacc)+1
                this%col_index(ic(ival,iacc),ival,iacc)=(rj*this%nColOrd)+jperm
-               write(*,*) 'ic',ic(ival,iacc)
-               write(*,*) 'filled COL',this%col_index(ic(ival,iacc),ival,iacc)
             enddo
           enddo
         enddo
 
 
         do iacc=1,3
-          write(*,*) 'irow',(ri*this%nColOrd)+iperm
           this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
         enddo
       enddo
@@ -1771,15 +1764,18 @@ contains
                     col_fac(1)=dble(3**color_fac) ! U(3)xU(3) LC
               endif
             endif
+
             if (col_acc.ge.1) then
             if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
                     col_fac(2)=dble(3**color_fac) ! U(3)xU(3) LC
-            elseif (ri.eq.rj.and.ri.eq.0.and..not.all(iper.eq.jper)) then
+            elseif (ri.eq.rj.and.ri.eq.0.and.color_fac.eq.(n-3)) then
                     col_fac(2)=dble(3**color_fac) ! U(3)xU(3) NLC
-            elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.all(iper.eq.jper)) then
-                    col_fac(2)=-(n-2)*dble(3**color_fac)  ! U(1)xU(3) NLC
-            elseif (ri.eq.rj.and.ri.eq.1.and.all(iper.eq.jper)) then 
-                    col_fac(2)=dble(3**color_fac) ! U(1)xU(1) NLC
+            ! comment out below...
+            !elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
+            !        col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
+            ! ... and set this to -(n-2)*
+            elseif (ri.eq.rj.and.ri.eq.1.and.color_fac.eq.(n-3)) then 
+                    col_fac(2)=-(n-2)*dble(3**color_fac) ! U(1)xU(1) NLC
             endif
             endif
             if (col_acc.ge.2) then
@@ -1821,7 +1817,7 @@ contains
                endif
             elseif (this%n_qqbar.eq.1) then
                if (all(iper.eq.jper)) then
-!!$                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
+                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
                   ! include the full expansion
                   call Tr_allocate(n)
                   Tr(0,0,0)=1 ! one term
@@ -1833,11 +1829,11 @@ contains
                   coef_Nc(:,:)=0
                   coef_Nc(0,1)=1
                   call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                  col_fac(2)=dble(col_factor)
+                  !col_fac(2)=dble(col_factor)
                   call Tr_deallocate
                else
                   call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
-!!$                  col_fac(2)=dble(acc*(3)**(n-3))
+                  col_fac(2)=dble(acc*(3)**(n-3))
                   ! include the full expansion
                   if (acc.ne.0) then
                      call Tr_allocate(n)
@@ -1850,7 +1846,7 @@ contains
                      coef_Nc(:,:)=0
                      coef_Nc(0,1)=1
                      call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                     col_fac(2)=dble(col_factor)
+                     !col_fac(2)=dble(col_factor)
                      call Tr_deallocate
                   endif
                endif
@@ -1900,6 +1896,33 @@ contains
       endif
     end subroutine compute_color_factor
 
+    subroutine get_u1_lin_comb
+      implicit none
+      integer i,j,k,l,ii
+      integer,dimension(1:n-2-this%n_sing-1) :: u1_rem,u1_test
+      integer,dimension(1:n-2-this%n_sing) :: perm,temp_perm
+
+      do i=1,this%nColOrd
+          ii=1
+          perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,i)
+          u1_rem(1:n-2-this%n_sing-1) = perm(1:n-2-this%n_sing)
+          do j=1,this%nColOrd
+             temp_perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,j)
+             k=1
+             do l=1,n-2-this%n_sing
+               if (temp_perm(l).ne.perm(n-2-this%n_sing)) then
+                  u1_test(k) = temp_perm(l)
+                  k = k+1
+               endif
+             enddo
+             if (all(u1_test.eq.u1_rem)) then
+                 this%u1_lin_comb(i,ii) = j
+                 ii = ii+1
+             endif
+          enddo
+      enddo
+
+    end subroutine get_u1_lin_comb
 
     subroutine convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
        implicit none
