@@ -117,7 +117,6 @@ program matrix_reweight
               endif
            enddo
         else
-           !write(*,*) '*********************'
            ri_end=0
            if (color_flow) ri_end=1
            do ri=0,ri_end ! loop over no U(1) and one U(1) in the rows
@@ -125,8 +124,6 @@ program matrix_reweight
               amp_col_c=(0d0,0d0)
               if (ri.eq.0) irow_mat = irow
               if (ri.eq.1) irow_mat = irow+amp_QCD%nColOrd
-              !write(*,*) 'irow_mat',irow_mat
-              !write(*,*) 'perm',amp_QCD%perm(:,irow)
               do i=1,amp_QCD%n_col_vals(iacc)
                  amp2_c=(0d0,0d0)
                  do ic=amp_QCD%row_index(irow_mat-1,i,iacc)+1,amp_QCD%row_index(irow_mat,i,iacc)
@@ -141,28 +138,20 @@ program matrix_reweight
                       amp2_c=amp2_c+amp_QCD%amps(icol_mat)
                     endif
                  enddo
-                 !write(*,*) 'added now with colour fac',amp_QCD%diff_col_vals(i,iacc)
                  amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc)
-                 !write(*,*) 'amp col c now',amp_col_c
               enddo
-              !if (ri.eq.1) then
-              !    do j=1,next-2
-              !      matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(amp_QCD%u1_lin_comb(irow,j))))
-              !    enddo
-              !else
+              if (ri.eq.1) then
+                  do j=1,next-2
+                    matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(amp_QCD%u1_lin_comb(irow,j))))
+                  enddo
+              else
                   matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
-              !endif
+              endif
            enddo
            enddo
         endif
         matrix2(3)=matrix2(2)
-        !write(*,*) 'matrix LC',matrix2(1)
-        !write(*,*) 'matrix NLC',matrix2(2)
 
-        !do i=1,amp_QCD%nColOrd
-        !   write(*,*) amp_QCD%perm(1:next-2-amp_QCD%n_sing,i)
-        !enddo
-        !stop 13
         call cpu_time(tAfter)
         if (iacc.eq.1) t_mat_LC=t_mat_LC+tAfter-tBefore
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore

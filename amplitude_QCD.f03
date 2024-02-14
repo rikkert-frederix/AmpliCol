@@ -2,7 +2,7 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
-  logical,parameter :: color_flow=.true.
+  logical,parameter :: color_flow=.false.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -1656,9 +1656,9 @@ contains
 
        do rj=0,lim
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,col_fac,color_flow)
-          if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
-          if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          endif
+          !if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
+          !if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+          !endif
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc)
@@ -1719,9 +1719,9 @@ contains
 
           do rj=0,lim
             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,col_fac,color_flow)
-            if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
-              if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-            endif
+            !if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
+            !  if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+            !endif
 
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
@@ -1771,11 +1771,11 @@ contains
             elseif (ri.eq.rj.and.ri.eq.0.and.color_fac.eq.(n-3)) then
                     col_fac(2)=dble(3**color_fac) ! U(3)xU(3) NLC
             ! comment out below...
-            !elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
-            !        col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
+            elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
+                    col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
             ! ... and set this to -(n-2)*
             elseif (ri.eq.rj.and.ri.eq.1.and.color_fac.eq.(n-3)) then 
-                    col_fac(2)=-(n-2)*dble(3**color_fac) ! U(1)xU(1) NLC
+                    col_fac(2)=dble(3**color_fac) ! U(1)xU(1) NLC
             endif
             endif
             if (col_acc.ge.2) then
