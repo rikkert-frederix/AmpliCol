@@ -1647,7 +1647,7 @@ contains
     endif
 
     do ri=0,lim ! number of U(1) gluons in amp
-    do jperm=1,this%nColOrd
+    do jperm=iperm,this%nColOrd
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
@@ -1656,9 +1656,7 @@ contains
 
        do rj=0,lim
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,col_fac,color_flow)
-          !if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
-          !if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          !endif
+          if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc)
@@ -1710,7 +1708,7 @@ contains
        endif
 
         ! for now, include all matrix
-        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+        do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
           if (this%n_qqbar.eq.0) then
              jper(1:n)=[this%perm(1:n-1,jperm),n]
           elseif (this%n_qqbar.eq.1) then
@@ -1719,10 +1717,7 @@ contains
 
           do rj=0,lim
             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,col_fac,color_flow)
-            !if (.not.(color_flow.and.this%n_qqbar.eq.1)) then
-            !  if (iperm.ne.jperm.or.ri.ne.rj) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-            !endif
-
+            if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
                do ival=1,n_vals(iacc)
