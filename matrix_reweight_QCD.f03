@@ -5,6 +5,7 @@ module common
   implicit none
   integer :: next
   type(amplitude_QCD) :: amp_QCD
+  type(amplitude_QCD),dimension(:),allocatable :: amps
   real(kind=8),dimension(:,:),allocatable :: p
 end module common
 module rw_events
@@ -27,8 +28,8 @@ program matrix_reweight
   use timings
   implicit none
   integer :: i,j,col_acc,icol,ihel,hel_picked,irow,ic,iacc
-  integer :: icol_mat,irow_mat,ri,ri_end ! TV
-  integer,dimension(:),allocatable :: hel,o,part
+  integer :: icol_mat,irow_mat,ri,ri_end,m,proc_num,iacc_in,k,skip 
+  integer,dimension(:),allocatable :: hel,o,part,temp_part
   real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c
@@ -50,11 +51,37 @@ program matrix_reweight
   call cpu_time(tBefore)
 
   if (.not.allocated(part)) allocate(part(1:next))
+  if (.not.allocated(temp_part)) allocate(temp_part(1:next))
   call read_event(11,done)
   rewind(11)
-  call amp_QCD%init(2,next,part,o)
+
+  allocate(amps((next-2)*(next-2))) 
+  temp_part=part
+  call amps(1)%init(2,next,temp_part,o)
   col_acc=20
-  call amp_QCD%init_col2(next,o,col_acc)
+  call amps(1)%init_col2(next,o,col_acc)
+  if (color_flow) then
+        do i=2,2 ! TV: only single external U(1) for now!
+         skip = 1
+         do k=1,next-2 ! loop through alil gluons
+          temp_part = part
+          do j=1,next
+           if (temp_part(j).eq.21) then
+               if (j.le.skip) then
+                   cycle
+               endif
+               temp_part(j) = 22
+               skip = j
+               exit
+           endif           
+           enddo
+          call amps(i+k-1)%init(2,next,temp_part,o)
+          col_acc=20
+          call amps(i+k-1)%init_col2(next,o,col_acc)
+         enddo
+        enddo
+  endif
+
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
@@ -76,14 +103,22 @@ program matrix_reweight
      enddo
 
 
-     call amp_QCD%evaluate(next,p,ihel)
+     call amps(1)%evaluate(next,p,ihel)
+     if (color_flow) then
+       do i=2,2
+        do k=1,next-2
+         call amps(i+k-1)%evaluate(next,p,ihel)
+        enddo
+       enddo
+     endif
+
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
-        if (amp_QCD%n_qqbar.eq.0) then
+        if (amps(1)%n_qqbar.eq.0) then
            do irow=1,amp_QCD%nColOrd
               if (use_real_gluons) then
                  amp_col=0d0
@@ -116,47 +151,53 @@ program matrix_reweight
                  matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
               endif
            enddo
+
+
         else
            ri_end=0
-           if (color_flow) ri_end=1
+           if (color_flow) ri_end= 1 !next-2 for FC
            do ri=0,ri_end ! loop over no U(1) and one U(1) in the rows
-           do irow=1,amp_QCD%nColOrd
+              iacc_in=iacc
+           do k=1,ri*(next-2)+1
+              proc_num = ri+1+k-1
+              if (proc_num.gt.1) iacc_in=min(3,iacc+1)
+           do irow=1,amps(proc_num)%nColOrd
               amp_col_c=(0d0,0d0)
-              if (ri.eq.0) irow_mat = irow
-              if (ri.eq.1) irow_mat = irow+amp_QCD%nColOrd
-              do i=1,amp_QCD%n_col_vals(iacc)
+              irow_mat = irow
+              do i=1,amps(proc_num)%n_col_vals(iacc)
                  amp2_c=(0d0,0d0)
-                 do ic=amp_QCD%row_index(irow_mat-1,i,iacc)+1,amp_QCD%row_index(irow_mat,i,iacc)
-                    icol=amp_QCD%col_index(ic,i,iacc)
-                    if (icol.gt.amp_QCD%nColOrd) icol_mat = icol-amp_QCD%nColOrd
-                    if (icol.le.amp_QCD%nColOrd) icol_mat = icol
-                    if (icol.gt.amp_QCD%nColOrd) then
-                      do j=1,next-2
-                         amp2_c=amp2_c+amp_QCD%amps(amp_QCD%u1_lin_comb(icol_mat,j))
-                      enddo
+                 do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc)+1,amps(proc_num)%row_index(irow_mat,i,iacc)
+                    icol=amps(proc_num)%col_index(ic,i,iacc)
+                    icol_mat = icol
+                    if (proc_num.eq.1) then
+                       amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
                     else
-                      amp2_c=amp2_c+amp_QCD%amps(icol_mat)
+                       if (icol_mat.eq.irow) then
+                          amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
+                       endif
                     endif
                  enddo
-                 amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc)
+                 if (proc_num.gt.1) then
+                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc)*(-1d0/3d0)
+                 else
+                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc)
+                 endif
               enddo
-              if (ri.eq.1) then
-                  do j=1,next-2
-                    matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(amp_QCD%u1_lin_comb(irow,j))))
-                  enddo
-              else
-                  matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
-              endif
+              matrix2(iacc_in)=matrix2(iacc_in)+dble(amp_col_c*conjg(amps(proc_num)%amps(irow)))
+           enddo
            enddo
            enddo
         endif
-        matrix2(3)=matrix2(2)
 
         call cpu_time(tAfter)
         if (iacc.eq.1) t_mat_LC=t_mat_LC+tAfter-tBefore
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
+
+     !write(*,*) 'matrix LC',matrix2(1)
+     !write(*,*) 'matrix NLC',matrix2(2)
+
      call write_event(12)
   enddo
   

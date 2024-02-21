@@ -2,7 +2,7 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
-  logical,parameter :: color_flow=.false.
+  logical,parameter :: color_flow=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -27,7 +27,7 @@ module amplitude_QCD_mod
           pp_bin_to_i,pp_i_to_bin
      integer,dimension(:,:),allocatable :: perm
      integer,dimension(:,:,:),allocatable :: row_index,col_index
-     integer,dimension(:,:),allocatable :: u1_lin_comb
+     integer,dimension(:,:,:),allocatable :: u1_lin_comb
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
@@ -1622,7 +1622,7 @@ contains
     real(kind=8),dimension(1:3) :: col_fac
     real(kind=8),dimension(max_vals,1:3) :: diff_vals
     integer,dimension(:,:),allocatable :: ic,ir
-    integer :: ri,rj,lim,y,t
+    integer :: ri,rj,lim,y,t,maxterms_u1,i
 
     write (*,*) 'Initialising colour matrix ...'
     if (this%n_qqbar.eq.0) then
@@ -1631,7 +1631,14 @@ contains
        lim=0
        if (color_flow) then
           lim=1 ! for NLC only
-          allocate(this%u1_lin_comb(1:this%nColOrd,1:(n-2)))
+          !lim=n-2 ! TV test: for FC
+          lim = 0 ! if U(1) amps generated separately
+          maxterms_u1 = 1d0
+          do i=2,n-1
+             maxterms_u1 = maxterms_u1 * (n-i)
+          enddo
+          allocate(this%u1_lin_comb(1:this%nColOrd,1:maxterms_u1,1:(n-2)))
+          this%u1_lin_comb = 0
           call get_u1_lin_comb
        endif
     endif
@@ -1678,14 +1685,12 @@ contains
 
     write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
          ' different colour factors at LC, NLC and full colour, respectively'
-    
-! Allocate the arrays now that we now their sizes
+
+ ! Allocate the arrays now that we now their sizes
     allocate(ic(1:maxval(n_vals(1:3)),1:3))
     allocate(ir(1:maxval(n_vals(1:3)),1:3))
-
-    allocate(this%col_index(1:2*this%nColOrd**2,1:maxval(n_vals(1:3)),1:3))
-
-    allocate(this%row_index(0:this%nColOrd*2,1:maxval(n_vals(1:3)),1:3)) ! for colopur flow *2
+    allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3)),1:3))
+    allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3)),1:3)) ! for colour flow *(n-1)
     this%row_index(0,1:maxval(n_vals(1:3)),1:3)=0
     this%col_index(0,1:maxval(n_vals(1:3)),1:3)=0
     allocate(this%n_col_vals(1:3))
@@ -1694,7 +1699,7 @@ contains
     do iacc=1,3
        this%diff_col_vals(1:n_vals(iacc),iacc)=diff_vals(1:n_vals(iacc),iacc)
     enddo
-    
+
 ! Compute all the colour factors and fill the col_index and row_index arrays
     ic=0
     ir=0
@@ -1729,7 +1734,6 @@ contains
             enddo
           enddo
         enddo
-
 
         do iacc=1,3
           this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
@@ -1766,15 +1770,16 @@ contains
             elseif (ri.eq.rj.and.ri.eq.0.and.color_fac.eq.(n-3)) then
                     col_fac(2)=dble(3**color_fac) ! U(3)xU(3) NLC
             ! comment out below...
-            elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
-                    col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
-            ! ... and set this to -(n-2)*
+            !elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
+            !        col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
+            ! ... and set this to (-)* (otherwise it is (+)*
             elseif (ri.eq.rj.and.ri.eq.1.and.color_fac.eq.(n-3)) then 
-                    col_fac(2)=dble(3**color_fac) ! U(1)xU(1) NLC
+                    col_fac(2)=-dble(3**color_fac) ! U(1)xU(1) NLC
             endif
             endif
             if (col_acc.ge.2) then
-            col_fac(3)=0d0 ! no full colour for now
+               if (mod(ri+rj,2).eq.0) col_fac(3)=dble(3d0**color_fac)
+               if (mod(ri+rj,2).eq.1) col_fac(3)=-dble(3d0**color_fac)
             endif
          else
            col_fac=0d0
@@ -1893,30 +1898,39 @@ contains
 
     subroutine get_u1_lin_comb
       implicit none
-      integer i,j,k,l,ii
-      integer,dimension(1:n-2-this%n_sing-1) :: u1_rem,u1_test
+      integer i,j,k,l,ii,m,top,add,num,j1,j2
+      integer,dimension(:),allocatable :: u1_rem,u1_test
       integer,dimension(1:n-2-this%n_sing) :: perm,temp_perm
 
       do i=1,this%nColOrd
+        do m=0,n-2 ! loop through all possible numbers of external U(1) gluons
+          if(allocated(u1_rem)) deallocate(u1_rem)
+          if(allocated(u1_test)) deallocate(u1_test)
+          allocate(u1_rem(1:n-2-this%n_sing-m))
+          allocate(u1_test(1:n-2-this%n_sing-m))
           ii=1
           perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,i)
-          u1_rem(1:n-2-this%n_sing-1) = perm(1:n-2-this%n_sing)
+          u1_rem(1:n-2-this%n_sing-m) = perm(1:n-2-this%n_sing-m)
+
           do j=1,this%nColOrd
              temp_perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,j)
              k=1
-             do l=1,n-2-this%n_sing
+             do l=1,n-2-this%n_sing-m+1
                if (temp_perm(l).ne.perm(n-2-this%n_sing)) then
                   u1_test(k) = temp_perm(l)
                   k = k+1
                endif
              enddo
-             if (all(u1_test.eq.u1_rem)) then
-                 this%u1_lin_comb(i,ii) = j
+
+             if ((all(u1_test.eq.u1_rem))) then
+              if (all(perm(n-2-this%n_sing-m+1:n-2-this%n_sing-1).eq.temp_perm(n-2-this%n_sing-m+2:n-2-this%n_sing)))  then
+                 this%u1_lin_comb(i,ii,m) = j
                  ii = ii+1
+              endif
              endif
           enddo
+        enddo
       enddo
-
     end subroutine get_u1_lin_comb
 
     subroutine convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
