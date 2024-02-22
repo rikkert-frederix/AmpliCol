@@ -12,6 +12,7 @@ module amplitude_QCD_mod
   type interaction
      integer :: type,singlet_move
      integer,dimension(2) :: currents
+     integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:,:),allocatable :: val_c
      real(kind=8),dimension(:,:),allocatable :: val_r
   end type interaction
@@ -775,7 +776,6 @@ contains
          if (this%current_list(ic2)%order(n2).eq.order(n)) return
       endif
       ip(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
-      write (*,*) ip
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order. Skip colour singlets
@@ -785,31 +785,35 @@ contains
          do j=1,n
             if (order(j).eq.ip(i)) exit
          enddo
-         write (*,*) i,j
+         write (*,*) 'ip',ip
          do k=1,isize-1
             if (i+k.gt.isize) exit            ! they are compatible
-            do
-               if (part(ip(i+k)).eq.22) then
-                  i=i+1
-                  if (i+k.gt.isize) exit
-               else
-                  exit
-               endif
-            enddo
-!!$            if (part(ip(i+k)).eq.22) i=i+1
+            if (part(ip(i+k)).eq.22) i=i+1
+            if (part(order(j+k)).eq.22) j=j+1
             if (i+k.gt.isize) exit            ! they are compatible
-!!$            if (part(order(j+k)).eq.22) j=j+1
-            do
-               if (part(order(j+k)).eq.22) then
-                  j=j+1
-                  if (j+k.gt.n) return
-               else
-                  exit
-               endif
-            enddo
-            write (*,*) k,i,j
             if (j+k.gt.n) return              ! incompatible: passed end of the order() array
             if (ip(i+k).ne.order(j+k)) return ! incompatible: order is different
+
+!!$            if (i+k.gt.isize) exit            ! they are compatible
+!!$            do
+!!$               if (part(ip(i+k)).eq.22) then
+!!$                  i=i+1
+!!$                  if (i+k.gt.isize) exit
+!!$               else
+!!$                  exit
+!!$               endif
+!!$            enddo
+!!$            if (i+k.gt.isize) exit            ! they are compatible
+!!$            do
+!!$               if (part(order(j+k)).eq.22) then
+!!$                  j=j+1
+!!$                  if (j+k.gt.n) return
+!!$               else
+!!$                  exit
+!!$               endif
+!!$            enddo
+!!$            if (j+k.gt.n) return              ! incompatible: passed end of the order() array
+!!$            if (ip(i+k).ne.order(j+k)) return ! incompatible: order is different
          enddo
       endif
 
@@ -839,11 +843,11 @@ contains
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
       this%interaction_list(this%n_vert)%currents(2)=ic2
-      this%interaction_list(this%n_vert)%singlet_move=0
+      allocate(this%interaction_list(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype)
     end subroutine add_vertex
 
-    function combined_currents(n1,n2,ip1,ip2,singlet_move)
+    function combined_currents(n1,n2,ip1,ip2,singlet_move,singlet_mv)
       ! just concatenate the two colour orders, except if there is a colour
       ! singlet. Move the singlet to the end of the combined current order.
       implicit none
@@ -852,6 +856,7 @@ contains
       integer,intent(out) :: singlet_move
       integer,dimension(n1) :: ip1
       integer,dimension(n2) :: ip2
+      integer,dimension(0:isize) :: singlet_mv
       singlet_move=0
       do i=n1,1,-1
          if (part(ip1(i)).eq.22) then
@@ -860,22 +865,67 @@ contains
             exit
          endif
       enddo
-      if (i.eq.n1) then ! no colour singlets
+      call fill_singlet_mv(n1,n2,ip1,ip2,singlet_mv)
+      if (singlet_mv(0).eq.0) then ! no colour singlets
          combined_currents(1:isize)=[ip1(1:n1),ip2(1:n2)]
-      else              ! n1-i colour singlets
+      elseif(singlet_mv(0).eq.1 .and. singlet_mv(1).eq.n1) then
          combined_currents(1:isize)=[ip1(1:i),ip2(1:n2),ip1(i+1:n1)]
+      else
+         combined_currents(1:isize)=[ip1(1:n1),ip2(1:n2)]
+         write (*,*) 'NEED TO CHECK THIS',singlet_mv(0),':',singlet_mv(1:singlet_mv(0))
+!!$         write (*,*) ip1(1:n1),':',part(ip1(1:n1))
+!!$         write (*,*) ip2(1:n2),':',part(ip2(1:n2))
+!!$         stop 1
       endif
+      write (*,*) 'combined_currents:',combined_currents(1:isize)
+      write (*,*) 'singlet_mv',singlet_mv
     end function combined_currents
 
+    subroutine fill_singlet_mv(n1,n2,ip1,ip2,singlet_mv)
+      ! singlet_mv contains the moves from the current locations of the colour
+      ! singlets in the combined array [ip1,ip2] to get all the colour
+      ! singlets at the end of the array in canonical order.
+      implicit none
+      integer :: i,j,n1,n2
+      integer,dimension(n1) :: ip1
+      integer,dimension(n2) :: ip2
+      integer,dimension(0:isize) :: singlet_mv
+      integer,dimension(isize) :: ip
+      logical,dimension(isize) :: colsing
+      ip(1:isize)=[ip1(1:n1),ip2(1:n2)]
+      ! find all colour singlets in ip
+      colsing(1:isize)=.false.
+      do i=1,isize
+         if (part(ip(i)).eq.22) then
+            ! found a colour singlet
+            colsing(i)=.true.
+         endif
+      enddo
+      ! determine the order
+      singlet_mv(0)=0
+      do i=1,n
+         do j=1,isize
+            if (.not.colsing(j)) cycle
+            write (*,*) i,j,colsing(j),ip(j)
+            if (ip(j).eq.i) then
+               singlet_mv(0)=singlet_mv(0)+1
+               singlet_mv(singlet_mv(0))=j
+            endif
+         enddo
+      enddo
+    end subroutine fill_singlet_mv
     subroutine add_all_currents(ctype)
       implicit none
       logical,dimension(8) :: vertex_sign
       integer,dimension(isize,8) :: ip
       integer :: i,cur_bin,ctype,nperm,singlet_move
+      integer,dimension(0:isize) :: singlet_mv
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
-         ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2),singlet_move)
-         this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+singlet_move
+         ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1), &
+              this%current_list(ic2)%order(1:n2),singlet_move,singlet_mv)
+         this%interaction_list(this%n_vert)%singlet_move=singlet_move
+         this%interaction_list(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
@@ -898,10 +948,11 @@ contains
       logical,intent(out),dimension(8) :: vertex_sign
       integer,dimension(1:n1,2) :: ip1
       integer,dimension(1:n2,2) :: ip2
-      logical :: ag1,ag2
+      logical :: ag1,ag2,iden
       integer,dimension(3) :: switch
       integer :: i,j,k
       integer,dimension(8) :: singlet_move
+      integer,dimension(0:isize,8) :: singlet_mv
       switch(1:3)=1
       ag1=all_gluon_current(this%current_list(ic1)%bin)
       ag2=all_gluon_current(this%current_list(ic2)%bin)
@@ -918,19 +969,40 @@ contains
             do k=1,switch(3)
                nperm=nperm+1
                if (k.eq.1) then
-                  ip(1:isize,nperm)=combined_currents(n1,n2,ip1(1:n1,i),ip2(1:n2,j),singlet_move(nperm))
+                  ip(1:isize,nperm)=combined_currents(n1,n2,ip1(1:n1,i),ip2(1:n2,j),&
+                       singlet_move(nperm),singlet_mv(0,nperm))
                else
-                  ip(1:isize,nperm)=combined_currents(n2,n1,ip2(1:n2,j),ip1(1:n1,i),singlet_move(nperm))
+                  ip(1:isize,nperm)=combined_currents(n2,n1,ip2(1:n2,j),ip1(1:n1,i),&
+                       singlet_move(nperm),singlet_mv(0,nperm))
                endif
                vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.2 .and. mod(n1,2).eq.0))
                if (.not.valid_current_order(ip(1:isize,nperm))) nperm=nperm-1
             enddo
          enddo
       enddo
-      if (all(singlet_move(1:nperm).eq.singlet_move(1))) then
-         this%interaction_list(this%n_vert)%singlet_move=this%interaction_list(this%n_vert)%singlet_move+singlet_move(1)
+      if (all(singlet_move(2:nperm).eq.singlet_move(1))) then
+         this%interaction_list(this%n_vert)%singlet_move=singlet_move(1)
       else
          write (*,*) 'Singlet move not identical for all permutations',nperm,':',singlet_move(1:nperm)
+         stop 1
+      endif
+
+      iden=.true.
+      if (all(singlet_mv(0,2:nperm).eq.singlet_mv(0,1))) then
+         do i=2,nperm
+            if (any(singlet_mv(1:singlet_mv(0,1),i).ne.singlet_mv(1:singlet_mv(0,1),1))) then
+               iden=.false.
+               exit
+            endif
+         enddo
+      endif
+      if (iden) then
+         this%interaction_list(this%n_vert)%singlet_mv(0:singlet_mv(0,1))=singlet_mv(0:singlet_mv(0,1),1)
+      else
+         write (*,*) 'Singlet move not identical for all permutations',nperm
+         do i=1,nperm
+            write (*,*) nperm,':',singlet_mv(0,i),':',singlet_mv(1:singlet_mv(0,i),i)
+         enddo
          stop 1
       endif
     end subroutine check_all_permutations
