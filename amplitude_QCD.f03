@@ -779,13 +779,18 @@ contains
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order. Skip colour singlets
+         write (*,*) 'ip',ip
          do i=1,isize
             if (part(ip(i)).ne.22) exit
          enddo
+         if (i.gt.isize) then
+            ! only colour singlets
+            valid_current_combination=.true.
+            return
+         endif
          do j=1,n
             if (order(j).eq.ip(i)) exit
          enddo
-         write (*,*) 'ip',ip
          do k=1,isize-1
             if (i+k.gt.isize) exit            ! they are compatible
             if (part(ip(i+k)).eq.22) i=i+1
@@ -886,33 +891,53 @@ contains
       ! singlets in the combined array [ip1,ip2] to get all the colour
       ! singlets at the end of the array in canonical order.
       implicit none
-      integer :: i,j,n1,n2
+      integer :: i,j,n1,n2,cur_pos
       integer,dimension(n1) :: ip1
       integer,dimension(n2) :: ip2
       integer,dimension(0:isize) :: singlet_mv
       integer,dimension(isize) :: ip
-      logical,dimension(isize) :: colsing
       ip(1:isize)=[ip1(1:n1),ip2(1:n2)]
-      ! find all colour singlets in ip
-      colsing(1:isize)=.false.
-      do i=1,isize
-         if (part(ip(i)).eq.22) then
-            ! found a colour singlet
-            colsing(i)=.true.
-         endif
-      enddo
-      ! determine the order
+!!$      ! find all colour singlets in ip
+!!$      colsing(1:isize)=.false.
+!!$      do i=1,isize
+!!$         if (part(ip(i)).eq.22) then
+!!$            ! found a colour singlet
+!!$            colsing(i)=.true.
+!!$         endif
+!!$      enddo
+      ! determine the order (singlets always have ip(i) larger than all
+      ! coloured particles)
+      cur_pos=0
       singlet_mv(0)=0
       do i=1,n
-         do j=1,isize
-            if (.not.colsing(j)) cycle
-            write (*,*) i,j,colsing(j),ip(j)
-            if (ip(j).eq.i) then
-               singlet_mv(0)=singlet_mv(0)+1
-               singlet_mv(singlet_mv(0))=j
-            endif
-         enddo
+         if (any(i.eq.ip(1:isize))) cur_pos=cur_pos+1
+         if (part(i).eq.22) then
+            do j=1,isize
+               if (ip(j).eq.i) then
+                  if (j.lt.cur_pos) then
+                     singlet_mv(0)=singlet_mv(0)+1
+                     singlet_mv(singlet_mv(0))=j
+                  endif
+               endif
+
+               write (*,*) ip(1:isize) ,':', i,j,cur_pos,singlet_mv(0:singlet_mv(0))
+               
+            enddo
+         endif
       enddo
+         
+!!$      singlet_mv(0)=0
+!!$      do 
+!!$      do i=1,n
+!!$         do j=1,isize
+!!$            if (.not.colsing(j)) cycle
+!!$            write (*,*) i,j,colsing(j),ip(j)
+!!$            if (ip(j).eq.i) then
+!!$               singlet_mv(0)=singlet_mv(0)+1
+!!$               singlet_mv(singlet_mv(0))=j
+!!$            endif
+!!$         enddo
+!!$      enddo
     end subroutine fill_singlet_mv
     subroutine add_all_currents(ctype)
       implicit none
@@ -980,7 +1005,7 @@ contains
             enddo
          enddo
       enddo
-      if (all(singlet_move(2:nperm).eq.singlet_move(1))) then
+      if (all(singlet_move(1:nperm).eq.singlet_move(1))) then
          this%interaction_list(this%n_vert)%singlet_move=singlet_move(1)
       else
          write (*,*) 'Singlet move not identical for all permutations',nperm,':',singlet_move(1:nperm)
@@ -988,7 +1013,7 @@ contains
       endif
 
       iden=.true.
-      if (all(singlet_mv(0,2:nperm).eq.singlet_mv(0,1))) then
+      if (all(singlet_mv(0,1:nperm).eq.singlet_mv(0,1))) then
          do i=2,nperm
             if (any(singlet_mv(1:singlet_mv(0,1),i).ne.singlet_mv(1:singlet_mv(0,1),1))) then
                iden=.false.
