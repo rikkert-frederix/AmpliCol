@@ -13,7 +13,7 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
-  character(len=31) :: filename
+  character(len=80) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
@@ -94,7 +94,7 @@ program matrix_integrate_QCD
      ! actual (unweighted) event generation
      call read_grids_from_file
      call gen(integrand,0,-1) ! initialise counters
-     filename='Outputs/events'//tag//'.lhe'
+     filename='Outputs/events'//trim(tag)//'.lhe'
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
@@ -359,7 +359,7 @@ contains
   subroutine get_run_arguments()
     implicit none
     integer :: argc
-    integer :: i
+    integer :: i,k
     character(len=256) :: argv
     ! integration steps:
     ! imode=0  (Setting up grids)
@@ -367,32 +367,56 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.7) then
-       write(*,*) 'integration mode (1 or 2):'
-       write(*,*)  'next'
-       write(*,*)  'imode'
-       write(*,*)  'type'
-       write(*,*)  'c_o_i'
-       write(*,*)  'c_o_j'
-       write(*,*)  'c_o_k'
-       read (*,*)  integration,next,imode,c_o_t,c_o_i,c_o_j,c_o_k
+    if (argc.le.10) then
+       write(*,*) 'Inconsistent arguments:'
+       write(*,*) '--------- Should be: --------'
+       write(*,*) 'integration, mode, next, *process*, *order*'
+       stop 2
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) integration
-          if (i.eq.2) read(argv,*) next
-          if (i.eq.3) read(argv,*) imode
-          if (i.eq.4) read(argv,*) c_o_t
-          if (i.eq.5) read(argv,*) c_o_i
-          if (i.eq.6) read(argv,*) c_o_j
-          if (i.eq.7) read(argv,*) c_o_k
+          if (i.eq.2) read(argv,*) imode
+          if (i.eq.3) then
+             read(argv,*) next
+             allocate(part(1:next))
+             allocate(o(1:next))
+          endif
+
+          do k=0,next
+          if (i.eq.4+k) then
+             read(argv,*) part(k+1)
+          endif
+          enddo
+
+          do k=0,next
+          if (i.eq.4+next+k) then
+               read(argv,*) o(k+1)
+          endif
+          enddo
        enddo
     endif
+
+    write (*,*) '******************************************'
+    write (*,*) 'Process is     ',part
+    write (*,*) 'Colour order is',o
+    write (*,*) '******************************************'
+
+    nquarks = 0
+    do i=1,next
+       if ((abs(part(i)).ge.1).and.(abs(part(i)).le.6)) then
+          nquarks = nquarks + 1
+       endif
+    enddo
+
+    write(*,*) 'nquarks',nquarks
+
     if (read_from_file) then
        call read_process_from_file
-    else
-       call get_process_from_arguments
+    !else
+    !   call get_process_from_arguments
     endif
+
     ! basic checks:
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
@@ -402,10 +426,10 @@ contains
        write (*,*) 'Incorrect imode',imode
        stop
     endif
-    if (c_o_i .gt.next+1.or.c_o_k.gt.next+1.or.c_o_j.gt.next-2) then
-       write (*,*) 'inconsistent color-ordering c_o_i,c_o_j,c_o_k',c_o_i,c_o_j,c_o_k
-       stop
-    endif
+    !if (c_o_i .gt.next+1.or.c_o_k.gt.next+1.or.c_o_j.gt.next-2) then
+    !   write (*,*) 'inconsistent color-ordering c_o_i,c_o_j,c_o_k',c_o_i,c_o_j,c_o_k
+    !   stop
+    !endif
 
     if (integration.ne.1 .and. integration.ne.2) then
        write (*,*) 'Integration modes only 1 or 2',integration
@@ -429,16 +453,16 @@ contains
     else
        call add_to_string(tag_read,imode,.true.)
     endif
-    call add_to_string(tag,c_o_t,.true.)
-    call add_to_string(tag_read,c_o_t,.true.)
-    call add_to_string(tag,c_o_i,.true.)
-    call add_to_string(tag_read,c_o_i,.true.)
-    call add_to_string(tag,c_o_j,.true.)
-    call add_to_string(tag_read,c_o_j,.true.)
-    call add_to_string(tag,c_o_k,.false.)
-    call add_to_string(tag_read,c_o_k,.false.)
-    call fill_string(tag,13)
-    call fill_string(tag_read,13)
+    do i=1,next
+       call add_to_string(tag,part(i),.true.)
+       call add_to_string(tag_read,part(i),.true.)
+    enddo
+    do i=1,next
+       call add_to_string(tag,o(i),.true.)
+       call add_to_string(tag_read,o(i),.true.)
+    enddo
+    call fill_string(tag,len(trim(tag)))
+    call fill_string(tag_read,len(trim(tag)))
     write (*,*) 'File tag is: ',tag
   end subroutine create_run_tag
 
@@ -446,7 +470,7 @@ contains
     ! Adds an integer 'inter' to the end of the string 'string' (followed by
     ! an underscore if 'add_underscore=.true.')
     implicit none
-    character(len=13) :: string
+    character(len=string_len) :: string
     integer :: inter
     logical :: add_underscore
     character(len=1) :: s1
@@ -457,11 +481,11 @@ contains
        string=trim(adjustl(string))//trim(adjustl(s1))
        if (add_underscore) string=trim(adjustl(string))//'_'
     elseif(inter.ge.-9 .and. inter.le.99) then
-       write(s2,'(i1)') inter
+       write(s2,'(i2)') inter
        string=trim(adjustl(string))//trim(adjustl(s2))
        if (add_underscore) string=trim(adjustl(string))//'_'
     elseif(inter.ge.-99 .and. inter.le.999) then
-       write(s3,'(i1)') inter
+       write(s3,'(i3)') inter
        string=trim(adjustl(string))//trim(adjustl(s3))
        if (add_underscore) string=trim(adjustl(string))//'_'
     else
@@ -472,13 +496,13 @@ contains
     ! Fills the string 'string' with leading underscores until the string has
     ! size 'size'. The declaration of the string must be at least size 'size'.
     implicit none
-    character(len=13) :: string
+    character(len=string_len) :: string
     integer :: size,n_to_add
     if (size.gt.len(string)) then
        write (*,*) 'Size greater than string',size,string
        stop 1
     endif
-    n_to_add=13-len(trim(string))
+    n_to_add=len(trim(string))+2-len(trim(string))
     do i=1,n_to_add
        string='_'//trim(adjustl(string))
     enddo
@@ -874,7 +898,7 @@ contains
     integer :: i,k
     integer,dimension(:),allocatable :: ord
     integer :: nsing
-    call check_input_colour_order_consistency
+    !call check_input_colour_order_consistency
     if (c_o_t.eq.0) then
        nquarks=0       
     else

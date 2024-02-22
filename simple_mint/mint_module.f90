@@ -96,7 +96,8 @@ module mint_module
   double precision, dimension(maxchannels), public :: virtual_fraction
   double precision, dimension(nintegrals,0:maxchannels), public :: ans,unc
   logical :: only_virt,new_point,pass_cuts_check
-  character(len=13) :: tag,tag_read
+  integer,parameter :: string_len=50
+  character(len=string_len) :: tag,tag_read
 
 ! private variables
   character(len=13), parameter, dimension(nintegrals), private :: title=(/ &
@@ -918,7 +919,7 @@ contains
        write(*,*)'Final result [ABS]:',ans(1,0),' +/-',unc(1,0)
        write(*,*)'Final result:',ans(2,0),' +/-',unc(2,0)
        write(*,*)'chi**2 per D.o.F.:',chi2(1,0)
-       open(unit=58,file='Outputs/Res_files/results'//tag//'.dat',status='unknown')
+       open(unit=58,file='Outputs/Res_files/results'//trim(tag)//'.dat',status='unknown')
        do kchan=0,nchans
           write(58,*) ans(1,kchan),unc(2,kchan),0d0,0,0,0,0,0d0,0d0,ans(2,kchan)
        enddo

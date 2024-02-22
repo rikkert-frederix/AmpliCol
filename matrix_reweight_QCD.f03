@@ -7,6 +7,7 @@ module common
   type(amplitude_QCD) :: amp_QCD
   type(amplitude_QCD),dimension(:),allocatable :: amps
   real(kind=8),dimension(:,:),allocatable :: p
+  integer :: string_len=50
 end module common
 module rw_events
   implicit none
@@ -38,16 +39,19 @@ program matrix_reweight
   
   call get_run_arguments()
 
+  write(*,*) 'itteittenn'
   call cpu_time(tTot_B)
 
-  allocate(o(next))
+  if (.not.allocated(o)) allocate(o(next))
   allocate(hel(next))
   allocate(mass(next))
   allocate(p(0:3,next))
 
   mass(1:next)=0d0
+  write(*,*) 'fali'
   call create_run_tag_and_open_files()
 
+  write(*,*) 'hahhahoo'
   call cpu_time(tBefore)
 
   if (.not.allocated(part)) allocate(part(1:next))
@@ -225,45 +229,40 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.6) then
-       write (*,*) 'Give number of gluons, imode and color'// &
-            ' ordering (number of gluons on first color line):'
-       read (*,*) next,imode,c_o_t,c_o_i,c_o_j,c_o_k
+
+    if (argc.le.8) then
+       write(*,*) 'Inconsistent arguments:'
+       write(*,*) '--------- Should be: --------'
+       write(*,*) 'next, *process*, *order*'
+       stop 2
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) next
-          if (i.eq.2) read(argv,*) imode
-          if (i.eq.3) read(argv,*) c_o_t
-          if (i.eq.4) read(argv,*) c_o_i
-          if (i.eq.5) read(argv,*) c_o_j
-          if (i.eq.6) read(argv,*) c_o_k
+          if (i.eq.1) then
+             read(argv,*) next
+             allocate(part(1:next))
+             allocate(o(1:next))
+          endif
+          do k=0,next
+          if (i.eq.2+k) then
+             read(argv,*) part(k+1)
+          endif
+          enddo
+          do k=0,next
+          if (i.eq.2+next+k) then
+               read(argv,*) o(k+1)
+          endif
+          enddo
        enddo
     endif
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
     endif
-    if (imode.ne.2) then
-       write (*,*) 'Incorrect imode',imode, ' (should be 2)'
-       stop
-    endif
-    if (c_o_t.lt.0 .or. c_o_t .gt.2) then
-       write (*,*) 'inconsistent color-ordering type',c_o_t
-       stop
-    endif
-    if (c_o_i.lt.0 .or. c_o_i .gt.next+1) then
-       write (*,*) 'inconsistent color-ordering i',c_o_i
-       stop
-    endif
-    if (c_o_j.lt.0 .or. c_o_j .gt.next) then
-       write (*,*) 'inconsistent color-ordering j',c_o_j
-       stop
-    endif
-    if (c_o_k.lt.0 .or. c_o_k .gt.next+1) then
-       write (*,*) 'inconsistent color-ordering k',c_o_k
-       stop
-    endif
+
+    write(*,*) next
+    write(*,*) part
+    write(*,*) o
   end subroutine get_run_arguments
 
   subroutine create_run_tag_and_open_files()
@@ -271,67 +270,70 @@ contains
     implicit none
     character(len=1) :: s1
     character(len=2) :: s2
-    character(len=13) :: tag,tag_read
-    if (next.le.9) then
-       write(s1,'(i1)') next
-       tag=trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') next
-       tag=trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(s2))//'_'
-    endif
-    write(s1,'(i1)') imode
-    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-    if (imode.gt.0) write(s1,'(i1)') imode-1
-    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    write(s1,'(i1)') c_o_t
-    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    if (c_o_i.le.9) then
-       write(s1,'(i1)') c_o_i
-       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') c_o_i
-       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
-    endif
-    if (c_o_j.le.9) then
-       write(s1,'(i1)') c_o_j
-       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') c_o_j
-       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
-    endif
-    if (c_o_k.le.9) then
-       write(s1,'(i1)') c_o_k
-       tag=trim(adjustl(tag))//trim(adjustl(s1))
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
-    else
-       write(s2,'(i2)') c_o_k
-       tag=trim(adjustl(tag))//trim(adjustl(s2))
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
-    endif
-    write(*,*) len(trim(tag_read))
-    if (len(trim(tag_read)).lt.13) then
-       if (13-len(trim(tag)).eq.1) then
-          tag='_'//trim(adjustl(tag))
-          tag_read='_'//trim(adjustl(tag_read))
-       elseif(13-len(trim(tag)).eq.2) then
-          tag='__'//trim(adjustl(tag))
-          tag_read='__'//trim(adjustl(tag_read))
-       elseif(13-len(trim(tag)).eq.3) then
-          tag='___'//trim(adjustl(tag))
-          tag_read='___'//trim(adjustl(tag_read))
-       endif
-    endif
-    write (*,*) tag
-    open(unit=11,file='Outputs/events'//tag//'.lhe',status='old')
-    open(unit=12,file='Outputs/events'//tag//'.lhe.rwgt',status='unknown')
+    character(len=string_len) :: tag,tag_read
+    tag=''       ! tag of current run
+    tag_read=''  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
+    call add_to_string(tag,next,.true.)
+    call add_to_string(tag_read,next,.true.)
+    call add_to_string(tag,2,.true.)
+    call add_to_string(tag_read,2,.true.)
+    do i=1,next
+       call add_to_string(tag,part(i),.true.)
+       call add_to_string(tag_read,part(i),.true.)
+    enddo
+    do i=1,next
+       call add_to_string(tag,o(i),.true.)
+       call add_to_string(tag_read,o(i),.true.)
+    enddo
+    call fill_string(tag,len(trim(tag)))
+    call fill_string(tag_read,len(trim(tag)))
+    open(unit=11,file='Outputs/events'//trim(tag)//'.lhe',status='old')
+    open(unit=12,file='Outputs/events'//trim(tag)//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
+
+  subroutine add_to_string(string,inter,add_underscore)
+    ! Adds an integer 'inter' to the end of the string 'string' (followed by
+    ! an underscore if 'add_underscore=.true.')
+    implicit none
+    character(len=string_len) :: string
+    integer :: inter
+    logical :: add_underscore
+    character(len=1) :: s1
+    character(len=2) :: s2
+    character(len=3) :: s3
+    if (inter.ge.0 .and. inter.le.9) then
+       write(s1,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s1))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-9 .and. inter.le.99) then
+       write(s2,'(i2)') inter
+       string=trim(adjustl(string))//trim(adjustl(s2))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-99 .and. inter.le.999) then
+       write(s3,'(i3)') inter
+       string=trim(adjustl(string))//trim(adjustl(s3))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    else
+       write (*,*) 'value too large to add to the run tag',inter
+    endif
+  end subroutine add_to_string
+
+  subroutine fill_string(string,size)
+    ! Fills the string 'string' with leading underscores until the string has
+    ! size 'size'. The declaration of the string must be at least size 'size'.
+    implicit none
+    character(len=string_len) :: string
+    integer :: size,n_to_add
+    if (size.gt.len(string)) then
+       write (*,*) 'Size greater than string',size,string
+       stop 1
+    endif
+    n_to_add=len(trim(string))+2-len(trim(string))
+    do i=1,n_to_add
+       string='_'//trim(adjustl(string))
+    enddo
+  end subroutine fill_string
+
 
   subroutine read_event(iunit,done)
     use rw_events
