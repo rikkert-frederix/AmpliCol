@@ -72,6 +72,10 @@ contains
     call set_max_cur()
     call set_max_vert()
 
+    write(*,*) 'IN INTI',part
+    write(*,*) order
+    write(*,*) 'MAX CUR',max_cur
+
     if (this%imode.eq.2) then
        call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
@@ -121,10 +125,14 @@ contains
           enddo
        else
           do isplit=1,isize-1
+             write(*,*) 'ISIZE---------------',isize
+             write(*,*) '...... isplit',isplit
              n1=isplit
              n2=isize-isplit
+             write(*,*) 'n1,n2',n1,n2
              do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
                 do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
+                   write(*,*) 'ic1,ic2',ic1,ic2
                    call add_if_allowed_threevertex()
                 enddo
              enddo
@@ -300,10 +308,11 @@ contains
       enddo
       if (any(quark_flav(:).ne.0)) then
          write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
+         write(*,*) quark_flav
          stop 1
       endif
-      if (this%n_qqbar.gt.1) then
-         write (*,*) 'ERROR: code only working for 0, or 1 qqbar pairs',this%n_qqbar
+      if (this%n_qqbar.gt.2) then
+         write (*,*) 'ERROR: code only working for 0, 1 or 2 qqbar pairs',this%n_qqbar
          write (*,*) part
          stop 1
       endif
@@ -359,22 +368,22 @@ contains
             if (order(i).eq.2) then
                if (part(order(i)).gt.1 .and. part(order(i)).lt.6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
-                     write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quak'
-                     write (*,*) order
-                     write (*,*) part
-                     stop 1
-                  endif
+                  !if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
+                  !   write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quak'
+                  !   write (*,*) order
+                  !   write (*,*) part
+                  !   stop 1
+                  !endif
                endif
             else
                if (part(order(i)).lt.-1 .and. part(order(i)).gt.-6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
-                     write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
-                     write (*,*) order
-                     write (*,*) part
-                     stop 1
-                  endif
+                  !if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
+                  !   write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
+                  !   write (*,*) order
+                  !   write (*,*) part
+                  !   stop 1
+                  !endif
                endif
             endif
          enddo
@@ -393,6 +402,13 @@ contains
             else
                if (this%n_qqbar.eq.0) max_cur=max_cur+(n-isize)*2
                if (this%n_qqbar.eq.1) max_cur=max_cur+((n-isize-1)*2+1)
+               if (this%n_qqbar.eq.2) then
+                 if (n-isize.ge.4) then
+                   max_cur = max_cur + (((n-isize-1)*2+1)+((n-isize-3)*2+3))
+                 else
+                   max_cur=max_cur+3
+                 endif
+               endif
             endif
          enddo
          max_cur=max_cur+1
@@ -713,50 +729,77 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      if (.not.valid_current_combination()) return
+      if (.not.valid_current_combination())  then
+        return
+      endif
+      write(*,*) 'CURR 1',this%current_list(ic1)%type
+      write(*,*) 'CURR 2',this%current_list(ic2)%type
+
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
          ! add the gluon-gluon to tensor vertex
          call add_vertex(1,-21)
+
       elseif (this%current_list(ic1)%type.eq.-21 .and. this%current_list(ic2)%type.eq.21) then
          ! add a tensor-gluon to gluon vertex
          call add_vertex(2,21)
+
       elseif (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.-21) then
          ! add a gluon-tensor to gluon vertex
          call add_vertex(3,21)
+
       elseif (this%current_list(ic1)%type.eq.21 .and. &
            (this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6)) then
          ! add a gluon-quark to quark vertex
          call add_vertex(4,this%current_list(ic2)%type)
+
       elseif (this%current_list(ic1)%type.eq.21 .and. &
            (this%current_list(ic2)%type.le.-1 .and. this%current_list(ic2)%type.ge.-6)) then
          ! add a gluon-antiquark to antiquark vertex
          call add_vertex(5,this%current_list(ic2)%type)
+
       elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
            this%current_list(ic2)%type.eq.21) then
          ! add a quark-gluon to quark vertex
+         write(*,*) 'adding this vertex? quark gluon'
          call add_vertex(6,this%current_list(ic1)%type)
+
       elseif ((this%current_list(ic1)%type.le.-1 .and. this%current_list(ic1)%type.ge.-6) .and. &
            this%current_list(ic2)%type.eq.21) then
          ! add a antiquark-gluon to antiquark vertex
          call add_vertex(7,this%current_list(ic1)%type)
+
       elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
            (this%current_list(ic2)%type.eq.anti_current(this%current_list(ic1)%type))) then
          ! add a quark-antiquark to gluon vertex
          call add_vertex(8,21)
+
       elseif ((this%current_list(ic1)%type.le.-1 .and. this%current_list(ic1)%type.ge.-6) .and. &
            (this%current_list(ic2)%type.eq.anti_current(this%current_list(ic1)%type))) then
          ! add a antiquark-quark to gluon vertex
          call add_vertex(9,21)
+
       elseif (this%current_list(ic1)%type.eq.22 .and. &
            (this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6)) then
          ! add a photon-quark to quark vertex
          call add_vertex(4,this%current_list(ic2)%type)
+
       elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
            this%current_list(ic2)%type.eq.22) then
          ! add a quark-photon to quark vertex
          call add_vertex(6,this%current_list(ic1)%type)
+
+      elseif (this%current_list(ic1)%type.eq.22 .and. &
+           (this%current_list(ic2)%type.le.-1 .and. this%current_list(ic2)%type.ge.-6)) then
+         ! add a photon-antiquark to quark vertex
+         call add_vertex(5,this%current_list(ic2)%type)
+
+      elseif ((this%current_list(ic1)%type.le.-1 .and. this%current_list(ic1)%type.ge.-6) .and. &
+           this%current_list(ic2)%type.eq.22) then
+         ! add a antiquark-photon to quark vertex
+         call add_vertex(7,this%current_list(ic1)%type)
+
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -768,15 +811,24 @@ contains
       integer,dimension(isize) :: ip
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
-      if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
+      if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) then
+              write(*,*) 'return 1'
+      return
+      endif
 
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
-         if (this%current_list(ic1)%order(n1).eq.order(n)) return
+         if (this%current_list(ic1)%order(n1).eq.order(n)) then
+                 write(*,*) 'return 2'
+                 return
+          endif
       endif
       if (n2.eq.1) then
-         if (this%current_list(ic2)%order(n2).eq.order(n)) return
+         if (this%current_list(ic2)%order(n2).eq.order(n)) then
+                 write(*,*) 'return 3'
+                 return
+         endif
       endif
 
       ip(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
@@ -820,7 +872,11 @@ contains
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) return ! dead tree. Filter already here
+      write(*,*) 'adding vertex',itype
+      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) then 
+        write(*,*) 'filter'
+        return ! dead tree. Filter already here
+      endif
       this%n_vert=this%n_vert+1
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
@@ -869,6 +925,7 @@ contains
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
+      write(*,*) 'chaking all perms'
       ! Need to consider all the possible permutations
       call check_all_permutations(nperm,ip,vertex_sign)
       cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
@@ -987,6 +1044,7 @@ contains
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
+         write(*,*) 'ADDING NEW',this%n_cur
          allocate(this%current_list(this%n_cur)%order(isize))
          this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
          this%current_list(this%n_cur)%type=ctype
@@ -1292,7 +1350,6 @@ contains
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
-             !write(*,*) 'ic',ic  
              if (this%current_list(ic)%order(1).le.2) then
                 ifinal=-1
              else
@@ -1309,47 +1366,28 @@ contains
                 else
                    ih_in=ih-1
                 endif
+                write(*,*) 'IH_IN',ih_in
                 if (this%current_list(ic)%type.eq.21) then
-                   !write(*,*) 'gluon'
-                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-                   !write(*,*) ih_in,ifinal
                    if (use_real_gluons) then
                       call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
                    else
                       call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
-                      !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
-                   !write(*,*) 'quark'
-                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-                   !write(*,*) ih_in,ifinal
                    call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
-                   !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   !write(*,*) 'anti-quark'
-                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-                   !write(*,*) ih_in,ifinal
                    call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
-                   !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                 elseif (this%current_list(ic)%type.eq.22) then
-                   !write(*,*) 'photon'
-                   !write(*,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                   !write(*,*) this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
-                   !write(*,*) ih_in,ifinal
                    if (use_real_gluons) then
                       call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_r(1:4,ih))
                    else
                       call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                            ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
-                      !write(*,*) this%current_list(ic)%val_c(1:4,ih)
                    endif
                 else
                    write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih
@@ -1360,12 +1398,19 @@ contains
           cycle
        endif
 
+
+       write(*,*) 'First current:',this%current_list(1)%val_c(1,:)
+       write(*,*) this%current_list(2)%val_c(1,:)
+       write(*,*) this%current_list(3)%val_c(1,:)
+       write(*,*) this%current_list(4)%val_c(1,:)
+
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
           do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
              do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
+
                 if (this%interaction_list(iv)%type.eq.0) then
                    if (use_real_gluons) then
                       call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1380,6 +1425,7 @@ contains
                            this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                                            this%interaction_list(iv)%val_c(1:4,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.1) then
                    if (use_real_gluons) then
                       call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1390,6 +1436,7 @@ contains
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                             this%interaction_list(iv)%val_c(1:6,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.2) then
                    if (use_real_gluons) then
                       call TensorGluontoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:6,ih1),&
@@ -1400,6 +1447,7 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.3) then
                    if (use_real_gluons) then
                        call GluonTensortoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1410,8 +1458,40 @@ contains
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6,ih2),&
                                                this%interaction_list(iv)%val_c(1:4,ih))
                     endif
+
+                 elseif(this%interaction_list(iv)%type.eq.4) then
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       write(*,*) 'SINGLET MOVE'
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
+                    if (use_real_gluons) then
+                       call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                                                   this%interaction_list(iv)%val_c(1:4,ih))
+                    else
+                       call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+                    endif
+
+                 elseif(this%interaction_list(iv)%type.eq.5) then
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       write(*,*) 'SINGLET MOVE'
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
+                    call GluonAquarktoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                           this%interaction_list(iv)%val_c(1:4,ih))
+
                  elseif(this%interaction_list(iv)%type.eq.6) then
                     if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       write(*,*) 'SINGLET MOVE'
                        call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
                     elseif (this%interaction_list(iv)%singlet_move.gt.1) then
                        write (*,*) 'Cannot do more than one singlet move at once'
@@ -1426,6 +1506,45 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
                     endif
+
+                 elseif(this%interaction_list(iv)%type.eq.7) then
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       write(*,*) 'SINGLET MOVE'
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
+                    call AquarkGluontoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                          this%interaction_list(iv)%val_c(1:4,ih))
+
+
+
+                elseif(this%interaction_list(iv)%type.eq.8) then
+                        if (this%interaction_list(iv)%singlet_move.eq.1) then
+                          write(*,*) 'SINGLET MOVE'
+                          call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                       elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                         write (*,*) 'Cannot do more than one singlet move at once'
+                         stop 1
+                       endif
+                        call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+
+                elseif(this%interaction_list(iv)%type.eq.9) then
+                       if (this%interaction_list(iv)%singlet_move.eq.1) then
+                         write(*,*) 'SINGLET MOVE'
+                         call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                       elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                         write (*,*) 'Cannot do more than one singlet move at once'
+                         stop 1
+                       endif
+                       call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+
                 else
                    write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
                    stop 1
@@ -1451,6 +1570,12 @@ contains
           elseif (this%current_list(ic)%type.eq.-21) then
              ! the non-propagating tensor current
              call combine_interactions(6)
+          elseif ((this%current_list(ic)%type.le.-1 .and. this%current_list(ic)%type.ge.-6)) then
+             ! an anti-quark current
+             call combine_interactions(4)
+             if (isize.ne.n-1)  then
+                call include_aquark_propagator()
+             endif
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
              stop 1
@@ -1607,6 +1732,12 @@ contains
       call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
            this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
     end subroutine include_quark_propagator
+
+    subroutine include_aquark_propagator()
+      implicit none
+      call AquarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+    end subroutine include_aquark_propagator
   end subroutine evaluate
 
   subroutine init_col2(this,n,order,col_acc)

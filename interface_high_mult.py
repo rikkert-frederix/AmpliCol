@@ -198,6 +198,7 @@ if to_rwgt == 'y':
         # Wait for all processes to finish
         for process in processes:
             process.join()
+    print('End of reweight.')
 else:
     print('End of run.')
 

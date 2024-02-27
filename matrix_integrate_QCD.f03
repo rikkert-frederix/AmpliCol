@@ -409,8 +409,6 @@ contains
        endif
     enddo
 
-    write(*,*) 'nquarks',nquarks
-
     if (read_from_file) then
        call read_process_from_file
     !else
@@ -426,19 +424,14 @@ contains
        write (*,*) 'Incorrect imode',imode
        stop
     endif
-    !if (c_o_i .gt.next+1.or.c_o_k.gt.next+1.or.c_o_j.gt.next-2) then
-    !   write (*,*) 'inconsistent color-ordering c_o_i,c_o_j,c_o_k',c_o_i,c_o_j,c_o_k
-    !   stop
-    !endif
-
     if (integration.ne.1 .and. integration.ne.2) then
        write (*,*) 'Integration modes only 1 or 2',integration
        stop
     endif
-    if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
-       write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
-       stop
-    endif
+    !if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
+    !   write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
+    !   stop
+    !endif
   end subroutine get_run_arguments
 
   subroutine create_run_tag()
