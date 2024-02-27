@@ -68,6 +68,7 @@ module mint_module
   implicit none
   integer, parameter, private :: nintervals=32    ! max number of intervals in the integration grids
   integer, parameter, public  :: ndimmax=60       ! max number of dimensions of the integral
+  integer, parameter, public  :: np_max=32
   integer, parameter, public  :: n_ave_virt=10    ! max number of grids to set up to approx virtual
   integer, parameter, public  :: nintegrals=26    ! number of integrals to keep track of
   integer, parameter, private :: nintervals_virt=8! max number of intervals in the grids for the approx virtual
@@ -87,7 +88,7 @@ module mint_module
   !
 
 ! public variables 
-  integer, public :: ncalls0,ndim,itmax,imode,n_ord_virt,nchans,iconfig,ichan,ifold_energy,ifold_yij,ifold_phi
+  integer, public :: ncalls0,ndim,itmax,imode,n_ord_virt,nchans,iconfig,ichan,ifold_energy,ifold_yij,ifold_phi,npp
   integer, dimension(ndimmax), public :: ifold
   integer, dimension(maxchannels), public :: iconfigs
   double precision, public :: accuracy,min_virt_fraction_mint,wgt_mult,virt_fraction
@@ -95,7 +96,8 @@ module mint_module
   double precision, dimension(0:n_ave_virt), public :: virt_wgt_mint,born_wgt_mint
   double precision, dimension(maxchannels), public :: virtual_fraction
   double precision, dimension(nintegrals,0:maxchannels), public :: ans,unc
-  logical :: only_virt,new_point,pass_cuts_check
+  logical :: only_virt,new_point
+  logical, dimension(np_max) :: pass_cuts_check
   character(len=13) :: tag,tag_read
 
 ! private variables
@@ -129,7 +131,7 @@ module mint_module
 
 
   integer, private :: nit,nit_included,kpoint_iter,nint_used,nint_used_virt,min_it,ncalls,pass_cuts_point,ng,npg,k
-  integer, dimension(ndimmax), private :: icell,ncell
+  integer, dimension(np_max,ndimmax), private :: icell,ncell
   integer, dimension(nintegrals), private :: non_zero_point,ntotcalls
   integer, dimension(nintervals,ndimmax,maxchannels), private :: nhits
   integer, dimension(maxchannels), private :: nhits_in_grids
@@ -141,11 +143,13 @@ module mint_module
   double precision, dimension(nintervals,ndimmax,maxchannels), private :: ymax,xmmm
   double precision, dimension(nintegrals,0:maxchannels), private :: vtot,etot,chi2
   double precision, dimension(nintegrals,3), private :: ans3,unc3
-  double precision, dimension(nintegrals), private :: ans_l3,unc_l3,chi2_l3,f
+  double precision, dimension(nintegrals), private :: ans_l3,unc_l3,chi2_l3
+  double precision, dimension(np_max,nintegrals), private :: f
   double precision, dimension(0:maxchannels), private :: ymax_virt,ans_chan
   double precision, dimension(2), private :: HwU_values
   double precision, dimension(nintervals_virt,ndimmax,0:n_ave_virt,maxchannels), private :: ave_virt,ave_virt_acc,ave_born_acc
-  double precision, private :: upper_bound,vol_chan
+  double precision, private :: vol_chan
+  double precision, dimension(np_max), private :: upper_bound
   double precision, dimension(ndimmax), private :: rand
   double precision, dimension(0:nintervals,ndimmax) :: xgrid_new
 
@@ -157,7 +161,7 @@ module mint_module
   common /c_fnlo_nlops/fixed_order,nlo_ps
 
 ! functions and subroutines:
-  public :: mint,gen,read_grids_from_file
+  public :: mint,gen,read_grids_from_file,get_random_x,mint_fill_zero_point
   private :: initialise_mint,setup_basic_mint &
        &,update_accumulated_results,prepare_next_iteration &
        &,check_desired_accuracy,update_integration_grids &
@@ -170,7 +174,7 @@ module mint_module
        &,check_for_special_channels_loop &
        &,combine_results_channels_special_loop,get_amount_of_points &
        &,add_point_to_grids,add_point_to_bounding_envelope &
-       &,accumulate_the_point,compute_integrand,get_random_x &
+       &,accumulate_the_point,compute_integrand &
        &,start_iteration,reset_accumulated_grids_for_updating &
        &,check_evenly_random_numbers,finalise_mint,write_results &
        &,write_channel_info,setup_imode_1 &
@@ -189,8 +193,6 @@ contains
   subroutine mint(fun)
     implicit none
     integer kpoint
-    double precision :: vol
-    double precision, dimension(ndimmax) :: x
     integer, dimension(ndimmax) :: kfold
     double precision, external :: fun
     logical :: enough_points,channel_loop_done
@@ -198,11 +200,13 @@ contains
     do while (nit.lt.itmax)
        call start_iteration
 2      kpoint_iter=kpoint_iter+1
-       do kpoint=1,ncalls
+       do kpoint=1,ncalls/npp
+!!$          write (*,*) kpoint,ncalls/npp,ntotcalls(1),non_zero_point(1),max_points
           new_point=.true.
-          call get_random_x(x,vol,kfold)
-          call compute_integrand(fun,x,vol)
-          call accumulate_the_point(x)
+!!$          call get_random_x(x,vol,kfold)
+          call compute_integrand(fun)
+          call accumulate_the_point
+          if (non_zero_point(1).lt.ncalls .and. ntotcalls(1).gt.max_points) exit
        enddo
        call get_amount_of_points(enough_points)
        if (.not.enough_points) goto 2
@@ -607,7 +611,7 @@ contains
     integer :: i
     do i=1,nintegrals
 ! Number of phase-space points used
-       ntotcalls(i)=ncalls*kpoint_iter
+!!$       ntotcalls(i)=ncalls*kpoint_iter
 ! Special for the computation of the 'computed virtual'
        if (i.eq.4 .and. non_zero_point(i).ne.0 ) &
             ntotcalls(i) = non_zero_point(i)
@@ -631,9 +635,9 @@ contains
           return
        endif
     endif
-    if (non_zero_point(1).lt.int(0.99*ncalls)) then
+    if (non_zero_point(1).lt.int(0.99*(ncalls/npp))) then
 ! Not enough (non-zero) points have been generated
-       if ( pass_cuts_point.gt.ncalls .and. &
+       if ( pass_cuts_point.gt.ncalls/npp .and. &
             non_zero_point(1).lt.2) then
 ! Many points passed the cuts, but less than 2 non-zero integrand
 ! values: must be that the PDFs or the matrix elements (e.g. coupling
@@ -671,48 +675,47 @@ contains
   
   
 
-  subroutine add_point_to_grids(x)
+  subroutine add_point_to_grids(ip)
     implicit none
-    integer :: kdim,k_ord_virt,ithree,isix
-    double precision, dimension(ndimmax) :: x
+    integer :: kdim,k_ord_virt,ithree,isix,ip
     double precision :: virtual,born
 ! accumulate the function in xacc(icell(kdim),kdim) to adjust the grid later
     do kdim=1,ndim
-       xacc(icell(kdim),kdim,ichan) = xacc(icell(kdim),kdim,ichan) + f(1)
+       xacc(icell(ip,kdim),kdim,ichan) = xacc(icell(ip,kdim),kdim,ichan) + f(ip,1)
     enddo
-! Set the Born contribution (to compute the average_virtual) to zero if
-! the virtual was not computed for this phase-space point. Compensate by
-! including the virtual_fraction.
-    do k_ord_virt=0,n_ord_virt
-       if (k_ord_virt.eq.0) then
-          ithree=3
-          isix=6
-       else
-          ithree=2*k_ord_virt+5
-          isix=2*k_ord_virt+6
-       endif
-       if (f(ithree).ne.0d0) then
-          born=f(isix)
-          ! virt_wgt_mint=(virtual-average_virtual*born)/virtual_fraction. Compensate:
-          virtual=f(ithree)*virtual_fraction(ichan)+ &
-               average_virtual(k_ord_virt,ichan)*f(isix)
-          call fill_ave_virt(x,k_ord_virt,virtual,born)
-       else
-          f(isix)=0d0
-       endif
-    enddo
+!!$! Set the Born contribution (to compute the average_virtual) to zero if
+!!$! the virtual was not computed for this phase-space point. Compensate by
+!!$! including the virtual_fraction.
+!!$       do k_ord_virt=0,n_ord_virt
+!!$          if (k_ord_virt.eq.0) then
+!!$             ithree=3
+!!$             isix=6
+!!$          else
+!!$             ithree=2*k_ord_virt+5
+!!$             isix=2*k_ord_virt+6
+!!$          endif
+!!$          if (f(ip,ithree).ne.0d0) then
+!!$             born=f(ip,isix)
+!!$          ! virt_wgt_mint=(virtual-average_virtual*born)/virtual_fraction. Compensate:
+!!$             virtual=f(ip,ithree)*virtual_fraction(ichan)+ &
+!!$                  average_virtual(k_ord_virt,ichan)*f(ip,isix)
+!!$             call fill_ave_virt(x,k_ord_virt,virtual,born)
+!!$          else
+!!$             f(ip,isix)=0d0
+!!$          endif
+!!$       enddo
   end subroutine add_point_to_grids
 
-  subroutine add_point_to_bounding_envelope
+  subroutine add_point_to_bounding_envelope(ip)
     implicit none
-    integer :: kdim,k_ord_virt,ithree,isix
+    integer :: kdim,k_ord_virt,ithree,isix,ip
     double precision :: prod
 ! update the upper bounding envelope total rate
     prod=1d0
     do kdim=1,ndim
-       prod=prod*ymax(ncell(kdim),kdim,ichan)
+       prod=prod*ymax(ncell(ip,kdim),kdim,ichan)
     enddo
-    prod=(f(1)/prod)
+    prod=(f(ip,1)/prod)
     if (prod.gt.1d0) then
 ! Weight for this PS point is larger than current upper bound. Increase
 ! the bound so that it is equal to the current max weight.  If the new
@@ -722,116 +725,131 @@ contains
        prod=min(2d0,prod)
        prod=prod**(1d0/dble(ndim))
        do kdim=1,ndim
-          ymax(ncell(kdim),kdim,ichan)=ymax(ncell(kdim),kdim,ichan)*prod
+          ymax(ncell(ip,kdim),kdim,ichan)=ymax(ncell(ip,kdim),kdim,ichan)*prod
        enddo
     endif
-! Update the upper bounding envelope virtual. Do not include the
-! enhancement due to the virtual_fraction. (And again limit by factor 2
-! at most).
-    if (f(5)*virtual_fraction(ichan).gt.ymax_virt(ichan)) &
-         ymax_virt(ichan) = min(f(5)*virtual_fraction(ichan),ymax_virt(ichan)*2d0)
-! for consistent printing in the log files (in particular when doing LO
-! runs), set also f(6) to zero when imode.eq.1 and the virtuals are not
-! included.
-    do k_ord_virt=0,n_ord_virt
-       if (k_ord_virt.eq.0) then
-          ithree=3
-          isix=6
-       else
-          ithree=2*k_ord_virt+5
-          isix=2*k_ord_virt+6
-       endif
-       if (f(ithree).eq.0) f(isix)=0d0
-    enddo
+!!$! Update the upper bounding envelope virtual. Do not include the
+!!$! enhancement due to the virtual_fraction. (And again limit by factor 2
+!!$! at most).
+!!$    if (f(5)*virtual_fraction(ichan).gt.ymax_virt(ichan)) &
+!!$         ymax_virt(ichan) = min(f(5)*virtual_fraction(ichan),ymax_virt(ichan)*2d0)
+!!$! for consistent printing in the log files (in particular when doing LO
+!!$! runs), set also f(6) to zero when imode.eq.1 and the virtuals are not
+!!$! included.
+!!$    do k_ord_virt=0,n_ord_virt
+!!$       if (k_ord_virt.eq.0) then
+!!$          ithree=3
+!!$          isix=6
+!!$       else
+!!$          ithree=2*k_ord_virt+5
+!!$          isix=2*k_ord_virt+6
+!!$       endif
+!!$       if (f(ithree).eq.0) f(isix)=0d0
+!!$    enddo
   end subroutine add_point_to_bounding_envelope
-     
-  subroutine accumulate_the_point(x)
+
+  subroutine mint_fill_zero_point(ip)
     implicit none
-    integer :: i
-    double precision, dimension(ndimmax) :: x
+    integer :: ip
+    f(ip,1:nintegrals)=0d0
     if(imode.eq.0) then
-       call add_point_to_grids(x)
+       call add_point_to_grids(ip)
     else
-       call add_point_to_bounding_envelope
+       call add_point_to_bounding_envelope(ip)
     endif
-    do i=1,nintegrals
-       if (f(i).ne.0d0) non_zero_point(i)=non_zero_point(i)+1
-    enddo
-    if (pass_cuts_check) pass_cuts_point=pass_cuts_point+1
+  end subroutine mint_fill_zero_point
+  
+  subroutine accumulate_the_point
+    implicit none
+    integer :: i,ip
+    do ip=1,npp
+       if(imode.eq.0) then
+          call add_point_to_grids(ip)
+       else
+          call add_point_to_bounding_envelope(ip)
+       endif
+       do i=1,nintegrals
+          if (f(ip,i).ne.0d0) non_zero_point(i)=non_zero_point(i)+1
+       enddo
+       if (pass_cuts_check(ip)) pass_cuts_point=pass_cuts_point+1
 ! Add the PS point to the result of this iteration
-    vtot(1:nintegrals,ichan)=vtot(1:nintegrals,ichan)+f(1:nintegrals)
-    etot(1:nintegrals,ichan)=etot(1:nintegrals,ichan)+f(1:nintegrals)**2
+       vtot(1:nintegrals,ichan)=vtot(1:nintegrals,ichan)+f(ip,1:nintegrals)
+       etot(1:nintegrals,ichan)=etot(1:nintegrals,ichan)+f(ip,1:nintegrals)**2
 ! Accumulate the points in the HwU histograms    
-    if (f(1).ne.0d0) call HwU_add_points
+    enddo
+    if (any(f(1:npp,1).ne.0d0)) call HwU_add_points
   end subroutine accumulate_the_point
 
   
-  subroutine compute_integrand(fun,x,vol)
+  subroutine compute_integrand(fun)
     implicit none
     integer :: ifirst,iret
     integer, dimension(ndimmax) :: kfold
-    double precision :: dummy,vol
-    double precision, dimension(nintegrals) :: f1
-    double precision, dimension(ndimmax) :: x
+    double precision :: dummy
+    double precision, dimension(np_max,nintegrals) :: f1
     double precision, external :: fun
     ! contribution to integral
     ifirst=0
-    if(imode.eq.0) then
-       dummy=fun(x,vol,ifirst,f1)
-       f(1:nintegrals)=f1(1:nintegrals)
-    else
-       f(1:nintegrals)=0d0
-       kfold(1:ndim)=1
-1      continue
-       ! this accumulated value will not be used
-       dummy=fun(x,vol,ifirst,f1)
-       ifirst=1
-       call nextlexi(ifold,kfold,iret)
-       if(iret.eq.0) then
-          call get_random_x_next_fold(x,vol,kfold)
-          goto 1
-       endif
-       !closing call: accumulated value with correct sign
-       ifirst=2
-       dummy=fun(x,vol,ifirst,f1)
-       f(1:nintegrals)=f1(1:nintegrals)
-    endif
+!!$    if(imode.eq.0) then
+       dummy=fun(ifirst,f1)
+       f(1:np_max,1:nintegrals)=f1(1:np_max,1:nintegrals)
+!!$    else
+!!$       f(1:np_max,1:nintegrals)=0d0
+!!$       kfold(1:ndim)=1
+!!$1      continue
+!!$       ! this accumulated value will not be used
+!!$       dummy=fun(ifirst,f1)
+!!$       ifirst=1
+!!$       call nextlexi(ifold,kfold,iret)
+!!$       if(iret.eq.0) then
+!!$          call get_random_x_next_fold(x,vol,kfold)
+!!$          goto 1
+!!$       endif
+!!$       !closing call: accumulated value with correct sign
+!!$       ifirst=2
+!!$       dummy=fun(ifirst,f1)
+!!$       f(1:np_max,1:nintegrals)=f1(1:np_max,1:nintegrals)
+!!$    endif
   end subroutine compute_integrand
   
-  subroutine get_random_x(x,vol,kfold)
+  subroutine get_random_x(x,vol,kfold,ip)
     implicit none
-    integer :: kdim,k_ord_virt,nintcurr
+    integer :: kdim,k_ord_virt,nintcurr,ip
     integer, dimension(ndimmax) :: kfold
-    double precision :: vol,dx
+    double precision :: dx
+    double precision :: vol
     double precision, dimension(ndimmax) :: x
+    ntotcalls(1:nintegrals)=ntotcalls(1:nintegrals)+1
     call get_channel
+    
 ! find random x, and its random cell
     do kdim=1,ndim
 ! if(even_rn), we should compute the ncell and the rand from the ran3()
        if (even_rn) then
           rand(kdim)=ran3(even_rn)
-          ncell(kdim)= min(int(rand(kdim)*nint_used)+1,nint_used)
-          rand(kdim)=rand(kdim)*nint_used-(ncell(kdim)-1)
+          ncell(ip,kdim)= min(int(rand(kdim)*nint_used)+1,nint_used)
+          rand(kdim)=rand(kdim)*nint_used-(ncell(ip,kdim)-1)
        else
-          ncell(kdim)=min(int(nint_used/ifold(kdim)*ran3(even_rn))+1,nint_used/ifold(kdim))
+          ncell(ip,kdim)=min(int(nint_used/ifold(kdim)*ran3(even_rn))+1,nint_used/ifold(kdim))
           rand(kdim)=ran3(even_rn)
        endif
     enddo
     kfold(1:ndim)=1
-    entry get_random_x_next_fold(x,vol,kfold)
+!!$    entry get_random_x_next_fold(x,vol,kfold)
     vol=1d0/vol_chan * wgt_mult
 ! convert 'flat x' ('rand') to 'vegas x' ('x') and include jacobian ('vol')
     do kdim=1,ndim
        nintcurr=nint_used/ifold(kdim)
-       icell(kdim)=ncell(kdim)+(kfold(kdim)-1)*nintcurr
-       dx=xgrid(icell(kdim),kdim,ichan)-xgrid(icell(kdim)-1,kdim,ichan)
+       icell(ip,kdim)=ncell(ip,kdim)+(kfold(kdim)-1)*nintcurr
+       dx=xgrid(icell(ip,kdim),kdim,ichan)-xgrid(icell(ip,kdim)-1,kdim,ichan)
        vol=vol*dx*nintcurr
-       x(kdim)=xgrid(icell(kdim)-1,kdim,ichan)+rand(kdim)*dx
-       if(imode.eq.0) nhits(icell(kdim),kdim,ichan)=nhits(icell(kdim),kdim,ichan)+1
+       x(kdim)=xgrid(icell(ip,kdim)-1,kdim,ichan)+rand(kdim)*dx
+       if(imode.eq.0) nhits(icell(ip,kdim),kdim,ichan)=nhits(icell(ip,kdim),kdim,ichan)+1
     enddo
-    do k_ord_virt=0,n_ord_virt
-       call get_ave_virt(x,k_ord_virt)
-    enddo
+!!$       do k_ord_virt=0,n_ord_virt
+!!$          call get_ave_virt(x,k_ord_virt)
+!!$       enddo
+    
   end subroutine get_random_x
   
 
@@ -849,6 +867,7 @@ contains
     kpoint_iter=0
     non_zero_point(1:nintegrals)=0
     pass_cuts_point=0
+    ntotcalls(1:nintegrals)=0
   end subroutine start_iteration
 
   subroutine reset_accumulated_grids_for_updating
@@ -1001,7 +1020,8 @@ contains
   
   subroutine setup_imode_m1
     implicit none
-    even_rn=.true.
+!!$    even_rn=.true.
+    even_rn=.false.
     imode=0
     min_it=min_it0
     ans_chan(1:nchans)=ans(1,1:nchans)
@@ -1010,7 +1030,8 @@ contains
   
   subroutine setup_imode_0
     implicit none
-    even_rn=.true.
+!!$    even_rn=.true.
+    even_rn=.false.
     min_it=min_it0
     call reset_mint_grids
   end subroutine setup_imode_0
@@ -1516,10 +1537,10 @@ contains
   subroutine gen(fun,gen_mode,vn)
     implicit none
     integer :: vn,gen_mode
-    logical :: found_point
+    logical, dimension(np_max) :: found_point
     double precision, external :: fun
-    double precision, dimension(ndimmax) :: x
-    double precision :: vol
+    double precision, dimension(ndimmax,np_max) :: x
+    double precision,dimension(np_max) :: vol
     if (gen_mode.eq.0) then
        call initialise_mint_gen
     elseif(gen_mode.eq.3) then
@@ -1533,10 +1554,10 @@ contains
        else
           call get_weighted_cell(x,vol)
        endif
-       call compute_integrand(fun,x,vol)
+       call compute_integrand(fun)
        call increase_gen_counters_middle(vn)
        call check_upper_bound(vn,found_point)
-       if (.not.found_point) goto 10
+       if (all(.not.found_point)) goto 10
        call increase_gen_counters_end(vn)
     else
        write (*,*) "Unknown gen_mode in gen (from mint_module)",gen_mode
@@ -1553,7 +1574,7 @@ contains
     else
        gen_counters(6)=gen_counters(6)+1
     endif
-    if (f(1).eq.0d0) then
+    if (f(1,1).eq.0d0) then
        gen_counters(4)=gen_counters(4)+1
     endif
   end subroutine increase_gen_counters_middle
@@ -1582,58 +1603,63 @@ contains
 
   subroutine check_upper_bound(vn,found_point)
     implicit none
-    logical :: found_point
-    integer :: vn
-    if (f(1).gt.upper_bound) then
-       if (vn.eq.2) then
-          gen_counters(7)=gen_counters(7)+1
-       elseif (vn.eq.1) then
-          gen_counters(8)=gen_counters(8)+1
-       elseif(vn.eq.3) then
-          gen_counters(9)=gen_counters(9)+1
+    logical, dimension(np_max) :: found_point
+    integer :: vn,ip
+    do ip=1,npp
+       if (f(ip,1).gt.upper_bound(ip)) then
+          if (vn.eq.2) then
+             gen_counters(7)=gen_counters(7)+1
+          elseif (vn.eq.1) then
+             gen_counters(8)=gen_counters(8)+1
+          elseif(vn.eq.3) then
+             gen_counters(9)=gen_counters(9)+1
+          endif
        endif
-    endif
-    upper_bound=upper_bound*ran3(.false.)
-    if (upper_bound.gt.f(1)) then
-       gen_counters(10)=gen_counters(10)+1
-       found_point=.false.
-    else
-       found_point=.true.
-    endif
+       upper_bound(ip)=upper_bound(ip)*ran3(.false.)
+       if (upper_bound(ip).gt.f(ip,1)) then
+          gen_counters(10)=gen_counters(10)+1
+          found_point(ip)=.false.
+       else
+          found_point(ip)=.true.
+       endif
+    enddo
   end subroutine check_upper_bound
   
   subroutine get_random_cell_flat(x,vol)
     implicit none
-    double precision :: vol
-    double precision, dimension(ndimmax) :: x
+    double precision, dimension(np_max) :: vol
+    double precision, dimension(ndimmax,np_max) :: x
     integer, dimension(ndimmax) :: kfold
-    call get_random_x(x,vol,kfold)
-    upper_bound=ymax_virt(ichan)
+!!$    call get_random_x(x,vol,kfold)
+!!$    upper_bound=ymax_virt(ichan)
   end subroutine get_random_cell_flat
 
   subroutine get_weighted_cell(x,vol)
     implicit none
-    integer :: kdim,nintcurr,kint
+    integer :: kdim,nintcurr,kint,ip
     integer, dimension(ndimmax) :: kfold
-    double precision :: vol,r
-    double precision, dimension(ndimmax) :: x
+    double precision :: r
+    double precision, dimension(np_max) :: vol
+    double precision, dimension(ndimmax,np_max) :: x
     call get_channel
-    do kdim=1,ndim
-       nintcurr=nintervals/ifold(kdim)
-       r=ran3(.false.)
-       do kint=1,nintcurr
-          if(r.lt.xmmm(kint,kdim,ichan)) then
-             ncell(kdim)=kint
-             exit
-          endif
+    do ip=1,npp
+       do kdim=1,ndim
+          nintcurr=nintervals/ifold(kdim)
+          r=ran3(.false.)
+          do kint=1,nintcurr
+             if(r.lt.xmmm(kint,kdim,ichan)) then
+                ncell(ip,kdim)=kint
+                exit
+             endif
+          enddo
+          rand(kdim)=ran3(.false.)
        enddo
-       rand(kdim)=ran3(.false.)
-    enddo
-    kfold(1:ndim)=1
-    call get_random_x_next_fold(x,vol,kfold)
-    upper_bound=1d0
-    do kdim=1,ndim
-       upper_bound=upper_bound*ymax(ncell(kdim),kdim,ichan)
+       kfold(1:ndim)=1
+!!$    call get_random_x_next_fold(x,vol,kfold)
+       upper_bound(ip)=1d0
+       do kdim=1,ndim
+          upper_bound(ip)=upper_bound(ip)*ymax(ncell(ip,kdim),kdim,ichan)
+       enddo
     enddo
   end subroutine get_weighted_cell
   

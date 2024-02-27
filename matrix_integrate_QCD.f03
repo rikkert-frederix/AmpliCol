@@ -17,6 +17,7 @@ program matrix_integrate_QCD
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
+  real*8, dimension(np_max,1:2) :: all_xbjrk
  
   call get_run_arguments()
   call compute_mutlichannel_symmetry_factor()
@@ -38,7 +39,7 @@ program matrix_integrate_QCD
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
-  accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+  accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
 
 ! relevant physics input parameters and initialisation of amplitudes
@@ -73,7 +74,7 @@ program matrix_integrate_QCD
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
-  call amps%init(1,next,part,o)
+  call amps%init(1,next,part,o,np)
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
@@ -82,11 +83,15 @@ program matrix_integrate_QCD
 
   ! number of helicities to sum over
   nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
-  allocate(amp2_hel(1:nhel))
+  allocate(amp2_hel(1:np,1:nhel))
+  allocate(amp2(1:np))
+  allocate(hel_picked(1:np))
+  allocate(all_p(1:np,0:3,1:next))
 
   ! Not so relevant mint-module parameters: only used in special cases.
   call set_mint_module_special_parameters()
-
+  npp=np
+  
   if (imode.le.1) then
      ! grid setup, or computation of upper bounding envelope
      call mint(integrand)
@@ -119,107 +124,133 @@ program matrix_integrate_QCD
   write(*,*) 'Number of numerical errors:',num_error
  
 contains
-  function integrand(x,vol,ifirst,f1)
+  function integrand(ifirst,f1)
     implicit none
     real*8 :: integrand
     integer :: ifirst
-    real*8, dimension(ndim) :: x
-    real*8, dimension(nintegrals) :: f1
-    real*8, save :: val
-    integer :: iperm,ih
-    real*8 :: vol,cuts_wgt
+    real*8, dimension(ndimmax,np_max) :: x
+    real*8, dimension(ndimmax) :: xx
+    real*8, dimension(np_max,nintegrals) :: f1
+    real*8, dimension(np_max) :: vol,all_jac
+    real*8, dimension(np_max), save :: val
+    integer :: iperm,ih,ip
+    real*8 :: cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
+    integer, dimension(ndimmax) :: kfold
 
     double precision :: y,frac,steep,cuts_wgt_1,Q
    
+    kfold(1:ndim)=1
     ! some point-by-point initialisation
-    f1(1:nintegrals)=0d0
+    f1(1:np_max,1:nintegrals)=0d0
     if (ifirst.eq.2) then
        ! use previously computed integrand
-       f1(1)=abs(val)
-       f1(2)=val
+       f1(1:np,1)=abs(val(1:np))
+       f1(1:np,2)=val(1:np)
        return
     endif
     new_point=.true.
-    pass_cuts_check=.true.
 
-    ! Generate phase-space point based on the random numbers 'x(1:ndim)'
-    if (integration.eq.1)then
-       call gen23_phase_space(x)
-    elseif (integration.eq.2) then
-       call PS_haag(x)
-    endif
-    
+    call cpu_time(tBefore)
+    ip=1
+    do
+       pass_cuts_check(ip)=.true.
+       ! Generate phase-space point based on the random numbers 'x(1:ndim)'
+       call get_random_x(xx,vol(ip),kfold,ip)
+       x(1:ndim,ip)=xx(1:ndim)
+       if (integration.eq.1)then
+          call gen23_phase_space(x(1,ip))
+       elseif (integration.eq.2) then
+          call PS_haag(x(1,ip))
+       endif
+
+       all_evt=all_evt+1
+
+       cuts_wgt=pass_cuts(next,p)
+       if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
+          pass_cuts_check(ip)=.false.
+          call mint_fill_zero_point(ip)
+          cycle
+       endif
+
+       all_p(ip,0:3,1:next)=p(0:3,1:next)
+       all_jac(ip)=jac
+       all_xbjrk(ip,1:2)=xbjrk(1:2)
+       passed = passed + 1
+       if (ip.eq.np) exit
+       ip=ip+1
+    enddo
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
-    all_evt=all_evt+1
-
-    cuts_wgt=pass_cuts(next,p)
-    if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
-       pass_cuts_check=.false.
-       val=0d0
-       return
-    endif
-
-    passed = passed + 1
-
+    
     ! compute amplitudes
     call cpu_time(tBefore)
-    call amps%evaluate(next,p,0)
+    call amps%evaluate(next,all_p,0,np)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
-    amp2_hel(1:nhel)=0d0
+    amp2_hel(1:np,1:nhel)=0d0
     do ih=1,nhel
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
-          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
+          do ip=1,np
+             amp2_hel(ip,ih)=amp2_hel(ip,ih)+amps%amps_r(ip,ih)*col_fac*amps%amps_r(ip,ih)
+          enddo
        else
-          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
+          do ip=1,np
+             amp2_hel(ip,ih)=amp2_hel(ip,ih)+dble(amps%amps(ip,ih)*col_fac*dconjg(amps%amps(ip,ih)))
+          enddo
        endif
     enddo
-    amp2=sum(amp2_hel(1:nhel))
+    amp2(1:np)=sum(amp2_hel(1:np,1:nhel),dim=2)
+
+!!$    write (*,*) x
+!!$    write (*,*) all_p
+!!$    write (*,*) amp2,pass_cuts_check
+!!$    stop 1
+    
 
     if (amps%n_sing.eq.1) then
-    do i=1,next
-     if (abs(part(i)).le.6) then
-        if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
-        if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
-     endif
-    enddo
+       do i=1,next
+          if (abs(part(i)).le.6) then
+             if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
+             if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
+          endif
+       enddo
     endif
 
+    do ip=1,np
     ! include the jacobian from mint ('vol') and the wgt from the phase-space ('jac') and other overal factors
-    if (amps%n_sing.eq.1) then
-       weight=vol*jac*(4*pi*alphas)**(next-3)/dble(iden)*conv
-       weight=weight*(Q*dsqrt(4*pi*alphaEW))**2
-       weight=weight*dsqrt(2d0)*dsqrt(2d0) ! do to normalization of fund. matrices
-    else
-       weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
-    endif
+       if (amps%n_sing.eq.1) then
+          weight=vol(ip)*all_jac(ip)*(4*pi*alphas)**(next-3)/dble(iden)*conv
+          weight=weight*(Q*dsqrt(4*pi*alphaEW))**2
+          weight=weight*dsqrt(2d0)*dsqrt(2d0) ! do to normalization of fund. matrices
+       else
+          weight=vol(ip)*all_jac(ip)*(4*pi*alphas)**(next-2)/dble(iden)*conv
+       endif
+       val(ip)=amp2(ip)*weight
 
-    val=amp2*weight
+       ! Apply the weight from the cuts
+       if (smooth_cuts) val(ip)=val(ip)*cuts_wgt
 
-    ! Apply the weight from the cuts
-    if (smooth_cuts) val=val*cuts_wgt
+       ! Since we only need to include a subset of all the colour-orderings, we
+       ! need to compensate with a symmetry factor
+       val(ip)=val(ip)*sym_fac
 
-    ! Since we only need to include a subset of all the colour-orderings, we
-    ! need to compensate with a symmetry factor
-    val=val*sym_fac
+       if (include_PDF) then
+          call multiply_by_PDF_value(val(ip),ip)
+       endif
+!!$       write (*,*) ip,vol(ip),all_jac(ip),amp2(ip),val(ip),pass_cuts_check(ip)
+
+       ! pass the result to the mint module
+       f1(ip,1)=abs(val(ip))
+       f1(ip,2)=val(ip)
+    enddo
 
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
-    
-    if (include_PDF) then
-       call multiply_by_PDF_value(val)
-    endif
-
-    ! pass the result to the mint module
-    f1(1)=abs(val)
-    f1(2)=val
-
   end function integrand
 
   double precision function pass_cuts(n,p)
@@ -336,24 +367,26 @@ contains
 
   subroutine unwgt_helicity
     implicit none
-    integer :: i
+    integer :: i,ip
     real*8 :: random
     real*8,external :: ran2
-    random=ran2()*amp2
-    i=1
-    do
-       if (amp2_hel(i).gt.random) then
-          exit
-       else
-          i=i+1
-          amp2_hel(i)=amp2_hel(i)+amp2_hel(i-1)
+    do ip=1,np
+       random=ran2()*amp2(ip)
+       i=1
+       do
+          if (amp2_hel(ip,i).gt.random) then
+             exit
+          else
+             i=i+1
+             amp2_hel(ip,i)=amp2_hel(ip,i)+amp2_hel(ip,i-1)
+          endif
+       enddo
+       hel_picked(ip)=i
+       if (hel_picked(ip).gt.nhel) then
+          write (*,*) 'Could not unweight helicity',ip,hel_picked(ip),nhel
+          stop 1
        endif
     enddo
-    hel_picked=i
-    if (hel_picked.gt.nhel) then
-       write (*,*) 'Could not unweight helicity',hel_picked,nhel
-       stop 1
-    endif
   end subroutine unwgt_helicity
   
   subroutine get_run_arguments()
@@ -600,15 +633,16 @@ contains
     endif
   end subroutine set_ipdgs_for_PDF
   
-  subroutine multiply_by_PDF_value(val)
+  subroutine multiply_by_PDF_value(val,ip)
     implicit none
+    integer :: ip
     real(kind=8),intent(inout) :: val
     real(kind=8) :: xmu_fac
     real*8, dimension(-6:7,2) :: PDF
     ! Include the PDFs
     xmu_fac=91.188d0 ! factorisation scale
-    call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
-    call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+    call PDF_eval(1,ipdgs(-6,1),all_xbjrk(ip,1),xmu_fac,PDF(-6,1))
+    call PDF_eval(1,ipdgs(-6,2),all_xbjrk(ip,2),xmu_fac,PDF(-6,2))
     if (part(1).eq.21) then
        val=val*PDF(0,1)
     elseif (part(1).eq.22) then

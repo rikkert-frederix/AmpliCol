@@ -2,14 +2,19 @@ module common
   use amplitude_QCD_mod
   implicit none
   real*8,parameter  :: alphaS=0.119d0,alphaEW=7.547E-003
-  integer :: next,nfin_glu,hel_picked
+  integer :: next,nfin_glu
+  integer,dimension(:),allocatable :: hel_picked
 
   type(amplitude_QCD) :: amps
 
-  real*8 :: amp2,weight
-  real*8,dimension(:),allocatable :: amp2_hel
-  real(kind=8),dimension(:,:),allocatable,public :: p
+  real*8 :: weight
+  real*8,dimension(:),allocatable :: amp2
+  real(kind=8),dimension(:,:),allocatable,public :: amp2_hel,p
   real(kind=8),public :: jac,xbjrk(2)
+  real(kind=8),dimension(:,:,:),allocatable,public :: all_p
+
+  ! number of events to compute in one go
+  integer,parameter :: np=8
 
   ! timing
   real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
