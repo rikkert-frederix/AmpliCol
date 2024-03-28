@@ -21,6 +21,7 @@ program test_QCD
   real(kind=8) :: tBefore,tAfter,t_eval,t_init
   real(kind=8) :: Q
   integer :: gi,gj,ui,uj
+  integer :: it ! quark order
 
   n=6
   one_qq=.false.
@@ -274,9 +275,10 @@ program test_QCD
 
   endif
 
+  it = 0 ! dummy
   if (single_perm) then
     call cpu_time(tBefore) 
-    call amps_col%init(2,n,part,order(1:n,1))
+    call amps_col%init(2,n,part,order(1:n,1),it)
     call cpu_time(tAfter)
     t_init = tAfter-tBefore
     call cpu_time(tBefore)
@@ -286,7 +288,7 @@ program test_QCD
   else
     do iperm=1,nperm
      call cpu_time(tBefore)
-     call amps(iperm)%init(1,n,part,order(1:n,iperm))
+     call amps(iperm)%init(1,n,part,order(1:n,iperm),it)
      call cpu_time(tAfter)
      t_init=tAfter-tBefore
      call cpu_time(tBefore)

@@ -17,9 +17,10 @@ program matrix_integrate_QCD
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
+  integer :: it ! quark order type
  
   call get_run_arguments()
-  call compute_mutlichannel_symmetry_factor()
+  call compute_multichannel_symmetry_factor()
   call create_run_tag()
 
   allocate(mass(next))
@@ -73,12 +74,16 @@ program matrix_integrate_QCD
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
-  call amps%init(1,next,part,o)
+  it = 0 ! dummy
+  call amps%init(1,next,part,o,it)
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
   ! Compute the leading colour factor
-  call compute_LC_colour_factor(col_fac)
+  if (amps%n_qqbar.eq.2) then
+      if (abs(part(o(1))).ne.abs(part(o(next)))) it = 2
+  endif
+  call compute_LC_colour_factor(col_fac,it)
 
   ! number of helicities to sum over
   nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
@@ -383,13 +388,13 @@ contains
              allocate(o(1:next))
           endif
 
-          do k=0,next
+          do k=0,next-1
           if (i.eq.4+k) then
              read(argv,*) part(k+1)
           endif
           enddo
 
-          do k=0,next
+          do k=0,next-1
           if (i.eq.4+next+k) then
                read(argv,*) o(k+1)
           endif
@@ -543,11 +548,12 @@ contains
     deallocate(iden_part)
   end subroutine set_final_state_identical_particle_factor
 
-  subroutine compute_LC_colour_factor(col_fac)
+  subroutine compute_LC_colour_factor(col_fac,it)
     implicit none
     integer,intent(inout) :: col_fac
     integer :: i,ifac
     real(kind=8) :: fac=0d0
+    integer :: it
     do i=1,next
        if (part(i).eq.21) then
           fac=fac+1d0
@@ -560,6 +566,9 @@ contains
        write (*,*) 'There is some issue with the LC colour factor computation: '// &
             'colour factor is not an integer',ifac,fac
        stop 1
+    endif
+    if (it.eq.2) then
+        ifac=(ifac-2) 
     endif
     col_fac=3**ifac
   end subroutine compute_LC_colour_factor
@@ -642,7 +651,7 @@ contains
     endif
   end subroutine multiply_by_PDF_value
   
-  subroutine compute_mutlichannel_symmetry_factor()
+  subroutine compute_multichannel_symmetry_factor()
     implicit none
     integer :: ngl=0
     ! count the number of final state gluons
@@ -713,10 +722,12 @@ contains
           ! 2!. Hence we have:
           sym_fac=factorial8(ngl)
        endif
-    else
+    elseif (nquarks.eq.4) then
+       sym_fac=1d0 ! CHANGE accordingly!
+    else        
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
-  end subroutine compute_mutlichannel_symmetry_factor
+  end subroutine compute_multichannel_symmetry_factor
 
   subroutine read_process_from_file
     implicit none

@@ -322,7 +322,7 @@ contains
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
-    write(*,*) 'q-g called'
+    !write(*,*) 'q-g called'
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
@@ -338,7 +338,7 @@ contains
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
-    write(*,*) 'g-q called'
+    !write(*,*) 'g-q called'
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
@@ -371,7 +371,7 @@ contains
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
-    write(*,*) 'aq-g called'
+    !write(*,*) 'aq-g called'
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
@@ -386,7 +386,7 @@ contains
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
-    write(*,*) 'g-aq called'
+    !write(*,*) 'g-aq called'
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
@@ -401,7 +401,7 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    write(*,*) 'q-aq called'
+    !write(*,*) 'q-aq called'
     wfg(1)=( wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) + wfq1(2)*wfq2(4))*prefact
     wfg(2)=(-wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) + wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*prefact
     wfg(3)=( wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) - wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*cImag*prefact
@@ -411,7 +411,7 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    write(*,*) 'aq-q called'
+    !write(*,*) 'aq-q called'
     wfg(1)=-( wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) + wfq2(2)*wfq1(4))*prefact
     wfg(2)=-(-wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) + wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*prefact
     wfg(3)=-( wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) - wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*cImag*prefact
@@ -428,7 +428,7 @@ contains
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: propagator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    write(*,*) 'gluon prop'
+    !write(*,*) 'gluon prop'
     propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     wfg(1:4,1:nhel)=wfg(1:4,1:nhel)*propagator
   end subroutine GluonPropagator
@@ -451,7 +451,7 @@ contains
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     integer :: ih
-    write(*,*) 'quark prop'
+    !write(*,*) 'quark prop'
     prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     do ih=1,nhel
        tmp_val(1:4)=wfq(1:4,ih)
@@ -474,7 +474,7 @@ contains
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     integer :: ih
-    write(*,*) 'Aquark prop'
+    !write(*,*) 'Aquark prop'
     prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     do ih=1,nhel
        tmp_val(1:4)=wfq(1:4,ih)

@@ -126,6 +126,9 @@ contains
        write (*,*) "set 2:",sets(:,2)
     endif
     !stop 1
+
+    write (*,*) "set 1:",sets(:,1)
+       write (*,*) "set 2:",sets(:,2)
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
     endif

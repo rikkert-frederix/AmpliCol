@@ -35,23 +35,24 @@ program matrix_reweight
   real(kind=8) :: amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c
   real(kind=8),dimension(:),allocatable :: mass
-  logical :: done
+  logical :: done,first
+  integer :: swap_q,swap_aq
+  integer :: it,gi,gi_iperm ! type for 2qq process
+  integer,dimension(:),allocatable :: iper_test
   
   call get_run_arguments()
 
-  write(*,*) 'itteittenn'
   call cpu_time(tTot_B)
 
   if (.not.allocated(o)) allocate(o(next))
   allocate(hel(next))
   allocate(mass(next))
   allocate(p(0:3,next))
+  allocate(iper_test(1:next-1)) ! needed for 2qq
 
   mass(1:next)=0d0
-  write(*,*) 'fali'
   call create_run_tag_and_open_files()
 
-  write(*,*) 'hahhahoo'
   call cpu_time(tBefore)
 
   if (.not.allocated(part)) allocate(part(1:next))
@@ -61,9 +62,27 @@ program matrix_reweight
 
   allocate(amps((next-2)*(next-2))) 
   temp_part=part
-  call amps(1)%init(2,next,temp_part,o)
+  it = 1
+  call amps(1)%init(2,next,temp_part,o,it)
   col_acc=20
-  call amps(1)%init_col2(next,o,col_acc)
+  call amps(1)%init_col2(next,temp_part,o,it,col_acc)
+
+  if (amps(1)%n_qqbar.eq.2) then
+      do i=1,1  ! remaining amps for type-1
+         it = it + 1
+         call amps(it)%init(2,next,temp_part,o,it)
+         col_acc=20
+         call amps(it)%init_col2(next,temp_part,o,it,col_acc)
+      enddo
+      !do i=2,next-4+1 ! amps for type-2
+      !   it = it + 1
+      !   call amps(it)%init(2,next,temp_part,o,it)
+      !   col_acc=20
+      !   call amps(it)%init_col2(next,temp_part,o,it,col_acc)
+      !enddo
+  endif
+
+
   if (color_flow) then
         do i=2,2 ! TV: only single external U(1) for now!
          skip = 1
@@ -79,9 +98,10 @@ program matrix_reweight
                exit
            endif           
            enddo
-          call amps(i+k-1)%init(2,next,temp_part,o)
+           it = 0! dummy
+          call amps(i+k-1)%init(2,next,temp_part,o,it)
           col_acc=20
-          call amps(i+k-1)%init_col2(next,o,col_acc)
+          call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
          enddo
         enddo
   endif
@@ -108,6 +128,9 @@ program matrix_reweight
 
 
      call amps(1)%evaluate(next,p,ihel)
+     if (amps(1)%n_qqbar.eq.2) then
+        call amps(2)%evaluate(next,p,ihel)
+     endif
      if (color_flow) then
        do i=2,2
         do k=1,next-2
@@ -129,7 +152,7 @@ program matrix_reweight
               else
                  amp_col_c=(0d0,0d0)
               endif
-              do i=1,amp_QCD%n_col_vals(iacc)
+              do i=1,amp_QCD%n_col_vals(iacc,1)
                  if (use_real_gluons) then
                     amp2=0d0
                  else
@@ -157,7 +180,7 @@ program matrix_reweight
            enddo
 
 
-        else
+        elseif (amps(1)%n_qqbar.eq.1) then
            ri_end=0
            if (color_flow) ri_end= 1 !next-2 for FC
            do ri=0,ri_end ! loop over no U(1) and one U(1) in the rows
@@ -168,7 +191,7 @@ program matrix_reweight
            do irow=1,amps(proc_num)%nColOrd
               amp_col_c=(0d0,0d0)
               irow_mat = irow
-              do i=1,amps(proc_num)%n_col_vals(iacc)
+              do i=1,amps(proc_num)%n_col_vals(iacc,1)
                  amp2_c=(0d0,0d0)
                  do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc)+1,amps(proc_num)%row_index(irow_mat,i,iacc)
                     icol=amps(proc_num)%col_index(ic,i,iacc)
@@ -191,6 +214,46 @@ program matrix_reweight
            enddo
            enddo
            enddo
+
+        elseif (amps(1)%n_qqbar.eq.2) then
+           write(*,*) 'IACC------------',iacc
+           do it=1,2
+           write(*,*) 'it',it
+           do irow=1,amps(it)%nColOrd
+              iper_test(1:next-1)=[amps(1)%perm(1:next-1,irow)] !
+              do i=1,next-1
+                if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
+                 if (i.ne.1) then
+                   gi = i - 2
+                   exit
+                 endif
+                endif
+              enddo
+              gi_iperm = gi + 1
+              write(*,*) 'irow',irow
+              amp_col_c=(0d0,0d0)
+              write(*,*) 'n col values',amps(it)%n_col_vals(iacc,1)
+              do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
+                 amp2_c=(0d0,0d0)
+                 do ic=amps(it)%row_index(irow-1,i,iacc)+1,amps(it)%row_index(irow,i,iacc)
+                    icol=amps(it)%col_index(ic,i,iacc)
+                    !write(*,*) 'col ord',amps(1)%nColOrd
+                    if (icol.le.amps(it)%nColOrd) then
+                        write(*,*) 'icol 1',icol
+                        amp2_c=amp2_c+amps(1)%amps(icol)
+                    else
+                        write(*,*) 'icol 2',icol
+                        icol = icol -amps(it)%nColOrd
+                        amp2_c=amp2_c+amps(2)%amps(icol)
+                    endif
+                    !amp2_c=amp2_c+amps(it)%amps(icol)
+                 enddo
+                 amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc)
+              enddo
+              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
+           enddo
+           enddo
+
         endif
 
         call cpu_time(tAfter)
@@ -200,7 +263,8 @@ program matrix_reweight
      enddo
 
      !write(*,*) 'matrix LC',matrix2(1)
-     !write(*,*) 'matrix NLC',matrix2(2)
+     !write(*,*) 'matrix NLC',matrix2(2),matrix2(2)/matrix2(1)
+     !write(*,*) 'matrix FC',matrix2(3),matrix2(3)/matrix2(1)
 
      call write_event(12)
   enddo
@@ -221,7 +285,7 @@ contains
   subroutine get_run_arguments()
     use arguments
     implicit none
-    integer :: argc
+    integer :: argc,nquarks
     character(len=256) :: argv
     ! integration steps:
     ! imode=0  (Setting up grids)
@@ -243,7 +307,7 @@ contains
              allocate(part(1:next))
              allocate(o(1:next))
           endif
-          do k=0,next
+          do k=0,next-1
           if (i.eq.2+k) then
              read(argv,*) part(k+1)
           endif
@@ -360,7 +424,7 @@ contains
     implicit none
     integer :: i,iunit
     rwgt_NLC=matrix2(2)/matrix2(1)
-    rwgt_full=matrix2(2)/matrix2(1)
+    rwgt_full=matrix2(3)/matrix2(1)
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt,wgt,matrix2,weight
     write (iunit,'(100i3)') o(1:next)

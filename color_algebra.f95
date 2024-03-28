@@ -13,6 +13,7 @@ module color_algebra
 ! infinite loop!
 !  
 ! Written by Rikkert Frederix 2018-2019
+! Additional functions added by Timea Vitos, 2021
 !
 ! 2019-12-05: Added conversion subroutine for string of matrices in
 !             adjoint representation (F matrices) to lambda matrices
@@ -26,6 +27,9 @@ module color_algebra
 !             coef_Nc(:,0)). Also added an alternative 'check_NLC' subroutine
 !             that quickly computes the (N)LC contributions in the fundamental
 !             basis for all-gluon amplitudes.
+!
+! 2021       : Added Kronecker delta contraction for 1qq, 2qqDF and 2qqSF cases
+!               Added check_NLC for 1qq and 2qqDF 2qqSF cases (Timea)
 !
 ! This package also contains to useful helper functions, 'ipnext' and
 ! 'get_next_iperm' that can be used to loop over permuation of
@@ -45,11 +49,16 @@ module color_algebra
        & Tr_print_string,&      ! Print the colour string in human readable format
        & convert_Fs_to_Tr,&     ! Convert a string of F-matrices to lambda matrices
        & color_flow_factor,&    ! Compute color factor in color flow basis
-       & color_flow_factor_1qqbar,&    ! Compute color factor in color flow basis for 1qq+gluons
-       & ipnext,&               ! Helper function: get next permutation
+       & color_flow_factor_1qqbar, &
+       & color_flow_factor_2qqbar, &
+       & color_flow_factor_2qqbar_sf, & 
+       & ipnext,&    
+       & ipnextgen,&       ! Helper function: get next permutation
        & get_next_iperm,&       ! Helper function: get next permutation (advanced)
-       & check_NLC,&
-       & check_NLC_1qqbar
+       & check_NLC,&            ! gives order in NLC based on permutations for all-gluon
+       & check_NLC_1qqbar,&     ! gives order in NLC for 1qq
+       & check_NLC_2qqbar, &       ! gives order in NLC based on permutations for 2qq
+       & check_NLC_2qqbar_SF
 contains
 
   subroutine Tr_allocate(n)
@@ -58,7 +67,10 @@ contains
 ! to cover the maximum possible size in all intermediate steps.
     implicit none
     integer :: n
-    call Tr_deallocate
+    if (allocated(Tr)) deallocate(Tr)
+    if (allocated(coef)) deallocate(coef)
+    if (allocated(coef_Nc)) deallocate(coef_Nc)
+    if (allocated(F)) deallocate(F)
     allocate(coef(2**n))
     allocate(coef_Nc(-n:n,0:2**n))
     allocate(Tr(0:2*(n-1),0:n,0:2**n))
@@ -73,7 +85,7 @@ contains
     if (allocated(coef_Nc)) deallocate(coef_Nc)
     if (allocated(F)) deallocate(F)
   end subroutine Tr_deallocate
-  
+
   subroutine Tr_full_simplify(res)
 ! Calls Tr_simplify repeatedly until no traces left. Returns the colour
 ! factor. Note there is no fail-safe, so might go into an infinite loop if
@@ -242,28 +254,29 @@ contains
     enddo
   end subroutine simplify_Tr0
 
-!!$  subroutine simplify_cyc()
-!!$    implicit none
-!!$    integer :: iterm,iprod
-!!$    integer,dimension(1) :: min_loc
-!!$    integer,allocatable,dimension(:) :: temp
-!!$    do iterm=1,Tr(0,0,0)
-!!$       do iprod=1,Tr(0,0,iterm)
-!!$          ! Use cyclicity to bring to canonical order [always smallest number
-!!$          ! first]
-!!$          min_loc=minloc(Tr(1:Tr(0,iprod,iterm),iprod,iterm))
-!!$          if (min_loc(1).ne.1) then
-!!$             allocate(temp(Tr(0,iprod,iterm)))
-!!$             temp(1:Tr(0,iprod,iterm))=Tr(1:Tr(0,iprod,iterm),iprod,iterm)
-!!$             Tr(1:Tr(0,iprod,iterm)-min_loc(1)+1,iprod,iterm)= &
-!!$                                         temp(min_loc(1):Tr(0,iprod,iterm))
-!!$             Tr(Tr(0,iprod,iterm)-min_loc(1)+2:Tr(0,iprod,iterm),iprod,iterm)= &
-!!$                                         temp(1:min_loc(1)-1)
-!!$             deallocate(temp)
-!!$          endif
-!!$       enddo
-!!$    enddo
-!!$  end subroutine simplify_cyc
+  subroutine simplify_cyc()
+    implicit none
+    integer :: iterm,iprod
+    integer,dimension(1) :: min_loc
+    integer,allocatable,dimension(:) :: temp
+    do iterm=1,Tr(0,0,0)
+       do iprod=1,Tr(0,0,iterm)
+          ! Use cyclicity to bring to canonical order [always smallest number
+          ! first]
+          min_loc=minloc(Tr(1:Tr(0,iprod,iterm),iprod,iterm))
+          if (min_loc(1).ne.1) then
+             allocate(temp(Tr(0,iprod,iterm)))
+             temp(1:Tr(0,iprod,iterm))=Tr(1:Tr(0,iprod,iterm),iprod,iterm)
+             Tr(1:Tr(0,iprod,iterm)-min_loc(1)+1,iprod,iterm)= &
+                                         temp(min_loc(1):Tr(0,iprod,iterm))
+             Tr(Tr(0,iprod,iterm)-min_loc(1)+2:Tr(0,iprod,iterm),iprod,iterm)= &
+                                         temp(1:min_loc(1)-1)
+             deallocate(temp)
+          endif
+       enddo
+    enddo
+  end subroutine simplify_cyc
+
 
   subroutine Tr_pair_simplify()
 ! simplifies products of traces:
@@ -405,6 +418,7 @@ contains
           ! create the first traces of fundamental matrices
           Tr(0,0,0)=2
           coef(2)=-coef(1)
+!          write(*,*) coef(1)
           coef_Nc(:,2)=-coef_Nc(:,1)
           Tr(0,0,1)=1
           Tr(0,0,2)=1
@@ -412,7 +426,7 @@ contains
           Tr(0,1,2)=3
           Tr(1:3,1,1)=(/ maxl+i , F(i) , maxl+i+1 /) ! 'Tr(b,a,c)'
           Tr(1:3,1,2)=(/ F(i) , maxl+i , maxl+i+1 /) ! 'Tr(a,b,c)'
-       else
+        else
           ! Multiply the existing traces of fundamental matrices by
           ! '[Tr(b,a,c)-Tr(a,b,c)]':
           call double_trs()
@@ -428,7 +442,7 @@ contains
                    ! be equal to the first new label, i.e., maxl+1
                    Tr(1:3,Tr(0,0,iterm),iterm)=(/ maxl+i , F(i) , maxl+1 /)
                 endif
-             else
+              else
                 if (i.ne.nF) then
                    ! The new trace that's added is Tr(a,b,c)
                    Tr(1:3,Tr(0,0,iterm),iterm)=(/ F(i) , maxl+i , maxl+i+1 /)
@@ -583,7 +597,7 @@ contains
     col_fac=-colfac
   end subroutine color_flow_factor
 
-    subroutine color_flow_factor_1qqbar(n,iper,jper,ri,rj,col_fac)
+  subroutine color_flow_factor_1qqbar(n,iper,jper,ri,rj,col_fac)
     ! Given two permutations (iper and jper) compute corresponding
     ! colour factor using the color flow decomposition (i.e., string
     ! of kronecker delta's -- eq.3 of hep-ph/0209271 [Maltoni, Paul,
@@ -596,44 +610,40 @@ contains
     !
     implicit none
     integer :: n                 ! number of external particles
-    integer,dimension(n) :: iper ! order in amplitude
-    integer,dimension(n) :: jper ! order in conjugate amplitude
-    integer,dimension(n-1) :: iper_q_up,iper_q_down,iper_q ! Krnecker delta string
+    integer,dimension(n-2) :: iper ! order in amplitude
+    integer,dimension(n-2) :: jper ! order in conjugate amplitude
+    integer,dimension(n-1) :: iper_q_up,iper_q_down,iper_q ! order in amplitude
     integer,dimension(n-1) :: jper_q_up,jper_q_down,jper_q
     integer :: col_fac           ! color factor
     integer :: index,colfac,i,flip,m,k
     integer, dimension(n-1) :: it,jt
-    integer :: ri,rj ! number of U(1) gluons
+    integer :: ri,rj
     integer, dimension(ri+1) :: it_1,iper_q_1
     integer, dimension(rj+1) :: jt_1,jper_q_1
     integer, dimension(n-1) :: itemp
 
     iper_q_up(1) = n-1
-    iper_q_up(2:n-1) = iper(2:n-1)
+    iper_q_up(2:n-1) = iper(1:n-2)
 
     jper_q_up(1) = n-1
-    jper_q_up(2:n-1) = jper(2:n-1)
+    jper_q_up(2:n-1) = jper(1:n-2)
 
-    iper_q_down(1:n-2-ri) = iper(2:n-2-ri+1)
-    iper_q_down(n-2-ri+1) = n-1
-    iper_q_down(n-2-ri+2:n-1) = iper(n-2-ri+2:n-1)
+    iper_q_down(1:ri) = iper(1:ri)
+    iper_q_down(ri+1) = n-1
+    iper_q_down(ri+2:n-1) = iper(ri+1:n-2)
 
-    jper_q_down(1:n-2-rj) = jper(2:n-2-rj+1)
-    jper_q_down(n-2-rj+1) = n-1
-    jper_q_down(n-2-rj+2:n-1) = jper(n-2-rj+2:n-1)
+    jper_q_down(1:rj) = jper(1:rj)
+    jper_q_down(rj+1) = n-1
+    jper_q_down(rj+2:n-1) = jper(rj+1:n-2)
+    
     itemp = jper_q_down
     jper_q_down = jper_q_up
     jper_q_up = itemp
 
-    !write(*,*) iper_q_up
-    !write(*,*) iper_q_down
-    !write(*,*) jper_q_up
-    !write(*,*) jper_q_down
-
     do i=1,size(iper_q_down)
        if (iper_q_down(i) .eq. i) then
                iper_q(i) = iper_q_up(i)
-       else
+       else 
           iper_q(iper_q_down(i)) = iper_q_up(i)
        endif
     enddo
@@ -645,7 +655,7 @@ contains
           jper_q(jper_q_down(i)) = jper_q_up(i)
        endif
     enddo
-
+    
     index=1
     colfac=-1
     flip=0
@@ -665,10 +675,276 @@ contains
        enddo
        if (flip.lt.n-1) colfac=colfac-1
     enddo
-!!$    col_fac=Nc**(-colfac)
+!!$    col_fac=Nc**(-colfac)    
     col_fac=-colfac
-    col_fac = col_fac - (ri) - (rj)
+    col_fac = col_fac - (n-2-ri) - (n-2-rj)
+    col_fac = col_fac
+    
   end subroutine color_flow_factor_1qqbar
+
+
+
+  subroutine color_flow_factor_2qqbar(n,iper_t,jper_t,ni_t,nj_t,ii_t,jj_t,col_fac)
+    ! Given two permutations (iper and jper) compute corresponding
+    ! colour factor using the color flow decomposition (i.e., string
+    ! of kronecker delta's -- eq.3 of hep-ph/0209271 [Maltoni, Paul,
+    ! Stelzer & Willenbrock]).
+    ! It sets up the string of delta's, contracts all the indices,
+    ! counts the closed loops ('colfac'), and set the color factor
+    ! equal to Nc**colfac.
+    !
+    ! by Timea Vitos
+    !
+    implicit none
+    integer :: n                 ! number of external particles
+    integer,dimension(n-3) :: iper_t ! order in amplitude
+    integer,dimension(n-3) :: jper_t ! order in conjugate amplitude
+    integer,dimension(n-2) :: iper_q_up,iper_q_down,iper_q ! order in amplitude
+    integer,dimension(n-2) :: jper_q_up,jper_q_down,jper_q
+    integer :: col_fac           ! color factor
+    integer :: index,colfac,u,flip,m,w
+    integer, dimension(n-1) :: it,jt
+    integer :: ii_t,jj_t,ni_t,nj_t
+    integer, dimension(ni_t+1) :: it_1,iper_q_1
+    integer, dimension(nj_t+1) :: jt_1,jper_q_1
+    integer, dimension(n-2) :: itemp
+
+    if (ii_t .eq. 1) then
+
+    iper_q_up(1) = n-2
+    iper_q_up(2:n-2) = iper_t(1:n-3)
+
+    iper_q_down(1:ni_t+1) = iper_t(1:ni_t+1)
+    iper_q_down(ni_t+2) = n-2
+    iper_q_down(ni_t+3:n-2) = iper_t(ni_t+2:n-3)
+
+
+    elseif (ii_t .eq. 2) then
+       
+    iper_q_up(1) = n-2
+    iper_q_up(2:n-2) = iper_t(1:n-3)
+
+    do u = 1,ni_t+1
+    if (iper_t(u) .eq. n-3) then
+            iper_q_down(u) = n-2
+    else
+            iper_q_down(u) = iper_t(u)
+    endif
+    enddo
+
+    iper_q_down(ni_t+2) = n-3
+    iper_q_down(ni_t+3:n-2) = iper_t(ni_t+2:n-3)
+
+    endif
+
+    if (jj_t .eq. 1) then
+
+    jper_q_up(1) = n-2
+    jper_q_up(2:n-2) = jper_t(1:n-3)
+
+    jper_q_down(1:nj_t+1) = jper_t(1:nj_t+1)
+    jper_q_down(nj_t+2) = n-2
+    jper_q_down(nj_t+3:n-2) = jper_t(nj_t+2:n-3)
+
+    elseif (jj_t .eq. 2) then
+
+    jper_q_up(1) = n-2
+    jper_q_up(2:n-2) = jper_t(1:n-3)
+
+    do u = 1,nj_t+1
+    if (jper_t(u) .eq. n-3) then
+            jper_q_down(u) = n-2
+    else
+            jper_q_down(u) = jper_t(u)
+    endif
+    enddo
+
+    jper_q_down(nj_t+2) = n-3
+    jper_q_down(nj_t+3:n-2) = jper_t(nj_t+2:n-3)
+
+    endif 
+
+    itemp = jper_q_down
+    jper_q_down = jper_q_up
+    jper_q_up = itemp
+
+    do u=1,size(iper_q_down)
+       if (iper_q_down(u) .eq. u) then
+               iper_q(u) = iper_q_up(u)
+       else
+          iper_q(iper_q_down(u)) = iper_q_up(u)
+       endif
+    enddo
+
+    do u=1,size(jper_q_down)
+       if (jper_q_down(u) .eq. u) then
+               jper_q(u) = jper_q_up(u)
+       else
+          jper_q(jper_q_down(u)) = jper_q_up(u)
+       endif
+    enddo
+
+    index=1
+    colfac=-1
+    flip=0
+    do
+       do
+          if (index.gt.n-2) exit
+          if (iper_q(index).ge.1) exit
+          index=index+1
+       enddo
+       if (index .ge. n-2) exit
+       w=index
+       do while (iper_q(w) .ge. 1)
+          m=w
+          w=jper_q(iper_q(w))
+          iper_q(m)=colfac
+          flip=flip+1
+       enddo
+       if (flip.lt.n-2) colfac=colfac-1
+    enddo
+!!$    col_fac=Nc**(-colfac)    
+    col_fac=-colfac
+    col_fac = col_fac - (n-4-ni_t) - (n-4-nj_t)+(1-ii_t)+ (1-jj_t)
+
+
+
+  end subroutine color_flow_factor_2qqbar
+
+
+
+
+  subroutine color_flow_factor_2qqbar_sf(n,iper,jper,ni,nj,ii,jj,col_fac)
+    ! Given two permutations (iper and jper) compute corresponding
+    ! colour factor using the color flow decomposition (i.e., string
+    ! of kronecker delta's -- eq.3 of hep-ph/0209271 [Maltoni, Paul,
+    ! Stelzer & Willenbrock]).
+    ! It sets up the string of delta's, contracts all the indices,
+    ! counts the closed loops ('colfac'), and set the color factor
+    ! equal to Nc**colfac.
+    !
+    ! by Timea Vitos
+    !
+
+    implicit none
+    integer :: n                 ! number of external particles
+    integer,dimension(n-3) :: iper ! order in amplitude
+    integer,dimension(n-3) :: jper ! order in conjugate amplitude
+    integer,dimension(n-2) :: iper_q_up,iper_q_down,iper_q ! order in amplitude
+    integer,dimension(n-2) :: jper_q_up,jper_q_down,jper_q
+    integer :: col_fac           ! color factor
+    integer :: index,colfac1,i,flip,m,k
+    integer, dimension(n-1) :: it,jt
+    integer :: ii,jj,ni,nj
+    integer, dimension(ni+1) :: it_1,iper_q_1
+    integer, dimension(nj+1) :: jt_1,jper_q_1
+    integer, dimension(n-2) :: itemp
+
+!!! It is assumed that the last next-4-ri/rj indices of iper,jper
+!!! are the U(1) gluon indices, so be careful with the input!!!! 
+
+    if (ii .eq. 1) then
+
+    iper_q_up(1) = n-2
+    iper_q_up(2:n-2) = iper(1:n-3)
+
+    iper_q_down(1:ni+1) = iper(1:ni+1)
+    iper_q_down(ni+2) = n-2
+    iper_q_down(ni+3:n-2) = iper(ni+2:n-3)
+
+
+    elseif (ii .eq. 2) then
+
+    iper_q_up(1) = n-2
+    iper_q_up(2:n-2) = iper(1:n-3)
+
+    do i = 1,ni+1
+    if (iper(i) .eq. n-3) then
+            iper_q_down(i) = n-2
+    else
+            iper_q_down(i) = iper(i)
+    endif
+    enddo
+
+
+    iper_q_down(ni+2) = n-3
+    iper_q_down(ni+3:n-2) = iper(ni+2:n-3)
+
+
+    endif
+
+    if (jj .eq. 1) then
+
+    jper_q_up(1) = n-2
+    jper_q_up(2:n-2) = jper(1:n-3)
+
+    jper_q_down(1:nj+1) = jper(1:nj+1)
+    jper_q_down(nj+2) = n-2
+    jper_q_down(nj+3:n-2) = jper(nj+2:n-3)
+
+
+    elseif (jj .eq. 2) then
+
+    jper_q_up(1) = n-2
+    jper_q_up(2:n-2) = jper(1:n-3)
+
+    do i = 1,nj+1
+    if (jper(i) .eq. n-3) then
+            jper_q_down(i) = n-2
+    else
+            jper_q_down(i) = jper(i)
+    endif
+    enddo
+
+    jper_q_down(nj+2) = n-3
+    jper_q_down(nj+3:n-2) = jper(nj+2:n-3)
+
+    endif
+
+    itemp = jper_q_down
+    jper_q_down = jper_q_up
+    jper_q_up = itemp
+
+    do i=1,size(iper_q_down)
+       if (iper_q_down(i) .eq. i) then
+               iper_q(i) = iper_q_up(i)
+       else
+          iper_q(iper_q_down(i)) = iper_q_up(i)
+       endif
+    enddo
+
+    do i=1,size(jper_q_down)
+       if (jper_q_down(i) .eq. i) then
+               jper_q(i) = jper_q_up(i)
+       else
+          jper_q(jper_q_down(i)) = jper_q_up(i)
+       endif
+    enddo
+
+    index=1
+    colfac1=-1
+    flip=0
+    do
+       do
+          if (index.gt.n-2) exit
+          if (iper_q(index).ge.1) exit
+          index=index+1
+       enddo
+       if (index .ge. n-2) exit
+       k=index
+       do while (iper_q(k) .ge. 1)
+          m=k
+          k=jper_q(iper_q(k))
+          iper_q(m)=colfac1
+          flip=flip+1
+       enddo
+       if (flip.lt.n-2) colfac1=colfac1-1
+    enddo
+    col_fac=-colfac1
+
+    col_fac = col_fac - (n-4-ni) - (n-4-nj)
+  
+  end subroutine color_flow_factor_2qqbar_sf
 
 
 
@@ -753,6 +1029,7 @@ contains
     endif
   end subroutine check_NLC
 
+
   subroutine check_NLC_1qqbar(next,iper,jper,acc)
     implicit none
     integer :: next                 ! number of external particles
@@ -766,6 +1043,7 @@ contains
     integer :: i,i1,i2,i3,i4,i5,sign
 
     integer,dimension(next-2) :: itemp
+
 
     acc = 0
           do i=1,next-2
@@ -811,9 +1089,759 @@ contains
            if ((all(itemp.eq.iper))) then
              acc=sign
           endif
-    end subroutine check_NLC_1qqbar
 
 
+    end subroutine check_NLC_1qqbar  
+
+
+  subroutine check_NLC_2qqbar(next,iper,jper,rri,rrj,iii,jjj,acc)
+    implicit none
+    integer :: next                 ! number of external particles
+ 
+    integer,dimension(next-4) :: iper ! order in amplitude
+    integer,dimension(next-4) :: jper ! order in conjugate amplitude
+    integer,dimension(next-4) :: jper_inv ! order in conjugate amplitude
+    integer :: acc               ! is equal to 0,1,-1 or 99.
+                                 ! 99 : LC contributions (NLC coefficient of that term is '-n')
+                                 ! 1,-1 ; NLC contribution with positive/negative sign
+                                 ! 0 : not a NLC contribution, but NNLC or further suppressed.
+    integer :: i,i1,i2,i3,i4,i5,sign,ii,jj,yy,tt
+    integer rri,rrj,iii,jjj
+    integer,dimension(2*(next-4)) :: temp
+    integer,dimension(next-4,2) :: index_i
+
+    integer, dimension(rri+rrj) :: temp2
+    integer, dimension(2*(next-4)-rri-rrj) :: temp3
+
+    integer,dimension(rri) :: itemp
+    integer,dimension(next-4-rrj) :: itemp2
+    
+    integer,dimension(1:rri-1) :: itemp4
+    integer,dimension(1:next-4-rrj-1) :: itemp5
+    integer,dimension(1:rrj-1) :: itemp6
+    integer,dimension(1:next-4-rri-1) :: itemp7
+
+    logical disjoint
+    integer :: length,ind_i,ind_j
+    integer,dimension(2*(next-4)-2) :: perm
+    integer skipped
+
+    integer, dimension(rri) :: Aa
+    integer, dimension(next-4-rri) :: Bb
+    integer, dimension(rrj) :: Cc
+    integer, dimension(next-4-rrj) :: Dd
+
+    itemp=0
+
+    acc = 0
+
+    if ((iii .eq. 2) .and. (jjj .eq. 2)) then
+        if (rri .eq. rrj) then
+               do ii=1,next-4
+                 if (iper(ii) .eq. jper(ii)) then
+                    continue  
+                 else
+                     acc = 0
+                     return
+                 endif
+               enddo
+               acc = 1
+        else 
+           acc = 0
+           return
+        endif
+    endif  
+
+
+    if (((iii .eq. 2) .and. (jjj .eq. 1)) .or. ((iii .eq. 1) .and. (jjj .eq. 2))) then
+
+        temp(1:rri)= iper(1:rri)
+        temp(rri+1:rri+(next-4-rrj)) = jper(next-4:rrj+1:-1)
+        temp(rri+(next-4-rrj)+1:2*(next-4)-rrj) = iper(rri+1:next-4)
+        temp(2*(next-4)-rrj+1:2*(next-4)) = jper(rrj:1:-1)
+
+       do jj = 1,next-4
+         yy = 1
+          do ii=1,2*(next-4) 
+             if (temp(ii) .eq. jj) then
+                  index_i(jj,yy) = ii
+                  yy=yy+1
+             endif
+          enddo 
+
+         if (mod(abs(index_i(jj,1)-index_i(jj,2)),2) .eq. 1) then
+             continue
+         else
+             acc = 0
+             return
+         endif
+       enddo
+
+
+     do jj = 1,next-4
+       do ii = jj+1,next-4
+          if ( (((  (  ( ((index_i(ii,1) .lt. index_i(jj,1)) .and. (index_i(ii,2) .lt. index_i(jj,1))) ) .or.  &
+                  (  ( ((index_i(ii,1) .gt. index_i(jj,2)) .and. (index_i(ii,2) .gt. index_i(jj,2)))) .or.  &
+                  (  ( ((index_i(ii,1) .lt. index_i(jj,2)) .and. (index_i(ii,2) .lt. index_i(jj,2)))) .and. &
+                    (  ((index_i(ii,1) .gt. index_i(jj,1)) .and. (index_i(ii,2) .gt. index_i(jj,1)))   ))))))) .or. &
+                    (((  (  ( ((index_i(jj,1) .lt. index_i(ii,1)) .and. (index_i(jj,2) .lt. index_i(ii,1))) ) .or.  &
+                  (  ( ((index_i(jj,1) .gt. index_i(ii,2)) .and. (index_i(jj,2) .gt. index_i(ii,2)))) .or.  &
+                  (  ( ((index_i(jj,1) .lt. index_i(ii,2)) .and. (index_i(jj,2) .lt. index_i(ii,2)))) .and. &
+                    (  ((index_i(jj,1) .gt. index_i(ii,1)) .and. (index_i(jj,2) .gt. index_i(ii,1)))   ))))))) ) then
+              continue
+          else
+               acc = 0 
+               return
+          endif
+       enddo
+     enddo   
+      acc = -1     
+    endif
+
+
+   if ((iii .eq. 1) .and. (jjj .eq. 1)) then
+
+        if ((rri .eq. rrj) .and. ((all(iper .eq. jper)) .or. ((size(iper).eq.0) &
+                .and. (size(jper).eq.0)))) then
+               acc = 99
+               return
+        endif
+
+
+      Aa(1:rri) = iper(1:rri)
+      Bb(1:next-4-rri) = iper(rri+1:next-4)
+      Cc(1:rrj) = jper(1:rrj)
+      Dd(1:next-4-rrj) = jper(rrj+1:next-4)
+
+      temp2(1:rri) = Aa(1:rri)
+      temp2(rri+1:rri+rrj) = Cc(rrj:1:-1)
+      
+      temp3(1:next-4-rri) = Bb(1:next-4-rri)
+      temp3(next-4-rri+1:2*(next-4)-rrj-rri) = Dd(next-4-rrj:1:-1)
+
+      disjoint = .true.
+
+    do ii=1,rri+rrj
+       if (.not. any(temp3(:) == temp2(ii))) then 
+           disjoint = .true.
+       else 
+           disjoint = .false.
+           exit
+       endif
+    enddo
+
+    if (disjoint) then
+
+          if ((size(Aa) .ne. 0) .and. (all(Bb .eq. Dd) .or. size(Bb) .eq. 0)) then
+ 
+          do i=1,rri
+            if (CC(i).ne.Aa(i)) exit
+          enddo
+          i1=i
+          if (i1 .gt. size(AA)) then
+                  acc = 99
+                  return
+          endif
+          do i=i1+1,rri
+            if (Cc(i).eq.Aa(i1)) exit
+          enddo
+          i2=i
+          do i=1,rri-i2
+             if (Cc(i2+i).ne.Aa(i1+i)) exit
+          enddo
+          i3=i2+i-1
+          i4=i1+i-1
+          do i=i1,rri
+            if (cc(i).eq.Aa(i4+1)) exit
+          enddo
+          i5=i
+           if (i5.gt.i3) return
+            sign=1
+            itemp(1:i1-1)=Cc(1:i1-1)
+            itemp(i1:i4)=Cc(i2:i3)
+            itemp(i4+1:i4+i2-i5)=Cc(i5:i2-1)
+             if (i1.gt.i5-1) then
+               if (i4-i1.eq.0 .and. i2-1-i5.eq.0) then
+                   sign=-1
+                   continue
+               elseif (i4-i1.eq.0 .or. i2-1-i5.eq.0) then
+                   return
+               elseif (i4-i1 + i2-1-i5 .le. next-4-4) then
+                   continue
+               else
+                   sign = 1
+             endif
+           endif
+           itemp(i4+i2-i5+1:i4+i2-i1)=Cc(i1:i5-1)
+           itemp(i4+i2-i1+1:rri)=Cc(i3+1:rri)
+           if ((all(itemp.eq.Aa))) then
+             acc=sign
+          endif 
+ 
+          elseif ((size(Bb) .ne. 0) .and. (all(Aa .eq. Cc) .or. size(Aa) .eq. 0)) then 
+
+          do i=1,next-4-rrj
+             if (Dd(i).ne.Bb(i)) exit
+          enddo
+          i1=i
+          if (i1 .gt. size(Bb)) then
+                  acc = 99
+                  return
+          endif
+          do i=i1+1,next-4-rrj
+            if (Dd(i).eq.Bb(i1)) exit
+          enddo
+          i2=i
+          do i=1,next-4-rrj-i2
+             if (Dd(i2+i).ne.Bb(i1+i)) exit
+          enddo
+          i3=i2+i-1
+          i4=i1+i-1
+          do i=i1,next-4-rrj
+            if (Dd(i).eq.Bb(i4+1)) exit
+          enddo
+          i5=i
+           if (i5.gt.i3) return
+            sign=1
+            itemp2(1:i1-1)=Dd(1:i1-1)
+            itemp2(i1:i4)=Dd(i2:i3)
+            itemp2(i4+1:i4+i2-i5)=Dd(i5:i2-1)
+             if (i1.gt.i5-1) then
+               if (i4-i1.eq.0 .and. i2-1-i5.eq.0) then
+                   sign=-1
+                   continue
+               elseif (i4-i1.eq.0 .or. i2-1-i5.eq.0) then
+                   return
+               elseif (i4-i1 + i2-1-i5 .le. next-4-rrj-4) then
+                   continue
+               else
+                 sign = 1
+               endif
+           endif
+         itemp2(i4+i2-i5+1:i4+i2-i1)=Dd(i1:i5-1)
+         itemp2(i4+i2-i1+1:next-4-rrj)=Dd(i3+1:next-4-rrj)
+         if ((all(itemp2.eq.Bb))) then
+            acc=sign
+         endif
+         else
+             acc = 0
+         endif
+
+
+
+    elseif (.not. disjoint) then
+
+      do ii=1,rri+rrj
+       if (any(temp3(:) == temp2(ii))) then
+           do jj=1,size(temp3)
+              if (temp3(jj) .eq. temp2(ii)) then 
+                        ind_i = ii
+                        ind_j = jj
+                        skipped = temp2(ii)
+                        goto 1
+              endif
+           enddo
+       endif
+      enddo
+
+
+1   if ((size(temp2) .eq. 1) .or. (size(temp3) .eq. 1)) then
+            acc = 0 
+            return
+    endif
+
+    perm=0
+
+    !!!   If common generator in A-D pair    
+     if ((ind_i .le. rri) .and. (ind_j .gt. next-4-rri)) then
+    
+      perm(1:rri-ind_i) = temp2(ind_i+1:rri)
+      perm(rri-ind_i+1:rri-ind_i+rrj) = temp2(rri+1:rri+rrj)
+      perm(rri+rrj-ind_i+1:rri+rrj-1) = temp2(1:ind_i-1)
+
+      perm(rri+rrj: -1+ 2*(next-4)-ind_j  ) = temp3(ind_j+1:2*(next-4)-rri-rrj) 
+      perm( 2*(next-4)-ind_j   :  -1+ 2*(next-4)-ind_j + next-4-rri   ) =temp3(1:next-4-rri)
+      perm(2*(next-4)-ind_j + next-4-rri:2*(next-4)-2) = temp3(next-4-rri+1:ind_j-1)
+
+      itemp4(1:ind_i-1) = temp2(1:ind_i-1)
+      itemp4(ind_i:rri-1) = temp2(ind_i+1:rri)
+
+      itemp5(1:2*(next-4)-rri-rrj-ind_j) = temp3(2*(next-4)-rri-rrj:ind_j+1:-1)
+      itemp5(2*(next-4)-rri-rrj-ind_j+1:next-4-rrj-1) = temp3(ind_j-1:next-4-rri+1:-1)
+
+      if (rrj .eq. rri-1) then
+              if (all(itemp4 .eq. Cc)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+      if (rrj+1 .eq. rri) then
+              if (all(itemp5 .eq. Bb)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+   
+
+      !!!    If common generator in B-C pair      
+      elseif  ((ind_i .gt. rri) .and. (ind_j .le. next-4-rri)) then   
+        perm(1:rri+rrj-ind_i) = temp2(ind_i+1:rri+rrj)
+        perm(rri+rrj-ind_i+1:rri+rrj-ind_i+rri) = temp2(1:rri)
+        perm(rri+rrj-ind_i+rri+1:rri+rrj-1) = temp2(rri+1:ind_i-1)
+
+        perm(rri+rrj:rrj-1+next-4-ind_j) = temp3(ind_j+1:next-4-rri)       
+        perm(rrj-1+next-4-ind_j+1:-1-ind_j+2*(next-4)) = temp3(next-4-rri+1:2*(next-4)-rri-rrj)
+        perm(-1-ind_j+2*(next-4)+1: 2*(next-4)-2) = temp3(1:ind_j-1)
+
+        itemp6(1:rri+rrj-ind_i) = temp2(rri+rrj:ind_i+1:-1)
+        itemp6(rri+rrj-ind_i+1:rrj-1) = temp2(ind_i-1:rri+1:-1)
+
+        itemp7(1:ind_j-1) = temp3(1:ind_j-1)
+        itemp7(ind_j -1 +1 : next-4-rri-1) = temp3(ind_j+1:next-4-rri)
+
+
+      if (rrj-1 .eq. rri) then
+              if (all(itemp6 .eq. Aa)) then
+                      acc = 0 
+                      return
+              endif
+      endif
+
+      if (rrj .eq. rri+1) then
+              if (all(itemp7 .eq. Dd)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+
+    endif 
+
+
+    do jj = 1,next-4
+       if (jj .eq. skipped) then
+               index_i(jj,1) = 0
+               index_i(jj,2) = 0
+               cycle
+       endif 
+         yy = 1
+          do ii=1,2*(next-4)-2
+             if (perm(ii) .eq. jj) then
+                  index_i(jj,yy) = ii
+                  yy=yy+1
+             endif
+          enddo
+       
+         if (mod(abs(index_i(jj,1)-index_i(jj,2)),2) .eq. 1) then
+            continue
+         else
+             acc = 0
+             return
+         endif
+     enddo
+   
+     do jj = 1,next-4
+       do ii = jj+1,next-4
+          if ((ii .eq. skipped) .or. (jj .eq. skipped)) then
+               cycle
+          endif
+          if ((    ((index_i(ii,1) .lt. index_i(jj,1)) .and. (index_i(ii,2) .lt. index_i(jj,1)))  .or.  &
+                  ((index_i(ii,1) .gt. index_i(jj,2)) .and. (index_i(ii,2) .gt. index_i(jj,2)))  .or.  &
+                ( ((index_i(ii,1) .lt. index_i(jj,2)) .and. (index_i(ii,2) .lt. index_i(jj,2)))  .and. &
+                  ((index_i(ii,1) .gt. index_i(jj,1)) .and. (index_i(ii,2) .gt. index_i(jj,1))))   ) .or. & 
+               (    ((index_i(jj,1) .lt. index_i(ii,1)) .and. (index_i(jj,2) .lt. index_i(ii,1)))  .or.  &
+                  ((index_i(jj,1) .gt. index_i(ii,2)) .and. (index_i(jj,2) .gt. index_i(ii,2)))  .or.  &
+                ( ((index_i(jj,1) .lt. index_i(ii,2)) .and. (index_i(jj,2) .lt. index_i(ii,2)))  .and. &
+                  ((index_i(jj,1) .gt. index_i(ii,1)) .and. (index_i(jj,2) .gt. index_i(ii,1))))   ) ) then
+              continue
+          else
+               acc = 0
+               return
+          endif
+       enddo
+     enddo
+
+     acc = 1
+
+    else 
+       acc = 0
+
+    endif
+
+    endif
+
+  end subroutine check_NLC_2qqbar
+
+
+
+
+
+  subroutine check_NLC_2qqbar_SF(next,iper,jper,ri,rj,ii,jj,acc)
+    implicit none
+    integer :: next                 ! number of external particles
+
+    integer,dimension(next-4) :: iper ! order in amplitude
+    integer,dimension(next-4) :: jper ! order in conjugate amplitude
+    integer,dimension(next-4) :: jper_inv ! order in conjugate amplitude
+    integer :: acc               ! is equal to 0,1,-1 or 99.
+                                 ! 99 : LC contributions (NLC coefficient of that term is '-n')
+                                 ! 1,-1 ; NLC contribution with positive/negative sign
+                                 ! 0 : not a NLC contribution, but NNLC or further suppressed.
+    integer :: i1,i2,i3,i4,i5,sign,i,j,yy,tt
+    integer ri,rj,ii,jj
+    integer,dimension(2*(next-4)) :: temp
+    integer,dimension(next-4,2) :: index_i
+
+    integer, dimension(ri+rj) :: temp2
+    integer, dimension(2*(next-4)-ri-rj) :: temp3
+    integer,dimension(ri) :: itemp
+    integer,dimension(next-4-rj) :: itemp2
+
+    integer,dimension(1:ri-1) :: itemp4
+    integer,dimension(1:next-4-rj-1) :: itemp5
+    integer,dimension(1:rj-1) :: itemp6
+    integer,dimension(1:next-4-ri-1) :: itemp7
+
+    logical disjoint
+    integer :: length,ind_i,ind_j
+    integer,dimension(2*(next-4)-2) :: perm
+    integer skipped
+
+    integer, dimension(ri) :: Aa
+    integer, dimension(next-4-ri) :: Bb
+    integer, dimension(rj) :: Cc
+    integer, dimension(next-4-rj) :: Dd
+
+    if (((ii .eq. 1) .and. (jj .eq. 2)) .or. ((ii .eq. 2) .and. (jj .eq. 1)))  then
+
+        temp(1:ri)= iper(1:ri)
+        temp(ri+1:ri+(next-4-rj)) = jper(next-4:rj+1:-1)
+        temp(ri+(next-4-rj)+1:2*(next-4)-rj) = iper(ri+1:next-4)
+        temp(2*(next-4)-rj+1:2*(next-4)) = jper(rj:1:-1)
+
+        do j = 1,next-4
+         yy = 1
+          do i=1,2*(next-4)
+             if (temp(i) .eq. j) then
+                  index_i(j,yy) = i
+                  yy=yy+1
+             endif
+          enddo
+
+         if (mod(abs(index_i(j,1)-index_i(j,2)),2) .eq. 1) then
+             continue
+         else
+             acc = 0
+             return
+         endif
+       enddo
+
+       do j = 1,next-4
+       do i = j+1,next-4
+          if ( (((  (  ( ((index_i(i,1) .lt. index_i(j,1)) .and. (index_i(i,2) .lt. index_i(j,1))) ) .or.  &
+                  (  ( ((index_i(i,1) .gt. index_i(j,2)) .and. (index_i(i,2) .gt. index_i(j,2)))) .or.  &
+                  (  ( ((index_i(i,1) .lt. index_i(j,2)) .and. (index_i(i,2) .lt. index_i(j,2)))) .and. &
+                    (  ((index_i(i,1) .gt. index_i(j,1)) .and. (index_i(i,2) .gt. index_i(j,1)))   ))))))) .or. &
+                    (((  (  ( ((index_i(j,1) .lt. index_i(i,1)) .and. (index_i(j,2) .lt. index_i(i,1))) ) .or.  &
+                  (  ( ((index_i(j,1) .gt. index_i(i,2)) .and. (index_i(j,2) .gt. index_i(i,2)))) .or.  &
+                  (  ( ((index_i(j,1) .lt. index_i(i,2)) .and. (index_i(j,2) .lt. index_i(i,2)))) .and. &
+                    (  ((index_i(j,1) .gt. index_i(i,1)) .and. (index_i(j,2) .gt. index_i(i,1)))   ))))))) ) then
+              continue
+          else
+               acc = 0
+               return
+          endif
+       enddo
+       enddo
+
+       acc = -1
+    
+!************************************************************
+
+  elseif (((ii .eq. 1) .and. (jj .eq. 1)) .or. ((ii .eq. 2) .and. (jj .eq. 2))) then
+
+      if ((ri .eq. rj) .and. ((all(iper .eq. jper)) .or. ((size(iper).eq.0) &
+                .and. (size(jper).eq.0)))) then
+               acc = 99
+               return
+      endif
+
+      Aa(1:ri) = iper(1:ri)
+      Bb(1:next-4-ri) = iper(ri+1:next-4)
+      Cc(1:rj) = jper(1:rj)
+      Dd(1:next-4-rj) = jper(rj+1:next-4)
+
+      temp2(1:ri) = Aa(1:ri)
+      temp2(ri+1:ri+rj) = Cc(rj:1:-1)
+
+      temp3(1:next-4-ri) = Bb(1:next-4-ri)
+      temp3(next-4-ri+1:2*(next-4)-rj-ri) = Dd(next-4-rj:1:-1)
+
+      disjoint = .true.
+
+      do i=1,ri+rj
+       if (.not. any(temp3(:) == temp2(i))) then
+           disjoint = .true.
+       else
+           disjoint = .false.
+           exit
+       endif
+      enddo
+
+  if (disjoint) then
+
+        if ((size(Aa) .ne. 0) .and. (all(Bb .eq. Dd) .or. size(Bb) .eq. 0)) then
+
+          do i=1,ri
+            if (CC(i).ne.Aa(i)) exit
+          enddo
+          i1=i
+          if (i1 .gt. size(AA)) then
+                  acc = 99
+                  return
+          endif
+          do i=i1+1,ri
+            if (Cc(i).eq.Aa(i1)) exit
+          enddo
+          i2=i
+          do i=1,ri-i2
+             if (Cc(i2+i).ne.Aa(i1+i)) exit
+          enddo
+          i3=i2+i-1
+          i4=i1+i-1
+          do i=i1,ri
+            if (cc(i).eq.Aa(i4+1)) exit
+          enddo
+          i5=i
+        if (i5.gt.i3) then
+            acc = 0
+            return
+        endif
+            sign=1
+            itemp(1:i1-1)=Cc(1:i1-1)
+            itemp(i1:i4)=Cc(i2:i3)
+            itemp(i4+1:i4+i2-i5)=Cc(i5:i2-1)
+             if (i1.gt.i5-1) then
+               if (i4-i1.eq.0 .and. i2-1-i5.eq.0) then
+                   sign=-1
+                   continue
+               elseif (i4-i1.eq.0 .or. i2-1-i5.eq.0) then
+                   acc = 0
+                   return
+               elseif (i4-i1 + i2-1-i5 .le. next-4-4) then
+                   continue
+               else
+                   sign = 1
+             endif
+           endif
+           itemp(i4+i2-i5+1:i4+i2-i1)=Cc(i1:i5-1)
+           itemp(i4+i2-i1+1:ri)=Cc(i3+1:ri)
+           if ((all(itemp.eq.Aa))) then                  
+             acc=sign
+             return
+           endif
+            acc = 0
+
+        elseif ((size(Bb) .ne. 0) .and. (all(Aa .eq. Cc) .or. size(Aa) .eq. 0)) then
+
+          do i=1,next-4-rj
+             if (Dd(i).ne.Bb(i)) exit
+          enddo
+
+          i1=i
+          if (i1 .gt. size(Bb)) then
+                  acc = 99
+                  return
+          endif
+          do i=i1+1,next-4-rj
+            if (Dd(i).eq.Bb(i1)) exit
+          enddo
+          i2=i
+          do i=1,next-4-rj-i2
+             if (Dd(i2+i).ne.Bb(i1+i)) exit
+          enddo
+          i3=i2+i-1
+          i4=i1+i-1
+          do i=i1,next-4-rj
+            if (Dd(i).eq.Bb(i4+1)) exit
+          enddo
+          i5=i
+          if (i5.gt.i3) then 
+            acc = 0
+            return
+          endif
+            sign=1
+            itemp2(1:i1-1)=Dd(1:i1-1)
+            itemp2(i1:i4)=Dd(i2:i3)
+            itemp2(i4+1:i4+i2-i5)=Dd(i5:i2-1)
+             if (i1.gt.i5-1) then
+               if (i4-i1.eq.0 .and. i2-1-i5.eq.0) then
+                   sign=-1
+                   continue
+               elseif (i4-i1.eq.0 .or. i2-1-i5.eq.0) then
+                   acc = 0
+                   return
+               elseif (i4-i1 + i2-1-i5 .le. next-4-rj-4) then
+                   continue
+               else
+                 sign = 1
+               endif
+           endif
+         itemp2(i4+i2-i5+1:i4+i2-i1)=Dd(i1:i5-1)
+         itemp2(i4+i2-i1+1:next-4-rj)=Dd(i3+1:next-4-rj)
+         if ((all(itemp2.eq.Bb))) then
+            acc=sign
+            return
+         endif
+            acc = 0
+
+         else
+             acc = 0
+             return
+         endif
+
+
+
+     elseif (.not. disjoint) then
+
+      do i=1,ri+rj
+       if (any(temp3(:) == temp2(i))) then
+           do j=1,size(temp3)
+              if (temp3(j) .eq. temp2(i)) then
+                        ind_i = i
+                        ind_j = j
+                        skipped = temp2(i)
+                        goto 2
+              endif
+           enddo
+       endif
+      enddo
+
+2     if ((size(temp2) .eq. 1) .or. (size(temp3) .eq. 1)) then
+            acc = 0
+            return
+      endif
+
+    perm=0
+    !!!   If common generator in A-D pair
+     if ((ind_i .le. ri) .and. (ind_j .gt. next-4-ri)) then
+      perm(1:ri-ind_i) = temp2(ind_i+1:ri)
+      perm(ri-ind_i+1:ri-ind_i+rj) = temp2(ri+1:ri+rj)
+      perm(ri+rj-ind_i+1:ri+rj-1) = temp2(1:ind_i-1)
+
+      perm(ri+rj: -1+ 2*(next-4)-ind_j  ) = temp3(ind_j+1:2*(next-4)-ri-rj)
+      perm( 2*(next-4)-ind_j   :  -1+ 2*(next-4)-ind_j + next-4-ri   ) =temp3(1:next-4-ri)
+      perm(2*(next-4)-ind_j + next-4-ri:2*(next-4)-2) = temp3(next-4-ri+1:ind_j-1)
+
+      itemp4(1:ind_i-1) = temp2(1:ind_i-1)
+      itemp4(ind_i:ri-1) = temp2(ind_i+1:ri)
+
+      itemp5(1:2*(next-4)-ri-rj-ind_j) = temp3(2*(next-4)-ri-rj:ind_j+1:-1)
+      itemp5(2*(next-4)-ri-rj-ind_j+1:next-4-rj-1) = temp3(ind_j-1:next-4-ri+1:-1)
+      if (rj .eq. ri-1) then
+              if (all(itemp4 .eq. Cc)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+      if (rj+1 .eq. ri) then
+              if (all(itemp5 .eq. Bb)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+      !!!    If common generator in B-C pair
+      elseif  ((ind_i .gt. ri) .and. (ind_j .le. next-4-ri)) then
+        perm(1:ri+rj-ind_i) = temp2(ind_i+1:ri+rj)
+        perm(ri+rj-ind_i+1:ri+rj-ind_i+ri) = temp2(1:ri)
+        perm(ri+rj-ind_i+ri+1:ri+rj-1) = temp2(ri+1:ind_i-1)
+
+        perm(ri+rj:rj-1+next-4-ind_j) = temp3(ind_j+1:next-4-ri)
+        perm(rj-1+next-4-ind_j+1:-1-ind_j+2*(next-4)) = temp3(next-4-ri+1:2*(next-4)-ri-rj)
+        perm(-1-ind_j+2*(next-4)+1: 2*(next-4)-2) = temp3(1:ind_j-1)
+
+        itemp6(1:ri+rj-ind_i) = temp2(ri+rj:ind_i+1:-1)
+        itemp6(ri+rj-ind_i+1:rj-1) = temp2(ind_i-1:ri+1:-1)
+
+        itemp7(1:ind_j-1) = temp3(1:ind_j-1)
+        itemp7(ind_j -1 +1 : next-4-ri-1) = temp3(ind_j+1:next-4-ri)
+
+
+      if (rj-1 .eq. ri) then
+              if (all(itemp6 .eq. Aa)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+      if (rj .eq. ri+1) then
+              if (all(itemp7 .eq. Dd)) then
+                      acc = 0
+                      return
+              endif
+      endif
+
+   endif
+
+  do j = 1,next-4
+       if (j .eq. skipped) then
+               index_i(j,1) = 0
+               index_i(j,2) = 0
+               cycle
+       endif
+         yy = 1
+          do i=1,2*(next-4)-2
+             if (perm(i) .eq. j) then
+                  index_i(j,yy) = i
+                  yy=yy+1
+             endif
+          enddo
+
+
+         if (mod(abs(index_i(j,1)-index_i(j,2)),2) .eq. 1) then
+            continue
+         else
+             acc = 0
+             return
+         endif
+
+  enddo
+
+
+     do j = 1,next-4
+       do i = j+1,next-4
+          if ((i .eq. skipped) .or. (j .eq. skipped)) then
+               cycle
+          endif
+          if ((    ((index_i(i,1) .lt. index_i(j,1)) .and. (index_i(i,2) .lt. index_i(j,1)))  .or.  &
+                  ((index_i(i,1) .gt. index_i(j,2)) .and. (index_i(i,2) .gt. index_i(j,2)))  .or.  &
+                ( ((index_i(i,1) .lt. index_i(j,2)) .and. (index_i(i,2) .lt. index_i(j,2)))  .and. &
+                  ((index_i(i,1) .gt. index_i(j,1)) .and. (index_i(i,2) .gt. index_i(j,1))))   ) .or. &
+               (    ((index_i(j,1) .lt. index_i(i,1)) .and. (index_i(j,2) .lt. index_i(i,1)))  .or.  &
+                  ((index_i(j,1) .gt. index_i(i,2)) .and. (index_i(j,2) .gt. index_i(i,2)))  .or.  &
+                ( ((index_i(j,1) .lt. index_i(i,2)) .and. (index_i(j,2) .lt. index_i(i,2)))  .and. &
+                  ((index_i(j,1) .gt. index_i(i,1)) .and. (index_i(j,2) .gt. index_i(i,1))))   ) ) then
+              continue
+          else
+               acc = 0
+               return
+          endif
+       enddo
+     enddo
+
+     acc = 1
+
+    endif
+
+    else
+       write(*,*) 'ERROR: only for 2qqbar processes'
+    endif
+
+   end subroutine check_NLC_2qqbar_SF
 
   
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -856,7 +1884,62 @@ contains
     enddo
     return
   end subroutine ipnext
-  
+ 
+
+  subroutine ipnextgen(ia, n)
+    ! Compute next permutation starting from the list 'ia' (of length
+    ! 'n'). Similar to get_next_iperm (see below), but with ip=n there.
+    implicit none
+    integer ::n,i,j,itemp
+    integer, dimension(n) :: ia,ia_new
+    i=n-1
+
+
+    do
+       if (i.lt.1) exit
+       if (ia(i).le.ia(i+1)) exit
+       i=i-1
+    enddo
+    if (i.lt.1) then
+       ! go back to the beginning
+       do i=1,n
+          ia_new(i)=ia(n-i+1)
+       enddo
+       ia=ia_new
+       return
+    endif
+    j = n
+    do while (ia(i).gt.ia(j))
+       j = j-1
+    enddo
+    itemp = ia(i)
+    ia(i) = ia(j)
+    ia(j) = itemp
+    i = i+1
+    j = n
+    do while (ia(i).gt.ia(j))
+       j = j-1
+    enddo
+    itemp = ia(i)
+    ia(i) = ia(j)
+    ia(j) = itemp
+    i = i+1
+    j = n
+    do while (i.lt.j)
+       itemp = ia(i)
+       ia(i) = ia(j)
+       ia(j) = itemp
+       i = i+1
+       j = j-1
+    enddo
+
+    return
+
+
+  end subroutine ipnextgen
+
+
+
   subroutine get_next_iperm(ip,ips_in,ips,n)
     ! Given a permutation ips_in, find the next one and return it through ips.
     ! For example for ip=3 (length of permutation list), n=4 (elements to be

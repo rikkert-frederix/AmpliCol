@@ -1,9 +1,5 @@
-! with fastjet:
-      ! gfortran -o plot_LHE HwU.f plot_LHE.f analysis_HwU_scales.f fjcore.cc fastjetfortran_madfks_core.cc -lstdc++
-
 ! without fastjet:
-      ! gfortran -o plot_LHE HwU.f plot_LHE.f analysis_HwU_scales.f
-
+      ! gfortran -fcheck=all -o plot_events HwU.f analysis.f plot_events.f90
 
 program plot_events
   implicit none
@@ -15,17 +11,20 @@ program plot_events
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8) :: evt_wgt_LC,evt_wgt_NLC,evt_wgt_full,rwgt_factor
   integer :: next
-  write (*,*) 'Give LHE file name'
-  read (*,'(a)') filename
+  character(len=256) :: argv
+
+  CALL GET_COMMAND_ARGUMENT(1, argv)
+  read(argv,'(a)') filename
+  write(*,*) filename
   ifile=11
   open(unit=ifile,file=filename,status='OLD')
 
   weights_info(1)="central value               "
   rwgt_factor=1d0
-  
+
   call set_error_estimation(0)
-  
   call analysis_begin(1,weights_info)
+
   nPSpoints=0
   do
      call read_event(ifile,done)
@@ -43,7 +42,7 @@ contains
     implicit none
     call analysis_fill(next,p,evt_wgt_LC,evt_wgt_NLC,evt_wgt_full)
   end subroutine plot_event
-     
+
   subroutine read_event(iunit,done)
     implicit none
     integer :: i,iunit
@@ -72,5 +71,7 @@ contains
     return
 99  done=.true.
   end subroutine read_event
-      
+
+
 end program plot_events
+

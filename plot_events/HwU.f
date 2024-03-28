@@ -190,32 +190,32 @@ c iteration ('histy') to the accumulated results ('histy_acc'), with the
 c uncertainty estimate given in 'histy_err' and empties the arrays for
 c the current iteration so that they can be filled with the next
 c iteration.
-      subroutine HwU_accum_iter(inclde,nPSpoints)
-      implicit none
-      include "HwU.inc"
-      logical inclde
-      integer nPSpoints,label,i,j
-      double precision nPSinv,etot,vtot(max_wgts),niter,y_squared
-      data niter /0d0/
-      nPSinv = 1d0/dble(nPSpoints)
-      if (inclde) niter = niter+1d0
-      do label=1,max_plots
-         if (.not. booked(label)) cycle
-         if (inclde) then
-            call accumulate_results(label,nPSinv,niter)
-         endif
-c     Reset the histo of the current iteration to zero so that they are
-c     ready for the next iteration.
-         do i=1,nbin(label)
-            do j=1,nwgts
-               histy(j,label,i)=0d0
-            enddo
-            histy2(label,i)=0d0
-            histi(label,i)=0
-         enddo
-      enddo
-      return
-      end
+c      subroutine HwU_accum_iter(inclde,nPSpoints)
+c      implicit none
+c      include "HwU.inc"
+c      logical inclde
+c      integer nPSpoints,label,i,j
+c      double precision nPSinv,etot,vtot(max_wgts),niter,y_squared
+c      data niter /0d0/
+c      nPSinv = 1d0/dble(nPSpoints)
+c      if (inclde) niter = niter+1d0
+c      do label=1,max_plots
+c         if (.not. booked(label)) cycle
+c         if (inclde) then
+c            call accumulate_results(label,nPSinv,niter)
+c         endif
+cc     Reset the histo of the current iteration to zero so that they are
+cc     ready for the next iteration.
+c         do i=1,nbin(label)
+c            do j=1,nwgts
+c               histy(j,label,i)=0d0
+c            enddo
+c            histy2(label,i)=0d0
+c            histi(label,i)=0
+c         enddo
+c      enddo
+c      return
+c      end
 
 c *****For plotting unweighted events****
 c Overwrites the accumulated results ('histy_acc') with the current
@@ -231,15 +231,15 @@ c HwU_output) to write intermediate plots to disk.
       nPSinv=1d0/dble(nPSpoints)
       niter=1d0
       do label=1,max_plots
-         if (.not. booked(label)) cycle
-         do i=1,nbin(label)
+        if (.not. booked(label)) cycle
+        do i=1,nbin(label)
 c     Set all the bins to zero.
-            do j=1,nwgts
-               histy_acc(j,label,i)=0d0
-            enddo
-            histy_err(label,i)=0d0
-         enddo
-         call accumulate_results(label,nPSinv,niter)
+           do j=1,nwgts
+              histy_acc(j,label,i)=0d0
+           enddo
+           histy_err(label,i)=0d0
+        enddo
+        call accumulate_results(label,nPSinv,niter)
       enddo
       return
       end
@@ -399,7 +399,7 @@ c     2 empty lines after each plot
       enddo
       return
       end
-
+c
 c dummy subroutine
       subroutine accum(idummy)
       integer idummy
