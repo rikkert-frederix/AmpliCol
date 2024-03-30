@@ -21,7 +21,8 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
-     real(kind=8),dimension(:,:),allocatable :: diff_col_vals,pp
+     real(kind=8),dimension(:,:),allocatable :: pp
+     real(kind=8),dimension(:,:,:),allocatable :: diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap, &
           pp_bin_to_i,pp_i_to_bin
@@ -73,8 +74,6 @@ contains
     endif
 
     call set_max_cur()
-    write(*,*) 'MAX CUR',max_cur
-    write(*,*) order
     call set_max_vert()
 
     if (this%imode.eq.2) then
@@ -127,15 +126,11 @@ contains
           enddo
        else
           do isplit=1,isize-1
-             !write(*,*) 'ISIZE---------------',isize
-             !write(*,*) '...... isplit',isplit
              n1=isplit
              n2=isize-isplit
-             !write(*,*) 'n1,n2',n1,n2
              do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
               
                 do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
-                   !write(*,*) 'ic1,ic2,ic1,ic2',ic1,ic2
                    call add_if_allowed_threevertex()
                 enddo
              enddo
@@ -157,7 +152,6 @@ contains
   contains
     subroutine allocate_and_fill_colour_permutations()
       implicit none
-      write(*,*) 'Allocating permutations'
       ! allocate and fill the colour orders
       if (this%n_qqbar.eq.0) then
          allocate(this%perm(1:n-1,1:this%nColOrd))
@@ -176,11 +170,8 @@ contains
          enddo
       elseif (this%n_qqbar.eq.2) then
          allocate(this%perm(1:n-1,1:this%nColOrd))
-         write(*,*) 'HELLO',this%nColOrd
-         write(*,*) this%n_cur_start(n-1),this%n_cur_end(n-1)
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
             this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
-            write(*,*) this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)
          enddo
       endif
     end subroutine allocate_and_fill_colour_permutations
@@ -873,12 +864,9 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      !write(*,*) 'CURR 1',this%current_list(ic1)%order
-      !write(*,*) 'CURR 2',this%current_list(ic2)%order
       if (.not.valid_current_combination())  then
         return
       endif
-      !write(*,*) 'valid current!',this%current_list(ic1)%type,this%current_list(ic2)%type
 
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
@@ -1432,7 +1420,6 @@ contains
       integer :: ctype,cur_bin,ic,key
       integer(kind=8) :: val
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-!!$         write (*,*) 'add_current',ctype,':',ip,':',this%current_list(ic1)%order(1:n1),':',this%current_list(ic2)%order(1:n2)
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
             if (ctype.ne.this%current_list(ic)%type) cycle
@@ -2137,12 +2124,7 @@ contains
                if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
                   this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_r(1:4,ih1)*this%current_list(n)%val_r(1:4,ih2))
                else
-                  !write(*,*) '*******'
-                  !write(*,*) 'ih',ih
-                  !write(*,*) 'n-1 current',this%current_list(this%n_cur)%val_c(1:4,ih1)
-                  !write(*,*) 'closing currentt',this%current_list(n)%val_c(1:4,ih2)
                   this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_c(1:4,ih1)*this%current_list(n)%val_c(1:4,ih2))
-                  !write(*,*) 'AMP',this%amps(this%helmap(ih))
                endif
             enddo
          enddo
@@ -2202,10 +2184,8 @@ contains
          enddo
 
       else
-         !write(*,*) 'in combining',ic
          this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=(0d0,0d0)
          do iv=1,this%current_list(ic)%n_vert
-            !write(*,*) 'iv',iv
             if (this%current_list(ic)%vertex_sign(iv))then
                this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)=&
                     this%current_list(ic)%val_c(1:dim,1:this%current_list(ic)%nhel)-&
@@ -2315,13 +2295,10 @@ contains
           endif
           endif
        enddo
-       if (gi.ne.iperm-1) cycle
+       if (gi.eq.iperm-1) exit
        enddo
        gi_iperm = iperm
     endif
-
-    write(*,*) 'IPERM',iper
-    write(*,*) 'cjecking gi',gi_iperm
 
     if (this%n_qqbar.eq.2) then
         uj_upper = 2
@@ -2340,15 +2317,12 @@ contains
           jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]  ! last one is dummy
        endif
 
-       write(*,*) 'JPER',jper
-
        do rj=0,lim
           if (this%n_qqbar.eq.2) then
               ui = it
           endif
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
           !if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          write(*,*) 'col fac',col_fac
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc,gi_iperm)
@@ -2369,28 +2343,29 @@ contains
     enddo
     enddo
 
-    enddo
-
     write (*,*) 'A single row in the colour matrix has',n_vals(1:3,gi_iperm),&
          ' different colour factors at LC, NLC and full colour, respectively'
 
+    enddo
+
+
  ! Allocate the arrays now that we know their sizes
-    allocate(ic(1:maxval(n_vals(1:3,gi_iperm)),1:3))
-    allocate(ir(1:maxval(n_vals(1:3,gi_iperm)),1:3))
+    allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3))
+    allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3))
     if (color_flow) then
-      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,gi_iperm)),1:3))
-      allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,gi_iperm)),1:3)) ! for colour flow *(n-1)
+      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3))
+      allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3)) ! for colour flow *(n-1)
     else
-      allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,gi_iperm)),1:3))
-      allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,gi_iperm)),1:3)) 
+      allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3))
+      allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3)) 
     endif
-    this%row_index(0,1:maxval(n_vals(1:3,gi_iperm)),1:3)=0
-    this%col_index(1,1:maxval(n_vals(1:3,gi_iperm)),1:3)=0
+    this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3)=0
+    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3)=0
     allocate(this%n_col_vals(1:3,iperm_upper))
-    this%n_col_vals(1:3,gi_iperm)=n_vals(1:3,gi_iperm)
-    allocate(this%diff_col_vals(1:maxval(n_vals(1:3,gi_iperm)),1:3))
+    this%n_col_vals(1:3,1:iperm_upper)=n_vals(1:3,1:iperm_upper)
+    allocate(this%diff_col_vals(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     do iacc=1,3
-       this%diff_col_vals(1:n_vals(iacc,gi_iperm),iacc)=diff_vals(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
+       this%diff_col_vals(1:n_vals(iacc,iperm_upper),iacc,1:iperm_upper)=diff_vals(1:n_vals(iacc,iperm_upper),iacc,1:iperm_upper)
     enddo
 
 ! Compute all the colour factors and fill the col_index and row_index arrays
@@ -2418,10 +2393,6 @@ contains
           gi_iperm = gi + 1
        endif
 
-       write(*,*) 'IPER',iper
-       write(*,*) 'ui',ui
-       write(*,*) '************************'
-
         ! for now, include all matrix ! TO CHANGE: put back off-diagonality
         do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
@@ -2446,15 +2417,9 @@ contains
                          exit
                  endif
                enddo   
-               !write(*,*) '------------------------>'
-               !write(*,*) 'SO',ival
-               !write(*,*) 'jperm:',jperm
-               !write(*,*) 'uj',uj
-               !write(*,*) 'col_fac',col_fac(iacc)
                ic(ival,iacc)=ic(ival,iacc)+1
                ir(ival,iacc)=ir(ival,iacc)+1
                this%col_index(ic(ival,iacc),ival,iacc)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
-               !write(*,*) 'filled col',this%col_index(ic(ival,iacc),ival,iacc)
             enddo
           enddo
           enddo
@@ -2537,8 +2502,8 @@ contains
                if (all(iper.eq.jper)) then
                   if (ui.eq.uj.and.ui.eq.1) then
                     col_fac(1)=dble(3**(n-2))
-                  !elseif (ui.eq.uj.and.ui.eq.2) then
-                  !  col_fac(1)=dble(3**(n-4))
+                  elseif (ui.eq.uj.and.ui.eq.2) then
+                    col_fac(1)=dble(3**(n-4))
                   endif
                endif
             endif
@@ -2619,14 +2584,6 @@ contains
                   enddo
 
                   call Tr_allocate(n)
-                  !write(*,*) 'ri is',gi
-                  !write(*,*) 'ui',ui
-                  !write(*,*) iper_glu
-
-                  !write(*,*) 'rj is',gj
-                  !write(*,*) 'uj',uj
-                  !write(*,*) jper_glu
-
                   call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
                   call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
                   if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence

@@ -167,9 +167,9 @@ program matrix_reweight
                     endif
                  enddo
                  if (use_real_gluons) then
-                    amp_col=amp_col+amp2*amp_QCD%diff_col_vals(i,iacc)
+                    amp_col=amp_col+amp2*amp_QCD%diff_col_vals(i,iacc,1)
                  else
-                    amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc)
+                    amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc,1)
                  endif
               enddo
               if (use_real_gluons) then
@@ -205,20 +205,17 @@ program matrix_reweight
                     endif
                  enddo
                  if (proc_num.gt.1) then
-                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc)*(-1d0/3d0)
+                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)*(-1d0/3d0)
                  else
-                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc)
+                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)
                  endif
               enddo
               matrix2(iacc_in)=matrix2(iacc_in)+dble(amp_col_c*conjg(amps(proc_num)%amps(irow)))
            enddo
            enddo
            enddo
-
         elseif (amps(1)%n_qqbar.eq.2) then
-           write(*,*) 'IACC------------',iacc
            do it=1,2
-           write(*,*) 'it',it
            do irow=1,amps(it)%nColOrd
               iper_test(1:next-1)=[amps(1)%perm(1:next-1,irow)] !
               do i=1,next-1
@@ -230,25 +227,19 @@ program matrix_reweight
                 endif
               enddo
               gi_iperm = gi + 1
-              write(*,*) 'irow',irow
               amp_col_c=(0d0,0d0)
-              write(*,*) 'n col values',amps(it)%n_col_vals(iacc,1)
               do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
                  amp2_c=(0d0,0d0)
                  do ic=amps(it)%row_index(irow-1,i,iacc)+1,amps(it)%row_index(irow,i,iacc)
                     icol=amps(it)%col_index(ic,i,iacc)
-                    !write(*,*) 'col ord',amps(1)%nColOrd
                     if (icol.le.amps(it)%nColOrd) then
-                        write(*,*) 'icol 1',icol
                         amp2_c=amp2_c+amps(1)%amps(icol)
                     else
-                        write(*,*) 'icol 2',icol
                         icol = icol -amps(it)%nColOrd
                         amp2_c=amp2_c+amps(2)%amps(icol)
                     endif
-                    !amp2_c=amp2_c+amps(it)%amps(icol)
                  enddo
-                 amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc)
+                 amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc,gi_iperm)
               enddo
               matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
            enddo
