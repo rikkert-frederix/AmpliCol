@@ -122,9 +122,10 @@ program matrix_integrate_QCD
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
   write(*,*) 'Number of numerical errors:',num_error
+  write(*,*) 'Number passing test cuts:',passed_it1
  
 contains
-  function integrand(x,vol,ifirst,f1)
+  function integrand(x,vol,ifirst,nit,f1)
     implicit none
     real*8 :: integrand
     integer :: ifirst
@@ -135,7 +136,7 @@ contains
     real*8 :: vol,cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
-
+    integer :: nit ! iteration number
     double precision :: y,frac,steep,cuts_wgt_1,Q
    
     ! some point-by-point initialisation
@@ -161,7 +162,7 @@ contains
 
     all_evt=all_evt+1
 
-    cuts_wgt=pass_cuts(next,p)
+    cuts_wgt=pass_cuts(next,p,nit)
     if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
        val=0d0
@@ -207,6 +208,33 @@ contains
 
     val=amp2*weight
 
+    if (nit.eq.1 ) then
+       frac = 0.8d0
+       steep=0.1d0
+    do i=3,next
+       if (pt_min.gt.0d0) then
+          if (pt(p(0,i)).lt.frac*pt_min) then
+             passed_it1(0) = passed_it1(0) + val
+          endif
+          if (pt(p(0,i)).gt.0.5d0*pt_min.and.pt(p(0,i)).lt.0.6d0*pt_min) then
+             passed_it1(1) = passed_it1(1) + val
+          endif
+          if (pt(p(0,i)).gt.0.6d0*pt_min.and.pt(p(0,i)).lt.0.7d0*pt_min) then
+             passed_it1(2) = passed_it1(2) + val
+          endif
+          if (pt(p(0,i)).gt.0.7d0*pt_min.and.pt(p(0,i)).lt.0.8d0*pt_min) then
+             passed_it1(3) = passed_it1(3) + val
+          endif
+          if (pt(p(0,i)).gt.0.8d0*pt_min.and.pt(p(0,i)).lt.0.9d0*pt_min) then
+             passed_it1(4) = passed_it1(4) + val
+          endif
+          if (pt(p(0,i)).gt.0.9d0*pt_min.and.pt(p(0,i)).lt.1.0d0*pt_min) then
+             passed_it1(5) = passed_it1(5) + val
+          endif
+       endif
+    enddo
+    endif
+
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
 
@@ -227,15 +255,21 @@ contains
 
   end function integrand
 
-  double precision function pass_cuts(n,p)
+  double precision function pass_cuts(n,p,nit)
     ! Cuts on the phase-space point.
     implicit none
     integer :: i,j,n
     real*8,dimension(0:3,n) :: p
     double precision :: frac,y,steep
+    integer :: nit
 
-    frac=0.8d0
-    steep=0.1d0
+    if (nit .eq.1) then
+      frac=0.8d0
+      steep=0.1d0
+    else
+      frac=0.8d0
+      steep=0.1d0
+    endif
     pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
        do i=1,n-1
@@ -247,6 +281,8 @@ contains
           enddo
        enddo
     endif
+
+
 
     do i=3,n
        if (pt_min.gt.0d0) then
@@ -264,6 +300,7 @@ contains
              return
           endif
        endif
+
        if (eta_max.gt.0d0) then
           if (abs(eta(p(0,i))).gt.eta_max) then
              pass_cuts=-1d0

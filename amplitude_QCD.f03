@@ -342,6 +342,7 @@ contains
         endif
       enddo
 
+      if (this%n_qqbar.ge.2) then
       k=1
       do i=1,n
          if((temp_part(i).ge.1).and.(temp_part(i).le.6)) then
@@ -371,6 +372,8 @@ contains
           this%quark_index(k)=i
        endif
       enddo
+
+      endif
 
       if (any(quark_flav(:).ne.0)) then
          write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
@@ -1125,7 +1128,7 @@ contains
       if (this%n_qqbar.eq.1 .and. (any(ip(2:isize).eq.order(1)))) then
          ! if there is a quark, it can only be at the first position
          valid_current_order=.false.
-         stop 10
+         !stop 10
          return
       endif
       if (this%n_qqbar.eq.1 .and. ip(1).eq.order(1)) then
@@ -2282,8 +2285,10 @@ contains
     do iperm=1,iperm_upper
     if (this%n_qqbar.eq.0) then
        iper(1:n)=[this%perm(1:n-1,iperm),n]
+       gi_iperm = 1 ! dummy
     elseif (this%n_qqbar.eq.1) then
        iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
+       gi_iperm = 1 ! dummy
     elseif (this%n_qqbar.eq.2) then
        do j=1,this%nColOrd
        iper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,j),order(n)] !
