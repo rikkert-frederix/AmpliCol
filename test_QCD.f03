@@ -282,7 +282,7 @@ program test_QCD
     call cpu_time(tAfter)
     t_init = tAfter-tBefore
     call cpu_time(tBefore)
-    call amps_col%evaluate(n,p,5)
+    call amps_col%evaluate(n,p,5,part)
     call cpu_time(tAfter)
     t_eval = tAfter-tBefore
   else
@@ -292,7 +292,7 @@ program test_QCD
      call cpu_time(tAfter)
      t_init=tAfter-tBefore
      call cpu_time(tBefore)
-     call amps(iperm)%evaluate(n,p,0)
+     call amps(iperm)%evaluate(n,p,0,part)
      call cpu_time(tAfter)
      t_eval=tAfter-tBefore
     enddo
@@ -408,8 +408,8 @@ contains
     integer, dimension(n) :: iper,jper
     real*16 :: col_factor
     ! 1
-    !iper(1:n-2)=order(2:n-1,iperm)
-    !jper(1:n-2)=order(2:n-1,jperm)
+    iper(1:n-2)=order(2:n-1,iperm)
+    jper(1:n-2)=order(2:n-1,jperm)
 
     ! 2
     !iper(1:n-2)=order(1:n-2,iperm)
@@ -428,8 +428,8 @@ contains
     !jper(3:n-2)=order(1:n-4,jperm)
 
     !5
-    iper(1:n-2)=order(3:n,iperm)
-    jper(1:n-2)=order(3:n,jperm)
+    !iper(1:n-2)=order(3:n,iperm)
+    !jper(1:n-2)=order(3:n,jperm)
 
 
     Tr(0,0,0)=1 ! one term
@@ -442,6 +442,8 @@ contains
     color_factor_one_qq=dble(col_factor)
     !if (.not.photon) write(*,*) color_factor_one_qq
     !if (color_factor_one_qq.lt.10d0) color_factor_one_qq=0d0
+
+    if (iperm.ne.jperm) color_factor_one_qq=0d0
   end function color_factor_one_qq
 
   double precision function color_factor_gluons(iperm,jperm)
@@ -497,7 +499,6 @@ contains
     integer,dimension(n) :: temp_part
     integer,dimension(2*n) :: dorder_i,dorder_j
 
-
     dorder_i(1:n)=order(1:n,iperm)
     dorder_i(n+1:2*n)=order(1:n,iperm)
     dorder_j(1:n)=order(1:n,jperm)
@@ -523,20 +524,11 @@ contains
        endif
     enddo
 
-    write(*,*) 'q_i',q_i,gi
-    write(*,*) 'dorder i',dorder_i
-
-    write(*,*) 'q_j',q_j,gj
-    write(*,*) 'dorder j',dorder_j
-    
-
     iper(1:gi)    =dorder_i(q_i+1:q_i+gi)
     iper(gi+1:n-4)=dorder_i(q_i+gi+3:q_i+gi+2+(n-4-gi))
     jper(1:gj)    =dorder_j(q_j+1:q_j+gj)
     jper(gj+1:n-4)=dorder_j(q_j+gj+3:q_j+gj+2+(n-4-gj))
 
-    write(*,*) iper
-    write(*,*) jper
     if (ui.eq.uj.and.ui.eq.1) then
        Tr(0,0,0)=1 ! one term
        Tr(0,0,1)=2 
@@ -584,6 +576,8 @@ contains
        call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
        color_factor_two_qq=dble(col_factor)
     endif
+
+    if (iperm.ne.jperm) color_factor_two_qq=0d0
   end function color_factor_two_qq
   
   subroutine get_perm_params(iperm,jperm,gi,gj,ui,uj)

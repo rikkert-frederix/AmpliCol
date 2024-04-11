@@ -37,8 +37,9 @@ program matrix_reweight
   real(kind=8),dimension(:),allocatable :: mass
   logical :: done,first
   integer :: swap_q,swap_aq
-  integer :: it,gi,gi_iperm ! type for 2qq process
+  integer :: it,gi,gi_iperm,gi_prev ! type for 2qq process
   integer,dimension(:),allocatable :: iper_test
+  integer :: ic_low,ic_upp
   
   call get_run_arguments()
 
@@ -62,13 +63,16 @@ program matrix_reweight
 
   allocate(amps((next-2)*(next-2))) 
   temp_part=part
+  write(*,*) 'INIT FOR it=1 ...............................'
   it = 1
   call amps(1)%init(2,next,temp_part,o,it)
+  write(*,*) 'done with it 1'
   col_acc=20
   call amps(1)%init_col2(next,temp_part,o,it,col_acc)
 
   if (amps(1)%n_qqbar.eq.2) then
       do i=1,1  ! remaining amps for type-1
+         write(*,*) 'INIT FOR it=2 ...............................'
          it = it + 1
          call amps(it)%init(2,next,temp_part,o,it)
          col_acc=20
@@ -127,14 +131,14 @@ program matrix_reweight
      enddo
 
 
-     call amps(1)%evaluate(next,p,ihel)
+     call amps(1)%evaluate(next,p,ihel,part)
      if (amps(1)%n_qqbar.eq.2) then
-        call amps(2)%evaluate(next,p,ihel)
+        call amps(2)%evaluate(next,p,ihel,part)
      endif
      if (color_flow) then
        do i=2,2
         do k=1,next-2
-         call amps(i+k-1)%evaluate(next,p,ihel)
+         call amps(i+k-1)%evaluate(next,p,ihel,part)
         enddo
        enddo
      endif
@@ -143,39 +147,40 @@ program matrix_reweight
      t_amp=t_amp+tAfter-tBefore
 
      do iacc=1,3 ! LC, NLC and full colour
+        !write(*,*) '*******************    iacc',iacc
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
         if (amps(1)%n_qqbar.eq.0) then
-           do irow=1,amp_QCD%nColOrd
+           do irow=1,amps(1)%nColOrd
               if (use_real_gluons) then
                  amp_col=0d0
               else
                  amp_col_c=(0d0,0d0)
               endif
-              do i=1,amp_QCD%n_col_vals(iacc,1)
+              do i=1,amps(1)%n_col_vals(iacc,1)
                  if (use_real_gluons) then
                     amp2=0d0
                  else
                     amp2_c=(0d0,0d0)
                  endif
-                 do ic=amp_QCD%row_index(irow-1,i,iacc)+1,amp_QCD%row_index(irow,i,iacc)
-                    icol=amp_QCD%col_index(ic,i,iacc)
+                 do ic=amps(1)%row_index(irow-1,i,iacc,1)+1,amps(1)%row_index(irow,i,iacc,1)
+                    icol=amps(1)%col_index(ic,i,iacc,1)
                     if (use_real_gluons) then
-                       amp2=amp2+amp_QCD%amps_r(icol)
+                       amp2=amp2+amps(1)%amps_r(icol)
                     else
-                       amp2_c=amp2_c+amp_QCD%amps(icol)
+                       amp2_c=amp2_c+amps(1)%amps(icol)
                     endif
                  enddo
                  if (use_real_gluons) then
-                    amp_col=amp_col+amp2*amp_QCD%diff_col_vals(i,iacc,1)
+                    amp_col=amp_col+amp2*amps(1)%diff_col_vals(i,iacc,1)
                  else
-                    amp_col_c=amp_col_c+amp2_c*amp_QCD%diff_col_vals(i,iacc,1)
+                    amp_col_c=amp_col_c+amp2_c*amps(1)%diff_col_vals(i,iacc,1)
                  endif
               enddo
               if (use_real_gluons) then
-                 matrix2(iacc)=matrix2(iacc)+amp_col*amp_QCD%amps_r(irow)
+                 matrix2(iacc)=matrix2(iacc)+amp_col*amps(1)%amps_r(irow)
               else
-                 matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amp_QCD%amps(irow)))
+                 matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(1)%amps(irow)))
               endif
            enddo
 
@@ -193,8 +198,8 @@ program matrix_reweight
               irow_mat = irow
               do i=1,amps(proc_num)%n_col_vals(iacc,1)
                  amp2_c=(0d0,0d0)
-                 do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc)+1,amps(proc_num)%row_index(irow_mat,i,iacc)
-                    icol=amps(proc_num)%col_index(ic,i,iacc)
+                 do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc,1)+1,amps(proc_num)%row_index(irow_mat,i,iacc,1)
+                    icol=amps(proc_num)%col_index(ic,i,iacc,1)
                     icol_mat = icol
                     if (proc_num.eq.1) then
                        amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
@@ -214,10 +219,14 @@ program matrix_reweight
            enddo
            enddo
            enddo
+
+
         elseif (amps(1)%n_qqbar.eq.2) then
            do it=1,2
+              !write(*,*) 'IT',it
            do irow=1,amps(it)%nColOrd
-              iper_test(1:next-1)=[amps(1)%perm(1:next-1,irow)] !
+              !write(*,*) 'IROW',irow
+              iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow)] !
               do i=1,next-1
                 if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
                  if (i.ne.1) then
@@ -227,21 +236,54 @@ program matrix_reweight
                 endif
               enddo
               gi_iperm = gi + 1
+              !write(*,*) 'gi_perm',gi_iperm
+
+              if (irow.ge.1) then
+              iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow-1)] !
+              do i=1,next-1
+                if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
+                 if (i.ne.1) then
+                   gi = i - 2
+                   exit
+                 endif
+                endif
+              enddo
+              gi_prev = gi + 1
+              else
+              gi_prev = 0
+              endif
+
               amp_col_c=(0d0,0d0)
+              
+              !write(*,*) 'n col vals',amps(it)%n_col_vals(iacc,gi_iperm)
+
               do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
+                 !write(*,*) 'n i col val',i
                  amp2_c=(0d0,0d0)
-                 do ic=amps(it)%row_index(irow-1,i,iacc)+1,amps(it)%row_index(irow,i,iacc)
-                    icol=amps(it)%col_index(ic,i,iacc)
+                 ic_low = amps(it)%row_index(irow-1,i,iacc,gi_prev)+1
+                 if(gi_prev.ne.gi_iperm) then
+                   ic_low = 1
+                 endif
+                 ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
+                 !write(*,*) 'going between',ic_low,ic_upp
+                 do ic = ic_low,ic_upp
+                    !write(*,*) 'ic ',ic
+                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
+                    !write(*,*) 'icol',icol
                     if (icol.le.amps(it)%nColOrd) then
                         amp2_c=amp2_c+amps(1)%amps(icol)
+                        !write(*,*) 'adding from amp 1',icol
                     else
                         icol = icol -amps(it)%nColOrd
                         amp2_c=amp2_c+amps(2)%amps(icol)
+                        !write(*,*) 'adding from amp 2',icol
                     endif
                  enddo
                  amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc,gi_iperm)
+                 !write(*,*) 'all come with color',amps(it)%diff_col_vals(i,iacc,gi_iperm)
               enddo
               matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
+              !write(*,*) 'closing with row',irow
            enddo
            enddo
 
@@ -252,6 +294,8 @@ program matrix_reweight
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
+
+     !stop 22
 
      !write(*,*) 'matrix LC',matrix2(1)
      !write(*,*) 'matrix NLC',matrix2(2),matrix2(2)/matrix2(1)

@@ -29,8 +29,9 @@ module amplitude_QCD_mod
      integer,dimension(:,:),allocatable ::  n_col_vals
      integer,dimension(:,:),allocatable :: perm
      integer,dimension(:),allocatable :: quark_index
-     integer,dimension(:,:,:),allocatable :: row_index,col_index
+     integer,dimension(:,:,:,:),allocatable :: row_index,col_index
      integer,dimension(:,:,:),allocatable :: u1_lin_comb
+     integer,dimension(:,:),allocatable :: buff
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
@@ -152,6 +153,7 @@ contains
   contains
     subroutine allocate_and_fill_colour_permutations()
       implicit none
+      integer :: ind
       ! allocate and fill the colour orders
       if (this%n_qqbar.eq.0) then
          allocate(this%perm(1:n-1,1:this%nColOrd))
@@ -170,11 +172,75 @@ contains
          enddo
       elseif (this%n_qqbar.eq.2) then
          allocate(this%perm(1:n-1,1:this%nColOrd))
+         call setup_buff_2qq()
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
+            call check_2qq_order(nc,ind)
+            !this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
+            this%perm(1:n-1,ind) = this%current_list(nc)%order(1:n-1)
          enddo
       endif
     end subroutine allocate_and_fill_colour_permutations
+
+    subroutine setup_buff_2qq
+      implicit none
+      integer :: i,j,k,m,q
+      integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in
+      integer,dimension(1:n-4-this%n_sing) :: gluons
+
+      allocate(this%buff(1:n-2-this%n_sing,(n-2-this%n_sing)*factorial(n-4-this%n_sing))) ! for photons: change
+      this%buff(:,:)=0
+
+      k=1
+      do i=1,n
+         if (part(i).eq.21) then
+                 gluons(k)=i
+                 k=k+1
+          endif
+      enddo
+
+      m = 1
+      do i=1,n-2-this%n_sing-1
+         do j=1,n-4-this%n_sing
+           first(j) = j
+         enddo
+         write(*,*) 'FIRST',first
+         do k=1,factorial(n-4-this%n_sing)
+           call get_next_iperm(n-4-this%n_sing,first,perm_out,n-4-this%n_sing)
+           write(*,*) 'perm_out',perm_out
+           do q=1,n-4-this%n_sing
+              perm_in(q) = gluons(perm_out(q))
+           enddo
+           write(*,*) perm_in
+           this%buff(1:i-1,m) = perm_in(1:i-1)
+           this%buff(i+2:n-2-this%n_sing,m) = perm_in(i:n-4-this%n_sing)
+           first = perm_out
+           m = m+1
+         enddo
+      enddo
+
+      write(*,*) 'hello',this%buff
+    end subroutine setup_buff_2qq
+
+    subroutine check_2qq_order(nc,ind)
+      implicit none
+      integer :: nc,ind
+      integer :: i
+      integer,dimension(1:n-2-this%n_sing) :: ord
+
+      ord = this%current_list(nc)%order(2:n-1)
+      do i=1,n-2
+        if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
+              ord(i)=0
+        endif
+      enddo
+
+      do i=1,(n-2-this%n_sing)*factorial(n-4-this%n_sing)
+          if (all(this%buff(:,i).eq.ord)) ind = i
+      enddo
+
+      write(*,*) 'ind',ind
+    end subroutine check_2qq_order
+
     subroutine setup_momentum_array()
       implicit none
       integer :: ic
@@ -380,7 +446,7 @@ contains
          write(*,*) quark_flav
          stop 1
       endif
-      if (this%n_qqbar.gt.2) then
+      if (this%n_qqbar.gt.3) then
          write (*,*) 'ERROR: code only working for 0, 1 or 2 qqbar pairs',this%n_qqbar
          write (*,*) part
          stop 1
@@ -1781,11 +1847,12 @@ contains
   end subroutine init
 
 
-  subroutine evaluate(this,n,p,hel)
+  subroutine evaluate(this,n,p,hel,part)
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
     integer :: n,hel
+    integer,dimension(n)::part
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
     integer :: ifinal
@@ -2120,6 +2187,7 @@ contains
     end subroutine fill_momentum_array
     subroutine compute_amps_from_currents
       implicit none
+      integer :: ind
       if (this%imode.eq.1) then
          do ih1=1,this%current_list(this%n_cur)%nhel ! helicities for combined current of particles 1 to n-1 (in the colour order)
             do ih2=1,this%current_list(n)%nhel       ! and for the current for particle n
@@ -2137,7 +2205,12 @@ contains
             if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
                this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
             else
-               this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               if (this%n_qqbar.eq.2) then
+                  call check_2qq_order(ic,ind)
+                  this%amps(ind) = sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               else        
+                  this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               endif     
             endif
          enddo
 
@@ -2168,6 +2241,29 @@ contains
          endif
       endif
     end subroutine compute_amps_from_currents
+
+    subroutine check_2qq_order(nc,ind)
+      implicit none
+      integer :: nc,ind
+      integer :: i
+      integer,dimension(1:n-2-this%n_sing) :: ord
+
+      ord = this%current_list(nc)%order(2:n-1)
+      do i=1,n-2
+        if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
+              ord(i)=0
+        endif
+      enddo
+
+      i=0
+      do 
+          if (all(this%buff(:,i).eq.ord)) then
+             ind = i
+             exit
+          endif
+          i = i + 1
+      enddo
+    end subroutine check_2qq_order
 
     subroutine combine_interactions(dim)
       implicit none
@@ -2240,7 +2336,7 @@ contains
     !real(kind=8),allocatable,dimension(:,:) :: col_fac
     !real(kind=8),dimension(max_vals,1:3) :: diff_vals
     real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
-    integer,dimension(:,:),allocatable :: ic,ir
+    integer,dimension(:,:,:),allocatable :: ic,ir
     integer :: ri,rj,lim,y,t,maxterms_u1,i,j,gi
     integer :: ui,uj,uj_upper ! quark ordering type
     integer :: it ! quark order type (1 or 2)
@@ -2292,6 +2388,7 @@ contains
     elseif (this%n_qqbar.eq.2) then
        do j=1,this%nColOrd
        iper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,j),order(n)] !
+       write(*,*) 'iper iper',iper
        do i=1,n-1
           if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
               if (i.ne.1) then
@@ -2304,6 +2401,8 @@ contains
        enddo
        gi_iperm = iperm
     endif
+
+    write(*,*) 'gi',gi_iperm
 
     if (this%n_qqbar.eq.2) then
         uj_upper = 2
@@ -2322,12 +2421,17 @@ contains
           jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]  ! last one is dummy
        endif
 
+       !write(*,*) 'jper',jper
+       !write(*,*) 'uj',uj
+
        do rj=0,lim
           if (this%n_qqbar.eq.2) then
               ui = it
           endif
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-          !if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+          !col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+          !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+          !write(*,*) 'col fac',col_fac
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc,gi_iperm)
@@ -2355,17 +2459,17 @@ contains
 
 
  ! Allocate the arrays now that we know their sizes
-    allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3))
-    allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3))
+    allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+    allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     if (color_flow) then
-      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3))
-      allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3)) ! for colour flow *(n-1)
+      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+      allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
     else
-      allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3))
-      allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3)) 
+      allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+      allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
     endif
-    this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3)=0
-    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3)=0
+    this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
+    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
     allocate(this%n_col_vals(1:3,iperm_upper))
     this%n_col_vals(1:3,1:iperm_upper)=n_vals(1:3,1:iperm_upper)
     allocate(this%diff_col_vals(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
@@ -2398,6 +2502,14 @@ contains
           gi_iperm = gi + 1
        endif
 
+       write(*,*) ' '
+       write(*,*) '##############################'
+       
+       write(*,*) 'iperm',iper
+       write(*,*) 'ui',ui
+       write(*,*) 'gi,iperm',gi_iperm
+       write(*,*) 'n vals',n_vals(:,gi_iperm)
+
         ! for now, include all matrix ! TO CHANGE: put back off-diagonality
         do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
@@ -2411,27 +2523,47 @@ contains
              jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)] 
           endif
 
+          write(*,*) 'jperm',jper
+          write(*,*) 'uj',uj
+
           do rj=0,lim
             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
             ! TO CHANGE: also here put back factor 2
-            !if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+            !col_fac(1:3)=col_fac(1:3)*2d0
+            !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+            write(*,*) 'col fac',col_fac
+            
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
+               write(*,*) '----- IACC',iacc
+               write(*,*) 'col fac iacc',col_fac(iacc)
+               write(*,*) 'n vals',n_vals(iacc,gi_iperm)
+               
                do ival=1,n_vals(iacc,gi_iperm)
                  if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
+                         write(*,*) 'ival',ival
                          exit
                  endif
-               enddo   
-               ic(ival,iacc)=ic(ival,iacc)+1
-               ir(ival,iacc)=ir(ival,iacc)+1
-               this%col_index(ic(ival,iacc),ival,iacc)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
+               enddo 
+
+               write(*,*) 'ival is:',ival
+               
+               ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
+               ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
+               this%col_index(ic(ival,iacc,gi_iperm),ival,iacc,gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
+               write(*,*) 'col index',(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
+               write(*,*) 'assigned to ic',ic(ival,iacc,gi_iperm)
             enddo
+
           enddo
           enddo
+
         enddo
 
         do iacc=1,3
-          this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc)=ir(1:n_vals(iacc,gi_iperm),iacc)
+          this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
+          write(*,*) 'row index',ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
+          write(*,*) 'assigned to',(ri*this%nColOrd)+iperm
         enddo
       enddo
     enddo

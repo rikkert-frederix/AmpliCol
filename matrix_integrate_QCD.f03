@@ -51,6 +51,10 @@ program matrix_integrate_QCD
 
   mass(1:next)=0d0
 
+!  mass(1:2) = 0d0
+!  mass(3:4) = 175d0
+!  mass(5:6) = 0d0
+
   if (include_pdf) then
      ndim=ndim+2
      call PDF_initialise
@@ -173,7 +177,7 @@ contains
 
     ! compute amplitudes
     call cpu_time(tBefore)
-    call amps%evaluate(next,p,0)
+    call amps%evaluate(next,p,0,part)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
@@ -263,13 +267,6 @@ contains
     double precision :: frac,y,steep
     integer :: nit
 
-    if (nit .eq.1) then
-      frac=0.8d0
-      steep=0.1d0
-    else
-      frac=0.8d0
-      steep=0.1d0
-    endif
     pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
        do i=1,n-1
@@ -283,8 +280,14 @@ contains
     endif
 
 
-
     do i=3,n
+       if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
+         frac  = 0.9d0
+         steep = 0.1d0
+       elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
+         frac  = 0.8d0
+         steep = 0.1d0
+       endif
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then
              pass_cuts=-1d0
@@ -293,7 +296,11 @@ contains
           if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
              y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
              if (imode.le.0) then
-               pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
+               !if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
+                  pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
+               !elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
+               !   pass_cuts=pass_cuts*((steep)*y/((steep+1d0-y)**2)) ! 1/x2 damping function
+               !endif
              else
                pass_cuts=-1d0
              endif
@@ -760,7 +767,7 @@ contains
           sym_fac=factorial8(ngl)
        endif
     elseif (nquarks.eq.4) then
-       sym_fac=1d0 ! CHANGE accordingly!
+       sym_fac=factorial8(ngl)
     else        
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
