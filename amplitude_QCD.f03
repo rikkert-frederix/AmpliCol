@@ -9,6 +9,7 @@ module amplitude_QCD_mod
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:,:),allocatable :: val_c
      real(kind=8),dimension(:,:),allocatable :: val_r
+     real(kind=8) :: mass,width
   end type current
   type interaction
      integer :: type,singlet_move
@@ -32,16 +33,18 @@ module amplitude_QCD_mod
      integer,dimension(:,:,:,:),allocatable :: row_index,col_index
      integer,dimension(:,:,:),allocatable :: u1_lin_comb
      integer,dimension(:,:),allocatable :: buff
+     logical :: same_flav
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,part,order,it)
+  subroutine init(this,imode,n,part,mass,width,order,it)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,order
+    real(kind=8),dimension(n) :: mass,width
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
@@ -111,6 +114,8 @@ contains
              this%n_cur=this%n_cur+1
              allocate(this%current_list(this%n_cur)%order(isize))
              this%current_list(this%n_cur)%order(1)=order(nc)
+             this%current_list(this%n_cur)%mass=mass(order(nc))
+             this%current_list(this%n_cur)%width=width(order(nc))
              if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then ! initial quark states
                 this%current_list(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
              else
@@ -142,6 +147,7 @@ contains
     enddo
 
     call simple_consistency_checks()
+
 
     ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices befroe filter',this%n_cur,this%n_vert
@@ -187,6 +193,7 @@ contains
       integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in
       integer,dimension(1:n-4-this%n_sing) :: gluons
 
+      if (n-4-this%n_sing.gt.0) then
       allocate(this%buff(1:n-2-this%n_sing,(n-2-this%n_sing)*factorial(n-4-this%n_sing))) ! for photons: change
       this%buff(:,:)=0
 
@@ -203,14 +210,11 @@ contains
          do j=1,n-4-this%n_sing
            first(j) = j
          enddo
-         write(*,*) 'FIRST',first
          do k=1,factorial(n-4-this%n_sing)
            call get_next_iperm(n-4-this%n_sing,first,perm_out,n-4-this%n_sing)
-           write(*,*) 'perm_out',perm_out
            do q=1,n-4-this%n_sing
               perm_in(q) = gluons(perm_out(q))
            enddo
-           write(*,*) perm_in
            this%buff(1:i-1,m) = perm_in(1:i-1)
            this%buff(i+2:n-2-this%n_sing,m) = perm_in(i:n-4-this%n_sing)
            first = perm_out
@@ -218,7 +222,7 @@ contains
          enddo
       enddo
 
-      write(*,*) 'hello',this%buff
+      endif
     end subroutine setup_buff_2qq
 
     subroutine check_2qq_order(nc,ind)
@@ -227,6 +231,7 @@ contains
       integer :: i
       integer,dimension(1:n-2-this%n_sing) :: ord
 
+      if (n-4-this%n_sing.gt.0) then
       ord = this%current_list(nc)%order(2:n-1)
       do i=1,n-2
         if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
@@ -235,10 +240,16 @@ contains
       enddo
 
       do i=1,(n-2-this%n_sing)*factorial(n-4-this%n_sing)
-          if (all(this%buff(:,i).eq.ord)) ind = i
+          if (all(this%buff(:,i).eq.ord)) then
+                  ind = i
+                  return
+          endif
       enddo
+      
+      else
+      ind = 1 
 
-      write(*,*) 'ind',ind
+      endif
     end subroutine check_2qq_order
 
     subroutine setup_momentum_array()
@@ -379,25 +390,35 @@ contains
       implicit none
       integer,dimension(6) :: quark_flav
       integer :: i,j,k
+      integer,dimension(8) :: flav  ! fills the flavours of quarks it finds ( in abs)
       integer,dimension(n) :: temp_part
 
       this%n_qqbar=0
       this%n_sing=0
       quark_flav=0
+      this%same_flav=.true.
+      flav = 0
+      k = 1
       do i=1,n
          if (i.le.2) then
             if (part(i).ne.21 .and. part(i).ne.22) then
                quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
+               flav(k) = abs(part(i))
+               k= k+1
                if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
             endif
          else
             if (part(i).ne.21 .and. part(i).ne.22) then
                quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
+               flav(k) = abs(part(i))
+               k= k+1
                if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
          endif
          if (part(i).ne.21 .and. abs(part(i)).gt.6) this%n_sing=this%n_sing+1
       enddo
+
+      if (any(flav(1:2*this%n_qqbar).ne.flav(1))) this%same_flav = .false.
 
       allocate(this%quark_index(2*this%n_qqbar))
 
@@ -471,14 +492,14 @@ contains
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          else
             if (.not.(part(order(1)).ge.1 .and. part(order(1)).le.6)) then
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          endif
          if (order(n).le.2) then
@@ -486,14 +507,14 @@ contains
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          else
             if (.not.(part(order(n)).le.-1 .and. part(order(n)).ge.-6)) then
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
-               !stop 1
+               stop 1
             endif
          endif
       endif
@@ -1068,6 +1089,7 @@ contains
          endif
       endif
       valid_current_combination=.true.
+
     end function valid_current_combination
     
     subroutine add_vertex(itype,ctype)
@@ -1506,6 +1528,16 @@ contains
          this%current_list(this%n_cur)%type=ctype
          this%current_list(this%n_cur)%bin=cur_bin
          this%current_list(this%n_cur)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
+         if (this%current_list(ic1)%mass.eq.this%current_list(ic2)%mass)  then
+            this%current_list(this%n_cur)%mass=0d0
+         else
+            this%current_list(this%n_cur)%mass=max(this%current_list(ic1)%mass,this%current_list(ic2)%mass)
+         endif
+         if (this%current_list(ic1)%width.eq.this%current_list(ic2)%width)  then
+            this%current_list(this%n_cur)%width=0d0
+         else
+            this%current_list(this%n_cur)%width=max(this%current_list(ic1)%width,this%current_list(ic2)%width)
+         endif
          if (ctype.eq.21) then
             allocate(this%current_list(this%n_cur)%vertices(5*(isize-1)))
             allocate(this%current_list(this%n_cur)%vertex_sign(5*(isize-1)))
@@ -1533,6 +1565,7 @@ contains
             ! anti-quark current
             call get_value(ip,2,val)
          endif
+
          !do ic=1,this%n_cur
          !   if (cur_bin.eq.this%current_list(ic)%bin) return
          !enddo
@@ -1847,12 +1880,13 @@ contains
   end subroutine init
 
 
-  subroutine evaluate(this,n,p,hel,part)
+  subroutine evaluate(this,n,p,mass,width,hel,part)
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
     integer :: n,hel
     integer,dimension(n)::part
+    real(kind=8),dimension(n) :: mass,width
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
     integer :: ifinal
@@ -1937,10 +1971,10 @@ contains
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
                    call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih),this%current_list(ic)%mass)
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                    call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih),this%current_list(ic)%mass)
                 elseif (this%current_list(ic)%type.eq.22) then
                    if (use_real_gluons) then
                       call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
@@ -2248,6 +2282,7 @@ contains
       integer :: i
       integer,dimension(1:n-2-this%n_sing) :: ord
 
+      if (n-4-this%n_sing.gt.0) then
       ord = this%current_list(nc)%order(2:n-1)
       do i=1,n-2
         if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
@@ -2255,14 +2290,20 @@ contains
         endif
       enddo
 
-      i=0
+      i = 1
       do 
           if (all(this%buff(:,i).eq.ord)) then
-             ind = i
-             exit
+                  ind = i
+                  return
           endif
-          i = i + 1
+          i = i+1
       enddo
+
+      else
+      ind = 1
+
+      endif
+
     end subroutine check_2qq_order
 
     subroutine combine_interactions(dim)
@@ -2311,13 +2352,17 @@ contains
     subroutine include_quark_propagator()
       implicit none
       call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), & 
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
     end subroutine include_quark_propagator
 
     subroutine include_aquark_propagator()
       implicit none
       call AquarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
     end subroutine include_aquark_propagator
   end subroutine evaluate
 
@@ -2388,7 +2433,6 @@ contains
     elseif (this%n_qqbar.eq.2) then
        do j=1,this%nColOrd
        iper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,j),order(n)] !
-       write(*,*) 'iper iper',iper
        do i=1,n-1
           if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
               if (i.ne.1) then
@@ -2401,8 +2445,6 @@ contains
        enddo
        gi_iperm = iperm
     endif
-
-    write(*,*) 'gi',gi_iperm
 
     if (this%n_qqbar.eq.2) then
         uj_upper = 2
@@ -2421,17 +2463,14 @@ contains
           jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]  ! last one is dummy
        endif
 
-       !write(*,*) 'jper',jper
-       !write(*,*) 'uj',uj
-
        do rj=0,lim
           if (this%n_qqbar.eq.2) then
               ui = it
           endif
+
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
           !col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
-          !write(*,*) 'col fac',col_fac
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc,gi_iperm)
@@ -2502,14 +2541,6 @@ contains
           gi_iperm = gi + 1
        endif
 
-       write(*,*) ' '
-       write(*,*) '##############################'
-       
-       write(*,*) 'iperm',iper
-       write(*,*) 'ui',ui
-       write(*,*) 'gi,iperm',gi_iperm
-       write(*,*) 'n vals',n_vals(:,gi_iperm)
-
         ! for now, include all matrix ! TO CHANGE: put back off-diagonality
         do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
@@ -2523,36 +2554,22 @@ contains
              jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)] 
           endif
 
-          write(*,*) 'jperm',jper
-          write(*,*) 'uj',uj
-
           do rj=0,lim
             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
             ! TO CHANGE: also here put back factor 2
             !col_fac(1:3)=col_fac(1:3)*2d0
             !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
-            write(*,*) 'col fac',col_fac
-            
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
-               write(*,*) '----- IACC',iacc
-               write(*,*) 'col fac iacc',col_fac(iacc)
-               write(*,*) 'n vals',n_vals(iacc,gi_iperm)
-               
                do ival=1,n_vals(iacc,gi_iperm)
                  if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
-                         write(*,*) 'ival',ival
                          exit
                  endif
                enddo 
 
-               write(*,*) 'ival is:',ival
-               
                ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
                ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
                this%col_index(ic(ival,iacc,gi_iperm),ival,iacc,gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
-               write(*,*) 'col index',(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
-               write(*,*) 'assigned to ic',ic(ival,iacc,gi_iperm)
             enddo
 
           enddo
@@ -2562,8 +2579,6 @@ contains
 
         do iacc=1,3
           this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
-          write(*,*) 'row index',ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
-          write(*,*) 'assigned to',(ri*this%nColOrd)+iperm
         enddo
       enddo
     enddo
