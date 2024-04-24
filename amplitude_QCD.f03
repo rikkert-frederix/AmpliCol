@@ -72,6 +72,7 @@ contains
     call set_max_vert()
 
     max_cur=10000
+    max_vert=10000
 
     
     if (this%imode.eq.2) then
@@ -82,11 +83,11 @@ contains
        key_to_current(1:max_key)=0
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
-       if (max_key.ne.max_cur) then
-          write (*,*) 'Number of dictionary keys is expected to be identical to the maximum number of currents',&
-               max_key,max_cur
-          stop 1
-       endif
+!!$       if (max_key.ne.max_cur) then
+!!$          write (*,*) 'Number of dictionary keys is expected to be identical to the maximum number of currents',&
+!!$               max_key,max_cur
+!!$          stop 1
+!!$       endif
     endif
 
     allocate(this%current_list(max_cur))
@@ -715,7 +716,7 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       if (.not.valid_current_combination()) return
-      write (*,*) 'valid combination',this%current_list(ic1)%order(1:n1),'+',this%current_list(ic2)%order(1:n2)
+!!$       write (*,*) 'valid combination',this%current_list(ic1)%order(1:n1),'+',this%current_list(ic2)%order(1:n2)
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -805,10 +806,10 @@ contains
             return
          else
             valid_current_combination=.true.
-            return
+            return ! no need to check further: below is ony checks about the colours
          endif
       endif
-
+      
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order.
@@ -821,14 +822,14 @@ contains
          enddo
          nc2=i-1
          ip(1:nc1+nc2)=[this%current_list(ic1)%order(1:nc1),this%current_list(ic2)%order(1:nc2)]
-         k=1
-         do i=1,nc1+nc2
-            do j=k,n
-               if (order(j).eq.ip(i)) exit ! we found ip(i) in the order
-            enddo
-            if (j.eq.n+1) return ! did not find ip(i) in the order
-            k=j+1 ! start checking in 'order' only after where the current one
-                  ! has been found.
+         do j=1,n
+            if (order(j).eq.ip(1)) then
+               do i=2,nc1+nc2
+                  if (j-1+i.gt.n) return
+                  if (order(j-1+i).ne.ip(i)) return
+               enddo
+               exit
+            endif
          enddo
       endif
 
@@ -884,12 +885,14 @@ contains
          ! No colour singlets or all colour singlets are in ip2
          singlet_mv(0)=0
          combined_currents(nc1+nc2+1:n1+n2)=ip2(nc2+1:n2)
+         singlet_move=singlet_mv(0)
          return
       elseif(nc2.eq.n2) then
          ! Some colour singlets in ip1, but no in ip2
          singlet_mv(0)=n1-nc1
          singlet_mv(1:singlet_mv(0))=nc1+1
          combined_currents(nc1+nc2+1:n1+n2)=ip1(nc1+1:n1)
+         singlet_move=singlet_mv(0)
          return
       else
          ! Some colour singlets in both ip1 and ip2
@@ -901,6 +904,7 @@ contains
             if (ip1(n1).lt.ip2(1)) then
                ! nothing to move
                combined_currents(1:n1+n2)=[ip1(1:n1),ip2(1:n2)]
+               singlet_move=singlet_mv(0)
                return
             endif
             do while (ip1(ns1).lt.ip2(1))
@@ -953,9 +957,9 @@ contains
               this%current_list(ic2)%order(1:n2),singlet_move,singlet_mv)
          this%interaction_list(this%n_vert)%singlet_move=singlet_move
          this%interaction_list(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
-         write (*,*) 'cur1=',this%current_list(ic1)%order(1:n1)
-         write (*,*) 'cur2=',this%current_list(ic2)%order(1:n2)
-         write (*,*) 'simv=',singlet_mv(0:isize)
+!!$         write (*,*) 'cur1=',this%current_list(ic1)%order(1:n1)
+!!$         write (*,*) 'cur2=',this%current_list(ic2)%order(1:n2)
+!!$         write (*,*) 'simv=',singlet_mv(0:isize)
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
@@ -1095,12 +1099,12 @@ contains
             this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
             this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
             this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
-            write (*,*) 'add to existing current',isize,n,':',ic
+!!$            write (*,*) 'add to existing current',isize,n,':',ic
             return
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
-         write (*,*) 'need a new current',isize,n,':',this%n_cur
+!!$         write (*,*) 'need a new current',isize,n,':',this%n_cur
          allocate(this%current_list(this%n_cur)%order(isize))
          this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
          this%current_list(this%n_cur)%type=ctype
@@ -1517,10 +1521,12 @@ contains
                                                this%interaction_list(iv)%val_c(1:4,ih))
                     endif
                  elseif(this%interaction_list(iv)%type.eq.6) then
-                    ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end
+                    ! makes sure the helicities in 'ih' are correctly set in case colour singlets are moved to the end
+!!$                    write (*,*) ih,this%interaction_list(iv)%singlet_mv(0:isize)
                     do imv=1,this%interaction_list(iv)%singlet_mv(0)
                        call move_ih(this%interaction_list(iv)%singlet_mv(imv),ih)
                     enddo
+!!$                    write (*,*) ih
                     if (use_real_gluons) then
                        call QuarkGluontoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
@@ -1584,9 +1590,13 @@ contains
       ! been moved towards the end: this is the bit that needs to be put at
       ! the end of 'ih'
       call mvbits(ihm1,imv-1,1,ising,0)
+!!$      write (*,*) imv,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+!!$      write (*,*) popcnt(this%current_list(this%interaction_list(iv)%currents(2))%bin), &
+!!$                       popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
+!!$                              this%current_list(this%interaction_list(iv)%currents(2))%bin)-imv
       ! move all the other bits one step towards the beginning
       call mvbits(ihm1,imv, &
-                       popcnt(this%current_list(this%interaction_list(iv)%currents(2))%bin+&
+                       popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
                               this%current_list(this%interaction_list(iv)%currents(2))%bin)-imv, &
                        ihm1,&
                        imv-1)
