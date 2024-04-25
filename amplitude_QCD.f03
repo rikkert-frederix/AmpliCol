@@ -70,10 +70,6 @@ contains
 
     call set_max_cur()
     call set_max_vert()
-
-    max_cur=10000
-    max_vert=10000
-
     
     if (this%imode.eq.2) then
        call cpu_time(tBefore)
@@ -398,6 +394,7 @@ contains
             endif
          enddo
          max_cur=max_cur+1
+         if (this%n_sing.ge.1) max_cur=max_cur*this%n_sing
       elseif(this%imode.eq.2) then
          if (this%n_qqbar.eq.0) then
             ! for increasing isize:
@@ -480,6 +477,7 @@ contains
                max_vert=max_vert+isize*(n-isize)*3
             endif
          enddo
+         if (this%n_sing.ge.1) max_vert=max_vert*this%n_sing
       elseif(this%imode.eq.2) then
          ! gluon and tensor vertices
          !
