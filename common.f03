@@ -1,7 +1,7 @@
 module common
   use amplitude_QCD_mod
   implicit none
-  real*8,parameter  :: alphaS=0.119d0
+  real*8,parameter  :: alphaS=0.119d0,alphaEW=0.00754677114d0
   integer :: next,nfin_glu,hel_picked
 
   type(amplitude_QCD) :: amps

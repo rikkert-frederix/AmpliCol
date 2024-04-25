@@ -3,14 +3,14 @@ module amplitude_QCD_mod
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
   type current
-     integer :: type,bin,nhel,n_vert,colour
+     integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:,:),allocatable :: val_c
      real(kind=8),dimension(:,:),allocatable :: val_r
   end type current
   type interaction
-     integer :: type,singlet_move
+     integer :: type
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:,:),allocatable :: val_c
@@ -716,7 +716,6 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       if (.not.valid_current_combination()) return
-!!$       write (*,*) 'valid combination',this%current_list(ic1)%order(1:n1),'+',this%current_list(ic2)%order(1:n2)
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -861,13 +860,12 @@ contains
       call add_all_currents(ctype)
     end subroutine add_vertex
 
-    function combined_currents(n1,n2,ip1,ip2,singlet_move,singlet_mv)
+    function combined_currents(n1,n2,ip1,ip2,singlet_mv)
       ! just concatenate the two colour orders, except if there is a colour
       ! singlet. Move the singlet to the end of the combined current order.
       implicit none
       integer,dimension(isize) :: combined_currents
       integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2
-      integer,intent(out) :: singlet_move
       integer,dimension(n1) :: ip1
       integer,dimension(n2) :: ip2
       integer,dimension(0:isize) :: singlet_mv
@@ -885,14 +883,12 @@ contains
          ! No colour singlets or all colour singlets are in ip2
          singlet_mv(0)=0
          combined_currents(nc1+nc2+1:n1+n2)=ip2(nc2+1:n2)
-         singlet_move=singlet_mv(0)
          return
       elseif(nc2.eq.n2) then
          ! Some colour singlets in ip1, but no in ip2
          singlet_mv(0)=n1-nc1
          singlet_mv(1:singlet_mv(0))=nc1+1
          combined_currents(nc1+nc2+1:n1+n2)=ip1(nc1+1:n1)
-         singlet_move=singlet_mv(0)
          return
       else
          ! Some colour singlets in both ip1 and ip2
@@ -904,7 +900,6 @@ contains
             if (ip1(n1).lt.ip2(1)) then
                ! nothing to move
                combined_currents(1:n1+n2)=[ip1(1:n1),ip2(1:n2)]
-               singlet_move=singlet_mv(0)
                return
             endif
             do while (ip1(ns1).lt.ip2(1))
@@ -939,9 +934,6 @@ contains
             endif
          enddo
       endif
-
-      singlet_move=singlet_mv(0)
-      
     end function combined_currents
 
 
@@ -949,17 +941,13 @@ contains
       implicit none
       logical,dimension(8) :: vertex_sign
       integer,dimension(isize,8) :: ip
-      integer :: i,cur_bin,ctype,nperm,singlet_move
+      integer :: i,cur_bin,ctype,nperm
       integer,dimension(0:isize) :: singlet_mv
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
          ip(1:isize,1)=combined_currents(n1,n2,this%current_list(ic1)%order(1:n1), &
-              this%current_list(ic2)%order(1:n2),singlet_move,singlet_mv)
-         this%interaction_list(this%n_vert)%singlet_move=singlet_move
+              this%current_list(ic2)%order(1:n2),singlet_mv)
          this%interaction_list(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
-!!$         write (*,*) 'cur1=',this%current_list(ic1)%order(1:n1)
-!!$         write (*,*) 'cur2=',this%current_list(ic2)%order(1:n2)
-!!$         write (*,*) 'simv=',singlet_mv(0:isize)
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
@@ -985,7 +973,6 @@ contains
       logical :: ag1,ag2,iden
       integer,dimension(3) :: switch
       integer :: i,j,k
-      integer,dimension(8) :: singlet_move
       integer,dimension(0:isize,8) :: singlet_mv
       switch(1:3)=1
       ag1=all_gluon_current(this%current_list(ic1)%bin)
@@ -1004,22 +991,16 @@ contains
                nperm=nperm+1
                if (k.eq.1) then
                   ip(1:isize,nperm)=combined_currents(n1,n2,ip1(1:n1,i),ip2(1:n2,j),&
-                       singlet_move(nperm),singlet_mv(0,nperm))
+                       singlet_mv(0,nperm))
                else
                   ip(1:isize,nperm)=combined_currents(n2,n1,ip2(1:n2,j),ip1(1:n1,i),&
-                       singlet_move(nperm),singlet_mv(0,nperm))
+                       singlet_mv(0,nperm))
                endif
                vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.2 .and. mod(n1,2).eq.0))
                if (.not.valid_current_order(ip(1:isize,nperm))) nperm=nperm-1
             enddo
          enddo
       enddo
-      if (all(singlet_move(1:nperm).eq.singlet_move(1))) then
-         this%interaction_list(this%n_vert)%singlet_move=singlet_move(1)
-      else
-         write (*,*) 'Singlet move not identical for all permutations',nperm,':',singlet_move(1:nperm)
-         stop 1
-      endif
 
       iden=.true.
       if (all(singlet_mv(0,1:nperm).eq.singlet_mv(0,1))) then
@@ -1099,12 +1080,10 @@ contains
             this%current_list(ic)%n_vert=this%current_list(ic)%n_vert+1
             this%current_list(ic)%vertices(this%current_list(ic)%n_vert)=this%n_vert
             this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert)=vertex_sign
-!!$            write (*,*) 'add to existing current',isize,n,':',ic
             return
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
-!!$         write (*,*) 'need a new current',isize,n,':',this%n_cur
          allocate(this%current_list(this%n_cur)%order(isize))
          this%current_list(this%n_cur)%order(1:isize)=ip(1:isize)
          this%current_list(this%n_cur)%type=ctype
@@ -1119,7 +1098,7 @@ contains
          else
             allocate(this%current_list(this%n_cur)%vertices(2*(isize-1)))
             allocate(this%current_list(this%n_cur)%vertex_sign(2*(isize-1)))
-        endif
+         endif
          this%current_list(this%n_cur)%vertices(1)=this%n_vert
          this%current_list(this%n_cur)%vertex_sign(1)=vertex_sign
          this%current_list(this%n_cur)%n_vert=1
@@ -1522,11 +1501,9 @@ contains
                     endif
                  elseif(this%interaction_list(iv)%type.eq.6) then
                     ! makes sure the helicities in 'ih' are correctly set in case colour singlets are moved to the end
-!!$                    write (*,*) ih,this%interaction_list(iv)%singlet_mv(0:isize)
                     do imv=1,this%interaction_list(iv)%singlet_mv(0)
                        call move_ih(this%interaction_list(iv)%singlet_mv(imv),ih)
                     enddo
-!!$                    write (*,*) ih
                     if (use_real_gluons) then
                        call QuarkGluontoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
@@ -1590,10 +1567,6 @@ contains
       ! been moved towards the end: this is the bit that needs to be put at
       ! the end of 'ih'
       call mvbits(ihm1,imv-1,1,ising,0)
-!!$      write (*,*) imv,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin)
-!!$      write (*,*) popcnt(this%current_list(this%interaction_list(iv)%currents(2))%bin), &
-!!$                       popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
-!!$                              this%current_list(this%interaction_list(iv)%currents(2))%bin)-imv
       ! move all the other bits one step towards the beginning
       call mvbits(ihm1,imv, &
                        popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
