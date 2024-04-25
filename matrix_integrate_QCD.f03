@@ -8,21 +8,19 @@ program matrix_integrate_QCD
   use math_functions
   implicit none
   integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
-  integer(kind=8) :: sym_fac
+  integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
-  character(len=30) :: filename
+  character(len=31) :: filename
   integer(kind=4) :: integration, nquarks
-  logical,dimension(-6:7,2) :: ipdgs=.false.
+  logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
-  integer*8 :: iden
-  integer(kind=4) :: n_events
  
-
   call get_run_arguments()
+  call compute_mutlichannel_symmetry_factor()
   call create_run_tag()
 
   allocate(mass(next))
@@ -49,26 +47,15 @@ program matrix_integrate_QCD
   sqrts=14000.d0
   ! setting energy
 
-
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min**2,2d0*pt_min**2*(1d0-cos(DRjj_min)))
 
   mass(1:next)=0d0
 
-  ! include pdfs?
   if (include_pdf) then
-     call PDF_initialise
      ndim=ndim+2
-     if (part(1).eq.21) then
-        ipdgs(0,1)=.true.
-     else
-        ipdgs(part(1),1)=.true.
-     endif
-     if (part(2).eq.21) then
-        ipdgs(0,2)=.true.
-     else
-        ipdgs(part(2),2)=.true.
-     endif
+     call PDF_initialise
+     call set_ipdgs_for_PDF(ipdgs)
   endif
   
   call cpu_time(tBefore)
@@ -83,24 +70,9 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
 
-  ! colour, polarisation incoming gluons: 8, 2
-  ! colour, polarisation incoming quarks: 3, 2
-  ! identical final state particle factor (gluons): nfin_glu!
-  nfin_glu=0
-  do i=3,next
-     if (part(i).eq.21) then
-        nfin_glu=nfin_glu+1
-     endif
-  enddo
   iden=1
-  do i=1,2
-     if (part(i).eq.21) then
-        iden=iden*8*2
-     elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
-        iden=iden*3*2
-     endif
-  enddo
-  iden=iden*factorial8(nfin_glu)
+  call set_final_state_identical_particle_factor(iden)
+  call set_initial_state_average_factor(iden)
 
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
@@ -110,59 +82,33 @@ program matrix_integrate_QCD
   t_amp_init=t_amp_init+tAfter-tBefore
 
   ! Compute the leading colour factor
-  if (nquarks.eq.0) then
-     col_fac=3**next
-  elseif (nquarks.eq.2) then
-     col_fac=3**(next-1)
-  else
-     write (*,*) 'Leading colour factor not implemented'
-  endif
+  call compute_LC_colour_factor(col_fac)
 
   ! number of helicities to sum over
   nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
   allocate(amp2_hel(1:nhel))
 
-! Not so relevant mint-module parameters: only used in special cases.
-  fixed_order=.false.
-  nlo_ps=.true.
-  n_ord_virt=1
-  nchans=1
-  iconfig=1
-  ichan=1
-  ifold_energy=1
-  ifold_yij=1
-  ifold_phi=1
-  ifold(1:ndimmax)=1
-  iconfigs(1:maxchannels)=1
-  min_virt_fraction_mint=1d0
-  virt_fraction=1d0
-  wgt_mult=1d0
-  average_virtual(0:n_ave_virt,maxchannels)=0d0
-  virt_wgt_mint(0:n_ave_virt)=0d0
-  born_wgt_mint(0:n_ave_virt)=0d0
-  virtual_fraction(1:maxchannels)=1d0
-  ans(1:nintegrals,0:maxchannels)=0d0
-  unc(1:nintegrals,0:maxchannels)=0d0
-  only_virt=.false.
+  ! Not so relevant mint-module parameters: only used in special cases.
+  call set_mint_module_special_parameters()
 
-!!$  open(unit=14,file='pt_list.txt',status='replace')
   if (imode.le.1) then
+     ! grid setup, or computation of upper bounding envelope
      call mint(integrand)
   else
+     ! actual (unweighted) event generation
      call read_grids_from_file
-     call gen(integrand,0,-1) ! initialise countersi
+     call gen(integrand,0,-1) ! initialise counters
      filename='Outputs/events'//tag//'.lhe'
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        call unwgt_helicity
+        call unwgt_helicity     ! pick a random helicity
         call write_event(11,ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
   endif
      
-!!$  close(14)
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
@@ -185,13 +131,12 @@ contains
     real*8, dimension(ndim) :: x
     real*8, dimension(nintegrals) :: f1
     real*8, save :: val
-    integer :: icol,iperm,jperm,ih
-    real*8 :: vol,xmu_fac,cuts_wgt
-    real*8, dimension(-6:7,2) :: PDF
+    integer :: iperm,ih
+    real*8 :: vol,cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
 
-    double precision :: y,frac,steep,cuts_wgt_1
+    double precision :: y,frac,steep,cuts_wgt_1,Q
    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
@@ -204,9 +149,9 @@ contains
     new_point=.true.
     pass_cuts_check=.true.
 
-    call cpu_time(tBefore)
+    ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (integration.eq.1)then
-        call gen23_phase_space(x)
+       call gen23_phase_space(x)
     elseif (integration.eq.2) then
         call PS_haag(x)
     elseif (integration.eq.3) then
@@ -227,8 +172,6 @@ contains
     
     passed = passed + 1
 
-
-
     ! compute amplitudes
     call cpu_time(tBefore)
     call amps%evaluate(next,p,0)
@@ -246,25 +189,19 @@ contains
     enddo
     amp2=sum(amp2_hel(1:nhel))
 
-    ! include the jacobian from vegas ('vol') and the wgt from the phase-space ('jac')
-    weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
-    val=amp2*weight
+    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
+    
+    if (amps%n_sing.ge.1) then
+       do i=1,next
+          if (abs(part(i)).le.6) then
+             if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
+             if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
+          endif
+       enddo
+       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**amps%n_sing
+    endif
 
-!!$    frac=0.8d0
-!!$    steep=0.01d0
-!!$    i=5
-!!$    y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
-!!$    if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
-!!$      cuts_wgt_1=((steep)*y/(steep+1d0-y))
-!!$    elseif (pt(p(0,i)).gt.pt_min) then
-!!$      cuts_wgt_1 = 1d0
-!!$    elseif (pt(p(0,i)).lt.frac*pt_min) then
-!!$      cuts_wgt_1 = 0d0
-!!$    endif
-!!$    !if (pt(p(0,3)).lt.pt_min) then
-!!$    !   if (cuts_wgt_1.gt.0d0) write(*,*) 'STOP'
-!!$    !endif
-!!$    write(14,*) pt(p(0,i)),cuts_wgt_1
+    val=amp2*weight
 
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
@@ -273,26 +210,11 @@ contains
     ! need to compensate with a symmetry factor
     val=val*sym_fac
 
-
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
-
     
     if (include_PDF) then
-       ! Include the PDFs
-       xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
-       if (part(1).eq.21) then
-          val=val*PDF(0,1)
-       else
-          val=val*PDF(part(1),1)
-       endif
-       if (part(2).eq.21) then
-          val=val*PDF(0,2)
-       else
-          val=val*PDF(part(2),2)
-       endif
+       call multiply_by_PDF_value(val)
     endif
 
     ! pass the result to the mint module
@@ -437,101 +359,282 @@ contains
   
   subroutine get_run_arguments()
     implicit none
-    integer :: argc,start,end,glu
+    integer :: argc
+    integer :: i
     character(len=256) :: argv
-    integer, dimension(:), allocatable :: process,ord
     ! integration steps:
     ! imode=0  (Setting up grids)
     ! imode=-1 (same as imode=0, but starting from existing grids)
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ne.2) then
+    if (argc.ne.7) then
+       write(*,*) 'integration mode (1 or 2):'
+       write(*,*)  'next'
        write(*,*)  'imode'
-       write(*,*) 'integration mode (1, 2 or 3):'
-       read (*,*)  imode,integration
+       write(*,*)  'type'
+       write(*,*)  'c_o_i'
+       write(*,*)  'c_o_j'
+       write(*,*)  'c_o_k'
+       read (*,*)  integration,next,imode,c_o_t,c_o_i,c_o_j,c_o_k
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) imode
-          if (i.eq.2) read(argv,*) integration
+          if (i.eq.1) read(argv,*) integration
+          if (i.eq.2) read(argv,*) next
+          if (i.eq.3) read(argv,*) imode
+          if (i.eq.4) read(argv,*) c_o_t
+          if (i.eq.5) read(argv,*) c_o_i
+          if (i.eq.6) read(argv,*) c_o_j
+          if (i.eq.7) read(argv,*) c_o_k
        enddo
     endif
+    if (read_from_file) then
+       call read_process_from_file
+    else
+       call get_process_from_arguments
+    endif
+    ! basic checks:
+    if (next.lt.4) then
+       write (*,*) 'Not enough external particles',next
+       stop 1
+    endif
+    if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
+       write (*,*) 'Incorrect imode',imode
+       stop
+    endif
+    if (c_o_i .gt.next+1.or.c_o_k.gt.next+1.or.c_o_j.gt.next-2) then
+       write (*,*) 'inconsistent color-ordering c_o_i,c_o_j,c_o_k',c_o_i,c_o_j,c_o_k
+       stop
+    endif
 
-    open (unit=99, file='process.txt', status='old', action='read')
-    read(99, *) next
-    allocate(process(next))
-    allocate(o(next))
-    allocate(part(next))
-    allocate(ord(next))
-    read(99, *) process
-    part=process
-    read(99, *) ord
-    nquarks = 0
-    do i=1,next
-       if (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
-           nquarks=nquarks+1
-       endif
-       if ((i.le.2) .and. (abs(process(i)).ge.1 .and. abs(process(i)).le.6))  then
-          process(i)=-process(i)
+    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3) then
+       write (*,*) 'Integration modes only 1, 2 or 3',integration
+       stop
+    endif
+    if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
+       write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
+       stop
+    endif
+  end subroutine get_run_arguments
+
+  subroutine create_run_tag()
+    implicit none
+    tag=''       ! tag of current run
+    tag_read=''  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
+    call add_to_string(tag,next,.true.)
+    call add_to_string(tag_read,next,.true.)
+    call add_to_string(tag,imode,.true.)
+    if(imode.gt.0) then
+       call add_to_string(tag_read,imode-1,.true.)
+    else
+       call add_to_string(tag_read,imode,.true.)
+    endif
+    call add_to_string(tag,c_o_t,.true.)
+    call add_to_string(tag_read,c_o_t,.true.)
+    call add_to_string(tag,c_o_i,.true.)
+    call add_to_string(tag_read,c_o_i,.true.)
+    call add_to_string(tag,c_o_j,.true.)
+    call add_to_string(tag_read,c_o_j,.true.)
+    call add_to_string(tag,c_o_k,.false.)
+    call add_to_string(tag_read,c_o_k,.false.)
+    call fill_string(tag,13)
+    call fill_string(tag_read,13)
+    write (*,*) 'File tag is: ',tag
+  end subroutine create_run_tag
+
+  subroutine add_to_string(string,inter,add_underscore)
+    ! Adds an integer 'inter' to the end of the string 'string' (followed by
+    ! an underscore if 'add_underscore=.true.')
+    implicit none
+    character(len=13) :: string
+    integer :: inter
+    logical :: add_underscore
+    character(len=1) :: s1
+    character(len=2) :: s2
+    character(len=3) :: s3
+    if (inter.ge.0 .and. inter.le.9) then
+       write(s1,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s1))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-9 .and. inter.le.99) then
+       write(s2,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s2))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-99 .and. inter.le.999) then
+       write(s3,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s3))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    else
+       write (*,*) 'value too large to add to the run tag',inter
+    endif
+  end subroutine add_to_string
+  subroutine fill_string(string,size)
+    ! Fills the string 'string' with leading underscores until the string has
+    ! size 'size'. The declaration of the string must be at least size 'size'.
+    implicit none
+    character(len=13) :: string
+    integer :: size,n_to_add
+    if (size.gt.len(string)) then
+       write (*,*) 'Size greater than string',size,string
+       stop 1
+    endif
+    n_to_add=13-len(trim(string))
+    do i=1,n_to_add
+       string='_'//trim(adjustl(string))
+    enddo
+  end subroutine fill_string
+
+  subroutine set_initial_state_average_factor(iden)
+    implicit none
+    integer(kind=8),intent(inout) :: iden
+    integer :: i
+    do i=1,2
+       if (part(i).eq.21) then
+          ! gluon: two polarisations and 8 colours
+          iden=iden*2*8
+       elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          ! (anti-)quark: two helicities and 3 colours
+          iden=iden*2*3
+       else
+          ! assume two helicities:
+          iden=iden*2
        endif
     enddo
+  end subroutine set_initial_state_average_factor
+  subroutine set_final_state_identical_particle_factor(iden)
+    implicit none
+    integer(kind=8),intent(inout) :: iden
+    integer :: i,j,ni=0
+    integer,dimension(:,:),allocatable :: iden_part
+    allocate(iden_part(1:next,2))
+    do i=3,next
+       do j=1,ni
+          if (iden_part(j,1).eq.part(i)) then
+             iden_part(j,2)=iden_part(j,2)+1
+             exit
+          endif
+       enddo
+       if (j.eq.ni+1) then
+          ni=ni+1
+          iden_part(j,1)=part(i)
+          iden_part(j,2)=1
+       endif
+    enddo
+    do i=1,ni
+       iden=iden*factorial8(iden_part(i,2))
+    enddo
+    deallocate(iden_part)
+  end subroutine set_final_state_identical_particle_factor
 
-    o=ord
-    if (nquarks.eq.0) then
-      do i=1,next
-        if (ord(i).eq.1) start=i
-        if (ord(i).eq.2) end=i
-      enddo
-      c_o=abs(end-start)-1
-      c_o_t=0
-      c_o_k=0
-      c_o_i=abs(end-start)-1
-      c_o_j=next-2-c_o_i
-    elseif (nquarks.eq.2) then
-      c_o=0 ! dummy value
-      glu=1
-      do i=1,next
-        if (process(i).lt.0) then
-          o(next)=i
-          end=i
-        endif
-        if (process(i).gt.0 .and. process(i).ne.21) then
-        o(1)=i
-        start=i
-        endif
-        if (process(i).eq.21) then
-            o(1+glu)=i
-            glu=glu+1
-        endif
-      enddo
-      if ((ord(next).eq.end) .and. (ord(1).eq.start)) then
-        write(*,*) 'VALID ORDER!!!'
-        o=ord ! the input order was a valid one, use that instead
-      endif
-
-      write(*,*) o
-      do i=1,next
-        if (o(i).eq.1) start=i
-        if (o(i).eq.2) end=i
-      enddo
-      if (start.lt.end) then
-         c_o_t=1
-         if (start.ne.1) c_o_i=abs(start-1)-1
-         if (start.eq.1) c_o_i=next+1
-         if (end.ne.next) c_o_k=abs(next-end)-1
-         if (end.eq.next) c_o_k=next+1
-      endif
-      if (start.gt.end) then
-         c_o_t=2
-         if (end.ne.1) c_o_k=abs(end-1)-1
-         if (end.eq.1) c_o_k=next+1
-         if (start.ne.next) c_o_i=abs(next-start)-1
-         if (start.eq.next) c_o_i=next+1
-      endif
-      c_o_j=abs(start-end)-1
+  subroutine compute_LC_colour_factor(col_fac)
+    implicit none
+    integer,intent(inout) :: col_fac
+    integer :: i,ifac
+    real(kind=8) :: fac=0d0
+    do i=1,next
+       if (part(i).eq.21) then
+          fac=fac+1d0
+       elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          fac=fac+0.5d0
+       endif
+    enddo
+    ifac=nint(fac)
+    if (dble(ifac).ne.fac) then
+       write (*,*) 'There is some issue with the LC colour factor computation: '// &
+            'colour factor is not an integer',ifac,fac
+       stop 1
     endif
-    
+    col_fac=3**ifac
+  end subroutine compute_LC_colour_factor
+  
+  subroutine set_mint_module_special_parameters()
+    ! these parameters need to be set for the mint-module to work correctly,
+    ! but are irrelevant for any LO process
+    implicit none
+    fixed_order=.false.
+    nlo_ps=.true.
+    n_ord_virt=1
+    nchans=1
+    iconfig=1
+    ichan=1
+    ifold_energy=1
+    ifold_yij=1
+    ifold_phi=1
+    ifold(1:ndimmax)=1
+    iconfigs(1:maxchannels)=1
+    min_virt_fraction_mint=1d0
+    virt_fraction=1d0
+    wgt_mult=1d0
+    average_virtual(0:n_ave_virt,maxchannels)=0d0
+    virt_wgt_mint(0:n_ave_virt)=0d0
+    born_wgt_mint(0:n_ave_virt)=0d0
+    virtual_fraction(1:maxchannels)=1d0
+    ans(1:nintegrals,0:maxchannels)=0d0
+    unc(1:nintegrals,0:maxchannels)=0d0
+    only_virt=.false.
+  end subroutine set_mint_module_special_parameters
+  
+  subroutine set_ipdgs_for_PDF(ipdgs)
+    implicit none
+    logical,dimension(-6:7,2) :: ipdgs
+    ipdgs(-6:7,1:2)=.false.
+    if (part(1).eq.21) then
+       ipdgs(0,1)=.true.    ! gluon is '0'
+    elseif (part(1).eq.22) then
+       ipdgs(7,1)=.true.    ! photon is '7'
+    elseif (abs(part(1)).ge.1 .and. abs(part(1)).le.6) then
+       ipdgs(part(1),1)=.true.
+    else
+       write (*,*) 'unknown PDF 1',part(1)
+       stop 1
+    endif
+    if (part(2).eq.21) then
+       ipdgs(0,2)=.true.    ! gluon is '0'
+    elseif (part(2).eq.22) then
+       ipdgs(7,2)=.true.    ! photon is '7'
+    elseif (abs(part(2)).ge.1 .and. abs(part(2)).le.6) then
+       ipdgs(part(2),2)=.true.
+    else
+       write (*,*) 'unknown PDF 2',part(2)
+       stop 1
+    endif
+  end subroutine set_ipdgs_for_PDF
+  
+  subroutine multiply_by_PDF_value(val)
+    implicit none
+    real(kind=8),intent(inout) :: val
+    real(kind=8) :: xmu_fac
+    real*8, dimension(-6:7,2) :: PDF
+    ! Include the PDFs
+    xmu_fac=91.188d0 ! factorisation scale
+    call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
+    call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+    if (part(1).eq.21) then
+       val=val*PDF(0,1)
+    elseif (part(1).eq.22) then
+       val=val*PDF(7,1)
+    else
+       val=val*PDF(part(1),1)
+    endif
+    if (part(2).eq.21) then
+       val=val*PDF(0,2)
+    elseif (part(2).eq.22) then
+       val=val*PDF(7,2)
+    else
+       val=val*PDF(part(2),2)
+    endif
+  end subroutine multiply_by_PDF_value
+  
+  subroutine compute_mutlichannel_symmetry_factor()
+    implicit none
+    integer :: ngl=0
+    ! count the number of final state gluons
+    do i=3,next
+       if (part(i).eq.21) then
+          ngl=ngl+1
+       endif
+    enddo
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
@@ -552,25 +655,25 @@ contains
        ! state gluon permutations, multiplied by 2 (except if we have an equal
        ! number of gluons on both colour lines that attached the two incoming
        ! gluons).
-       if (c_o*2.eq.(next-2)) then
-          sym_fac=factorial8(next-2)
+       if (c_o*2.eq.(ngl)) then
+          sym_fac=factorial8(ngl)
        else
-          sym_fac=2*factorial8(next-2)
+          sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
-       if ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .and. &
-           (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+       if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
+           (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
           ! which would result in the following symmetry factor:
-          sym_fac=factorial8(next-2)
-       elseif ((abs(process(1)).ge.1 .and. abs(process(1)).le.6) .or. &
-               (abs(process(2)).ge.1 .and. abs(process(2)).le.6) )then
+          sym_fac=factorial8(ngl)
+       elseif ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .or. &
+               (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! one incoming quark (or anti-quark). There are ngluons
           ! channels needed: they correspond to having the incoming
           ! gluon at all possible positions between the quark and
           ! anti-quark in the colour order. Hence, each channel comes
           ! with an (ngluons-1)! symmetry factor:
-          sym_fac=factorial8(next-3)
+          sym_fac=factorial8(ngl)
        else
           ! both quark and anti-quark are final state. This is similar
           ! to the all-gluon case above, treating the q-qbar pair as
@@ -578,109 +681,420 @@ contains
           ! next=6 (and assuming that the qqbar pair are particles 5
           ! and 6) one has the following possibilities:
           !
-          ! ia   --> 1,2,3,4,(5,6)  ---- : both gluons on the same
-          ! ib   --> 1,2,3,(5,6),4  --/         line as the qqbar pair
-          ! ic   --> 1,2,(5,6),3,4  -/
-          ! iia  --> 1,3,2,4,(5,6)  ---- : one gluon on the same 
-          ! iib  --> 1,3,2,(5,6),4  -/          line as the qqbar pair
-          ! iii  --> 1,3,4,2,(5,6)  ---- : both gluons on the other quark line
+          ! ia   --> 1,2,3,4,(5,6) = 5,4,3,2,1,6 ---- : both gluons on the same
+          ! ib   --> 1,2,3,(5,6),4 = 5,3,2,1,4,6 --/         line as the qqbar pair
+          ! ic   --> 1,2,(5,6),3,4 = 5,2,1,4,3,6 -/
+          ! iia  --> 1,3,2,4,(5,6) = 5,4,2,3,1,6 ---- : one gluon on the same 
+          ! iib  --> 1,3,2,(5,6),4 = 5,2,3,1,4,6 -/          line as the qqbar pair
+          ! iii  --> 1,3,4,2,(5,6) = 5,2,4,3,1,6 ---- : both gluons on the other quark line
           !
-          ! Furthermore all these can have the quark and anti-quark
-          ! order reversed, so there are in total 12 truly different
-          ! colour orders to consider.
+          ! Furthermore all these can have the quark and anti-quark order
+          ! reversed (or, equivalently, the two incoming particles
+          ! interchanged in the colour order), so there are in total 12 truly
+          ! different colour orders to consider.
           !
           ! All these come with a symmetry factor of (ngluon-2)! =
           ! 2!. Hence we have:
-          sym_fac=factorial8(next-4)
+          sym_fac=factorial8(ngl)
        endif
     else
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
-    
-    if (next.lt.4) then
-       write (*,*) 'Not enough external particles',next
-       stop 1
-    endif
-    if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
-       write (*,*) 'Incorrect imode',imode
-       stop
-    endif
-    if (c_o.lt.0 .or. c_o .gt. next-2) then
-       write (*,*) 'inconsistent color-ordering',c_o
-       stop
-    endif
-    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3) then
-       write (*,*) 'Integration modes only 1, 2 or 3',integration
-       stop
-    endif
-    if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
-       write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
-       stop
-    endif
+  end subroutine compute_mutlichannel_symmetry_factor
 
-  end subroutine get_run_arguments
-
-  subroutine create_run_tag()
+  subroutine read_process_from_file
     implicit none
-    character(len=1) :: s1
-    character(len=2) :: s2
-    if (next.le.9) then
-       write(s1,'(i1)') next
-       tag=trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') next
-       tag=trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(s2))//'_'
+    integer :: i,end,start,glu
+    integer,dimension(:),allocatable :: ord
+    open (unit=99, file='process.txt', status='old', action='read')
+    read(99, *) next
+    allocate(part(next))
+    allocate(o(next))
+    read(99, *) part
+    read(99, *) o
+    nquarks = 0
+    do i=1,next
+       if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
+          nquarks=nquarks+1
+          if (i.le.2) part(i)=-part(i)
+       endif
+    enddo
+    if (nquarks.eq.0) then
+       do i=1,next
+          if (o(i).eq.1) start=i
+          if (o(i).eq.2) end=i
+       enddo
+       c_o_t=0
+       c_o_k=0
+       c_o_i=abs(end-start)-1
+       c_o_j=next-2-c_o_i
+       c_o=min(c_o_i,c_o_j)
+    elseif (nquarks.eq.2) then
+       do i=1,next
+          if (o(i).eq.1) start=i
+          if (o(i).eq.2) end=i
+       enddo
+       if (start.lt.end) then
+          c_o_t=1
+          if (start.ne.1) c_o_i=abs(start-1)-1
+          if (start.eq.1) c_o_i=next+1
+          if (end.ne.next) c_o_k=abs(next-end)-1
+          if (end.eq.next) c_o_k=next+1
+       endif
+       if (start.gt.end) then
+          c_o_t=2
+          if (end.ne.1) c_o_k=abs(end-1)-1
+          if (end.eq.1) c_o_k=next+1
+          if (start.ne.next) c_o_i=abs(next-start)-1
+          if (start.eq.next) c_o_i=next+1
+       endif
+       c_o_j=abs(start-end)-1
     endif
-    write(s1,'(i1)') imode
-    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-    if (imode.gt.0) write(s1,'(i1)') imode-1
-    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    write(s1,'(i1)') c_o_t
-    tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-    tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    if (c_o_i.le.9) then
-       write(s1,'(i1)') c_o_i
-       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') c_o_i
-       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
-    endif
-    if (c_o_j.le.9) then
-       write(s1,'(i1)') c_o_j
-       tag=trim(adjustl(tag))//trim(adjustl(s1))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))//'_'
-    else
-       write(s2,'(i2)') c_o_j
-       tag=trim(adjustl(tag))//trim(adjustl(s2))//'_'
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))//'_'
-    endif
-    if (c_o_k.le.9) then
-       write(s1,'(i1)') c_o_k
-       tag=trim(adjustl(tag))//trim(adjustl(s1))
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s1))
-    else
-       write(s2,'(i2)') c_o_k
-       tag=trim(adjustl(tag))//trim(adjustl(s2))
-       tag_read=trim(adjustl(tag_read))//trim(adjustl(s2))
-    endif
-    write(*,*) len(trim(tag_read))
-    if (len(trim(tag_read)).lt.13) then
-       if (13-len(trim(tag)).eq.1) then
-          tag='_'//trim(adjustl(tag))
-          tag_read='_'//trim(adjustl(tag_read))
-       elseif(13-len(trim(tag)).eq.2) then
-          tag='__'//trim(adjustl(tag))
-          tag_read='__'//trim(adjustl(tag_read))
-       elseif(13-len(trim(tag)).eq.3) then
-          tag='___'//trim(adjustl(tag))
-          tag_read='___'//trim(adjustl(tag_read))
+  end subroutine read_process_from_file
+
+  subroutine check_input_colour_order_consistency
+    ! Checks that the c_o_t, c_o_i, c_o_j, and c_o_k are in their correct
+    ! ranges.
+    implicit none
+    if (c_o_t.eq.0 .and. (c_o_j.gt.int((next-2)/2) .or. c_o_j.lt.0)) then
+       write (*,*) 'Inconsistent colour order #1', c_o_t,c_o_i,c_o_j,c_o_k
+       stop 1
+    elseif (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
+       if (c_o_t.ne.1 .and. c_o_t.ne.2) then
+          write (*,*) 'Inconsistent colour order #2a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
+          write (*,*) 'Inconsistent colour order #2b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    elseif (c_o_i.eq.next+1) then
+       if (c_o_t.lt.1 .or. c_o_t.gt.4) then
+          write (*,*) 'Inconsistent colour order #3a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_k.gt.next-3 .or. c_o_k.lt.0) then
+          write (*,*) 'Inconsistent colour order #3b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.gt.next-3 .or. c_o_j.lt.0) then
+          write (*,*) 'Inconsistent colour order #3c', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_k+c_o_j.gt.next-3) then
+          write (*,*) 'Inconsistent colour order #3d', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    elseif (c_o_k.eq.next+1) then
+       if (c_o_t.lt.1 .or. c_o_t.gt.4) then
+          write (*,*) 'Inconsistent colour order #4a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i.gt.next-3 .or. c_o_i.lt.0) then
+          write (*,*) 'Inconsistent colour order #4b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.gt.next-3 .or. c_o_j.lt.0) then
+          write (*,*) 'Inconsistent colour order #4c', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i+c_o_j.gt.next-3) then
+          write (*,*) 'Inconsistent colour order #4d', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+    elseif (c_o_t.ge.1) then
+       if (c_o_t.lt.1 .or. c_o_t.gt.8) then
+          write (*,*) 'Inconsistent colour order #5a', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i.gt.next-4 .or. c_o_i.lt.0) then
+          write (*,*) 'Inconsistent colour order #5b', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_j.gt.next-4 .or. c_o_j.lt.0) then
+          write (*,*) 'Inconsistent colour order #5c', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_k.gt.next-4 .or. c_o_k.lt.0) then
+          write (*,*) 'Inconsistent colour order #5d', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
+       endif
+       if (c_o_i+c_o_j+c_o_k.gt.next-4) then
+          write (*,*) 'Inconsistent colour order #5e', c_o_t,c_o_i,c_o_j,c_o_k
+          stop 1
        endif
     endif
-    write (*,*) tag
-  end subroutine create_run_tag
-
+  end subroutine check_input_colour_order_consistency
+  
+  subroutine get_process_from_arguments
+    implicit none
+    ! c_o_t == 0 --> all gluon process; c_o_j is the minimum between the
+    !                numbers of gluons on each of the two colour lines that
+    !                connect the two incoming gluons
+    !
+    ! c_o_t > 0 --> there is 1 qqbar particle:
+    !      c_o_i == n+1 && c_o_k == n+1 --> the two quarks are in the initial
+    !                state. (c_o_t==1 or 2 defines if it is qqbar->ngluons or
+    !                qbarq->ngluons). c_o_j defines the number of gluons that
+    !                are colour-ordered; hence if this is less than the number
+    !                of gluons in the process, the remaining ones are photons.
+    !
+    !      c_o_i == n+1 && c_o_k < n-2 --> left incoming particle is a quark
+    !                (if c_o_t==2) or anti-quark (if c_o_t==1) and the other
+    !                incoming particle a gluon (add 2 to c_o_t to make this a
+    !                photon). c_o_j defines the number of gluons between the
+    !                incoming (anti-)quark and the incoming gluon in the
+    !                colour order; c_o_k is the number of gluons between the
+    !                incoming gluon and the final state anti-quark.
+    !
+    !      c_o_i < n-2 && c_o_k == n+1 --> Same as previous, but with the
+    !                right-incoming particle the (anti-quark), and the
+    !                left-incoming the gluon.
+    !
+    !      c_o_i < n-2 && c_o_k < n-2 --> Both the quark and anti-quark are
+    !                final state. As before, c_o_i is the number of gluons in
+    !                the colour order between the left-incoming gluon and the
+    !                quark; c_o_k between the right-incoming gluon and the
+    !                anti-quark; and c_o_j the number of gluons between the
+    !                two incoming gluons. If c_o_t==2, the role of
+    !                left-incoming and right-incoming is interchanged. If
+    !                c_o_i+c_o_j+c_o_k < n-4, the remaining particles are
+    !                photons. Add 2 to c_o_t to make the left incoming initial
+    !                state particle a photon; Add 4 to c_o_t to make the right
+    !                incoming initial state particle a photon; add 6 to c_o_t
+    !                to make both incoming particles photons.
+    !
+    ! NOTE: for qqbar process, the colour order is such that the first
+    ! particle should be a quark (if final state) or anti-quark (if initial
+    ! state), while the last particle is that anti-quark (if final state) or
+    ! quark (if initial state). This is even true when there are photons
+    ! around: these photons are always put just before the final particle in
+    ! the colour (i.e., just before the anti-quark (if final state) or quark
+    ! (if initial state)). THE LATTER IS SOMEWHAT COUNTER-INTUITIVE, since the
+    ! photons shouldn't be part of the colour order whatsoever...
+    integer :: i,k
+    integer,dimension(:),allocatable :: ord
+    integer :: nsing
+    call check_input_colour_order_consistency
+    if (c_o_t.eq.0) then
+       nquarks=0       
+    else
+       nquarks=2
+       ! count the number of colour-singlets:
+       if (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
+          ! We gave next-2 final state gluons, of which c_o_j are colour-ordered
+          nsing=(next-2)-c_o_j
+       elseif(c_o_i.eq.next+1 .and. c_o_k.ne.next+1) then
+          ! We have next-3 final state gluons, of which (c_o_j+c_o_k) are colour-ordered
+          nsing=(next-3)-(c_o_j+c_o_k)
+       elseif(c_o_i.ne.next+1 .and. c_o_k.eq.next+1) then
+          ! We have next-3 final state gluons, of which (c_o_i+c_o_j) are colour-ordered
+          nsing=(next-3)-(c_o_i+c_o_j)
+       else
+          ! We have next-4 final state gluons, of which (c_o_i+c_o_j+c_o_k) are colour ordered
+          nsing=(next-4)-(c_o_i+c_o_j+c_o_k)
+       endif
+    endif
+       
+    allocate(part(next))
+    allocate(o(next))
+    allocate(ord(next))
+    if (nquarks.eq.2) then
+       if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
+          if (c_o_t.eq.1) then
+             part(1)=-1
+             part(2)=1
+             ord(1)=1
+             ord(next)=2
+          elseif (c_o_t.eq.2) then
+             part(1)=1
+             part(2)=-1
+             ord(1)=2
+             ord(next)=1
+          endif
+          do i=3,next
+             if (i.le.c_o_j+2) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
+          enddo
+          do i=2,next-1
+             ord(i)=i+1
+          enddo
+       elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
+          if (mod(c_o_t,2).eq.1) then
+             part(1)=-1
+             if (c_o_t.eq.1) then
+                part(2)=21
+             else
+                part(2)=22
+             endif
+             part(3)=-1
+             ord(1)=1
+             ord(next)=3
+             ord(2+c_o_j)=2
+             k=4
+             do i=2,2+c_o_j-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_j+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          elseif (mod(c_o_t,2).eq.0) then
+             part(1)=1
+             if (c_o_t.eq.2) then
+                part(2)=21
+             else
+                part(2)=22
+             endif
+             part(3)=1
+             ord(1)=3
+             ord(next)=1
+             ord(2+c_o_k)=2
+             k=4
+             do i=2,2+c_o_k-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_k+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          endif
+          do i=4,next
+             if (i.le.c_o_j+c_o_k+3) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
+          enddo
+       elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
+          if (mod(c_o_t,2).eq.1) then
+             if (c_o_t.eq.1) then
+                part(1)=21
+             else
+                part(1)=22
+             endif
+             part(2)=1
+             part(3)=1
+             ord(1)=3
+             ord(next)=2
+             ord(2+c_o_i)=1
+             k=4
+             do i=2,2+c_o_i-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_i+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          elseif (mod(c_o_t,2).eq.0) then
+             if (c_o_t.eq.2) then
+                part(1)=21
+             else
+                part(1)=22
+             endif
+             part(2)=-1
+             part(3)=-1
+             ord(1)=2
+             ord(next)=3
+             ord(2+c_o_j)=1
+             k=4
+             do i=2,2+c_o_j-1
+                ord(i)=k
+                k=k+1
+             enddo
+             do i=2+c_o_j+1,next-1
+                ord(i)=k
+                k=k+1
+             enddo
+          endif
+          do i=4,next
+             if (i.le.c_o_j+c_o_k+3) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
+          enddo
+       else
+          if (c_o_t.le.2) then
+             part(1)=21
+             part(2)=21
+          elseif (c_o_t.le.4) then
+             part(1)=22
+             part(2)=21
+          elseif (c_o_t.le.6) then
+             part(1)=21
+             part(2)=22
+          elseif (c_o_t.le.8) then
+             part(1)=22
+             part(2)=22
+          endif
+          part(3)=1
+          part(4)=-1
+          do i=5,next
+             if (i.le.c_o_i+c_o_j+c_o_k+4) then
+                part(i)=21
+             else
+                part(i)=22
+             endif
+          enddo
+          ord(1)=3
+          ord(next)=4
+          if (mod(c_o_t,2).eq.1) then
+             ord(2+c_o_i)=1
+             ord(3+c_o_i+c_o_j)=2
+          else
+             ord(2+c_o_i)=2
+             ord(3+c_o_i+c_o_j)=1
+          endif
+          k=5
+          do i=2,2+c_o_i-1
+             ord(i)=k
+             k=k+1
+          enddo
+          do i=2+c_o_i+1,3+c_o_i+c_o_j-1
+             ord(i)=k
+             k=k+1
+          enddo
+          do i=3+c_o_i+c_o_j+1,next-1
+             ord(i)=k
+             k=k+1
+          enddo
+       endif
+    elseif (nquarks.eq.0) then
+       do i=1,next
+          part(i)=21
+       enddo
+       ord(1)=1
+       ord(2+c_o_j)=2
+       k=3
+       do i=2,2+c_o_j-1
+          ord(i)=k
+          k=k+1
+       enddo
+       do i=2+c_o_j+1,next
+          ord(i)=k
+          k=k+1
+       enddo
+       c_o=min(next-2-c_o_j,c_o_j)
+       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
+          write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
+          stop
+       elseif (c_o_i.gt.0 .or. c_o_k.gt.0) then
+          write(*,*) 'Incorrect colour order for all gluons (c_i and c_k must be 0): ',c_o_i,c_o_k
+          stop
+       endif
+    endif
+    o=ord
+    write (*,*) '******************************************'
+    write (*,*) 'Process is     ',part
+    write (*,*) 'Colour order is',o
+    write (*,*) '******************************************'
+  end subroutine get_process_from_arguments
+  
 end program matrix_integrate_QCD
