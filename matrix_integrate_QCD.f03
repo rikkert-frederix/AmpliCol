@@ -182,22 +182,16 @@ contains
     enddo
     amp2=sum(amp2_hel(1:nhel))
 
-    if (amps%n_sing.eq.1) then
-    do i=1,next
-     if (abs(part(i)).le.6) then
-        if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
-        if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
-     endif
-    enddo
-    endif
-
-    ! include the jacobian from mint ('vol') and the wgt from the phase-space ('jac') and other overal factors
-    if (amps%n_sing.eq.1) then
-       weight=vol*jac*(4*pi*alphas)**(next-3)/dble(iden)*conv
-       weight=weight*(Q*dsqrt(4*pi*alphaEW))**2
-       weight=weight*dsqrt(2d0)*dsqrt(2d0) ! do to normalization of fund. matrices
-    else
-       weight=vol*jac*(4*pi*alphas)**(next-2)/dble(iden)*conv
+    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
+    
+    if (amps%n_sing.ge.1) then
+       do i=1,next
+          if (abs(part(i)).le.6) then
+             if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
+             if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
+          endif
+       enddo
+       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**amps%n_sing
     endif
 
     val=amp2*weight
