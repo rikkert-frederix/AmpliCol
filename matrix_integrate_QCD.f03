@@ -29,14 +29,14 @@ program matrix_integrate_QCD
 
 ! relevant input parameters for integration
 !!$  ncalls0=-10000   ! Number of events to generate. (If negative, start
-  ncalls0=1000000   ! Number of events to generate. (If negative, start
+  ncalls0=500000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
 
   ndim=3*(next-2)-4   ! Number of dimensions of the integration.
 
-  itmax=20         ! Number of iterations. (If ncalls0 < 0, the
+  itmax=10         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
@@ -121,7 +121,6 @@ program matrix_integrate_QCD
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
   write(*,*) 'Number of numerical errors:',num_error
-  write(*,*) 'Number of x_Bj > 1:',count_xbj
  
 contains
   function integrand(x,vol,ifirst,f1)
@@ -156,6 +155,13 @@ contains
         call PS_haag(x)
     elseif (integration.eq.3) then
         call genpt_phase_space(x)
+    endif
+
+
+
+    if (jac.lt.0d0) then
+       write (*,*) jac
+       stop 1
     endif
     
     call cpu_time(tAfter)

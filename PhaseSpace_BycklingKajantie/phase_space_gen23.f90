@@ -12,7 +12,7 @@ module phase_space_gen23
 
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false., debug=.false.
+  logical,parameter :: verbose=.false., debug=.true.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-2.0d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
@@ -91,6 +91,7 @@ contains
           stop 1
        endif
        invm(ibset(0,i-1))=m(i)**2
+       invm(ibclr(maskr(next),i-1))=m(i)**2
     enddo
     if (verbose) write (*,*) 'masses:',m(1:n)
     call setup_PS_cuts(s_cut)
@@ -154,7 +155,11 @@ contains
                 mass=mass+sqrt(invm(ibset(0,j)))
              endif
           enddo
-          invm_min(i)=max(s_cut(2)*(npart)*(npart-1)/2d0,mass**2)
+          if (npart.eq.next-2) then
+             invm_min(i)=max(s_cut(1)*npart**2,mass**2)
+          else
+             invm_min(i)=max(s_cut(2)*(npart)*(npart-1)/2d0,mass**2)
+          endif
        endif
     enddo
   end subroutine setup_PS_cuts
@@ -193,6 +198,7 @@ contains
     sqrtshat=sqrt(tau)*sqrts
     xbjrk(1)=sqrt(tau)*exp(ycm)
     xbjrk(2)=sqrt(tau)*exp(-ycm)
+    if (debug) write (*,*) 'sqrtshat :',sqrtshat,xbjrk(1:2),sqrtshat**2
   end subroutine generate_initial_state
 
   subroutine generate_tau
@@ -294,8 +300,8 @@ contains
              if (t_channel) then
                 call gent_one_step(inext,set(i),3-i)
              else
-                call gen23_one_step(inext,set(i),3-i,im1)
-!!$                call genpt_one_step(inext,set(i),3-i,im1)
+!!$                call gen23_one_step(inext,set(i),3-i,im1)
+                call genpt_one_step(inext,set(i),3-i,im1)
              endif
              if (jac.le.0d0) return
           enddo
@@ -398,6 +404,7 @@ contains
     if (invm_min(i+ia).ne.0d0) tmin=max(tmin,invm_min(i+ia))
     if (tmin.ge.tmax) then
        jac=-1d0
+       num_error=num_error+1
        if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
@@ -412,6 +419,7 @@ contains
     if (invm_min(i+ib).ne.0d0) tmin=max(tmin,invm_min(i+ib))
     if (tmin.ge.tmax) then
        jac=-2d0
+       num_error=num_error+1
        if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
@@ -473,6 +481,7 @@ contains
     if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     if (tmin.ge.tmax) then
        jac=-3d0
+       num_error=num_error+1
        if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
        return
     endif
@@ -487,6 +496,7 @@ contains
     if (invm_max(i+im1).ne.0d0) smax=min(smax,invm_max(i+im1))
     if (smin.ge.smax) then
        jac=-4d0
+       num_error=num_error+1
        if (debug) write (*,*) 'smin.ge.smax',smin,smax
        return
     endif
@@ -508,6 +518,7 @@ contains
     if (gram4.ge.0d0) then 
        write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
        jac=-5d0
+       num_error=num_error+1
        return
     endif
     jac=jac/(8d0*sqrt(-gram4))
@@ -531,13 +542,16 @@ contains
     pt2max=sqrtshat**2/4d0
 !!$    pt2max=min(sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2)
 !!$    write (*,*) pt2min,pt2max,sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2,invm(i+im1)
-!!$    if (pt2min.gt.pt2max) then
-!!$       jac=-1d0
-!!$       return
-!!$    endif
+    if (pt2min.gt.pt2max) then
+       jac=-14d0
+       return
+    endif
 
     ix=ix+1
-    call random_to_var(x(ix),-2d0,pt2min,pt2max,pt2,jac)
+    call random_to_var(x(ix),-1d0,pt2min,pt2max,pt2,jac)
+    if (debug) then
+       write (*,*) 'pt2 - i    ',i,pt2,pt2min,pt2max
+    endif
     ! generate phi
 !!$    phimin=-pi
 !!$    phimax=pi
@@ -550,16 +564,23 @@ contains
 !!$    write (*,*) phimin,phimax,1d0-invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0))
     ix=ix+1
     call random_to_var(x(ix),0d0,phimin,phimax,phi,jac)
+    if (debug) then
+       write (*,*) 'phi - i    ',i,phi,phimin,phimax
+    endif
     shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
     shatmax=invm(i+ir+im1)
     if (shatmin.gt.shatmax) then
 !!$       write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
-       jac=-1d0
+       jac=-13d0
+       num_error=num_error+1
        return
     endif
       
     ix=ix+1
     call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
+    if (debug) then
+       write (*,*) 'shat - i+im1  ',i+im1,invm(i+im1),shatmin,shatmax
+    endif
     ! fill momentum, assuming that previous particle is along the x-axis.
     call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pp(0,i),jac)
     ! boost along the z-axis
@@ -569,11 +590,17 @@ contains
     if(pp(1,im1).lt.0d0) phi=phi+pi
     call rotz(pb,phi,pp(0,i))
     jac=jac/dble(4)
+    write (*,*) 'pp(ir+i+im1)',pp(0:3,ir+i+im1),invm(ir+i+im1)
+    write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1)
+    write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i)
+    write (*,*) 'pp(i)       ',pp(0:3,i),invm(i)
     pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
     invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
 !!$    write (*,*) ir,invm(ir),sqrt(pt2),sqrt(invm(i+im1)),invm(ir+i)
     if (invm(ir).lt.0d0) then
-       jac=-1d0
+       write (*,*) 'invm(ir)',invm(ir)
+       jac=-12d0
+       num_error=num_error+1
        return
     endif
     ! fill t-channel stuff to be safe.
@@ -594,7 +621,7 @@ contains
     ! There are two values of the pz that correspond to a single
     ! invm. Take one of the two at random.
     p(3)=sqrt(p(0)**2-pt2)
-    if (ran2().gt.0.5d0) p(3)=-p(3)
+    if (ran2().lt.0.5d0) p(3)=-p(3)
     jac=jac*2d0
     jac=jac*abs(1d0/(2d0*Eref*p(3)))
   end subroutine fill_momentum_pt2invmphi
@@ -634,13 +661,15 @@ contains
     if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     if (tmin.ge.tmax) then
        jac=-6d0
-       if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       num_error=num_error+1
+       if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax,invm(ir+i),invm(ir+i+ib),invm(ir),invm(i)
        return
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
+    invm(ir+ib)=-1000d0
     if (debug) then
-       write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib)
+       write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib),tmin,tmax
     endif
     ix=ix+1
     call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
@@ -698,6 +727,7 @@ contains
           if (invm_max(j1).ne.0d0) shatmax=max(shatmax,invm_max(j1))
           if (shatmin.ge.shatmax) then
              jac=-7d0
+             num_error=num_error+1
              if (debug) write (*,*) 'shatmin.ge.shatmax',j,i,ir,shatmin,shatmax,invm(j2)
              return
           endif
@@ -862,6 +892,7 @@ contains
     if (esum+ed.le.0d0) then
        write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
        jac=-8d0
+       num_error=num_error+1
        return
        write (*,*) pa(0:3)
        write (*,*) pb(0:3)
@@ -907,6 +938,7 @@ contains
     ESUM2 = dot(ptot,ptot)
     if (esum2 .le. 0d0) then
        jac=-9d0
+       num_error=num_error+1
        write (*,*) "error :: must be time-like momentum in gentcms2",esum2
        return
        stop 1
@@ -947,6 +979,7 @@ contains
     if (esum+ed.le.0d0) then
        write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
        jac=-10d0
+       num_error=num_error+1
        return
        stop 1
     endif
@@ -955,6 +988,7 @@ contains
     if (pt2/esum2.lt.-tiny) then
        write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
        jac=-11d0
+       num_error=num_error+1
        return
        stop 1
     elseif (pt2.lt.0d0) then
