@@ -3,7 +3,7 @@ module phase_space_gen23
   private
   integer(kind=4) :: ix,ndim
   integer(kind=4),dimension(:),allocatable :: order
-  real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x
+  real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x,Emin
   real(kind=8),dimension(:,:),allocatable :: pp
   integer(kind=4),dimension(:,:),allocatable :: sets
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -13,7 +13,7 @@ module phase_space_gen23
   ! TECHNIAL PARAMETERS
   ! vebose:
   logical,parameter :: verbose=.false.
-  logical,parameter,public :: debug=.false.
+  logical,parameter,public :: debug=.true.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-2.0d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
@@ -77,6 +77,7 @@ contains
     allocate(order(next))
     allocate(invm(maskr(next)))
     allocate(invm_min(maskr(next)))
+    allocate(Emin(maskr(next)))
     allocate(invm_max(maskr(next)))
     allocate(pp(0:3,0:maskr(next)))
     pp(0:3,0:maskr(next))=0d0
@@ -95,9 +96,9 @@ contains
        invm(ibclr(maskr(next),i-1))=m(i)**2
     enddo
     if (verbose) write (*,*) 'masses:',m(1:n)
-    call setup_PS_cuts(s_cut)
     drcut=dr_cut
     ptcut=pt_cut
+    call setup_PS_cuts(s_cut)
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
     do i=1,next
@@ -146,9 +147,9 @@ contains
        if (btest(i,0).and.btest(i,1)) then
           invm_min(i)=0d0
        elseif (btest(i,0).or.btest(i,1)) then
-          if (npart.eq.2 .or. npart.eq.next-2) then
-             invm_max(i)=-s_cut(1)
-          endif
+!!$          if (npart.eq.2 .or. npart.eq.next-2) then
+!!$             invm_max(i)=-s_cut(1)
+!!$          endif
        else
           mass=0d0
           do j=0,next-1
@@ -163,7 +164,23 @@ contains
           endif
        endif
     enddo
+    call setup_Emin
   end subroutine setup_PS_cuts
+
+  subroutine setup_Emin
+    ! Setup the minimum required energy for each (combination of) final state
+    ! particle(s) in the collision c.o.m. frame. Based on the masses and the
+    ! ptcut
+    integer :: i,j
+    Emin(1:maskr(next))=0d0
+    do i=1,maskr(next)
+       if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
+       do j=0,next-1
+          if (btest(i,j)) Emin(i)=Emin(i)+sqrt(invm(ibset(0,j))+ptcut**2)
+       enddo
+       Emin(i)=max(Emin(i),sqrt(invm_min(i)))
+    enddo
+  end subroutine setup_Emin
   
   subroutine gen23_deallocate
     implicit none
@@ -205,7 +222,7 @@ contains
   subroutine generate_tau
     implicit none
     real(kind=8) :: smin,smax,shat
-    smin=invm_min(maskr(next)-3)
+    smin=max(invm_min(maskr(next)-3),Emin(maskr(next)-3)**2)
     smax=sqrts**2
     ix=ix+1
     call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
@@ -396,13 +413,24 @@ contains
 ! back-to-back incoming particles.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ia,ib
-    real(kind=8) :: tmin,tmax,phi,pt2,esum,yr
-    esum=sqrt(invm(ia+ib))
+    real(kind=8) :: tmin,tmax,phi,pt2,yr
+    if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
+       write (*,*) 'Subroutine only for i is a single particle '&
+            //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
+       stop 1
+    endif
     yr=sqrt(lambda(invm(ia+ib),invm(i),invm_min(ir)))
     tmin=(-invm(ia+ib)+invm(i)+invm_min(ir)-yr)/2d0
     tmax=(-invm(ia+ib)+invm(i)+invm_min(ir)+yr)/2d0
-    if (invm_max(i+ia).ne.0d0) tmax=min(invm_max(i+ia),tmax)
-    if (invm_min(i+ia).ne.0d0) tmin=max(tmin,invm_min(i+ia))
+!!$    if (invm_max(i+ia).ne.0d0) tmax=min(invm_max(i+ia),tmax)
+!!$    if (invm_min(i+ia).ne.0d0) tmin=max(tmin,invm_min(i+ia))
+
+    ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
+    ! being larger than Emin(i) and Emin(ir), respectively:
+    
+    ...
+
+    
     if (tmin.ge.tmax) then
        jac=-1d0
        num_error=num_error+1
@@ -445,11 +473,11 @@ contains
     elseif (pt2.lt.0d0) then
        pt2=0d0
     endif
-    pp(0,i)=(-invm(i+ia)-invm(i+ib)+2d0*invm(i))/(2d0*esum)
+    pp(0,i)=(-invm(i+ia)-invm(i+ib)+2d0*invm(i))/(2d0*sqrtshat)
     pp(1,i)=sqrt(pt2)*cos(phi)
     pp(2,i)=sqrt(pt2)*sin(phi)
-    pp(3,i)=(invm(i+ia)-invm(i+ib))/(2d0*esum)
-    pp(0,ir)=esum-pp(0,i)
+    pp(3,i)=(invm(i+ia)-invm(i+ib))/(2d0*sqrtshat)
+    pp(0,ir)=sqrtshat-pp(0,i)
     pp(1:3,ir)=-pp(1:3,i)
     invm(ir)=dot(pp(0,ir),pp(0,ir))
     if (invm(ir).le.0d0) then
@@ -470,8 +498,17 @@ contains
 ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
     implicit none
     integer(kind=4),intent(in) :: im1,i,ir,ib
-    real(kind=8) :: tmin,tmax,smin,smax,phi,gram4,V,sqrtGG,Eirmax,pzmax
-    call generate_masses(i,ir)
+    real(kind=8) :: tmin,tmax,smin,smax,phi,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax
+    if (popcnt(i).gt.1) then
+       if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+       call shatminmax(i,ir,shatmin,shatmax)
+       call generate_mass(i,shatmin,shatmax)
+    endif
+    if (popcnt(ir).gt.1) then
+       call shatminmax(ir,i,shatmin,shatmax)
+       call generate_mass(ir,shatmin,shatmax)
+    endif
+    if (jac.le.0d0) return
     if (debug) then
        write (*,*) '23- i    ',i,invm(i)
        write (*,*) '23- ir   ',ir,invm(ir)
@@ -482,13 +519,13 @@ contains
 !!$    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
 
     ! Make sure that the t-range is compatible with the pT cut
-    Eirmax=pp(0,i+ir+ib)+pp(0,ib)-ptcut ! max energy available for ir
-    if (Eirmax.lt.max(popcnt(ir)*ptcut,sqrt(invm(ir)))) then
+    Eirmax=pp(0,i+ir+ib)+pp(0,ib)-Emin(i) ! max energy available for ir
+    if (Eirmax.lt.max(Emin(ir),sqrt(invm(ir)))) then
        jac=-17d0
        return
     endif
     if (popcnt(ir).eq.1) then
-       pzmax=sqrt(Eirmax**2-ptcut**2)
+       pzmax=sqrt(Eirmax**2-Emin(ir)**2)
        tmax=min(tmax,-sqrtshat*(Eirmax-pzmax))
        tmin=max(tmin,-sqrtshat*(Eirmax+pzmax))
     else
@@ -702,23 +739,41 @@ contains
     ! One step in the usual MadGraph t-channel phase-space generation.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib
-    real(kind=8) :: tmin,tmax,phi,E,pzmax
-    invm_min(i)=(popcnt(i)*2d0*sqrtshat*ptcut-sqrtshat**2)
-    invm_max(i)=sqrtshat**2-2d0*sqrtshat*ptcut
-    call generate_masses(i,ir)
+    real(kind=8) :: tmin,tmax,phi,pzmax,Emaxi,Eir,shatmin,shatmax
+    if (popcnt(i).gt.1) then
+       if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+       call shatminmax(i,ir,shatmin,shatmax)
+       if (popcnt(ir).eq.1 .and. popcnt(i+ir).eq.next-2) then
+          ! The energy of i will be
+          ! Ei=(sqrtshat+(invm(i)-invm(ir))/sqrtshat)/2d0. This gives a
+          ! constraint on the allowed value of invm(i), since Ei>Emin(i)
+          shatmin=max(shatmin,invm(ir)+sqrtshat*(2d0*Emin(i)-sqrtshat))
+          Emaxi=sqrtshat-Emin(ir) ! maximum energy for i
+          shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Emaxi-sqrtshat))
+       endif
+       call generate_mass(i,shatmin,shatmax)
+    endif
+    if (popcnt(ir).gt.1) then
+       call shatminmax(ir,i,shatmin,shatmax)
+       call generate_mass(ir,shatmin,shatmax)
+    endif
+    if (jac.le.0d0) return
     if (debug) then
        write (*,*) 't - i    ',i,invm(i),invm_min(i),invm_max(i)
        write (*,*) 't - ir   ',ir,invm(ir)
     endif
-    if (jac.le.0d0) return
+    
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
 !!$    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
 !!$    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
 
-    E=(sqrtshat-invm(i)/sqrtshat)/2d0
-    pzmax=min(sqrt(E**2-ptcut**2),sqrt(((sqrtshat-E)/popcnt(i))**2-ptcut**2)*popcnt(i))
-    tmax=min(tmax,-sqrtshat*(E-pzmax))
-    tmin=max(tmin,-sqrtshat*(E+pzmax))
+    if (popcnt(ir).eq.1 .and. popcnt(i+ir).eq.next-2) then
+       Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0
+       pzmax=min(sqrt(Eir**2-ptcut**2),sqrt(((sqrtshat-Eir)/popcnt(i))**2-ptcut**2)*popcnt(i))
+!!$       pzmax=sqrt(Eir**2-ptcut**2)
+       tmax=min(tmax,-sqrtshat*(Eir-pzmax))
+       tmin=max(tmin,-sqrtshat*(Eir+pzmax))
+    endif
     
     if (tmin.ge.tmax) then
        jac=-6d0
@@ -728,12 +783,6 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
-!!$    call random_to_var(x(ix),0d0,tmin,tmax,invm(ir+ib),jac)
-
-!!$    invm(ir+ib)=tmax
-
-!!$    write (*,*) (sqrtshat-invm(i)/sqrtshat)/2d0
-    
     if (debug) then
        write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib),tmin,tmax
     endif
@@ -742,19 +791,24 @@ contains
     call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt(invm(i)) &
          &,sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
     pp(0:3,ir)=pp(0:3,ib+ir+i)+pp(0:3,ib)-pp(0:3,i)
-
-!!$    write (*,*) 3d0*sqrt(ptcut**2+(pp(3,ir)/3d0)**2)
-
-    
     jac = jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
   end subroutine gent_one_step
 
   subroutine gens_one_step(i,ir)
     implicit none
     integer(kind=4),intent(in) :: i,ir
-    real(kind=8) :: esum,costh,phi
+    real(kind=8) :: esum,costh,phi,shatmin,shatmax
     real(kind=8),dimension(0:3) :: p_i,p_ir
-    call generate_masses(i,ir)
+    if (popcnt(i).gt.1) then
+       if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+       call shatminmax(i,ir,shatmin,shatmax)
+       call generate_mass(i,shatmin,shatmax)
+    endif
+    if (popcnt(ir).gt.1) then
+       call shatminmax(ir,i,shatmin,shatmax)
+       call generate_mass(ir,shatmin,shatmax)
+    endif
+    if (jac.le.0d0) return
     esum=sqrt(invm(i+ir))
     ix=ix+1
     call random_to_var(x(ix),0d0,-1d0,1d0,costh,jac)
@@ -775,39 +829,23 @@ contains
     invm(ir+2)=dot(pp(0:3,ir+2),pp(0:3,ir+2))
   end subroutine gens_one_step
 
-  subroutine generate_masses(i,ir)
-    ! Generates the two invariant masses for (combined) particles i and ir. 
+  subroutine generate_mass(i,shatmin,shatmax)
     implicit none
-    integer(kind=4),intent(in) :: i,ir
-    integer(kind=4) :: j,j1,j2
+    integer :: i
     real(kind=8) :: shatmin,shatmax
-    if (popcnt(i).gt.1) invm(i)=0d0
-    if (popcnt(ir).gt.1) invm(ir)=0d0
-    do j=1,2
-       if (j.eq.1) then
-          j1=ir
-          j2=i
-       else
-          j1=i
-          j2=ir
-       endif
-       if (popcnt(j1).ge.2) then
-          call shatminmax(j1,j2,shatmin,shatmax)
-          if (invm_min(j1).ne.0d0) shatmin=max(shatmin,invm_min(j1))
-          if (invm_max(j1).ne.0d0) shatmax=min(shatmax,invm_max(j1))
-          if (debug) write (*,*)'shatmin,shatmax',shatmin,shatmax
-          if (shatmin.ge.shatmax) then
-             jac=-7d0
-             num_error=num_error+1
-             if (debug) write (*,*) 'shatmin.ge.shatmax',j,i,ir,shatmin,shatmax,invm(j2)
-             return
-          endif
-          ix=ix+1
+    if (invm_min(i).ne.0d0) shatmin=max(shatmin,invm_min(i))
+    if (invm_max(i).ne.0d0) shatmax=min(shatmax,invm_max(i))
+    if (shatmin.ge.shatmax) then
+       jac=-7d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'shatmin.ge.shatmax',i,shatmin,shatmax
+       return
+    endif
+    ix=ix+1
 !!$          call random_to_var(x(ix),ip,shatmin,shatmax,invm(j1),jac)
-          call random_to_var(x(ix),0d0,shatmin,shatmax,invm(j1),jac)
-       endif
-    enddo
-  end subroutine generate_masses
+    call random_to_var(x(ix),0d0,shatmin,shatmax,invm(i),jac)
+  end subroutine generate_mass
+  
   
   subroutine shatminmax(j1,j2,shatmin,shatmax)
     ! Determines minimum and maximum allowed s-channel invariant
