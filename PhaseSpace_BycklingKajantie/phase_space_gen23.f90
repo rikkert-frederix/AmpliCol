@@ -13,7 +13,7 @@ module phase_space_gen23
   ! TECHNIAL PARAMETERS
   ! vebose:
   logical,parameter :: verbose=.false.
-  logical,parameter,public :: debug=.true.
+  logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-2.0d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
@@ -470,7 +470,7 @@ contains
 ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
     implicit none
     integer(kind=4),intent(in) :: im1,i,ir,ib
-    real(kind=8) :: tmin,tmax,smin,smax,phi,gram4,V,sqrtGG
+    real(kind=8) :: tmin,tmax,smin,smax,phi,gram4,V,sqrtGG,Eirmax,pzmax
     call generate_masses(i,ir)
     if (debug) then
        write (*,*) '23- i    ',i,invm(i)
@@ -478,8 +478,25 @@ contains
     endif
     if (jac.le.0d0) return
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
-    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
+!!$    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+!!$    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
+
+    ! Make sure that the t-range is compatible with the pT cut
+    Eirmax=pp(0,i+ir+ib)+pp(0,ib)-ptcut ! max energy available for ir
+    if (Eirmax.lt.max(popcnt(ir)*ptcut,sqrt(invm(ir)))) then
+       jac=-17d0
+       return
+    endif
+    if (popcnt(ir).eq.1) then
+       pzmax=sqrt(Eirmax**2-ptcut**2)
+       tmax=min(tmax,-sqrtshat*(Eirmax-pzmax))
+       tmin=max(tmin,-sqrtshat*(Eirmax+pzmax))
+    else
+       pzmax=sqrt(Eirmax**2-invm(ir))
+       tmax=min(tmax,-sqrtshat*(Eirmax-pzmax) + invm(ir))
+       tmin=max(tmin,-sqrtshat*(Eirmax+pzmax) + invm(ir))
+    endif
+    
     if (tmin.ge.tmax) then
        jac=-3d0
        num_error=num_error+1
@@ -510,6 +527,7 @@ contains
          &,invm(ir+i+ib),V,sqrtGG)
     call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi &
          &,sqrt(invm(i)),sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
+    
     if (im1.le.2) then
        pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
     endif
@@ -684,7 +702,7 @@ contains
     ! One step in the usual MadGraph t-channel phase-space generation.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib
-    real(kind=8) :: tmin,tmax,phi,E,pz
+    real(kind=8) :: tmin,tmax,phi,E,pzmax
     invm_min(i)=(popcnt(i)*2d0*sqrtshat*ptcut-sqrtshat**2)
     invm_max(i)=sqrtshat**2-2d0*sqrtshat*ptcut
     call generate_masses(i,ir)
@@ -698,11 +716,9 @@ contains
 !!$    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
 
     E=(sqrtshat-invm(i)/sqrtshat)/2d0
-    pz=min(sqrt(E**2-ptcut**2),sqrt(((sqrtshat-E)/popcnt(i))**2-ptcut**2)*popcnt(i))
-    tmax=min(tmax,-sqrtshat*(E-pz))
-    tmin=max(tmin,-sqrtshat*(E+pz))
-
-!!$    write (*,*)-sqrtshat/2d0*(E-sqrt(E**2-ptcut**2)),-sqrtshat/2d0*(E),-sqrtshat/2d0*(E+sqrt(E**2-ptcut**2)),E
+    pzmax=min(sqrt(E**2-ptcut**2),sqrt(((sqrtshat-E)/popcnt(i))**2-ptcut**2)*popcnt(i))
+    tmax=min(tmax,-sqrtshat*(E-pzmax))
+    tmin=max(tmin,-sqrtshat*(E+pzmax))
     
     if (tmin.ge.tmax) then
        jac=-6d0

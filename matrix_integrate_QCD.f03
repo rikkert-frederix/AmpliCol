@@ -40,7 +40,7 @@ program matrix_integrate_QCD
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
-  accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+  accuracy=0.001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
 
 ! relevant physics input parameters and initialisation of amplitudes
