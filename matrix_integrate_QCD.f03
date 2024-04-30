@@ -158,8 +158,7 @@ contains
     endif
 
 
-
-    if (jac.lt.0d0) then
+    if (debug .and. jac.lt.0d0) then
        write (*,*) jac
        stop 1
     endif

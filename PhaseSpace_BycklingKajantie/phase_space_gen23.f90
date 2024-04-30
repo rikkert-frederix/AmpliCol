@@ -12,7 +12,8 @@ module phase_space_gen23
 
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false., debug=.true.
+  logical,parameter :: verbose=.false.
+  logical,parameter,public :: debug=.true.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-2.0d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
@@ -300,8 +301,8 @@ contains
              if (t_channel) then
                 call gent_one_step(inext,set(i),3-i)
              else
-!!$                call gen23_one_step(inext,set(i),3-i,im1)
-                call genpt_one_step(inext,set(i),3-i,im1)
+                call gen23_one_step(inext,set(i),3-i,im1)
+!!$                call genpt_one_step(inext,set(i),3-i,im1)
              endif
              if (jac.le.0d0) return
           enddo
@@ -508,7 +509,7 @@ contains
     phi=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
          &,invm(ir+i+ib),V,sqrtGG)
     call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi &
-            &,sqrt(invm(i)),sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
+         &,sqrt(invm(i)),sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
     if (im1.le.2) then
        pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
     endif
@@ -529,7 +530,8 @@ contains
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
     real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi
-    real(kind=8),dimension(0:3) :: pb,pim1
+    real(kind=8),dimension(0:3) :: pb,pim1,piir
+    real(kind=8),external :: ran2
     if (invm(i).ne.0d0) then
        write (*,*) 'genpt_one_step only for massless particles',i,invm(i)
        stop 1
@@ -537,20 +539,23 @@ contains
     ! get the energy in the frame where p(:,im1) has p_z=0.
     y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
     call boostz(pp(0,im1),y,pim1)
+    call boostz(pp(0,i+ir),y,piir)
     ! generate pT^2
     pt2min=ptcut**2
-    pt2max=sqrtshat**2/4d0
+    pt2max=min(sqrtshat**2/4d0,(pp(0,i+ir)-popcnt(ir)*ptcut)**2)
 !!$    pt2max=min(sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2)
 !!$    write (*,*) pt2min,pt2max,sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2,invm(i+im1)
     if (pt2min.gt.pt2max) then
+       if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
        jac=-14d0
        return
     endif
 
     ix=ix+1
     call random_to_var(x(ix),-1d0,pt2min,pt2max,pt2,jac)
+
     if (debug) then
-       write (*,*) 'pt2 - i    ',i,pt2,pt2min,pt2max
+       write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
     endif
     ! generate phi
 !!$    phimin=-pi
@@ -560,26 +565,54 @@ contains
     else
        phimax=pi
     endif
-    phimin=-phimax
+
+
+    if (abs(((piir(0)-sqrt(pt2))**2-pt2-(piir(1)**2+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)**2+piir(2)**2))).lt.1d0) then
+       phimin=abs(abs(acos(((piir(0)-sqrt(pt2))**2-pt2-(piir(1)**2+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)**2+piir(2)**2))))-pi)
+    else
+       phimin=0d0
+    endif
+     
+    
 !!$    write (*,*) phimin,phimax,1d0-invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0))
     ix=ix+1
     call random_to_var(x(ix),0d0,phimin,phimax,phi,jac)
+
+!!$    phi=phimin!+0.6d0
+    
+    if (ran2().lt.0.5d0) phi=-phi
+    jac=jac*2d0
+
     if (debug) then
-       write (*,*) 'phi - i    ',i,phi,phimin,phimax
+       write (*,*) 'cosphi',((piir(0)-sqrt(pt2))**2-pt2-(piir(1)**2&
+            &+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)**2+piir(2)&
+            &**2))
+       write (*,*) 'acosphi',acos(((piir(0)-sqrt(pt2))**2-pt2&
+            &-(piir(1)**2+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)&
+            &**2+piir(2)**2)))
+    endif
+    
+!!$    phi=1.351d0
+    
+    if (debug) then
+       write (*,*) 'phi - i  ',i,phi,phimin,phimax
     endif
     shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
-    shatmax=invm(i+ir+im1)
+    shatmax=4d0*pim1(0)*(piir(0)-popcnt(ir)*ptcut)
     if (shatmin.gt.shatmax) then
-!!$       write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
+       if (debug) write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
        jac=-13d0
        num_error=num_error+1
        return
     endif
       
     ix=ix+1
-    call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
+    call random_to_var(x(ix),0d0,shatmin,shatmax,invm(i+im1),jac)
+
+    invm(i+im1)=shatmin
+    
     if (debug) then
-       write (*,*) 'shat - i+im1  ',i+im1,invm(i+im1),shatmin,shatmax
+       write (*,*) 'shat - i+im1',i+im1,invm(i+im1),shatmin,shatmax
     endif
     ! fill momentum, assuming that previous particle is along the x-axis.
     call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pp(0,i),jac)
@@ -590,15 +623,17 @@ contains
     if(pp(1,im1).lt.0d0) phi=phi+pi
     call rotz(pb,phi,pp(0,i))
     jac=jac/dble(4)
-    write (*,*) 'pp(ir+i+im1)',pp(0:3,ir+i+im1),invm(ir+i+im1)
-    write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1)
-    write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i)
-    write (*,*) 'pp(i)       ',pp(0:3,i),invm(i)
     pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
     invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
-!!$    write (*,*) ir,invm(ir),sqrt(pt2),sqrt(invm(i+im1)),invm(ir+i)
+    if (debug) then
+       write (*,*) 'pp(ir+i+im1)',pp(0:3,ir+i+im1),invm(ir+i+im1)
+       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1)
+       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i)
+       write (*,*) 'pp(i)       ',pp(0:3,i),invm(i)
+       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir)
+    endif
+    if (debug) write (*,*) ir,invm(ir),sqrt(pt2),sqrt(invm(i+im1)),invm(ir+i)
     if (invm(ir).lt.0d0) then
-       write (*,*) 'invm(ir)',invm(ir)
        jac=-12d0
        num_error=num_error+1
        return
@@ -649,16 +684,26 @@ contains
     ! One step in the usual MadGraph t-channel phase-space generation.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib
-    real(kind=8) :: tmin,tmax,phi
+    real(kind=8) :: tmin,tmax,phi,E,pz
+    invm_min(i)=(popcnt(i)*2d0*sqrtshat*ptcut-sqrtshat**2)
+    invm_max(i)=sqrtshat**2-2d0*sqrtshat*ptcut
     call generate_masses(i,ir)
     if (debug) then
-       write (*,*) 't - i    ',i,invm(i)
+       write (*,*) 't - i    ',i,invm(i),invm_min(i),invm_max(i)
        write (*,*) 't - ir   ',ir,invm(ir)
     endif
     if (jac.le.0d0) return
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
-    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
+!!$    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+!!$    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
+
+    E=(sqrtshat-invm(i)/sqrtshat)/2d0
+    pz=min(sqrt(E**2-ptcut**2),sqrt(((sqrtshat-E)/popcnt(i))**2-ptcut**2)*popcnt(i))
+    tmax=min(tmax,-sqrtshat*(E-pz))
+    tmin=max(tmin,-sqrtshat*(E+pz))
+
+!!$    write (*,*)-sqrtshat/2d0*(E-sqrt(E**2-ptcut**2)),-sqrtshat/2d0*(E),-sqrtshat/2d0*(E+sqrt(E**2-ptcut**2)),E
+    
     if (tmin.ge.tmax) then
        jac=-6d0
        num_error=num_error+1
@@ -667,7 +712,12 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
-    invm(ir+ib)=-1000d0
+!!$    call random_to_var(x(ix),0d0,tmin,tmax,invm(ir+ib),jac)
+
+!!$    invm(ir+ib)=tmax
+
+!!$    write (*,*) (sqrtshat-invm(i)/sqrtshat)/2d0
+    
     if (debug) then
        write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib),tmin,tmax
     endif
@@ -676,6 +726,10 @@ contains
     call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt(invm(i)) &
          &,sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
     pp(0:3,ir)=pp(0:3,ib+ir+i)+pp(0:3,ib)-pp(0:3,i)
+
+!!$    write (*,*) 3d0*sqrt(ptcut**2+(pp(3,ir)/3d0)**2)
+
+    
     jac = jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
   end subroutine gent_one_step
 
@@ -724,7 +778,8 @@ contains
        if (popcnt(j1).ge.2) then
           call shatminmax(j1,j2,shatmin,shatmax)
           if (invm_min(j1).ne.0d0) shatmin=max(shatmin,invm_min(j1))
-          if (invm_max(j1).ne.0d0) shatmax=max(shatmax,invm_max(j1))
+          if (invm_max(j1).ne.0d0) shatmax=min(shatmax,invm_max(j1))
+          if (debug) write (*,*)'shatmin,shatmax',shatmin,shatmax
           if (shatmin.ge.shatmax) then
              jac=-7d0
              num_error=num_error+1
@@ -732,7 +787,8 @@ contains
              return
           endif
           ix=ix+1
-          call random_to_var(x(ix),ip,shatmin,shatmax,invm(j1),jac)
+!!$          call random_to_var(x(ix),ip,shatmin,shatmax,invm(j1),jac)
+          call random_to_var(x(ix),0d0,shatmin,shatmax,invm(j1),jac)
        endif
     enddo
   end subroutine generate_masses
@@ -921,9 +977,9 @@ contains
 ! Generates 4 momentum for particle p1, and remainder pr given the
 ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
 ! particles with momenta pa, pb and outgoing particles with mass
-! m1,m2; t=(pb-p1)^2. Assumes that pa is a massless momentum; phi is
-! the azimuthal angle between pr and pc in the pa+pb rest frame, with
-! pa aligned with the positive z-axis.
+! m1,m2; t=(pb-p1)^2=(pa-pr)^2. Assumes that pa is a massless
+! momentum; phi is the azimuthal angle between pr and pc in the pa+pb
+! rest frame, with pa aligned with the positive z-axis.
     implicit none
     real(kind=8),intent(in) :: t,phi,m1,m2
     real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
