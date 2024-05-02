@@ -170,7 +170,7 @@ contains
   subroutine setup_Emin
     ! Setup the minimum required energy for each (combination of) final state
     ! particle(s) in the collision c.o.m. frame. Based on the masses and the
-    ! ptcut
+    ! ptcut (i.e., assumes that all pz=0 and pT=pTcut)
     integer :: i,j
     Emin(1:maskr(next))=0d0
     do i=1,maskr(next)
@@ -413,7 +413,7 @@ contains
 ! back-to-back incoming particles.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ia,ib
-    real(kind=8) :: tmin,tmax,phi,pt2,yr
+    real(kind=8) :: tmin,tmax,phi,pt2,yr,Eimax,pzmax
     if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
        write (*,*) 'Subroutine only for i is a single particle '&
             //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
@@ -427,9 +427,10 @@ contains
 
     ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
     ! being larger than Emin(i) and Emin(ir), respectively:
-    
-    ...
-
+    Eimax=sqrtshat-Emin(ir)
+    pzmax=sqrt(Eimax**2-Emin(i)**2)
+    tmin=max(tmin,-sqrtshat*(Eimax+pzmax))
+    tmax=min(tmax,-sqrtshat*(Eimax-pzmax))
     
     if (tmin.ge.tmax) then
        jac=-1d0
@@ -440,12 +441,24 @@ contains
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(i+ia),jac)
     if (debug) then
-       write (*,*) 'dt- i+ia',i+ia,invm(i+ia),invm_min(i+ia),invm_max(i+ia)
+       write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
     endif
     tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+invm_min(ir)
     tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
-    if (invm_max(i+ib).ne.0d0) tmax=min(invm_max(i+ib),tmax)
-    if (invm_min(i+ib).ne.0d0) tmin=max(tmin,invm_min(i+ib))
+!!$    if (invm_max(i+ib).ne.0d0) tmax=min(invm_max(i+ib),tmax)
+!!$    if (invm_min(i+ib).ne.0d0) tmin=max(tmin,invm_min(i+ib))
+
+    ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
+    ! being larger than Emin(i) and Emin(ir), respectively:
+    
+!!$    Eimax=sqrtshat-Emin(ir)
+!!$    pzmax=sqrt(Eimax**2-Emin(i)**2)
+!!$    tmin=max(tmin,-sqrtshat*(Eimax+pzmax))
+!!$    tmax=min(tmax,-sqrtshat*(Eimax-pzmax))
+    tmax=min(tmax,-invm(i+ia)+2d0*invm(i)-2d0*sqrtshat*Emin(i))
+    tmin=max(tmin,-invm(i+ia)+2d0*invm(i)-2d0*sqrtshat*(sqrtshat-Emin(ir)))
+    
+    
     if (tmin.ge.tmax) then
        jac=-2d0
        num_error=num_error+1
@@ -455,7 +468,7 @@ contains
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(i+ib),jac)
     if (debug) then
-       write (*,*) 'dt- i+ib',i+ib,invm(i+ib),invm_min(i+ib),invm_max(i+ib)
+       write (*,*) 'dt- i+ib',i+ib,invm(i+ib),tmin,tmax
     endif
     ix=ix+1
     call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
@@ -521,6 +534,7 @@ contains
     ! Make sure that the t-range is compatible with the pT cut
     Eirmax=pp(0,i+ir+ib)+pp(0,ib)-Emin(i) ! max energy available for ir
     if (Eirmax.lt.max(Emin(ir),sqrt(invm(ir)))) then
+       if (debug) write (*,*) 'Eirmax=', Eirmax,Emin(ir),sqrt(invm(ir))
        jac=-17d0
        return
     endif
@@ -739,7 +753,7 @@ contains
     ! One step in the usual MadGraph t-channel phase-space generation.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib
-    real(kind=8) :: tmin,tmax,phi,pzmax,Emaxi,Eir,shatmin,shatmax
+    real(kind=8) :: tmin,tmax,phi,pzmax,Eimax,Eir,shatmin,shatmax,Eirmax
     if (popcnt(i).gt.1) then
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
        call shatminmax(i,ir,shatmin,shatmax)
@@ -748,8 +762,8 @@ contains
           ! Ei=(sqrtshat+(invm(i)-invm(ir))/sqrtshat)/2d0. This gives a
           ! constraint on the allowed value of invm(i), since Ei>Emin(i)
           shatmin=max(shatmin,invm(ir)+sqrtshat*(2d0*Emin(i)-sqrtshat))
-          Emaxi=sqrtshat-Emin(ir) ! maximum energy for i
-          shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Emaxi-sqrtshat))
+          Eimax=sqrtshat-Emin(ir) ! maximum energy for i
+          shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Eimax-sqrtshat))
        endif
        call generate_mass(i,shatmin,shatmax)
     endif
@@ -769,10 +783,18 @@ contains
 
     if (popcnt(ir).eq.1 .and. popcnt(i+ir).eq.next-2) then
        Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0
-       pzmax=min(sqrt(Eir**2-ptcut**2),sqrt(((sqrtshat-Eir)/popcnt(i))**2-ptcut**2)*popcnt(i))
-!!$       pzmax=sqrt(Eir**2-ptcut**2)
+!!$       pzmax=min(sqrt(Eir**2-Emin(ir)**2),sqrt(((sqrtshat-Eir)/popcnt(i))**2-ptcut**2)*popcnt(i))
+       pzmax=sqrt(Eir**2-Emin(ir)**2)
        tmax=min(tmax,-sqrtshat*(Eir-pzmax))
        tmin=max(tmin,-sqrtshat*(Eir+pzmax))
+    elseif (popcnt(ir).eq.1) then
+       Eirmax=pp(0,ib)+pp(0,ir+i+ib)-Emin(i) ! max available energy for ir
+       pzmax=sqrt(Eirmax**2-Emin(ir)**2)
+       tmax=min(tmax,-sqrtshat*(Eirmax-pzmax))
+       tmin=max(tmin,-sqrtshat*(Eirmax+pzmax))
+    else
+       write (*,*) 'gent_one_step: additional limits to implement'
+       stop 1
     endif
     
     if (tmin.ge.tmax) then
@@ -783,6 +805,7 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
+!!$    call random_to_var(x(ix),0d0,tmin,tmax,invm(ir+ib),jac)
     if (debug) then
        write (*,*) 't - ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib),tmin,tmax
     endif
@@ -957,11 +980,11 @@ contains
   end subroutine mom2cx
 
   subroutine gentcms(pa,pb,t,phi,m1,m2,p1,pr)
-! Generates 4 momentum for particle p1, and remainder pr given the
-! values t, and phi in the process pb+pa -> pr+p1.  Assuming incoming
-! particles with momenta pa, pb and outgoing particles with mass
-! m1,m2; t=(pa-p1)^2 ; phi is the azimuthal angle between p1 and pa in
-! the pa+pb rest frame, with pa aligned with the positive z-axis.
+! Generates 4 momentum for particle p1, and remainder pr=pa-p1=p2-pb given the
+! values t, and phi in the process pb+pa -> p2+p1.  Assuming incoming
+! particles with momenta pa, pb and outgoing particles with mass m1,m2;
+! t=(pb-p2)^2=(pa-p1)^2 ; phi is the azimuthal angle between p1 and pa in the
+! pa+pb rest frame, with pa aligned with the positive z-axis.
     implicit none
     real(kind=8),intent(in) :: t,phi,m1,m2
     real(kind=8),intent(in),dimension(0:3) :: pa,pb
