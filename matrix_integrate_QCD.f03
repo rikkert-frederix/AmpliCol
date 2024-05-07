@@ -149,6 +149,7 @@ contains
     pass_cuts_check=.true.
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
+    call cpu_time(tBefore)
     if (integration.eq.1)then
        call gen23_phase_space(x)
     elseif (integration.eq.2) then
@@ -156,15 +157,16 @@ contains
     elseif (integration.eq.3) then
         call genpt_phase_space(x)
     endif
+    call cpu_time(tAfter)
+    t_PS= t_PS +tAfter-tBefore
 
 
-    if (debug .and. jac.lt.0d0) then
+!!$    if (debug .and. jac.lt.0d0) then
+    if (debug ) then
        write (*,*) jac
        stop 1
     endif
     
-    call cpu_time(tAfter)
-    t_PS= t_PS +tAfter-tBefore
 
     all_evt=all_evt+1
 

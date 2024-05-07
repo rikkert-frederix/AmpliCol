@@ -427,8 +427,9 @@ contains
 
     ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
     ! being larger than Emin(i) and Emin(ir), respectively:
-    Eimax=sqrtshat-Emin(ir)
-    pzmax=sqrt(Eimax**2-Emin(i)**2)
+    pzmax=sqrt(lambda(sqrtshat**2,Emin(i)**2,Emin(ir)**2))/(2d0*sqrtshat)
+    Eimax=sqrtshat-sqrt(Emin(ir)**2+pzmax**2)
+    
     tmin=max(tmin,-sqrtshat*(Eimax+pzmax))
     tmax=min(tmax,-sqrtshat*(Eimax-pzmax))
     
@@ -440,24 +441,22 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(i+ia),jac)
+!!$    call random_to_var(x(ix),0d0,tmin,tmax,invm(i+ia),jac)
+
     if (debug) then
        write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
     endif
+    
     tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+invm_min(ir)
     tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
-!!$    if (invm_max(i+ib).ne.0d0) tmax=min(invm_max(i+ib),tmax)
-!!$    if (invm_min(i+ib).ne.0d0) tmin=max(tmin,invm_min(i+ib))
-
+    
     ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
     ! being larger than Emin(i) and Emin(ir), respectively:
-    
-!!$    Eimax=sqrtshat-Emin(ir)
-!!$    pzmax=sqrt(Eimax**2-Emin(i)**2)
-!!$    tmin=max(tmin,-sqrtshat*(Eimax+pzmax))
-!!$    tmax=min(tmax,-sqrtshat*(Eimax-pzmax))
-    tmax=min(tmax,-invm(i+ia)+2d0*invm(i)-2d0*sqrtshat*Emin(i))
-    tmin=max(tmin,-invm(i+ia)+2d0*invm(i)-2d0*sqrtshat*(sqrtshat-Emin(ir)))
-    
+
+    tmax=min(tmax,(sqrtshat**2*Emin(i)**2-invm(i)**2+invm(i)*invm(i+ia))/(invm(i+ia)-invm(i)))
+    tmin=max(tmin,(invm(i)**2-Emin(ir)**2*sqrtshat**2-2d0*invm(i)*sqrtshat**2+ &
+         sqrtshat**4-invm(i)*invm(i+ia)+sqrtshat**2*invm(i+ia))/(invm(i)-sqrtshat**2-invm(i+ia)))
+
     
     if (tmin.ge.tmax) then
        jac=-2d0
@@ -467,6 +466,9 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(i+ib),jac)
+!!$    call random_to_var(x(ix),0d0,tmin,min(tmax,0d0),invm(i+ib),jac)
+
+    
     if (debug) then
        write (*,*) 'dt- i+ib',i+ib,invm(i+ib),tmin,tmax
     endif
@@ -493,6 +495,16 @@ contains
     pp(0,ir)=sqrtshat-pp(0,i)
     pp(1:3,ir)=-pp(1:3,i)
     invm(ir)=dot(pp(0,ir),pp(0,ir))
+
+    if (pt2.lt.900d0) write (*,*) pt2
+    if (pp(0,ir).lt.90d0) write (*,*) pp(0,ir)
+    if (pp(3,i).gt.pzmax) write (*,*) pp(3,i)
+    if (pp(0,i).lt.30d0) then
+       write (*,*) 'pp(:,i )',pp(0:3,i)
+       write (*,*) 'pp(:,ir)',pp(0:3,ir)
+       write (*,*) 'pt2,pzmax',pt2,pzmax
+    endif
+    
     if (invm(ir).le.0d0) then
        write (*,*) "ERROR in double_t: invariant mass of system", &
             & " must be larger than zero",ir,invm(ir),i
@@ -783,8 +795,11 @@ contains
 
     if (popcnt(ir).eq.1 .and. popcnt(i+ir).eq.next-2) then
        Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0
-!!$       pzmax=min(sqrt(Eir**2-Emin(ir)**2),sqrt(((sqrtshat-Eir)/popcnt(i))**2-ptcut**2)*popcnt(i))
        pzmax=sqrt(Eir**2-Emin(ir)**2)
+       ! additional constraint on pz(ir)=pz(i) due to energy of particle
+       ! i. Needs to be fixed in terms of Emin(i) instead of ptcut 
+       ! FIX THIS FIX THIS FIX THIS
+       pzmax=min(pzmax,sqrt(((sqrtshat-Eir)/popcnt(i))**2-ptcut**2)*popcnt(i))
        tmax=min(tmax,-sqrtshat*(Eir-pzmax))
        tmin=max(tmin,-sqrtshat*(Eir+pzmax))
     elseif (popcnt(ir).eq.1) then
@@ -814,6 +829,9 @@ contains
     call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt(invm(i)) &
          &,sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
     pp(0:3,ir)=pp(0:3,ib+ir+i)+pp(0:3,ib)-pp(0:3,i)
+!!$
+!!$    write (*,*) 'energy',pp(0,ir)
+!!$    
     jac = jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
   end subroutine gent_one_step
 
@@ -981,9 +999,9 @@ contains
 
   subroutine gentcms(pa,pb,t,phi,m1,m2,p1,pr)
 ! Generates 4 momentum for particle p1, and remainder pr=pa-p1=p2-pb given the
-! values t, and phi in the process pb+pa -> p2+p1.  Assuming incoming
+! values t, and phi in the process pa+pb -> p1+p2.  Assuming incoming
 ! particles with momenta pa, pb and outgoing particles with mass m1,m2;
-! t=(pb-p2)^2=(pa-p1)^2 ; phi is the azimuthal angle between p1 and pa in the
+! t=(pb-p2)^2 ; phi is the azimuthal angle between p1 and pa in the
 ! pa+pb rest frame, with pa aligned with the positive z-axis.
     implicit none
     real(kind=8),intent(in) :: t,phi,m1,m2
@@ -1045,6 +1063,7 @@ contains
     p1(1) = pt*cos(phi)
     p1(2) = pt*sin(phi)
     call rotxxx(p1,pa_cms,p1_rot)       !Rotate p1 to the pa_cms frame
+!!$    p1_rot=p1
     call boostm(p1_rot,ptot,esum,p1)    !boost back to lab fram
     pr(0:3)=pa(0:3)-p1(0:3)         !Return remainder of momentum
   end subroutine gentcms
