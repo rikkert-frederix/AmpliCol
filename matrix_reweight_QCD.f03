@@ -30,16 +30,17 @@ program matrix_reweight
   implicit none
   integer :: i,j,col_acc,icol,ihel,hel_picked,irow,ic,iacc
   integer :: icol_mat,irow_mat,ri,ri_end,m,proc_num,iacc_in,k,skip 
-  integer,dimension(:),allocatable :: hel,o,part,temp_part
+  integer,dimension(:),allocatable :: hel,o,part,part_sf,orig_part,temp_part
   real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c
-  real(kind=8),dimension(:),allocatable :: mass
+  real(kind=8),dimension(:),allocatable :: mass,width
   logical :: done,first
   integer :: swap_q,swap_aq
   integer :: it,gi,gi_iperm,gi_prev ! type for 2qq process
   integer,dimension(:),allocatable :: iper_test
   integer :: ic_low,ic_upp
+  integer,dimension(8) :: flav
   
   call get_run_arguments()
 
@@ -48,35 +49,56 @@ program matrix_reweight
   if (.not.allocated(o)) allocate(o(next))
   allocate(hel(next))
   allocate(mass(next))
+  allocate(width(next))
   allocate(p(0:3,next))
   allocate(iper_test(1:next-1)) ! needed for 2qq
 
   mass(1:next)=0d0
+
+!  mass(1:2)= 0d0
+!  mass(3:4)= 173.d0
+!  mass(5)  = 0d0
+!  width(1:2)= 0d0
+!  width(3:4)= 1.4915d0
+!  width(5)  = 0d0
+
+
   call create_run_tag_and_open_files()
 
   call cpu_time(tBefore)
 
   if (.not.allocated(part)) allocate(part(1:next))
+  if (.not.allocated(part_sf)) allocate(part_sf(1:next))
+  if (.not.allocated(orig_part)) allocate(orig_part(1:next))
   if (.not.allocated(temp_part)) allocate(temp_part(1:next))
   call read_event(11,done)
   rewind(11)
 
   allocate(amps((next-2)*(next-2))) 
-  temp_part=part
-  write(*,*) 'INIT FOR it=1 ...............................'
+  orig_part(:)=part(:)
   it = 1
-  call amps(1)%init(2,next,temp_part,o,it)
-  write(*,*) 'done with it 1'
+
+  ! counting of quark flavours in process
+  call fill_quark_info()
+
+  call define_symm_2qq(next,part,1)
+  write(*,*) 'GOING IN ORIG AND PART amps 1'
+  write(*,*) orig_part
+  write(*,*) part
+  call amps(1)%init(2,next,orig_part,part,mass,width,o,it)
   col_acc=20
-  call amps(1)%init_col2(next,temp_part,o,it,col_acc)
+  call amps(1)%init_col2(next,orig_part,o,it,col_acc)
+
 
   if (amps(1)%n_qqbar.eq.2) then
       do i=1,1  ! remaining amps for type-1
-         write(*,*) 'INIT FOR it=2 ...............................'
          it = it + 1
-         call amps(it)%init(2,next,temp_part,o,it)
+         write(*,*) 'GOING IN ORIG AND PART amps 2'
+         write(*,*) orig_part
+         write(*,*) part
+         call amps(2)%init(2,next,orig_part,part,mass,width,o,it)
          col_acc=20
-         call amps(it)%init_col2(next,temp_part,o,it,col_acc)
+         call amps(2)%init_col2(next,orig_part,o,it,col_acc)
       enddo
       !do i=2,next-4+1 ! amps for type-2
       !   it = it + 1
@@ -86,6 +108,18 @@ program matrix_reweight
       !enddo
   endif
 
+  if (amps(1)%n_qqbar.eq.2.and.amps(1)%same_flav) then
+    part_sf(:)=orig_part(:)
+    call define_symm_2qq(next,part_sf,2)
+    it = 2
+    call amps(3)%init(2,next,orig_part,part_sf,mass,width,o,it)
+    col_acc=20
+    call amps(3)%init_col2(next,part_sf,o,it,col_acc)
+    it = it - 1
+    call amps(4)%init(2,next,orig_part,part_sf,mass,width,o,it)
+    col_acc=20
+    call amps(4)%init_col2(next,part_sf,o,it,col_acc)
+  endif
 
   if (color_flow) then
         do i=2,2 ! TV: only single external U(1) for now!
@@ -103,7 +137,7 @@ program matrix_reweight
            endif           
            enddo
            it = 0! dummy
-          call amps(i+k-1)%init(2,next,temp_part,o,it)
+          call amps(i+k-1)%init(2,next,orig_part,temp_part,mass,width,o,it)
           col_acc=20
           call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
          enddo
@@ -130,15 +164,22 @@ program matrix_reweight
         endif
      enddo
 
-
-     call amps(1)%evaluate(next,p,ihel,part)
+     call amps(1)%evaluate(next,p,mass,width,ihel,part)
      if (amps(1)%n_qqbar.eq.2) then
-        call amps(2)%evaluate(next,p,ihel,part)
+        call amps(2)%evaluate(next,p,mass,width,ihel,part)
+        if (amps(1)%same_flav) then
+          call amps(3)%evaluate(next,p,mass,width,ihel,part)
+          call amps(4)%evaluate(next,p,mass,width,ihel,part)
+          amps(1)%amps(:)=amps(1)%amps(:)+(1d0/3d0)*amps(3)%amps(:)
+          amps(2)%amps(:)=(1d0/3d0)*amps(2)%amps(:)+amps(4)%amps(:)
+        endif
      endif
+
+
      if (color_flow) then
        do i=2,2
         do k=1,next-2
-         call amps(i+k-1)%evaluate(next,p,ihel,part)
+         call amps(i+k-1)%evaluate(next,p,mass,width,ihel,part)
         enddo
        enddo
      endif
@@ -146,8 +187,9 @@ program matrix_reweight
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
+
+!!! ###########################################     
      do iacc=1,3 ! LC, NLC and full colour
-        !write(*,*) '*******************    iacc',iacc
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
         if (amps(1)%n_qqbar.eq.0) then
@@ -221,11 +263,10 @@ program matrix_reweight
            enddo
 
 
-        elseif (amps(1)%n_qqbar.eq.2) then
+        elseif (amps(1)%n_qqbar.eq.2.and..not.amps(1)%same_flav) then
            do it=1,2
-              !write(*,*) 'IT',it
            do irow=1,amps(it)%nColOrd
-              !write(*,*) 'IROW',irow
+              if (next.ge.5) then
               iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow)] !
               do i=1,next-1
                 if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
@@ -236,10 +277,55 @@ program matrix_reweight
                 endif
               enddo
               gi_iperm = gi + 1
-              !write(*,*) 'gi_perm',gi_iperm
+              else
+                gi_iperm=1
+              endif
+              if (next.ge.5) then
+                if (irow.ge.2) then
+                  iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow-1)] !
+                  do i=1,next-1
+                   if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
+                     if (i.ne.1) then
+                       gi = i - 2
+                       exit
+                     endif
+                    endif
+                  enddo
+                  gi_prev = gi + 1
+                else
+                  gi_prev = 1
+                endif
+              else
+                 gi_prev=1
+              endif
+              amp_col_c=(0d0,0d0)
+              do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
+                 amp2_c=(0d0,0d0)
+                 ic_low = amps(it)%row_index(irow-1,i,iacc,gi_prev)+1
+                 if(gi_prev.ne.gi_iperm) then
+                   ic_low = 1
+                 endif
+                 ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
+                 do ic = ic_low,ic_upp
+                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
+                    if (icol.le.amps(it)%nColOrd) then
+                        amp2_c=amp2_c+amps(1)%amps(icol)
+                    else
+                        icol = icol -amps(it)%nColOrd
+                        amp2_c=amp2_c+amps(2)%amps(icol)
+                    endif
+                 enddo
+                 amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc,gi_iperm)
+              enddo
+              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
+           enddo
+           enddo
 
-              if (irow.ge.1) then
-              iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow-1)] !
+        elseif (amps(1)%n_qqbar.eq.2.and.amps(1)%same_flav) then
+           do it=1,2
+           do irow=1,amps(it)%nColOrd
+              if (next.ge.5) then
+              iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow)] !
               do i=1,next-1
                 if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
                  if (i.ne.1) then
@@ -248,42 +334,49 @@ program matrix_reweight
                  endif
                 endif
               enddo
-              gi_prev = gi + 1
+              gi_iperm = gi + 1
               else
-              gi_prev = 0
+                gi_iperm=1
+              endif
+              if (next.ge.5) then
+                if (irow.ge.2) then
+                  iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow-1)] !
+                  do i=1,next-1
+                   if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
+                     if (i.ne.1) then
+                       gi = i - 2
+                       exit
+                     endif
+                    endif
+                  enddo
+                  gi_prev = gi + 1
+                else
+                  gi_prev = 1
+                endif
+              else
+                 gi_prev=1
               endif
 
               amp_col_c=(0d0,0d0)
-              
-              !write(*,*) 'n col vals',amps(it)%n_col_vals(iacc,gi_iperm)
-
-              do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
-                 !write(*,*) 'n i col val',i
+              do i=1,amps(it)%n_col_vals(iacc,gi_iperm)
                  amp2_c=(0d0,0d0)
                  ic_low = amps(it)%row_index(irow-1,i,iacc,gi_prev)+1
                  if(gi_prev.ne.gi_iperm) then
                    ic_low = 1
                  endif
                  ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
-                 !write(*,*) 'going between',ic_low,ic_upp
                  do ic = ic_low,ic_upp
-                    !write(*,*) 'ic ',ic
                     icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
-                    !write(*,*) 'icol',icol
                     if (icol.le.amps(it)%nColOrd) then
                         amp2_c=amp2_c+amps(1)%amps(icol)
-                        !write(*,*) 'adding from amp 1',icol
                     else
                         icol = icol -amps(it)%nColOrd
                         amp2_c=amp2_c+amps(2)%amps(icol)
-                        !write(*,*) 'adding from amp 2',icol
                     endif
                  enddo
                  amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc,gi_iperm)
-                 !write(*,*) 'all come with color',amps(it)%diff_col_vals(i,iacc,gi_iperm)
               enddo
               matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
-              !write(*,*) 'closing with row',irow
            enddo
            enddo
 
@@ -295,7 +388,11 @@ program matrix_reweight
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
 
-     !stop 22
+
+     !if (matrix2(1).eq.0d0) then
+     !   write(*,*) 'LC is zero!'
+     !   stop 11
+     !endif
 
      !write(*,*) 'matrix LC',matrix2(1)
      !write(*,*) 'matrix NLC',matrix2(2),matrix2(2)/matrix2(1)
@@ -317,6 +414,36 @@ program matrix_reweight
   write(*,*) 'Time spent in picking random colors',t_ran
   write(*,*) 'Total time:',t_all
 contains  
+
+  subroutine fill_quark_info()
+    implicit none
+    integer,dimension(8) :: flav
+    integer :: k
+
+    flav = 0
+    k = 1
+    amps%n_qqbar= 0
+    amps(1)%same_flav=.true.
+    do i=1,next
+     if (i.le.2) then
+        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+           flav(k) = abs(orig_part(i))
+           k= k+1
+           if (orig_part(i).lt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
+        endif
+     else
+        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+           flav(k) = abs(orig_part(i))
+           k= k+1
+           if (orig_part(i).gt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
+        endif
+     endif
+     enddo
+
+     if (any(flav(1:2*amps(1)%n_qqbar).ne.flav(1))) amps(1)%same_flav = .false.
+  end subroutine fill_quark_info
+
+
   subroutine get_run_arguments()
     use arguments
     implicit none
@@ -475,6 +602,55 @@ contains
     enddo
     write (iunit,*) '</event>'
   end subroutine write_event
+
+  subroutine define_symm_2qq(next,part,chan)
+    implicit none
+    integer :: next,chan
+    integer, dimension(next) :: part
+    integer :: i,j,sgn
+    logical :: first
+
+    write(*,*) 'checking for symm 2qq',amps(1)%same_flav
+    if (amps(1)%same_flav) then
+    
+    if (chan.eq.2) then
+     do i=1,next
+       if (part(i).lt.0) then
+          first=.true.
+          do j=i+1,next
+             if (i.le.2.and.j.le.2) sgn=-1
+             if (i.le.2.and.j.gt.2) sgn=+1
+             if (i.gt.2.and.j.gt.2) sgn=-1
+             if (part(j).eq.sgn*part(i).and..not.first) then
+                part(i) = part(i)-1
+                part(j) = sgn*(part(i))
+                exit
+             endif
+             if (part(j).eq.sgn*part(i).and.first) then
+                first = .false.
+             endif
+          enddo
+       endif
+     enddo
+    elseif (chan.eq.1) then
+      do i=1,next
+       if (abs(orig_part(i)).gt.0.and.abs(orig_part(i)).lt.6) then
+          do j=i+1,next
+           if (i.le.2.and.j.le.2) sgn=-1
+           if (i.le.2.and.j.gt.2) sgn=+1
+           if (i.gt.2.and.j.gt.2) sgn=-1
+           if (orig_part(j).eq.sgn*orig_part(i)) then
+                part(i) = part(i)-1
+                part(j) = sgn*(part(i))
+                exit
+           endif
+          enddo
+          exit
+        endif
+       enddo
+     endif
+   endif
+  end subroutine define_symm_2qq
 
 
 end program matrix_reweight

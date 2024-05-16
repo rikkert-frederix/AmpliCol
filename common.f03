@@ -5,6 +5,7 @@ module common
   integer :: next,nfin_glu,hel_picked
 
   type(amplitude_QCD) :: amps
+  type(amplitude_QCD) :: amps_sf
 
   real*8 :: amp2,weight
   real*8,dimension(:),allocatable :: amp2_hel
@@ -29,7 +30,7 @@ module common
   real*8,parameter :: pT_min     = 30d0
   real*8,parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
   real*8,parameter :: eta_max    = 5d0
-  real*8,parameter :: sqrt_s_min = -1d0
+  real*8,parameter :: sqrt_s_min =30d0
   
 end module common
 

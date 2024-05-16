@@ -322,7 +322,6 @@ contains
          if ( pp3.eq.rZero ) then
             chi(2) = dcmplx(-nh )
          else
-            stop 14
             chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
          endif
          wf(1) = sfomeg(1)*chi(im)

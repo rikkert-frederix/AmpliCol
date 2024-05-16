@@ -38,12 +38,12 @@ module amplitude_QCD_mod
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,part,mass,width,order,it)
+  subroutine init(this,imode,n,orig_part,part,mass,width,order,it)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
     integer::n,imode
-    integer,dimension(n)::part,order
+    integer,dimension(n)::part,orig_part,order
     real(kind=8),dimension(n) :: mass,width
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key
     real(kind=4) :: tAfter,tBefore
@@ -70,6 +70,8 @@ contains
     this%imode=imode
 
     call check_input_consistency()
+
+    write(*,*) 'DOING PART in amp_QCD',part
 
     if (this%imode.eq.2) then
        call define_canonical_color_order(it)
@@ -153,6 +155,8 @@ contains
     write (*,*) 'Total number of currents and vertices befroe filter',this%n_cur,this%n_vert
     call filter_dead_trees()
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
+
+    write(*,*) 'SET MAX CUR',max_cur
     if (this%imode.eq.1) call create_helicity_map()
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
@@ -369,8 +373,6 @@ contains
          endif
       enddo
 
-
-
       if (nq.eq.0) then
          this%nColOrd=factorial(nglu-1)
       elseif (nq.eq.1) then
@@ -389,7 +391,7 @@ contains
     subroutine check_input_consistency()
       implicit none
       integer,dimension(6) :: quark_flav
-      integer :: i,j,k
+      integer :: i,j,k,sgn
       integer,dimension(8) :: flav  ! fills the flavours of quarks it finds ( in abs)
       integer,dimension(n) :: temp_part
 
@@ -401,21 +403,21 @@ contains
       k = 1
       do i=1,n
          if (i.le.2) then
-            if (part(i).ne.21 .and. part(i).ne.22) then
-               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
-               flav(k) = abs(part(i))
+            if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+               quark_flav(abs(orig_part(i)))=quark_flav(abs(orig_part(i)))-sign(1,part(i))
+               flav(k) = abs(orig_part(i))
                k= k+1
-               if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
+               if (orig_part(i).lt.0) this%n_qqbar=this%n_qqbar+1
             endif
          else
-            if (part(i).ne.21 .and. part(i).ne.22) then
-               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
-               flav(k) = abs(part(i))
+            if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+               quark_flav(abs(orig_part(i)))=quark_flav(abs(orig_part(i)))+sign(1,orig_part(i))
+               flav(k) = abs(orig_part(i))
                k= k+1
-               if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
+               if (orig_part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
          endif
-         if (part(i).ne.21 .and. abs(part(i)).gt.6) this%n_sing=this%n_sing+1
+         if (orig_part(i).ne.21 .and. abs(orig_part(i)).gt.6) this%n_sing=this%n_sing+1
       enddo
 
       if (any(flav(1:2*this%n_qqbar).ne.flav(1))) this%same_flav = .false.
@@ -563,14 +565,19 @@ contains
                if (this%n_qqbar.eq.1) max_cur=max_cur+((n-isize-1)*2+1)
                if (this%n_qqbar.eq.2) then
                  if (n-isize.ge.4) then
-                   max_cur = max_cur + (((n-isize-1)*2+1)+((n-isize-3)*2+3))
-                 else
+                   max_cur = max_cur+(n-isize-3)*2+3 ! pure gluon currents
+                   max_cur=max_cur+3 ! gq + qq currents
+                 elseif (n-isize.ge.3) then
                    max_cur=max_cur+3
+                 elseif (n-isize.ge.2) then
+                   max_cur=max_cur+1
                  endif
                endif
             endif
          enddo
          max_cur=max_cur+1
+         max_cur=max_cur*3 ! to REMOVE
+
       elseif(this%imode.eq.2) then
          if (this%n_qqbar.eq.0) then
             ! for increasing isize:
@@ -635,6 +642,7 @@ contains
                max_cur=max_cur+ifact
             enddo
             max_cur=max_cur+1
+
          elseif (this%n_qqbar.eq.2) then
             max_cur=0
             do isize=1,n-1
@@ -1296,7 +1304,8 @@ contains
          enddo
       endif
      
-      if (this%n_qqbar.eq.2.and.quark_in_current(ip,isize).le.4) then ! one quark only-> OK
+      if (this%n_qqbar.eq.2) then
+      if (quark_in_current(ip,isize).le.4) then ! one quark only-> OK
          valid_current_order=.true.
          maxi=0
          mini=100
@@ -1316,7 +1325,7 @@ contains
          endif
          return
       endif
-      if (this%n_qqbar.eq.2.and.quark_in_current(ip,isize).ge.11.and.&
+      if (quark_in_current(ip,isize).ge.11.and.&
               quark_in_current(ip,isize).le.14) then ! three quarks -> OK
          valid_current_order=.true.
          maxi=0
@@ -1337,7 +1346,7 @@ contains
         endif
         return
       endif
-      if (this%n_qqbar.eq.2 .and.(quark_in_current(ip,isize).eq.5 &
+      if ((quark_in_current(ip,isize).eq.5 &
               .or.quark_in_current(ip,isize).eq.10))  then
          valid_current_order=.true.
          maxi=0
@@ -1359,9 +1368,10 @@ contains
       return
       endif
 
-      if (this%n_qqbar.eq.2.and.quark_in_current(ip,isize).eq.15) then ! four quarks -> OK
+      if (quark_in_current(ip,isize).eq.15) then ! four quarks -> OK
          valid_current_order=.true.
          return
+      endif
       endif
 
       ! This must be an all-gluon (or tensor) current. Here we take only one
@@ -1630,11 +1640,7 @@ contains
             if ((.not.use_symmetry) .or. valid_current_order(ips_in)) then
                if (any(ips_in(1:isize).eq.order(n))) cycle ! should not contain last closing particle 
                if (this%n_qqbar.eq.0 .or. &
-                  (this%n_qqbar.eq.1.and.all(ips_in(1:isize).ne.order(1))) .or.& 
-                 ((this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(1)))).and.&
-                  (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(2)))).and.&
-                  (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(3)))).and.&
-                  (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4)))))) then
+                  (this%n_qqbar.eq.1.and.all(ips_in(1:isize).ne.order(1)))) then
                   
                   key=key+1
                   call get_value(ips_in,0,val) ! add the gluon
@@ -1644,36 +1650,54 @@ contains
                      call get_value(ips_in,-1,val)
                      current_dict(key)=val
                   endif
+
+                elseif (this%n_qqbar.eq.2) then
+                     if ((this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(1)))).and.&
+                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(2)))).and.&
+                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(3)))).and.&
+                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4))))) then
+                        key=key+1
+                        call get_value(ips_in,0,val) ! add the gluon
+                        write(*,*) 'aded key 1',key
+                        current_dict(key)=val
+                        if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
+                           key=key+1
+                           call get_value(ips_in,-1,val)
+                           current_dict(key)=val
+                        endif
+                      endif
                endif
+
                if (this%n_qqbar.eq.1 .and. ips_in(1).eq.order(1)) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.1) then
+               if (this%n_qqbar.eq.2) then
+               if (quark_in_current(ips_in,isize).eq.1) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.3) then
+               if (quark_in_current(ips_in,isize).eq.3) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
-
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.2) then
+              
+               if (quark_in_current(ips_in,isize).eq.2) then
                   key=key+1
                   call get_value(ips_in,2,val) ! add a quark
                   current_dict(key)=val
                endif
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.4) then
+               if (quark_in_current(ips_in,isize).eq.4) then
                   key=key+1
                   call get_value(ips_in,2,val) ! add a quark
                   current_dict(key)=val
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.5) then
+               if (quark_in_current(ips_in,isize).eq.5) then
                   key=key+1
                   call get_value(ips_in,0,val) ! add the gluon
                   current_dict(key)=val
@@ -1683,7 +1707,7 @@ contains
                      current_dict(key)=val
                   endif
                endif
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.10) then
+               if (quark_in_current(ips_in,isize).eq.10) then
                   key=key+1
                   call get_value(ips_in,0,val) ! add the gluon
                   current_dict(key)=val
@@ -1694,31 +1718,31 @@ contains
                   endif
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.11) then
+               if (quark_in_current(ips_in,isize).eq.11) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.12) then
+               if (quark_in_current(ips_in,isize).eq.12) then
                   key=key+1
                   call get_value(ips_in,2,val) ! add a a-quark
                   current_dict(key)=val
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.13) then
+               if (quark_in_current(ips_in,isize).eq.13) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.14) then
+               if (quark_in_current(ips_in,isize).eq.14) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a a-quark
                   current_dict(key)=val
                endif
 
-               if (this%n_qqbar.eq.2 .and. quark_in_current(ips_in,isize).eq.15) then
+               if (quark_in_current(ips_in,isize).eq.15) then
                   key=key+1
                   call get_value(ips_in,0,val) ! add the gluon
                   current_dict(key)=val
@@ -1728,6 +1752,8 @@ contains
                      current_dict(key)=val
                   endif
                endif
+              endif
+
             endif
          enddo
          deallocate(ips_in)
@@ -1891,6 +1917,7 @@ contains
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip
     integer :: ifinal
 
+
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -1940,7 +1967,7 @@ contains
     endif
 
     call fill_momentum_array()
-    
+   
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
@@ -1973,7 +2000,7 @@ contains
                    call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih),this%current_list(ic)%mass)
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih),this%current_list(ic)%mass)
                 elseif (this%current_list(ic)%type.eq.22) then
                    if (use_real_gluons) then
@@ -2388,6 +2415,7 @@ contains
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
 
     write (*,*) 'Initialising colour matrix ...'
+    write(*,*) part
     if (this%n_qqbar.eq.0) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
@@ -2559,6 +2587,9 @@ contains
             ! TO CHANGE: also here put back factor 2
             !col_fac(1:3)=col_fac(1:3)*2d0
             !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+            write(*,*) 'COLOR FACTOR',iper
+            write(*,*) jper
+            write(*,*) col_fac
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
                do ival=1,n_vals(iacc,gi_iperm)
@@ -2654,10 +2685,13 @@ contains
                if (all(iper.eq.jper)) then
                   if (ui.eq.uj.and.ui.eq.1) then
                     col_fac(1)=dble(3**(n-2))
-                  elseif (ui.eq.uj.and.ui.eq.2) then
+                  elseif (ui.eq.uj.and.ui.eq.2.and..not.this%same_flav) then
                     col_fac(1)=dble(3**(n-4))
+                  elseif (ui.eq.uj.and.ui.eq.2.and.this%same_flav) then
+                    col_fac(1)=dble(3**(n-2))
                   endif
                endif
+               !write(*,*) col_fac(1)
             endif
          endif
          if (col_acc.ge.1) then ! NLC
@@ -2740,7 +2774,14 @@ contains
                   call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
                   if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
                   if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
+                  if (this%same_flav) then
+                     call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+                     if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+                     if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
+                  endif
             endif
+
+            write(*,*) col_fac(2)
          endif
          if (col_acc.ge.2) then
             call Tr_allocate(n)
@@ -2802,7 +2843,8 @@ contains
                       Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
                       Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
                       Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
-                      coef(1)=((-1d0/3d0)**2)*(1d0,0d0)
+                      coef(1)=(1d0,0d0)
+                      if (.not.this%same_flav) coef(1)=((-1d0/3d0)**2)*(1d0,0d0)
                       call Tr_full_simplify(col_factor)
                   elseif (ui.eq.2.and.uj.eq.1) then
                       Tr(0,0,0)=1 ! one term
@@ -2812,7 +2854,9 @@ contains
                       Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
                       Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
                       Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
-                      coef(1)=((-1d0/3d0))*(1d0,0d0)
+                      coef(1)=(1d0,0d0)
+                      if (.not.this%same_flav) coef(1)=((1d0/3d0))*(1d0,0d0)
+                      coef(1)=coef(1)*(-1d0)
                       call Tr_full_simplify(col_factor)
                   elseif (ui.eq.1.and.uj.eq.2) then
                       Tr(0,0,0)=1 ! one term
@@ -2822,10 +2866,13 @@ contains
                       Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
                       Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
                       Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
-                      coef(1)=((-1d0/3d0))*(1d0,0d0)
+                      coef(1)=(1d0,0d0)
+                      if (.not.this%same_flav) coef(1)=((1d0/3d0))*(1d0,0d0)
+                      coef(1)=coef(1)*(-1d0)
                       call Tr_full_simplify(col_factor)
                   endif
                   col_fac(3)=dble(col_factor)
+                  write(*,*) col_fac(3)
             endif
             call Tr_deallocate
          endif

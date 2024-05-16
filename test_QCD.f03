@@ -9,10 +9,10 @@ program test_QCD
   type(amplitude_QCD) :: amps_col
   type(amplitude_cache) :: ampplitudes_cache
   integer :: n
-  integer,dimension(:),allocatable :: part
+  integer,dimension(:,:),allocatable :: part
   real(kind=8),dimension(:),allocatable :: mass,width
   integer,dimension(:,:),allocatable :: helmap,order
-  integer :: i,ih,iden,iperm,jperm,nperm
+  integer :: i,ih,iden,iperm,jperm,nperm,nperm_upp
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8) :: amp2,t
   real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0,alphaEW=7.547E-003
@@ -24,19 +24,21 @@ program test_QCD
   integer :: gi,gj,ui,uj
   integer :: it ! quark order
   real(kind=8) :: top_mass
+  logical :: heavy_initial
 
-  n=6
+  n=4
   one_qq=.false.
   photon=.false.
 
   two_qq=.true.
   heavy=.false.
-  
-  same_flav=.false.
+
+  heavy_initial=.false.
+  same_flav=.true.
 
   single_perm = .false.
   
-  allocate(part(n))
+  allocate(part(n,2))
   allocate(mass(n))
   allocate(width(n))
 
@@ -76,28 +78,35 @@ program test_QCD
   allocate(p(0:3,n))
   
   if (n.eq.4) then
-     p(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-     p(0:3,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-     p(0:3,3)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
-     p(0:3,4)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
+     p(0:3,1)=(/500.0000d0,  0.00000d0,  0.0000000d0,  500.0000d0/)
+     p(0:3,2)=(/500.0000d0,  0.00000d0,  0.0000000d0, -500.0000d0/)
+     p(0:3,3)=(/500.0000d0,  110.9243d0,  444.8308d0, -199.5529d0/)
+     p(0:3,4)=(/500.0000d0, -110.9243d0, -444.8308d0,  199.5529d0/)
      if (heavy) then
-       p(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-       p(0:3,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-       p(0:3,3)=(/0.5000000E+03,  0.2252977E+03,  0.3101302E+03, -0.2704278E+03/)
-       p(0:3,4)=(/0.5000000E+03, -0.2252977E+03, -0.3101302E+03,  0.2704278E+03/)
+       p(0:3,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
+       p(0:3,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
+       p(0:3,3)=(/500.0000d0,  225.2977d0,   310.1302d0, -270.4278d0/)
+       p(0:3,4)=(/500.0000d0, -225.2977d0,  -310.1302d0,  270.4278d0/)
      endif
   elseif (n.eq.5) then
-     p(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-     p(0:3,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  -0.5000000E+03/)
-     p(0:3,3)=(/0.4959179E+03, -0.1999048E+02,  0.7981352E+02, -0.4890448E+03/)
-     p(0:3,4)=(/0.1328543E+03, -0.2648250E+02, -0.4416981E+02,  0.1224662E+03/)
-     p(0:3,5)=(/0.3712277E+03,  0.4647298E+02, -0.3564372E+02,  0.3665785E+03/)
+     p(0:3,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
+     p(0:3,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
+     p(0:3,3)=(/495.9179d0, -19.99048d0,  79.81352d0, -489.0448d0/)
+     p(0:3,4)=(/132.8543d0, -26.48250d0, -44.16981d0,  122.4662d0/)
+     p(0:3,5)=(/371.2277d0,  46.47298d0, -35.64372d0,  366.5785d0/)
      if (heavy) then
        p(0:3,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
        p(0:3,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
        p(0:3,3)=(/457.7589d0,  156.6052d0,   350.8682d0, -178.8310d0/)
        p(0:3,4)=(/378.3336d0, -16.94009d0, -321.3412d0,  98.28614d0/)
        p(0:3,5)=(/163.9075d0, -139.6651d0, -29.52695d0,  80.54490d0/)
+     endif
+     if (heavy_initial) then
+       p(0:3,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  469.1173d0/)
+       p(0:3,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -469.1173d0/)
+       p(0:3,3)=(/458.5788d0,  169.4532d0,  379.6537d0, -193.5025d0/)
+       p(0:3,4)=(/364.0666d0, -18.32987d0, -347.7043d0,  106.3496d0/)
+       p(0:3,5)=(/177.3546d0, -151.1234d0, -31.94936d0,  87.15287d0/)
      endif
   elseif (n.eq.6) then
      p(0:3,1)=(/500.0000000d0,   0.00000000d0,  0.0000000000d0,   500.0000000d0/)
@@ -109,46 +118,56 @@ program test_QCD
      if (heavy) then
        p(0:3,1)=(/500.0000000d0,   0.00000000d0,  0.0000000000d0,   500.0000000d0/)
        p(0:3,2)=(/500.0000000d0,   0.00000000d0,  0.0000000000d0,  -500.0000000d0/)
-       p(0:3,3)=(/0.1881691E+03, -0.1847334E+02,  0.3350204E+02, -0.6336362E+02/)
-       p(0:3,4)=(/0.3244180E+03, -0.8680496E+02, -0.2523779E+03,  0.6393995E+02/)
-       p(0:3,5)=(/0.1273518E+03, -0.8850291E+02, -0.8167273E+02,  0.4141610E+02/)
-       p(0:3,6)=(/0.3600611E+03,  0.1937812E+03,  0.3005486E+03, -0.4199242E+02/)
+       p(0:3,3)=(/188.1691d0, -18.47334d0,  33.50204d0, -63.36362d0/)
+       p(0:3,4)=(/324.4180d0, -86.80496d0, -252.3779d0,  63.93995d0/)
+       p(0:3,5)=(/127.3518d0, -88.50291d0, -81.67273d0,  41.41610d0/)
+       p(0:3,6)=(/360.0611d0,  193.7812d0,  300.5486d0, -41.99242d0/)
      endif
   endif
 
   if (n.eq.4) then
 
      if (one_qq) then
-         part(1:n)=[-1,1,21,21]
-         iden=3*3*2*2
-         order(1:n,1)= [1,3,4,2]
-         order(1:n,2)= [1,4,3,2]
-         iden=iden*2
+         nperm=2
+         part(1:n,1)=[21,21,1,-1]
+         iden=8*8*2*2
+         order(1:n,1)= [3,1,2,4]
+         order(1:n,2)= [3,2,1,4]
+         !iden=iden*2
          if (heavy) then
             nperm=2
-            part(1:n)=[21,21,6,-6]
+            part(1:n,1)=[21,21,6,-6]
             order(1:n,1)= [3,1,2,4]
             order(1:n,2)= [3,2,1,4]
             iden=8*8*2*2
+
+            top_mass=173d0
+
+            mass(1:n)=[0d0,0d0,top_mass,top_mass]
+            width(1:n)=[0d0,0d0,1.4915d0,1.4915d0]
          endif
      endif
 
      if (two_qq) then
          nperm=2
-         part(1:n)=[-1,1,-2,2] !  1 -1 -2 2
+         part(1:n,1)=[-1,2,-1,2] !  1 -1 -2 2
          iden=3*3*2*2
          order(1:n,1)=[1,3,4,2]
          order(1:n,2)=[1,2,4,3]
          if (same_flav) then
-            nperm=1
-            part(1:n)=[-1,1,-1,1] !  1 -1 1 -1
+            nperm=2
+            part(1:n,1)=[-2,2,-1,1] !  
             iden=3*3*2*2
             order(1:n,1)=[1,3,4,2]
             order(1:n,2)=[1,2,4,3]
+
+            part(1:n,2)=[-2,1,-2,1] !  
+            order(1:n,1+nperm)=[1,3,4,2]
+            order(1:n,2+nperm)=[1,2,4,3]
          endif
          if (heavy) then
             nperm=2
-            part(1:n)=[-1,1,6,-6] !  1 -1 1 -1
+            part(1:n,1)=[-1,1,6,-6] !  
             iden=3*3*2*2
             order(1:n,1)=[1,4,3,2]
             order(1:n,2)=[1,2,3,4]
@@ -158,13 +177,10 @@ program test_QCD
             mass(1:n)=[0d0,0d0,top_mass,top_mass]
             width(1:n)=[0d0,0d0,1.4915d0,1.4915d0]
          endif
-
      endif
 
-     
-
      if (photon) then
-       part(1:n)=[-1,21,-1,22]
+       part(1:n,1)=[-1,21,-1,22]
        iden=3*8*2*2
        order(1:n,1)= [1,2,4,3]
        if (.not. single_perm) then
@@ -172,19 +188,32 @@ program test_QCD
        endif
      endif
 
+     if (.not.one_qq.and..not.two_qq.and..not.photon) then
+     nperm=3*2
+     part(1:n,1)=[21,21,21,21]
+     iden=8*8*2*2
+     order(1:n,1)= [1,2,3,4]
+     order(1:n,2)= [1,2,4,3]
+     order(1:n,3)= [1,3,2,4]
+     order(1:n,4)= [1,3,4,2]
+     order(1:n,5)= [1,4,3,2]
+     order(1:n,6)= [1,4,2,3]
+     iden=iden*2
+     endif
+
   elseif (n.eq.5) then
 
      if (two_qq) then
          nperm=4
-         part(1:n)=[-1,1,2,-2,21] !    -1 1 2 -2 21
+         part(1:n,1)=[-1,1,-2,2,21] !    -1 1 2 -2 21
          iden=3*3*2*2
-         order(1:n,1)=[1,5,2,3,4]
-         order(1:n,2)=[1,2,3,5,4]
-         order(1:n,3)=[1,5,4,3,2]
-         order(1:n,4)=[1,4,3,5,2]
+         order(1:n,1)=[1,5,2,4,3]
+         order(1:n,2)=[1,2,4,5,3]
+         order(1:n,3)=[1,5,3,4,2]
+         order(1:n,4)=[1,3,4,5,2]
          if (same_flav) then
             nperm=4
-            part(1:n)=[-1,1,1,-1,21] !    1 -1 1 -1 21
+            part(1:n,1)=[-1,1,1,-1,21] !    1 -1 1 -1 21
             iden=3*3*2*2
             order(1:n,1)=[1,5,2,3,4]
             order(1:n,2)=[1,2,3,5,4]
@@ -193,7 +222,7 @@ program test_QCD
          endif
          if (heavy) then
            nperm=4
-           part(1:n)=[-1,1,6,-6,21] !    -1 1 2 -2 21
+           part(1:n,1)=[-1,1,6,-6,21] !    -1 1 2 -2 21
            iden=3*3*2*2
            order(1:n,4)=[1,5,2,3,4]
            order(1:n,3)=[1,2,3,5,4]
@@ -208,7 +237,7 @@ program test_QCD
      endif
 
      if (photon) then
-       part(1:n)=[-1,1,21,21,22]
+       part(1:n,1)=[-1,1,21,21,22]
        iden=3*3*2*2
        order(1:n,1)= [5,4,3,1,2]
        if (.not. single_perm) then
@@ -219,8 +248,8 @@ program test_QCD
 
     if (one_qq) then
        !nperm=1
-       part(1:n)=[-1,1,21,21,21]
-       iden=3*3*2*2 ! initial status colours and helicities/polarisation
+       part(1:n,1)=[21,21,1,-1,21]
+       iden=8*8*2*2 ! initial status colours and helicities/polarisation
        ! 1
        !order(1:n,1)=  [1,3,4,5,2]
        !if (.not.single_perm) then
@@ -254,34 +283,50 @@ program test_QCD
        !  order(1:n,5)=[5,1,2,4,3]
        !  order(1:n,6)=[5,1,2,3,4]
        ! 5
-       order(1:n,1)=  [2,1,3,4,5]
+       order(1:n,1)=  [3,1,2,5,4]
        if (.not.single_perm) then
-         order(1:n,2)=[2,1,3,5,4]
-         order(1:n,3)=[2,1,4,3,5]
-         order(1:n,4)=[2,1,4,5,3]
-         order(1:n,5)=[2,1,5,4,3]
-         order(1:n,6)=[2,1,5,3,4]
-         iden=iden*2*3  ! final state identical particles
+         order(1:n,2)=[3,1,5,2,4]
+         order(1:n,3)=[3,2,1,5,4]
+         order(1:n,4)=[3,2,5,1,4]
+         order(1:n,5)=[3,5,2,1,4]
+         order(1:n,6)=[3,5,1,2,4]
+         !iden=iden*2*3  ! final state identical particles
        endif
+
        if (heavy) then
          nperm=6
-         part(1:n)=[21,21,6,-6,21]
-         order(1:n,1)= [3,1,2,5,4]
-         order(1:n,2)= [3,1,5,2,4]
-         order(1:n,3)= [3,2,1,5,4]
-         order(1:n,4)= [3,2,5,1,4]
-         order(1:n,5)= [3,5,1,2,4]
-         order(1:n,6)= [3,5,2,1,4]
+         part(1:n,1)=[21,21,-6,6,21]
+         order(1:n,1)= [4,1,2,5,3]
+         order(1:n,2)= [4,1,5,2,3]
+         order(1:n,3)= [4,2,1,5,3]
+         order(1:n,4)= [4,2,5,1,3]
+         order(1:n,5)= [4,5,1,2,3]
+         order(1:n,6)= [4,5,2,1,3]
          iden=8*8*2*2
 
          mass(1:n)=[0d0,0d0,173d0,173d0,0d0]
          width(1:n)=[0d0,0d0,1.4915d0,1.4915d0,0d0]
+       endif
 
+       if (heavy_initial) then
+         nperm=6
+         part(1:n,1)=[6,-6,21,21,21]
+         order(1:n,1)= [2,3,4,5,1]
+         order(1:n,2)= [2,3,5,4,1]
+         order(1:n,3)= [2,4,3,5,1]
+         order(1:n,4)= [2,4,5,3,1]
+         order(1:n,5)= [2,5,3,4,1]
+         order(1:n,6)= [2,5,4,3,1]
+         iden=3*3*2*2
+         iden = iden*3*2
+
+         mass(1:n)=[173d0,173d0,0d0,0d0,0d0]
+         width(1:n)=[1.4915d0,1.4915d0,0d0,0d0,0d0]
        endif
      endif
 
      if ((.not.photon).and.(.not.one_qq).and.(.not.two_qq)) then
-       part(1:n)=[21,21,21,21,21]   
+       part(1:n,1)=[21,21,21,21,21]   
        iden=8*8*2*2  
        order(1:n,1)= [1,2,3,4,5]
        if (.not.single_perm) then
@@ -315,41 +360,42 @@ program test_QCD
 
    elseif (n.eq.6) then
      if (one_qq) then
-       part(1:n)=[-1,1,21,21,21,21]
-       iden=3*3*2*2 ! initial status colours and helicities/polarisation
-         order(1:n,1)=  [1,3,4,5,6,2]
+       nperm=24
+       part(1:n,1)=[21,21,1,-1,21,21]
+       iden=8*8*2*2 ! initial status colours and helicities/polarisation
+         order(1:n,1)=  [3,1,2,5,6,4]
        if (.not.single_perm) then
-         order(1:n,2)=  [1,3,4,6,5,2]
-         order(1:n,3)=  [1,3,5,4,6,2]
-         order(1:n,4)=  [1,3,5,6,4,2]
-         order(1:n,5)=  [1,3,6,4,5,2]
-         order(1:n,6)=  [1,3,6,5,4,2]
-         order(1:n,7)=  [1,4,3,5,6,2]
-         order(1:n,8)=  [1,4,3,6,5,2]
-         order(1:n,9)=  [1,4,5,3,6,2]
-         order(1:n,10)= [1,4,5,6,3,2]
-         order(1:n,11)= [1,4,6,3,5,2]
-         order(1:n,12)= [1,4,6,5,3,2]
-         order(1:n,13)= [1,5,3,4,6,2]
-         order(1:n,14)= [1,5,3,6,4,2]
-         order(1:n,15)= [1,5,4,3,6,2]
-         order(1:n,16)= [1,5,4,6,3,2]
-         order(1:n,17)= [1,5,6,3,4,2]
-         order(1:n,18)= [1,5,6,4,3,2]
-         order(1:n,19)= [1,6,3,5,4,2]
-         order(1:n,20)= [1,6,3,4,5,2]
-         order(1:n,21)= [1,6,5,3,4,2]
-         order(1:n,22)= [1,6,5,4,3,2]
-         order(1:n,23)= [1,6,4,3,5,2]
-         order(1:n,24)= [1,6,4,5,3,2]
+         order(1:n,2)=  [3,1,2,6,5,4]
+         order(1:n,3)=  [3,1,5,6,2,4]
+         order(1:n,4)=  [3,1,5,2,6,4]
+         order(1:n,5)=  [3,1,6,2,5,4]
+         order(1:n,6)=  [3,1,6,5,2,4]
+         order(1:n,7)=  [3,2,1,5,6,4]
+         order(1:n,8)=  [3,2,1,6,5,4]
+         order(1:n,9)=  [3,2,5,1,6,4]
+         order(1:n,10)= [3,2,5,6,1,4]
+         order(1:n,11)= [3,2,6,1,5,4]
+         order(1:n,12)= [3,2,6,5,1,4]
+         order(1:n,13)= [3,5,6,1,2,4]
+         order(1:n,14)= [3,5,1,6,2,4]
+         order(1:n,15)= [3,5,1,2,6,4]
+         order(1:n,16)= [3,5,2,6,1,4]
+         order(1:n,17)= [3,5,2,1,6,4]
+         order(1:n,18)= [3,5,6,2,1,4]
+         order(1:n,19)= [3,6,1,5,2,4]
+         order(1:n,20)= [3,6,1,2,5,4]
+         order(1:n,21)= [3,6,2,5,1,4]
+         order(1:n,22)= [3,6,2,1,5,4]
+         order(1:n,23)= [3,6,5,1,2,4]
+         order(1:n,24)= [3,6,5,2,1,4]
 
-         iden=iden*2*3*4  ! final state identical particles
+         iden=iden*2  ! final state identical particles
        endif
 
 
        if (heavy) then
          nperm=24
-         part(1:n)=[21,21,6,-6,21,21]
+         part(1:n,1)=[21,21,6,-6,21,21]
          order(1:n,1)= [3,1,2,5,6,4]
          order(1:n,2)= [3,1,5,2,6,4]
          order(1:n,3)= [3,2,1,5,6,4]
@@ -389,26 +435,26 @@ program test_QCD
 
      if (two_qq) then
          nperm=12
-         part(1:n)=[-1,1,2,-2,21,21] !    -1 1 2 -2 21
+         part(1:n,1)=[-1,1,-2,2,21,21] !    -1 1 2 -2 21
          iden=3*3*2*2
-         order(1:n,1)=[1,5,6,2,3,4]
-         order(1:n,2)=[1,6,5,2,3,4]
-         order(1:n,3)=[1,2,3,5,6,4]
-         order(1:n,4)=[1,2,3,6,5,4]
-         order(1:n,5)=[1,5,2,3,6,4]
-         order(1:n,6)=[1,6,2,3,5,4]
+         order(1:n,1)=[1,5,6,2,4,3]
+         order(1:n,2)=[1,6,5,2,4,3]
+         order(1:n,3)=[1,2,4,5,6,3]
+         order(1:n,4)=[1,2,4,6,5,3]
+         order(1:n,5)=[1,5,2,4,6,3]
+         order(1:n,6)=[1,6,2,4,5,3]
 
-         order(1:n,7)=[1,5,6,4,3,2]
-         order(1:n,8)=[1,6,5,4,3,2]
-         order(1:n,9)=[1,4,3,5,6,2]
-         order(1:n,10)=[1,4,3,6,5,2]
-         order(1:n,11)=[1,5,4,3,6,2]
-         order(1:n,12)=[1,6,4,3,5,2]
+         order(1:n,7)=[1,5,6,3,4,2]
+         order(1:n,8)=[1,6,5,3,4,2]
+         order(1:n,9)=[1,3,4,5,6,2]
+         order(1:n,10)=[1,3,4,6,5,2]
+         order(1:n,11)=[1,5,3,4,6,2]
+         order(1:n,12)=[1,6,3,4,5,2]
          iden=iden*2
 
          if (heavy) then
          nperm=12
-         part(1:n)=[-1,1,6,-6,21,21] !    -1 1 2 -2 21
+         part(1:n,1)=[-1,1,6,-6,21,21] !    -1 1 2 -2 21
          iden=3*3*2*2
          order(1:n,1)=[1,5,6,2,3,4]
          order(1:n,2)=[1,6,5,2,3,4]
@@ -434,29 +480,58 @@ program test_QCD
 
 
 
+
   endif
 
   it = 0 ! dummy
   if (single_perm) then
     call cpu_time(tBefore) 
-    call amps_col%init(2,n,part,mass,width,order(1:n,1),it)
+    call amps_col%init(2,n,part(:,1),part(:,1),mass,width,order(1:n,1),it)
     call cpu_time(tAfter)
     t_init = tAfter-tBefore
     call cpu_time(tBefore)
-    call amps_col%evaluate(n,p,mass,width,5,part)
+    call amps_col%evaluate(n,p,mass,width,5,part(:,1))
     call cpu_time(tAfter)
     t_eval = tAfter-tBefore
   else
-    do iperm=1,nperm
-     call cpu_time(tBefore)
-     call amps(iperm)%init(1,n,part,mass,width,order(1:n,iperm),it)
-     call cpu_time(tAfter)
-     t_init=tAfter-tBefore
-     call cpu_time(tBefore)
-     call amps(iperm)%evaluate(n,p,mass,width,0,part)
-     call cpu_time(tAfter)
-     t_eval=tAfter-tBefore
+    nperm_upp = nperm
+    if (same_flav) nperm_upp = nperm*2
+    do iperm=1,nperm_upp
+     write(*,*) 'IPERM',iperm
+     write(*,*) 'order(1:n,iperm)',order(1:n,iperm)
+     if (iperm.le.nperm) then
+       write(*,*) 'process',part(:,1)
+       call cpu_time(tBefore)
+       call amps(iperm)%init(1,n,part(:,1),part(:,1),mass,width,order(1:n,iperm),it)
+       call cpu_time(tAfter)
+       t_init=tAfter-tBefore
+       call cpu_time(tBefore)
+       call amps(iperm)%evaluate(n,p,mass,width,0,part(:,1))
+       call cpu_time(tAfter)
+       t_eval=tAfter-tBefore
+     elseif (iperm.gt.nperm) then
+       write(*,*) 'process',part(:,2)
+       call cpu_time(tBefore)
+       call amps(iperm)%init(1,n,part(:,2),part(:,2),mass,width,order(1:n,iperm),it)
+       call cpu_time(tAfter)
+       t_init=tAfter-tBefore
+       call cpu_time(tBefore)
+       call amps(iperm)%evaluate(n,p,mass,width,0,part(:,2))
+       call cpu_time(tAfter)
+       t_eval=tAfter-tBefore
+     endif
     enddo
+    if (same_flav) then
+       do ih=1,2**n
+          do iperm=1,nperm
+            if (iperm.le.nperm/2) then
+              amps(iperm)%amps(ih) = amps(iperm)%amps(ih) + (1d0/3d0)*amps(iperm+nperm)%amps(ih)
+            elseif (iperm.gt.nperm/2) then
+              amps(iperm)%amps(ih) = (1d0/3d0)*amps(iperm)%amps(ih) + amps(iperm+nperm)%amps(ih)
+            endif
+          enddo
+       enddo
+    endif
   endif
 
 !  do i = 1, amps_col%nColOrd
@@ -494,26 +569,26 @@ program test_QCD
   if (.not.single_perm)then
     do ih=1,2**n
      t=0d0
-     !write(*,*) '**********************'
-     !write(*,*) 'ih',ih
-     !do i=1,n
-     !   write(*,*) 'particle number',i
-     !   if (btest(ih-1,i-1)) then
-     !      write(*,*) 'hel +1'
-     !   else
-     !      write(*,*) 'hel -1'
-     !   endif
-     !enddo
+     write(*,*) '**********************'
+     write(*,*) 'ih',ih
+     do i=1,n
+        !write(*,*) 'particle number',i
+        if (btest(ih-1,i-1)) then
+           write(*,*) 'hel +1'
+        else
+           write(*,*) 'hel -1'
+        endif
+     enddo
+     write(*,*) amps(1)%amps(ih)
+     write(*,*) amps(2)%amps(ih)
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
            !write(*,*) 'added',iperm,jperm
            !write(*,*) 'helmap: ',amps(iperm)%helmap(ih)
            ztemp=ztemp+amps(iperm)%amps(ih) *col_fac(iperm,jperm)*(4*pi*alphas)**(n-2)
-      !     write(*,*) amps(1)%amps(ih)
-      !     write(*,*) amps(2)%amps(ih)
       !     write(*,*) '****'
-           !write(*,*) 'color',col_fac(iperm,jperm)
+           write(*,*) 'color',col_fac(iperm,jperm)
            !write(*,*) 'amp for iperm',iperm
         !write(*,*) amps(iperm)%amps(ih)*(4*pi*alphas)**(n-2)*col_fac(iperm,jperm)*dconjg(amps(jperm)%amps(ih))
         enddo
@@ -522,7 +597,7 @@ program test_QCD
         !write(*,*) 'closing with amp',dconjg(amps(jperm)%amps(ih))
      enddo
      amp2=amp2+t
-     !write(*,*) 'T',T
+     write(*,*) 'T',T
     enddo
   else
     t=0d0
@@ -539,9 +614,9 @@ program test_QCD
 
   if (photon) then
   do i=1,n
-     if (abs(part(i)).le.6) then
-        if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
-        if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
+     if (abs(part(i,1)).le.6) then
+        if (mod(abs(part(i,1)),2).eq.0) Q=2d0/3d0
+        if (mod(abs(part(i,1)),2).eq.1) Q=-1d0/3d0
      endif
   enddo
   endif
@@ -605,7 +680,6 @@ contains
     call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
     color_factor_one_qq=dble(col_factor)
 
-    !if (iperm.ne.jperm) color_factor_one_qq=0d0
   end function color_factor_one_qq
 
   double precision function color_factor_gluons(iperm,jperm)
@@ -666,7 +740,7 @@ contains
     dorder_j(1:n)=order(1:n,jperm)
     dorder_j(n+1:2*n)=order(1:n,jperm)
 
-    temp_part = part
+    temp_part(:) = part(:,1)
     do i=1,n
        if ((i.le.2).and.(abs(temp_part(i)).le.6)) then
                temp_part(i) = -temp_part(i)
@@ -745,7 +819,7 @@ contains
        color_factor_two_qq=dble(col_factor)
     endif
 
-    if (same_flav) color_factor_two_qq = ((1d0+1d0/3d0)**2)*color_factor_two_qq
+    !if (same_flav) color_factor_two_qq = ((1d0+1d0/3d0)**2)*color_factor_two_qq
 
   end function color_factor_two_qq
   
@@ -755,7 +829,7 @@ contains
     integer :: i,q_i,q_j
     integer,dimension(n) :: temp_part
 
-    temp_part = part
+    temp_part(:) = part(:,1)
     do i=1,n
        if ((i.le.2).and.(abs(temp_part(i)).le.6)) then
                temp_part(i) = -temp_part(i)

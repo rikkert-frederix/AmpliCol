@@ -9,8 +9,8 @@ program matrix_integrate_QCD
   integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
   integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
-  integer(kind=4),dimension(:),allocatable :: o,part
-  real(kind=8),dimension(:),allocatable :: mass
+  integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf
+  real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
   character(len=80) :: filename
@@ -24,11 +24,12 @@ program matrix_integrate_QCD
   call create_run_tag()
 
   allocate(mass(next))
+  allocate(width(next))
 
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-10000   ! Number of events to generate. (If negative, start
+  ncalls0=-100000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -49,18 +50,19 @@ program matrix_integrate_QCD
   s_cut(1)=max(sqrt_s_min,pt_min)**2
   s_cut(2)=max(sqrt_s_min**2,pt_min**2*(1d0-cos(DRjj_min)))
 
-  mass(1:next)=0d0
-
-!  mass(1:2) = 0d0
-!  mass(3:4) = 175d0
-!  mass(5:6) = 0d0
-
-  if (include_pdf) then
-     ndim=ndim+2
-     call PDF_initialise
-     call set_ipdgs_for_PDF(ipdgs)
+  if (sqrt_s_min.gt.0d0) then
+     s_cut(1:2)=sqrt_s_min**2
   endif
-  
+
+!  mass(1:next)=0d0
+!  width(1:next)=0d0
+!  mass(1:2) = 0d0
+!  mass(3:4) = 173d0
+!  mass(5) = 0d0
+!  width(1:2) = 0d0
+!  width(3:4) = 1.491500d0
+!  width(5) = 0d0
+
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
@@ -79,15 +81,40 @@ program matrix_integrate_QCD
   ! colour factors, etc.)
   call cpu_time(tBefore)
   it = 0 ! dummy
-  call amps%init(1,next,part,o,it)
+  orig_part(:)=part(:)
+
+  ! counting of quark flavours in process
+  call fill_quark_info()
+
+  call define_symm_2qq(next,part,1)
+  call amps%init(1,next,orig_part,part,mass,width,o,it)
+
+  if (include_pdf) then
+     ndim=ndim+2
+     call PDF_initialise
+     call set_ipdgs_for_PDF(ipdgs)
+  endif
+
+  if (amps%same_flav) then
+    part_sf(:) = orig_part(:)
+    call define_symm_2qq(next,part_sf,2)
+    call amps_sf%init(1,next,orig_part,part_sf,mass,width,o,it)
+  endif
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
+
+  if (include_pdf) then
+     ndim=ndim+2
+     call PDF_initialise
+     call set_ipdgs_for_PDF(ipdgs)
+  endif
 
   ! Compute the leading colour factor
   if (amps%n_qqbar.eq.2) then
       if (abs(part(o(1))).ne.abs(part(o(next)))) it = 2
   endif
   call compute_LC_colour_factor(col_fac,it)
+  write(*,*) 'LC col fac',col_fac
 
   ! number of helicities to sum over
   nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
@@ -177,18 +204,32 @@ contains
 
     ! compute amplitudes
     call cpu_time(tBefore)
-    call amps%evaluate(next,p,0,part)
+
+    call amps%evaluate(next,p,mass,width,0,part)
+
+    if (amps%same_flav) then
+      call amps_sf%evaluate(next,p,mass,width,0,part_sf)
+      do ih=1,nhel
+        if (it.eq.2) then
+           amps%amps(ih)=amps%amps(ih)+(1d0/3d0)*amps_sf%amps(ih)
+        else
+           amps%amps(ih)=(1d0/3d0)*amps%amps(ih)+amps_sf%amps(ih)
+        endif
+      enddo
+    endif
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
     amp2_hel(1:nhel)=0d0
     do ih=1,nhel
+       !write(*,*) 'ih',ih
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
           amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
        else
           amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
        endif
+       !write(*,*) amps%amps(ih)
     enddo
     amp2=sum(amp2_hel(1:nhel))
 
@@ -254,6 +295,7 @@ contains
     endif
 
     ! pass the result to the mint module
+
     f1(1)=abs(val)
     f1(2)=val
 
@@ -326,6 +368,81 @@ contains
        endif
     enddo
   end function pass_cuts
+
+  subroutine define_symm_2qq(next,part,chan)
+    implicit none
+    integer :: next,chan
+    integer, dimension(next) :: part
+    integer :: i,j,sgn
+    logical :: first
+
+    if (amps%same_flav) then
+    if (chan.eq.2) then
+     do i=1,next
+       if (part(i).lt.0) then
+          first=.true.
+          do j=i+1,next
+             if (i.le.2.and.j.le.2) sgn=-1
+             if (i.le.2.and.j.gt.2) sgn=+1
+             if (i.gt.2.and.j.gt.2) sgn=-1
+             if (part(j).eq.sgn*part(i).and..not.first) then
+                part(i) = part(i)-1
+                part(j) = sgn*(part(i))
+                exit
+             endif
+             if (part(j).eq.sgn*part(i).and.first) then
+                first = .false.
+             endif
+          enddo
+       endif
+     enddo
+    elseif (chan.eq.1) then
+      do i=1,next
+       if (abs(orig_part(i)).gt.0.and.abs(orig_part(i)).lt.6) then
+          do j=i+1,next
+           if (i.le.2.and.j.le.2) sgn=-1
+           if (i.le.2.and.j.gt.2) sgn=+1
+           if (i.gt.2.and.j.gt.2) sgn=-1
+           if (orig_part(j).eq.sgn*orig_part(i)) then
+                part(i) = part(i)-1
+                part(j) = sgn*(part(i))
+                exit
+           endif
+          enddo
+          exit
+        endif
+       enddo
+     endif
+   endif
+  end subroutine define_symm_2qq
+
+  subroutine fill_quark_info()
+    implicit none
+    integer,dimension(8) :: flav
+    integer :: k
+
+    flav = 0
+    k = 1
+    amps%n_qqbar= 0
+    amps%same_flav=.true.
+    do i=1,next
+     if (i.le.2) then
+        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+           flav(k) = abs(orig_part(i))
+           k= k+1
+           if (orig_part(i).lt.0) amps%n_qqbar=amps%n_qqbar+1
+        endif
+     else
+        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+           flav(k) = abs(orig_part(i))
+           k= k+1
+           if (orig_part(i).gt.0) amps%n_qqbar=amps%n_qqbar+1
+        endif
+     endif
+     enddo
+
+     if (any(flav(1:2*amps%n_qqbar).ne.flav(1))) amps%same_flav = .false.
+  end subroutine fill_quark_info
   
   real*8 function pt(p)
     ! transverse momentum of 'p'
@@ -375,9 +492,9 @@ contains
     write (iunit,'(100i3)') o(1:next)
     do i=1,next
        if (i.le.2) then
-          write (iunit,*) part(i) ,p(1:3,i),p(0,i)
+          write (iunit,*) orig_part(i) ,p(1:3,i),p(0,i)
        else
-          write (iunit,*) part(i) ,p(1:3,i),p(0,i)
+          write (iunit,*) orig_part(i) ,p(1:3,i),p(0,i)
        endif
     enddo
     write (iunit,*) '</event>'
@@ -429,6 +546,8 @@ contains
           if (i.eq.3) then
              read(argv,*) next
              allocate(part(1:next))
+             allocate(orig_part(1:next))
+             allocate(part_sf(1:next))
              allocate(o(1:next))
           endif
 
@@ -611,7 +730,7 @@ contains
             'colour factor is not an integer',ifac,fac
        stop 1
     endif
-    if (it.eq.2) then
+    if (it.eq.2.and..not.amps%same_flav) then
         ifac=(ifac-2) 
     endif
     col_fac=3**ifac
@@ -648,24 +767,24 @@ contains
     implicit none
     logical,dimension(-6:7,2) :: ipdgs
     ipdgs(-6:7,1:2)=.false.
-    if (part(1).eq.21) then
+    if (orig_part(1).eq.21) then
        ipdgs(0,1)=.true.    ! gluon is '0'
-    elseif (part(1).eq.22) then
+    elseif (orig_part(1).eq.22) then
        ipdgs(7,1)=.true.    ! photon is '7'
-    elseif (abs(part(1)).ge.1 .and. abs(part(1)).le.6) then
-       ipdgs(part(1),1)=.true.
+    elseif (abs(orig_part(1)).ge.1 .and. abs(orig_part(1)).le.6) then
+       ipdgs(orig_part(1),1)=.true.
     else
-       write (*,*) 'unknown PDF 1',part(1)
+       write (*,*) 'unknown PDF 1',orig_part(1)
        stop 1
     endif
-    if (part(2).eq.21) then
+    if (orig_part(2).eq.21) then
        ipdgs(0,2)=.true.    ! gluon is '0'
-    elseif (part(2).eq.22) then
+    elseif (orig_part(2).eq.22) then
        ipdgs(7,2)=.true.    ! photon is '7'
-    elseif (abs(part(2)).ge.1 .and. abs(part(2)).le.6) then
-       ipdgs(part(2),2)=.true.
+    elseif (abs(orig_part(2)).ge.1 .and. abs(orig_part(2)).le.6) then
+       ipdgs(orig_part(2),2)=.true.
     else
-       write (*,*) 'unknown PDF 2',part(2)
+       write (*,*) 'unknown PDF 2',orig_part(2)
        stop 1
     endif
   end subroutine set_ipdgs_for_PDF
@@ -677,21 +796,22 @@ contains
     real*8, dimension(-6:7,2) :: PDF
     ! Include the PDFs
     xmu_fac=91.188d0 ! factorisation scale
+
     call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
     call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
-    if (part(1).eq.21) then
+    if (orig_part(1).eq.21) then
        val=val*PDF(0,1)
-    elseif (part(1).eq.22) then
+    elseif (orig_part(1).eq.22) then
        val=val*PDF(7,1)
     else
-       val=val*PDF(part(1),1)
+       val=val*PDF(orig_part(1),1)
     endif
-    if (part(2).eq.21) then
+    if (orig_part(2).eq.21) then
        val=val*PDF(0,2)
-    elseif (part(2).eq.22) then
+    elseif (orig_part(2).eq.22) then
        val=val*PDF(7,2)
     else
-       val=val*PDF(part(2),2)
+       val=val*PDF(orig_part(2),2)
     endif
   end subroutine multiply_by_PDF_value
   
@@ -727,7 +847,7 @@ contains
        if (c_o*2.eq.(ngl)) then
           sym_fac=factorial8(ngl)
        else
-          sym_fac=2*factorial8(ngl)
+          sym_fac=factorial8(ngl) !2*factorial8(ngl)  ! TO CHANGE: put back factor 2 here
        endif
     elseif (nquarks.eq.2) then
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
