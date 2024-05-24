@@ -124,16 +124,21 @@ process='u ux > g g'   # TO CHANGE
 #integrator = raw_input('Type in integrator to use (haag, genpt or gen23):\n' )
 integrator = 'haag'    # TO CHANGE
 
+print('Process:')
+print(process)
 job = Integrator(process, integrator)
 n = job.convert_proc_line_to_pdg()
 job.set_integrator()
 job.get_all_color_orders()
+print(job.color_order_list)
 job.prompt_on_co()
+color_order=[]
 
 if (job.co_pick != -1):
-    color_order = job.color_order_list[job.co_pick-1]
+    color_order.append(job.color_order_list[job.co_pick-1])
 elif (job.co_pick == -1):
     job.get_ind_co()
+    color_order = job.color_order_list
 
 #nm = input('Pick mode 0,1 or 2 (or -1 for all):\n')
 nm = -1  # TO CHANGE
@@ -146,7 +151,11 @@ elif nm==1:
 elif nm==2:
     modes = ['2']
 
-for mode in modes:
+for col_ord in color_order:
+
+ print(col_ord)
+
+ for mode in modes:
     processes=[]
     program='./matrix_integrate_QCD'
     output_file='log_'+str(job.int)+'_'+mode+'_'+str(n)+'_'
@@ -154,7 +163,7 @@ for mode in modes:
     for r in job.proc:
         args.append(str(r))
         output_file=output_file+str(r)+'_'
-    for r in color_order:
+    for r in col_ord:
         args.append(str(r))
         output_file=output_file+str(r)+'_'
     output_file = output_file+'.txt'
@@ -170,6 +179,8 @@ for mode in modes:
     for process in processes:
         process.join()
 
+print('Finished generating all channels for LC events.')
+print('####################\n')
 to_rwgt = raw_input('Would you like to reweight to NLC and FC? (y/n):\n')
 
 if to_rwgt == 'y':
@@ -200,5 +211,5 @@ if to_rwgt == 'y':
             process.join()
     print('End of reweight.')
 else:
-    print('End of run.')
+    print('No reweighting done.\n Note: the events are only LC accurate!\nEnd of run.')
 
