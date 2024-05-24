@@ -2183,12 +2183,6 @@ contains
                     endif
 
                  elseif(this%interaction_list(iv)%type.eq.4) then
-                    if (this%interaction_list(iv)%singlet_move.eq.1) then
-                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
-                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
-                       write (*,*) 'Cannot do more than one singlet move at once'
-                       stop 1
-                    endif
                     if (use_real_gluons) then
                        call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
@@ -2201,12 +2195,6 @@ contains
                     endif
 
                  elseif(this%interaction_list(iv)%type.eq.5) then
-                    if (this%interaction_list(iv)%singlet_move.eq.1) then
-                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
-                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
-                       write (*,*) 'Cannot do more than one singlet move at once'
-                       stop 1
-                    endif
                     call GluonAquarktoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                            this%interaction_list(iv)%val_c(1:4,ih))
@@ -2227,12 +2215,6 @@ contains
                     endif
 
                  elseif(this%interaction_list(iv)%type.eq.7) then
-                    if (this%interaction_list(iv)%singlet_move.eq.1) then
-                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
-                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
-                       write (*,*) 'Cannot do more than one singlet move at once'
-                       stop 1
-                    endif
                     call AquarkGluontoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                           this%interaction_list(iv)%val_c(1:4,ih))
@@ -2240,23 +2222,11 @@ contains
 
 
                 elseif(this%interaction_list(iv)%type.eq.8) then
-                        if (this%interaction_list(iv)%singlet_move.eq.1) then
-                          call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
-                       elseif (this%interaction_list(iv)%singlet_move.gt.1) then
-                         write (*,*) 'Cannot do more than one singlet move at once'
-                         stop 1
-                       endif
                         call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
 
                 elseif(this%interaction_list(iv)%type.eq.9) then
-                       if (this%interaction_list(iv)%singlet_move.eq.1) then
-                         call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
-                       elseif (this%interaction_list(iv)%singlet_move.gt.1) then
-                         write (*,*) 'Cannot do more than one singlet move at once'
-                         stop 1
-                       endif
                        call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
