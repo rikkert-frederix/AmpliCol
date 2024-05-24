@@ -813,8 +813,8 @@ contains
     endif
     
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-    if (popcnt(ir).eq.1 .and. popcnt(i+ir).eq.next-2) then
-       ! This is a first-step t-channel generation
+    if (popcnt(i+ir).eq.next-2) then
+       ! This is a first-step t-channel generation (i.e., evaluated in partonic C.o.M frame)
        Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0
        Ei =(sqrtshat+(invm(i)-invm(ir))/sqrtshat)/2d0
        pzmax=min(sqrt(Eir**2-ETmin(ir)**2),sqrt(Ei**2-ETmin(i)**2)) ! two conditions since i and ir are back-to-back
