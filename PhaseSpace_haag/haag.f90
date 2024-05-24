@@ -15,7 +15,7 @@ module haag
   integer(kind=4) :: ix, ndim
 
   integer(kind=4),dimension(:),allocatable :: order
-  real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x
+  real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x,sigma_ij
   real(kind=8),dimension(:,:),allocatable :: pp
   integer(kind=4),dimension(:,:),allocatable :: sets
   logical :: includePDF
@@ -43,7 +43,6 @@ contains
     real(kind=8),intent(in) :: s_cut(2)
     real(kind=8),dimension(n),intent(in) :: m
     logical,intent(in) :: s_chan
-    ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
     sqrtshat=sqrtsh
@@ -62,6 +61,7 @@ contains
     allocate(invm(maskr(next)))
     allocate(invm_min(maskr(next)))
     allocate(invm_max(maskr(next)))
+    allocate(sigma_ij(maskr(next)))
     allocate(pp(0:3,0:maskr(next)))
     allocate(masses(next))
     pp(0:3,0:maskr(next))=0d0
@@ -71,15 +71,18 @@ contains
     ! masses of external particles
     do i=1,n
        if ((i.eq.1 .or. i.eq.2) .and. m(i).ne.0d0) then
-          write (*,*) 'ERROR in gen23_init() -- ', &
+          write (*,*) 'ERROR in haag_init() -- ', &
                & 'incoming particles should be massless'
           write (*,*) m
           stop 1
        endif
        invm(ibset(0,i-1))=m(i)**2
     enddo
+    
+    call setup_PS_cuts(s_cut)
     masses=m
     tot_mass=sum(masses)
+
     call get_approx_s0()
 
     ! Bring the colour order to a canonical order (first in the list
@@ -95,9 +98,11 @@ contains
     process=part
     nquarks=0
     do i=1,next
+       ! Count number of quarks
        if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
            nquarks=nquarks+1
        endif
+       ! charge conjugate process to all outgoing particles
        if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
           process(i)=-process(i)
        endif
@@ -121,11 +126,8 @@ contains
        sets(0,1)=ibset(sets(0,1),order(i)-1)
     enddo
 
-    if (verbose) then
-       write (*,*) "set 1:",sets(:,1)
-       write (*,*) "set 2:",sets(:,2)
-    endif
-    !stop 1
+    write (*,*) "set 1:",sets(:,1)
+    write (*,*) "set 2:",sets(:,2)
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
     endif
@@ -156,22 +158,39 @@ contains
     integer(kind=4) :: i,j,npart
     invm_min=0d0
     invm_max=0d0
+    sigma_ij=0d0
     do i=1,maskr(next)
        npart=popcnt(i)
-       if (btest(i,0).and.btest(i,1)) then
+       if (btest(i,0).and.btest(i,1)) then ! both initial particles
           invm_min(i)=0d0
-       elseif (btest(i,0).or.btest(i,1)) then
-          if (npart.eq.2 .or. npart.eq.next-2) then
-             invm_max(i)=-s_cut(1)
+       elseif (btest(i,0).or.btest(i,1)) then  ! one initial particle
+          if (npart.eq.2) then
+            do j=0,next-1
+             if (btest(i,j)) then              
+                   invm_max(i)=-s_cut(1) + invm(ibset(0,j))
+             endif
+            enddo
+          elseif (npart.eq.next-2) then
+            do j=0,next-1
+             if (.not.btest(i,j)) then
+                   invm_max(i)=-s_cut(1) + invm(ibset(0,j))
+             endif
+            enddo
           endif
-       else
+       else      ! all final particles
           mass=0d0
           do j=0,next-1
              if (btest(i,j)) then
                 mass=mass+sqrt(invm(ibset(0,j)))
+                if (npart.eq.2) then
+                   sigma_ij(i) = sigma_ij(i) - invm(ibset(0,j))
+                endif
              endif
           enddo
           invm_min(i)=max(s_cut(2)*(npart)*(npart-1)/2d0,mass**2)
+          if (npart.eq.2) then
+             sigma_ij(i) = (sigma_ij(i) + invm_min(i))/2d0
+          endif
        endif
     enddo
   end subroutine setup_PS_cuts
@@ -182,6 +201,7 @@ contains
     if (allocated(invm)) deallocate(invm)
     if (allocated(invm_min)) deallocate(invm_min)
     if (allocated(invm_max)) deallocate(invm_max)
+    if (allocated(sigma_ij)) deallocate(sigma_ij)
     if (allocated(masses)) deallocate(masses)
     if (allocated(pp)) deallocate(pp)
     if (allocated(p)) deallocate(p)
@@ -207,7 +227,7 @@ contains
   subroutine generate_momenta
     implicit none
     real(kind=8),dimension(0:3,next) :: q, qk, qlab
-    real(kind=8),dimension(0:3) :: qtot,qtotm, tot, bst, bst_back, qin1,qin2
+    real(kind=8),dimension(0:3) :: qtot,qtotm, tot, bst, bst_back
     real(kind=8) :: costheta,phi,sintheta,dum,scale,a_sum
     integer(kind=4):: i, t,j,k,m,first,second
     real(kind=8) :: sk, E, pz, pT, xy,kappa,Atilde,wsq,v,esum,R,min
@@ -218,7 +238,10 @@ contains
     integer(kind=8),dimension(next-2) :: perm_final
     real(kind=8),dimension(next-2) :: schan_ran,schan_ran_sorted
     real(kind=8),dimension(0:3) :: q1_ref,q2_ref
-    
+
+    integer :: parts
+    real(kind=8),external :: ran2
+
     if(.not.allocated(subperm1)) allocate(subperm1(1:next-2))
     if(.not.allocated(subperm2)) allocate(subperm2(1:next-2))
     if(.not.allocated(subperm)) allocate(subperm(1:next-2))
@@ -240,23 +263,17 @@ contains
     pp(3,ibset(0,0))= pp(0,ibset(0,0))
     pp(3,ibset(0,1))=-pp(0,ibset(0,1))
 
-    qin1 =  pp(:,ibset(0,0))
-    qin2 =  pp(:,ibset(0,1))
-    !qin1(0) = sqrtshat/2d0
-    !qin1(1:2) = 0d0
-    !qin1(3) = qin1(0)
-    !qin2(0) = sqrtshat/2d0
-    !qin2(1:2) = 0d0
-    !qin2(3) = -qin2(0)
-    !q(:,1) = qin1
-    !q(:,2) = qin2
+    parts = 0
 
     ! Total momentum P=p_1+p_2
     qk(:,next-2) = pp(:,ibset(0,0))+pp(:,ibset(0,1))
+
+    ! initiate soft factors
     soft = 1d0
 
+! Do m>1 type splitting
 ! First split the antenna to two subantennae: Q_m and Q_{n-m}
-if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then ! Do m>1 type splitting
+if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then 
      mass1=0d0
      do i=1,mm
        mass1=mass1+masses(subperm1(i))
@@ -271,24 +288,24 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then ! Do m>1 type splitting
 ! Generate Q_{m} antenna
   if (mm .gt. 2) then
       call basic_antenna(q(0:3,subperm1(mm)),masses(subperm1(mm)),qk(0:3,mm-1),-1d0,&
-         Qm,qin2,qin1,0,.false.,mm)
+         Qm,pp(:,ibset(0,1)),pp(:,ibset(0,0)),0,.false.,mm,parts)
       mass_sum=mass_sum+masses(subperm1(mm))
   else
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),qk(0:3,1),&
-           masses(subperm1(1)),Qm,qin2,qin1,0,.false.,mm)
+           masses(subperm1(1)),Qm,pp(:,ibset(0,1)),pp(:,ibset(0,0)),0,.false.,mm,parts)
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
 
   do i=1,mm-3
       call basic_antenna(q(0:3,subperm1(mm-i)),masses(subperm1(mm-i)),qk(0:3,mm-i-1),-1d0,&
-           qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),qin1,i,.false.,mm)
+           qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),pp(:,ibset(0,0)),i,.false.,mm,parts)
       mass_sum=mass_sum+masses(subperm1(mm-i))
   enddo
 
   if (mm .gt. 2) then
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),qk(0:3,1),masses(subperm1(1)),&
-               qk(0:3,2),q(0:3,subperm1(3)),qin1,mm-2,.false.,mm)
+               qk(0:3,2),q(0:3,subperm1(3)),pp(:,ibset(0,0)),mm-2,.false.,mm,parts)
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
@@ -297,24 +314,24 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then ! Do m>1 type splitting
 ! Generate Q_{n-m} antenna
   if (next-2-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(next-2-mm)),masses(subperm2(next-2-mm)),qk(0:3,next-2-1),-1d0,&
-           Qnm,qin1,qin2,0,.false.,next-2-mm)
+           Qnm,pp(:,ibset(0,0)),pp(:,ibset(0,1)),0,.false.,next-2-mm,parts)
     mass_sum=mass_sum+masses(subperm2(next-2-mm))
   else
     call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),qk(0:3,next-2-1),&
-        masses(subperm2(1)),Qnm,qin1,qin2,0,.false.,next-2-mm)
+        masses(subperm2(1)),Qnm,pp(:,ibset(0,0)),pp(:,ibset(0,1)),0,.false.,next-2-mm,parts)
     mass_sum=mass_sum+masses(subperm2(1))
     mass_sum=mass_sum+masses(subperm2(2))
   endif
 
   do i=1,(next-2-mm)-3
     call basic_antenna(q(0:3,subperm2(next-2-mm-i)),masses(subperm2(next-2-mm-i)),qk(0:3,next-2-1-i),-1d0,&
-               qk(0:3,next-2-i),q(0:3,subperm2(next-2-mm-i+1)),qin2,i,.false.,next-2-mm)
+               qk(0:3,next-2-i),q(0:3,subperm2(next-2-mm-i+1)),pp(:,ibset(0,1)),i,.false.,next-2-mm,parts)
     mass_sum=mass_sum+masses(subperm2(next-2-mm-i))
   enddo
 
   if (next-2-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),qk(0:3,mm+1),masses(subperm2(1)),&
-               qk(0:3,mm+2),q(0:3,subperm2(3)),qin2,next-2-mm-2,.false.,next-2-mm)
+               qk(0:3,mm+2),q(0:3,subperm2(3)),pp(:,ibset(0,1)),next-2-mm-2,.false.,next-2-mm,parts)
     mass_sum=mass_sum+masses(subperm2(2))
     mass_sum=mass_sum+masses(subperm2(1))
   endif
@@ -325,48 +342,58 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then ! Do m>1 type splitting
 elseif (((mm .eq. 1).or.(next-2-mm .eq. 1))) then 
   !write(*,*) 'doing m=1 type splitting'
   m1 = .true.
+  
+  R = ran2()
   if (mm .eq. 1) then
      subperm=subperm1
      subperm_rest=subperm2
-     q1_ref = qin2
-     q2_ref = qin1
+     q1_ref = pp(:,ibset(0,1))
+     q2_ref = pp(:,ibset(0,0))
+     if (R.lt.0.5d0) then
+        q1_ref = pp(:,ibset(0,0))
+        q2_ref = pp(:,ibset(0,1))
+     endif
   elseif (next-2-mm .eq. 1) then
      subperm = subperm2
      subperm_rest=subperm1
-     q1_ref = qin1
-     q2_ref = qin2
+     q1_ref = pp(:,ibset(0,0))
+     q2_ref = pp(:,ibset(0,1))
+     if (R.lt.0.5d0) then
+        q1_ref = pp(:,ibset(0,1))
+        q2_ref = pp(:,ibset(0,0))
+     endif
   endif
 
   mass_sum=0d0
   if (next-2 .gt. 2) then
      call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),qk(0:3,next-2-1),-1d0,&
-                  qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2)
+                  qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
      mass_sum=mass_sum+masses(subperm(1))
   else
      call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),qk(0:3,next-2-1),&
-                 masses(subperm_rest(1)),qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2)
+                 masses(subperm_rest(1)),qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
      mass_sum=mass_sum+masses(subperm(1))
      mass_sum=mass_sum+masses(subperm_rest(1))
   endif
   if (next-2 .gt. 3) then
        call basic_antenna(q(0:3,subperm_rest(next-2-1)),masses(subperm_rest(next-2-1)),qk(0:3,next-2-1-1),&
-                 -1d0,qk(0:3,next-2-1),q2_ref,q1_ref,1,m1,next-2)
+                 -1d0,qk(0:3,next-2-1),q2_ref,q1_ref,1,m1,next-2,parts)
        mass_sum=mass_sum+masses(subperm_rest(next-2-1))
   elseif (next-2 .eq. 3) then 
        call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),qk(0:3,next-2-2),&
-         masses(subperm_rest(1)),qk(0:3,next-2-1),q2_ref,q1_ref,1,.false.,next-2)
+         masses(subperm_rest(1)),qk(0:3,next-2-1),q2_ref,q1_ref,1,.false.,next-2,parts)
        mass_sum=mass_sum+masses(subperm_rest(2))
        mass_sum=mass_sum+masses(subperm_rest(1))
   endif
   do i=2,next-2-3
    call basic_antenna(q(0:3,subperm_rest(next-2-i)),masses(subperm_rest(next-2-i)),qk(0:3,next-2-i-1),-1d0,&
-                  qk(0:3,next-2-i),q(0:3,subperm_rest(next-2-i+1)),q1_ref,i,.false.,next-2)
+                  qk(0:3,next-2-i),q(0:3,subperm_rest(next-2-i+1)),q1_ref,i,.false.,next-2,parts)
    mass_sum=mass_sum+masses(subperm_rest(next-2-i))
   enddo
   if (next-2 .gt. 3) then
           call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),qk(0:3,1),&
                masses(subperm_rest(1)),qk(0:3,2),&
-               q(0:3,subperm_rest(3)),q1_ref,next-2-2,.false.,next-2)
+               q(0:3,subperm_rest(3)),q1_ref,next-2-2,.false.,next-2,parts)
      mass_sum=mass_sum+masses(subperm_rest(2))
      mass_sum=mass_sum+masses(subperm_rest(1))
   endif
@@ -380,34 +407,43 @@ else
 
   if (mm .eq. 0) then
      perm_final=subperm2
-     q1_ref = qin1
-     q2_ref = qin2
+     q1_ref = pp(:,ibset(0,0))
+     q2_ref = pp(:,ibset(0,1))
   elseif (next-2-mm .eq. 0) then
      perm_final=subperm1
-     q1_ref = qin2
-     q2_ref = qin1
+     q1_ref = pp(:,ibset(0,1))
+     q2_ref = pp(:,ibset(0,0))
   endif
+
+  parts = 0
+  do i=1,next-2
+     parts = parts + ibset(0,perm_final(i)-1)
+  enddo
 
   if (next-2 .gt. 2) then
      call basic_antenna(q(0:3,perm_final(next-2)),masses(perm_final(next-2)),qk(0:3,next-2-1),mass_in,&
-                qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2)
-     mass_sum=mass_sum+masses(perm_final(next-2))
+                qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
+     mass_sum=mass_sum+masses(perm_final(next-2))**2
+     parts = parts - ibset(0,perm_final(next-2)-1)
   else
      call basic_antenna(q(0:3,perm_final(next-2)),masses(perm_final(next-2)),qk(0:3,next-2-1),&
-               masses(perm_final(1)),qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2)
-     mass_sum=mass_sum+masses(perm_final(next-2))
+               masses(perm_final(1)),qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
+     mass_sum=mass_sum+masses(perm_final(next-2))**2
+     parts = parts - ibset(0,perm_final(next-2)-1)
   endif
   do i=1,next-2-3
      call basic_antenna(q(0:3,perm_final(next-2-i)),masses(perm_final(next-2-i)),qk(0:3,next-2-i-1),&
-               mass_in,qk(0:3,next-2-i),q(0:3,perm_final(next-2-i+1)),q2_ref,i,.false.,next-2)
-     mass_sum=mass_sum+masses(perm_final(next-2-i))
+               mass_in,qk(0:3,next-2-i),q(0:3,perm_final(next-2-i+1)),q2_ref,i,.false.,next-2,parts)
+     mass_sum=mass_sum+masses(perm_final(next-2-i))**2
+     parts = parts - ibset(0,perm_final(next-2-i)-1)
   enddo
   if (next-2 .gt. 2) then
         call basic_antenna(q(0:3,perm_final(2)),masses(perm_final(2)),qk(0:3,1),&
-        masses(perm_final(1)),qk(0:3,2),q(0:3,perm_final(3)),q2_ref,next-2-2,.false.,next-2)
+        masses(perm_final(1)),qk(0:3,2),q(0:3,perm_final(3)),q2_ref,next-2-2,.false.,next-2,parts)
+        mass_sum=mass_sum+masses(perm_final(2))**2
+        parts = parts - ibset(0,perm_final(2)-1)
   endif
-  mass_sum=mass_sum+masses(perm_final(2))
-  mass_sum=mass_sum+masses(perm_final(1))
+  mass_sum=mass_sum+masses(perm_final(1))**2
   q(0:3,perm_final(1)) = qk(0:3,1)
 endif
 
@@ -419,6 +455,9 @@ endif
     ! The usual 2*pi factors for the phase-space
     jac=jac*soft/((2d0*pi)**(3*(next-2)-4)) !wgt
     jac=jac/(2d0*sqrtshat**2)
+
+    !write(*,*) 'jac',jac
+
 
 
   end subroutine generate_momenta
@@ -437,6 +476,7 @@ endif
     integer :: i
     real(kind=8) :: smin,smax,shat
     smin=(next-2)*(next-3)*s0
+    !smin=invm_min(maskr(next)-3)
     smax=sqrts**2
     ix=ix+1
     call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
@@ -453,7 +493,7 @@ endif
     call random_to_var(x(ix),0d0,ymin,ymax,ycm,jac)
   end subroutine generate_y
 
-  subroutine basic_antenna(p1,mass1,p2,mass2,P,q1,q2,i,m1,maxn)
+  subroutine basic_antenna(p1,mass1,p2,mass2,P,q1,q2,i,m1,maxn,parts)
     ! Incoming momentum: P
     ! Reference momenta: q1,q2
     ! Outgoing momenta: p1, p2
@@ -483,9 +523,13 @@ endif
     real(kind=8) :: tmin,tmax,t1,t2,yr,pt2
     real(kind=8),dimension(0:3) :: pass1,pass2
     real(kind=8) :: pt2min,pt2max,pt,y,ymin,ymax
+    integer :: parts
+
+    !write(*,*) 'Particles to generate:',maskr(parts)
+    !write(*,*) 'ibset',ibset(0,2)
 
     k = maxn - i   !  k is the number of particles remaining to generate
-    s1 = mass1     ! mass of the final state particle to be generated
+    s1 = mass1**2     ! mass of the final state particle to be generated
     z_sign=sign(1d0,q2(3))
     s = (dot(P,P)) ! Incoming inv mass
 
@@ -593,8 +637,10 @@ endif
     else
        if (k .ge. 3) then
          call generate_s2(k,s,s1,s2,q1_cmf,P_cmf)
+         !write(*,*) 'generated s2',s2
        else
-         s2 = mass2
+         !write(*,*) 'not generating s2'
+         s2 = mass2**2
          gs = 1d0
          jac = jac/gs
        endif
@@ -602,6 +648,7 @@ endif
 
     ! cuts on a1 and a2
     a2cut = (k-1)*(s0/2d0)/(dot(q2_cmf,P_cmf))  ! should be (k+1) dont change!
+
     a1cut = (s0/2d0)/(dot(q1_cmf,P_cmf))
 
     h = 1d-6
@@ -642,9 +689,14 @@ endif
         call generate_a2_term1(i,m1,maxn,a1,s,s1,s2,costheta,a2cut,h,a2)
     endif
 
+    !write(*,*) 'a1',a1
+
     ! Mapping back to the momenta p1,p2 in CMF
     20    p1_cmf(0) = (s+s1-s2)/(2D0*sqrt(s))
     solution = solver(s,s1,s2,q1_cmf,q2_cmf,z_sign,a1,a2,p1_cmf(0),P_cmf,costheta)
+
+    !write(*,*) solution
+
     p1_cmf(1) = solution(1)
     p1_cmf(2) = solution(2)
     p1_cmf(3) = solution(3)
@@ -935,7 +987,9 @@ endif
     ! Include also initial momenta in the limits!
    
     scut = s0
+
     Lambda = mass_sum+(k-1)*(k-2)*scut/2D0
+
     Sigma = mass_sum    !always just a sum of particle masses
     Sigmaold = mass_sum-s1
     Delta = s1+2d0*(k-1)*scut/2D0
@@ -998,6 +1052,7 @@ endif
     h1 = ((1d0-beta)/(2d0*beta))*(1d0+(s1-s2)/s)
     a1max = 0.5d0*(1d0-(s2-s1)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
     a1min = 0.5d0*(1d0-(s2-s1)/(s)-dsqrt(kallen(1d0,s1/s,s2/s)))
+
     if (a1min .lt. 0d0) then ! just for numerical stability!
         a1min = 0d0
     endif

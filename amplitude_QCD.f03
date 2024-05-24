@@ -2,12 +2,14 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
+  logical,parameter :: color_flow=.false.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:,:),allocatable :: val_c
      real(kind=8),dimension(:,:),allocatable :: val_r
+     real(kind=8) :: mass,width
   end type current
   type interaction
      integer :: type
@@ -21,26 +23,34 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
-     real(kind=8),dimension(:,:),allocatable :: diff_col_vals,pp
+     real(kind=8),dimension(:,:),allocatable :: pp
+     real(kind=8),dimension(:,:,:),allocatable :: diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
-     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap,n_col_vals, &
+     integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap, &
           pp_bin_to_i,pp_i_to_bin
+     integer,dimension(:,:),allocatable ::  n_col_vals
      integer,dimension(:,:),allocatable :: perm
-     integer,dimension(:,:,:),allocatable :: row_index,col_index
+     integer,dimension(:),allocatable :: quark_index
+     integer,dimension(:,:,:,:),allocatable :: row_index,col_index
+     integer,dimension(:,:,:),allocatable :: u1_lin_comb
+     integer,dimension(:,:),allocatable :: buff
+     logical :: same_flav
    contains
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,part,order)
+  subroutine init(this,imode,n,orig_part,part,mass,width,order,it)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
     integer::n,imode
-    integer,dimension(n)::part,order
+    integer,dimension(n)::part,orig_part,order
+    real(kind=8),dimension(n) :: mass,width
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
+    integer :: it ! quark order type
 
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -60,13 +70,13 @@ contains
     endif
     this%imode=imode
 
+    call check_input_consistency()
+
     if (this%imode.eq.2) then
-       call define_canonical_color_order()
+       call define_canonical_color_order(it)
     else
        this%nColOrd=1
     endif
-
-    call check_input_consistency()
 
     call set_max_cur()
     call set_max_vert()
@@ -75,15 +85,15 @@ contains
        call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
        call create_current_dict()
-       allocate(key_to_current(max_key)) 
+       allocate(key_to_current(max_key))
        key_to_current(1:max_key)=0
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
-!!$       if (max_key.ne.max_cur) then
-!!$          write (*,*) 'Number of dictionary keys is expected to be identical to the maximum number of currents',&
-!!$               max_key,max_cur
-!!$          stop 1
-!!$       endif
+       if (max_key.ne.max_cur) then
+          write (*,*) 'Number of dictionary keys is expected to be identical to the maximum number of currents',&
+               max_key,max_cur
+          !stop 1
+       endif
     endif
 
     allocate(this%current_list(max_cur))
@@ -105,6 +115,8 @@ contains
              this%n_cur=this%n_cur+1
              allocate(this%current_list(this%n_cur)%order(isize))
              this%current_list(this%n_cur)%order(1)=order(nc)
+             this%current_list(this%n_cur)%mass=mass(order(nc))
+             this%current_list(this%n_cur)%width=width(order(nc))
              if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then ! initial quark states
                 this%current_list(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
              else
@@ -117,12 +129,14 @@ contains
                 this%current_list(this%n_cur)%nhel=1 ! only one helicity
              endif
              this%current_list(this%n_cur)%n_vert=0
+
           enddo
        else
           do isplit=1,isize-1
              n1=isplit
              n2=isize-isplit
              do ic1=this%n_cur_start(n1),this%n_cur_end(n1)
+              
                 do ic2=this%n_cur_start(n2),this%n_cur_end(n2)
                    call add_if_allowed_threevertex()
                 enddo
@@ -135,7 +149,9 @@ contains
 
     call simple_consistency_checks()
 
+
     ! All done. But there could be currents that are not needed. Filter them out
+    write (*,*) 'Total number of currents and vertices befroe filter',this%n_cur,this%n_vert
     call filter_dead_trees()
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
     if (this%imode.eq.1) call create_helicity_map()
@@ -144,6 +160,7 @@ contains
   contains
     subroutine allocate_and_fill_colour_permutations()
       implicit none
+      integer :: ind
       ! allocate and fill the colour orders
       if (this%n_qqbar.eq.0) then
          allocate(this%perm(1:n-1,1:this%nColOrd))
@@ -160,8 +177,85 @@ contains
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
             this%perm(1:n-2,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(2:n-1)
          enddo
+      elseif (this%n_qqbar.eq.2) then
+         allocate(this%perm(1:n-1,1:this%nColOrd))
+         call setup_buff_2qq()
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+            call check_2qq_order(nc,ind)
+            !this%perm(1:n-1,nc-this%n_cur_start(n-1)+1)=this%current_list(nc)%order(1:n-1)
+            this%perm(1:n-1,ind) = this%current_list(nc)%order(1:n-1)
+         enddo
       endif
+
+      do nc=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+      enddo
     end subroutine allocate_and_fill_colour_permutations
+
+    subroutine setup_buff_2qq
+      implicit none
+      integer :: i,j,k,m,q
+      integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in
+      integer,dimension(1:n-4-this%n_sing) :: gluons
+
+      if (n-4-this%n_sing.gt.0) then
+      allocate(this%buff(1:n-2-this%n_sing,(n-2-this%n_sing)*factorial(n-4-this%n_sing))) ! for photons: change
+      this%buff(:,:)=0
+
+      k=1
+      do i=1,n
+         if (part(i).eq.21) then
+                 gluons(k)=i
+                 k=k+1
+          endif
+      enddo
+
+      m = 1
+      do i=1,n-2-this%n_sing-1
+         do j=1,n-4-this%n_sing
+           first(j) = j
+         enddo
+         do k=1,factorial(n-4-this%n_sing)
+           call get_next_iperm(n-4-this%n_sing,first,perm_out,n-4-this%n_sing)
+           do q=1,n-4-this%n_sing
+              perm_in(q) = gluons(perm_out(q))
+           enddo
+           this%buff(1:i-1,m) = perm_in(1:i-1)
+           this%buff(i+2:n-2-this%n_sing,m) = perm_in(i:n-4-this%n_sing)
+           first = perm_out
+           m = m+1
+         enddo
+      enddo
+
+      endif
+    end subroutine setup_buff_2qq
+
+    subroutine check_2qq_order(nc,ind)
+      implicit none
+      integer :: nc,ind
+      integer :: i
+      integer,dimension(1:n-2-this%n_sing) :: ord
+
+      if (n-4-this%n_sing.gt.0) then
+      ord = this%current_list(nc)%order(2:n-1)
+      do i=1,n-2
+        if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
+              ord(i)=0
+        endif
+      enddo
+
+      do i=1,(n-2-this%n_sing)*factorial(n-4-this%n_sing)
+          if (all(this%buff(:,i).eq.ord)) then
+                  ind = i
+                  return
+          endif
+      enddo
+      
+      else
+      ind = 1 
+
+      endif
+    end subroutine check_2qq_order
+
     subroutine setup_momentum_array()
       implicit none
       integer :: ic
@@ -199,16 +293,19 @@ contains
          write (*,*) 'The total number of colour orders to consider should be equal to the '// &
               'number of max-size currents (except for all-gluon and using symmetry)', &
               this%nColOrd,this%n_cur_start(n-1),this%n_cur_end(n-1),this%n_qqbar,use_symmetry
-         stop 1
+         !stop 1
       endif
     end subroutine simple_consistency_checks
   
-    subroutine define_canonical_color_order()
+    subroutine define_canonical_color_order(it)
       ! canonical order: (q,glu,glu,glu,singlet,singlet,qbar,q,qbar)
       use math_functions
       implicit none
       integer :: i
       integer :: nq,naq,nglu,nsing,iq,iaq,iglu,ising
+      integer,dimension(n) :: input
+      integer :: it ! quark order type
+
       nq=0; naq=0 ; nglu=0 ; nsing=0
       do i=1,n
          if (part(i).eq.21) nglu=nglu+1
@@ -218,6 +315,7 @@ contains
              (i.le.2 .and. (part(i).ge.1 .and. part(i).le.6))) naq=naq+1
          if (part(i).eq.22) nsing=nsing+1
       enddo
+
       if (nq.ne.naq) then
          write (*,*) 'not the same number of quarks and anti-quarks',nq,naq
          stop 1
@@ -231,6 +329,7 @@ contains
          stop 1
       endif
       iq=0; iaq=0 ; iglu=0 ; ising=0
+      order= 0
       do i=1,n
          if (part(i).eq.21) then
             iglu=iglu+1
@@ -250,10 +349,19 @@ contains
          elseif ((i.gt.2 .and. (part(i).le.-1 .and. part(i).ge.-6) ).or. &
               (i.le.2 .and. (part(i).ge.1 .and. part(i).le.6))) then
             iaq=iaq+1
-            if (iaq.eq.1) then
+            !order(n)=i ! for one-qq
+            if (it.eq.1)then 
+              if (iaq.eq.1) then
                order(n)=i
-            else
+              else
                order(n-2)=i
+              endif
+            elseif (it.eq.2) then
+              if (iaq.eq.1) then
+               order(n-2)=i
+              else
+               order(n)=i
+              endif
             endif
          elseif (part(i).eq.22) then
             ising=ising+1
@@ -269,6 +377,8 @@ contains
          this%nColOrd=factorial(nglu-1)
       elseif (nq.eq.1) then
          this%nColOrd=factorial(nglu)
+      elseif (nq.eq.2) then
+         this%nColOrd=factorial(nglu)*(nglu+1)
       else
          write (*,*) 'Number of colour orders unknown',nq
          stop 1
@@ -278,33 +388,90 @@ contains
     subroutine check_input_consistency()
       implicit none
       integer,dimension(6) :: quark_flav
-      integer :: i,j
+      integer :: i,j,k,sgn
+      integer,dimension(8) :: flav  ! fills the flavours of quarks it finds ( in abs)
+      integer,dimension(n) :: temp_part
+
       this%n_qqbar=0
       this%n_sing=0
       quark_flav=0
+      this%same_flav=.true.
+      flav = 0
+      k = 1
       do i=1,n
          if (i.le.2) then
-            if (part(i).ne.21 .and. part(i).ne.22) then
-               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
-               if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
+            if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+               quark_flav(abs(orig_part(i)))=quark_flav(abs(orig_part(i)))-sign(1,part(i))
+               flav(k) = abs(orig_part(i))
+               k= k+1
+               if (orig_part(i).lt.0) this%n_qqbar=this%n_qqbar+1
             endif
          else
-            if (part(i).ne.21 .and. part(i).ne.22) then
-               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
-               if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
+            if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+               quark_flav(abs(orig_part(i)))=quark_flav(abs(orig_part(i)))+sign(1,orig_part(i))
+               flav(k) = abs(orig_part(i))
+               k= k+1
+               if (orig_part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
          endif
-         if (part(i).ne.21 .and. abs(part(i)).gt.6) this%n_sing=this%n_sing+1
+         if (orig_part(i).ne.21 .and. abs(orig_part(i)).gt.6) this%n_sing=this%n_sing+1
       enddo
+
+      if (any(flav(1:2*this%n_qqbar).ne.flav(1))) this%same_flav = .false.
+
+      allocate(this%quark_index(2*this%n_qqbar))
+
+      temp_part = part
+      do i=1,n
+       if ((i.le.2).and.(abs(temp_part(i)).le.6)) then
+               temp_part(i) = -temp_part(i)
+        endif
+      enddo
+
+      if (this%n_qqbar.ge.2) then
+      k=1
+      do i=1,n
+         if((temp_part(i).ge.1).and.(temp_part(i).le.6)) then
+           this%quark_index(k)=i
+           k=k+2
+         endif
+      enddo
+      k=2
+      do i=1,n
+         if ((temp_part(i).le.-1).and.(temp_part(i).ge.-6)) then
+         if (temp_part(i).eq.-temp_part(this%quark_index(1))) then
+           this%quark_index(k)=i
+         elseif (temp_part(i).eq.-temp_part(this%quark_index(3))) then
+           this%quark_index(k+2)=i
+         endif
+         endif
+      enddo
+
+      do i=1,n
+       if (k.ge.2) then
+       if ((temp_part(i).eq.-temp_part(this%quark_index(k-1)))) then
+          this%quark_index(k)=i
+          k=k+1
+          exit
+       endif
+       else
+          this%quark_index(k)=i
+       endif
+      enddo
+
+      endif
+
       if (any(quark_flav(:).ne.0)) then
          write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
+         write(*,*) quark_flav
          stop 1
       endif
-      if (this%n_qqbar.gt.1) then
-         write (*,*) 'ERROR: code only working for 0, or 1 qqbar pairs',this%n_qqbar
+      if (this%n_qqbar.gt.3) then
+         write (*,*) 'ERROR: code only working for 0, 1 or 2 qqbar pairs',this%n_qqbar
          write (*,*) part
          stop 1
       endif
+      if (imode.eq.1.or.imode.eq.3) then
       if (any(order(:).gt.n) .or. any(order(:).lt.1)) then
          write (*,*) 'ERROR: inconsistent colour order. An element is too large or too small',order
          stop 1
@@ -353,12 +520,12 @@ contains
 
       if (this%n_qqbar.ge.2) then
          do i=1,n
-            if (order(i).eq.1 .or. order(i).eq.n) cycle
+            if (i.eq.1 .or. i.eq.n) cycle
             if (order(i).eq.2) then
                if (part(order(i)).gt.1 .and. part(order(i)).lt.6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
-                     write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quak'
+                  if (.not.(part(order(i+1)).lt.-1 .and. part(order(i+1)).gt.-6)) then
+                     write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
                      write (*,*) order
                      write (*,*) part
                      stop 1
@@ -377,6 +544,8 @@ contains
             endif
          enddo
       endif
+
+      endif
     end subroutine check_input_consistency
 
     subroutine set_max_cur()
@@ -391,10 +560,21 @@ contains
             else
                if (this%n_qqbar.eq.0) max_cur=max_cur+(n-isize)*2
                if (this%n_qqbar.eq.1) max_cur=max_cur+((n-isize-1)*2+1)
+               if (this%n_qqbar.eq.2) then
+                 if (n-isize.ge.4) then
+                   max_cur = max_cur+(n-isize-3)*2+3 ! pure gluon currents
+                   max_cur=max_cur+3 ! gq + qq currents
+                 elseif (n-isize.ge.3) then
+                   max_cur=max_cur+3
+                 elseif (n-isize.ge.2) then
+                   max_cur=max_cur+1
+                 endif
+               endif
             endif
          enddo
          max_cur=max_cur+1
          if (this%n_sing.ge.1) max_cur=max_cur*this%n_sing
+         max_cur=max_cur*3 ! to REMOVE
       elseif(this%imode.eq.2) then
          if (this%n_qqbar.eq.0) then
             ! for increasing isize:
@@ -427,7 +607,7 @@ contains
             max_cur=max_cur+1
          elseif(this%n_qqbar.eq.1) then
             ! for increasing isize:
-            ! - Number of gluon currents (remove the '/2' if use_symmetry=.false.):
+            ! -Number of gluon currents (remove the '/2' if use_symmetry=.false.):
             !   (next-2) + ( (next-2)*(next-3) + (next-2)*(next-3)*(next-4) + ... )/2
             ! - Number of tensor currents: 
             !   same as for the gluons except that the first term is absent
@@ -459,6 +639,60 @@ contains
                max_cur=max_cur+ifact
             enddo
             max_cur=max_cur+1
+
+         elseif (this%n_qqbar.eq.2) then
+            max_cur=0
+            do isize=1,n-1
+               ! gluons and tensors
+               ifact=n-4 ! n-4 gluons in total -> if no singlets around!!
+               do j=1,isize-1
+                  ifact=ifact*(n-4-j)
+               enddo
+               if (isize.eq.1) then
+                  max_cur=max_cur+ifact
+               else
+                  if (use_symmetry) then
+                     max_cur=max_cur+ifact
+                  else
+                     max_cur=max_cur+ifact*2
+                  endif
+               endif
+               ! single quark currents
+               ifact=1
+               do j=1,isize-1
+                  ifact=ifact*(n-4-j+1)
+               enddo
+               max_cur=max_cur+3*ifact ! factor 3 for 3 q/aq externals
+               enddo
+               ! double quark currents
+               if (isize.ge.2) then
+                  max_cur=max_cur+2*1 ! for q-aq of both flavors
+                  ifact=1
+                  do j=1,isize-1
+                    ifact=ifact*(n-4-j+1)
+                  enddo
+                  !max_cur=max_cur+2*ifact ! for both flavors
+               endif
+               ! three quark currents
+               if (isize.ge.3) then
+                  max_cur=max_cur+2*1 
+                  ifact=1
+                  do j=1,isize-1
+                    ifact=ifact*(n-4-j+1)
+                  enddo
+                  max_cur=max_cur+2*ifact ! for both flavors
+               endif
+               ! four quark currents
+               if (isize.ge.4) then
+                  max_cur=max_cur+1 ! only one 4-q
+                  ifact=1
+                  do j=1,isize-1
+                    ifact=ifact*(n-4-j+1)
+                  enddo
+                  max_cur=max_cur+ifact 
+               endif
+               max_cur=max_cur+1
+               max_cur=max_cur+50 ! TO CHANGE
          endif
       endif
     end subroutine set_max_cur
@@ -512,6 +746,8 @@ contains
             next=n-1
          elseif(this%n_qqbar.eq.1) then
             next=n-2
+         elseif (this%n_qqbar.eq.2) then
+            next=n-4
          endif
          mv=0d0
          fact=factorial(next)
@@ -542,6 +778,15 @@ contains
                   mv=mv+fact/(factorial(n-isize-1))/dble(iden)
                enddo
             enddo
+         elseif (this%n_qqbar.eq.2) then
+            do isize=2,n-1
+               do isplit=1,isize-1
+                  iden=1
+                  if (isplit.gt.1 .and. use_symmetry) iden=iden*2
+                  mv=mv+fact/(factorial(n-isize-1))/dble(iden)
+               enddo
+            enddo
+            mv=10*mv ! TO CHANGE!
          endif
          max_vert=nint(mv)
       endif
@@ -713,50 +958,73 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      if (.not.valid_current_combination()) return
+      if (.not.valid_current_combination())  then
+        return
+      endif
+
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
          ! add the gluon-gluon to tensor vertex
          call add_vertex(1,-21)
+
       elseif (this%current_list(ic1)%type.eq.-21 .and. this%current_list(ic2)%type.eq.21) then
          ! add a tensor-gluon to gluon vertex
          call add_vertex(2,21)
+
       elseif (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.-21) then
          ! add a gluon-tensor to gluon vertex
          call add_vertex(3,21)
+
       elseif (this%current_list(ic1)%type.eq.21 .and. &
            (this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6)) then
          ! add a gluon-quark to quark vertex
          call add_vertex(4,this%current_list(ic2)%type)
+
       elseif (this%current_list(ic1)%type.eq.21 .and. &
            (this%current_list(ic2)%type.le.-1 .and. this%current_list(ic2)%type.ge.-6)) then
          ! add a gluon-antiquark to antiquark vertex
          call add_vertex(5,this%current_list(ic2)%type)
+
       elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
            this%current_list(ic2)%type.eq.21) then
          ! add a quark-gluon to quark vertex
          call add_vertex(6,this%current_list(ic1)%type)
+
       elseif ((this%current_list(ic1)%type.le.-1 .and. this%current_list(ic1)%type.ge.-6) .and. &
            this%current_list(ic2)%type.eq.21) then
          ! add a antiquark-gluon to antiquark vertex
          call add_vertex(7,this%current_list(ic1)%type)
+
       elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
            (this%current_list(ic2)%type.eq.anti_current(this%current_list(ic1)%type))) then
          ! add a quark-antiquark to gluon vertex
          call add_vertex(8,21)
+
       elseif ((this%current_list(ic1)%type.le.-1 .and. this%current_list(ic1)%type.ge.-6) .and. &
            (this%current_list(ic2)%type.eq.anti_current(this%current_list(ic1)%type))) then
          ! add a antiquark-quark to gluon vertex
          call add_vertex(9,21)
+
       elseif (this%current_list(ic1)%type.eq.22 .and. &
            (this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6)) then
          ! add a photon-quark to quark vertex
          call add_vertex(4,this%current_list(ic2)%type)
+
       elseif ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
            this%current_list(ic2)%type.eq.22) then
          ! add a quark-photon to quark vertex
          call add_vertex(6,this%current_list(ic1)%type)
+
+      elseif (this%current_list(ic1)%type.eq.22 .and. &
+           (this%current_list(ic2)%type.le.-1 .and. this%current_list(ic2)%type.ge.-6)) then
+         ! add a photon-antiquark to quark vertex
+         call add_vertex(5,this%current_list(ic2)%type)
+
+      elseif ((this%current_list(ic1)%type.le.-1 .and. this%current_list(ic1)%type.ge.-6) .and. &
+           this%current_list(ic2)%type.eq.22) then
+         ! add a antiquark-photon to quark vertex
+         call add_vertex(7,this%current_list(ic1)%type)
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -787,10 +1055,14 @@ contains
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
-         if (this%current_list(ic1)%order(n1).eq.order(n)) return
+         if (this%current_list(ic1)%order(n1).eq.order(n)) then
+                 return
+          endif
       endif
       if (n2.eq.1) then
-         if (this%current_list(ic2)%order(n2).eq.order(n)) return
+         if (this%current_list(ic2)%order(n2).eq.order(n)) then
+                 return
+         endif
       endif
 
       colour_singlet1=all_singlet_current(this%current_list(ic1)%bin)
@@ -842,14 +1114,28 @@ contains
       if (use_symmetry .and. this%imode.eq.2 .and. gluon_current) then
          if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
       endif
-      
+      if (.not. gluon_current) then
+         ! if quark is in there, it should be the very first particle
+         if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
+              this%current_list(ic1)%order(1).ne.order(1)) then
+              !stop 10
+              return
+         endif
+         if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) then
+            !stop 11
+            return
+         endif
+      endif
       valid_current_combination=.true.
+
     end function valid_current_combination
     
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) return ! dead tree. Filter already here
+      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) then 
+        return ! dead tree. Filter already here
+      endif
       this%n_vert=this%n_vert+1
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
@@ -949,6 +1235,7 @@ contains
          call add_current(.false.,cur_bin,ip(1:isize,1),ctype)
          return
       endif
+
       ! Need to consider all the possible permutations
       call check_all_permutations(nperm,ip,vertex_sign)
       cur_bin=this%current_list(ic1)%bin+this%current_list(ic2)%bin
@@ -987,6 +1274,7 @@ contains
          do j=1,switch(2)
             do k=1,switch(3)
                nperm=nperm+1
+
                if (k.eq.1) then
                   ip(1:isize,nperm)=combined_currents(n1,n2,ip1(1:n1,i),ip2(1:n2,j),&
                        singlet_mv(0,nperm))
@@ -1025,11 +1313,14 @@ contains
       ! when use_symmetry=.true. --> the smallest number needs to come before
       ! the largest number in this list.
       implicit none
-      integer :: i,maxi,mini,min_loc,max_loc
-      integer,dimension(isize) :: ip
+      integer :: i,j,maxi,mini,min_loc,max_loc,k,length
+      integer,dimension(isize) :: ip,ip_q
+      integer,dimension(2*this%n_qqbar) :: quarks
+      
       if (this%n_qqbar.eq.1 .and. (any(ip(2:isize).eq.order(1)))) then
          ! if there is a quark, it needs to be in the first position
          valid_current_order=.false.
+         !stop 10
          return
       endif
       if (this%n_qqbar.eq.1 .and. ip(1).eq.order(1)) then
@@ -1039,6 +1330,146 @@ contains
          valid_current_order=.true.
          return
       endif
+
+      k=1
+      do i=1,n
+         if (abs(part(order(i))).ge.1.and.abs(part(order(i))).le.6) then
+                 quarks(k)=order(i)
+                 k=k+1
+         endif
+      enddo
+
+      k=1
+      ip_q=0
+      if (this%n_qqbar.ge.2) then
+         do i=1,isize
+            if (any(quarks.eq.ip(i))) then
+                 ip_q(k)=ip(i)
+                 k=k+1
+            endif
+         enddo
+         length=k-1
+      endif
+
+
+      if (this%n_qqbar.ge.2) then
+         do i=1,4
+           if (ip_q(1).eq.quarks(i)) then
+              if (i+length-1.gt.4) then
+                 valid_current_order=.false.
+                 return
+              endif
+
+              if ((any(ip.eq.quarks(2))).and.(any(ip.eq.quarks(3)))) then ! gluons cannot be between the two internal quark pair in order
+                  do j=1,isize
+                     if (ip(j).eq.quarks(2)) then
+                        if (j.eq.isize) then
+                            valid_current_order=.false.
+                            return
+                        endif
+                        if (ip(j+1).ne.quarks(3)) then
+                                valid_current_order=.false.
+                                return
+                        endif
+                     endif    
+                  enddo
+              endif
+              if ((any(ip.eq.quarks(2))).and..not.(any(ip.eq.quarks(3)))) then ! gluons cannot be between the two internal quark pair in order
+                 if ((ip(isize).ne.quarks(2))) then
+                   valid_current_order=.false.
+                   return
+                 endif
+              endif
+              if ((any(ip.eq.quarks(3))).and..not.(any(ip.eq.quarks(2)))) then ! gluons cannot be between the two internal quark pair in order
+                 if ((ip(1).ne.quarks(3))) then
+                   valid_current_order=.false.
+                   return
+                 endif
+              endif
+
+
+              if (all(ip_q(1:length).eq.quarks(i:i+length-1))) then
+                  valid_current_order=.true.
+                  return
+              else
+                  valid_current_order=.false.
+                  return
+              endif
+              
+           endif
+         enddo
+      endif
+     
+      if (this%n_qqbar.eq.2) then
+      if (quark_in_current(ip,isize).le.4) then ! one quark only-> OK
+         valid_current_order=.true.
+         maxi=0
+         mini=100
+         do i=1,isize
+          if (ip(i).gt.maxi) then
+            maxi=ip(i)
+            max_loc=i
+           endif
+           if (ip(i).lt.mini) then
+            mini=ip(i)
+            min_loc=i
+           endif
+         enddo
+         if (min_loc.gt.max_loc) then
+           valid_current_order=.false.
+           return
+         endif
+         return
+      endif
+      if (quark_in_current(ip,isize).ge.11.and.&
+              quark_in_current(ip,isize).le.14) then ! three quarks -> OK
+         valid_current_order=.true.
+         maxi=0
+         mini=100
+         do i=1,isize
+          if (ip(i).gt.maxi) then
+            maxi=ip(i)
+            max_loc=i
+           endif
+           if (ip(i).lt.mini) then
+            mini=ip(i)
+            min_loc=i
+           endif
+        enddo
+        if (min_loc.gt.max_loc) then
+         valid_current_order=.false.
+         return
+        endif
+        return
+      endif
+      if ((quark_in_current(ip,isize).eq.5 &
+              .or.quark_in_current(ip,isize).eq.10))  then
+         valid_current_order=.true.
+         maxi=0
+         mini=100
+         do i=1,isize
+          if (ip(i).gt.maxi) then
+            maxi=ip(i)
+            max_loc=i
+           endif
+           if (ip(i).lt.mini) then
+            mini=ip(i)
+            min_loc=i
+           endif
+        enddo
+        if (min_loc.gt.max_loc) then
+         valid_current_order=.false.
+         return
+        endif
+      return
+      endif
+
+      if (quark_in_current(ip,isize).eq.15) then ! four quarks -> OK
+         valid_current_order=.true.
+         return
+      endif
+      endif
+
       ! This must be an all-gluon (or tensor) current. Here we take only one
       ! single order. Define it such that smallest label comes before the
       ! biggest. This must be compatible with what orders are skipped in
@@ -1062,6 +1493,123 @@ contains
       valid_current_order=.true.
     end function valid_current_order
 
+    integer function quark_in_current(ip,isize)
+      implicit none
+      integer :: isize,i,j
+      integer,dimension(isize) :: ip
+
+      quark_in_current=0
+      do i=1,isize
+        ! q
+        if(ip(i).eq.this%quark_index(1).and.(.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(3))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=1
+            exit
+        endif
+        ! qx
+        if(ip(i).eq.this%quark_index(2).and.(.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(3))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=2
+            exit
+        endif
+        ! q'
+        if(ip(i).eq.this%quark_index(3).and.(.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=3
+            exit
+        endif
+        ! qx'
+        if(ip(i).eq.this%quark_index(4).and.(.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(3)))) then
+            quark_in_current=4
+            exit
+        endif
+        ! q-qx
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(3))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=5
+            exit
+        endif
+        ! q-q'
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=6
+            exit
+        endif
+        ! q-qx'
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(4)).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(2)))) then
+            quark_in_current=7
+            exit
+        endif
+        ! qx-q'
+        if(ip(i).eq.this%quark_index(2).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=8
+            exit
+        endif
+        ! qx-q'
+        if(ip(i).eq.this%quark_index(2).and.any(ip(1:isize).eq.this%quark_index(4)).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(3)))) then
+            quark_in_current=9
+            exit
+        endif
+        ! q'-qx'
+        if(ip(i).eq.this%quark_index(3).and.any(ip(1:isize).eq.this%quark_index(4)).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
+               (.not.any(ip(1:isize).eq.this%quark_index(2)))) then
+            quark_in_current=10
+            exit
+        endif
+        ! q-qx-q'
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
+               any(ip(1:isize).eq.this%quark_index(3)).and.&
+              (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
+            quark_in_current=11
+            exit
+        endif
+        ! q-qx-qx'
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
+               any(ip(1:isize).eq.this%quark_index(4)).and.&
+              (.not.any(ip(1:isize).eq.this%quark_index(3)))) then
+            quark_in_current=12
+            exit
+        endif
+        ! q-q'-qx'
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
+               any(ip(1:isize).eq.this%quark_index(4)).and.&
+              (.not.any(ip(1:isize).eq.this%quark_index(2)))) then
+            quark_in_current=13
+            exit
+        endif
+        ! qx-q'-qx'
+        if(ip(i).eq.this%quark_index(2).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
+               any(ip(1:isize).eq.this%quark_index(4)).and.&
+              (.not.any(ip(1:isize).eq.this%quark_index(1)))) then
+            quark_in_current=14
+            exit
+        endif
+        ! q-qx-q'-qx'
+        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
+               any(ip(1:isize).eq.this%quark_index(3)).and.&
+               any(ip(1:isize).eq.this%quark_index(4))) then
+            quark_in_current=15
+            exit
+        endif
+      enddo
+
+    end function quark_in_current
+
+
     subroutine add_current(vertex_sign,cur_bin,ip,ctype)
       implicit none
       logical :: vertex_sign
@@ -1069,7 +1617,6 @@ contains
       integer :: ctype,cur_bin,ic,key
       integer(kind=8) :: val
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-!!$         write (*,*) 'add_current',ctype,':',ip,':',this%current_list(ic1)%order(1:n1),':',this%current_list(ic2)%order(1:n2)
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
             if (ctype.ne.this%current_list(ic)%type) cycle
@@ -1087,6 +1634,16 @@ contains
          this%current_list(this%n_cur)%type=ctype
          this%current_list(this%n_cur)%bin=cur_bin
          this%current_list(this%n_cur)%nhel=this%current_list(ic1)%nhel*this%current_list(ic2)%nhel
+         if (this%current_list(ic1)%mass.eq.this%current_list(ic2)%mass)  then
+            this%current_list(this%n_cur)%mass=0d0
+         else
+            this%current_list(this%n_cur)%mass=max(this%current_list(ic1)%mass,this%current_list(ic2)%mass)
+         endif
+         if (this%current_list(ic1)%width.eq.this%current_list(ic2)%width)  then
+            this%current_list(this%n_cur)%width=0d0
+         else
+            this%current_list(this%n_cur)%width=max(this%current_list(ic1)%width,this%current_list(ic2)%width)
+         endif
          if (ctype.eq.21) then
             allocate(this%current_list(this%n_cur)%vertices(5*(isize-1)))
             allocate(this%current_list(this%n_cur)%vertex_sign(5*(isize-1)))
@@ -1110,7 +1667,14 @@ contains
          elseif (ctype.ge.1 .and. ctype.le.6) then
             ! quark current
             call get_value(ip,1,val)
+         elseif (ctype.ge.-6 .and. ctype.le.-1) then
+            ! anti-quark current
+            call get_value(ip,2,val)
          endif
+
+         !do ic=1,this%n_cur
+         !   if (cur_bin.eq.this%current_list(ic)%bin) return
+         !enddo
          call solve_dict(val,key)
          ic=key_to_current(key)
          if (ic.eq.0) then
@@ -1170,23 +1734,121 @@ contains
                ips_in=ips
             endif
             if ((.not.use_symmetry) .or. valid_current_order(ips_in)) then
-               if (any(ips_in(1:isize).eq.order(n))) cycle
+               if (any(ips_in(1:isize).eq.order(n))) cycle ! should not contain last closing particle 
                if (this%n_qqbar.eq.0 .or. &
-                    (this%n_qqbar.eq.1 .and. all(ips_in(1:isize).ne.order(1)))) then
+                  (this%n_qqbar.eq.1.and.all(ips_in(1:isize).ne.order(1)))) then
+                  
                   key=key+1
                   call get_value(ips_in,0,val) ! add the gluon
                   current_dict(key)=val
-                  if (isize.ne.1 .and. isize.ne.n-1) then
+                  if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
                      key=key+1
                      call get_value(ips_in,-1,val)
                      current_dict(key)=val
                   endif
+
+                elseif (this%n_qqbar.eq.2) then
+                     if ((this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(1)))).and.&
+                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(2)))).and.&
+                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(3)))).and.&
+                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4))))) then
+                        key=key+1
+                        call get_value(ips_in,0,val) ! add the gluon
+                        current_dict(key)=val
+                        if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
+                           key=key+1
+                           call get_value(ips_in,-1,val)
+                           current_dict(key)=val
+                        endif
+                      endif
                endif
+
                if (this%n_qqbar.eq.1 .and. ips_in(1).eq.order(1)) then
                   key=key+1
                   call get_value(ips_in,1,val) ! add a quark
                   current_dict(key)=val
                endif
+
+               if (this%n_qqbar.eq.2) then
+               if (quark_in_current(ips_in,isize).eq.1) then
+                  key=key+1
+                  call get_value(ips_in,1,val) ! add a quark
+                  current_dict(key)=val
+               endif
+               if (quark_in_current(ips_in,isize).eq.3) then
+                  key=key+1
+                  call get_value(ips_in,1,val) ! add a quark
+                  current_dict(key)=val
+               endif
+              
+               if (quark_in_current(ips_in,isize).eq.2) then
+                  key=key+1
+                  call get_value(ips_in,2,val) ! add a quark
+                  current_dict(key)=val
+               endif
+               if (quark_in_current(ips_in,isize).eq.4) then
+                  key=key+1
+                  call get_value(ips_in,2,val) ! add a quark
+                  current_dict(key)=val
+               endif
+
+               if (quark_in_current(ips_in,isize).eq.5) then
+                  key=key+1
+                  call get_value(ips_in,0,val) ! add the gluon
+                  current_dict(key)=val
+                  if (isize.ne.n-1) then ! add the tensor
+                     key=key+1
+                     call get_value(ips_in,-1,val)
+                     current_dict(key)=val
+                  endif
+               endif
+               if (quark_in_current(ips_in,isize).eq.10) then
+                  key=key+1
+                  call get_value(ips_in,0,val) ! add the gluon
+                  current_dict(key)=val
+                  if (isize.ne.n-1) then ! add the tensor
+                     key=key+1
+                     call get_value(ips_in,-1,val)
+                     current_dict(key)=val
+                  endif
+               endif
+
+               if (quark_in_current(ips_in,isize).eq.11) then
+                  key=key+1
+                  call get_value(ips_in,1,val) ! add a quark
+                  current_dict(key)=val
+               endif
+
+               if (quark_in_current(ips_in,isize).eq.12) then
+                  key=key+1
+                  call get_value(ips_in,2,val) ! add a a-quark
+                  current_dict(key)=val
+               endif
+
+               if (quark_in_current(ips_in,isize).eq.13) then
+                  key=key+1
+                  call get_value(ips_in,1,val) ! add a quark
+                  current_dict(key)=val
+               endif
+
+               if (quark_in_current(ips_in,isize).eq.14) then
+                  key=key+1
+                  call get_value(ips_in,1,val) ! add a a-quark
+                  current_dict(key)=val
+               endif
+
+               if (quark_in_current(ips_in,isize).eq.15) then
+                  key=key+1
+                  call get_value(ips_in,0,val) ! add the gluon
+                  current_dict(key)=val
+                  if (isize.ne.n-1) then ! add the tensor
+                     key=key+1
+                     call get_value(ips_in,-1,val)
+                     current_dict(key)=val
+                  endif
+               endif
+              endif
+
             endif
          enddo
          deallocate(ips_in)
@@ -1214,15 +1876,18 @@ contains
       do j=1,isize
          val=val+int(ips(isize+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
       enddo
-      ! Take the types into account (we have only 3 types (gluon,
-      ! tensor and quark), so multiply by three (and add one for the
+      ! Take the types into account (we have only 4 types (gluon,
+      ! tensor and quark and anti-quark), so multiply by three (and add one for the
       ! tensor and two for quark))
-      val=val*int(3,kind=8) ! gluon
+      val=val*int(4,kind=8) ! gluon
       if (itype.eq.-1) then
          val=val+int(1,kind=8) ! tensor
       endif
       if (itype.eq.1) then
          val=val+int(2,kind=8) ! quark
+      endif
+      if (itype.eq.2) then
+         val=val+int(3,kind=8) ! anti-quark
       endif
     end subroutine get_value
 
@@ -1234,6 +1899,7 @@ contains
       implicit none
       integer :: key,left,middle,right
       integer(kind=8) :: val
+      if (this%n_qqbar.le.1) then
       left=1
       right=max_key
       do while (left.le.right)
@@ -1247,6 +1913,17 @@ contains
             left=middle+1
          endif
       enddo
+
+      elseif (this%n_qqbar.eq.2) then
+        middle = 0
+        do middle=1,max_key
+         if (current_dict(middle).eq.val) then
+            key=middle
+            return
+         endif
+        enddo
+        key=0
+      endif
     end subroutine solve_dict
 
     subroutine get_next_iperm(ip,ips_in,ips,n)
@@ -1337,14 +2014,17 @@ contains
   end subroutine init
 
 
-  subroutine evaluate(this,n,p,hel)
+  subroutine evaluate(this,n,p,mass,width,hel,part)
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
     integer :: n,hel
+    integer,dimension(n)::part
+    real(kind=8),dimension(n) :: mass,width
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip,imv
     integer :: ifinal
+
 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
@@ -1395,11 +2075,11 @@ contains
     endif
 
     call fill_momentum_array()
-    
+   
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
-          do ic=this%n_cur_start(isize),this%n_cur_end(isize)   
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
              if (this%current_list(ic)%order(1).le.2) then
                 ifinal=-1
              else
@@ -1426,10 +2106,10 @@ contains
                    endif
                 elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
                    call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih),this%current_list(ic)%mass)
                 elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
-                   call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih))
+                        call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4,ih),this%current_list(ic)%mass)
                 elseif (this%current_list(ic)%type.eq.22) then
                    if (use_real_gluons) then
                       call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
@@ -1453,6 +2133,7 @@ contains
           do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
              do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
+
                 if (this%interaction_list(iv)%type.eq.0) then
                    if (use_real_gluons) then
                       call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1467,6 +2148,7 @@ contains
                            this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                                            this%interaction_list(iv)%val_c(1:4,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.1) then
                    if (use_real_gluons) then
                       call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1477,6 +2159,7 @@ contains
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                             this%interaction_list(iv)%val_c(1:6,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.2) then
                    if (use_real_gluons) then
                       call TensorGluontoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:6,ih1),&
@@ -1487,6 +2170,7 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
                    endif
+
                 elseif(this%interaction_list(iv)%type.eq.3) then
                    if (use_real_gluons) then
                        call GluonTensortoGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -1497,6 +2181,36 @@ contains
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6,ih2),&
                                                this%interaction_list(iv)%val_c(1:4,ih))
                     endif
+
+                 elseif(this%interaction_list(iv)%type.eq.4) then
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
+                    if (use_real_gluons) then
+                       call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                                                   this%interaction_list(iv)%val_c(1:4,ih))
+                    else
+                       call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+
+                    endif
+
+                 elseif(this%interaction_list(iv)%type.eq.5) then
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
+                    call GluonAquarktoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                           this%interaction_list(iv)%val_c(1:4,ih))
+
                  elseif(this%interaction_list(iv)%type.eq.6) then
                     ! makes sure the helicities in 'ih' are correctly set in case colour singlets are moved to the end
                     do imv=1,this%interaction_list(iv)%singlet_mv(0)
@@ -1511,6 +2225,42 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
                     endif
+
+                 elseif(this%interaction_list(iv)%type.eq.7) then
+                    if (this%interaction_list(iv)%singlet_move.eq.1) then
+                       call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                    elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                       write (*,*) 'Cannot do more than one singlet move at once'
+                       stop 1
+                    endif
+                    call AquarkGluontoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                          this%interaction_list(iv)%val_c(1:4,ih))
+
+
+
+                elseif(this%interaction_list(iv)%type.eq.8) then
+                        if (this%interaction_list(iv)%singlet_move.eq.1) then
+                          call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                       elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                         write (*,*) 'Cannot do more than one singlet move at once'
+                         stop 1
+                       endif
+                        call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+
+                elseif(this%interaction_list(iv)%type.eq.9) then
+                       if (this%interaction_list(iv)%singlet_move.eq.1) then
+                         call move_ih(ih) ! makes sure the helicities in 'ih' are correctly set in case a colour singlet is moved to the end of the colour order
+                       elseif (this%interaction_list(iv)%singlet_move.gt.1) then
+                         write (*,*) 'Cannot do more than one singlet move at once'
+                         stop 1
+                       endif
+                       call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
+                                              this%interaction_list(iv)%val_c(1:4,ih))
+
                 else
                    write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
                    stop 1
@@ -1518,6 +2268,7 @@ contains
              enddo
           enddo
        enddo
+
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
@@ -1527,7 +2278,7 @@ contains
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-          elseif ((this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6)) then
+          elseif ((this%current_list(ic)%type.ge.1.and.this%current_list(ic)%type.le.6)) then
              ! a quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
@@ -1536,12 +2287,20 @@ contains
           elseif (this%current_list(ic)%type.eq.-21) then
              ! the non-propagating tensor current
              call combine_interactions(6)
+          elseif ((this%current_list(ic)%type.le.-1.and.this%current_list(ic)%type.ge.-6)) then
+             ! an anti-quark current
+             call combine_interactions(4)
+             if (isize.ne.n-1)  then
+                call include_aquark_propagator()
+             endif
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
              stop 1
           endif
        enddo
+
     enddo
+
 
     call compute_amps_from_currents
 
@@ -1589,9 +2348,15 @@ contains
             if (btest(ibin,i-1)) this%pp(0:3,ip)=this%pp(0:3,ip)+p(0:3,i)
          enddo
       enddo
+         !this%pp(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+         !this%pp(0:3,4)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+         !this%pp(0:3,2)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
+         !this%pp(0:3,3)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
+
     end subroutine fill_momentum_array
     subroutine compute_amps_from_currents
       implicit none
+      integer :: ind
       if (this%imode.eq.1) then
          do ih1=1,this%current_list(this%n_cur)%nhel ! helicities for combined current of particles 1 to n-1 (in the colour order)
             do ih2=1,this%current_list(n)%nhel       ! and for the current for particle n
@@ -1609,7 +2374,12 @@ contains
             if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
                this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
             else
-               this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               if (this%n_qqbar.eq.2) then
+                  call check_2qq_order(ic,ind)
+                  this%amps(ind) = sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               else        
+                  this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+               endif     
             endif
          enddo
 
@@ -1631,6 +2401,7 @@ contains
                endif
             enddo
          endif
+
       elseif (this%imode.eq.3) then
          if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
             this%amps_r(1)=sum(this%current_list(this%n_cur)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,2))
@@ -1639,6 +2410,36 @@ contains
          endif
       endif
     end subroutine compute_amps_from_currents
+
+    subroutine check_2qq_order(nc,ind)
+      implicit none
+      integer :: nc,ind
+      integer :: i
+      integer,dimension(1:n-2-this%n_sing) :: ord
+
+      if (n-4-this%n_sing.gt.0) then
+      ord = this%current_list(nc)%order(2:n-1)
+      do i=1,n-2
+        if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
+              ord(i)=0
+        endif
+      enddo
+
+      i = 1
+      do 
+          if (all(this%buff(:,i).eq.ord)) then
+                  ind = i
+                  return
+          endif
+          i = i+1
+      enddo
+
+      else
+      ind = 1
+
+      endif
+
+    end subroutine check_2qq_order
 
     subroutine combine_interactions(dim)
       implicit none
@@ -1686,135 +2487,292 @@ contains
     subroutine include_quark_propagator()
       implicit none
       call QuarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), & 
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
     end subroutine include_quark_propagator
+
+    subroutine include_aquark_propagator()
+      implicit none
+      call AquarkPropagator(this%current_list(ic)%val_c,this%current_list(ic)%nhel, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
+    end subroutine include_aquark_propagator
   end subroutine evaluate
 
-  subroutine init_col2(this,n,order,col_acc)
+  subroutine init_col2(this,n,part,order,it,col_acc)
     use color_algebra
     use math_functions
     implicit none
     class(amplitude_qcd) :: this
     integer :: col_acc,n
-    integer,dimension(n) :: order,iper,jper
+    integer,dimension(n) :: order,iper,jper,part
     integer :: iperm,jperm,ival,iacc
-    integer,dimension(1:3) :: n_vals
+    !integer,dimension(1:3) :: n_vals
+    integer,allocatable,dimension(:,:) :: n_vals
     integer,parameter :: max_vals=100
     real(kind=8),dimension(1:3) :: col_fac
-    real(kind=8),dimension(max_vals,1:3) :: diff_vals
-    integer,dimension(:,:),allocatable :: ic,ir
-    logical colour_flow
+    !real(kind=8),allocatable,dimension(:,:) :: col_fac
+    !real(kind=8),dimension(max_vals,1:3) :: diff_vals
+    real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
+    integer,dimension(:,:,:),allocatable :: ic,ir
+    integer :: ri,rj,lim,y,t,maxterms_u1,i,j,gi
+    integer :: ui,uj,uj_upper ! quark ordering type
+    integer :: it ! quark order type (1 or 2)
+    integer :: iperm_upper,gi_iperm  ! needed for 2qq
+
     write (*,*) 'Initialising colour matrix ...'
     if (this%n_qqbar.eq.0) then
-       colour_flow=.true.
+       allocate(n_vals(1:3,1))
+       allocate(diff_vals(max_vals,1:3,1))
+       !allocate(col_fac(1:3,1))
+       lim=0
+       iperm_upper = 1
     elseif (this%n_qqbar.eq.1) then
-       colour_flow=.false.
+       allocate(n_vals(1:3,1))
+       allocate(diff_vals(max_vals,1:3,1))
+       !allocate(col_fac(1:3,1))
+       lim=0
+       iperm_upper = 1
+       if (color_flow) then
+          lim=1 ! for NLC only
+          !lim=n-2 ! TV test: for FC
+          lim = 0 ! if U(1) amps generated separately
+          maxterms_u1 = 1d0
+          do i=2,n-1
+             maxterms_u1 = maxterms_u1 * (n-i)
+          enddo
+          allocate(this%u1_lin_comb(1:this%nColOrd,1:maxterms_u1,1:(n-2)))
+          this%u1_lin_comb = 0
+          call get_u1_lin_comb
+       endif
+    elseif (this%n_qqbar.eq.2) then
+         lim = 0
+         iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
+         allocate(n_vals(1:3,iperm_upper))
+         allocate(diff_vals(max_vals,1:3,iperm_upper))
+         !allocate(col_fac(1:3,iperm_upper))
     endif
+
 ! first check a single row in the colour matrix to determine how many
 ! different colour factors there are
-    n_vals(1:3)=0
-    iperm=1
+    n_vals(1:3,:)=0
+    do iperm=1,iperm_upper
     if (this%n_qqbar.eq.0) then
        iper(1:n)=[this%perm(1:n-1,iperm),n]
+       gi_iperm = 1 ! dummy
     elseif (this%n_qqbar.eq.1) then
        iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
+       gi_iperm = 1 ! dummy
+    elseif (this%n_qqbar.eq.2) then
+       do j=1,this%nColOrd
+       iper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,j),order(n)] !
+       do i=1,n-1
+          if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
+              if (i.ne.1) then
+                 gi = i - 2
+              exit
+          endif
+          endif
+       enddo
+       if (gi.eq.iperm-1) exit
+       enddo
+       gi_iperm = iperm
     endif
-    do jperm=iperm,this%nColOrd
+
+    if (this%n_qqbar.eq.2) then
+        uj_upper = 2
+    else
+        uj_upper = 1
+    endif
+
+    do ri=0,lim ! number of U(1) gluons in amp
+    do jperm=1,this%nColOrd ! TO CHANGE!
+      do uj=1,uj_upper
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
           jper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
+       elseif (this%n_qqbar.eq.2) then
+          jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]  ! last one is dummy
        endif
-       call compute_color_factor(col_acc,n-this%n_sing,iper,jper,col_fac,colour_flow)
-       if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-       do iacc=1,3
-          if (col_fac(iacc).eq.0d0) cycle
-          do ival=1,n_vals(iacc)
-             if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
-          enddo
-          if (ival.ge.max_vals) then
-             write (*,*) 'Too many different colour factors. Increase max_vals',&
-                  ival,n_vals(1:3),max_vals
-             stop 1
-          elseif (ival.eq.n_vals(iacc)+1) then
-             ! new colour factor
-             n_vals(iacc)=n_vals(iacc)+1
-             diff_vals(n_vals(iacc),iacc)=col_fac(iacc)
+
+       do rj=0,lim
+          if (this%n_qqbar.eq.2) then
+              ui = it
           endif
+
+          call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
+          !col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+          !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+          do iacc=1,3
+            if (col_fac(iacc).eq.0d0) cycle
+             do ival=1,n_vals(iacc,gi_iperm)
+               if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
+             enddo
+             if (ival.ge.max_vals) then
+               write (*,*) 'Too many different colour factors. Increase max_vals',&
+                  ival,n_vals(1:3,gi_iperm),max_vals
+               stop 1
+             elseif (ival.eq.n_vals(iacc,gi_iperm)+1) then
+               ! new colour factor
+               n_vals(iacc,gi_iperm)=n_vals(iacc,gi_iperm)+1
+               diff_vals(n_vals(iacc,gi_iperm),iacc,gi_iperm)=col_fac(iacc)
+             endif
+          enddo
        enddo
+     enddo
     enddo
-    write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
+    enddo
+
+    write (*,*) 'A single row in the colour matrix has',n_vals(1:3,gi_iperm),&
          ' different colour factors at LC, NLC and full colour, respectively'
-    
-! Allocate the arrays now that we now their sizes
-    allocate(ic(1:maxval(n_vals(1:3)),1:3))
-    allocate(ir(1:maxval(n_vals(1:3)),1:3))
-    allocate(this%col_index(1:this%nColOrd**2,1:maxval(n_vals(1:3)),1:3))
-    allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3)),1:3))
-    this%row_index(0,1:maxval(n_vals(1:3)),1:3)=0
-    allocate(this%n_col_vals(1:3))
-    this%n_col_vals(1:3)=n_vals(1:3)
-    allocate(this%diff_col_vals(1:maxval(n_vals(1:3)),1:3))
-    do iacc=1,3
-       this%diff_col_vals(1:n_vals(iacc),iacc)=diff_vals(1:n_vals(iacc),iacc)
+
     enddo
-    
+
+
+ ! Allocate the arrays now that we know their sizes
+    allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+    allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+    if (color_flow) then
+      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+      allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
+    else
+      allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+      allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
+    endif
+    this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
+    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
+    allocate(this%n_col_vals(1:3,iperm_upper))
+    this%n_col_vals(1:3,1:iperm_upper)=n_vals(1:3,1:iperm_upper)
+    allocate(this%diff_col_vals(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+    do iacc=1,3
+       this%diff_col_vals(1:n_vals(iacc,iperm_upper),iacc,1:iperm_upper)=diff_vals(1:n_vals(iacc,iperm_upper),iacc,1:iperm_upper)
+    enddo
+
 ! Compute all the colour factors and fill the col_index and row_index arrays
     ic=0
     ir=0
+
+    do ri=0,lim
     do iperm=1,this%nColOrd
+        
        if (this%n_qqbar.eq.0) then
           iper(1:n)=[this%perm(1:n-1,iperm),n]
        elseif (this%n_qqbar.eq.1) then
           iper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
+       elseif (this%n_qqbar.eq.2) then
+          iper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,iperm),order(n)] 
+          ! find out what channel it belongs to, find gi
+          do i=1,n-1
+          if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
+              if (i.ne.1) then
+                 gi = i - 2
+              exit
+              endif
+          endif
+          enddo
+          gi_iperm = gi + 1
        endif
-       do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+
+        ! for now, include all matrix ! TO CHANGE: put back off-diagonality
+        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+         do uj=1,uj_upper
+          
           if (this%n_qqbar.eq.0) then
              jper(1:n)=[this%perm(1:n-1,jperm),n]
           elseif (this%n_qqbar.eq.1) then
              jper(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
+          elseif (this%n_qqbar.eq.2) then
+             ! all quark elements are dummy, only the gluon locations matter
+             jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)] 
           endif
-          call compute_color_factor(col_acc,n-this%n_sing,iper,jper,col_fac,colour_flow)
-          if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          do iacc=1,3
-             if (col_fac(iacc).eq.0d0) cycle
-             do ival=1,n_vals(iacc)
-                if (col_fac(iacc).eq.diff_vals(ival,iacc)) exit
-             enddo
-             ic(ival,iacc)=ic(ival,iacc)+1
-             ir(ival,iacc)=ir(ival,iacc)+1
-             this%col_index(ic(ival,iacc),ival,iacc)=jperm
+
+          do rj=0,lim
+            call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
+            ! TO CHANGE: also here put back factor 2
+            !col_fac(1:3)=col_fac(1:3)*2d0
+            !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+            do iacc=1,3
+              if (col_fac(iacc).eq.0d0) cycle
+               do ival=1,n_vals(iacc,gi_iperm)
+                 if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
+                         exit
+                 endif
+               enddo 
+
+               ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
+               ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
+               this%col_index(ic(ival,iacc,gi_iperm),ival,iacc,gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
+            enddo
+
           enddo
-       enddo
-       do iacc=1,3
-          this%row_index(iperm,1:n_vals(iacc),iacc)=ir(1:n_vals(iacc),iacc)
-       enddo
+          enddo
+
+        enddo
+
+        do iacc=1,3
+          this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
+        enddo
+      enddo
     enddo
     write (*,*) '... colour matrix initialised'
   contains
-    subroutine compute_color_factor(col_acc,n,iper,jper,col_fac,color_flow)
+    subroutine compute_color_factor(col_acc,n,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
       use color_algebra
       implicit none
-      integer :: i,n,acc,col_acc,color_fac
+      integer :: i,n,acc,col_acc,color_fac,k
       real(kind=8),dimension(1:3) :: col_fac
       integer,dimension(n) :: iper,jper
+      integer,dimension(n) :: iper_red, jper_red
+      integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
       logical :: color_flow
       real(kind=16) :: col_factor
+      integer :: ri,rj
+      integer :: ui,uj ! for 2qq processes: type of quark ordering 
+      integer :: gi,gj ! for 2qq: number of gluons on first quark color line
+
       if (color_flow) then
          if (this%n_qqbar.ne.0) then
-            write (*,*) 'Can only compute color-flow colour factor for all-gluon processes'
-            stop 1
-         endif
-         col_fac=0d0
-         call color_flow_factor(n,jper,iper,color_fac)
-         if (color_fac.ge.n-2*min(col_acc,0)) then
-            col_fac(1)=dble(3**color_fac)
-         endif
-         if(color_fac.ge.n-2*min(col_acc,1)) then
-            col_fac(2)=dble(3**color_fac)
-         endif
-         if(color_fac.ge.n-2*col_acc) then
-            col_fac(3)=dble(3**color_fac)
+            col_fac=0d0
+            call convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
+            call color_flow_factor_1qqbar(n,iper_red,jper_red,ri,rj,color_fac)
+            if (col_acc.ge.0) then
+              if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
+                    col_fac(1)=dble(3**color_fac) ! U(3)xU(3) LC
+              endif
+            endif
+
+            if (col_acc.ge.1) then
+            if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
+                    col_fac(2)=dble(3**color_fac) ! U(3)xU(3) LC
+            elseif (ri.eq.rj.and.ri.eq.0.and.color_fac.eq.(n-3)) then
+                    col_fac(2)=dble(3**color_fac) ! U(3)xU(3) NLC
+            ! comment out below...
+            !elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
+            !        col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
+            ! ... and set this to (-)* (otherwise it is (+)*
+            elseif (ri.eq.rj.and.ri.eq.1.and.color_fac.eq.(n-3)) then 
+                    col_fac(2)=-dble(3**color_fac) ! U(1)xU(1) NLC
+            endif
+            endif
+            if (col_acc.ge.2) then
+               if (mod(ri+rj,2).eq.0) col_fac(3)=dble(3d0**color_fac)
+               if (mod(ri+rj,2).eq.1) col_fac(3)=-dble(3d0**color_fac)
+            endif
+         else
+           col_fac=0d0
+           call color_flow_factor(n,jper,iper,color_fac)
+           if (color_fac.ge.n-2*min(col_acc,0)) then
+             col_fac(1)=dble(3**color_fac)
+           endif
+           if(color_fac.ge.n-2*min(col_acc,1)) then
+             col_fac(2)=dble(3**color_fac)
+           endif
+           if(color_fac.ge.n-2*col_acc) then
+             col_fac(3)=dble(3**color_fac)
+           endif
          endif
       else
          col_fac(1:3)=0d0
@@ -1826,6 +2784,16 @@ contains
             elseif (this%n_qqbar.eq.1) then
                if (all(iper.eq.jper)) then
                   col_fac(1)=dble(3**(n-1))
+               endif
+            elseif (this%n_qqbar.eq.2) then
+               if (all(iper.eq.jper)) then
+                  if (ui.eq.uj.and.ui.eq.1) then
+                    col_fac(1)=dble(3**(n-2))
+                  elseif (ui.eq.uj.and.ui.eq.2.and..not.this%same_flav) then
+                    col_fac(1)=dble(3**(n-4))
+                  elseif (ui.eq.uj.and.ui.eq.2.and.this%same_flav) then
+                    col_fac(1)=dble(3**(n-2))
+                  endif
                endif
             endif
          endif
@@ -1839,7 +2807,7 @@ contains
                endif
             elseif (this%n_qqbar.eq.1) then
                if (all(iper.eq.jper)) then
-!!$                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
+                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
                   ! include the full expansion
                   call Tr_allocate(n)
                   Tr(0,0,0)=1 ! one term
@@ -1851,11 +2819,11 @@ contains
                   coef_Nc(:,:)=0
                   coef_Nc(0,1)=1
                   call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                  col_fac(2)=dble(col_factor)
+                  !col_fac(2)=dble(col_factor)
                   call Tr_deallocate
                else
                   call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
-!!$                  col_fac(2)=dble(acc*(3)**(n-3))
+                  col_fac(2)=dble(acc*(3)**(n-3))
                   ! include the full expansion
                   if (acc.ne.0) then
                      call Tr_allocate(n)
@@ -1868,10 +2836,52 @@ contains
                      coef_Nc(:,:)=0
                      coef_Nc(0,1)=1
                      call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                     col_fac(2)=dble(col_factor)
+                     !col_fac(2)=dble(col_factor)
                      call Tr_deallocate
                   endif
                endif
+
+            elseif (this%n_qqbar.eq.2) then
+                  do i=1,n-1
+                     if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
+                        if (i.ne.1) then
+                           gi = i - 2
+                           exit
+                        endif 
+                     endif
+                  enddo
+                  do i=1,n-1
+                     if ((abs(part(jper(i))).ge.1.and.abs(part(jper(i))).le.6)) then
+                        if (i.ne.1) then
+                           gj = i - 2
+                           exit
+                        endif
+                     endif
+                  enddo
+
+                  k=1
+                  do i=1,n
+                     if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) cycle
+                     iper_glu(k)=iper(i)
+                     k=k+1
+                  enddo
+                  k=1
+                  do i=1,n
+                     if ((abs(part(jper(i))).ge.1.and.abs(part(jper(i))).le.6)) cycle
+                     jper_glu(k)=jper(i)
+                     k=k+1
+                  enddo
+
+                  call Tr_allocate(n)
+                  call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
+                  call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+                  if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+                  if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
+                  if (this%same_flav) then
+                     call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+                     if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+                     if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
+                  endif
             endif
          endif
          if (col_acc.ge.2) then
@@ -1912,11 +2922,178 @@ contains
                coef_Nc(0,1)=1
                call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
                col_fac(3)=dble(col_factor)
+
+             elseif (this%n_qqbar.eq.2) then
+                   if (ui.eq.uj.and.ui.eq.1) then
+                      Tr(0,0,0)=1 ! one term
+                      Tr(0,0,1)=2
+                      Tr(0,1,1) = gi+gj  ! number of generators in first trace
+                      Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
+                      Tr(1:gi,1,1) = iper(2:2+gi-1)
+                      Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
+                      Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
+                      Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
+                      coef(1)=(1d0,0d0)
+                      call Tr_full_simplify(col_factor)
+                   elseif (ui.eq.uj.and.ui.eq.2) then
+                      Tr(0,0,0) = 1 ! one term
+                      Tr(0,0,1) = 2 ! product of two traces
+                      Tr(0,1,1) = gi+gj  ! number of generators in first trace
+                      Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
+                      Tr(1:gi,1,1) = iper(2:2+gi-1)
+                      Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
+                      Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
+                      Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
+                      coef(1)=(1d0,0d0)
+                      if (.not.this%same_flav) coef(1)=((-1d0/3d0)**2)*(1d0,0d0)
+                      call Tr_full_simplify(col_factor)
+                  elseif (ui.eq.2.and.uj.eq.1) then
+                      Tr(0,0,0)=1 ! one term
+                      Tr(0,0,1)=1 ! a single trace
+                      Tr(0,1,1) = 2*(n-4) ! all gluon generators appear in the single trace
+                      Tr(1:gi,1,1) = iper(2:2+gi-1)
+                      Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
+                      Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
+                      Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
+                      coef(1)=(1d0,0d0)
+                      if (.not.this%same_flav) coef(1)=((1d0/3d0))*(1d0,0d0)
+                      coef(1)=coef(1)*(-1d0)
+                      call Tr_full_simplify(col_factor)
+                  elseif (ui.eq.1.and.uj.eq.2) then
+                      Tr(0,0,0)=1 ! one term
+                      Tr(0,0,1)=1 ! a single trace
+                      Tr(0,1,1) = 2*(n-4) ! all gluon generators appear in the single trace
+                      Tr(1:gi,1,1) = iper(2:2+gi-1)
+                      Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
+                      Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
+                      Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
+                      coef(1)=(1d0,0d0)
+                      if (.not.this%same_flav) coef(1)=((1d0/3d0))*(1d0,0d0)
+                      coef(1)=coef(1)*(-1d0)
+                      call Tr_full_simplify(col_factor)
+                  endif
+                  col_fac(3)=dble(col_factor)
             endif
             call Tr_deallocate
          endif
       endif
     end subroutine compute_color_factor
+
+    subroutine convert_gluon_string(next,iper,jper,iper_new,jper_new)
+      implicit none
+      integer :: next
+      integer,dimension(next-4) :: iper,jper,iper_new,jper_new
+      integer :: ik,jk,i,j
+      integer,dimension(next-4) :: imax,jmax
+      imax(1:next-4)=-1
+      jmax(1:next-4)=-1
+      do i=1,next-4
+         do j=1,next-4
+          if ((iper(j).gt.imax(i)).and..not.(any(iper(j).eq.imax(1:i-1)))) imax(i)=iper(j)
+          if ((jper(j).gt.jmax(i)).and..not.(any(jper(j).eq.jmax(1:i-1)))) jmax(i)=jper(j)
+         enddo
+      enddo
+      ik=next-4
+      jk=next-4
+      do i=1,next-4
+       do j=1,next-4
+        if (iper(j).eq.imax(i)) then
+         iper_new(j) = next-4-i+1
+        endif
+        if (jper(j).eq.jmax(i)) then
+         jper_new(j) = next-4-i+1
+        endif
+       enddo
+      enddo
+    end subroutine convert_gluon_string
+
+
+    subroutine get_u1_lin_comb
+      implicit none
+      integer i,j,k,l,ii,m,top,add,num,j1,j2
+      integer,dimension(:),allocatable :: u1_rem,u1_test
+      integer,dimension(1:n-2-this%n_sing) :: perm,temp_perm
+
+      do i=1,this%nColOrd
+        do m=0,n-2 ! loop through all possible numbers of external U(1) gluons
+          if(allocated(u1_rem)) deallocate(u1_rem)
+          if(allocated(u1_test)) deallocate(u1_test)
+          allocate(u1_rem(1:n-2-this%n_sing-m))
+          allocate(u1_test(1:n-2-this%n_sing-m))
+          ii=1
+          perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,i)
+          u1_rem(1:n-2-this%n_sing-m) = perm(1:n-2-this%n_sing-m)
+
+          do j=1,this%nColOrd
+             temp_perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,j)
+             k=1
+             do l=1,n-2-this%n_sing-m+1
+               if (temp_perm(l).ne.perm(n-2-this%n_sing)) then
+                  u1_test(k) = temp_perm(l)
+                  k = k+1
+               endif
+             enddo
+
+             if ((all(u1_test.eq.u1_rem))) then
+              if (all(perm(n-2-this%n_sing-m+1:n-2-this%n_sing-1).eq.temp_perm(n-2-this%n_sing-m+2:n-2-this%n_sing)))  then
+                 this%u1_lin_comb(i,ii,m) = j
+                 ii = ii+1
+              endif
+             endif
+          enddo
+        enddo
+      enddo
+    end subroutine get_u1_lin_comb
+
+    subroutine convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
+       implicit none
+       integer :: n,i,j,maxval,minval,low,upp,min_x,max_x
+       integer,dimension(n) :: iper,jper,iper_red,jper_red
+       integer,dimension(2,n) :: dual,dual_red
+
+       minval=100
+       maxval=-1
+       iper_red=0
+       jper_red=0
+       dual(1,1:n)=iper(1:n)
+       dual(2,1:n)=jper(1:n)
+       dual_red(1,:)=iper_red
+       dual_red(2,:)=jper_red
+       dual(1:2,1)=0
+       dual(1:2,n)=0
+
+       do j=1,2
+         minval=100
+         maxval=-1
+         low=1
+         upp=n-2
+         do
+         minval=100
+         maxval=-1
+         do i=2,n-1
+           if (dual(j,i).lt.minval.and.dual(j,i).ne.0) then
+               minval=dual(j,i)
+               min_x = i
+           endif
+           if (dual(j,i).gt.maxval.and.dual(j,i).ne.0) then
+              maxval=dual(j,i)
+              max_x = i
+           endif
+         enddo
+         dual_red(j,min_x)=low
+         dual_red(j,max_x)=upp
+         low=low+1
+         upp=upp-1
+         dual(j,min_x)=0
+         dual(j,max_x)=0
+         if (all(dual(j,:).eq.0)) exit
+         enddo
+       enddo
+
+       iper_red(1:n) = dual_red(1,1:n)
+       jper_red(1:n) = dual_red(2,1:n)
+    end subroutine convert_perm_color_flow
+
   end subroutine init_col2
   
 end module amplitude_QCD_mod
