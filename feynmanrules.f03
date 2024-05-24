@@ -288,7 +288,6 @@ contains
          if ( sqp0p3.eq.rZero ) then
             chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
          else
-            stop 12
             chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
          endif
          if ( -nhel.eq.1 ) then

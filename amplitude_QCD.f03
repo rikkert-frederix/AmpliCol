@@ -71,8 +71,6 @@ contains
 
     call check_input_consistency()
 
-    write(*,*) 'DOING PART in amp_QCD',part
-
     if (this%imode.eq.2) then
        call define_canonical_color_order(it)
     else
@@ -155,8 +153,6 @@ contains
     write (*,*) 'Total number of currents and vertices befroe filter',this%n_cur,this%n_vert
     call filter_dead_trees()
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
-
-    write(*,*) 'SET MAX CUR',max_cur
     if (this%imode.eq.1) call create_helicity_map()
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
@@ -189,6 +185,9 @@ contains
             this%perm(1:n-1,ind) = this%current_list(nc)%order(1:n-1)
          enddo
       endif
+
+      do nc=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+      enddo
     end subroutine allocate_and_fill_colour_permutations
 
     subroutine setup_buff_2qq
@@ -383,9 +382,6 @@ contains
          write (*,*) 'Number of colour orders unknown',nq
          stop 1
       endif
-
-      write(*,*) 'COLOR ORDER:',order
-
      end subroutine define_canonical_color_order
 
     subroutine check_input_consistency()
@@ -523,26 +519,26 @@ contains
 
       if (this%n_qqbar.ge.2) then
          do i=1,n
-            if (order(i).eq.1 .or. order(i).eq.n) cycle
+            if (i.eq.1 .or. i.eq.n) cycle
             if (order(i).eq.2) then
                if (part(order(i)).gt.1 .and. part(order(i)).lt.6) then
                   ! next should be a quark
-                  !if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
-                  !   write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quak'
-                  !   write (*,*) order
-                  !   write (*,*) part
-                  !   stop 1
-                  !endif
+                  if (.not.(part(order(i+1)).lt.-1 .and. part(order(i+1)).gt.-6)) then
+                     write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
+                     write (*,*) order
+                     write (*,*) part
+                     stop 1
+                  endif
                endif
             else
                if (part(order(i)).lt.-1 .and. part(order(i)).gt.-6) then
                   ! next should be a quark
-                  !if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
-                  !   write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
-                  !   write (*,*) order
-                  !   write (*,*) part
-                  !   stop 1
-                  !endif
+                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
+                     write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
+                     write (*,*) order
+                     write (*,*) part
+                     stop 1
+                  endif
                endif
             endif
          enddo
@@ -695,8 +691,6 @@ contains
                   max_cur=max_cur+ifact 
                endif
                max_cur=max_cur+1
-
-               write(*,*) 'set max cur',max_cur
                max_cur=max_cur+50 ! TO CHANGE
          endif
       endif
@@ -1658,7 +1652,6 @@ contains
                          (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4))))) then
                         key=key+1
                         call get_value(ips_in,0,val) ! add the gluon
-                        write(*,*) 'aded key 1',key
                         current_dict(key)=val
                         if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
                            key=key+1
@@ -2415,7 +2408,6 @@ contains
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
 
     write (*,*) 'Initialising colour matrix ...'
-    write(*,*) part
     if (this%n_qqbar.eq.0) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
@@ -2587,9 +2579,6 @@ contains
             ! TO CHANGE: also here put back factor 2
             !col_fac(1:3)=col_fac(1:3)*2d0
             !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
-            write(*,*) 'COLOR FACTOR',iper
-            write(*,*) jper
-            write(*,*) col_fac
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
                do ival=1,n_vals(iacc,gi_iperm)
@@ -2691,7 +2680,6 @@ contains
                     col_fac(1)=dble(3**(n-2))
                   endif
                endif
-               !write(*,*) col_fac(1)
             endif
          endif
          if (col_acc.ge.1) then ! NLC
@@ -2780,8 +2768,6 @@ contains
                      if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
                   endif
             endif
-
-            write(*,*) col_fac(2)
          endif
          if (col_acc.ge.2) then
             call Tr_allocate(n)
@@ -2872,7 +2858,6 @@ contains
                       call Tr_full_simplify(col_factor)
                   endif
                   col_fac(3)=dble(col_factor)
-                  write(*,*) col_fac(3)
             endif
             call Tr_deallocate
          endif

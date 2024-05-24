@@ -26,7 +26,7 @@ program test_QCD
   real(kind=8) :: top_mass
   logical :: heavy_initial
 
-  n=4
+  n=6
   one_qq=.false.
   photon=.false.
 
@@ -150,12 +150,14 @@ program test_QCD
 
      if (two_qq) then
          nperm=2
-         part(1:n,1)=[-1,2,-1,2] !  1 -1 -2 2
+         part(1:n,1)=[-1,1,-2,2] !  1 -1 -2 2
          iden=3*3*2*2
          order(1:n,1)=[1,3,4,2]
          order(1:n,2)=[1,2,4,3]
+
          if (same_flav) then
             nperm=2
+            ! for dxd-dxd
             part(1:n,1)=[-2,2,-1,1] !  
             iden=3*3*2*2
             order(1:n,1)=[1,3,4,2]
@@ -164,7 +166,19 @@ program test_QCD
             part(1:n,2)=[-2,1,-2,1] !  
             order(1:n,1+nperm)=[1,3,4,2]
             order(1:n,2+nperm)=[1,2,4,3]
+
+            ! for dd-dd
+            part(1:n,1)=[2,1,2,1] !
+            iden=3*3*2*2
+            order(1:n,1)=[3,1,4,2]
+            order(1:n,2)=[3,2,4,1]
+
+            part(1:n,2)=[2,1,1,2] !
+            order(1:n,1+nperm)=[3,1,4,2]
+            order(1:n,2+nperm)=[3,2,4,1]
+            iden=iden*2
          endif
+
          if (heavy) then
             nperm=2
             part(1:n,1)=[-1,1,6,-6] !  
@@ -211,14 +225,37 @@ program test_QCD
          order(1:n,2)=[1,2,4,5,3]
          order(1:n,3)=[1,5,3,4,2]
          order(1:n,4)=[1,3,4,5,2]
+
          if (same_flav) then
             nperm=4
-            part(1:n,1)=[-1,1,1,-1,21] !    1 -1 1 -1 21
+            ! for dxd-dxdg
+            part(1:n,1)=[-2,2,-1,1,21] 
             iden=3*3*2*2
-            order(1:n,1)=[1,5,2,3,4]
-            order(1:n,2)=[1,2,3,5,4]
-            order(1:n,3)=[1,5,4,3,2]
-            order(1:n,4)=[1,4,3,5,2]
+            order(1:n,1)=[1,5,3,4,2]
+            order(1:n,2)=[1,3,4,5,2]
+            order(1:n,3)=[1,5,2,4,3]
+            order(1:n,4)=[1,2,4,5,3]
+
+            part(1:n,2)=[-2,1,-2,1,21]    
+            order(1:n,1+nperm)=[1,5,3,4,2]
+            order(1:n,2+nperm)=[1,3,4,5,2]
+            order(1:n,3+nperm)=[1,5,2,4,3]
+            order(1:n,4+nperm)=[1,2,4,5,3]
+            
+            ! for dd-ddg
+            part(1:n,1)=[2,1,2,1,21]
+            iden=3*3*2*2
+            order(1:n,1)=[3,5,2,4,1]
+            order(1:n,2)=[3,2,4,5,1]
+            order(1:n,3)=[3,5,1,4,2]
+            order(1:n,4)=[3,1,4,5,2]
+
+            part(1:n,2)=[2,1,1,2,21]
+            order(1:n,1+nperm)=[3,5,2,4,1]
+            order(1:n,2+nperm)=[3,2,4,5,1]
+            order(1:n,3+nperm)=[3,5,1,4,2]
+            order(1:n,4+nperm)=[3,1,4,5,2]
+            iden=iden*2
          endif
          if (heavy) then
            nperm=4
@@ -428,7 +465,6 @@ program test_QCD
 
          mass(1:n)=[0d0,0d0,173d0,173d0,0d0,0d0]
          width(1:n)=[0d0,0d0,1.4915d0,1.4915d0,0d0,0d0]
-
        endif
 
      endif
@@ -476,6 +512,209 @@ program test_QCD
          mass(1:n)=[0d0,0d0,top_mass,top_mass,0d0,0d0]
          width(1:n)=[0d0,0d0,1.4915d0,1.4915d0,0d0,0d0]
          endif
+         if (same_flav) then
+           nperm=12
+           !for dxd-dxdgg
+           part(1:n,1)=[-2,2,-1,1,21,21] !    -1 1 2 -2 21
+           iden=3*3*2*2
+           order(1:n,1)=[1,5,6,3,4,2]
+           order(1:n,2)=[1,6,5,3,4,2]
+           order(1:n,3)=[1,3,4,5,6,2]
+           order(1:n,4)=[1,3,4,6,5,2]
+           order(1:n,5)=[1,5,3,4,6,2]
+           order(1:n,6)=[1,6,3,4,5,2]
+
+           order(1:n,7) =[1,5,6,2,4,3]
+           order(1:n,8) =[1,6,5,2,4,3]
+           order(1:n,9) =[1,2,4,5,6,3]
+           order(1:n,10)=[1,2,4,6,5,3]
+           order(1:n,11)=[1,5,2,4,6,3]
+           order(1:n,12)=[1,6,2,4,5,3]
+           iden=iden*2
+
+           part(1:n,2)=[-2,1,-2,1,21,21] !    -1 1 2 -2 21
+           order(1:n,1+nperm)=[1,5,6,3,4,2]
+           order(1:n,2+nperm)=[1,6,5,3,4,2]
+           order(1:n,3+nperm)=[1,3,4,5,6,2]
+           order(1:n,4+nperm)=[1,3,4,6,5,2]
+           order(1:n,5+nperm)=[1,5,3,4,6,2]
+           order(1:n,6+nperm)=[1,6,3,4,5,2]
+
+           order(1:n,7+nperm)= [1,5,6,2,4,3]
+           order(1:n,8+nperm)= [1,6,5,2,4,3]
+           order(1:n,9+nperm)= [1,2,4,5,6,3]
+           order(1:n,10+nperm)=[1,2,4,6,5,3]
+           order(1:n,11+nperm)=[1,5,2,4,6,3]
+           order(1:n,12+nperm)=[1,6,2,4,5,3]
+
+           ! for dd-ddgg
+           part(1:n,1)=[2,1,2,1,21,21] ! 
+           iden=3*3*2*2
+           order(1:n,1)=[3,5,6,2,4,1]
+           order(1:n,2)=[3,5,2,4,6,1]
+           order(1:n,3)=[3,2,4,5,6,1]
+           order(1:n,4)=[3,6,5,2,4,1]
+           order(1:n,5)=[3,6,2,4,5,1]
+           order(1:n,6)=[3,2,4,6,5,1]
+
+           order(1:n,7) =[3,5,6,1,4,2]
+           order(1:n,8) =[3,5,1,4,6,2]
+           order(1:n,9) =[3,1,4,5,6,2]
+           order(1:n,10)=[3,6,5,1,4,2]
+           order(1:n,11)=[3,6,1,4,5,2]
+           order(1:n,12)=[3,1,4,6,5,2]
+           iden=iden*2*2
+
+           part(1:n,2)=[2,1,1,2,21,21] !
+           order(1:n,1+nperm)=[3,5,6,2,4,1]
+           order(1:n,2+nperm)=[3,5,2,4,6,1]
+           order(1:n,3+nperm)=[3,2,4,5,6,1]
+           order(1:n,4+nperm)=[3,6,5,2,4,1]
+           order(1:n,5+nperm)=[3,6,2,4,5,1]
+           order(1:n,6+nperm)=[3,2,4,6,5,1]
+
+           order(1:n,7+nperm)= [3,5,6,1,4,2]
+           order(1:n,8+nperm)= [3,5,1,4,6,2]
+           order(1:n,9+nperm)= [3,1,4,5,6,2]
+           order(1:n,10+nperm)=[3,6,5,1,4,2]
+           order(1:n,11+nperm)=[3,6,1,4,5,2]
+           order(1:n,12+nperm)=[3,1,4,6,5,2]
+         endif
+     endif
+
+     if (.not.one_qq.and..not.two_qq) then
+       nperm=2*3*4*5        
+       part(1:n,1)=[21,21,21,21,21,21]
+       iden=8*8*2*2
+       order(1:n,1)= [1,2,3,4,5,6]
+         order(1:n,2)=  [1,2,3,5,4,6]
+         order(1:n,3)=  [1,2,4,3,5,6]
+         order(1:n,4)=  [1,2,4,5,3,6]
+         order(1:n,5)=  [1,2,5,3,4,6]
+         order(1:n,6)=  [1,2,5,4,3,6]
+         order(1:n,7)=  [1,3,2,4,5,6]
+         order(1:n,8)=  [1,3,2,5,4,6]
+         order(1:n,9)=  [1,3,4,2,5,6]
+         order(1:n,10)= [1,3,4,5,2,6]
+         order(1:n,11)= [1,3,5,4,2,6]
+         order(1:n,12)= [1,3,5,2,4,6]
+         order(1:n,13)= [1,4,2,3,5,6]
+         order(1:n,14)= [1,4,2,5,3,6]
+         order(1:n,15)= [1,4,3,2,5,6]
+         order(1:n,16)= [1,4,3,5,2,6]
+         order(1:n,17)= [1,4,5,3,2,6]
+         order(1:n,18)= [1,4,5,2,3,6]
+         order(1:n,19)= [1,5,2,3,4,6]
+         order(1:n,20)= [1,5,2,4,3,6]
+         order(1:n,21)= [1,5,3,2,4,6]
+         order(1:n,22)= [1,5,3,4,2,6]
+         order(1:n,23)= [1,5,4,3,2,6]
+         order(1:n,24)= [1,5,4,2,3,6]
+
+         order(1:n,25)=  [1,2,3,4,6,5]
+         order(1:n,26)=  [1,2,3,5,6,4]
+         order(1:n,27)=  [1,2,4,3,6,5]
+         order(1:n,28)=  [1,2,4,5,6,3]
+         order(1:n,29)=  [1,2,5,3,6,4]
+         order(1:n,30)=  [1,2,5,4,6,3]
+         order(1:n,31)=  [1,3,2,4,6,5]
+         order(1:n,32)=  [1,3,2,5,6,4]
+         order(1:n,33)=  [1,3,4,2,6,5]
+         order(1:n,34)= [1,3,4,5,6,2]
+         order(1:n,35)= [1,3,5,4,6,2]
+         order(1:n,36)= [1,3,5,2,6,4]
+         order(1:n,37)= [1,4,2,3,6,5]
+         order(1:n,38)= [1,4,2,5,6,3]
+         order(1:n,39)= [1,4,3,2,6,5]
+         order(1:n,40)= [1,4,3,5,6,2]
+         order(1:n,41)= [1,4,5,3,6,2]
+         order(1:n,42)= [1,4,5,2,6,3]
+         order(1:n,43)= [1,5,2,3,6,4]
+         order(1:n,44)= [1,5,2,4,6,3]
+         order(1:n,45)= [1,5,3,2,6,4]
+         order(1:n,46)= [1,5,3,4,6,2]
+         order(1:n,47)= [1,5,4,3,6,2]
+         order(1:n,48)= [1,5,4,2,6,3]
+
+         order(1:n,49)=  [1,2,3,6,4,5]
+         order(1:n,50)=  [1,2,3,6,5,4]
+         order(1:n,51)=  [1,2,4,6,3,5]
+         order(1:n,52)=  [1,2,4,6,5,3]
+         order(1:n,53)=  [1,2,5,6,3,4]
+         order(1:n,54)=  [1,2,5,6,4,3]
+         order(1:n,55)=  [1,3,2,6,4,5]
+         order(1:n,56)=  [1,3,2,6,5,4]
+         order(1:n,57)=  [1,3,4,6,2,5]
+         order(1:n,58)= [1,3,4,6,5,2]
+         order(1:n,59)= [1,3,5,6,4,2]
+         order(1:n,60)= [1,3,5,6,2,4]
+         order(1:n,61)= [1,4,2,6,3,5]
+         order(1:n,62)= [1,4,2,6,5,3]
+         order(1:n,63)= [1,4,3,6,2,5]
+         order(1:n,64)= [1,4,3,6,5,2]
+         order(1:n,65)= [1,4,5,6,3,2]
+         order(1:n,66)= [1,4,5,6,2,3]
+         order(1:n,67)= [1,5,2,6,3,4]
+         order(1:n,68)= [1,5,2,6,4,3]
+         order(1:n,69)= [1,5,3,6,2,4]
+         order(1:n,70)= [1,5,3,6,4,2]
+         order(1:n,71)= [1,5,4,6,3,2]
+         order(1:n,72)= [1,5,4,6,2,3]
+
+         order(1:n,73)=  [1,2,6,3,4,5]
+         order(1:n,74)=  [1,2,6,3,5,4]
+         order(1:n,75)=  [1,2,6,4,3,5]
+         order(1:n,76)=  [1,2,6,4,5,3]
+         order(1:n,77)=  [1,2,6,5,3,4]
+         order(1:n,78)=  [1,2,6,5,4,3]
+         order(1:n,79)=  [1,3,6,2,4,5]
+         order(1:n,80)=  [1,3,6,2,5,4]
+         order(1:n,81)=  [1,3,6,4,2,5]
+         order(1:n,82)= [1,3,6,4,5,2]
+         order(1:n,83)= [1,3,6,5,4,2]
+         order(1:n,84)= [1,3,6,5,2,4]
+         order(1:n,85)= [1,4,6,2,3,5]
+         order(1:n,86)= [1,4,6,2,5,3]
+         order(1:n,87)= [1,4,6,3,2,5]
+         order(1:n,88)= [1,4,6,3,5,2]
+         order(1:n,89)= [1,4,6,5,3,2]
+         order(1:n,90)= [1,4,6,5,2,3]
+         order(1:n,91)= [1,5,6,2,3,4]
+         order(1:n,92)= [1,5,6,2,4,3]
+         order(1:n,93)= [1,5,6,3,2,4]
+         order(1:n,94)= [1,5,6,3,4,2]
+         order(1:n,95)= [1,5,6,4,3,2]
+         order(1:n,96)= [1,5,6,4,2,3]
+
+         order(1:n,97)=  [1,6,2,3,4,5]
+         order(1:n,98)=  [1,6,2,3,5,4]
+         order(1:n,99)=  [1,6,2,4,3,5]
+         order(1:n,100)=  [1,6,2,4,5,3]
+         order(1:n,101)=  [1,6,2,5,3,4]
+         order(1:n,102)=  [1,6,2,5,4,3]
+         order(1:n,103)=  [1,6,3,2,4,5]
+         order(1:n,104)=  [1,6,3,2,5,4]
+         order(1:n,105)=  [1,6,3,4,2,5]
+         order(1:n,106)= [1,6,3,4,5,2]
+         order(1:n,107)= [1,6,3,5,4,2]
+         order(1:n,108)= [1,6,3,5,2,4]
+         order(1:n,109)= [1,6,4,2,3,5]
+         order(1:n,110)= [1,6,4,2,5,3]
+         order(1:n,111)= [1,6,4,3,2,5]
+         order(1:n,112)= [1,6,4,3,5,2]
+         order(1:n,113)= [1,6,4,5,3,2]
+         order(1:n,114)= [1,6,4,5,2,3]
+         order(1:n,115)= [1,6,5,2,3,4]
+         order(1:n,116)= [1,6,5,2,4,3]
+         order(1:n,117)= [1,6,5,3,2,4]
+         order(1:n,118)= [1,6,5,3,4,2]
+         order(1:n,119)= [1,6,5,4,3,2]
+         order(1:n,120)= [1,6,5,4,2,3]
+         iden=iden*4*3*2
+
+
+
+
      endif
 
 
@@ -497,10 +736,7 @@ program test_QCD
     nperm_upp = nperm
     if (same_flav) nperm_upp = nperm*2
     do iperm=1,nperm_upp
-     write(*,*) 'IPERM',iperm
-     write(*,*) 'order(1:n,iperm)',order(1:n,iperm)
      if (iperm.le.nperm) then
-       write(*,*) 'process',part(:,1)
        call cpu_time(tBefore)
        call amps(iperm)%init(1,n,part(:,1),part(:,1),mass,width,order(1:n,iperm),it)
        call cpu_time(tAfter)
@@ -510,7 +746,6 @@ program test_QCD
        call cpu_time(tAfter)
        t_eval=tAfter-tBefore
      elseif (iperm.gt.nperm) then
-       write(*,*) 'process',part(:,2)
        call cpu_time(tBefore)
        call amps(iperm)%init(1,n,part(:,2),part(:,2),mass,width,order(1:n,iperm),it)
        call cpu_time(tAfter)
@@ -569,35 +804,39 @@ program test_QCD
   if (.not.single_perm)then
     do ih=1,2**n
      t=0d0
-     write(*,*) '**********************'
-     write(*,*) 'ih',ih
-     do i=1,n
-        !write(*,*) 'particle number',i
-        if (btest(ih-1,i-1)) then
-           write(*,*) 'hel +1'
-        else
-           write(*,*) 'hel -1'
-        endif
-     enddo
-     write(*,*) amps(1)%amps(ih)
-     write(*,*) amps(2)%amps(ih)
+     !if (ih.ne.6) cycle
+     !write(*,*) '**********************'
+     !write(*,*) 'ih',ih
+     !do i=1,n
+     !   if (btest(ih-1,i-1)) then
+     !      write(*,*) 'hel +1'
+     !   else
+     !      write(*,*) 'hel -1'
+     !   endif
+     !enddo
+     !write(*,*) amps(1)%amps(ih)
+     !write(*,*) amps(2)%amps(ih)
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
            !write(*,*) 'added',iperm,jperm
            !write(*,*) 'helmap: ',amps(iperm)%helmap(ih)
-           ztemp=ztemp+amps(iperm)%amps(ih) *col_fac(iperm,jperm)*(4*pi*alphas)**(n-2)
+           !if (jperm.eq.iperm) then
+           !  col_fac=27d0
+             ztemp=ztemp+amps(iperm)%amps(ih) *col_fac(iperm,jperm)*(4*pi*alphas)**(n-2)
       !     write(*,*) '****'
-           write(*,*) 'color',col_fac(iperm,jperm)
-           !write(*,*) 'amp for iperm',iperm
+             !write(*,*) 'color',col_fac(iperm,jperm)
+             !write(*,*) iperm,jperm
         !write(*,*) amps(iperm)%amps(ih)*(4*pi*alphas)**(n-2)*col_fac(iperm,jperm)*dconjg(amps(jperm)%amps(ih))
+           !endif
         enddo
+
         !write(*,*) 'total ztemp',ztemp
         t=t+dble(ztemp*dconjg(amps(jperm)%amps(ih)))
         !write(*,*) 'closing with amp',dconjg(amps(jperm)%amps(ih))
      enddo
      amp2=amp2+t
-     write(*,*) 'T',T
+     !write(*,*) 'T',T
     enddo
   else
     t=0d0
@@ -608,7 +847,6 @@ program test_QCD
        enddo
        t=t+dble(ztemp*dconjg(amps_col%amps(jperm)))
     enddo
-    !write (*,'(e20.12,x,a,x,b6.6)') t*(4*pi*alphas)**(n-2)
    amp2=t
   endif
 

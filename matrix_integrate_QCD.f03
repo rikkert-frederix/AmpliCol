@@ -29,7 +29,7 @@ program matrix_integrate_QCD
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-100000   ! Number of events to generate. (If negative, start
+  ncalls0=-500000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -54,8 +54,8 @@ program matrix_integrate_QCD
      s_cut(1:2)=sqrt_s_min**2
   endif
 
-!  mass(1:next)=0d0
-!  width(1:next)=0d0
+  mass(1:next)=0d0
+  width(1:next)=0d0
 !  mass(1:2) = 0d0
 !  mass(3:4) = 173d0
 !  mass(5) = 0d0
@@ -83,39 +83,37 @@ program matrix_integrate_QCD
   it = 0 ! dummy
   orig_part(:)=part(:)
 
-  ! counting of quark flavours in process
-  call fill_quark_info()
-
-  call define_symm_2qq(next,part,1)
-  call amps%init(1,next,orig_part,part,mass,width,o,it)
-
   if (include_pdf) then
      ndim=ndim+2
      call PDF_initialise
      call set_ipdgs_for_PDF(ipdgs)
   endif
 
-  if (amps%same_flav) then
+
+  ! counting of quark flavours in process
+  call fill_quark_info()
+
+  if (amps%n_qqbar.eq.2) then
+    call define_symm_2qq(next,part,1)
+  endif
+  call amps%init(1,next,orig_part,part,mass,width,o,it)
+
+  if (amps%n_qqbar.eq.2.and.amps%same_flav) then
     part_sf(:) = orig_part(:)
     call define_symm_2qq(next,part_sf,2)
     call amps_sf%init(1,next,orig_part,part_sf,mass,width,o,it)
   endif
+
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
-
-  if (include_pdf) then
-     ndim=ndim+2
-     call PDF_initialise
-     call set_ipdgs_for_PDF(ipdgs)
-  endif
 
   ! Compute the leading colour factor
   if (amps%n_qqbar.eq.2) then
       if (abs(part(o(1))).ne.abs(part(o(next)))) it = 2
   endif
-  call compute_LC_colour_factor(col_fac,it)
-  write(*,*) 'LC col fac',col_fac
 
+  call compute_LC_colour_factor(col_fac,it)
+  
   ! number of helicities to sum over
   nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
   allocate(amp2_hel(1:nhel))
@@ -207,13 +205,13 @@ contains
 
     call amps%evaluate(next,p,mass,width,0,part)
 
-    if (amps%same_flav) then
+    if (amps%n_qqbar.eq.2.and.amps%same_flav) then
       call amps_sf%evaluate(next,p,mass,width,0,part_sf)
       do ih=1,nhel
         if (it.eq.2) then
-           amps%amps(ih)=amps%amps(ih)+(1d0/3d0)*amps_sf%amps(ih)
-        else
            amps%amps(ih)=(1d0/3d0)*amps%amps(ih)+amps_sf%amps(ih)
+        else
+           amps%amps(ih)=amps%amps(ih)+(1d0/3d0)*amps_sf%amps(ih)
         endif
       enddo
     endif
@@ -223,13 +221,11 @@ contains
     call cpu_time(tBefore)
     amp2_hel(1:nhel)=0d0
     do ih=1,nhel
-       !write(*,*) 'ih',ih
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
           amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
        else
           amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
        endif
-       !write(*,*) amps%amps(ih)
     enddo
     amp2=sum(amp2_hel(1:nhel))
 
@@ -252,33 +248,6 @@ contains
     endif
 
     val=amp2*weight
-
-    if (nit.eq.1 ) then
-       frac = 0.8d0
-       steep=0.1d0
-    do i=3,next
-       if (pt_min.gt.0d0) then
-          if (pt(p(0,i)).lt.frac*pt_min) then
-             passed_it1(0) = passed_it1(0) + val
-          endif
-          if (pt(p(0,i)).gt.0.5d0*pt_min.and.pt(p(0,i)).lt.0.6d0*pt_min) then
-             passed_it1(1) = passed_it1(1) + val
-          endif
-          if (pt(p(0,i)).gt.0.6d0*pt_min.and.pt(p(0,i)).lt.0.7d0*pt_min) then
-             passed_it1(2) = passed_it1(2) + val
-          endif
-          if (pt(p(0,i)).gt.0.7d0*pt_min.and.pt(p(0,i)).lt.0.8d0*pt_min) then
-             passed_it1(3) = passed_it1(3) + val
-          endif
-          if (pt(p(0,i)).gt.0.8d0*pt_min.and.pt(p(0,i)).lt.0.9d0*pt_min) then
-             passed_it1(4) = passed_it1(4) + val
-          endif
-          if (pt(p(0,i)).gt.0.9d0*pt_min.and.pt(p(0,i)).lt.1.0d0*pt_min) then
-             passed_it1(5) = passed_it1(5) + val
-          endif
-       endif
-    enddo
-    endif
 
     ! Apply the weight from the cuts
     if (smooth_cuts) val=val*cuts_wgt
@@ -379,14 +348,14 @@ contains
     if (amps%same_flav) then
     if (chan.eq.2) then
      do i=1,next
-       if (part(i).lt.0) then
+       if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
           first=.true.
           do j=i+1,next
              if (i.le.2.and.j.le.2) sgn=-1
              if (i.le.2.and.j.gt.2) sgn=+1
              if (i.gt.2.and.j.gt.2) sgn=-1
              if (part(j).eq.sgn*part(i).and..not.first) then
-                part(i) = part(i)-1
+                part(i) = sign(abs(orig_part(i))+1,orig_part(i))
                 part(j) = sgn*(part(i))
                 exit
              endif
@@ -404,7 +373,7 @@ contains
            if (i.le.2.and.j.gt.2) sgn=+1
            if (i.gt.2.and.j.gt.2) sgn=-1
            if (orig_part(j).eq.sgn*orig_part(i)) then
-                part(i) = part(i)-1
+                part(i) = sign(abs(orig_part(i))+1,orig_part(i))
                 part(j) = sgn*(part(i))
                 exit
            endif
@@ -596,10 +565,10 @@ contains
        write (*,*) 'Integration modes only 1 or 2',integration
        stop
     endif
-    !if ((nquarks.ne.0 .and. nquarks.ne.2) .or. (nquarks.gt.next)) then
-    !   write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
-    !   stop
-    !endif
+    if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
+       write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
+       stop
+    endif
   end subroutine get_run_arguments
 
   subroutine create_run_tag()
@@ -804,6 +773,7 @@ contains
     elseif (orig_part(1).eq.22) then
        val=val*PDF(7,1)
     else
+       !write(*,*) 'orig pdf',orig_part(1)
        val=val*PDF(orig_part(1),1)
     endif
     if (orig_part(2).eq.21) then
@@ -818,12 +788,22 @@ contains
   subroutine compute_multichannel_symmetry_factor()
     implicit none
     integer :: ngl=0
+    integer,dimension(6) :: nq,naq
+    integer :: i,j
+
+    nq=0
+    naq=0
     ! count the number of final state gluons
     do i=3,next
        if (part(i).eq.21) then
           ngl=ngl+1
        endif
+       do j=1,6
+         if (part(i).eq.j) nq(j)=nq(j)+1
+         if (part(i).eq.-j) naq(j)=naq(j)+1
+       enddo
     enddo
+
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
