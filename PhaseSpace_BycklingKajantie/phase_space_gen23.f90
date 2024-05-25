@@ -319,8 +319,8 @@ contains
                 call gent_one_step(inext,set(i),3-i)
              else
 !!$                call gent_one_step_v2(inext,set(i),3-i)
-                call gen23_one_step(inext,set(i),3-i,im1)
-!!$                call genpt_one_step(inext,set(i),3-i,im1)
+!!$                call gen23_one_step(inext,set(i),3-i,im1)
+                call genpt_one_step(inext,set(i),3-i,im1)
              endif
              if (jac.le.0d0) return
           enddo
@@ -621,22 +621,25 @@ contains
 
 
   subroutine genpt_one_step(i,ir,ib,im1)
+    ! This subroutines assumes that all particles in 'ir' are massless. 
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
-    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi
-    real(kind=8),dimension(0:3) :: pb,pim1,piir
+    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,xjac
+    real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim
     real(kind=8),external :: ran2
     if (invm(i).ne.0d0) then
        write (*,*) 'genpt_one_step only for massless particles',i,invm(i)
        stop 1
     endif
-    ! get the energy in the frame where p(:,im1) has p_z=0.
-    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
-    call boostz(pp(0,im1),y,pim1)
+    ! get the energy in the frame where p(:,i+ir) has p_z=0.
+    y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
     call boostz(pp(0,i+ir),y,piir)
+    call boostz(pp(0,im1),y,pim1)
     ! generate pT^2
-    pt2min=ptcut**2
-    pt2max=min(sqrtshat**2/4d0,(pp(0,i+ir)-popcnt(ir)*ptcut)**2)
+!!$    pt2min=ptcut**2
+!!$    pt2max=min(sqrtshat**2/4d0,(pp(0,i+ir)-popcnt(ir)*ptcut)**2)
+    pt2min=ETmin(i)**2-invm(i)
+    pt2max=min((piir(0)-ETmin(ir))**2,0.25d0*(piir(0)+sqrt(piir(1)**2+piir(2)**2))**2)
 !!$    pt2max=min(sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2)
 !!$    write (*,*) pt2min,pt2max,sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2,invm(i+im1)
     if (pt2min.gt.pt2max) then
@@ -651,48 +654,50 @@ contains
     if (debug) then
        write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
     endif
+
     ! generate phi
-!!$    phimin=-pi
-!!$    phimax=pi
-    if (invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0)) .lt. 2d0) then
-       phimax=acos(1d0-invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0)))
+    phimax=(piir(1)**2+piir(2)**2+pT2-(piir(0)-sqrt(pT2+invm(i)))**2)/(2d0*sqrt((piir(1)**2+piir(2)**2)*pT2))
+    if (phimax.gt.1d0) then
+       write (*,*) 'ERROR,phimax',phimax,sqrt(piir(1)**2+piir(2)**2),sqrt(pT2),piir(0)
+       write (*,*) piir(0)-sqrt(pT2),sqrt(piir(1)**2+piir(2)**2+pT2-1.99999d0*phimax*sqrt(PT2)*sqrt(piir(1)**2+piir(2)**2))
+       stop 1
+    elseif (phimax.gt.-1d0) then
+       phimax=acos(phimax)
     else
        phimax=pi
     endif
+    phimin=0d0
 
-
-    if (abs(((piir(0)-sqrt(pt2))**2-pt2-(piir(1)**2+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)**2+piir(2)**2))).lt.1d0) then
-       phimin=abs(abs(acos(((piir(0)-sqrt(pt2))**2-pt2-(piir(1)**2+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)**2+piir(2)**2))))-pi)
-    else
-       phimin=0d0
-    endif
-     
-    
-!!$    write (*,*) phimin,phimax,1d0-invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0))
     ix=ix+1
     call random_to_var(x(ix),0d0,phimin,phimax,phi,jac)
-
-!!$    phi=phimin!+0.6d0
-    
     if (ran2().lt.0.5d0) phi=-phi
     jac=jac*2d0
-
-    if (debug) then
-       write (*,*) 'cosphi',((piir(0)-sqrt(pt2))**2-pt2-(piir(1)**2&
-            &+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)**2+piir(2)&
-            &**2))
-       write (*,*) 'acosphi',acos(((piir(0)-sqrt(pt2))**2-pt2&
-            &-(piir(1)**2+piir(2)**2))/(-2d0*sqrt(pt2)*sqrt(piir(1)&
-            &**2+piir(2)**2)))
-    endif
-    
-!!$    phi=1.351d0
     
     if (debug) then
        write (*,*) 'phi - i  ',i,phi,phimin,phimax
     endif
+
+    ! phi is the angle between pT(i+ir) and pT(i), but it needs to be the
+    ! angle between pT(im1) and pT(i). Hence, compensate:
+    phi_rot=acos((piir(1)*pim1(1)+piir(2)*pim1(2))/(sqrt(piir(1)**2+piir(2)**2)*sqrt(pim1(1)**2+pim1(2)**2)))
+    if(piir(1)*pim1(2).lt.piir(2)*pim1(1)) phi_rot=-phi_rot
+    phi=phi-phi_rot
+    if (phi.lt.-pi) phi=phi+2d0*pi
+    if (phi.gt.+pi) phi=phi-2d0*pi
+
+    ! boost to the frame where p(:,im1) has p_z=0.
+    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
+    call boostz(pp(0,im1),y,pim1)
+    call boostz(pp(0,i+ir),y,piir)
+
+    ! E(i)>ETmin(i)
     shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
-    shatmax=4d0*pim1(0)*(piir(0)-popcnt(ir)*ptcut)
+    ! E(ir)>ETmin(ir)
+    shatmax=(piir(0)*pim1(0)*(piir(0)**2-Etmin(ir)**2-2d0*cos(phi)*piir(0)*sqrt(pT2)+pT2)-&
+         pim1(0)*(piir(0)-2d0*cos(phi)*sqrt(pt2))*piir(3)**2+&
+         abs(pim1(0)*piir(3))*sqrt(lambda(piir(0)**2,ETmin(ir)**2,pT2+piir(3)**2)+4d0*ETmin(ir)**2*piir(3)**2))/&
+         ((piir(0)-piir(3))*(piir(0)+piir(3)))
+    
     if (shatmin.gt.shatmax) then
        if (debug) write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
        jac=-13d0
@@ -701,32 +706,60 @@ contains
     endif
       
     ix=ix+1
-    call random_to_var(x(ix),0d0,shatmin,shatmax,invm(i+im1),jac)
+    call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
 
-    invm(i+im1)=shatmin
-    
     if (debug) then
        write (*,*) 'shat - i+im1',i+im1,invm(i+im1),shatmin,shatmax
     endif
+
     ! fill momentum, assuming that previous particle is along the x-axis.
-    call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pp(0,i),jac)
+    call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pip(0),xjac)
+    jac=jac*xjac
+    ! check both +pz and -pz
+    pim(0:2)=pip(0:2)
+    pim(3)=-pip(3)
+
+    phi_rot=atan(pp(2,im1)/pp(1,im1))
+    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+
     ! boost along the z-axis
-    call boostz(pp(0,i),-y,pb)
+    call boostz(pip,-y,pb)
     ! rotate about the z-axis
-    phi=atan(pp(2,im1)/pp(1,im1))
-    if(pp(1,im1).lt.0d0) phi=phi+pi
-    call rotz(pb,phi,pp(0,i))
-    jac=jac/dble(4)
+    call rotz(pb,phi_rot,pip)
+    ! boost along the z-axis
+    call boostz(pim,-y,pb)
+    ! rotate about the z-axis
+    call rotz(pb,phi_rot,pim)
+    
+    if ( pp(0,ir+i)-pip(0).gt.Etmin(ir) .and. &
+         pp(0,ir+i)-pim(0).gt.Etmin(ir) ) then
+       if (ran2().gt.0.5d0) then
+          pp(0:3,i)=pip(0:3)
+       else
+          pp(0:3,i)=pim(0:3)
+       endif
+       jac=jac*2d0
+    elseif ( pp(0,ir+i)-pip(0).gt.Etmin(ir) ) then
+       pp(0:3,i)=pip(0:3)
+    elseif ( pp(0,ir+i)-pim(0).gt.Etmin(ir) ) then
+       pp(0:3,i)=pim(0:3)
+    else
+       jac=-21d0
+       num_error=num_error+1
+       return
+    endif
+    
     pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
+    jac=jac/dble(4)
     invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
     if (debug) then
        write (*,*) 'pp(ir+i+im1)',pp(0:3,ir+i+im1),invm(ir+i+im1)
-       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1)
-       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i)
-       write (*,*) 'pp(i)       ',pp(0:3,i),invm(i)
-       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir)
+       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1),im1
+       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i),ir+i
+       write (*,*) 'pp(i)       ',pp(0:3,i),invm(i),i
+       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir),ir
+       write (*,*) ''
     endif
-    if (debug) write (*,*) ir,invm(ir),sqrt(pt2),sqrt(invm(i+im1)),invm(ir+i)
     if (invm(ir).lt.0d0) then
        jac=-12d0
        num_error=num_error+1
@@ -738,9 +771,9 @@ contains
     invm(i+ib)=dot(pp(0:3,i+ib),pp(0:3,i+ib))
     invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
   end subroutine genpt_one_step
-  subroutine fill_momentum_pt2invmphi(pt2,invm,phi,Eref,p,jac)
+  subroutine fill_momentum_pt2invmphi(pt2,invm,phi,Eref,p,xjac)
     implicit none
-    real(kind=8) :: pt2,invm,phi,jac,pt,Eref
+    real(kind=8) :: pt2,invm,phi,xjac,pt,Eref
     real(kind=8),dimension(0:3) :: p
     real(kind=8),external :: ran2
     pt=sqrt(pt2)
@@ -749,10 +782,16 @@ contains
     p(0)=invm/(2d0*Eref)+p(1)
     ! There are two values of the pz that correspond to a single
     ! invm. Take one of the two at random.
-    p(3)=sqrt(p(0)**2-pt2)
-    if (ran2().lt.0.5d0) p(3)=-p(3)
-    jac=jac*2d0
-    jac=jac*abs(1d0/(2d0*Eref*p(3)))
+    p(3)=p(0)**2-pt2
+    if (p(3).lt.0d0 .and. p(3).ge.-tiny) then
+       p(3)=0d0
+    elseif( p(3).lt.-tiny) then
+       jac=-20d0
+       return
+    else
+       p(3)=sqrt(p(3))
+    endif
+    xjac=abs(1d0/(2d0*Eref*(p(3)+vtiny)))
   end subroutine fill_momentum_pt2invmphi
   subroutine boostz(p,yb,pb)
     ! boost in the z-direction with rapidity yb
@@ -1295,21 +1334,8 @@ contains
 ! phase-space integral in terms of simpler processes,'' Phys. Rev. 187
 ! (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
-    real(kind=8) :: xa2,xb2,S,rat
-    real(kind=8),parameter :: tiny=1.d-8
+    real(kind=8) :: xa2,xb2,S
     lambda=s**2-2d0*(xa2+xb2)*s+(xa2-xb2)**2
-    if(lambda.le.0.d0)then
-       if(xa2.lt.0.d0.or.xb2.lt.0.d0)then
-          write(6,*)'Error #1 in function Lambda:',s,xa2,xb2
-          stop
-       endif
-       rat=1-(sqrt(xa2)+sqrt(xb2))/s
-       if(rat.gt.-tiny)then
-          lambda=0.d0
-       else
-          write(6,*)'Error #2 in function Lambda:',s,xa2,xb2,rat
-       endif
-    endif
   end function lambda
   
   subroutine boostm(p,q,m,pboost)
