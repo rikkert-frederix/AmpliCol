@@ -29,7 +29,7 @@ program matrix_integrate_QCD
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-500000   ! Number of events to generate. (If negative, start
+  ncalls0=-10000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
