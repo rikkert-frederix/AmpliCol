@@ -18,13 +18,13 @@ class Integrator:
             if l=='d':
                 self.proc.append(1)
                 n=n+1
-            if l=='dx':
+            if l=='d~':
                 self.proc.append(-1)
                 n=n+1
             if l=='u':
                 self.proc.append(2)
                 n=n+1
-            if l=='ux':
+            if l=='u~':
                 self.proc.append(-2)
                 n=n+1
             if l=='s ':
@@ -57,14 +57,26 @@ class Integrator:
 
     def get_all_color_orders(self):
         color_order=[0 for i in range(0,n)]
-        for i in [0,1]:
-            if abs(self.proc[i])<=6:
-                self.proc[i]=-self.proc[i]
+        quarks=0
+        for i in range(0,n-1):
+            if (abs(self.proc[i])<=6):
+                quarks=quarks+1
+                if (i <= 1):
+                    self.proc[i]=-self.proc[i]
+        last=False
+        first=False
+        quark_pair=[0,0]
         for i,t in enumerate(self.proc):
-            if t<0:
+            if (t<0 and not last):
                 color_order[n-1]=i+1
-            if (t>0 and t<7):
+                last = True
+            elif (t<0 and last):
+                quark_pair[0]=i+1
+            if (t>0 and t<=6 and not first):
                 color_order[0]=i+1
+                first=True
+            elif (t>0 and t<=6 and first):
+                quark_pair[1]=i+1
         if all([v == 0 for v in color_order]):
             color_order[n-1]=n
         for i,t in enumerate(self.proc):
@@ -77,39 +89,58 @@ class Integrator:
         to_perm=0
         to_perm_list=[]
         for i,r in enumerate(self.proc):
-            if (i+1 not in color_order):
+            if (self.proc[i] == 21):
                 to_perm=to_perm+1
                 to_perm_list.append(i+1)
 
-        self.color_order_list=[]
-        for perm in list(itertools.permutations(to_perm_list)):
-            color_order_comp=copy.deepcopy(color_order)
-            k=0
-            for i,t in enumerate(color_order):
-                if (t == 0):
-                    color_order_comp[i] = perm[k]
-                    k=k+1
-            self.color_order_list.append(color_order_comp)
+        if (quarks > 2):
+            to_perm_list.append(n+1)
 
-        i=0
-        print('The color orders needed are:')
-        print('(Those in curly brackets are to be permuted)')
-        print_co = ''
-        for t in color_order:
-            if (t != 0):
-                print_co = print_co + ' ' + str(t)
-            else:
-                print_co = print_co + ' {'+ str(to_perm_list[i])+'}'
-                i = i+1
-        print(print_co)
-        print('Explicitly:')
-        for i,r in enumerate(self.color_order_list):
-            print(str(i+1)+': '+str(r))
+        self.color_order_list=[]
+        if (quarks > 2):
+            for perm in list(itertools.permutations(to_perm_list)):
+                invalid=False
+                color_order_comp=copy.deepcopy(color_order)
+                k=0
+                for i,t in enumerate(color_order_comp):
+                    if (t == 0 and perm[k] != n+1):
+                        color_order_comp[i] = perm[k]
+                        k=k+1
+                    elif ( t==0 and perm[k] == n+1):
+                        if (color_order_comp[i+1] == 0):
+                            color_order_comp[i] = quark_pair[0]
+                            color_order_comp[i+1] = quark_pair[1]
+                            k=k+1
+                        else:
+                            invalid=True
+                    if (k > len(perm)-1):
+                        break
+
+    
+                if (not invalid):
+                    self.color_order_list.append(color_order_comp)
+                    print(color_order_comp)
+
+            i=0
+            print('The color orders needed are:')
+            #print('(Those in curly brackets are to be permuted)')
+            print_co = ''
+            for j,t in enumerate(color_order):
+                if (t != 0 and self.proc[j] != 21):
+                    print_co = print_co + ' ' + str(t)
+                elif ( t != 0 and to_perm_list[i] != n+1):
+                    print_co = print_co + ' {'+ str(to_perm_list[i])+'}'
+                    i = i+1
+            #print(print_co)
+            print('Explicitly:')
+            for i,r in enumerate(self.color_order_list):
+                print(str(i+1)+': '+str(r))
 
     def prompt_on_co(self):
         prompt = 'Pick color order to integrate (type in label)\n'+\
                 'Or: type -1 for generating all independent ones.\n'
-        self.co_pick = input(prompt)
+        #self.co_pick = input(prompt) 
+        self.co_pick = -1
 
     def get_ind_co(self):
         self.color_order_list
@@ -120,9 +151,9 @@ def run_program(program, args, output_file):
 
 
 #process = raw_input('Type in process: \n' )
-process='u ux > g g'   # TO CHANGE
+process='d~ d > u u~ g g'   # TO CHANGE
 #integrator = raw_input('Type in integrator to use (haag, genpt or gen23):\n' )
-integrator = 'haag'    # TO CHANGE
+integrator = 'gen23'    # TO CHANGE
 
 print('Process:')
 print(process)
@@ -130,7 +161,6 @@ job = Integrator(process, integrator)
 n = job.convert_proc_line_to_pdg()
 job.set_integrator()
 job.get_all_color_orders()
-print(job.color_order_list)
 job.prompt_on_co()
 color_order=[]
 
@@ -179,22 +209,25 @@ for col_ord in color_order:
     for process in processes:
         process.join()
 
-print('Finished generating all channels for LC events.')
+print('\nFinished generating all channels for LC events.')
 print('####################\n')
 to_rwgt = raw_input('Would you like to reweight to NLC and FC? (y/n):\n')
 
 if to_rwgt == 'y':
     imodes=['2']
+    make_process = subprocess.Popen("make;", shell=True, stdout=subprocess.PIPE)
     program='./matrix_reweight_QCD'
-            
-    for imode in imodes:
+
+    for col_ord in color_order:
+
+      for imode in imodes:
         processes=[]
         output_file='log_'+str(n)+'_'
         args=[str(n)]
         for r in job.proc:
             args.append(str(r))
             output_file=output_file+str(r)+'_'
-        for r in color_order:
+        for r in col_ord:
             args.append(str(r))
             output_file=output_file+str(r)+'_'
         output_file = output_file+'.txt'
@@ -209,7 +242,7 @@ if to_rwgt == 'y':
         # Wait for all processes to finish
         for process in processes:
             process.join()
-    print('End of reweight.')
+    print('End of reweight.\n')
 else:
-    print('No reweighting done.\n Note: the events are only LC accurate!\nEnd of run.')
+    print('\nNo reweighting done.\n!!Note: the events are only LC accurate!\nEnd of run.\n')
 
