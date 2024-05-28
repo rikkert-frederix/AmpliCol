@@ -624,7 +624,7 @@ contains
     ! This subroutines assumes that all particles in 'ir' are massless. 
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
-    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,xjac
+    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,xjac,cosphi
     real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim
     real(kind=8),external :: ran2
     if (invm(i).ne.0d0) then
@@ -636,12 +636,8 @@ contains
     call boostz(pp(0,i+ir),y,piir)
     call boostz(pp(0,im1),y,pim1)
     ! generate pT^2
-!!$    pt2min=ptcut**2
-!!$    pt2max=min(sqrtshat**2/4d0,(pp(0,i+ir)-popcnt(ir)*ptcut)**2)
     pt2min=ETmin(i)**2-invm(i)
     pt2max=min((piir(0)-ETmin(ir))**2,0.25d0*(piir(0)+sqrt(piir(1)**2+piir(2)**2))**2)
-!!$    pt2max=min(sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2)
-!!$    write (*,*) pt2min,pt2max,sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2,invm(i+im1)
     if (pt2min.gt.pt2max) then
        if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
        jac=-14d0
@@ -656,10 +652,10 @@ contains
     endif
 
     ! generate phi
-    phimax=(piir(1)**2+piir(2)**2+pT2-(piir(0)-sqrt(pT2+invm(i)))**2)/(2d0*sqrt((piir(1)**2+piir(2)**2)*pT2))
+    phimax=(piir(1)**2+piir(2)**2+pT2-(piir(0)-sqrt(pT2+invm(i)))**2) &
+         /(2d0*sqrt((piir(1)**2+piir(2)**2)*pT2))
     if (phimax.gt.1d0) then
        write (*,*) 'ERROR,phimax',phimax,sqrt(piir(1)**2+piir(2)**2),sqrt(pT2),piir(0)
-       write (*,*) piir(0)-sqrt(pT2),sqrt(piir(1)**2+piir(2)**2+pT2-1.99999d0*phimax*sqrt(PT2)*sqrt(piir(1)**2+piir(2)**2))
        stop 1
     elseif (phimax.gt.-1d0) then
        phimax=acos(phimax)
@@ -679,7 +675,11 @@ contains
 
     ! phi is the angle between pT(i+ir) and pT(i), but it needs to be the
     ! angle between pT(im1) and pT(i). Hence, compensate:
-    phi_rot=acos((piir(1)*pim1(1)+piir(2)*pim1(2))/(sqrt(piir(1)**2+piir(2)**2)*sqrt(pim1(1)**2+pim1(2)**2)))
+    cosphi=(piir(1)*pim1(1)+piir(2)*pim1(2))/&
+         (sqrt(piir(1)**2+piir(2)**2)*sqrt(pim1(1)**2+pim1(2)**2))
+    if (cosphi.gt.1d0 .and. cosphi.lt.1d0+tiny) cosphi=1d0
+    if (cosphi.lt.-1d0 .and. cosphi.gt.-1d0-tiny) cosphi=-1d0
+    phi_rot=acos(cosphi)
     if(piir(1)*pim1(2).lt.piir(2)*pim1(1)) phi_rot=-phi_rot
     phi=phi-phi_rot
     if (phi.lt.-pi) phi=phi+2d0*pi
@@ -692,11 +692,29 @@ contains
 
     ! E(i)>ETmin(i)
     shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
+
     ! E(ir)>ETmin(ir)
-    shatmax=(piir(0)*pim1(0)*(piir(0)**2-Etmin(ir)**2-2d0*cos(phi)*piir(0)*sqrt(pT2)+pT2)-&
+    if ( sqrt(pt2).gt.piir(0)-abs(piir(3)) .or. &
+         ( sqrt(pt2).lt.piir(0)-abs(piir(3)) .and. &
+           ETmin(ir)**2.gt.(piir(0)-sqrt(pt2))**2-piir(3)**2 ) ) then
+       shatmin=max(shatmin,&
+            (piir(0)*pim1(0)*(piir(0)**2-Etmin(ir)**2-2d0*cos(phi)*piir(0)*sqrt(pt2)+pt2)-&
+            pim1(0)*(piir(0)-2d0*cos(phi)*sqrt(pt2))*piir(3)**2-&
+            Sqrt(pim1(0)**2*piir(3)**2*(piir(0)**2-(etmin(ir)-sqrt(pt2))**2-piir(3)**2)*&
+            (piir(0)**2-(etmin(ir)+sqrt(pt2))**2-piir(3)**2)))/(piir(0)**2-piir(3)**2) )
+    elseif (pt2.gt.piir(0)**2-piir(3)**2) then
+       write (*,*) 'pT2 too large',pt2,piir(0)**2-piir(3)**2
+       stop 1
+
+    elseif (Etmin(ir).gt.sqrt(piir(0)**2-piir(3)**2)-sqrt(pt2)) then
+       write (*,*) 'Not enough energy',Etmin(ir),sqrt(piir(0)**2-piir(3)**2)-sqrt(pt2)
+       stop 1
+    endif
+
+    shatmax=(piir(0)*pim1(0)*(piir(0)**2-Etmin(ir)**2-2d0*cos(phi)*piir(0)*sqrt(pt2)+pt2)-&
          pim1(0)*(piir(0)-2d0*cos(phi)*sqrt(pt2))*piir(3)**2+&
-         abs(pim1(0)*piir(3))*sqrt(lambda(piir(0)**2,ETmin(ir)**2,pT2+piir(3)**2)+4d0*ETmin(ir)**2*piir(3)**2))/&
-         ((piir(0)-piir(3))*(piir(0)+piir(3)))
+         Sqrt(pim1(0)**2*piir(3)**2*(piir(0)**2-(etmin(ir)-sqrt(pt2))**2-piir(3)**2)*&
+         (piir(0)**2-(etmin(ir)+sqrt(pt2))**2-piir(3)**2)))/(piir(0)**2-piir(3)**2)
     
     if (shatmin.gt.shatmax) then
        if (debug) write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
@@ -708,17 +726,23 @@ contains
     ix=ix+1
     call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
 
+    
     if (debug) then
        write (*,*) 'shat - i+im1',i+im1,invm(i+im1),shatmin,shatmax
     endif
-
+    
     ! fill momentum, assuming that previous particle is along the x-axis.
     call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pip(0),xjac)
+    if (xjac.lt.0d0) then
+       jac=xjac
+       return
+    endif
     jac=jac*xjac
+
     ! check both +pz and -pz
     pim(0:2)=pip(0:2)
     pim(3)=-pip(3)
-
+    
     phi_rot=atan(pp(2,im1)/pp(1,im1))
     if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
 
@@ -731,21 +755,37 @@ contains
     ! rotate about the z-axis
     call rotz(pb,phi_rot,pim)
     
-    if ( pp(0,ir+i)-pip(0).gt.Etmin(ir) .and. &
-         pp(0,ir+i)-pim(0).gt.Etmin(ir) ) then
+    if ( (pp(0,ir+i)-pip(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pip(3))**2 .and. &
+         (pp(0,ir+i)-pim(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pim(3))**2 ) then
        if (ran2().gt.0.5d0) then
           pp(0:3,i)=pip(0:3)
        else
           pp(0:3,i)=pim(0:3)
        endif
        jac=jac*2d0
-    elseif ( pp(0,ir+i)-pip(0).gt.Etmin(ir) ) then
+    elseif ( (pp(0,ir+i)-pip(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pip(3))**2 ) then
        pp(0:3,i)=pip(0:3)
-    elseif ( pp(0,ir+i)-pim(0).gt.Etmin(ir) ) then
+    elseif ( (pp(0,ir+i)-pim(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pim(3))**2 ) then
        pp(0:3,i)=pim(0:3)
     else
+       write (*,*) 'not possible',shatmin,shatmax,invm(i+im1)
+       pp(0:3,ir)=pp(0:3,ir+i)-pip(0:3)
+       invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
+       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1),im1
+       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i),ir+i
+       write (*,*) 'pp(i)       ',pip(0:3),invm(i),i
+       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir),ir
+       write (*,*) ''
+       pp(0:3,ir)=pp(0:3,ir+i)-pim(0:3)
+       invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
+       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1),im1
+       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i),ir+i
+       write (*,*) 'pp(i)       ',pim(0:3),invm(i),i
+       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir),ir
+       write (*,*) ''
        jac=-21d0
        num_error=num_error+1
+       stop 1
        return
     endif
     
@@ -785,8 +825,8 @@ contains
     p(3)=p(0)**2-pt2
     if (p(3).lt.0d0 .and. p(3).ge.-tiny) then
        p(3)=0d0
-    elseif( p(3).lt.-tiny) then
-       jac=-20d0
+    elseif(p(3).lt.-tiny) then
+       xjac=-20d0
        return
     else
        p(3)=sqrt(p(3))
