@@ -625,8 +625,9 @@ contains
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
     real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,xjac,cosphi
-    real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim
+    real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim,prp,prm,pipr
     real(kind=8),external :: ran2
+    logical :: use_plus
     if (invm(i).ne.0d0) then
        write (*,*) 'genpt_one_step only for massless particles',i,invm(i)
        stop 1
@@ -690,10 +691,7 @@ contains
     call boostz(pp(0,im1),y,pim1)
     call boostz(pp(0,i+ir),y,piir)
 
-    ! E(i)>ETmin(i)
     shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
-
-    ! E(ir)>ETmin(ir)
     if ( sqrt(pt2).gt.piir(0)-abs(piir(3)) .or. &
          ( sqrt(pt2).lt.piir(0)-abs(piir(3)) .and. &
            ETmin(ir)**2.gt.(piir(0)-sqrt(pt2))**2-piir(3)**2 ) ) then
@@ -725,68 +723,64 @@ contains
       
     ix=ix+1
     call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
-
     
     if (debug) then
        write (*,*) 'shat - i+im1',i+im1,invm(i+im1),shatmin,shatmax
     endif
     
     ! fill momentum, assuming that previous particle is along the x-axis.
-    call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pip(0),xjac)
+    call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pipr(0),xjac)
     if (xjac.lt.0d0) then
        jac=xjac
        return
     endif
     jac=jac*xjac
 
+    ! rotate about the z-axis
+    phi_rot=atan(pp(2,im1)/pp(1,im1))
+    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+    call rotz(pipr,phi_rot,pip)
+
     ! check both +pz and -pz
     pim(0:2)=pip(0:2)
     pim(3)=-pip(3)
-    
-    phi_rot=atan(pp(2,im1)/pp(1,im1))
-    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
-
-    ! boost along the z-axis
-    call boostz(pip,-y,pb)
-    ! rotate about the z-axis
-    call rotz(pb,phi_rot,pip)
-    ! boost along the z-axis
-    call boostz(pim,-y,pb)
-    ! rotate about the z-axis
-    call rotz(pb,phi_rot,pim)
-    
-    if ( (pp(0,ir+i)-pip(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pip(3))**2 .and. &
-         (pp(0,ir+i)-pim(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pim(3))**2 ) then
+    prp(0:3)=piir(0:3)-pip(0:3)
+    prm(0:3)=piir(0:3)-pim(0:3)
+    if ( prp(0)**2-prp(3)**2 .ge. Etmin(ir)**2 .and. &
+         prp(0)**2-prp(3)**2 .ge. Etmin(ir)**2 .and. &
+         dot(prp(0:3),prp(0:3)) .ge. 0d0 .and. &
+         dot(prm(0:3),prm(0:3)) .ge. 0d0 &
+         ) then
        if (ran2().gt.0.5d0) then
-          pp(0:3,i)=pip(0:3)
+          use_plus=.true.
        else
-          pp(0:3,i)=pim(0:3)
+          use_plus=.false.
        endif
        jac=jac*2d0
-    elseif ( (pp(0,ir+i)-pip(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pip(3))**2 ) then
-       pp(0:3,i)=pip(0:3)
-    elseif ( (pp(0,ir+i)-pim(0))**2.ge.Etmin(ir)**2+(pp(3,ir+i)-pim(3))**2 ) then
-       pp(0:3,i)=pim(0:3)
+    elseif ( prp(0)**2-prp(3)**2 .ge. Etmin(ir)**2 .and. &
+         dot(prp(0:3),prp(0:3)) .ge. 0d0 &
+         ) then
+       use_plus=.true.
+    elseif ( prm(0)**2-prm(3)**2 .ge. Etmin(ir)**2 .and. &
+         dot(prm(0:3),prm(0:3)) .ge. 0d0 &
+         ) then
+       use_plus=.false.
     else
-       write (*,*) 'not possible',shatmin,shatmax,invm(i+im1)
-       pp(0:3,ir)=pp(0:3,ir+i)-pip(0:3)
-       invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
-       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1),im1
-       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i),ir+i
-       write (*,*) 'pp(i)       ',pip(0:3),invm(i),i
-       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir),ir
-       write (*,*) ''
-       pp(0:3,ir)=pp(0:3,ir+i)-pim(0:3)
-       invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
-       write (*,*) 'pp(im1 )    ',pp(0:3,im1),invm(im1),im1
-       write (*,*) 'pp(ir+i)    ',pp(0:3,ir+i),invm(ir+i),ir+i
-       write (*,*) 'pp(i)       ',pim(0:3),invm(i),i
-       write (*,*) 'pp(ir)      ',pp(0:3,ir),invm(ir),ir
-       write (*,*) ''
+       ! The constraints shatmin/shatmax are such that
+       ! E(ir)>ETmin(ir). However, sometimes, the invariant mass of ir
+       ! is smaller than zero for both configurations (i.e., for both
+       ! +pz and -pz). This boundary has not been implemented
+       ! consistently. In that case we simply return.
        jac=-21d0
        num_error=num_error+1
-       stop 1
        return
+    endif
+    
+    ! boost along the z-axis
+    if (use_plus) then
+       call boostz(pip,-y,pp(0,i))
+    else
+       call boostz(pim,-y,pp(0,i))
     endif
     
     pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
