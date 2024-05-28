@@ -624,7 +624,8 @@ contains
     ! This subroutines assumes that all particles in 'ir' are massless. 
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
-    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,xjac,cosphi
+    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,&
+         xjac,cosphi,pt,root,denom,base,pre
     real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim,prp,prm,pipr
     real(kind=8),external :: ran2
     logical :: use_plus
@@ -691,31 +692,31 @@ contains
     call boostz(pp(0,im1),y,pim1)
     call boostz(pp(0,i+ir),y,piir)
 
-    shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
-    if ( sqrt(pt2).gt.piir(0)-abs(piir(3)) .or. &
-         ( sqrt(pt2).lt.piir(0)-abs(piir(3)) .and. &
-           ETmin(ir)**2.gt.(piir(0)-sqrt(pt2))**2-piir(3)**2 ) ) then
-       shatmin=max(shatmin,&
-            (piir(0)*pim1(0)*(piir(0)**2-Etmin(ir)**2-2d0*cos(phi)*piir(0)*sqrt(pt2)+pt2)-&
-            pim1(0)*(piir(0)-2d0*cos(phi)*sqrt(pt2))*piir(3)**2-&
-            Sqrt(pim1(0)**2*piir(3)**2*(piir(0)**2-(etmin(ir)-sqrt(pt2))**2-piir(3)**2)*&
-            (piir(0)**2-(etmin(ir)+sqrt(pt2))**2-piir(3)**2)))/(piir(0)**2-piir(3)**2) )
-    elseif (pt2.gt.piir(0)**2-piir(3)**2) then
+    pt=sqrt(pt2)
+    shatmin=2d0*pt*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
+
+    pre=pim1(0)*piir(0)-2d0*cos(phi)*pim1(0)*pt
+    base=-pim1(0)*piir(0)*(ETmin(ir)-pt)*(ETmin(ir)+pt)
+    root=abs(pim1(0)*piir(3))*sqrt((piir(0)**2-(etmin(ir)-pt)**2-piir(3)**2)*&
+         (piir(0)**2-(etmin(ir)+pt)**2-piir(3)**2))
+    denom=(piir(0)-piir(3))*(piir(0)+piir(3))
+    
+    if ( pt.gt.piir(0)-abs(piir(3)) .or. &
+         ( pt.lt.piir(0)-abs(piir(3)) .and. &
+           ETmin(ir)**2.gt.(piir(0)-pt)**2-piir(3)**2 ) ) then
+       shatmin=max(shatmin,pre+(base-root)/denom)
+    elseif (pt2.gt.denom) then
        write (*,*) 'pT2 too large',pt2,piir(0)**2-piir(3)**2
        stop 1
-
-    elseif (Etmin(ir).gt.sqrt(piir(0)**2-piir(3)**2)-sqrt(pt2)) then
-       write (*,*) 'Not enough energy',Etmin(ir),sqrt(piir(0)**2-piir(3)**2)-sqrt(pt2)
+    elseif (Etmin(ir).gt.sqrt(piir(0)**2-piir(3)**2)-pt) then
+       write (*,*) 'Not enough energy',Etmin(ir),sqrt(piir(0)**2-piir(3)**2)-pt
        stop 1
     endif
 
-    shatmax=(piir(0)*pim1(0)*(piir(0)**2-Etmin(ir)**2-2d0*cos(phi)*piir(0)*sqrt(pt2)+pt2)-&
-         pim1(0)*(piir(0)-2d0*cos(phi)*sqrt(pt2))*piir(3)**2+&
-         Sqrt(pim1(0)**2*piir(3)**2*(piir(0)**2-(etmin(ir)-sqrt(pt2))**2-piir(3)**2)*&
-         (piir(0)**2-(etmin(ir)+sqrt(pt2))**2-piir(3)**2)))/(piir(0)**2-piir(3)**2)
+    shatmax=pre+(base+root)/denom
     
     if (shatmin.gt.shatmax) then
-       if (debug) write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
+       if (debug) write (*,*) shatmin,shatmax,2d0*pt*pim1(0)*(1d0-cos(drcut))
        jac=-13d0
        num_error=num_error+1
        return
@@ -729,7 +730,7 @@ contains
     endif
     
     ! fill momentum, assuming that previous particle is along the x-axis.
-    call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pipr(0),xjac)
+    call fill_momentum_ptinvmphi(pt,invm(i+im1),phi,pim1(0),pipr(0),xjac)
     if (xjac.lt.0d0) then
        jac=xjac
        return
@@ -805,18 +806,17 @@ contains
     invm(i+ib)=dot(pp(0:3,i+ib),pp(0:3,i+ib))
     invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
   end subroutine genpt_one_step
-  subroutine fill_momentum_pt2invmphi(pt2,invm,phi,Eref,p,xjac)
+  subroutine fill_momentum_ptinvmphi(pt,invm,phi,Eref,p,xjac)
     implicit none
-    real(kind=8) :: pt2,invm,phi,xjac,pt,Eref
+    real(kind=8) :: invm,phi,xjac,pt,Eref
     real(kind=8),dimension(0:3) :: p
     real(kind=8),external :: ran2
-    pt=sqrt(pt2)
     p(1)=pt*cos(phi)
     p(2)=pt*sin(phi)
     p(0)=invm/(2d0*Eref)+p(1)
     ! There are two values of the pz that correspond to a single
     ! invm. Take one of the two at random.
-    p(3)=p(0)**2-pt2
+    p(3)=p(0)**2-pt**2
     if (p(3).lt.0d0 .and. p(3).ge.-tiny) then
        p(3)=0d0
     elseif(p(3).lt.-tiny) then
@@ -826,7 +826,7 @@ contains
        p(3)=sqrt(p(3))
     endif
     xjac=abs(1d0/(2d0*Eref*(p(3)+vtiny)))
-  end subroutine fill_momentum_pt2invmphi
+  end subroutine fill_momentum_ptinvmphi
   subroutine boostz(p,yb,pb)
     ! boost in the z-direction with rapidity yb
     implicit none
