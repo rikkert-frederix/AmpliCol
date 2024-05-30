@@ -647,7 +647,7 @@ contains
     endif
 
     ix=ix+1
-    call random_to_var(x(ix),-1d0,pt2min,pt2max,pt2,jac)
+    call random_to_var(x(ix),ip,pt2min,pt2max,pt2,jac)
 
     if (debug) then
        write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
@@ -723,7 +723,7 @@ contains
     endif
       
     ix=ix+1
-    call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
+    call random_to_var(x(ix),ip,shatmin,shatmax,invm(i+im1),jac)
     
     if (debug) then
        write (*,*) 'shat - i+im1',i+im1,invm(i+im1),shatmin,shatmax
