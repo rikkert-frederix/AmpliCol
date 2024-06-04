@@ -510,7 +510,7 @@ contains
     implicit none
     integer(kind=4),intent(in) :: im1,i,ir,ib
     real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax,y,base,root,phi_rot
-    real(kind=8),dimension(0:3) :: ppi1,ppir1,ppibir1,ppi2,ppir2,ppibir2,piir,pib,pim1,piirr,pim1r
+    real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
     real(kind=8),external :: ran2
     if (popcnt(i).gt.1) then
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -566,15 +566,16 @@ contains
     if (invm_min(i+im1).ne.0d0) smin=max(smin,invm_min(i+im1))
     if (invm_max(i+im1).ne.0d0) smax=min(smax,invm_max(i+im1))
 
-!!$! This does not give an additional constraint:
-!!$    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
-!!$    call boostz(pp(0,i+ir),y,piirr)
-!!$    call boostz(pp(0,im1),y,pim1r)
-!!$    phi_rot=atan(pp(2,im1)/pp(1,im1))
-!!$    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
-!!$    call rotz(piirr,-phi_rot,piir)
-!!$    call rotz(pim1r,-phi_rot,pim1)
-!!$    smin=max(smin,2d0*pim1(0)*ETmin(i)+invm(i)+invm(im1)-2d0*ETmin(i)*abs(pim1(1)))
+! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
+    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
+    call boostz(pp(0,i+ir),y,piirr)
+    call boostz(pp(0,im1),y,pim1r)
+    phi_rot=atan(pp(2,im1)/pp(1,im1))
+    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+    call rotz(piirr,-phi_rot,piir)
+    call rotz(pim1r,-phi_rot,pim1)
+    ! Eir > Etmin(ir)
+    smax=min(smax,invm(i)+invm(im1)+2d0*(piir(0)-ETmin(ir))*(pim1(0)+pim1(1)) )
     
     if (smin.ge.smax) then
        jac=-4d0
@@ -585,9 +586,9 @@ contains
     ix=ix+1
     call random_to_var(x(ix),ip,smin,smax,invm(i+im1),jac)
     if (debug) then
-       write (*,*) '23- i+im1',i+im1,invm(i+im1),invm_min(i+im1),invm_max(i+im1)
+       write (*,*) '23- i+im1',i+im1,invm(i+im1),smin,smax
     endif
-
+    
     ! Generate the momenta from the integration variables. Since there is an
     ! ambiguity in phi, get both of them and pick the one that passes the cuts
     ! (if it's only one). If both pass, simply pick one of the two at random
@@ -595,33 +596,49 @@ contains
     phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
          &,invm(ir+i+ib),V,sqrtGG,1d0)
     call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
-         &,sqrt(invm(i)),sqrt(invm(ir)),ppi1,ppibir1)
+         &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+    pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
     phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
          &,invm(ir+i+ib),V,sqrtGG,0d0)
     call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
-         &,sqrt(invm(i)),sqrt(invm(ir)),ppi2,ppibir2)
-    if ( ppi1(0).ge.ETmin(i) .and. (pp(0,ir+i)-ppi1(0).ge.ETmin(ir)) .and. &
-         ppi2(0).ge.ETmin(i) .and. (pp(0,ir+i)-ppi2(0).ge.ETmin(ir)) ) then
+         &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+    pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
+    if ( pi1(0)**2-pi1(3)**2.ge.ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.ETmin(ir)**2 .and. &
+         pi2(0)**2-pi2(3)**2.ge.ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.ETmin(ir)**2 ) then
        if(ran2().gt.0.5d0) then
-          pp(0:3,i)=ppi1(0:3)
+          pp(0:3,i)=pi1(0:3)
+          pp(0:3,ir)=pp(0:3,i+ir)-pi1(0:3)
           pp(0:3,ib+ir)=ppibir1(0:3)
        else
-          pp(0:3,i)=ppi2(0:3)
+          pp(0:3,i)=pi2(0:3)
+          pp(0:3,ir)=pp(0:3,i+ir)-pi2(0:3)
           pp(0:3,ib+ir)=ppibir2(0:3)
        endif
-    elseif (ppi1(0).ge.ETmin(i) .and. (pp(0,ir+i)-ppi1(0).ge.ETmin(ir))) then
-       pp(0:3,i)=ppi1(0:3)
+    elseif (pi1(0)**2-pi1(3)**2.ge.ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.ETmin(ir)**2) then
+       pp(0:3,i)=pi1(0:3)
+       pp(0:3,ir)=pp(0:3,i+ir)-pi1(0:3)
        pp(0:3,ib+ir)=ppibir1(0:3)
        jac=jac/2d0
-    elseif (ppi2(0).ge.ETmin(i) .and. (pp(0,ir+i)-ppi2(0).ge.ETmin(ir))) then
-       pp(0:3,i)=ppi2(0:3)
+    elseif (pi2(0)**2-pi2(3)**2.ge.ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.ETmin(ir)**2) then
+       pp(0:3,i)=pi2(0:3)
+       pp(0:3,ir)=pp(0:3,i+ir)-pi2(0:3)
        pp(0:3,ib+ir)=ppibir2(0:3)
        jac=jac/2d0
     else
        jac=-19d0
+       if (debug) then
+          write (*,*) 'piir',pp(0:3,i+ir)
+          write (*,*) 'pim1',pp(0:3,im1)
+          write (*,*) '1:',phi1,(phi1+phi2)/(2d0*pi)
+          write (*,*) 'i',i,ETmin(i),':',pi1(0:3)
+          write (*,*) 'ir',ir,ETmin(ir),':',pr1(0:3)
+          write (*,*) '2:',phi2
+          write (*,*) 'i',i,ETmin(i),':',pi2(0:3)
+          write (*,*) 'ir',ir,ETmin(ir),':',pr2(0:3)
+          write (*,*) ''
+       endif
        return
     endif
-    pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
 
     ! Compute the Jacobian
     gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
@@ -1743,7 +1760,6 @@ contains
     implicit none
     real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
     real(kind=8) :: cosphi,x
-    real(kind=8),external :: ran2
     cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
     x=ran
     if (x.gt.0.5d0) then
