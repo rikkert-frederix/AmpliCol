@@ -319,8 +319,8 @@ contains
                 call gent_one_step(inext,set(i),3-i)
              else
 !!$                call gent_one_step_v2(inext,set(i),3-i)
-!!$                call gen23_one_step(inext,set(i),3-i,im1)
-                call genpt_one_step(inext,set(i),3-i,im1)
+                call gen23_one_step(inext,set(i),3-i,im1)
+!!$                call genpt_one_step(inext,set(i),3-i,im1)
              endif
              if (jac.le.0d0) return
           enddo
@@ -509,8 +509,8 @@ contains
 ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
     implicit none
     integer(kind=4),intent(in) :: im1,i,ir,ib
-    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax
-    real(kind=8),dimension(0:3) :: ppi1,ppir1,ppibir1,ppi2,ppir2,ppibir2
+    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax,y,base,root,phi_rot
+    real(kind=8),dimension(0:3) :: ppi1,ppir1,ppibir1,ppi2,ppir2,ppibir2,piir,pib,pim1,piirr,pim1r
     real(kind=8),external :: ran2
     if (popcnt(i).gt.1) then
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -526,28 +526,29 @@ contains
        write (*,*) '23- i    ',i,invm(i)
        write (*,*) '23- ir   ',ir,invm(ir)
     endif
-    if (jac.le.0d0) return
-    call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-!!$    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
-!!$    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
 
-    ! Make sure that the t-range is compatible with the pT cut
-    Eirmax=pp(0,i+ir+ib)+pp(0,ib)-ETmin(i) ! max energy available for ir
-    if (Eirmax.lt.max(ETmin(ir),sqrt(invm(ir)))) then
-       if (debug) write (*,*) 'Eirmax=', Eirmax,ETmin(ir),sqrt(invm(ir))
-       jac=-17d0
+    call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
+    ! Make sure that the t-range is compatible with the pT cut. Since t is an
+    ! invariant we can compute it in any frame. Let's use the frame in which
+    ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
+    ! ETmin() is boost invariant in the z-direction)
+    pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
+    y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
+    call boostz(pp(0,i+ir),y,piir)
+    call boostz(pp(0,ib),y,pib)
+    base=piir(0)**2-ETmin(i)**2+Etmin(ir)**2
+    ! Note, root=lambda(piir(0)**2,Etmin(i)**2,Etmin(ir)**2), but the
+    ! following is more stable:
+    root=(piir(0)-ETmin(i)-Etmin(ir))*(piir(0)+ETmin(i)-Etmin(ir))*&
+         (piir(0)-ETmin(i)+Etmin(ir))*(piir(0)+ETmin(i)+Etmin(ir))
+    if (root.lt.0d0) then
+       jac=-33d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'root.lt.0d0',root
        return
     endif
-    if (popcnt(ir).eq.1) then
-       pzmax=sqrt(Eirmax**2-ETmin(ir)**2)
-       tmax=min(tmax,invm(ir)-sqrtshat*(Eirmax-pzmax))
-       tmin=max(tmin,invm(ir)-sqrtshat*(Eirmax+pzmax))
-    else
-       pzmax=sqrt(Eirmax**2-max(invm(ir),ETmin(ir)**2))
-       tmax=min(tmax,invm(ir)-sqrtshat*(Eirmax-pzmax))
-       tmin=max(tmin,invm(ir)-sqrtshat*(Eirmax+pzmax))
-    endif
-    
+    tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
+    tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
     if (tmin.ge.tmax) then
        jac=-3d0
        num_error=num_error+1
@@ -556,14 +557,25 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
-!!$    call random_to_var(x(ix),0d0,tmin,tmax,invm(ir+ib),jac)
     if (debug) then
-       write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),invm_min(ir+ib),invm_max(ir+ib)
+       write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
     endif
+
     call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
          &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
     if (invm_min(i+im1).ne.0d0) smin=max(smin,invm_min(i+im1))
     if (invm_max(i+im1).ne.0d0) smax=min(smax,invm_max(i+im1))
+
+!!$! This does not give an additional constraint:
+!!$    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
+!!$    call boostz(pp(0,i+ir),y,piirr)
+!!$    call boostz(pp(0,im1),y,pim1r)
+!!$    phi_rot=atan(pp(2,im1)/pp(1,im1))
+!!$    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+!!$    call rotz(piirr,-phi_rot,piir)
+!!$    call rotz(pim1r,-phi_rot,pim1)
+!!$    smin=max(smin,2d0*pim1(0)*ETmin(i)+invm(i)+invm(im1)-2d0*ETmin(i)*abs(pim1(1)))
+    
     if (smin.ge.smax) then
        jac=-4d0
        num_error=num_error+1
@@ -572,10 +584,14 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,smin,smax,invm(i+im1),jac)
-!!$    call random_to_var(x(ix),0d0,smin,smax,invm(i+im1),jac)
     if (debug) then
        write (*,*) '23- i+im1',i+im1,invm(i+im1),invm_min(i+im1),invm_max(i+im1)
     endif
+
+    ! Generate the momenta from the integration variables. Since there is an
+    ! ambiguity in phi, get both of them and pick the one that passes the cuts
+    ! (if it's only one). If both pass, simply pick one of the two at random
+    ! with a flat prior.
     phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
          &,invm(ir+i+ib),V,sqrtGG,1d0)
     call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
@@ -607,6 +623,7 @@ contains
     endif
     pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
 
+    ! Compute the Jacobian
     gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
          &,invm(ir+i),invm(i+im1),invm(ir+ib+i+im1),invm(ir),invm(i)&
          &,invm(im1))
