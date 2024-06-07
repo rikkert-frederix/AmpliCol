@@ -310,7 +310,7 @@ contains
           invm((3-i)+set(i)+inext)=dot(pp(0:3,(3-i)+set(i)+inext),pp(0:3,(3-i)+set(i)+inext))
           pp(0:3,(3-i)+set(i))=pp(0:3,i)-pp(0:3,sets(0,(3-i)))-pp(0:3,inext)
           invm((3-i)+set(i))=dot(pp(0:3,(3-i)+set(i)),pp(0:3,(3-i)+set(i)))
-          do j=2,popcnt(set(i))-1
+          do j=2,popcnt(set(i))-2
              ! loop over the remaining particles in the set
              inext=ibset(0,sets(j,i)-1)
              im1=ibset(0,sets(j-1,i)-1)
@@ -318,9 +318,9 @@ contains
              if (t_channel) then
                 call gent_one_step(inext,set(i),3-i)
              else
-!!$                call gent_one_step_v2(inext,set(i),3-i)
-                call gen23_one_step(inext,set(i),3-i,im1)
-!!$                call genpt_one_step(inext,set(i),3-i,im1)
+!!$                call gen23_one_step(inext,set(i),3-i,im1)
+                call genpt_one_step(inext,set(i),3-i,im1)
+!!$                call gent_one_step_v2(inext,set(i),3-i,im1)
              endif
              if (jac.le.0d0) return
           enddo
@@ -330,7 +330,16 @@ contains
           if (t_channel) then
              call gent_one_step(inext,set(i),3-i)
           else
-!!$             call gent_one_step_v2(inext,set(i),3-i)
+!!$             call gen23_one_step(inext,set(i),3-i,im1)
+             call genpt_one_step(inext,set(i),3-i,im1)
+          endif
+          if (jac.le.0d0) return
+          inext=ibset(0,sets(j+1,i)-1)
+          im1=ibset(0,sets(j,i)-1)
+          set(i)=set(i)-inext
+          if (t_channel) then
+             call gent_one_step(inext,set(i),3-i)
+          else
              call gen23_one_step(inext,set(i),3-i,im1)
           endif
           if (jac.le.0d0) return
@@ -568,6 +577,7 @@ contains
     if (invm_min(i+im1).ne.0d0) smin=max(smin,invm_min(i+im1))
     if (invm_max(i+im1).ne.0d0) smax=min(smax,invm_max(i+im1))
 
+    
 ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
     y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
     call boostz(pp(0,i+ir),y,piirr)
@@ -580,6 +590,10 @@ contains
     ! Eir > Etmin(ir) + constraint coming from t
     etminir=max(pib(0)*etmin(ir)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),Etmin(ir))
     smax=min(smax,invm(i)+invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-invm(i))*pim1(1))
+
+    if(invm(i).eq.0d0) then
+       smin=max(smin,2d0*ETmin(i)*(pim1(0)-pim1(1)*cos(drcut)))
+    endif
     
     if (smin.ge.smax) then
        jac=-4d0
@@ -589,7 +603,7 @@ contains
     endif
     ix=ix+1
     call random_to_var(x(ix),ip,smin,smax,invm(i+im1),jac)
-       
+
     if (debug) then
        write (*,*) '23- i+im1',i+im1,invm(i+im1),smin,smax
     endif
@@ -659,12 +673,237 @@ contains
   end subroutine gen23_one_step
 
 
-  subroutine genpt_one_step(i,ir,ib,im1)
+    
+  subroutine gen23_one_step_v2(i,ir,ib,im1)
+! Generates one step using the 2->3 setup, using the invariants
+! shat(i), s(i) and t(i) as defined in E.~Byckling and K.~Kajantie,
+! ``Reductions of the phase-space integral in terms of simpler
+! processes,'' Phys. Rev. 187 (1969), 2008-2016,
+! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
+    implicit none
+    integer(kind=4),intent(in) :: im1,i,ir,ib
+    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax,y,base,root,phi_rot,&
+         etminir
+    real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+    real(kind=8),external :: ran2
+    integer :: j
+    integer :: ic,irc,ibc,im1c
+    common /current_step/ ic,irc,ibc,im1c
+
+    integer,parameter :: n_try=10
+    real(kind=8) :: xb1,xb2
+    integer :: nb,icode
+    real(kind=8),parameter :: xacc=1d-8
+    real(kind=8),dimension(n_try) :: xbb1,xbb2
+
+    ic=i ; irc=ir; ibc=ib; im1c=im1
+    if (popcnt(i).gt.1) then
+       if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+       call shatminmax(i,ir,shatmin,shatmax)
+       call generate_mass(i,shatmin,shatmax)
+    endif
+    if (popcnt(ir).gt.1) then
+       call shatminmax(ir,i,shatmin,shatmax)
+       call generate_mass(ir,shatmin,shatmax)
+    endif
+    if (jac.le.0d0) return
+    if (debug) then
+       write (*,*) '23- i    ',i,invm(i)
+       write (*,*) '23- ir   ',ir,invm(ir)
+    endif
+
+    call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
+    ! Make sure that the t-range is compatible with the pT cut. Since t is an
+    ! invariant we can compute it in any frame. Let's use the frame in which
+    ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
+    ! ETmin() is boost invariant in the z-direction)
+    pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
+    y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
+    call boostz(pp(0,i+ir),y,piir)
+    call boostz(pp(0,ib),y,pib)
+    base=piir(0)**2-ETmin(i)**2+Etmin(ir)**2
+    ! Note, root=lambda(piir(0)**2,Etmin(i)**2,Etmin(ir)**2), but the
+    ! following is more stable:
+    root=(piir(0)-ETmin(i)-Etmin(ir))*(piir(0)+ETmin(i)-Etmin(ir))*&
+         (piir(0)-ETmin(i)+Etmin(ir))*(piir(0)+ETmin(i)+Etmin(ir))
+    if (root.lt.0d0) then
+       jac=-33d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'root.lt.0d0',root
+       return
+    endif
+    tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
+    tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
+    if (tmin.ge.tmax) then
+       jac=-3d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       return
+    endif
+    ix=ix+1
+    call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
+    if (debug) then
+       write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
+    endif
+
+    call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
+         &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
+    if (invm_min(i+im1).ne.0d0) smin=max(smin,invm_min(i+im1))
+    if (invm_max(i+im1).ne.0d0) smax=min(smax,invm_max(i+im1))
+
+! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
+    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
+    call boostz(pp(0,i+ir),y,piirr)
+    call boostz(pp(0,im1),y,pim1r)
+    call boostz(pp(0,ib),y,pib)
+    phi_rot=atan(pp(2,im1)/pp(1,im1))
+    if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+    call rotz(piirr,-phi_rot,piir)
+    call rotz(pim1r,-phi_rot,pim1)
+    ! Eir > Etmin(ir) + constraint coming from t
+    etminir=max(pib(0)*etmin(ir)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),Etmin(ir))
+    smax=min(smax,invm(i)+invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-invm(i))*pim1(1))
+
+    if(invm(i).eq.0d0) then
+       smin=max(smin,2d0*ETmin(i)*(pim1(0)-pim1(1)*cos(drcut)))
+    endif
+    
+    if (smin.ge.smax) then
+       jac=-4d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'smin.ge.smax',smin,smax
+       return
+    endif
+
+    smin=smin*1.00000001d0
+    smax=smax*0.99999999d0
+
+    nb=n_try
+    call zbrak(smin_constraint,smin,smax,n_try,xbb1,xbb2,nb)
+
+
+    if (nb.ge.1) then
+       if (smin_constraint(smin).lt.0d0) then
+          root=rtbis(smin_constraint,xbb1(1),xbb2(1),xacc,icode)
+          if (icode.ge.0) smin=max(smin,root)
+       endif
+       if (smin_constraint(smax).lt.0d0) then
+          root=rtbis(smin_constraint,xbb1(nb),xbb2(nb),xacc,icode)
+          if (icode.ge.0) smax=min(smax,root)
+       endif
+    endif
+    
+    ix=ix+1
+    call random_to_var(x(ix),ip,smin,smax,invm(i+im1),jac)
+    
+    if (debug) then
+       write (*,*) '23- i+im1',i+im1,invm(i+im1),smin,smax
+    endif
+
+    ! Generate the momenta from the integration variables. Since there is an
+    ! ambiguity in phi, get both of them and pick the one that passes the cuts
+    ! (if it's only one). If both pass, simply pick one of the two at random
+    ! with a flat prior.
+    phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
+         &,invm(ir+i+ib),V,sqrtGG,1d0)
+    call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
+         &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+    pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
+    phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
+         &,invm(ir+i+ib),V,sqrtGG,0d0)
+    call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
+         &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+    pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
+    if ( pi1(0)**2-pi1(3)**2.ge.ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.ETmin(ir)**2 .and. &
+         pi2(0)**2-pi2(3)**2.ge.ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.ETmin(ir)**2 ) then
+       if(ran2().gt.0.5d0) then
+          pp(0:3,i)=pi1(0:3)
+          pp(0:3,ir)=pr1(0:3)
+          pp(0:3,ib+ir)=ppibir1(0:3)
+       else
+          pp(0:3,i)=pi2(0:3)
+          pp(0:3,ir)=pr2(0:3)
+          pp(0:3,ib+ir)=ppibir2(0:3)
+       endif
+    elseif (pi1(0)**2-pi1(3)**2.ge.ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.ETmin(ir)**2) then
+       pp(0:3,i)=pi1(0:3)
+       pp(0:3,ir)=pr1(0:3)
+       pp(0:3,ib+ir)=ppibir1(0:3)
+       jac=jac/2d0
+    elseif (pi2(0)**2-pi2(3)**2.ge.ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.ETmin(ir)**2) then
+       pp(0:3,i)=pi2(0:3)
+       pp(0:3,ir)=pr2(0:3)
+       pp(0:3,ib+ir)=ppibir2(0:3)
+       jac=jac/2d0
+    else
+       jac=-19d0
+       if (debug) then
+          write (*,*) 'piir',pp(0:3,i+ir)
+          write (*,*) 'pim1',pp(0:3,im1)
+          write (*,*) '1:',phi1,(phi1+phi2)/(2d0*pi)
+          write (*,*) 'i',i,ETmin(i),':',pi1(0:3)
+          write (*,*) 'ir',ir,ETmin(ir),':',pr1(0:3)
+          write (*,*) '2:',phi2
+          write (*,*) 'i',i,ETmin(i),':',pi2(0:3)
+          write (*,*) 'ir',ir,ETmin(ir),':',pr2(0:3)
+          write (*,*) ''
+       endif
+       return
+    endif
+    
+    ! Compute the Jacobian
+    gram4=gram_determinant4(invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib)&
+         &,invm(ir+i),invm(i+im1),invm(ir+ib+i+im1),invm(ir),invm(i)&
+         &,invm(im1))
+    if (gram4.ge.0d0) then 
+       write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
+       jac=-5d0
+       num_error=num_error+1
+       return
+    endif
+    jac=jac/(8d0*sqrt(-gram4))
+
+
+    
+  end subroutine gen23_one_step_v2
+
+
+  real(kind=8) function smin_constraint(siim1)
+    implicit none
+    real(kind=8),intent(in) :: siim1
+    real(kind=8) :: smin,smax,V,sqrtGG,phi1,phi2
+    real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2
+    integer :: i,ir,ib,im1
+    common /current_step/ i,ir,ib,im1
+    
+    call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
+         &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
+    ! Generate the momenta from the integration variables. Since there is an
+    ! ambiguity in phi, get both of them and pick the one that passes the cuts
+    ! (if it's only one). If both pass, simply pick one of the two at random
+    ! with a flat prior.
+    phi1=getphifroms(siim1,invm(ir+i),invm(ir),invm(ir+i+im1)&
+         &,invm(ir+i+ib),V,sqrtGG,1d0)
+    call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
+         &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+    pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
+    phi2=getphifroms(siim1,invm(ir+i),invm(ir),invm(ir+i+im1)&
+         &,invm(ir+i+ib),V,sqrtGG,0d0)
+    call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
+         &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+    pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
+    smin_constraint= &
+         max(min(pi1(0)**2-pi1(3)**2-ETmin(i)**2,pr1(0)**2-pr1(3)**2-ETmin(ir)**2), &
+             min(pi2(0)**2-pi2(3)**2-ETmin(i)**2,pr2(0)**2-pr2(3)**2-ETmin(ir)**2))
+  end function smin_constraint
+  
+
+subroutine genpt_one_step(i,ir,ib,im1)
     ! This subroutines assumes that all particles in 'ir' are massless. 
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
     real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,&
-         xjac,cosphi,pt,root,denom,base,pre
+         xjac,cosphi,pt,root,denom,base,pre,ptiir
     real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim,prp,prm,pipr
     real(kind=8),external :: ran2
     logical :: use_plus
@@ -676,9 +915,10 @@ contains
     y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
     call boostz(pp(0,i+ir),y,piir)
     call boostz(pp(0,im1),y,pim1)
+    ptiir=sqrt(piir(1)**2+piir(2)**2)
     ! generate pT^2
     pt2min=ETmin(i)**2-invm(i)
-    pt2max=min((piir(0)-ETmin(ir))**2,0.25d0*(piir(0)+sqrt(piir(1)**2+piir(2)**2))**2)
+    pt2max=min((piir(0)-ETmin(ir))**2-invm(i),0.25d0*(piir(0)+ptiir)**2)
     if (pt2min.gt.pt2max) then
        if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
        jac=-14d0
@@ -687,6 +927,7 @@ contains
 
     ix=ix+1
     call random_to_var(x(ix),ip,pt2min,pt2max,pt2,jac)
+    pt=sqrt(pt2)
 
     if (debug) then
        write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
@@ -694,9 +935,9 @@ contains
 
     ! generate phi
     phimax=(piir(1)**2+piir(2)**2+pT2-(piir(0)-sqrt(pT2+invm(i)))**2) &
-         /(2d0*sqrt((piir(1)**2+piir(2)**2)*pT2))
+         /(2d0*ptiir*pT)
     if (phimax.gt.1d0) then
-       write (*,*) 'ERROR,phimax',phimax,sqrt(piir(1)**2+piir(2)**2),sqrt(pT2),piir(0)
+       write (*,*) 'ERROR,phimax',phimax,sqrt(piir(1)**2+piir(2)**2),pT,piir(0)
        stop 1
     elseif (phimax.gt.-1d0) then
        phimax=acos(phimax)
@@ -717,7 +958,7 @@ contains
     ! phi is the angle between pT(i+ir) and pT(i), but it needs to be the
     ! angle between pT(im1) and pT(i). Hence, compensate:
     cosphi=(piir(1)*pim1(1)+piir(2)*pim1(2))/&
-         (sqrt(piir(1)**2+piir(2)**2)*sqrt(pim1(1)**2+pim1(2)**2))
+         (ptiir*sqrt(pim1(1)**2+pim1(2)**2))
     if (cosphi.gt.1d0 .and. cosphi.lt.1d0+tiny) cosphi=1d0
     if (cosphi.lt.-1d0 .and. cosphi.gt.-1d0-tiny) cosphi=-1d0
     phi_rot=acos(cosphi)
@@ -731,8 +972,7 @@ contains
     call boostz(pp(0,im1),y,pim1)
     call boostz(pp(0,i+ir),y,piir)
 
-    pt=sqrt(pt2)
-    shatmin=2d0*pt*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
+    shatmin=2d0*pt*(pim1(0)-sqrt(pim1(1)**2+pim1(2)**2)*cos(max(drcut,abs(phi))))
 
     pre=pim1(0)*piir(0)-2d0*cos(phi)*pim1(0)*pt
     base=-pim1(0)*piir(0)*(ETmin(ir)-pt)*(ETmin(ir)+pt)
@@ -964,147 +1204,157 @@ contains
     jac = jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
   end subroutine gent_one_step
 
-  subroutine gent_one_step_v2(i,ir,ib)
-    ! One step in the usual MadGraph t-channel phase-space generation.
+  subroutine gent_one_step_v2(i,ir,ib,im1)
     implicit none
-    integer(kind=4),intent(in) :: i,ir,ib
-    real(kind=8) :: tmin,tmax,phi,pzmax,Eimax,Eir,shatmin,shatmax,Eirmax,y,phi_z,phi_y,pzppmin,pzppmax,root
-    real(kind=8),dimension(0:3) :: piir,pib,piirrot,pb_cms,ptotm,pch,piirib,pirot,piribrot,piiribrot
-    integer(kind=4) :: j,icode
-    real(kind=8),parameter :: xacc=1d-8
-    real(kind=8) :: ETminir,cosy,cosphi,Epp,Eq,pxq,siny,invmi,invmiir
-    common /c_constraint/ ETminir,cosy,cosphi,Epp,Eq,pxq,siny,invmi,invmiir
+    integer(kind=4),intent(in) :: i,ir,ib,im1
+    real(kind=8) :: pt2,y,phi_rot,pt2min,pt2max,tmin,tmax,smin,smax,&
+         ea,eimax,mi,tr,siim1,mim1,eim1,pxim1,V,sqrtGG,base,root,yb
+    real(kind=8),dimension(0:3) :: piirr,pim1r,pib,piir,pim1,pii,pir
+    real(kind=8),external :: ran2
+    
+! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
+    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
+    call boostz(pp(0,i+ir),y,piirr)
+    call boostz(pp(0,im1),y,pim1r)
+    call boostz(pp(0,ib),y,pib)
+    phi_rot=atan(pp(2,im1)/pp(1,im1))
+    if (pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+    call rotz(piirr,-phi_rot,piir)
+    call rotz(pim1r,-phi_rot,pim1)
 
-    real(kind=8) :: xb1,xb2
-    integer :: nb
-    real(kind=8),dimension(1000) :: xbb1,xbb2
-    
-    
-    if (popcnt(i).gt.1) then
-       if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
-       call shatminmax(i,ir,shatmin,shatmax)
-       if (popcnt(ir).eq.1 .and. popcnt(i+ir).eq.next-2) then
-          ! The energy of i will be
-          ! Ei=(sqrtshat+(invm(i)-invm(ir))/sqrtshat)/2d0. This gives a
-          ! constraint on the allowed value of invm(i), since Ei>ETmin(i)
-          shatmin=max(shatmin,invm(ir)+sqrtshat*(2d0*ETmin(i)-sqrtshat))
-          Eimax=sqrtshat-ETmin(ir) ! maximum energy for i
-          shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Eimax-sqrtshat))
-       endif
-       call generate_mass(i,shatmin,shatmax)
-    endif
-    if (popcnt(ir).gt.1) then
-       call shatminmax(ir,i,shatmin,shatmax)
-       call generate_mass(ir,shatmin,shatmax)
-    endif
-    if (jac.le.0d0) return
-    if (debug) then
-       write (*,*) 't2- i    ',i,invm(i),invm_min(i),invm_max(i)
-       write (*,*) 't2- ir   ',ir,invm(ir)
+    ! generate pT^2
+    pt2min=ETmin(i)**2-invm(i)
+    pt2max=min((piir(0)-ETmin(ir))**2-invm(i),&
+               0.25d0*(piir(0)+sqrt(piir(1)**2+piir(2)**2))**2)
+    if (pt2min.gt.pt2max) then
+       if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
+       jac=-14d0
+       return
     endif
 
     ix=ix+1
-    call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
-
-    call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-
-    ! boost to the frame where i+ir has pz=0 
-    y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
-    call boostz(pp(0,i+ir),y,piir)
-    call boostz(pp(0,ib),y,pib)
-    call boostz(pp(0,i+ir+ib),y,piirib)
-
-    ! rotate about the z-axis such that i+ir is in the px-direction
-    phi_z=atan(pp(2,i+ir)/pp(1,i+ir))
-    if (pp(1,i+ir).lt.0d0) phi_z=phi_z+pi
-    call rotz(piir,-phi_z,piirrot)
-    call rotz(piirib,-phi_z,piiribrot)
+    call random_to_var(x(ix),ip,pt2min,pt2max,pt2,jac)
     
-    ! boost to the frame where p(i+ir) is at rest
-    ptotm(0)=piirrot(0)
-    ptotm(1:3)=-piirrot(1:3)
-    call boostm(pib,ptotm,sqrt(invm(i+ir)),pb_cms)
-
-    cosphi=cos(phi)
-    Eq=piirrot(0)
-    pxq=piirrot(1)
-    cosy=pb_cms(3)/sqrt(pb_cms(1)**2+pb_cms(2)**2+pb_cms(3)**2)
-    siny=sqrt(1d0-cosy**2)
-    Epp=(sqrt(invm(i+ir))+(invm(i)-invm(ir))/sqrt(invm(i+ir)))/2d0
-    ETminir=ETmin(ir)
-    invmi=invm(i)
-    invmiir=invm(i+ir)
-
-    pzppmin=Epp-(invm(i)-tmin)/(2*pb_cms(0))+tiny
-    pzppmax=Epp-(invm(i)-tmax)/(2*pb_cms(0))-tiny
-
-    nb=1000
-    call zbrak(tminmax_constraint,pzppmin,pzppmax,1000,xbb1,xbb2,nb)
-    if (nb.ge.3) then
-       write (*,*) 'nb',nb
-       write (*,*) 'Etminir',Etminir
-       write (*,*) 'cosy',cosy
-       write (*,*) 'cosphi',cosphi
-       write (*,*) 'Epp',Epp
-       write (*,*) 'mi',sqrt(invm(i))
-       write (*,*) 'mir',sqrt(invm(i+ir))
-       write (*,*) 'Eq',Eq
-       write (*,*) 'pxq',pxq
-       stop 1
+    if (debug) then
+       write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
     endif
+
+    Ea=pib(0)
+    mi=sqrt(invm(i))
+    tr=invm(ib+i)
+    mim1=sqrt(invm(im1))
+    eim1=pim1(0)
+    pxim1=pim1(1)
     
-    if (tminmax_constraint(pzppmin).lt.0d0) then
-       call find_lower_bracket(tminmax_constraint,pzppmin,pzppmax,xb1,xb2)
-!!$       write (*,*) pzppmin,pzppmax,xb1,xb2
-       root=rtbis(tminmax_constraint,xb1,xb2,xacc,icode)
-       if (icode.ge.0) tmin=max(tmin,invm(i)+2*pb_cms(0)*(root-Epp))
-    endif
-    if (tminmax_constraint(pzppmax).lt.0d0) then
-       call find_upper_bracket(tminmax_constraint,pzppmin,pzppmax,xb1,xb2)
-       root=rtbis(tminmax_constraint,xb1,xb2,xacc,icode)
-!!$       write (*,*) xb1,xb2,root,tminmax_constraint(root),tmax,invm(i)+2*pb_cms(0)*(root-Epp)
-       if (icode.ge.0) tmax=min(tmax,invm(i)+2*pb_cms(0)*(root-Epp))
-!!$       write (*,*) tmax
-    endif
-
-    if (tmin.ge.tmax) then
-       jac=-6d0
+    ! Make sure that the t-range is compatible with the pT cut. Since t is an
+    ! invariant we can compute it in any frame. Let's use the frame in which
+    ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
+    ! ETmin() is boost invariant in the z-direction)
+    pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
+    yb=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
+    call boostz(pp(0,i+ir),yb,piir)
+    call boostz(pp(0,ib),yb,pib)
+    base=piir(0)**2+pt2-Etmin(ir)**2+invm(i)*(1d0-piir(0)/pib(0))
+    ! Note, root=lambda(piir(0)**2,pt2+invm(i),Etmin(ir)**2), but the
+    ! following is more stable:
+    root=(piir(0)-sqrt(pt2+invm(i))-Etmin(ir))*(piir(0)+sqrt(pt2+invm(i))-Etmin(ir))*&
+         (piir(0)-sqrt(pt2+invm(i))+Etmin(ir))*(piir(0)+sqrt(pt2+invm(i))+Etmin(ir))
+    if (root.lt.0d0) then
+       jac=-33d0
        num_error=num_error+1
-       if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax,invm(ir+i),invm(ir+i+ib),invm(ir),invm(i)
+       if (debug) write (*,*) 'root.lt.0d0',root
+       return
+    endif
+    tmin=invm(i)-pib(0)/piir(0)*(base+sqrt(root))
+    tmax=invm(i)-pib(0)/piir(0)*(base-sqrt(root))
+    if (tmin.ge.tmax) then
+       jac=-3d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
+       return
+    endif
+
+    
+    ! generate t
+    ix=ix+1
+    call random_to_var(x(ix),ip,tmin,tmax,invm(ib+i),jac)
+    
+    if (debug) then
+       write (*,*) 'pt2 - ib+i',ib+i,invm(ib+i),tmin,tmax
+    endif
+
+
+    pii(0)=(Ea*(mi**2 + pt2))/(mi**2 - tr) + (mi**2 - tr)/(4.*Ea)
+    pii(3)=(Ea*(mi**2 + pt2))/(mi**2 - tr) + (-mi**2 + tr)/(4.*Ea)
+
+    
+
+    smin=invm_min(i+im1)
+    if(invm(i).eq.0d0) then
+       smin=max(smin,2d0*sqrt(pt2)*(pim1(0)-pim1(1)*cos(drcut)))
+    endif
+    smin=max(smin,2*pii(0)*eim1+mi**2+mim1**2-2d0*sqrt(pt2)*pxim1)
+    smax=2*pii(0)*eim1+mi**2+mim1**2+2d0*sqrt(pt2)*pxim1
+    
+    if (smin.ge.smax) then
+       jac=-4d0
+       num_error=num_error+1
+       if (debug) write (*,*) 'smin.ge.smax',smin,smax
        return
     endif
     ix=ix+1
-!!$    call random_to_var(x(ix),ip,tmin,tmax,invm(i+ib),jac)
-    call random_to_var(x(ix),0d0,tmin,tmax,invm(i+ib),jac)
+    call random_to_var(x(ix),ip,smin,smax,invm(i+im1),jac)
+
+!!$    invm(i+im1)=smax+1d0
     
     if (debug) then
-       write (*,*) 't2- ir+ib',ir+ib,invm(i+ib),invm_min(ir+ib),invm_max(ir+ib),tmin,tmax
+       write (*,*) '23- i+im1',i+im1,invm(i+im1),smin,smax
     endif
-    call gentcms_v2(pib,piiribrot,invm(ib+i),phi,sqrt(invm(i)) &
-         &,sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
 
-    call rotz(pp(0,i),phi_z,pirot)
-    call rotz(pp(0,ib+ir),phi_z,piribrot)
-    call boostz(pirot,-y,pp(0,i))
-    call boostz(piribrot,-y,pp(0,ir+ib))
+
+    siim1=invm(i+im1)
+
+    pii(1)=(2*(mi**2 + mim1**2 - siim1) + &
+         (4*Ea*eim1*(mi**2 + pt2))/(mi**2 - tr) + (eim1*(mi**2 - tr))/Ea)/(4.*pxim1)
+
+    if (pii(1)**2.gt.pt2) then
+       jac=-101d0
+       return
+    endif
     
-    pp(0:3,ir)=pp(0:3,ib+ir+i)+pp(0:3,ib)-pp(0:3,i)
-    jac = jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
+    pii(2)=sqrt(pt2-pii(1)**2)
+    if (ran2().gt.0.5d0) pii(2)=-pii(2)
+    jac=jac*2d0
+
+
+
+    
+    call rotz(pii,phi_rot,pir)
+    call boostz(pir,-y,pp(0,i))
+
+    pp(0:3,ir)=pp(0:3,i+ir)-pp(0:3,i)
+    invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
+    pp(0:3,ir+ib)=pp(0:3,ir)-pp(0:3,ib)
+    invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
+
+    jac=jac*(1d0/abs(8*Ea*pxim1*pii(2)*(-1d0 + pii(3)/pii(0))))*2d0/pii(0)
+    jac=jac/4d0
+
+    if (invm(ir).lt.0d0 .or. pp(0,ir).lt.ETmin(ir)) then
+       jac=-102d0
+       return
+    endif
+    
+!!$    write (*,*) 'jac',jac
+!!$    write (*,*) 'pii',i,pii
+!!$    write (*,*) 'p i ',i,pp(0:3,i),dot(pp(0:3,i),pp(0:3,i))
+!!$    write (*,*) 'p ir',ir,pp(0:3,ir),dot(pp(0:3,ir),pp(0:3,ir))
+
   end subroutine gent_one_step_v2
 
-  double precision function tminmax_constraint(pzpp)
-    implicit none
-    real(kind=8) :: pzpp
-    real(kind=8) :: Etminir,cosy,cosphi,Epp,Eq,pxq,siny,invmi,invmiir
-    common /c_constraint/ Etminir,cosy,cosphi,Epp,Eq,pxq,siny,invmi,invmiir
-    tminmax_constraint=-Etminir**2-(cosy*pzpp-cosphi*Sqrt(Epp**2-invmi-pzpp**2)*siny)**2+ &
-!!$         (Epp*Eq-pxq*(cosphi*cosy*sqrt(Epp**2-invmi-pzpp**2)+pzpp*siny))**2/invmiir
-         (Eq-(Epp*Eq-pxq*(cosphi*cosy*sqrt(Epp**2-invmi-pzpp**2)+pzpp*siny))/sqrt(invmiir))**2
-  end function tminmax_constraint
-  
   double precision function rtbis(func,x1,x2,xacc,icode)
     implicit none
-    integer,parameter :: jmax=40
+    integer,parameter :: jmax=1000
     real*8,intent(in) :: x1,x2,xacc
     integer,intent(out) :: icode
     real*8,external :: func
@@ -1140,77 +1390,6 @@ contains
     write (*,*)  "WARNING: too many bisections in rtbis"
   end function rtbis
 
-  subroutine find_lower_bracket(fx,x1,x2,xb1,xb2)
-    implicit none
-    real(kind=8) :: x1,x2,xb1,xb2,xa,xb,fa,fb,dum
-    real(kind=8),external :: fx
-    real(kind=8) :: step
-    step=1d-4
-    xa=x1
-    fa=tminmax_constraint(xa)
-    if (fa.gt.0d0) then
-       xb1=x1
-       xb2=x2
-       return
-    endif
-    xb=x1+step*(x2-x1)
-    do
-       fb=tminmax_constraint(xb)
-       if (fb.gt.0d0) then
-          xb1=xa
-          xb2=xb
-          return
-       else
-          dum=xa
-          xa=xb
-          fa=fb
-          step=step*1.3d0
-          xb=x1+step*(x2-x1)
-          if (xb.gt.x2) then
-             xb1=xa
-             xb2=x2
-             return
-          endif
-       endif
-    enddo
-  end subroutine find_lower_bracket
-  
-  
-  subroutine find_upper_bracket(fx,x1,x2,xb1,xb2)
-    implicit none
-    real(kind=8) :: x1,x2,xb1,xb2,xa,xb,fa,fb,dum
-    real(kind=8),external :: fx
-    real(kind=8) :: step
-    step=1d-4
-    xb=x2
-    fb=tminmax_constraint(xb)
-    if (fb.gt.0d0) then
-       xb1=x1
-       xb2=x2
-       return
-    endif
-    xa=x2-step*(x2-x1)
-    do
-       fa=tminmax_constraint(xa)
-       if (fa.gt.0d0) then
-          xb1=xa
-          xb2=xb
-          return
-       else
-          dum=xb
-          xb=xa
-          fb=fa
-          step=step*1.5d0
-          xa=x2-step*(x2-x1)
-          if (xb.lt.x1) then
-             xb1=xa
-             xb2=x2
-             return
-          endif
-       endif
-    enddo
-  end subroutine find_upper_bracket
-  
   
   subroutine zbrak(fx,x1,x2,n,xb1,xb2,nb)
 ! Given a function fx defined on the interval from x1-x2 subdivide the
@@ -1826,7 +2005,7 @@ contains
     GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
       & *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
     if (GG.le.0d0 .or. V.eq.-99d99) then
-       write (*,*) 'No allowed range for s: smin=smax',GG,V
+!!$       write (*,*) 'No allowed range for s: smin=smax',GG,V
 !!$       stop 1
        GG=0d0
        V=0d0

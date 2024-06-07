@@ -265,7 +265,7 @@ contains
     pt=dsqrt(pt2)
     p(0) = pt/(dsqrt(costheta**2+(1d0-costheta**2)*cos(phi)**2))
     p(1) = p(0)*costheta
-    p(2)= p(0)*dsqrt(1d0-costheta**2)*cos(phi)
+    p(2) = p(0)*dsqrt(1d0-costheta**2)*cos(phi)
     p(3) = p(0)*dsqrt(1d0-costheta**2)*sin(phi)
     jac=jac*2d0 ! left-over factor from the overall jacobian of pi's and 2's
     jac = jac/(1+costheta**2-(costheta**2-1d0)*cos(2d0*phi))
