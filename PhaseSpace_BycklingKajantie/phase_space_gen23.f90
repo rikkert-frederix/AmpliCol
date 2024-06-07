@@ -330,8 +330,8 @@ contains
           if (t_channel) then
              call gent_one_step(inext,set(i),3-i)
           else
-!!$             call gen23_one_step(inext,set(i),3-i,im1)
-             call genpt_one_step(inext,set(i),3-i,im1)
+             call gen23_one_step(inext,set(i),3-i,im1)
+!!$             call genpt_one_step(inext,set(i),3-i,im1)
           endif
           if (jac.le.0d0) return
           inext=ibset(0,sets(j+1,i)-1)
