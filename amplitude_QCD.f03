@@ -522,9 +522,9 @@ contains
          do i=1,n
             if (i.eq.1 .or. i.eq.n) cycle
             if (order(i).eq.2) then
-               if (part(order(i)).gt.1 .and. part(order(i)).lt.6) then
+               if (part(order(i)).ge.1 .and. part(order(i)).lt.6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).lt.-1 .and. part(order(i+1)).gt.-6)) then
+                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).lt.6)) then
                      write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
                      write (*,*) order
                      write (*,*) part
@@ -1052,6 +1052,7 @@ contains
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(this%current_list(ic1)%bin,this%current_list(ic2)%bin)).ne.isize) return
+      
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
@@ -1103,10 +1104,10 @@ contains
       endif
 
       ! The second current cannot be a quark current
-      if ( this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6) return
+      !if ( this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6) return
       ! If the first current is a quark current, the first particle in the order must be the quark
-      if ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
-           this%current_list(ic1)%order(1).ne.order(1)) return
+      !if ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
+      !     this%current_list(ic1)%order(1).ne.order(1)) return
 
       ! If using symmetry and the current is a combination of all external
       ! gluons, take only one of the two possible orders
@@ -1162,6 +1163,7 @@ contains
          if (part(ip2(i)).ge.22) exit
       enddo
       nc2=i-1
+
       combined_currents(1:nc1+nc2)=[ip1(1:nc1),ip2(1:nc2)]
       if (nc1.eq.n1) then
          ! No colour singlets or all colour singlets are in ip2
@@ -1219,7 +1221,6 @@ contains
          enddo
       endif
     end function combined_currents
-
 
     subroutine add_all_currents(ctype)
       implicit none
@@ -2133,7 +2134,6 @@ contains
           do ih2=1,this%current_list(this%interaction_list(iv)%currents(2))%nhel
              do ih1=1,this%current_list(this%interaction_list(iv)%currents(1))%nhel
                 ih=(ih2-1)*this%current_list(this%interaction_list(iv)%currents(1))%nhel+ih1
-
                 if (this%interaction_list(iv)%type.eq.0) then
                    if (use_real_gluons) then
                       call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
@@ -2191,7 +2191,6 @@ contains
                        call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
-
                     endif
 
                  elseif(this%interaction_list(iv)%type.eq.5) then
@@ -2213,21 +2212,30 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
                     endif
-
                  elseif(this%interaction_list(iv)%type.eq.7) then
+                    ! makes sure the helicities in 'ih' are correctly set in case colour singlets are moved to the end
+                    do imv=1,this%interaction_list(iv)%singlet_mv(0)
+                       call move_ih(this%interaction_list(iv)%singlet_mv(imv),ih)
+                    enddo
                     call AquarkGluontoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                           this%interaction_list(iv)%val_c(1:4,ih))
-
-
-
                 elseif(this%interaction_list(iv)%type.eq.8) then
-                        call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                    ! makes sure the helicities in 'ih' are correctly set in case colour singlets are moved to the end
+                    do imv=1,this%interaction_list(iv)%singlet_mv(0)
+                       call move_ih(this%interaction_list(iv)%singlet_mv(imv),ih)
+                    enddo
+
+                   call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
 
                 elseif(this%interaction_list(iv)%type.eq.9) then
-                       call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
+                    ! makes sure the helicities in 'ih' are correctly set in case colour singlets are moved to the end
+                    do imv=1,this%interaction_list(iv)%singlet_mv(0)
+                       call move_ih(this%interaction_list(iv)%singlet_mv(imv),ih)
+                    enddo
+                    call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                               this%interaction_list(iv)%val_c(1:4,ih))
 
@@ -2335,6 +2343,11 @@ contains
                   this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_r(1:4,ih1)*this%current_list(n)%val_r(1:4,ih2))
                else
                   this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_c(1:4,ih1)*this%current_list(n)%val_c(1:4,ih2))
+               !write(*,*) 'holahola0'
+               !write(*,*) this%amps(this%helmap(ih))
+
+               !write(*,*) this%current_list(n)%val_c(1:4,ih2)
+               !write(*,*) this%current_list(this%n_cur)%val_c(1:4,ih1)
                endif
             enddo
          enddo
