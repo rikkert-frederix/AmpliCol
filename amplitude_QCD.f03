@@ -532,9 +532,9 @@ contains
                   endif
                endif
             else
-               if (part(order(i)).lt.-1 .and. part(order(i)).gt.-6) then
+               if (part(order(i)).le.-1 .and. part(order(i)).gt.-6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).gt.1 .and. part(order(i+1)).lt.6)) then
+                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).lt.6)) then
                      write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
                      write (*,*) order
                      write (*,*) part
