@@ -100,6 +100,7 @@ module mint_module
   character(len=string_len) :: tag,tag_read
 
 ! private variables
+  logical,parameter,private  :: fixed_points_pass_cuts=.true.
   character(len=13), parameter, dimension(nintegrals), private :: title=(/ &
                                                    'ABS integral ', & !  1
                                                    'Integral     ', & !  2
@@ -199,12 +200,21 @@ contains
     do while (nit.lt.itmax)
        call start_iteration
 2      kpoint_iter=kpoint_iter+1
-       do kpoint=1,ncalls
+       kpoint=0
+       do
           new_point=.true.
           call get_random_x(x,vol,kfold)
           call compute_integrand(fun,x,vol)
           call accumulate_the_point(x)
+          if (fixed_points_pass_cuts) then
+             if (non_zero_point(1).ge.ncalls .or. &
+                  (nit.le.3 .and. ntotcalls(1).gt.1000000 .and. double_events)) exit
+          else
+             kpoint=kpoint+1
+             if (kpoint.ge.ncalls) exit
+          endif
        enddo
+       write (*,*) 'ncalls',ncalls,non_zero_point(1),ntotcalls(1)
        call get_amount_of_points(enough_points)
        if (.not.enough_points) goto 2
        if (imode.eq.0 .and. nit.eq.1 .and. double_events) then
@@ -245,7 +255,11 @@ contains
        nint_used_virt=nintervals_virt
     else
        ! if ncalls0.le.0, reset it and double the events per iteration
-       ncalls0=80*ndim*(nchans/3+1)
+       if (fixed_points_pass_cuts) then
+          ncalls0=625
+       else
+          ncalls0=80*ndim*(nchans/3+1)
+       endif
        double_events=.true.
        if (imode.eq.1 .or. imode.eq.-1) then
           nint_used=nintervals
@@ -506,7 +520,11 @@ contains
           write (*,*)'2nd bad iteration in a row. Resetting grids and starting from scratch...'
           if (double_events) then
              if (imode.eq.0) nint_used=min_inter ! reset number of intervals
-             ncalls0=ncalls0/8   ! Start with larger number
+             if (fixed_points_pass_cuts) then
+                ncalls0=625
+             else
+                ncalls0=ncalls0/8   ! Start with larger number
+             endif
           endif
           call reset_mint_grids
           call reset_MC_grid  ! reset the grid for the integers
@@ -606,6 +624,10 @@ contains
     implicit none
     logical :: enough_points
     integer :: i
+    if (fixed_points_pass_cuts) then
+       enough_points=.true.
+       return
+    endif
     do i=1,nintegrals
 ! Number of phase-space points used
        ntotcalls(i)=ncalls*kpoint_iter
@@ -778,14 +800,14 @@ contains
     ! contribution to integral
     ifirst=0
     if(imode.eq.0) then
-       dummy=fun(x,vol,ifirst,nit,f1)
+       dummy=fun(x,vol,ifirst,f1)
        f(1:nintegrals)=f1(1:nintegrals)
     else
        f(1:nintegrals)=0d0
        kfold(1:ndim)=1
 1      continue
        ! this accumulated value will not be used
-       dummy=fun(x,vol,ifirst,nit,f1)
+       dummy=fun(x,vol,ifirst,f1)
        ifirst=1
        call nextlexi(ifold,kfold,iret)
        if(iret.eq.0) then
@@ -794,9 +816,10 @@ contains
        endif
        !closing call: accumulated value with correct sign
        ifirst=2
-       dummy=fun(x,vol,ifirst,nit,f1)
+       dummy=fun(x,vol,ifirst,f1)
        f(1:nintegrals)=f1(1:nintegrals)
     endif
+    if (fixed_points_pass_cuts) ntotcalls(1:nintegrals)=ntotcalls(1:nintegrals)+1
   end subroutine compute_integrand
   
   subroutine get_random_x(x,vol,kfold)
@@ -849,6 +872,7 @@ contains
     etot(1:nintegrals,0:nchans)=0d0
     kpoint_iter=0
     non_zero_point(1:nintegrals)=0
+    if (fixed_points_pass_cuts) ntotcalls(1:nintegrals)=0
     pass_cuts_point=0
   end subroutine start_iteration
 
@@ -1011,7 +1035,11 @@ contains
   
   subroutine setup_imode_0
     implicit none
-    even_rn=.true.
+    if (fixed_points_pass_cuts) then
+       even_rn=.false.
+    else
+       even_rn=.true.
+    endif
     min_it=min_it0
     call reset_mint_grids
   end subroutine setup_imode_0
@@ -1152,7 +1180,8 @@ contains
     double precision, parameter :: tiny=1d-8
 ! compute total number of points and update grids if large
     regridded(kchan)=.false.
-    if (sum(nhits(1:nint_used,kdim,kchan),dim=1).lt.nint(0.9*nhits_in_grids(kchan))) return
+    if ((.not.fixed_points_pass_cuts) .and. &
+         sum(nhits(1:nint_used,kdim,kchan),dim=1).lt.nint(0.9*nhits_in_grids(kchan))) return
     regridded(kchan)=.true.
 ! Use the same smoothing as in VEGAS uses for the grids, i.e. use the
 ! average of the central and the two neighbouring grid points: (Only do

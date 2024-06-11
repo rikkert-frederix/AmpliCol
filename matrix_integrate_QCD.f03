@@ -30,19 +30,23 @@ program matrix_integrate_QCD
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-!!$  ncalls0=-10000   ! Number of events to generate. (If negative, start
-  ncalls0=1000000   ! Number of events to generate. (If negative, start
-                   ! from a small number of points and double it each
-                   ! iteration. If positive, this is the number of
-                   ! points per iteration as well).
+  ! Number of events to generate. (If negative, start
+  ! from a small number of points and double it each
+  ! iteration. If positive, this is the number of
+  ! points per iteration as well).
+  if (imode.eq.0 .or. imode.eq.2) then
+     ncalls0=-1000
+  else
+     ncalls0=600000
+  endif
 
   ndim=3*(next-2)-4   ! Number of dimensions of the integration.
 
-  itmax=20         ! Number of iterations. (If ncalls0 < 0, the
+  itmax=10         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
-  accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+  accuracy=0.00001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
 
 ! relevant physics input parameters and initialisation of amplitudes
@@ -68,11 +72,13 @@ program matrix_integrate_QCD
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
-     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,t_chan,include_pdf)
+     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,.false.,include_pdf)
   elseif  (integration.eq.2) then
      call haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
   elseif (integration.eq.3) then
      call genpt_init(sqrts,next,mass,pt_min,eta_max,DRjj_min,include_pdf)
+  elseif (integration.eq.4) then
+     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,.true.,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
@@ -157,7 +163,7 @@ program matrix_integrate_QCD
   write(*,*) 'Number of numerical errors:',num_error
  
 contains
-  function integrand(x,vol,ifirst,nit,f1)
+  function integrand(x,vol,ifirst,f1)
     implicit none
     real*8 :: integrand
     integer :: ifirst
@@ -168,7 +174,6 @@ contains
     real*8 :: vol,cuts_wgt
     real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
-    integer :: nit ! iteration number
     double precision :: y,frac,steep,cuts_wgt_1,Q
    
     ! some point-by-point initialisation
@@ -183,7 +188,8 @@ contains
     pass_cuts_check=.true.
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
-    if (integration.eq.1)then
+    call cpu_time(tBefore)
+    if (integration.eq.1 .or. integration.eq.4)then
        call gen23_phase_space(x)
     elseif (integration.eq.2) then
         call PS_haag(x)
@@ -196,7 +202,7 @@ contains
 
     all_evt=all_evt+1
 
-    cuts_wgt=pass_cuts(next,p,nit)
+    cuts_wgt=pass_cuts(next,p)
     if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
        val=0d0
@@ -269,13 +275,12 @@ contains
 
   end function integrand
 
-  double precision function pass_cuts(n,p,nit)
+  double precision function pass_cuts(n,p)
     ! Cuts on the phase-space point.
     implicit none
     integer :: i,j,n
     real*8,dimension(0:3,n) :: p
     double precision :: frac,y,steep
-    integer :: nit
 
     pass_cuts=1d0
     if (sqrt_s_min.gt.0d0) then
