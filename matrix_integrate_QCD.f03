@@ -196,9 +196,16 @@ contains
     elseif (integration.eq.3) then
         call genpt_phase_space(x)
     endif
-    
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
+
+
+!!$    if (debug .and. jac.lt.0d0) then
+    if (debug ) then
+       write (*,*) jac
+       stop 1
+    endif
+    
 
     all_evt=all_evt+1
 
@@ -565,8 +572,9 @@ contains
        write (*,*) 'Incorrect imode',imode
        stop
     endif
-    if (integration.ne.1 .and. integration.ne.2) then
-       write (*,*) 'Integration modes only 1 or 2',integration
+
+    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
+       write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
        stop
     endif
     if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then

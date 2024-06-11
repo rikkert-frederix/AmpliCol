@@ -5,7 +5,7 @@ module phase_space_genpt
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: includePDF
   real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,ycut,DRcut
-  integer,parameter :: use_mode=2 ! all modes use pT^2 and phi, but
+  integer,parameter :: use_mode=4 ! all modes use pT^2 and phi, but
                                   ! 1 = uses rapidity (original chili)
                                   ! 2 = uses DeltaR with previous particle
                                   ! 3 = uses invariant mass with previous particle
@@ -265,7 +265,7 @@ contains
     pt=dsqrt(pt2)
     p(0) = pt/(dsqrt(costheta**2+(1d0-costheta**2)*cos(phi)**2))
     p(1) = p(0)*costheta
-    p(2)= p(0)*dsqrt(1d0-costheta**2)*cos(phi)
+    p(2) = p(0)*dsqrt(1d0-costheta**2)*cos(phi)
     p(3) = p(0)*dsqrt(1d0-costheta**2)*sin(phi)
     jac=jac*2d0 ! left-over factor from the overall jacobian of pi's and 2's
     jac = jac/(1+costheta**2-(costheta**2-1d0)*cos(2d0*phi))

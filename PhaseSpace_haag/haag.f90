@@ -4,7 +4,7 @@ module haag
   real(kind=8),parameter :: pi=3.1415926535897932d0
 
   real(kind=8),public :: s0
-  logical,public :: debug=.false.,  flat=.false.,  open=.false.
+  logical :: debug=.false.,  flat=.false.,  open=.false.
   logical,public :: flat_split=.false., a1_split=.true.
   logical,public :: haag_style=.true.
   logical,public :: one_pt=.false.
