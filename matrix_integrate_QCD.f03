@@ -37,7 +37,7 @@ program matrix_integrate_QCD
   if (imode.eq.0 .or. imode.eq.2) then
      ncalls0=-1000
   else
-     ncalls0=600000
+     ncalls0=640000
   endif
 
   ndim=3*(next-2)-4   ! Number of dimensions of the integration.
