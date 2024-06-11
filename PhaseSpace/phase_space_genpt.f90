@@ -5,7 +5,7 @@ module phase_space_genpt
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: includePDF
   real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,ycut,DRcut
-  integer,parameter :: use_mode=4 ! all modes use pT^2 and phi, but
+  integer,parameter :: use_mode=1 ! all modes use pT^2 and phi, but
                                   ! 1 = uses rapidity (original chili)
                                   ! 2 = uses DeltaR with previous particle
                                   ! 3 = uses invariant mass with previous particle
