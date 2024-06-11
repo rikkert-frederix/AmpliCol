@@ -8,13 +8,13 @@ module phase_space_gen23
   integer(kind=4),dimension(:,:),allocatable :: sets
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: t_channel,includePDF
-  real(kind=8) :: sqrtshat,sqrts,tau,ycm
+  real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,drcut
 
   ! TECHNIAL PARAMETERS
   ! vebose:
   logical,parameter :: verbose=.false., debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),parameter :: ip=-1d0,ip_shat=-2d0
+  real(kind=8),parameter :: ip=-1d0,ip_shat=-2.0d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12
 
@@ -27,7 +27,7 @@ module phase_space_gen23
   
   public :: gen23_init,gen23_phase_space
 contains
-  subroutine gen23_init(sqrtsh,n,m,o,part,s_cut,t_chan,include_pdf)
+  subroutine gen23_init(sqrtsh,n,m,o,part,s_cut,pt_cut,dr_cut,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
     ! INPUT
@@ -41,7 +41,7 @@ contains
     ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
     ! an initial and a final state particle; s_cut(2) is between two final
     ! state particles.
-    real(kind=8),intent(in) :: s_cut(2)
+    real(kind=8),intent(in) :: s_cut(2),pt_cut,dr_cut
     ! masses of all the particles. The two incoming particles must be
     ! massless.
     real(kind=8),dimension(n),intent(in) :: m
@@ -94,6 +94,8 @@ contains
     enddo
     if (verbose) write (*,*) 'masses:',m(1:n)
     call setup_PS_cuts(s_cut)
+    drcut=dr_cut
+    ptcut=pt_cut
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
     do i=1,next
@@ -284,7 +286,7 @@ contains
           invm((3-i)+set(i)+inext)=dot(pp(0:3,(3-i)+set(i)+inext),pp(0:3,(3-i)+set(i)+inext))
           pp(0:3,(3-i)+set(i))=pp(0:3,i)-pp(0:3,sets(0,(3-i)))-pp(0:3,inext)
           invm((3-i)+set(i))=dot(pp(0:3,(3-i)+set(i)),pp(0:3,(3-i)+set(i)))
-          do j=2,popcnt(set(i))
+          do j=2,popcnt(set(i))-1
              ! loop over the remaining particles in the set
              inext=ibset(0,sets(j,i)-1)
              im1=ibset(0,sets(j-1,i)-1)
@@ -293,9 +295,19 @@ contains
                 call gent_one_step(inext,set(i),3-i)
              else
                 call gen23_one_step(inext,set(i),3-i,im1)
+!!$                call genpt_one_step(inext,set(i),3-i,im1)
              endif
              if (jac.le.0d0) return
           enddo
+          inext=ibset(0,sets(j,i)-1)
+          im1=ibset(0,sets(j-1,i)-1)
+          set(i)=set(i)-inext
+          if (t_channel) then
+             call gent_one_step(inext,set(i),3-i)
+          else
+             call gen23_one_step(inext,set(i),3-i,im1)
+          endif
+          if (jac.le.0d0) return
        elseif (popcnt(set(i)).eq.1 .and. popcnt(sets(0,3-i)).ne.0) then
           ! Exactly 2 particles in a set (and the other set contains at least one)
           if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
@@ -501,6 +513,110 @@ contains
     jac=jac/(8d0*sqrt(-gram4))
   end subroutine gen23_one_step
 
+
+  subroutine genpt_one_step(i,ir,ib,im1)
+    implicit none
+    integer(kind=4),intent(in) :: i,ir,ib,im1
+    real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi
+    real(kind=8),dimension(0:3) :: pb,pim1
+    if (invm(i).ne.0d0) then
+       write (*,*) 'genpt_one_step only for massless particles',i,invm(i)
+       stop 1
+    endif
+    ! get the energy in the frame where p(:,im1) has p_z=0.
+    y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
+    call boostz(pp(0,im1),y,pim1)
+    ! generate pT^2
+    pt2min=ptcut**2
+    pt2max=sqrtshat**2/4d0
+!!$    pt2max=min(sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2)
+!!$    write (*,*) pt2min,pt2max,sqrtshat**2/4d0,(invm(i+im1)/(2d0*pim1(0)*(1d0-cos(drcut))))**2,invm(i+im1)
+!!$    if (pt2min.gt.pt2max) then
+!!$       jac=-1d0
+!!$       return
+!!$    endif
+
+    ix=ix+1
+    call random_to_var(x(ix),-2d0,pt2min,pt2max,pt2,jac)
+    ! generate phi
+!!$    phimin=-pi
+!!$    phimax=pi
+    if (invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0)) .lt. 2d0) then
+       phimax=acos(1d0-invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0)))
+    else
+       phimax=pi
+    endif
+    phimin=-phimax
+!!$    write (*,*) phimin,phimax,1d0-invm(i+ir+im1)/(2d0*sqrt(pt2)*pim1(0))
+    ix=ix+1
+    call random_to_var(x(ix),0d0,phimin,phimax,phi,jac)
+    shatmin=2d0*sqrt(pt2)*pim1(0)*(1d0-cos(max(drcut,abs(phi))))
+    shatmax=invm(i+ir+im1)
+    if (shatmin.gt.shatmax) then
+!!$       write (*,*) shatmin,shatmax,2d0*sqrt(pt2)*pim1(0)*(1d0-cos(drcut))
+       jac=-1d0
+       return
+    endif
+      
+    ix=ix+1
+    call random_to_var(x(ix),-1d0,shatmin,shatmax,invm(i+im1),jac)
+    ! fill momentum, assuming that previous particle is along the x-axis.
+    call fill_momentum_pt2invmphi(pt2,invm(i+im1),phi,pim1(0),pp(0,i),jac)
+    ! boost along the z-axis
+    call boostz(pp(0,i),-y,pb)
+    ! rotate about the z-axis
+    phi=atan(pp(2,im1)/pp(1,im1))
+    if(pp(1,im1).lt.0d0) phi=phi+pi
+    call rotz(pb,phi,pp(0,i))
+    jac=jac/dble(4)
+    pp(0:3,ir)=pp(0:3,ir+i)-pp(0:3,i)
+    invm(ir)=dot(pp(0:3,ir),pp(0:3,ir))
+!!$    write (*,*) ir,invm(ir),sqrt(pt2),sqrt(invm(i+im1)),invm(ir+i)
+    if (invm(ir).lt.0d0) then
+       jac=-1d0
+       return
+    endif
+    ! fill t-channel stuff to be safe.
+    pp(0:3,i+ib)=pp(0:3,i)-pp(0:3,ib)
+    pp(0:3,ir+ib)=pp(0:3,ir)-pp(0:3,ib)
+    invm(i+ib)=dot(pp(0:3,i+ib),pp(0:3,i+ib))
+    invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
+  end subroutine genpt_one_step
+  subroutine fill_momentum_pt2invmphi(pt2,invm,phi,Eref,p,jac)
+    implicit none
+    real(kind=8) :: pt2,invm,phi,jac,pt,Eref
+    real(kind=8),dimension(0:3) :: p
+    real(kind=8),external :: ran2
+    pt=sqrt(pt2)
+    p(1)=pt*cos(phi)
+    p(2)=pt*sin(phi)
+    p(0)=invm/(2d0*Eref)+p(1)
+    ! There are two values of the pz that correspond to a single
+    ! invm. Take one of the two at random.
+    p(3)=sqrt(p(0)**2-pt2)
+    if (ran2().gt.0.5d0) p(3)=-p(3)
+    jac=jac*2d0
+    jac=jac*abs(1d0/(2d0*Eref*p(3)))
+  end subroutine fill_momentum_pt2invmphi
+  subroutine boostz(p,yb,pb)
+    ! boost in the z-direction with rapidity yb
+    implicit none
+    real(kind=8),dimension(0:3) :: p,pb
+    real(kind=8) :: yb
+    pb(0)=p(0)*cosh(yb)-p(3)*sinh(yb)
+    pb(1:2)=p(1:2)
+    pb(3)=p(3)*cosh(yb)-p(0)*sinh(yb)
+  end subroutine boostz
+
+  subroutine rotz(p,phi,prot)
+    implicit none
+    real(kind=8),dimension(0:3) :: p,prot
+    real(kind=8) :: phi
+    prot(0)=p(0)
+    prot(1)=p(1)*cos(phi)-p(2)*sin(phi)
+    prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
+    prot(3)=p(3)
+  end subroutine rotz
 
   subroutine gent_one_step(i,ir,ib)
     ! One step in the usual MadGraph t-channel phase-space generation.

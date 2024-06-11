@@ -29,8 +29,8 @@ module common
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   real*8,parameter :: pT_min     = 30d0
   real*8,parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
-  real*8,parameter :: eta_max    = 5d0
-  real*8,parameter :: sqrt_s_min =-1d0
+  real*8,parameter :: eta_max    = 6d0
+  real*8,parameter :: sqrt_s_min = -1d0
   
 end module common
 

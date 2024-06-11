@@ -3,6 +3,7 @@ program matrix_integrate_QCD
   use common
   use mint_module
   use phase_space_gen23
+  use phase_space_genpt
   use haag
   use math_functions
   implicit none
@@ -29,7 +30,8 @@ program matrix_integrate_QCD
   call cpu_time(tTot_B)
 
 ! relevant input parameters for integration
-  ncalls0=-10000   ! Number of events to generate. (If negative, start
+!!$  ncalls0=-10000   ! Number of events to generate. (If negative, start
+  ncalls0=1000000   ! Number of events to generate. (If negative, start
                    ! from a small number of points and double it each
                    ! iteration. If positive, this is the number of
                    ! points per iteration as well).
@@ -48,7 +50,7 @@ program matrix_integrate_QCD
   ! setting energy
 
   s_cut(1)=max(sqrt_s_min,pt_min)**2
-  s_cut(2)=max(sqrt_s_min**2,pt_min**2*(1d0-cos(DRjj_min)))
+  s_cut(2)=max(sqrt_s_min**2,2d0*pt_min**2*(1d0-cos(DRjj_min)))
 
   if (sqrt_s_min.gt.0d0) then
      s_cut(1:2)=sqrt_s_min**2
@@ -66,12 +68,24 @@ program matrix_integrate_QCD
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
-     call gen23_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,t_chan,include_pdf)
   elseif  (integration.eq.2) then
-     call  haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+  elseif (integration.eq.3) then
+     call genpt_init(sqrts,next,mass,pt_min,eta_max,DRjj_min,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
+
+  ! colour, polarisation incoming gluons: 8, 2
+  ! colour, polarisation incoming quarks: 3, 2
+  ! identical final state particle factor (gluons): nfin_glu!
+  nfin_glu=0
+  do i=3,next
+     if (part(i).eq.21) then
+        nfin_glu=nfin_glu+1
+     endif
+  enddo
 
   iden=1
   call set_final_state_identical_particle_factor(iden)
@@ -151,7 +165,6 @@ program matrix_integrate_QCD
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
   write(*,*) 'Number of numerical errors:',num_error
-  write(*,*) 'Number passing test cuts:',passed_it1
  
 contains
   function integrand(x,vol,ifirst,nit,f1)
@@ -183,7 +196,9 @@ contains
     if (integration.eq.1)then
        call gen23_phase_space(x)
     elseif (integration.eq.2) then
-       call PS_haag(x)
+        call PS_haag(x)
+    elseif (integration.eq.3) then
+        call genpt_phase_space(x)
     endif
     
     call cpu_time(tAfter)
@@ -197,7 +212,7 @@ contains
        val=0d0
        return
     endif
-
+    
     passed = passed + 1
 
     ! compute amplitudes
