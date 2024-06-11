@@ -1,14 +1,30 @@
 #!/usr/bin/env python
 
+import concurrent.futures
+import time
+import os
 import subprocess
-import multiprocessing
-import numpy as np
 from itertools import chain
+import threading
 
-def run_program(program, args, output_file):
-    """Function to run a program with a list of arguments"""
-    with open(output_file, 'w') as f:
-        subprocess.call([program] + args, stdout=f)
+
+def run_fortran_program(executable, argument, output_file):
+    """
+    Function to run a Fortran program with a given argument.
+    """
+    try:
+        result = subprocess.run([executable]+argument, capture_output=True, text=True)
+        
+        # Write the output to the file
+        with open(output_file, 'w') as f_out:
+            f_out.write(result.stdout)
+            f_out.write(result.stderr)
+
+        return (argument, result.stdout, result.stderr)
+    except Exception as e:
+        return (argument, str(e), "")
+        with open(output_file, 'w') as f_out:
+            f_out.write(str(e))
 
 if __name__ == '__main__':
 
@@ -35,40 +51,54 @@ if __name__ == '__main__':
     
     nexternal=['4','5','6','7','8','9']
     imodes=['0','1','2']
-    
+    integrators=['1','2','3','4']
+    seeds=['101','102','103','104','105','106','107','108','109','110']
+
+    # Number of workers (adjust to the number of CPU cores or desired level of parallelism)
+    max_workers = 64  # Change this to match the number of CPU cores you want to utilize
+
     for imode in imodes:
-        program='./matrix_integrate_QCD'
-        processes=[]
+        executable='./matrix_integrate_QCD'
+        # create the argument list
+        arguments=[]
+        outfiles=[]
         for n in nexternal:
             for i,color_order in enumerate(orders[n]):
-                output_file='log_'+n+'_'+imode+'_'+str(i)+'.txt'
-                args=list(chain.from_iterable(['1',imode,n,flavour[n].split(),color_order.split()]))
-                print(args,output_file)
-                processes.append(multiprocessing.Process(target=run_program, args=(program, args, output_file)))
-        
-        # Start all processes
-        for process in processes:
-            process.start()
- 
-        # Wait for all processes to finish
-        for process in processes:
-            process.join()
- 
-#        imodes=['2']
-#        program='./matrix_reweight'
-#            
-#        for imode in imodes:
-#            processes=[]
-#            for color_order in color_orders:
-#                output_file='log_'+n+'_'+imode+'_'+color_order+'_rwgt.txt'
-#                args=[n,imode,color_order]
-#                processes.append(multiprocessing.Process(target=run_program, args=(program, args, output_file)))
-#
-#            # Start all processes
-#            for process in processes:
-#                process.start()
-#
-#            # Wait for all processes to finish
-#            for process in processes:
-#                process.join()
+                for integrator in integrators:
+                    for seed in seeds:
+                        add_arg='S'+seed+'I'+integrator
+                        directory='./Outputs'+add_arg+'/Res_files/'
+                        if not os.path.exists(directory):
+                            time.sleep(0.1)
+                            os.makedirs(directory)
+                        output_file='./Outputs'+add_arg+'/log_'+n+'_'+imode+'_'+str(i)+'.txt'
+                        outfiles.append(output_file)
+                        args=list(chain.from_iterable([integrator,imode,n,flavour[n].split(),color_order.split()]))+[add_arg]
+                        print(args)
+                        arguments.append(args)
 
+        # Shared counter for completed jobs
+        completed_jobs = 0
+        total_jobs = len(arguments)
+        counter_lock = threading.Lock()
+        print(f"Doing imode {imode}. We have {total_jobs} jobs to do")
+    
+        # Use ProcessPoolExecutor for parallel execution
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks to the executor
+            future_to_argument = {executor.submit(run_fortran_program, executable, arg, outfile): arg for arg,outfile in zip(arguments,outfiles)}
+
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_argument):
+                arg = future_to_argument[future]
+                try:
+                    stdout, stderr = future.result()[1], future.result()[2]
+                except Exception as exc:
+                    print(f"Argument: {arg} generated an exception: {exc}")
+                    
+                # Update and print the counter
+                with counter_lock:
+                    completed_jobs += 1
+                    print(f"Completed {completed_jobs}/{total_jobs} jobs for imode {imode}")
+
+ 

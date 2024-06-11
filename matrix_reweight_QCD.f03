@@ -7,7 +7,7 @@ module common
   type(amplitude_QCD) :: amp_QCD
   type(amplitude_QCD),dimension(:),allocatable :: amps
   real(kind=8),dimension(:,:),allocatable :: p
-  integer :: string_len=50
+  integer,parameter :: string_len=50
 end module common
 module rw_events
   implicit none
@@ -41,6 +41,7 @@ program matrix_reweight
   integer,dimension(:),allocatable :: iper_test
   integer :: ic_low,ic_upp
   integer,dimension(8) :: flav
+  character(len=string_len) :: tag,tag_read,add_arg=''
   
   call get_run_arguments()
 
@@ -397,15 +398,19 @@ contains
              allocate(o(1:next))
           endif
           do k=0,next-1
-          if (i.eq.2+k) then
-             read(argv,*) part(k+1)
-          endif
+             if (i.eq.2+k) then
+                read(argv,*) part(k+1)
+             endif
           enddo
           do k=0,next
-          if (i.eq.2+next+k) then
-               read(argv,*) o(k+1)
-          endif
+             if (i.eq.2+next+k) then
+                read(argv,*) o(k+1)
+             endif
           enddo
+          if (argc.eq.2+2*next +1 .and. i.eq.argc) then
+             ! Special case: we have an additional argument. Use it as a special tag
+             read(argv,*) add_arg
+          endif
        enddo
     endif
     if (next.lt.4) then
@@ -419,7 +424,6 @@ contains
     implicit none
     character(len=1) :: s1
     character(len=2) :: s2
-    character(len=string_len) :: tag,tag_read
     tag='_'       ! tag of current run
     tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
     call add_to_string(tag,next,.true.)
@@ -436,8 +440,8 @@ contains
     enddo
     call add_to_string(tag,o(next),.false.)
     call add_to_string(tag_read,o(next),.false.)
-    open(unit=11,file='Outputs/events'//trim(adjustl(tag))//'.lhe',status='old')
-    open(unit=12,file='Outputs/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
+    open(unit=11,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe',status='old')
+    open(unit=12,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
 
   subroutine add_to_string(string,inter,add_underscore)

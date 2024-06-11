@@ -54,8 +54,8 @@ cRF : always read the seed from the randinit file (this file is updated
 c by amcatnlo_run_interface every time a run starts). This makes sure
 c that the code does not need any remcompilation when only the seed is
 c changed (useful for NLO gridpack mode).
-c$$$         if (iseed .eq. 0) call get_base(iseed)
-         call get_base(iseed)
+         if (iseed .eq. 0) call get_base(iseed)
+c$$$         call get_base(iseed)
 c
 c     TJS 3/13/2008
 c     Modified to allow for more sequences 

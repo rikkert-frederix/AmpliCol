@@ -138,7 +138,7 @@ program matrix_integrate_QCD
      ! actual (unweighted) event generation
      call read_grids_from_file
      call gen(integrand,0,-1) ! initialise counters
-     filename='Outputs/events'//trim(adjustl(tag))//'.lhe'
+     filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
@@ -507,6 +507,9 @@ contains
     integer :: argc
     integer :: i,k
     character(len=256) :: argv
+    integer(kind=8) iseed
+    common /to_seed/iseed
+    iseed=0
     ! integration steps:
     ! imode=0  (Setting up grids)
     ! imode=-1 (same as imode=0, but starting from existing grids)
@@ -530,18 +533,22 @@ contains
              allocate(part_sf(1:next))
              allocate(o(1:next))
           endif
-
           do k=0,next-1
-          if (i.eq.4+k) then
-             read(argv,*) part(k+1)
-          endif
+             if (i.eq.4+k) then
+                read(argv,*) part(k+1)
+             endif
           enddo
-
           do k=0,next-1
-          if (i.eq.4+next+k) then
-               read(argv,*) o(k+1)
-          endif
+             if (i.eq.4+next+k) then
+                read(argv,*) o(k+1)
+             endif
           enddo
+          if (argc.eq.3+2*next +1 .and. i.eq.argc) then
+             ! Special case: we have an additional argument. Use it as a special tag
+             read(argv,*) add_arg
+             read (add_arg((index(add_arg,'S'))+1:(index(add_arg,'I'))-1),*,err=99) iseed
+99           continue             
+          endif
        enddo
     endif
 
@@ -607,7 +614,7 @@ contains
     enddo
     call add_to_string(tag,o(next),.false.)
     call add_to_string(tag_read,o(next),.false.)
-    write (*,*) 'File tag is: ',tag
+    write (*,*) 'File tag is: ',tag,'   ',add_arg
   end subroutine create_run_tag
 
   subroutine add_to_string(string,inter,add_underscore)
