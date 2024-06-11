@@ -151,7 +151,7 @@ contains
 
 
     ! All done. But there could be currents that are not needed. Filter them out
-    write (*,*) 'Total number of currents and vertices befroe filter',this%n_cur,this%n_vert
+    write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call filter_dead_trees()
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
     if (this%imode.eq.1) call create_helicity_map()
