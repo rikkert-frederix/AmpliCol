@@ -420,8 +420,8 @@ contains
     character(len=1) :: s1
     character(len=2) :: s2
     character(len=string_len) :: tag,tag_read
-    tag=''       ! tag of current run
-    tag_read=''  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
+    tag='_'       ! tag of current run
+    tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
     call add_to_string(tag,next,.true.)
     call add_to_string(tag_read,next,.true.)
     call add_to_string(tag,2,.true.)
@@ -430,14 +430,14 @@ contains
        call add_to_string(tag,part(i),.true.)
        call add_to_string(tag_read,part(i),.true.)
     enddo
-    do i=1,next
+    do i=1,next-1
        call add_to_string(tag,o(i),.true.)
        call add_to_string(tag_read,o(i),.true.)
     enddo
-    call fill_string(tag,len(trim(tag)))
-    call fill_string(tag_read,len(trim(tag)))
-    open(unit=11,file='Outputs/events'//trim(tag)//'.lhe',status='old')
-    open(unit=12,file='Outputs/events'//trim(tag)//'.lhe.rwgt',status='unknown')
+    call add_to_string(tag,o(next),.false.)
+    call add_to_string(tag_read,o(next),.false.)
+    open(unit=11,file='Outputs/events'//trim(adjustl(tag))//'.lhe',status='old')
+    open(unit=12,file='Outputs/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
 
   subroutine add_to_string(string,inter,add_underscore)

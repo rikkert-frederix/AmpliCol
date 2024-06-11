@@ -138,7 +138,7 @@ program matrix_integrate_QCD
      ! actual (unweighted) event generation
      call read_grids_from_file
      call gen(integrand,0,-1) ! initialise counters
-     filename='Outputs/events'//trim(tag)//'.lhe'
+     filename='Outputs/events'//trim(adjustl(tag))//'.lhe'
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
@@ -585,8 +585,10 @@ contains
 
   subroutine create_run_tag()
     implicit none
-    tag=''       ! tag of current run
-    tag_read=''  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
+    tag='_'       ! tag of current run
+    tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
+!    call add_to_string(tag,integration,.true.)
+!    call add_to_string(tag_read,integration,.true.)
     call add_to_string(tag,next,.true.)
     call add_to_string(tag_read,next,.true.)
     call add_to_string(tag,imode,.true.)
@@ -599,12 +601,12 @@ contains
        call add_to_string(tag,part(i),.true.)
        call add_to_string(tag_read,part(i),.true.)
     enddo
-    do i=1,next
+    do i=1,next-1
        call add_to_string(tag,o(i),.true.)
        call add_to_string(tag_read,o(i),.true.)
     enddo
-    call fill_string(tag,len(trim(tag)))
-    call fill_string(tag_read,len(trim(tag)))
+    call add_to_string(tag,o(next),.false.)
+    call add_to_string(tag_read,o(next),.false.)
     write (*,*) 'File tag is: ',tag
   end subroutine create_run_tag
 

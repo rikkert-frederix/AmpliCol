@@ -943,14 +943,14 @@ contains
        write(*,*)'Final result [ABS]:',ans(1,0),' +/-',unc(1,0)
        write(*,*)'Final result:',ans(2,0),' +/-',unc(2,0)
        write(*,*)'chi**2 per D.o.F.:',chi2(1,0)
-       open(unit=58,file='Outputs/Res_files/results'//trim(tag)//'.dat',status='unknown')
+       open(unit=58,file='Outputs/Res_files/results'//trim(adjustl(tag))//'.dat',status='unknown')
        do kchan=0,nchans
           write(58,*) ans(1,kchan),unc(2,kchan),0d0,0,0,0,0,0d0,0d0,ans(2,kchan)
        enddo
        close(58)
     else
        if (imode.eq.0) then
-          open(unit=58,file='Outputs/Res_files/res'//tag,status='unknown')
+          open(unit=58,file='Outputs/Res_files/res'//trim(adjustl(tag)),status='unknown')
           write(58,*)'Final result [ABS]:',ans(1,1),' +/-',unc(1,1)
           write(58,*)'Final result:',ans(2,1),' +/-',unc(2,1)
           close(58)
@@ -965,14 +965,14 @@ contains
              ans(3,1)=0d0 ! virtual Xsec
              ans(5,1)=0d0 ! ABS virtual Xsec
           endif
-          open(unit=58,file='Outputs/Res_files/res'//tag,status='unknown')
+          open(unit=58,file='Outputs/Res_files/res'//trim(adjustl(tag)),status='unknown')
           write(58,*)'Final result [ABS]:',ans(1,1)+ans(5,1),' +/-',sqrt(unc(1,1)**2+unc(5,1)**2)
           write(58,*)'Final result:',ans(2,1),' +/-',unc(2,1)
           close(58)
           write(*,*)'Final result [ABS]:',ans(1,1)+ans(5,1),' +/-',sqrt(unc(1,1)**2+unc(5,1)**2)
           write(*,*)'Final result:',ans(2,1),' +/-',unc(2,1)
           write(*,*)'chi**2 per D.o.F.:',chi2(1,1)
-          open(unit=58,file='Outputs/Res_files/results'//tag//'.dat',status='unknown')
+          open(unit=58,file='Outputs/Res_files/results'//trim(adjustl(tag))//'.dat',status='unknown')
           write(58,*)ans(1,1)+ans(5,1),unc(2,1),0d0,0,0,0,0,0d0,0d0,ans(2,1) 
           close(58)
        else
@@ -1082,7 +1082,7 @@ contains
 ! Write the MINT integration grids to file
     implicit none
     integer :: i,j,k,kchan
-    open (unit=12,file='Outputs/Res_files/mint_grids'//tag,status='unknown')
+    open (unit=12,file='Outputs/Res_files/mint_grids'//trim(adjustl(tag)),status='unknown')
     do kchan=1,nchans
        do j=0,nintervals
           write (12,*) 'AVE',(xgrid(j,i,kchan),i=1,ndim)
@@ -1114,7 +1114,7 @@ contains
     implicit none
     integer :: i,j,k,kchan,idum
     character(len=3) :: dummy
-    open (unit=12, file='Outputs/Res_files/mint_grids'//tag_read,status='old')
+    open (unit=12, file='Outputs/Res_files/mint_grids'//trim(adjustl(tag_read)),status='old')
     ans(1,0)=0d0
     unc(1,0)=0d0
     do kchan=1,nchans
@@ -1474,7 +1474,7 @@ contains
     average_virtual(0,1:nchans)=0d0
     call write_grids_to_file
     call write_results
-    open (unit=12, file='Outputs/Res_files/res'//tag//'.dat',status='unknown')
+    open (unit=12, file='Outputs/Res_files/res'//trim(adjustl(tag))//'.dat',status='unknown')
     do kchan=0,nchans
        write (12,*)ans(1,kchan),unc(1,kchan),ans(2,kchan),unc(2,kchan) &
             ,itmax,ncalls0,0d0

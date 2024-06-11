@@ -22,7 +22,6 @@ module common
   
   ! counting events
   integer(kind=4) :: passed=0
-  real(kind=8),dimension(0:5) :: passed_it1(0:5)=0
   integer(kind=4) :: all_evt=0
   integer(kind=4) :: num_error=0
 
