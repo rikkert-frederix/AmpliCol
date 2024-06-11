@@ -234,7 +234,6 @@ contains
     xbjrk(1)=sqrt(tau)*exp(ycm)
     xbjrk(2)=sqrt(tau)*exp(-ycm)
     if (xbjrk(1).ge.1d0 .or. xbjrk(2).ge.1d0) then
-       count_xbj = count_xbj + 1
        jac=-1d0
        return
     endif

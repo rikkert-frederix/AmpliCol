@@ -77,16 +77,6 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
 
-  ! colour, polarisation incoming gluons: 8, 2
-  ! colour, polarisation incoming quarks: 3, 2
-  ! identical final state particle factor (gluons): nfin_glu!
-  nfin_glu=0
-  do i=3,next
-     if (part(i).eq.21) then
-        nfin_glu=nfin_glu+1
-     endif
-  enddo
-
   iden=1
   call set_final_state_identical_particle_factor(iden)
   call set_initial_state_average_factor(iden)
