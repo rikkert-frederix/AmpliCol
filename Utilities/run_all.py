@@ -34,7 +34,7 @@ if __name__ == '__main__':
 
     
     nexternal=['4','5','6','7','8','9']
-    imodes=['0','1']
+    imodes=['0','1','2']
     
     for imode in imodes:
         program='./matrix_integrate_QCD'
