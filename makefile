@@ -22,10 +22,10 @@ FFLAGS=-ffast-math -O3
 	$(FC) $(FFLAGS) -c -I. $<
 %.o: PDF/%.f
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
-%.o: simple_mint/%.f
-	$(FC) $(FFLAGS) -c -I. -Isimple_mint $<
-%.o: simple_mint/%.f90
-	$(FC) $(FFLAGS) -c -I. -Isimple_mint $<
+%.o: SimpleMint/%.f
+	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: SimpleMint/%.f90
+	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
 %.o: PhaseSpace/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 
