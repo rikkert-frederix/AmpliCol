@@ -826,7 +826,7 @@ contains
        if (c_o*2.eq.(ngl)) then
           sym_fac=factorial8(ngl)
        else
-          sym_fac=factorial8(ngl) !2*factorial8(ngl)  ! TO CHANGE: put back factor 2 here
+          sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
