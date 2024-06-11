@@ -26,10 +26,8 @@ FFLAGS=-ffast-math -O3
 	$(FC) $(FFLAGS) -c -I. -Isimple_mint $<
 %.o: simple_mint/%.f90
 	$(FC) $(FFLAGS) -c -I. -Isimple_mint $<
-%.o: PhaseSpace_BycklingKajantie/%.f90
-	$(FC) $(FFLAGS) -c -I. -IPhaseSpace_BycklingKajantie $<
-%.o: PhaseSpace_haag/%.f90
-	$(FC) $(FFLAGS) -c -I. -IPhaseSpace_haag $<
+%.o: PhaseSpace/%.f90
+	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 
 
 matrix_integrate_QCD:  $(FILES_M_INT_QCD)
