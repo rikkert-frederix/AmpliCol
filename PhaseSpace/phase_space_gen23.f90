@@ -96,8 +96,13 @@ contains
        invm(ibclr(maskr(next),i-1))=m(i)**2
     enddo
     if (verbose) write (*,*) 'masses:',m(1:n)
-    drcut=dr_cut
-    ptcut=pt_cut
+    if (pt_cut.gt.0d0) then
+       drcut=dr_cut
+       ptcut=pt_cut
+    else
+       drcut=0d0
+       ptcut=0d0
+    endif
     call setup_PS_cuts(s_cut)
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
