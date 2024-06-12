@@ -515,8 +515,9 @@ contains
   subroutine get_run_arguments()
     implicit none
     integer :: argc
-    integer :: i,k
+    integer :: i,j,k
     character(len=256) :: argv
+    logical :: found_1
     integer(kind=8) iseed
     common /to_seed/iseed
     iseed=0
@@ -573,7 +574,26 @@ contains
           nquarks = nquarks + 1
        endif
     enddo
-
+    
+    if (nquarks.eq.0) then
+       ! count the number of gluons between '1' and '2' in the colour order
+       c_o=0
+       i=0
+       found_1=.false.
+       do
+          i=i+1
+          if (i.gt.next) i=1
+          if (found_1) c_o=c_o+1
+          if (o(i).eq.1) then
+             found_1=.true.
+          endif
+          if (o(i).eq.2 .and. found_1) then
+             c_o=c_o-1
+             exit
+          endif
+       enddo
+    endif
+    
     if (read_from_file) then
        call read_process_from_file
     !else
