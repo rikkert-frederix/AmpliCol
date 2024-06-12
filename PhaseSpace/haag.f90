@@ -220,7 +220,13 @@ contains
     if (includePDF) call generate_initial_state
     call generate_momenta
     do i=1,next
-       p(0:3,i)=pp(0:3,i)
+       if (includePDF) then
+          ! Note: 'ycm' is the rapidity needed to go from lab to CM
+          ! frame. Hence, here we boost from CM to lab frame with '-ycm'
+          call boostz(pp(0:3,i),-ycm,p(0:3,i))
+       else
+          p(0:3,i)=pp(0:3,i)
+       endif
     enddo
   end subroutine PS_haag
 
@@ -1852,6 +1858,15 @@ endif
     endif
   end subroutine random_to_var
 
+  subroutine boostz(p,yb,pb)
+    ! boost in the z-direction with rapidity yb
+    implicit none
+    real(kind=8),dimension(0:3) :: p,pb
+    real(kind=8) :: yb
+    pb(0)=p(0)*cosh(yb)-p(3)*sinh(yb)
+    pb(1:2)=p(1:2)
+    pb(3)=p(3)*cosh(yb)-p(0)*sinh(yb)
+  end subroutine boostz
 
 !!$  FUNCTION RN(IDUMMY)
 !!$      REAL*8 RN,RAN

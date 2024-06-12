@@ -205,7 +205,13 @@ contains
     if (includePDF) call generate_initial_state
     call generate_momenta
     do i=1,next
-       p(0:3,i)=pp(0:3,ibset(0,i-1))
+       if (includePDF) then
+          ! Note: 'ycm' is the rapidity needed to go from lab to CM
+          ! frame. Hence, here we boost from CM to lab frame with '-ycm'
+          call boostz(pp(0:3,ibset(0,i-1)),-ycm,p(0:3,i))
+       else
+          p(0:3,i)=pp(0:3,ibset(0,i-1))
+       endif
     enddo
   end subroutine gen23_phase_space
 

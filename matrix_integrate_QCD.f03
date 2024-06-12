@@ -215,7 +215,7 @@ contains
        val=0d0
        return
     endif
-    
+
     passed = passed + 1
 
     ! compute amplitudes

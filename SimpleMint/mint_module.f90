@@ -497,6 +497,7 @@ contains
     logical, save :: bad_iteration=.false.
     integer iappl
     common /for_applgrid/ iappl
+    if (fixed_points_pass_cuts) return
 ! If there was a large fluctation in this iteration, be careful with
 ! including it in the accumalated results and plots.
     if (efrac(1).gt.0.3d0 .and. iappl.eq.0 .and. nit.gt.3) then
