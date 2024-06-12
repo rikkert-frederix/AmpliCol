@@ -1296,7 +1296,12 @@ endif
     sin = dsqrt(1d0-cos**2)
     beta = (1d0+(s2-s1)/s) + (1d0-(s2-s1)/s)*cos
     if (h.gt.0d0) then ! Old approach
-      lin_coeff = -cos*beta-sin**2+sin**2*(s2-s1)/s-2d0*h*cos
+      if (cos.lt.0.999d0) then
+        lin_coeff = -cos*beta-sin**2+sin**2*(s2-s1)/s-2d0*h*cos
+      else
+        ! use Taylor expansion around cos=1
+        lin_coeff = -beta-2d0*h + 2d0*(1-beta-h-(s2-s1)/s)*(cos-1d0)
+      endif
       con_term = 0.25d0*(beta**2) + h*beta + h**2 + (sin**2)*s1/s
     elseif (h.eq.0d0) then ! New approach
       lin_coeff = (-cos*beta-sin**2+sin**2*(s2-s1)/s + beta)/(2d0-2d0*cos)
