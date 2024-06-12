@@ -50,11 +50,21 @@ program matrix_integrate_QCD
 
 
 ! relevant physics input parameters and initialisation of amplitudes
-  sqrts=14000.d0
-  ! setting energy
 
-  s_cut(1)=max(sqrt_s_min,pt_min)**2
-  s_cut(2)=max(sqrt_s_min**2,2d0*pt_min**2*(1d0-cos(DRjj_min)))
+  ! setting energy
+  sqrts=14000.d0
+
+  ! cuts on invariants (Note: these assume massless particles!)
+  s_cut(1)=0d0 ! cut on invariant between initial and final state particle
+  s_cut(2)=0d0 ! cut on invariant of two final state particles.
+  if (sqrt_s_min.gt.0d0) then
+     s_cut(1)=max(s_cut(1),sqrt_s_min**2)
+     s_cut(2)=max(s_cut(2),sqrt_s_min**2)
+  endif
+  if (pt_min.gt.0d0) then
+     s_cut(1)=max(s_cut(1),pt_min**2)
+     s_cut(2)=max(s_cut(2),2d0*pt_min**2*(1d0-cos(DRjj_min)))
+  endif
 
   if (sqrt_s_min.gt.0d0) then
      s_cut(1:2)=sqrt_s_min**2

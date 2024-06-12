@@ -147,9 +147,9 @@ contains
        if (btest(i,0).and.btest(i,1)) then
           invm_min(i)=0d0
        elseif (btest(i,0).or.btest(i,1)) then
-!!$          if (npart.eq.2 .or. npart.eq.next-2) then
-!!$             invm_max(i)=-s_cut(1)
-!!$          endif
+          if (npart.eq.2 .or. npart.eq.next-2) then
+             invm_max(i)=-s_cut(1)
+          endif
        else
           mass=0d0
           do j=0,next-1
@@ -158,7 +158,7 @@ contains
              endif
           enddo
           if (npart.eq.next-2) then
-             invm_min(i)=max(s_cut(1)*npart**2,mass**2)
+             invm_min(i)=max(s_cut(2)*npart**2,mass**2)
           else
              invm_min(i)=max(s_cut(2)*(npart)*(npart-1)/2d0,mass**2)
           endif
@@ -442,6 +442,8 @@ contains
     yr=sqrt(lambda(invm(ia+ib),invm(i),invm_min(ir)))
     tmin=(-invm(ia+ib)+invm(i)+invm_min(ir)-yr)/2d0
     tmax=(-invm(ia+ib)+invm(i)+invm_min(ir)+yr)/2d0
+    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
 
     ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
     ! being larger than ETmin(i) and ETmin(ir), respectively:
@@ -547,6 +549,8 @@ contains
     endif
 
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
+    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     ! Make sure that the t-range is compatible with the pT cut. Since t is an
     ! invariant we can compute it in any frame. Let's use the frame in which
     ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
@@ -735,6 +739,8 @@ contains
     endif
 
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
+    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     ! Make sure that the t-range is compatible with the pT cut. Since t is an
     ! invariant we can compute it in any frame. Let's use the frame in which
     ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
@@ -1206,6 +1212,8 @@ subroutine genpt_one_step(i,ir,ib,im1)
     endif
 
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
+    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     ! Make sure that the t-range is compatible with the pT cut. Since t is an
     ! invariant we can compute it in any frame. Let's use the frame in which
     ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
