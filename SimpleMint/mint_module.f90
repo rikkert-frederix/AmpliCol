@@ -208,7 +208,8 @@ contains
           call accumulate_the_point(x)
           if (fixed_points_pass_cuts) then
              if (non_zero_point(1).ge.ncalls .or. &
-                  (nit.le.3 .and. ntotcalls(1).gt.1000000 .and. double_events)) exit
+                  ((nit.le.3 .and. ntotcalls(1).gt.1000000 .and. double_events) &
+                                                  .and.non_zero_point(1).ge.3)) exit
           else
              kpoint=kpoint+1
              if (kpoint.ge.ncalls) exit
