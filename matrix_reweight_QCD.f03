@@ -402,12 +402,12 @@ contains
                 read(argv,*) part(k+1)
              endif
           enddo
-          do k=0,next
+          do k=0,next-1
              if (i.eq.2+next+k) then
                 read(argv,*) o(k+1)
              endif
           enddo
-          if (argc.eq.2+2*next +1 .and. i.eq.argc) then
+          if (argc.eq.1+2*next +1 .and. i.eq.argc) then
              ! Special case: we have an additional argument. Use it as a special tag
              read(argv,*) add_arg
           endif
