@@ -6,8 +6,6 @@ module haag
   real(kind=8),public :: s0
   logical :: debug=.false.,  flat=.false.,  open=.false.
   logical,public :: flat_split=.false., a1_split=.true.
-  logical,public :: haag_style=.true.
-  logical,public :: one_pt=.false.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
@@ -288,6 +286,7 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then
      do i=1,next-2-mm
        mass2=mass2+masses(subperm2(i))
      enddo
+
      call generate_split_Qm_Qnm(sqrtshat**2,mass1,mass2,mm,Qm,Qnm)
      mass_sum=0d0
 
@@ -565,87 +564,14 @@ endif
     !Generate s2
     if (m1 .and. (i .eq. 0)) then 
         ! If m=1 type first splitting -> do also a1,phi sampling here!
-         if (haag_style.and..not.one_pt) then
-            call generate_first_single(k,s,s1,q1_cmf,P_cmf,a1,s2)
-            if (k.eq.2) s2=0d0
-            a2 = 300d0
-            goto 20
-         ! do rather a t-channel ("double-t") integration step
-         elseif(.not.haag_style.and. .not.one_pt) then 
-            yr = dsqrt(kallen(sqrtshat**2,0d0,(next-3)*(next-4)/2d0*s0))
-            tmin=(-sqrtshat**2+(next-3)*(next-4)/2d0*s0-yr)/2d0
-            tmax=(-sqrtshat**2+(next-3)*(next-4)/2d0*s0+yr)/2d0
-            if (-s0.ne.0d0) tmax=min(-s0,tmax)
-            if (0d0.ne.0d0) tmin=max(tmin,0d0)
-            ix=ix+1
-            call random_to_var(x(ix),-1d0,tmin,tmax,t1,jac)
-            if (tmin.ge.tmax) then
-                jac=-2d0
-                return
-            endif
-            tmin=-sqrtshat**2-t1+(next-3)*(next-4)/2d0*s0
-            tmax=0d0*(0d0-sqrtshat-t1)/(0d0-t1)
-
-            if (-s0.ne.0d0) tmax=min(-s0,tmax)
-            if (0d0.ne.0d0) tmin=max(tmin,0d0)
-
-            if (tmin.ge.tmax) then
-                jac=-2d0
-                return
-            endif
-            ix=ix+1
-            call random_to_var(x(ix),-1d0,tmin,tmax,t2,jac)
-            ix=ix+1
-            call random_to_var(x(ix),0d0,0d0,2d0*pi,phi,jac)
-            pt2=t1*t2/sqrtshat**2+ &
-               & 0d0**2/sqrtshat**2-(t1+t2)*0d0/sqrtshat**2-0d0
-            pass1(0) =(-t1-t2+2d0*0d0)/(2d0*sqrtshat)
-            pass1(1)=sqrt(pt2)*cos(phi)
-            pass1(2)=sqrt(pt2)*sin(phi)
-            pass1(3)=(t1-t2)/(2d0*sqrtshat)
-            pass2(0)=sqrtshat-pass1(0)
-            pass2(1:3)=-pass1(1:3)
-
-            jac = jac/(4d0*sqrt(kallen(sqrtshat**2,0d0,0d0)))
-            p1 = pass1
-            p2 = pass2
-            return
-         ! do rather a pT-y-phi integration step
-         elseif (one_pt) then
-            pt2min=pt_min**2
-            pt2max=sqrtshat**2/4d0
-            ix=ix+1
-            call random_to_var(x(ix),-1d0,pt2min,pt2max,pt2,jac)
-            pt=sqrt(pt2)
-            ! generate phi
-            ix=ix+1
-            call random_to_var(x(ix),0d0,-pi,pi,phi,jac)
-            ! generate rapidity
-            ix=ix+1
-            ymin=-min(eta_max,acosh(sqrtshat/pt))
-            ymax=min(eta_max,acosh(sqrtshat/pt))
-            call random_to_var(x(ix),0d0,ymin,ymax,y,jac)
-            ! fill momentum
-            pass1(1)=pt*cos(phi)
-            pass1(2)=pt*sin(phi)
-            pass1(3)=pt*sinh(y)
-            pass1(0)=pt*cosh(y)
-            pass2(0)=sqrtshat-pass1(0)
-            pass2(1:3)=-pass1(1:3)
-
-            if (dot(pass2,pass2).lt.0d0) return
-
-            p1 = pass1
-            p2 = pass2
-            jac=jac/(32d0*pi*pi*pi)
-            return
-         endif
+        call generate_first_single(k,s,s1,q1_cmf,P_cmf,a1,s2)
+        if (k.eq.2) s2=0d0
+        a2 = 300d0
+        goto 20
     else
        if (k .ge. 3) then
          call generate_s2(k,s,s1,s2,q1_cmf,P_cmf)
-         !write(*,*) 'generated s2',s2
        else
-         !write(*,*) 'not generating s2'
          s2 = mass2**2
          gs = 1d0
          jac = jac/gs
@@ -811,7 +737,7 @@ endif
     ! Generate s1,s2 invariants
     m=dsqrt(s)
     c1 = dsqrt(mass1 + mn*(mn-1)*s0/2d0)
-    c2 = dsqrt(mass2 + (n-mn)*(n-mn-1)*s0/2d0)
+    c2 = dsqrt(mass2 + (next-2-mn)*(next-2-mn-1)*s0/2d0)
 
     if (.not. flat_split) then
       ix = ix +1
@@ -994,11 +920,11 @@ endif
    
     scut = s0
 
-    Lambda = mass_sum+(k-1)*(k-2)*scut/2D0
+    Lambda = mass_sum + (k-1)*(k-2)/2d0*scut
 
     Sigma = mass_sum    !always just a sum of particle masses
     Sigmaold = mass_sum-s1
-    Delta = s1+2d0*(k-1)*scut/2D0
+    Delta = s1 + (k-1)*scut
     sigmak =  s1   !always just the previous particle mass
     ! NOTE: added extra upper limit for massive case!
     if (Delta .lt. (2d0*dsqrt(s1*s)-s1)) then
@@ -1016,6 +942,7 @@ endif
     ! S limits exactly same as in COMIX! 
 
     if (smin.gt.smax) return
+
     if ((.not.open) .and. (.not. flat)) then
        ix = ix +1
        call random_to_var(x(ix),0d0,0d0,1d0,R,jac)
