@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import sys
+import math
     
 def get_string(tag):
     string=tag
@@ -13,7 +14,7 @@ def get_string(tag):
     except:
         string=string+" & --"
     try:
-        string=string+" & %7.4f \%%"%(uncertainty[tag]/cross_section[tag] * 100.)
+        string=string+" & %7.2f \%%"%(uncertainty[tag]/cross_section[tag] * 100.)
     except:
         string=string+" & --"
     try:
@@ -47,25 +48,67 @@ def get_string(tag):
     string=string+" \\\\ \n"
     return string
 
+def compute_averages(list_of_tags):
+    ave_tag='average'
+    l=len(list_of_tags)
+    if l==0:
+        try:
+            del cross_section[ave_tag]
+            del uncertainty[ave_tag]
+            del chi2_per_DoF[ave_tag]
+            del number_of_events[ave_tag]
+            del number_passing_cuts[ave_tag]
+            del total_time[ave_tag]
+            del gen_eff[ave_tag]
+        except:
+            pass
+        return ave_tag
+    try:
+        cross_section[ave_tag]=sum(cross_section[tag] for tag in list_of_tags)/l
+    except:
+        pass
+    try:
+        uncertainty[ave_tag]=math.sqrt(sum(uncertainty[tag]**2 for tag in list_of_tags))/l
+    except:
+        pass
+#    try:
+#        chi2_per_DoF[ave_tag]=sum(chi2_per_DoF[tag] for tag in list_of_tags)/l
+#    except:
+#        pass
+    try:
+        number_of_events[ave_tag]=sum(number_of_events[tag] for tag in list_of_tags)/l
+    except:
+        pass
+    try:
+        number_passing_cuts[ave_tag]=sum(number_passing_cuts[tag] for tag in list_of_tags)/l
+    except:
+        pass
+    try:
+        total_time[ave_tag]=sum(total_time[tag] for tag in list_of_tags)/l
+    except:
+        pass
+    try:
+        gen_eff[ave_tag]=sum(gen_eff[tag] for tag in list_of_tags)/l
+    except:
+        pass
+    return ave_tag
 
 if __name__ == '__main__':
-    table_header=r"""\noindent The tag has the for nX-oX-fX-mX-iX-sXXX, where X is an integer. The integer after 
-\begin{description}
-\item[n] corresponds to the number of external particles,
-\item[o] the colour order index: minimum number of gluons between the two incoming particles in the colour order,
-\item[f] flavour index (always 0 for all-gluon),
-\item[m] corresponds to imode: 0 for grid setup; 1 for upper bounding envelope estimation; 2 for event generation,
-\item[i] the integrator: 1 for gen23; 2 for haag; 3 for genpt (chili-like); 4 for t-channel
-\item[s] the random number seed.
-\end{description}
+    table_header=r"""\noindent The tag has the form \textbf{nX-oX-fX-mX-iX-sXXX}, where X is an integer. The integer after 
+\textbf{n} corresponds to the number of external particles,
+\textbf{o} the colour order index: minimum number of gluons between the two incoming particles in the colour order,
+\textbf{f} flavour index (always 0 for all-gluon),
+\textbf{m} corresponds to imode: 0 for grid setup; 1 for upper bounding envelope estimation; 2 for event generation,
+\textbf{i} the integrator: 1 for gen23; 2 for haag; 3 for genpt (chili-like); 4 for t-channel
+\textbf{s} the random number seed.
+
 \begin{tabularx}{0.95\textwidth}{l r r r r r r r r r r}
   \toprule
   tag&Xsec&unc&rel.unc.&$\chi^2$/&events&events&fraction&time&unw.eff.&unw.eff\\
     &(in pb)&&&D.o.F.&(total)&(pass)&passing&(in s)&(total)&(pass)\\
   \midrule
 """
-    table_footer=r"""  \bottomrule
-\end{tabularx}
+    table_footer=r"""\end{tabularx}
 \newpage
 """
     latex_header=r"""\documentclass[10pt]{article}
@@ -100,7 +143,7 @@ if __name__ == '__main__':
            '11':['1 2 3 4 5 6 7 8 9 10 11','1 3 2 4 5 6 7 8 9 10 11','1 3 4 2 5 6 7 8 9 10 11','1 3 4 5 2 6 7 8 9 10 11','1 3 4 5 6 2 7 8 9 10 11'],
            '12':['1 2 3 4 5 6 7 8 9 10 11 12','1 3 2 4 5 6 7 8 9 10 11 12','1 3 4 2 5 6 7 8 9 10 11 12','1 3 4 5 2 6 7 8 9 10 11 12','1 3 4 5 6 2 7 8 9 10 11 12','1 3 4 5 6 7 2 8 9 10 11 12']}
 
-    nexternal=['4','5','6','7','8']#,'9','10','11','12']
+    nexternal=['4','5','6','7','8','9']#,'10','11','12']
     imodes=['0','1','2']
     integrators=['1','2','3','4']
     seeds=['101','102','103','104','105','106','107','108','109','110']
@@ -123,10 +166,9 @@ if __name__ == '__main__':
                     for integrator in integrators:
                         for seed in seeds:
                             log_file='./OutputsS'+seed+'I'+integrator+'/log_'+n+'_'+imode+'_'+str(io)+'.txt'
-                            tag='n'+n+'-o'+str(io)+'-f'+str(iflav)+'-m'+imode+'-i'+integrator+'-s'+seed
-                            tags.append(tag)
                             try:
                                 with open(log_file) as file:
+                                    tag='n'+n+'-o'+str(io)+'-f'+str(iflav)+'-m'+imode+'-i'+integrator+'-s'+seed
                                     for line in file:
                                         if 'Final result:'in line:
                                             cross_section[tag]=float(line.split()[2])
@@ -139,10 +181,11 @@ if __name__ == '__main__':
                                             number_passing_cuts[tag]=int(line.split()[3])
                                         if 'Total time:' in line:
                                             total_time[tag]=float(line.split()[2])
+                                            tags.append(tag) 
                                         if 'Generation efficiencies:' in line:
                                             gen_eff[tag]=float(line.split()[2])
                             except:
-                                continue
+                                pass
 
     with open('tables.tex','w') as f:
         f.write(latex_header)
@@ -152,13 +195,21 @@ if __name__ == '__main__':
                 for iflav,flavour in enumerate(flavours[n]):
                     for imode in imodes:
                         f.write(table_header)
-                        for integrator in integrators:
+                        for i,integrator in enumerate(integrators):
+                            tags_to_average=[]
                             for seed in seeds:
                                 tag='n'+n+'-o'+str(io)+'-f'+str(iflav)+'-m'+imode+'-i'+integrator+'-s'+seed
                                 if tag in tags:
                                     string=get_string(tag)
                                     f.write(string)
+                                    tags_to_average.append(tag)
                             f.write('\\midrule \n')
+                            tag=compute_averages(tags_to_average)
+                            string=get_string(tag)
+                            f.write(string)
+                            f.write('\\bottomrule \n')
+                            
+                            
                         f.write(table_footer)
                 
         f.write(latex_footer)
