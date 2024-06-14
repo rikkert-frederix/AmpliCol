@@ -473,6 +473,8 @@ contains
     
     tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+invm_min(ir)
     tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
+    if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
+    if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
     
     ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
     ! being larger than ETmin(i) and ETmin(ir), respectively:
