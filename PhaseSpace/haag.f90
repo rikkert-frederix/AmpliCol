@@ -5,7 +5,7 @@ module haag
 
   real(kind=8),public :: s0
   logical :: debug=.false.,  flat=.false.,  open=.false.
-  logical,public :: flat_split=.false., a1_split=.true.
+  logical,public :: flat_split=.false., a1_split=.false.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
@@ -343,6 +343,8 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then
     q(0:3,subperm2(1)) = qk(0:3,mm+1)
 
 
+
+
 ! Do m=1 type splitting
 elseif (((mm .eq. 1).or.(next-2-mm .eq. 1))) then 
   !write(*,*) 'doing m=1 type splitting'
@@ -621,13 +623,9 @@ endif
         call generate_a2_term1(i,m1,maxn,a1,s,s1,s2,costheta,a2cut,h,a2)
     endif
 
-    !write(*,*) 'a1',a1
-
     ! Mapping back to the momenta p1,p2 in CMF
     20    p1_cmf(0) = (s+s1-s2)/(2D0*sqrt(s))
     solution = solver(s,s1,s2,q1_cmf,q2_cmf,z_sign,a1,a2,p1_cmf(0),P_cmf,costheta)
-
-    !write(*,*) solution
 
     p1_cmf(1) = solution(1)
     p1_cmf(2) = solution(2)
@@ -824,7 +822,7 @@ endif
       a1cut = 0.5d0*s0*mn/(s/2d0)
       if ((a1cut.gt.a1min).and.(a1cut.lt.a1max)) a1min=a1cut
       a1max = comm + root
-      a1cut = 1d0-0.5d0*s0*(n-mn)/(s/2d0)
+      a1cut = 1d0-0.5d0*s0*(next-2-mn)/(s/2d0)
       if ((a1cut.gt.a1min).and.(a1cut.lt.a1max)) a1max=a1cut
       ix = ix + 1
       call random_to_var(x(ix),-1d0,a1min,a1max,a1,jac)
@@ -838,7 +836,7 @@ endif
       E2 = dsqrt(s) - E1
       solution = solver(s,s1,s2,dummy,dummy,dm,a1,a2,E1,dummy,dm) ! use same solver 
 
-      Qm = (/E1,solution(1),solution(2),solution(3)/)
+      Qm =  (/E1, solution(1), solution(2), solution(3)/)
       Qnm = (/E2,-solution(1),-solution(2),-solution(3)/)
     endif
   end subroutine generate_split_Qm_Qnm

@@ -1,22 +1,36 @@
 ! without fastjet:
-      ! gfortran -o compute_unw_eff compute_unw_eff.f plot_LHE.f
+      ! gfortran -o compute_unw_eff compute_unw_eff.f90 
 
 
 program plot_events
   implicit none
   integer ifile,nPSpoints
   logical :: done
-  character*140 filename
+  character*140 :: filename
+  character(:),allocatable :: outfile
   character*50 weights_info(10)
   double precision dummy
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8) :: evt_wgt_LC,evt_wgt_NLC,evt_wgt_full,rwgt_factor,unw_eff,max_wgt
   integer :: next
-  write (*,*) 'Give LHE file name'
-  read (*,'(a)') filename
+  integer :: argc
+  character(len=456) :: argv
+  integer :: i
+
+  CALL GET_COMMAND_ARGUMENT(1, argv)
+  read(argv,*) filename
   ifile=11
+  write(*,*) filename
   open(unit=ifile,file=filename,status='OLD')
-  
+  allocate(character(len(trim(filename))) :: outfile)  ! Note the correct form
+  outfile=filename(7:)
+  do i=1,len(outfile)
+     if (outfile(i:i).eq.'l') exit
+  enddo
+  outfile=adjustl(outfile(1:i-2))
+  write(*,*) 'out_unwgt_'//outfile//'.txt'
+  outfile='out_unwgt_'//outfile//'.txt'
+  open(unit=20,file=outfile)
   max_wgt=0d0
   do
      call read_event(ifile,done)
@@ -39,8 +53,10 @@ program plot_events
      unw_eff=unw_eff+evt_wgt_full/max_wgt
   enddo
 
-  write (*,*) 'unweighting efficiency is',unw_eff/dble(nPSpoints)
+  write(20,*) 'unweighting efficiency is',unw_eff/dble(nPSpoints)
+  !write (*,*) 'unweighting efficiency is',unw_eff/dble(nPSpoints)
   close (ifile)
+  close(20)
 
 contains
   subroutine read_event(iunit,done)
