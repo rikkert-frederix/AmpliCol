@@ -100,7 +100,7 @@ module mint_module
   character(len=string_len) :: tag,tag_read,add_arg=''
 
 ! private variables
-  logical,parameter,private  :: fixed_points_pass_cuts=.true.
+  logical,parameter,private  :: fixed_points_pass_cuts=.true.,aggressive_channel_combination=.false.
   character(len=13), parameter, dimension(nintegrals), private :: title=(/ &
                                                    'ABS integral ', & !  1
                                                    'Integral     ', & !  2
@@ -132,7 +132,7 @@ module mint_module
 
   integer, private :: nit,nit_included,kpoint_iter,nint_used,nint_used_virt,min_it,ncalls,pass_cuts_point,ng,npg,k
   integer, dimension(ndimmax), private :: icell,ncell
-  integer, dimension(nintegrals), private :: non_zero_point,ntotcalls
+  integer, dimension(nintegrals), private :: non_zero_point,ntotcalls,ntotcallsalliter
   integer, dimension(nintervals,ndimmax,maxchannels), private :: nhits
   integer, dimension(maxchannels), private :: nhits_in_grids
   integer, dimension(nintervals_virt,ndimmax,0:n_ave_virt,maxchannels), private :: nvirt,nvirt_acc
@@ -330,6 +330,7 @@ contains
     integer :: i
 ! Quit if the desired accuracy has been reached
     iterations_done=.false.
+    ntotcallsalliter(1:nintegrals)=ntotcallsalliter(1:nintegrals)+ntotcalls(1:nintegrals)
     if (nit_included.ge.min_it .and. accuracy.gt.0d0) then
        if (unc(1,0)/ans(1,0)*max(1d0,chi2(1,0)/dble(nit_included-1)).lt.accuracy) then
           write (*,*) 'Found desired accuracy'
@@ -440,7 +441,7 @@ contains
   
   subroutine combine_iterations
     implicit none
-    integer i,kchan
+    integer i,kchan,np
     HwU_values(1)=etot(1,0)
     HwU_values(2)=unc(1,0)
     if(nit.eq.1) then ! first iteration
@@ -455,8 +456,17 @@ contains
              if (i.ne.1 .and. (etot(i,0).eq.0d0 .or. unc(i,0).eq.0d0)) then
                 continue ! do not do anything
              else
-                ans(i,kchan)=(ans(i,kchan)/unc(i,0)+vtot(i,kchan)/etot(i,0))/(1d0/unc(i,0)+1d0/etot(i,0))
-                unc(i,kchan)=1d0/sqrt(1d0/unc(i,kchan)**2+1d0/etot(i,kchan)**2)
+                if (aggressive_channel_combination .or. ntotcallsalliter(1).eq.0) then
+                   ans(i,kchan)=(ans(i,kchan)/unc(i,0)+vtot(i,kchan)/etot(i,0))/(1d0/unc(i,0)+1d0/etot(i,0))
+                   unc(i,kchan)=1d0/sqrt(1d0/unc(i,kchan)**2+1d0/etot(i,kchan)**2)
+                else
+                   np=ntotcallsalliter(i)+ntotcalls(i)
+                   unc(i,kchan)=sqrt((unc(i,kchan)**2*dble(ntotcallsalliter(i))**2+&
+                        etot(i,kchan)**2*dble(ntotcalls(i))**2)/dble(np)**2 &
+                        +ntotcallsalliter(i)*(ans(i,kchan)-vtot(i,kchan))**2*dble(ntotcalls(i))**2/&
+                        (dble(ntotcalls(i))*dble(np)**3))
+                   ans(i,kchan)=(ntotcallsalliter(i)*ans(i,kchan)+ntotcalls(i)*vtot(i,kchan))/dble(np)
+                endif
                 chi2(i,kchan)=chi2(i,kchan)+(vtot(i,kchan)-ans(i,kchan))**2/etot(i,kchan)**2
              endif
           enddo
@@ -601,6 +611,7 @@ contains
           ans_chan(kchan)=0d0
           ans_chan(kchan+1)=1d0
           ntotcalls(1:nintegrals)=0
+          ntotcallsalliter(1:nintegrals)=0
           non_zero_point(1:nintegrals)=0
           pass_cuts_point=0
           kpoint_iter=0
@@ -1077,6 +1088,7 @@ contains
     ans3(1:nintegrals,1:3)=0d0
     unc3(1:nintegrals,1:3)=0d0
     HwU_values(1:2)=0d0
+    ntotcallsalliter(1:nintegrals)=0
   end subroutine setup_common
   
   
