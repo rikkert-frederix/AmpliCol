@@ -441,7 +441,8 @@ contains
   
   subroutine combine_iterations
     implicit none
-    integer i,kchan,np
+    integer :: i,kchan,np
+    double precision,dimension(2) :: tmp
     HwU_values(1)=etot(1,0)
     HwU_values(2)=unc(1,0)
     if(nit.eq.1) then ! first iteration
@@ -456,10 +457,14 @@ contains
              if (i.ne.1 .and. (etot(i,0).eq.0d0 .or. unc(i,0).eq.0d0)) then
                 continue ! do not do anything
              else
-                if (aggressive_channel_combination .or. ntotcallsalliter(1).eq.0) then
+                if (aggressive_channel_combination .or. ntotcallsalliter(1).eq.0 .or. double_events) then
                    ans(i,kchan)=(ans(i,kchan)/unc(i,0)+vtot(i,kchan)/etot(i,0))/(1d0/unc(i,0)+1d0/etot(i,0))
                    unc(i,kchan)=1d0/sqrt(1d0/unc(i,kchan)**2+1d0/etot(i,kchan)**2)
                 else
+!!$                   tmp(1)=unc(i,0)/ans(i,0)
+!!$                   tmp(2)=etot(i,0)/vtot(i,0)
+!!$                   ans(i,kchan)=(ans(i,kchan)/tmp(1)+vtot(i,kchan)/tmp(2))/(1d0/tmp(1)+1d0/tmp(2))
+!!$                   unc(i,kchan)=ans(i,kchan)/sqrt(1d0/tmp(1)**2+1d0/tmp(2)**2)
                    np=ntotcallsalliter(i)+ntotcalls(i)
                    unc(i,kchan)=sqrt((unc(i,kchan)**2*dble(ntotcallsalliter(i))**2+&
                         etot(i,kchan)**2*dble(ntotcalls(i))**2)/dble(np)**2 &
