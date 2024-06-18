@@ -54,11 +54,29 @@ def compute_averages(list_of_tags):
     if l==0:
         try:
             del cross_section[ave_tag]
+        except:
+            pass
+        try:
             del uncertainty[ave_tag]
+        except:
+            pass
+        try:
             del chi2_per_DoF[ave_tag]
+        except:
+            pass
+        try:
             del number_of_events[ave_tag]
+        except:
+            pass
+        try:
             del number_passing_cuts[ave_tag]
+        except:
+            pass
+        try:
             del total_time[ave_tag]
+        except:
+            pass
+        try:
             del gen_eff[ave_tag]
         except:
             pass
@@ -66,31 +84,52 @@ def compute_averages(list_of_tags):
     try:
         cross_section[ave_tag]=sum(cross_section[tag] for tag in list_of_tags)/l
     except:
-        pass
+        try:
+            del cross_section[ave_tag]
+        except:
+            pass
     try:
         uncertainty[ave_tag]=math.sqrt(sum(uncertainty[tag]**2 for tag in list_of_tags))/l
     except:
-        pass
+        try:
+            del uncertainty[ave_tag]
+        except:
+            pass
 #    try:
 #        chi2_per_DoF[ave_tag]=sum(chi2_per_DoF[tag] for tag in list_of_tags)/l
 #    except:
-#        pass
+#        try:
+#            del chi2_per_DoF[ave_tag]
+#        except:
+#            pass
     try:
         number_of_events[ave_tag]=sum(number_of_events[tag] for tag in list_of_tags)/l
     except:
-        pass
+        try:
+            del number_of_events[ave_tag]
+        except:
+            pass
     try:
         number_passing_cuts[ave_tag]=sum(number_passing_cuts[tag] for tag in list_of_tags)/l
     except:
-        pass
+        try:
+            del number_passing_cuts[ave_tag]
+        except:
+            pass
     try:
         total_time[ave_tag]=sum(total_time[tag] for tag in list_of_tags)/l
     except:
-        pass
+        try:
+            del total_time[ave_tag]
+        except:
+            pass
     try:
         gen_eff[ave_tag]=sum(gen_eff[tag] for tag in list_of_tags)/l
     except:
-        pass
+        try:
+            del gen_eff[ave_tag]
+        except:
+            pass
     return ave_tag
 
 if __name__ == '__main__':
@@ -208,8 +247,5 @@ if __name__ == '__main__':
                             string=get_string(tag)
                             f.write(string)
                             f.write('\\bottomrule \n')
-                            
-                            
                         f.write(table_footer)
-                
         f.write(latex_footer)

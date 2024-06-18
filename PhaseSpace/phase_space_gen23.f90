@@ -15,7 +15,7 @@ module phase_space_gen23
   logical,parameter :: verbose=.false.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),parameter :: ip=-1d0,ip_shat=-2.0d0
+  real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
 
@@ -1605,7 +1605,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
     endif
     ix=ix+1
 !!$          call random_to_var(x(ix),ip,shatmin,shatmax,invm(j1),jac)
-    call random_to_var(x(ix),0d0,shatmin,shatmax,invm(i),jac)
+    call random_to_var(x(ix),-0.5d0,shatmin,shatmax,invm(i),jac)
   end subroutine generate_mass
   
   
