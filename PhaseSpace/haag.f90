@@ -582,8 +582,7 @@ endif
 
     ! cuts on a1 and a2
     a2cut = (k-1)*(s0/2d0)/(dot(q2_cmf,P_cmf))  ! should be (k+1) dont change!
-
-    a1cut = (s0/2d0)/(dot(q1_cmf,P_cmf))
+    a1cut = (s0)/(2d0*dot(q1_cmf,P_cmf))
 
     h = 1d-6
     if (h .gt. get_min_a2_bound(s,s1,s2,costheta)) then
@@ -990,7 +989,7 @@ endif
         a1min = a1cut
     endif
     if (abs(h).gt.0) then
-      a1max_force = 1d0 - a1cut*(maxn-i-1)
+      a1max_force = 1d0 - a1cut*(maxn-i-2)
       if ((a1max_force.lt.a1max).and.(a1max_force.gt.a1min)) then
         a1max=a1max_force
       endif
