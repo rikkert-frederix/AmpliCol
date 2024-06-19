@@ -874,7 +874,6 @@ endif
         gs = 1d0/(s2-Sigma)
         jac = jac/gs
         a1 = a1_m1(s,s1,s2,q1_cmf,P_cmf,k)
-        write(14,*) a1
         mu = (s2-s1)/s
         a2 = a1 + mu
         jac = jac*a1*(1d0-a1)*(1d0-a2)*a2
