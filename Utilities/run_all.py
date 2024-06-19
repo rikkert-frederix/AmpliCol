@@ -49,7 +49,7 @@ if __name__ == '__main__':
            '12':['1 2 3 4 5 6 7 8 9 10 11 12','1 3 2 4 5 6 7 8 9 10 11 12','1 3 4 2 5 6 7 8 9 10 11 12','1 3 4 5 2 6 7 8 9 10 11 12','1 3 4 5 6 2 7 8 9 10 11 12','1 3 4 5 6 7 2 8 9 10 11 12']}
 
     
-    nexternal=['4','5','6','7','8','9']
+    nexternal=['4','5','6','7','8','9','10']
     imodes=['0','1','2']
     integrators=['1','2','3','4']
     seeds=['101','102','103','104','105','106','107','108','109','110']
@@ -73,7 +73,7 @@ if __name__ == '__main__':
                             os.makedirs(directory)
                         output_file='./Outputs'+add_arg+'/log_'+n+'_'+imode+'_'+str(i)+'.txt'
                         outfiles.append(output_file)
-                        args=list(chain.from_iterable([integrator,imode,n,flavour[n].split(),color_order.split()]))+[add_arg]
+                        args=list(chain.from_iterable([integrator,imode,[n],flavour[n].split(),color_order.split()]))+[add_arg]
                         print(args)
                         arguments.append(args)
 
