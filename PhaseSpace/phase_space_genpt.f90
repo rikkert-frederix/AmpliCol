@@ -28,7 +28,7 @@ contains
        pt2min=ptcut**2
        pt2max=sqrts**2/4d0
        ix=ix+1
-       call random_to_var(xx(ix),-1d0,pt2min,pt2max,pt2,jac)
+       call random_to_var(xx(ix),-1.5d0,pt2min,pt2max,pt2,jac)
        ! generate phi
        phimin=-pi
        phimax=pi

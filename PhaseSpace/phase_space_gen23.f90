@@ -302,7 +302,8 @@ contains
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
        if (debug) write (*,*) '2->2 scattering with one particle in each set'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
-       call gens_one_step(set(2),set(1))
+!!$       call gens_one_step(set(2),set(1))
+       call gent_one_step(set(2),set(1),1)
        if (jac.le.0d0) return
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
@@ -2121,8 +2122,8 @@ subroutine genpt_one_step(i,ir,ib,im1)
     integer(kind=4),parameter :: n=4
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
-    real(kind=8),parameter :: tol=1d-10
-    real(kind=8) :: deter
+    real(kind=8),parameter :: tol=1d-8
+    real(kind=8) :: deter,deter_check
     logical :: success
     a(1:4,1)=(/ 0d0           , t_im1-shat_im1 , t_i-shat_i       , t_ip1-shat_ip1    /)
     a(1:4,2)=(/ t_im1-shat_im1, 2d0*t_im1      , t_i+t_im1-m_i_2  , t_im1+t_ip1-s_i   /)
@@ -2135,6 +2136,17 @@ subroutine genpt_one_step(i,ir,ib,im1)
     else
        gram_determinant4=1d0
     endif
+!!$    a(1:4,3)=(/ t_i-shat_i       , t_im1-shat_im1 , 0d0           , t_ip1-shat_ip1    /)
+!!$    a(1:4,1)=(/ t_i+t_im1-m_i_2  , 2d0*t_im1      , t_im1-shat_im1, t_im1+t_ip1-s_i   /)
+!!$    a(1:4,2)=(/ 2d0*t_i          , t_i+t_im1-m_i_2, t_i-shat_i    , t_i+t_ip1-m_ip1_2 /)
+!!$    a(1:4,4)=(/ t_i+t_ip1-m_ip1_2, t_im1+t_ip1-s_i, t_ip1-shat_ip1, 2d0*t_ip1         /)
+!!$    call LUPdecompose(a,n,tol,p,success)
+!!$    if (success) then
+!!$       call LUPdeterminant(a,p,n,deter_check)
+!!$       if (abs(deter/(-deter_check)-1d0).gt.1d-9) then
+!!$          write (*,*) deter,deter_check,deter/(-deter_check)-1d0
+!!$       endif
+!!$    endif
   end function gram_determinant4
   
 end module phase_space_gen23
