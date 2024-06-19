@@ -394,6 +394,10 @@ contains
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) then
              read(argv,*) next
+             if (next.le.3) then
+                write (*,*) 'Need at least 4 particles (2->2 scattering)',next
+                stop 1
+             endif
              allocate(part(1:next))
              allocate(o(1:next))
           endif

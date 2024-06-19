@@ -539,6 +539,10 @@ contains
           if (i.eq.2) read(argv,*) imode
           if (i.eq.3) then
              read(argv,*) next
+             if (next.le.3) then
+                write (*,*) 'Need at least 4 particles (2->2 scattering)',next
+                stop 1
+             endif
              allocate(part(1:next))
              allocate(orig_part(1:next))
              allocate(part_sf(1:next))
