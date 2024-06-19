@@ -7,7 +7,7 @@ module common
   type(amplitude_QCD) :: amp_QCD
   type(amplitude_QCD),dimension(:),allocatable :: amps
   real(kind=8),dimension(:,:),allocatable :: p
-  integer,parameter :: string_len=50
+  integer,parameter :: string_len=150
 end module common
 module rw_events
   implicit none
