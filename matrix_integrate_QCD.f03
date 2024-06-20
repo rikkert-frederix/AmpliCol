@@ -293,7 +293,8 @@ contains
   end function integrand
 
   double precision function pass_cuts(n,p)
-    ! Cuts on the phase-space point.
+    ! Cuts on the phase-space point. Note that these cuts need to be symmetric
+    ! under pz -> -pz.
     implicit none
     integer :: i,j,n
     real*8,dimension(0:3,n) :: p
@@ -477,16 +478,30 @@ contains
     implicit none
     integer :: i,iunit
     real(kind=8) :: wgt
+    real(kind=8),external :: ran2
     write (iunit,*) '<event>'
     write (iunit,*) next,hel_picked,wgt,amp2*weight,amp2,weight
     write (iunit,'(100i3)') o(1:next)
-    do i=1,next
-       if (i.le.2) then
-          write (iunit,*) orig_part(i) ,p(1:3,i),p(0,i)
-       else
-          write (iunit,*) orig_part(i) ,p(1:3,i),p(0,i)
-       endif
-    enddo
+    ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
+    ! compensate for reducing the number of integration channels (see
+    ! sym_fac()) assuming symmetric initial states, we need to randomly flip
+    ! all z-components in those cases. Easiest to always do this if the two
+    ! incoming particles are identical.
+    if (orig_part(1).ne.orig_part(2) .or. ran2().lt.0.5d0) then
+       ! do not flip
+       do i=1,next
+          write (iunit,*) orig_part(i),p(1:3,i),p(0,i)
+       enddo
+    else
+       ! do flip
+       do i=1,next
+          if (i.le.2) then
+             write (iunit,*) orig_part(i),p(1:2,3-i),-p(3,3-i),p(0,3-i)
+          else
+             write (iunit,*) orig_part(i),p(1:2,i),-p(3,i),p(0,i)
+          endif
+       enddo
+    endif
     write (iunit,*) '</event>'
   end subroutine write_event
 
@@ -845,7 +860,6 @@ contains
     integer :: ngl=0
     integer,dimension(6) :: nq,naq
     integer :: i,j
-
     nq=0
     naq=0
     ! count the number of final state gluons
