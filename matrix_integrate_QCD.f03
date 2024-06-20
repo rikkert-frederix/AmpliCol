@@ -912,14 +912,20 @@ contains
           ! iib  --> 1,3,2,(5,6),4 = 5,2,3,1,4,6 -/          line as the qqbar pair
           ! iii  --> 1,3,4,2,(5,6) = 5,2,4,3,1,6 ---- : both gluons on the other quark line
           !
-          ! Furthermore all these can have the quark and anti-quark order
-          ! reversed (or, equivalently, the two incoming particles
-          ! interchanged in the colour order), so there are in total 12 truly
-          ! different colour orders to consider.
-          !
-          ! All these come with a symmetry factor of (ngluon-2)! =
-          ! 2!. Hence we have:
-          sym_fac=factorial8(ngl)
+          ! Note, however, that in the above situation ia and ic results in
+          ! the same cross section. Also iia and iib result in the same
+          ! rate. Furthermore, there is an additional factor 2, since one can
+          ! interchange the two incoming particles. Hence, there are only
+          ! trully 4 independent colour orders to consider:
+          ! ia, with symmetry factor (ngluon-2)!*2*2
+          ! ib, with symmetry factor (ngluon-2)!*2
+          ! iaa, with symmetry factor (ngluon-2)!*2*2
+          ! iii, with symmetry factor (ngluon-2)!*2
+          ! Hence
+          sym_fac=factorial8(ngl)*2
+          if (ifindloc(o,next,1).ne.next-ifindloc(o,next,2)+1) then
+             sym_fac=sym_fac*2
+          endif
        endif
     elseif (nquarks.eq.4) then
        sym_fac=factorial8(ngl)
@@ -928,6 +934,18 @@ contains
     endif
   end subroutine compute_multichannel_symmetry_factor
 
+  integer(kind=4) function ifindloc(a,n,i)
+    ! returns the location of the value 'i' in the array 'a' (of size 'n'). If
+    ! the array 'a' does not contain 'i', the value 'n+1' is returned.
+    implicit none
+    integer,intent(in) :: i,n
+    integer,dimension(n),intent(in) :: a
+    do ifindloc=1,n
+       if (a(ifindloc).eq.i) return
+    enddo
+  end function ifindloc
+    
+  
   subroutine read_process_from_file
     implicit none
     integer :: i,end,start,glu
