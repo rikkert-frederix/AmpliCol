@@ -48,6 +48,28 @@ def get_string(tag):
     string=string+" \\\\ \n"
     return string
 
+def convert_proc_to_string(flavour):
+    string=''
+    for i,iflav in enumerate(flavour.split()):
+        if i==0:
+            string+=pdg_to_str(iflav)+' '
+        elif i==1:
+            string+=pdg_to_str(iflav)+' -> '
+        else:
+            if iflav == '21' :
+                string+=' '+str(len(flavour.split())-i)+pdg_to_str(iflav)
+                return string
+            else:
+                string+=pdg_to_str(iflav)
+    return string
+
+def pdg_to_str(ipdg):
+    string=''
+    if ipdg == '21' : string='g'
+    if ipdg == '1' : string='d'
+    if ipdg == '-1' : string='~d{.55-}'
+    return string
+    
 def compute_averages(list_of_tags):
     ave_tag='average'
     l=len(list_of_tags)
@@ -160,7 +182,43 @@ if __name__ == '__main__':
     latex_footer=r"""\end{scriptsize}
 \end{document}
 """
-    
+
+    gnuplot_header=r"""reset
+set lmargin 10
+set rmargin 10
+set bmargin 0.5
+set tmargin 0.5
+set terminal postscript portrait enhanced color "Helvetica" 10
+set output "plots.ps"
+set linetype 1 lc rgb '#a9e5bb' lw 0
+set linetype 2 lc rgb '#f7b32b' lw 0
+set linetype 3 lc rgb '#f72c25' lw 0
+set linetype 4 lc rgb '#533756' lw 0
+unset xtics
+set xrange [-2:51]
+"""
+    gnuplot_footer=r"""!ps2pdf "plots.ps" &> /dev/null
+"""
+    gnuplot_middle="""set multiplot layout 3,1
+set size 0.5,0.5
+set origin 0,0.5
+set label 'Cross section [pb]' at graph 0.1, graph 0.97
+plot 'event_numbers.dat' i %s u 0:($2):3:(int($0/13)+1) w yerrorbar pointtype 7 pointsize 0 linecolor variable notitle
+unset label
+set logscale y
+set size 0.5,0.25
+set origin 0,0.25
+set label 'Unweighting eff.' at graph 0.1, graph 0.95
+plot 'event_numbers.dat' i %s u 0:($4):(int($0/13)+1) w points pointtype 7 linecolor variable notitle
+unset label
+set size 0.5,0.25
+set origin 0.0,0.0
+set label '2nd. Unw. eff.' at graph 0.1, graph 0.95
+plot 'event_numbers.dat' i %s u 0:($5):(int($0/13)+1) w points pointtype 7 linecolor variable notitle
+unset label
+unset logscale y
+unset multiplot
+"""
     
     flavours={'4':['21 21 21 21',                        '21 21 1 -1',                        '-1 21 -1 21',                       '-1 1 21 21'                  ],
               '5':['21 21 21 21 21',                     '21 21 1 -1 21',                     '-1 21 -1 21 21',                    '-1 1 21 21 21'               ],
@@ -290,3 +348,38 @@ if __name__ == '__main__':
                             f.write('\\bottomrule \n')
                         f.write(table_footer)
         f.write(latex_footer)
+
+
+    with open('event_numbers.gnuplot','w') as f1:
+        with open('event_numbers.dat','w') as f2:
+            f1.write(gnuplot_header)
+            icount=0
+            for n in nexternal:
+                for iflav,flavour in enumerate(flavours[n]):
+                    for io,order in enumerate(orders[iflav][n]):
+                        to_write=[]
+                        for i,integrator in enumerate(integrators):
+                            for seed in seeds:
+                                line=''
+                                for imode in ['1','2']:
+                                    tag='n'+n+'-f'+str(iflav)+'-o'+str(io)+'-m'+imode+'-i'+integrator+'-s'+seed
+                                    if tag in tags:
+                                        if imode=='1':
+                                            line+=tag+'  '+str(cross_section[tag])+'  '+str(uncertainty[tag])
+                                        elif imode=='2':
+                                            line+='  '+str(gen_eff[tag]*number_of_events[tag]/number_passing_cuts[tag])+'  '+str(1.0)
+                                if line: to_write.append(line)
+                            to_write.append('""')
+                            to_write.append('""')
+                            to_write.append('""')
+                        to_write.append('')
+                        to_write.append('')
+                        to_write.append('')
+                        if (len(to_write)==55):
+                            f2.write('\n'.join(to_write))
+                            string='set label "'+convert_proc_to_string(flavour)+', '+''.join(order)+'" at graph 0,graph 1.05\n'
+                            f1.write(string)
+                            f1.write(gnuplot_middle%(icount,icount,icount))
+                            icount=icount+1
+            f1.write(gnuplot_footer)            
+
