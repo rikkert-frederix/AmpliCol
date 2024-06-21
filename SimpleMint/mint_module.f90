@@ -362,7 +362,7 @@ contains
        call regrid_ave_virt(k_ord_virt)
     enddo
 ! Regrid the MC over integers (used for the MC over FKS dirs)
-    call regrid_MC_integer
+!!$    call regrid_MC_integer
   end subroutine update_integration_grids
 
   
@@ -523,7 +523,7 @@ contains
 ! Do not include the results in the updating of the grids.
        write (*,*) 'Large fluctuation ( >30 % ). Not including iteration in results.'
 ! empty the accumulated results in the MC over integers
-       call empty_MC_integer
+!!$       call empty_MC_integer
 ! empty the accumulated results for the MINT grids (Cannot really
 ! skip the increase of the upper bounding envelope. So, simply
 ! continue here. Note that no matter how large the integrand for the
@@ -544,7 +544,7 @@ contains
              endif
           endif
           call reset_mint_grids
-          call reset_MC_grid  ! reset the grid for the integers
+!!$          call reset_MC_grid  ! reset the grid for the integers
           if (fixed_order) call initplot  ! Also reset all the plots
           call setup_common
           bad_iteration=.false.

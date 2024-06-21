@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := matrix_integrate_QCD
 
-FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o MC_integer.o ranmar.o HwU.o	\
+FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o	\
 LUPdecompose.o phase_space_gen23.o haag.o color_algebra.o math_functions.o	\
 feynmanrules.o amplitude_QCD.o matrix_integrate_QCD.o common.o			\
 phase_space_genpt.o
