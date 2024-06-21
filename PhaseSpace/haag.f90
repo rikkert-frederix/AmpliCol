@@ -989,7 +989,7 @@ endif
         a1min = a1cut
     endif
     if (abs(h).gt.0) then
-      a1max_force = 1d0 - a1cut*(maxn-i-2)
+      a1max_force = 1d0 - a1cut*(maxn-i-1)
       if ((a1max_force.lt.a1max).and.(a1max_force.gt.a1min)) then
         a1max=a1max_force
       endif
