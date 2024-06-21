@@ -106,8 +106,8 @@ if __name__ == '__main__':
         arguments=[]
         outfiles=[]
         for n in nexternal:
-            for f,flavour in enumerate(flavours[n]):
-                for i,color_order in enumerate(orders[f][n]):
+            for iflav,flavour in enumerate(flavours[n]):
+                for io,color_order in enumerate(orders[iflav][n]):
                     for integrator in integrators:
                         for seed in seeds:
                             add_arg='S'+seed+'I'+integrator
@@ -115,7 +115,7 @@ if __name__ == '__main__':
                             if not os.path.exists(directory):
                                 time.sleep(0.1)
                                 os.makedirs(directory)
-                            output_file='./Outputs'+add_arg+'/log_'+n+'_'+imode+'_'+str(i)+'_'+str(f)+'.txt'
+                            output_file='./Outputs'+add_arg+'/log_'+n+'_'+imode+'_'+str(io)+'_'+str(iflav)+'.txt'
                             outfiles.append(output_file)
                             args=list(chain.from_iterable([integrator,imode,[n],flavour.split(),color_order.split()]))+[add_arg]
                             print(args,output_file)

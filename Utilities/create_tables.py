@@ -134,11 +134,11 @@ def compute_averages(list_of_tags):
 
 if __name__ == '__main__':
     table_header=r"""\noindent The tag has the form \textbf{nX-oX-fX-mX-iX-sXXX}, where X is an integer. The integer after 
-\textbf{n} corresponds to the number of external particles,
-\textbf{o} the colour order index: minimum number of gluons between the two incoming particles in the colour order,
-\textbf{f} flavour index (always 0 for all-gluon),
-\textbf{m} corresponds to imode: 0 for grid setup; 1 for upper bounding envelope estimation; 2 for event generation,
-\textbf{i} the integrator: 1 for gen23; 2 for haag; 3 for genpt (chili-like); 4 for t-channel
+\textbf{n} corresponds to the number of external particles;
+\textbf{f} flavour index: 0 for $gg \to (n-2)g$, 1 for $gg\to d\bar{d}+(n-4)g$, 2 for $\bar{d} g\to \bar{d}+(n-3)g$ , 3 for $\bar{d}d \to (n-2)g$ );
+\textbf{o} the colour order index: minimum number of gluons between the two incoming particles in the colour order;
+\textbf{m} corresponds to imode: 0 for grid setup, 1 for upper bounding envelope estimation, 2 for event generation;
+\textbf{i} the integrator: 1 for gen23, 2 for haag, 3 for genpt (chili-like), 4 for t-channel;
 \textbf{s} the random number seed.
 
 \begin{tabularx}{0.95\textwidth}{l r r r r r r r r r r}
@@ -162,27 +162,68 @@ if __name__ == '__main__':
 """
     
     
-    flavours={'4':['21 21 21 21'],
-              '5':['21 21 21 21 21'],
-              '6':['21 21 21 21 21 21'],
-              '7':['21 21 21 21 21 21 21'],
-              '8':['21 21 21 21 21 21 21 21'],
-              '9':['21 21 21 21 21 21 21 21 21'],
-             '10':['21 21 21 21 21 21 21 21 21 21'],
-             '11':['21 21 21 21 21 21 21 21 21 21 21'],
-              '12':['21 21 21 21 21 21 21 21 21 21 21 21']}
-    
-    orders={'4':['1 2 3 4','1 3 2 4'],
-            '5':['1 2 3 4 5','1 3 2 4 5'],
-            '6':['1 2 3 4 5 6','1 3 2 4 5 6','1 3 4 2 5 6'],
-            '7':['1 2 3 4 5 6 7','1 3 2 4 5 6 7','1 3 4 2 5 6 7'],
-            '8':['1 2 3 4 5 6 7 8','1 3 2 4 5 6 7 8','1 3 4 2 5 6 7 8','1 3 4 5 2 6 7 8'],
-            '9':['1 2 3 4 5 6 7 8 9','1 3 2 4 5 6 7 8 9','1 3 4 2 5 6 7 8 9','1 3 4 5 2 6 7 8 9'],
-           '10':['1 2 3 4 5 6 7 8 9 10','1 3 2 4 5 6 7 8 9 10','1 3 4 2 5 6 7 8 9 10','1 3 4 5 2 6 7 8 9 10','1 3 4 5 6 2 7 8 9 10'],
-           '11':['1 2 3 4 5 6 7 8 9 10 11','1 3 2 4 5 6 7 8 9 10 11','1 3 4 2 5 6 7 8 9 10 11','1 3 4 5 2 6 7 8 9 10 11','1 3 4 5 6 2 7 8 9 10 11'],
-           '12':['1 2 3 4 5 6 7 8 9 10 11 12','1 3 2 4 5 6 7 8 9 10 11 12','1 3 4 2 5 6 7 8 9 10 11 12','1 3 4 5 2 6 7 8 9 10 11 12','1 3 4 5 6 2 7 8 9 10 11 12','1 3 4 5 6 7 2 8 9 10 11 12']}
+    flavours={'4':['21 21 21 21',                        '21 21 1 -1',                        '-1 21 -1 21',                       '-1 1 21 21'                  ],
+              '5':['21 21 21 21 21',                     '21 21 1 -1 21',                     '-1 21 -1 21 21',                    '-1 1 21 21 21'               ],
+              '6':['21 21 21 21 21 21',                  '21 21 1 -1 21 21',                  '-1 21 -1 21 21 21',                 '-1 1 21 21 21 21'            ],
+              '7':['21 21 21 21 21 21 21',               '21 21 1 -1 21 21 21',               '-1 21 -1 21 21 21 21',              '-1 1 21 21 21 21 21'         ],
+              '8':['21 21 21 21 21 21 21 21',            '21 21 1 -1 21 21 21 21',            '-1 21 -1 21 21 21 21 21',           '-1 1 21 21 21 21 21 21'      ],
+              '9':['21 21 21 21 21 21 21 21 21',         '21 21 1 -1 21 21 21 21 21',         '-1 21 -1 21 21 21 21 21 21',        '-1 1 21 21 21 21 21 21 21'   ],
+             '10':['21 21 21 21 21 21 21 21 21 21',      '21 21 1 -1 21 21 21 21 21 21',      '-1 21 -1 21 21 21 21 21 21 21',     '-1 1 21 21 21 21 21 21 21 21']}
 
-    nexternal=['4','5','6','7','8','9']#,'10','11','12']
+    orders=[{},{},{},{}]
+
+    # gg -> (n-2)g
+    orders[0]={'4':['1 2 3 4','1 3 2 4'],
+               '5':['1 2 3 4 5','1 3 2 4 5'],
+               '6':['1 2 3 4 5 6','1 3 2 4 5 6','1 3 4 2 5 6'],
+               '7':['1 2 3 4 5 6 7','1 3 2 4 5 6 7','1 3 4 2 5 6 7'],
+               '8':['1 2 3 4 5 6 7 8','1 3 2 4 5 6 7 8','1 3 4 2 5 6 7 8','1 3 4 5 2 6 7 8'],
+               '9':['1 2 3 4 5 6 7 8 9','1 3 2 4 5 6 7 8 9','1 3 4 2 5 6 7 8 9','1 3 4 5 2 6 7 8 9'],
+              '10':['1 2 3 4 5 6 7 8 9 10','1 3 2 4 5 6 7 8 9 10','1 3 4 2 5 6 7 8 9 10','1 3 4 5 2 6 7 8 9 10','1 3 4 5 6 2 7 8 9 10']
+              }
+
+    # gg -> qqbar + (n-4)g
+    orders[1]={'4':['3 1 2 4'],
+               '5':['3 1 2 5 4','3 1 5 2 4'],
+               '6':['3 1 2 5 6 4','3 1 5 2 6 4','3 1 5 6 2 4',
+                    '3 5 1 2 6 4'],
+               '7':['3 1 2 5 6 7 4','3 5 1 2 6 7 4','3 1 5 2 6 7 4','3 1 5 6 2 7 4','3 1 5 6 7 2 4','3 5 1 6 2 7 4'],
+               '8':['3 1 2 5 6 7 8 4','3 1 5 2 6 7 8 4','3 1 5 6 2 7 8 4','3 1 5 6 7 2 8 4','3 1 5 6 7 8 2 4',
+                    '3 5 1 2 6 7 8 4','3 5 1 6 2 7 8 4','3 5 1 6 7 2 8 4',
+                    '3 5 6 1 2 7 8 4'],
+               '9':['3 1 2 5 6 7 8 9 4','3 1 5 2 6 7 8 9 4','3 1 5 6 2 7 8 9 4','3 1 5 6 7 2 8 9 4','3 1 5 6 7 8 2 9 4','3 1 5 6 7 8 9 2 4',
+                    '3 5 1 2 6 7 8 9 4','3 5 1 6 2 7 8 9 4','3 5 1 6 7 2 8 9 4','3 5 1 6 7 8 2 9 4',
+                    '3 5 6 1 2 7 8 9 4','3 5 6 1 7 2 8 9 4'],
+              '10':['3 1 2 5 6 7 8 9 10 4','3 1 5 2 6 7 8 9 10 4','3 1 5 6 2 7 8 9 10 4','3 1 5 6 7 2 8 9 10 4','3 1 5 6 7 8 2 9 10 4','3 1 5 6 7 8 9 2 10 4','3 1 5 6 7 8 9 10 2 4',
+                    '3 5 1 2 6 7 8 9 10 4','3 5 1 6 2 7 8 9 10 4','3 5 1 6 7 2 8 9 10 4','3 5 1 6 7 8 2 9 10 4','3 5 1 6 7 8 9 2 10 4',
+                    '3 5 6 1 2 7 8 9 10 4','3 5 6 1 7 2 8 9 10 4','3 5 6 1 7 8 2 9 10 4',
+                    '3 5 6 7 1 2 8 9 10 4']
+              }
+
+    # qbar g -> qbar + (n-3)g
+    orders[2]={'4':['1 2 4 3','1 4 2 3'],
+               '5':['1 2 4 5 3','1 4 2 5 3','1 4 5 2 3'],
+               '6':['1 2 4 5 6 3','1 4 2 5 6 3','1 4 5 2 6 3','1 4 5 6 2 3'],
+               '7':['1 2 4 5 6 7 3','1 4 2 5 6 7 3','1 4 5 2 6 7 3',
+                    '1 4 5 6 2 7 3','1 4 5 6 7 2 3'],
+               '8':['1 2 4 5 6 7 8 3','1 4 2 5 6 7 8 3','1 4 5 2 6 7 8 3',
+                    '1 4 5 6 2 7 8 3','1 4 5 6 7 2 8 3','1 4 5 6 7 8 2 3'],
+               '9':['1 2 4 5 6 7 8 9 3','1 4 2 5 6 7 8 9 3','1 4 5 2 6 7 8 9 3',
+                    '1 4 5 6 2 7 8 9 3','1 4 5 6 7 2 8 9 3','1 4 5 6 7 8 2 9 3','1 4 5 6 7 8 9 2 3'],
+              '10':['1 2 4 5 6 7 8 9 10 3','1 4 2 5 6 7 8 9 10 3','1 4 5 2 6 7 8 9 10 3','1 4 5 6 2 7 8 9 10 3','1 4 5 6 7 2 8 9 10 3','1 4 5 6 7 8 2 9 10 3','1 4 5 6 7 8 9 2 10 3','1 4 5 6 7 8 9 10 2 3']
+              }
+
+    # qbar q -> (n-2)g
+    orders[3]={'4':['1 3 4 2'],
+               '5':['1 3 4 5 2'],
+               '6':['1 3 4 5 6 2'],
+               '7':['1 3 4 5 6 7 2'],
+               '8':['1 3 4 5 6 7 8 2'],
+               '9':['1 3 4 5 6 7 8 9 2'],
+              '10':['1 3 4 5 6 7 8 9 10 2']
+              }
+
+    nexternal=['4','5','6','7','8','9','10']
     imodes=['0','1','2']
     integrators=['1','2','3','4']
     seeds=['101','102','103','104','105','106','107','108','109','110']
@@ -199,15 +240,15 @@ if __name__ == '__main__':
     gen_eff={}
     tags=[]
     for n in nexternal:
-        for io,order in enumerate(orders[n]):
-            for iflav,flavour in enumerate(flavours[n]):
+        for iflav,flavour in enumerate(flavours[n]):
+            for io,order in enumerate(orders[iflav][n]):
                 for imode in imodes:
                     for integrator in integrators:
                         for seed in seeds:
-                            log_file='./OutputsS'+seed+'I'+integrator+'/log_'+n+'_'+imode+'_'+str(io)+'.txt'
+                            log_file='./OutputsS'+seed+'I'+integrator+'/log_'+n+'_'+imode+'_'+str(io)+'_'+str(iflav)+'.txt'
                             try:
                                 with open(log_file) as file:
-                                    tag='n'+n+'-o'+str(io)+'-f'+str(iflav)+'-m'+imode+'-i'+integrator+'-s'+seed
+                                    tag='n'+n+'-f'+str(iflav)+'-o'+str(io)+'-m'+imode+'-i'+integrator+'-s'+seed
                                     for line in file:
                                         if 'Final result:'in line:
                                             cross_section[tag]=float(line.split()[2])
@@ -230,14 +271,14 @@ if __name__ == '__main__':
         f.write(latex_header)
 
         for n in nexternal:
-            for io,order in enumerate(orders[n]):
-                for iflav,flavour in enumerate(flavours[n]):
+            for iflav,flavour in enumerate(flavours[n]):
+                for io,order in enumerate(orders[iflav][n]):
                     for imode in imodes:
                         f.write(table_header)
                         for i,integrator in enumerate(integrators):
                             tags_to_average=[]
                             for seed in seeds:
-                                tag='n'+n+'-o'+str(io)+'-f'+str(iflav)+'-m'+imode+'-i'+integrator+'-s'+seed
+                                tag='n'+n+'-f'+str(iflav)+'-o'+str(io)+'-m'+imode+'-i'+integrator+'-s'+seed
                                 if tag in tags:
                                     string=get_string(tag)
                                     f.write(string)
