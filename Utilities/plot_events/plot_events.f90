@@ -5,7 +5,7 @@ program plot_events
   implicit none
   integer ifile,nPSpoints
   logical :: done
-  character*140 filename
+  character*240 filename
   character*50 weights_info(10)
   double precision dummy
   real(kind=8),dimension(:,:),allocatable :: p

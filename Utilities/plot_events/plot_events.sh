@@ -5,9 +5,8 @@ full_path='/home/timea/Documents/Uppsala_MUNKAHELY/Projects/Colour_implement/Int
 cd $full_path
 
 gfortran -fcheck=all -o plot_events HwU.f analysis.f plot_events.f90
-echo $2
 mkdir "res_wgt_$2"
-#rm -f events_*.HwU > /dev/null
+rm -f events_*.HwU > /dev/null
 
 for file in $1_*.lhe.rwgt ; do
 	./plot_events $file

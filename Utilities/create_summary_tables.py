@@ -8,46 +8,13 @@ from itertools import chain
 
 def get_string(tag1,tag2,plot):
     string=tag1
-#    try:
-#        string=string+" & %8.3e"%cross_section[tag]
-#    except:
-#        string=string+" & --"
-#    try:
-#        string=string+" & %8.3e"%uncertainty[tag]
-#    except:
-#        string=string+" & --"
     try:
         if ('s101') in tag1:
              string=string+" & \multirow{10}{*}{\includegraphics[scale=0.2]{save_diag/"+plot+"}}"
         else:
             string=string+" & "
-        #string=string+" & %7.2f \%%"%(uncertainty[tag]/cross_section[tag] * 100.)
     except:
         string=string+" & --"
-#    try:
-#        string=string+" & %2.1f"%(chi2_per_DoF[tag])
-#    except:
-#        string=string+" & --"
-#    try:
-#        string=string+" & %ik"%(number_of_events[tag]/1000)
-#    except:
-#        string=string+" & --"
-#    try:
-#        string=string+" & %ik"%(number_passing_cuts[tag]/1000)
-#    except:
-#        string=string+" & --"
-#    try:
-#        string=string+" & %2.1f \%%"%(number_passing_cuts[tag]/number_of_events[tag] *100.)
-#    except:
-#        string=string+" & --"
-#    try:
-#        string=string+" & %i "%(total_time[tag])
-#    except:
-#        string=string+" & --"
-#    try:
-#        string=string+" & %2.3f \%%"%(gen_eff[tag] * 100.)
-#    except:
-#        string=string+" & --"
     try:
         string=string+" & %2.3f \%%"%(gen_eff[tag2]*number_of_events[tag2]/number_passing_cuts[tag2] * 100.)
     except:
@@ -62,78 +29,6 @@ def get_string(tag1,tag2,plot):
 def compute_averages(list_of_tags):
     ave_tag='average'
     l=len(list_of_tags)
-    if l==0:
-        try:
-            del cross_section[ave_tag]
-        except:
-            pass
-        try:
-            del uncertainty[ave_tag]
-        except:
-            pass
-        try:
-            del chi2_per_DoF[ave_tag]
-        except:
-            pass
-        try:
-            del number_of_events[ave_tag]
-        except:
-            pass
-        try:
-            del number_passing_cuts[ave_tag]
-        except:
-            pass
-        try:
-            del total_time[ave_tag]
-        except:
-            pass
-        try:
-            del gen_eff[ave_tag]
-        except:
-            pass
-        return ave_tag
-    try:
-        cross_section[ave_tag]=sum(cross_section[tag] for tag in list_of_tags)/l
-    except:
-        try:
-            del cross_section[ave_tag]
-        except:
-            pass
-    try:
-        uncertainty[ave_tag]=math.sqrt(sum(uncertainty[tag]**2 for tag in list_of_tags))/l
-    except:
-        try:
-            del uncertainty[ave_tag]
-        except:
-            pass
-#    try:
-#        chi2_per_DoF[ave_tag]=sum(chi2_per_DoF[tag] for tag in list_of_tags)/l
-#    except:
-#        try:
-#            del chi2_per_DoF[ave_tag]
-#        except:
-#            pass
-    try:
-        number_of_events[ave_tag]=sum(number_of_events[tag] for tag in list_of_tags)/l
-    except:
-        try:
-            del number_of_events[ave_tag]
-        except:
-            pass
-    try:
-        number_passing_cuts[ave_tag]=sum(number_passing_cuts[tag] for tag in list_of_tags)/l
-    except:
-        try:
-            del number_passing_cuts[ave_tag]
-        except:
-            pass
-    try:
-        total_time[ave_tag]=sum(total_time[tag] for tag in list_of_tags)/l
-    except:
-        try:
-            del total_time[ave_tag]
-        except:
-            pass
     try:
         gen_eff[ave_tag]=sum(gen_eff[tag] for tag in list_of_tags)/l
     except:
@@ -261,6 +156,8 @@ if __name__ == '__main__':
     unwgt_eff={}
     for n in nexternal:
         for iflav,flavour in enumerate(flavours[n]):
+            if (iflav > 0):
+                break
             for io,order in enumerate(orders[iflav][n]):
                 for imode in imodes:
                     for integrator in integrators:
@@ -303,6 +200,8 @@ if __name__ == '__main__':
 
     for n in nexternal:
         for iflav,flavour in enumerate(flavours[n]):
+            if (iflav > 0):
+                break
             for io,order in enumerate(orders[iflav][n]):
                 for imode in ['1']:
                     for i,integrator in enumerate(integrators):
@@ -320,6 +219,8 @@ if __name__ == '__main__':
         f.write(latex_header)
         for n in nexternal:
             for iflav,flavour in enumerate(flavours[n]):
+                if (iflav > 0):
+                    break
                 for io,order in enumerate(orders[iflav][n]):
                     f.write(table_header)
                     for i,integrator in enumerate(integrators):
