@@ -2587,8 +2587,8 @@ contains
           endif
 
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-          !col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+          col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+          if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
              do ival=1,n_vals(iacc,gi_iperm)
@@ -2660,7 +2660,7 @@ contains
        endif
 
         ! for now, include all matrix ! TO CHANGE: put back off-diagonality
-        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+        do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
           
           if (this%n_qqbar.eq.0) then
@@ -2675,8 +2675,8 @@ contains
           do rj=0,lim
             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
             ! TO CHANGE: also here put back factor 2
-            !col_fac(1:3)=col_fac(1:3)*2d0
-            !if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+            col_fac(1:3)=col_fac(1:3)*2d0
+            if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
                do ival=1,n_vals(iacc,gi_iperm)
@@ -2819,7 +2819,7 @@ contains
                      coef_Nc(:,:)=0
                      coef_Nc(0,1)=1
                      call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                     !col_fac(2)=dble(col_factor)
+                     col_fac(2)=dble(col_factor)
                      call Tr_deallocate
                   endif
                endif
