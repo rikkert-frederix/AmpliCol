@@ -2499,22 +2499,35 @@ contains
     !real(kind=8),allocatable,dimension(:,:) :: col_fac
     !real(kind=8),dimension(max_vals,1:3) :: diff_vals
     real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
+    real(kind=8),allocatable,dimension(:,:) :: col_vals
     integer,dimension(:,:,:),allocatable :: ic,ir
     integer :: ri,rj,lim,y,t,maxterms_u1,i,j,gi
     integer :: ui,uj,uj_upper ! quark ordering type
     integer :: it ! quark order type (1 or 2)
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
+    integer :: val,max_val
 
     write (*,*) 'Initialising colour matrix ...'
+    
+    do i=0,n-1
+        iper(i+1)=n-i
+    enddo
+    max_val=0
+    do j=1,n
+       max_val=max_val+int(iper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
+    enddo
+
     if (this%n_qqbar.eq.0) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
+       allocate(col_vals(1:3,max_val))
        !allocate(col_fac(1:3,1))
        lim=0
        iperm_upper = 1
     elseif (this%n_qqbar.eq.1) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
+       allocate(col_vals(1:3,max_val))
        !allocate(col_fac(1:3,1))
        lim=0
        iperm_upper = 1
@@ -2541,6 +2554,7 @@ contains
 ! first check a single row in the colour matrix to determine how many
 ! different colour factors there are
     n_vals(1:3,:)=0
+    col_vals(1:3,1:max_val)=0d0
     do iperm=1,iperm_upper
     if (this%n_qqbar.eq.0) then
        iper(1:n)=[this%perm(1:n-1,iperm),n]
@@ -2573,6 +2587,7 @@ contains
     do ri=0,lim ! number of U(1) gluons in amp
     do jperm=1,this%nColOrd ! TO CHANGE!
       do uj=1,uj_upper
+
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
@@ -2580,6 +2595,11 @@ contains
        elseif (this%n_qqbar.eq.2) then
           jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]  ! last one is dummy
        endif
+
+       val=0
+       do j=1,n
+          val=val+int(jper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
+       enddo
 
        do rj=0,lim
           if (this%n_qqbar.eq.2) then
@@ -2589,8 +2609,10 @@ contains
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
           col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
+            col_vals(iacc,val)=col_fac(iacc)
              do ival=1,n_vals(iacc,gi_iperm)
                if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
              enddo
@@ -2611,7 +2633,6 @@ contains
 
     write (*,*) 'A single row in the colour matrix has',n_vals(1:3,gi_iperm),&
          ' different colour factors at LC, NLC and full colour, respectively'
-
     enddo
 
 
@@ -2673,10 +2694,16 @@ contains
           endif
 
           do rj=0,lim
-            call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
+
+            ! COMPUTE color factors again
+            !call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
             ! TO CHANGE: also here put back factor 2
             col_fac(1:3)=col_fac(1:3)*2d0
             if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+
+            ! GET color factors from permuting first row
+            call get_col_fac(col_fac)
+
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
                do ival=1,n_vals(iacc,gi_iperm)
@@ -2702,6 +2729,50 @@ contains
     enddo
     write (*,*) '... colour matrix initialised'
   contains
+   subroutine get_col_fac(col_fac)
+     implicit none
+     integer,dimension(n) :: col_new,row_first,row_per,col_per
+     integer :: i,j,val
+     real(kind=8),dimension(1:3) :: col_fac
+
+     ! First row
+     if (this%n_qqbar.eq.0) then
+          row_first(1:n)=[this%perm(1:n-1,1),n]
+     elseif (this%n_qqbar.eq.1) then
+          row_first(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,1),order(n)]
+     endif
+
+     ! Row in consideration
+     if (this%n_qqbar.eq.0) then
+          row_per(1:n)=[this%perm(1:n-1,iperm),n]
+     elseif (this%n_qqbar.eq.1) then
+          row_per(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
+     endif
+
+     ! Column in consideration
+     if (this%n_qqbar.eq.0) then
+          col_per(1:n)=[this%perm(1:n-1,jperm),n]
+     elseif (this%n_qqbar.eq.1) then
+          col_per(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,jperm),order(n)]
+     endif
+
+     do i=1,n
+        do j=1,n
+           if (col_per(i) .eq. row_per(j)) exit
+        enddo
+        col_new(i) = row_first(j)
+     enddo
+
+     val=0
+     do j=1,n
+          val=val+int(col_new(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
+     enddo
+
+     col_fac(1:3)=col_vals(1:3,val)
+   end subroutine get_col_fac
+
+
+
     subroutine compute_color_factor(col_acc,n,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
       use color_algebra
       implicit none
@@ -2802,7 +2873,7 @@ contains
                   coef_Nc(:,:)=0
                   coef_Nc(0,1)=1
                   call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                  !col_fac(2)=dble(col_factor)
+                  col_fac(2)=dble(col_factor)
                   call Tr_deallocate
                else
                   call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
