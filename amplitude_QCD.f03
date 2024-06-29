@@ -2505,29 +2505,25 @@ contains
     integer :: ui,uj,uj_upper ! quark ordering type
     integer :: it ! quark order type (1 or 2)
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
-    integer :: val,max_val
-
-    write (*,*) 'Initialising colour matrix ...'
+    integer :: key
+    integer(kind=8),allocatable,dimension(:) :: perm_dict
+    integer :: max_keys
     
-    do i=0,n-1
-        iper(i+1)=n-i
-    enddo
-    max_val=0
-    do j=1,n
-       max_val=max_val+int(iper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
-    enddo
+    write (*,*) 'Initialising colour matrix ...'
+
+    call create_perm_dict()
 
     if (this%n_qqbar.eq.0) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
-       allocate(col_vals(1:3,max_val))
+       allocate(col_vals(1:3,max_keys))
        !allocate(col_fac(1:3,1))
        lim=0
        iperm_upper = 1
     elseif (this%n_qqbar.eq.1) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
-       allocate(col_vals(1:3,max_val))
+       allocate(col_vals(1:3,max_keys))
        !allocate(col_fac(1:3,1))
        lim=0
        iperm_upper = 1
@@ -2554,7 +2550,7 @@ contains
 ! first check a single row in the colour matrix to determine how many
 ! different colour factors there are
     n_vals(1:3,:)=0
-    col_vals(1:3,1:max_val)=0d0
+    col_vals(1:3,1:max_keys)=0d0
     do iperm=1,iperm_upper
     if (this%n_qqbar.eq.0) then
        iper(1:n)=[this%perm(1:n-1,iperm),n]
@@ -2596,10 +2592,7 @@ contains
           jper(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]  ! last one is dummy
        endif
 
-       val=0
-       do j=1,n
-          val=val+int(jper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
-       enddo
+       key=solve_dict(get_value(jper(1:n)))
 
        do rj=0,lim
           if (this%n_qqbar.eq.2) then
@@ -2612,7 +2605,7 @@ contains
 
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
-            col_vals(iacc,val)=col_fac(iacc)
+            col_vals(iacc,key)=col_fac(iacc)
              do ival=1,n_vals(iacc,gi_iperm)
                if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
              enddo
@@ -2643,7 +2636,7 @@ contains
       allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
       allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
     else
-      allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+       allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
       allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
     endif
     this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
@@ -2682,6 +2675,7 @@ contains
 
         ! for now, include all matrix ! TO CHANGE: put back off-diagonality
         do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+!!$        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
           
           if (this%n_qqbar.eq.0) then
@@ -2695,11 +2689,11 @@ contains
 
           do rj=0,lim
 
-            ! COMPUTE color factors again
-            !call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-            ! TO CHANGE: also here put back factor 2
-            col_fac(1:3)=col_fac(1:3)*2d0
-            if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+!!$            ! COMPUTE color factors again
+!!$            call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
+!!$            ! TO CHANGE: also here put back factor 2
+!!$            col_fac(1:3)=col_fac(1:3)*2d0
+!!$            if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
 
             ! GET color factors from permuting first row
             call get_col_fac(col_fac)
@@ -2763,16 +2757,80 @@ contains
         col_new(i) = row_first(j)
      enddo
 
-     val=0
-     do j=1,n
-          val=val+int(col_new(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
-     enddo
-
-     col_fac(1:3)=col_vals(1:3,val)
+     key=solve_dict(get_value(col_new(1:n)))
+       
+     col_fac(1:3)=col_vals(1:3,key)
    end subroutine get_col_fac
 
+   integer function solve_dict(val)
+     ! Given the value 'val', find the corresponding key in the 'perm_dict'
+     ! dictionary. Use a binary search algorithm. (This only works if the
+     ! dictionary values are ordered, and all values only appear once).
+     implicit none
+     integer :: key,left,middle,right
+     integer(kind=8) :: val
+     left=1
+     right=max_keys
+     do while (left.le.right)
+        middle=(right+left)/2
+        if (perm_dict(middle).eq.val) then
+           solve_dict=middle
+           return
+        elseif(perm_dict(middle).gt.val) then
+           right=middle-1
+        else
+           left=middle+1
+        endif
+     enddo
+   end function solve_dict
+    
+    subroutine create_perm_dict()
+      ! Create a dictionary that uniquely gives every colour permutation a
+      ! label. This can be used to quickly find, (O(logN)), a permutation in
+      ! the list of permutations. Note that when we create the dictionary, we
+      ! must make sure that the val's are created in ascending order, and that
+      ! we add an element to the dictionary for all possible val's. Hence,
+      ! better to create a larger dictionary than strictly needed.
+      implicit none
+      integer :: iperm,i
+      integer(kind=8) :: val,previous_val
+      integer,dimension(:),allocatable :: iper,iper_in
+      allocate(iper(1:n))
+      allocate(iper_in(1:n))
+      max_keys=factorial(n)
+      allocate(perm_dict(1:max_keys))
+      do i=1,n
+         iper(i)=i
+      enddo
+      previous_val=0
+      do iperm=1,max_keys
+         val=get_value(iper(1:n))
+         if (val.le.previous_val) then
+            write (*,*) 'In create_perm_dict need to get values in ascending order',val,previous_val
+            stop 1
+         else
+            previous_val=val
+         endif
+         perm_dict(iperm)=val
+         iper_in=iper
+         call get_next_iperm(n,iper_in,iper,n)
+      enddo
+      deallocate(iper)
+    end subroutine create_perm_dict
 
-
+    integer(kind=8) function get_value(iper)
+      ! Give a unique identifier based on the colour order. Simply convert the
+      ! list to an integer with base equal to the number of elements in the
+      ! order.
+      implicit none
+      integer :: j
+      integer,dimension(1:n) :: iper
+      get_value=0
+      do j=1,n
+         get_value=get_value+int(iper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
+      enddo
+    end function get_value
+    
     subroutine compute_color_factor(col_acc,n,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
       use color_algebra
       implicit none
