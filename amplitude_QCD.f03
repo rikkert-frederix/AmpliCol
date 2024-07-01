@@ -3,6 +3,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: color_flow=.false.
+  logical,parameter :: use_symm_cm=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -2507,7 +2508,7 @@ contains
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
     integer :: key
     integer(kind=8),allocatable,dimension(:) :: perm_dict
-    integer :: max_keys
+    integer :: max_keys,jperm_lower
     
     write (*,*) 'Initialising colour matrix ...'
 
@@ -2581,7 +2582,7 @@ contains
     endif
 
     do ri=0,lim ! number of U(1) gluons in amp
-    do jperm=1,this%nColOrd ! TO CHANGE!
+    do jperm=1,this%nColOrd 
       do uj=1,uj_upper
 
        if (this%n_qqbar.eq.0) then
@@ -2602,10 +2603,11 @@ contains
           endif
 
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-          col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-          if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+          if (use_symm_cm) then
+             col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+             if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+          endif
 
-          write(*,*) 'ui,uj',ui,uj
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
             col_vals(iacc,key)=col_fac(iacc)
@@ -2676,9 +2678,13 @@ contains
           gi_iperm = gi + 1
        endif
 
-        ! for now, include all matrix ! TO CHANGE: put back off-diagonality
-        do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
-!!$        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+       if (use_symm_cm) then
+           jperm_lower = iperm
+       else
+           jperm_lower = 1
+       endif
+
+       do jperm=jperm_lower,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
           
           if (this%n_qqbar.eq.0) then
@@ -2691,10 +2697,9 @@ contains
           endif
 
           do rj=0,lim
-
+            
 !!$            ! COMPUTE color factors again
 !!$            call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-!!$            ! TO CHANGE: also here put back factor 2
 !!$            col_fac(1:3)=col_fac(1:3)*2d0
 !!$            if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
 
