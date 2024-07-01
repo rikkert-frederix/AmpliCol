@@ -11,14 +11,14 @@ program plot_events
   character*50 weights_info(10)
   double precision dummy
   real(kind=8),dimension(:,:),allocatable :: p
-  real(kind=8) :: evt_wgt_LC,evt_wgt_NLC,evt_wgt_full,rwgt_factor,unw_eff,max_wgt
+  real(kind=8) :: evt_wgt_LC,evt_wgt_NLC,evt_wgt_full,rwgt_factor,unw_eff(3),max_wgt(3)
   integer :: next
   integer :: argc
   character(len=456) :: argv
   integer :: i
 
   CALL GET_COMMAND_ARGUMENT(1, argv)
-  read(argv,*) filename
+  read(argv,'(a)') filename
   ifile=11
   write(*,*) filename
   open(unit=ifile,file=filename,status='OLD')
@@ -39,7 +39,9 @@ program plot_events
         write (*,*) 'Found negative weight. Stopping...'
         stop
      endif
-     max_wgt=max(max_wgt,evt_wgt_full)
+     max_wgt(1)=max(max_wgt(1),evt_wgt_full/evt_wgt_LC)
+     max_wgt(2)=max(max_wgt(2),evt_wgt_NLC/evt_wgt_LC)
+     max_wgt(3)=max(max_wgt(3),evt_wgt_full/evt_wgt_NLC)
   enddo
 
   rewind(ifile)
@@ -50,11 +52,20 @@ program plot_events
      call read_event(ifile,done)
      if (done) exit
      nPSpoints=nPSpoints+1
-     unw_eff=unw_eff+evt_wgt_full/max_wgt
+     unw_eff(1)=unw_eff(1)+(evt_wgt_full/evt_wgt_LC)/max_wgt(1)
+     unw_eff(2)=unw_eff(2)+(evt_wgt_NLC/evt_wgt_LC)/max_wgt(2)
+     unw_eff(3)=unw_eff(3)+(evt_wgt_full/evt_wgt_NLC)/max_wgt(3)
   enddo
 
-  write(20,*) 'unweighting efficiency is',unw_eff/dble(nPSpoints)
-  !write (*,*) 'unweighting efficiency is',unw_eff/dble(nPSpoints)
+  if (nPSpoints.gt.0) then
+     write(20,*) 'unweighting efficiency LC->full  ',unw_eff(1)/dble(nPSpoints), max_wgt(1)
+     write(20,*) 'unweighting efficiency LC->NLC   ',unw_eff(2)/dble(nPSpoints), max_wgt(2)
+     write(20,*) 'unweighting efficiency NLC->full ',unw_eff(3)/dble(nPSpoints), max_wgt(3)
+  else
+     write(20,*) 'unweighting efficiency LC->full  ',1d0,0d0
+     write(20,*) 'unweighting efficiency LC->NLC   ',1d0,0d0
+     write(20,*) 'unweighting efficiency NLC->full ',1d0,0d0
+  endif
   close (ifile)
   close(20)
 
