@@ -9,8 +9,7 @@ FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
 
 FC=gfortran
-#FFLAGS=-ffast-math -O3
-FFLAGS= -O3
+FFLAGS=-ffast-math -O3
 #FFLAGS=-fbounds-check -g
 
 # Files for all executables
