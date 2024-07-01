@@ -1,7 +1,18 @@
 #!/usr/bin/env python
 
+
+# Some useful bash one-liners:
+# from main directory:
+# for dir in OutputsS*/ ; do cd $dir ; for file in *.lhe.rwgt ; do ../Utilities/compute_unweighting_efficiency/compute_unw_eff $file ; done ; cd .. ; done
+# for dir in OutputsS*/ ; do cd $dir ; for file in *.lhe.rwgt ; do ../Utilities/plot_events/plot_events $file ; done ; cd .. ; done
+
+# from with HwU_plots:
+# for file in ../OutputsS101I1/*.HwU ; do ../Utilities/plot_events/internal/histograms.py ../OutputsS1*I1/${file:17} --average --out=${file:17:-4} ; done
+
+
 import sys
 import math
+import os.path
     
 def get_string(tag):
     string=tag
@@ -184,40 +195,72 @@ if __name__ == '__main__':
 """
 
     gnuplot_header=r"""reset
-set lmargin 10
-set rmargin 10
+set lmargin 5
+set rmargin 0
 set bmargin 0.5
 set tmargin 0.5
 set terminal postscript portrait enhanced color "Helvetica" 10
 set output "plots.ps"
-set linetype 1 lc rgb '#a9e5bb' lw 0
-set linetype 2 lc rgb '#f7b32b' lw 0
-set linetype 3 lc rgb '#f72c25' lw 0
-set linetype 4 lc rgb '#533756' lw 0
+set linetype 1 lc rgb '#a9e5bb' lw 3
+set linetype 2 lc rgb '#f7b32b' lw 3
+set linetype 3 lc rgb '#f72c25' lw 3
+set linetype 4 lc rgb '#533756' lw 3
+set linetype 5 lc rgb '#a4d3cf' lw 3
+set linetype 6 lc rgb '#89b487' lw 3
+set linetype 7 lc rgb '#7c7056' lw 3
 unset xtics
-set xrange [-2:51]
 """
     gnuplot_footer=r"""!ps2pdf "plots.ps" &> /dev/null
 """
-    gnuplot_middle="""set multiplot layout 3,1
-set size 0.5,0.5
+    gnuplot_middle="""set multiplot layout 3,3
+set xrange [-2:51]
+set size 0.4,0.5
 set origin 0,0.5
 set label 'Cross section [pb]' at graph 0.1, graph 0.97
 plot 'event_numbers.dat' i %s u 0:($2):3:(int($0/13)+1) w yerrorbar pointtype 7 pointsize 0 linecolor variable notitle
 unset label
 set logscale y
-set size 0.5,0.25
+set size 0.4,0.25
 set origin 0,0.25
 set label 'Unweighting eff.' at graph 0.1, graph 0.95
 plot 'event_numbers.dat' i %s u 0:($4):(int($0/13)+1) w points pointtype 7 linecolor variable notitle
 unset label
-set size 0.5,0.25
+set size 0.25,0.25
 set origin 0.0,0.0
-set label '2nd. Unw. eff.' at graph 0.1, graph 0.95
-plot 'event_numbers.dat' i %s u 0:($5):(int($0/13)+1) w points pointtype 7 linecolor variable notitle
+set label '2nd. Unw. eff. (LC->full)' at graph 0.1, graph 0.95
+set xrange [-2:12]
+plot 'event_numbers.dat' i %s u 0:($5):(int($0/13)+5) w points pointtype 7 linecolor variable notitle
+unset label
+set size 0.25,0.25
+set origin 0.3,0.0
+set label '2nd. Unw. eff. (LC->NLC)' at graph 0.1, graph 0.95
+set xrange [-2:12]
+plot 'event_numbers.dat' i %s u 0:($6):(int($0/13)+6) w points pointtype 7 linecolor variable notitle
+unset label
+set size 0.25,0.25
+set origin 0.6,0.0
+set label '2nd. Unw. eff. (NLC->full)' at graph 0.1, graph 0.95
+set xrange [-2:12]
+plot 'event_numbers.dat' i %s u 0:($7):(int($0/13)+7) w points pointtype 7 linecolor variable notitle
 unset label
 unset logscale y
-unset multiplot
+"""
+    gnuplot_middle2="""set xrange[0:3]
+set size 0.5,0.5
+set origin 0.5,0.4
+set label 'weight distribution' at graph 0.1, graph 0.95
+set xtics
+set logscale y
+set yrange [5e-7:1.1]
+set format y '10^{%%T}'
+plot '%s' i 0 u ($1+$2)/2:3 w histep linetype 5 t 'LC->full',\
+     '%s' i 1 u ($1+$2)/2:3 w histep linetype 6 t 'LC->NLC',\
+     '%s' i 2 u ($1+$2)/2:3 w histep linetype 7 t 'NLC->full'
+unset xtics
+unset logscale y
+unset yrange
+unset format y
+unset label
 """
     
     flavours={'4':['21 21 21 21',                        '21 21 1 -1',                        '-1 21 -1 21',                       '-1 1 21 21'                  ],
@@ -296,6 +339,9 @@ unset multiplot
     number_passing_cuts={}
     total_time={}
     gen_eff={}
+    sec_unw_eff_LF={}
+    sec_unw_eff_LN={}
+    sec_unw_eff_NF={}
     tags=[]
     for n in nexternal:
         for iflav,flavour in enumerate(flavours[n]):
@@ -322,6 +368,21 @@ unset multiplot
                                             tags.append(tag) 
                                         if 'Generation efficiencies:' in line:
                                             gen_eff[tag]=float(line.split()[2])
+                                    if imode=='2':
+                                        try:
+                                            log_file='./OutputsS'+seed+'I'+integrator+'/out_unwgt__'+n+'_2_'+'_'.join(flavour.split())+'_'+'_'.join(order.split())+'.txt'
+                                            with open(log_file) as file:
+                                                for line in file:
+                                                    if ' LC->full' in line:
+                                                        sec_unw_eff_LF[tag]=float(line.split()[3])
+                                                    if ' LC->NLC' in line:
+                                                        sec_unw_eff_LN[tag]=float(line.split()[3])
+                                                    if ' NLC->full' in line:
+                                                        sec_unw_eff_NF[tag]=float(line.split()[3])
+                                        except:
+                                            sec_unw_eff_LF[tag]=1.
+                                            sec_unw_eff_LN[tag]=1.
+                                            sec_unw_eff_NF[tag]=1.
                             except:
                                 pass
 
@@ -367,7 +428,7 @@ unset multiplot
                                         if imode=='1':
                                             line+=tag+'  '+str(cross_section[tag])+'  '+str(uncertainty[tag])
                                         elif imode=='2':
-                                            line+='  '+str(gen_eff[tag]*number_of_events[tag]/number_passing_cuts[tag])+'  '+str(1.0)
+                                            line+='  '+str(gen_eff[tag]*number_of_events[tag]/number_passing_cuts[tag])+'  '+str(sec_unw_eff_LF[tag])+'  '+str(sec_unw_eff_LN[tag])+'  '+str(sec_unw_eff_NF[tag])
                                 if line: to_write.append(line)
                             to_write.append('""')
                             to_write.append('""')
@@ -379,7 +440,13 @@ unset multiplot
                             f2.write('\n'.join(to_write))
                             string='set label "'+convert_proc_to_string(flavour)+', '+''.join(order)+'" at graph 0,graph 1.05\n'
                             f1.write(string)
-                            f1.write(gnuplot_middle%(icount,icount,icount))
+                            f1.write(gnuplot_middle%(icount,icount,icount,icount,icount))
                             icount=icount+1
+
+                            HwU_file='HwU_plots/events_'+n+'_2_'+'_'.join(flavour.split())+'_'+'_'.join(order.split())+'.HwU'
+                            if os.path.isfile(HwU_file):
+                                f1.write(gnuplot_middle2%(HwU_file,HwU_file,HwU_file))
+
+                                
             f1.write(gnuplot_footer)            
 
