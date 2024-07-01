@@ -4,6 +4,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: color_flow=.false.
   logical,parameter :: use_symm_cm=.true.
+  logical,parameter :: use_cm_dict=.true.
   type current
      integer :: type,bin,nhel,n_vert
      integer,dimension(:),allocatable :: vertices,order
@@ -2549,7 +2550,9 @@ contains
          iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
          allocate(n_vals(1:3,iperm_upper))
          allocate(diff_vals(max_vals,1:3,iperm_upper))
+         allocate(this%i_col_i(max_vals,1:3))
          allocate(n_colour_elements(max_vals,1:3,iperm_upper))
+         allocate(col_vals(1:3,max_keys))
          !allocate(col_fac(1:3,iperm_upper))
     endif
 
@@ -2590,6 +2593,12 @@ contains
     do jperm=1,this%nColOrd 
       do uj=1,uj_upper
 
+       if (this%n_qqbar.eq.2) then
+              ui = it
+       else
+              ui = uj
+       endif
+
        if (this%n_qqbar.eq.0) then
           jper(1:n)=[this%perm(1:n-1,jperm),n]
        elseif (this%n_qqbar.eq.1) then
@@ -2601,11 +2610,6 @@ contains
        key=solve_dict(get_value(jper(1:n)))
 
        do rj=0,lim
-          if (this%n_qqbar.eq.2) then
-              ui = it
-          else
-              ui = uj
-          endif
 
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
           if (use_symm_cm) then
@@ -2644,7 +2648,7 @@ contains
     ! determine i_col_i:
     if (this%n_qqbar.eq.2) then
        write (*,*) 'The following does not work for 2 quark lines'
-       stop 1
+       !stop 1
     endif
     isum=1
     do iacc=1,3
@@ -2719,14 +2723,16 @@ contains
           endif
 
           do rj=0,lim
-            
-!!$            ! COMPUTE color factors again
-!!$            call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-!!$            col_fac(1:3)=col_fac(1:3)*2d0
-!!$            if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
-
-            ! GET color factors from permuting first row
-            call get_col_fac(col_fac)
+         
+            if (use_cm_dict) then
+               ! GET color factors from permuting first row
+               call get_col_fac(col_fac)
+            else
+               ! COMPUTE color factors again
+               call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
+               col_fac(1:3)=col_fac(1:3)*2d0
+               if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+            endif
 
             do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
