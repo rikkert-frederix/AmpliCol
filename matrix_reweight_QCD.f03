@@ -204,7 +204,8 @@ program matrix_reweight
                     amp2_c=(0d0,0d0)
                  endif
                  do ic=amps(1)%row_index(irow-1,i,iacc,1)+1,amps(1)%row_index(irow,i,iacc,1)
-                    icol=amps(1)%col_index(ic,i,iacc,1)
+!!$                    icol=amps(1)%col_index(ic,i,iacc,1)
+                    icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc)+ic,1)
                     if (use_real_gluons) then
                        amp2=amp2+amps(1)%amps_r(icol)
                     else
@@ -239,7 +240,8 @@ program matrix_reweight
               do i=1,amps(proc_num)%n_col_vals(iacc,1)
                  amp2_c=(0d0,0d0)
                  do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc,1)+1,amps(proc_num)%row_index(irow_mat,i,iacc,1)
-                    icol=amps(proc_num)%col_index(ic,i,iacc,1)
+!!$                    icol=amps(proc_num)%col_index(ic,i,iacc,1)
+                    icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc)+ic,1)
                     icol_mat = icol
                     if (proc_num.eq.1) then
                        amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
@@ -306,7 +308,8 @@ program matrix_reweight
                  endif
                  ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
                  do ic = ic_low,ic_upp
-                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
+!!$                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
+                    icol=amps(it)%col_index(amps(it)%i_col_i(i,iacc)+ic,gi_iperm)
                     if (icol.le.amps(it)%nColOrd) then
                         amp2_c=amp2_c+amps(1)%amps(icol)
                     else

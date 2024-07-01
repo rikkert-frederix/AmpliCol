@@ -29,9 +29,9 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap, &
           pp_bin_to_i,pp_i_to_bin
      integer,dimension(:,:),allocatable ::  n_col_vals
-     integer,dimension(:,:),allocatable :: perm
+     integer,dimension(:,:),allocatable :: perm,i_col_i,col_index
      integer,dimension(:),allocatable :: quark_index
-     integer,dimension(:,:,:,:),allocatable :: row_index,col_index
+     integer,dimension(:,:,:,:),allocatable :: row_index
      integer,dimension(:,:,:),allocatable :: u1_lin_comb
      integer,dimension(:,:),allocatable :: buff
      logical :: same_flav
@@ -2491,7 +2491,7 @@ contains
     class(amplitude_qcd) :: this
     integer :: col_acc,n
     integer,dimension(n) :: order,iper,jper,part
-    integer :: iperm,jperm,ival,iacc
+    integer :: iperm,jperm,ival,iacc,isum
     !integer,dimension(1:3) :: n_vals
     integer,allocatable,dimension(:,:) :: n_vals
     integer,parameter :: max_vals=100
@@ -2500,7 +2500,7 @@ contains
     !real(kind=8),dimension(max_vals,1:3) :: diff_vals
     real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
     real(kind=8),allocatable,dimension(:,:) :: col_vals
-    integer,dimension(:,:,:),allocatable :: ic,ir
+    integer,dimension(:,:,:),allocatable :: ic,ir,n_colour_elements
     integer :: ri,rj,lim,y,t,maxterms_u1,i,j,gi
     integer :: ui,uj,uj_upper ! quark ordering type
     integer :: it ! quark order type (1 or 2)
@@ -2516,6 +2516,8 @@ contains
     if (this%n_qqbar.eq.0) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
+       allocate(this%i_col_i(max_vals,1:3))
+       allocate(n_colour_elements(max_vals,1:3,1))
        allocate(col_vals(1:3,max_keys))
        !allocate(col_fac(1:3,1))
        lim=0
@@ -2523,6 +2525,8 @@ contains
     elseif (this%n_qqbar.eq.1) then
        allocate(n_vals(1:3,1))
        allocate(diff_vals(max_vals,1:3,1))
+       allocate(this%i_col_i(max_vals,1:3))
+       allocate(n_colour_elements(max_vals,1:3,1))
        allocate(col_vals(1:3,max_keys))
        !allocate(col_fac(1:3,1))
        lim=0
@@ -2544,6 +2548,7 @@ contains
          iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
          allocate(n_vals(1:3,iperm_upper))
          allocate(diff_vals(max_vals,1:3,iperm_upper))
+         allocate(n_colour_elements(max_vals,1:3,iperm_upper))
          !allocate(col_fac(1:3,iperm_upper))
     endif
 
@@ -2604,13 +2609,15 @@ contains
           call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
           col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
           if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
-
-          write(*,*) 'ui,uj',ui,uj
+          
           do iacc=1,3
             if (col_fac(iacc).eq.0d0) cycle
             col_vals(iacc,key)=col_fac(iacc)
              do ival=1,n_vals(iacc,gi_iperm)
-               if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
+                if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
+                   n_colour_elements(ival,iacc,gi_iperm)=n_colour_elements(ival,iacc,gi_iperm)+1
+                   exit
+                endif
              enddo
              if (ival.ge.max_vals) then
                write (*,*) 'Too many different colour factors. Increase max_vals',&
@@ -2618,8 +2625,9 @@ contains
                stop 1
              elseif (ival.eq.n_vals(iacc,gi_iperm)+1) then
                ! new colour factor
-               n_vals(iacc,gi_iperm)=n_vals(iacc,gi_iperm)+1
-               diff_vals(n_vals(iacc,gi_iperm),iacc,gi_iperm)=col_fac(iacc)
+               n_vals(iacc,gi_iperm)=ival
+               diff_vals(ival,iacc,gi_iperm)=col_fac(iacc)
+               n_colour_elements(ival,iacc,gi_iperm)=1
              endif
           enddo
        enddo
@@ -2631,19 +2639,34 @@ contains
          ' different colour factors at LC, NLC and full colour, respectively'
     enddo
 
+    ! determine i_col_i:
+    if (this%n_qqbar.eq.2) then
+       write (*,*) 'The following does not work for 2 quark lines'
+       stop 1
+    endif
+    isum=1
+    do iacc=1,3
+       do ival=1,n_vals(iacc,gi_iperm)
+          this%i_col_i(ival,iacc)=isum
+          isum=isum+n_colour_elements(ival,iacc,gi_iperm)*this%nColOrd
+       enddo
+    enddo
+    
 
  ! Allocate the arrays now that we know their sizes
     allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     if (color_flow) then
-      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+!!$      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
       allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
     else
-       allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
-      allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
+!!$       allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
+       allocate(this%col_index(1:isum,iperm_upper))
+       allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
     endif
     this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
-    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
+!!$    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
+    this%col_index(1,1:iperm_upper)=0
     allocate(this%n_col_vals(1:3,iperm_upper))
     this%n_col_vals(1:3,1:iperm_upper)=n_vals(1:3,1:iperm_upper)
     allocate(this%diff_col_vals(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
@@ -2656,8 +2679,7 @@ contains
     ir=0
 
     do ri=0,lim
-    do iperm=1,this%nColOrd
-        
+     do iperm=1,this%nColOrd
        if (this%n_qqbar.eq.0) then
           iper(1:n)=[this%perm(1:n-1,iperm),n]
        elseif (this%n_qqbar.eq.1) then
@@ -2678,7 +2700,6 @@ contains
 
         ! for now, include all matrix ! TO CHANGE: put back off-diagonality
         do jperm=iperm,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
-!!$        do jperm=1,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
          do uj=1,uj_upper
           
           if (this%n_qqbar.eq.0) then
@@ -2711,7 +2732,9 @@ contains
 
                ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
                ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
-               this%col_index(ic(ival,iacc,gi_iperm),ival,iacc,gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
+!!$               this%col_index(ic(ival,iacc,gi_iperm),ival,iacc,gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
+               
+               this%col_index(this%i_col_i(ival,iacc)+ic(ival,iacc,gi_iperm),gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
             enddo
 
           enddo
@@ -2723,7 +2746,8 @@ contains
           this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
         enddo
       enddo
-    enddo
+   enddo
+   
     write (*,*) '... colour matrix initialised'
   contains
    subroutine get_col_fac(col_fac)
