@@ -5,7 +5,8 @@ program plot_events
   implicit none
   integer ifile,nPSpoints
   logical :: done
-  character*240 filename
+  character*140 filename,outfile
+  common /c_to_analysis/outfile
   character*50 weights_info(10)
   double precision dummy
   real(kind=8),dimension(:,:),allocatable :: p
@@ -19,6 +20,9 @@ program plot_events
   ifile=11
   open(unit=ifile,file=filename,status='OLD')
 
+  outfile=filename(1:index(filename,'.lhe'))//'HwU'
+  write (*,*) outfile
+  
   weights_info(1)="central value               "
   rwgt_factor=1d0
 
