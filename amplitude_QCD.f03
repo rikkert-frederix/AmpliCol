@@ -2495,7 +2495,7 @@ contains
     integer :: iperm,jperm,ival,iacc,isum
     !integer,dimension(1:3) :: n_vals
     integer,allocatable,dimension(:,:) :: n_vals
-    integer,parameter :: max_vals=100
+    integer,parameter :: max_vals=300
     real(kind=8),dimension(1:3) :: col_fac
     !real(kind=8),allocatable,dimension(:,:) :: col_fac
     !real(kind=8),dimension(max_vals,1:3) :: diff_vals
