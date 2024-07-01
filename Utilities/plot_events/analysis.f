@@ -16,7 +16,7 @@ c
       call HwU_inithist(nwgt,weights_info)
 c
       call HwU_book(1,'weights LC to full ',500,0d0-tiny,5d0-tiny)
-      call HwU_book(2,'weights LC to NLO  ',500,0d0-tiny,5d0-tiny)
+      call HwU_book(2,'weights LC to NLC  ',500,0d0-tiny,5d0-tiny)
       call HwU_book(3,'weights NLC to full',500,0d0-tiny,5d0-tiny)
       
       call HwU_book(4,'rates',3,0d0,3d0)
