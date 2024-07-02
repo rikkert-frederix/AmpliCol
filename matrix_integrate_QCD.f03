@@ -135,7 +135,8 @@ program matrix_integrate_QCD
   call compute_LC_colour_factor(col_fac,it)
   
   ! number of helicities to sum over
-  nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
+  nhel=(amps%n_cur_end(next-1)-amps%n_cur_start(next-1)+1)*(amps%n_cur_end(next)-amps%n_cur_start(next)+1)
+!!$  nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
   allocate(amp2_hel(1:nhel))
 
   ! Not so relevant mint-module parameters: only used in special cases.
@@ -256,7 +257,7 @@ contains
        endif
     enddo
     amp2=sum(amp2_hel(1:nhel))
-
+    
     weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     
     if (amps%n_sing.ge.1) then
