@@ -559,85 +559,62 @@ contains
 
 
 
-  subroutine GluonPropagator(wfg,nhel,p)
+  subroutine GluonPropagator(wfg,p)
     implicit none
-    integer,intent(in) :: nhel
-    complex(kind=8),dimension(1:4,nhel),intent(inout) :: wfg
+    complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: propagator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
-    wfg(1:4,1:nhel)=wfg(1:4,1:nhel)*propagator
+    wfg(1:4)=wfg(1:4)*propagator
   end subroutine GluonPropagator
 
-  subroutine GluonPropagator_real(wfg,nhel,p)
+  subroutine GluonPropagator_real(wfg,p)
     implicit none
-    integer,intent(in) :: nhel
-    real(kind=8),dimension(1:4,nhel),intent(inout) :: wfg
+    real(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
     real(kind=8) :: propagator
     propagator=1d0/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
-    wfg(1:4,1:nhel)=wfg(1:4,1:nhel)*propagator
+    wfg(1:4)=wfg(1:4)*propagator
   end subroutine GluonPropagator_Real
 
-  subroutine QuarkPropagator(wfq,nhel,p,fm,fw)
+  subroutine QuarkPropagator(wfq,p,fm,fw)
     implicit none
-    integer,intent(in) :: nhel
-    complex(kind=8),dimension(1:4,nhel),intent(inout) :: wfq
+    complex(kind=8),dimension(1:4),intent(inout) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: prefact
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    integer :: ih
     real(kind=8) :: fm,fw
-
     prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
-    do ih=1,nhel
-       tmp_val(1:4)=wfq(1:4,ih)
-       tmp_p(1)=(p(0)+p(3))
-       tmp_p(2)=(p(0)-p(3))
-       tmp_p(3)=(p(1)+cImag*p(2))
-       tmp_p(4)=(p(1)-cImag*p(2))
-
-       wfq(1,ih)=(tmp_p(1)*tmp_val(3)+tmp_p(3)*tmp_val(4)&
-                  +fm*tmp_val(1))*prefact
-       wfq(2,ih)=(tmp_p(2)*tmp_val(4)+tmp_p(4)*tmp_val(3)&
-                  +fm*tmp_val(2))*prefact
-       wfq(3,ih)=(tmp_p(2)*tmp_val(1)-tmp_p(3)*tmp_val(2)&
-                  +fm*tmp_val(3))*prefact
-       wfq(4,ih)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)&
-                  +fm*tmp_val(4))*prefact
-    enddo
+    tmp_val(1:4)=wfq(1:4)
+    tmp_p(1)=(p(0)+p(3))
+    tmp_p(2)=(p(0)-p(3))
+    tmp_p(3)=(p(1)+cImag*p(2))
+    tmp_p(4)=(p(1)-cImag*p(2))
+    wfq(1)=(tmp_p(1)*tmp_val(3)+tmp_p(3)*tmp_val(4)+fm*tmp_val(1))*prefact
+    wfq(2)=(tmp_p(2)*tmp_val(4)+tmp_p(4)*tmp_val(3)+fm*tmp_val(2))*prefact
+    wfq(3)=(tmp_p(2)*tmp_val(1)-tmp_p(3)*tmp_val(2)+fm*tmp_val(3))*prefact
+    wfq(4)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine QuarkPropagator
 
-  subroutine AquarkPropagator(wfq,nhel,p,fm,fw)
+  subroutine AquarkPropagator(wfq,p,fm,fw)
     implicit none
-    integer,intent(in) :: nhel
-    complex(kind=8),dimension(1:4,nhel),intent(inout) :: wfq
+    complex(kind=8),dimension(1:4),intent(inout) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: prefact
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    integer :: ih
     real(kind=8) :: fm,fw
-
     prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
-
-    do ih=1,nhel
-       tmp_val(1:4)=wfq(1:4,ih)
-       tmp_p(1)=-(p(0)+p(3))
-       tmp_p(2)=-(p(0)-p(3))
-       tmp_p(3)=-(p(1)+cImag*p(2))
-       tmp_p(4)=-(p(1)-cImag*p(2))
-       wfq(1,ih)=(tmp_p(2)*tmp_val(3)-tmp_p(4)*tmp_val(4)&
-                   +fm*tmp_val(1))*prefact
-       wfq(2,ih)=(tmp_p(1)*tmp_val(4)-tmp_p(3)*tmp_val(3)&
-                   +fm*tmp_val(2))*prefact
-       wfq(3,ih)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)&
-                   +fm*tmp_val(3))*prefact
-       wfq(4,ih)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)&
-                   +fm*tmp_val(4))*prefact
-    enddo
+    tmp_val(1:4)=wfq(1:4)
+    tmp_p(1)=-(p(0)+p(3))
+    tmp_p(2)=-(p(0)-p(3))
+    tmp_p(3)=-(p(1)+cImag*p(2))
+    tmp_p(4)=-(p(1)-cImag*p(2))
+    wfq(1)=(tmp_p(2)*tmp_val(3)-tmp_p(4)*tmp_val(4)+fm*tmp_val(1))*prefact
+    wfq(2)=(tmp_p(1)*tmp_val(4)-tmp_p(3)*tmp_val(3)+fm*tmp_val(2))*prefact
+    wfq(3)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3))*prefact
+    wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine AquarkPropagator
-
 end module FeynmanRules

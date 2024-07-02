@@ -136,7 +136,6 @@ program matrix_integrate_QCD
   
   ! number of helicities to sum over
   nhel=(amps%n_cur_end(next-1)-amps%n_cur_start(next-1)+1)*(amps%n_cur_end(next)-amps%n_cur_start(next)+1)
-!!$  nhel=amps%current_list(amps%n_cur)%nhel*amps%current_list(next)%nhel
   allocate(amp2_hel(1:nhel))
 
   ! Not so relevant mint-module parameters: only used in special cases.
