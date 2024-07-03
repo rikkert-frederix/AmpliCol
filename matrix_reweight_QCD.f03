@@ -31,6 +31,7 @@ program matrix_reweight
   integer :: i,j,col_acc,icol,ihel,hel_picked,irow,ic,iacc
   integer :: icol_mat,irow_mat,ri,ri_end,m,proc_num,iacc_in,k,skip 
   integer,dimension(:),allocatable :: hel,o,part,part_sf,orig_part,temp_part
+  integer,dimension(:,:),allocatable :: spin
   real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c
@@ -84,7 +85,7 @@ program matrix_reweight
   call fill_quark_info()
 
   call define_symm_2qq(next,part,1)
-  call amps(1)%init(2,next,orig_part,part,mass,width,o,it)
+  call amps(1)%init(2,next,orig_part,part,spin,mass,width,o,it)
   col_acc=20
   call amps(1)%init_col2(next,orig_part,o,it,col_acc)
 
@@ -92,7 +93,7 @@ program matrix_reweight
   if (amps(1)%n_qqbar.eq.2) then
       do i=1,1  ! remaining amps for type-1
          it = it + 1
-         call amps(2)%init(2,next,orig_part,part,mass,width,o,it)
+         call amps(2)%init(2,next,orig_part,part,spin,mass,width,o,it)
          col_acc=20
          call amps(2)%init_col2(next,orig_part,o,it,col_acc)
       enddo
@@ -108,12 +109,12 @@ program matrix_reweight
     part_sf(:)=orig_part(:)
     call define_symm_2qq(next,part_sf,2)
     it = 1
-    call amps(3)%init(2,next,orig_part,part_sf,mass,width,o,it)
+    call amps(3)%init(2,next,orig_part,part_sf,spin,mass,width,o,it)
     col_acc=20
     call amps(3)%init_col2(next,orig_part,o,it,col_acc)
     
     it = 2
-    call amps(4)%init(2,next,orig_part,part_sf,mass,width,o,it)
+    call amps(4)%init(2,next,orig_part,part_sf,spin,mass,width,o,it)
     col_acc=20
     call amps(4)%init_col2(next,orig_part,o,it,col_acc)
   endif
@@ -134,7 +135,7 @@ program matrix_reweight
            endif           
            enddo
            it = 0! dummy
-          call amps(i+k-1)%init(2,next,orig_part,temp_part,mass,width,o,it)
+          call amps(i+k-1)%init(2,next,orig_part,temp_part,spin,mass,width,o,it)
           col_acc=20
           call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
          enddo
@@ -420,12 +421,24 @@ contains
           endif
        enddo
     endif
+
+    call setup_spin()
+    
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
     endif
   end subroutine get_run_arguments
 
+  subroutine setup_spin()
+    implicit none
+    if (.not. allocated(spin)) allocate(spin(0:3,1:next))
+    do i=1,next
+       spin(0,i)=1  ! one arbitrary spin state (use '-9')
+       spin(1,i)=-9
+    enddo
+  end subroutine setup_spin
+  
   subroutine create_run_tag_and_open_files()
     use arguments
     implicit none

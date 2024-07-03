@@ -41,12 +41,13 @@ module amplitude_QCD_mod
      procedure :: init,evaluate,init_col2
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,orig_part,part,mass,width,order,it)
+  subroutine init(this,imode,n,orig_part,part,spin,mass,width,order,it)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
     integer::n,imode
     integer,dimension(n)::part,orig_part,order
+    integer,dimension(0:3,n) :: spin
     real(kind=8),dimension(n) :: mass,width
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key,ispin
     real(kind=4) :: tAfter,tBefore
@@ -115,13 +116,9 @@ contains
           ! external currents
           do nc=1,n
              if (nc.eq.n) this%n_cur_start(n)=this%n_cur+1
-             if (this%imode.eq.1) then
-                do ispin=-1,1,2 ! two spin states: '-1' and '1'
-                   call create_external_current(nc,ispin)
-                enddo
-             elseif (this%imode.eq.2 .or. this%imode.eq.3) then
-                call create_external_current(nc,-9) ! use -9 to be 'arbitrary' spin
-             endif
+             do ispin=1,spin(0,order(nc))
+                call create_external_current(nc,spin(ispin,order(nc)))
+             enddo
              if (nc.eq.n) this%n_cur_end(n)=this%n_cur
           enddo
        else

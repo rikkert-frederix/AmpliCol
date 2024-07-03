@@ -11,6 +11,7 @@ program matrix_integrate_QCD
   integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf
+  integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
@@ -116,12 +117,12 @@ program matrix_integrate_QCD
   if (amps%n_qqbar.eq.2) then
     call define_symm_2qq(next,part,1)
   endif
-  call amps%init(1,next,orig_part,part,mass,width,o,it)
+  call amps%init(1,next,orig_part,part,spin,mass,width,o,it)
 
   if (amps%n_qqbar.eq.2.and.amps%same_flav) then
     part_sf(:) = orig_part(:)
     call define_symm_2qq(next,part_sf,2)
-    call amps_sf%init(1,next,orig_part,part_sf,mass,width,o,it)
+    call amps_sf%init(1,next,orig_part,part_sf,spin,mass,width,o,it)
   endif
 
   call cpu_time(tAfter)
@@ -619,6 +620,8 @@ contains
     !   call get_process_from_arguments
     endif
 
+    call setup_spin()
+    
     ! basic checks:
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
@@ -639,6 +642,21 @@ contains
     endif
   end subroutine get_run_arguments
 
+  subroutine setup_spin()
+    implicit none
+    if (.not. allocated(spin)) allocate(spin(0:3,1:next))
+    do i=1,next
+       if (abs(part(i)).le.6 .or. part(i).eq.21 .or. part(i).eq.22) then
+          spin(0,i)=2   ! two spin states: '-1' and '1'
+          spin(1,i)=-1
+          spin(2,i)=1
+       else
+          write (*,*) 'spin state not known',i,part(i)
+          stop 1
+       endif
+    enddo
+  end subroutine setup_spin
+  
   subroutine create_run_tag()
     implicit none
     tag='_'       ! tag of current run
