@@ -20,6 +20,7 @@ program matrix_integrate_QCD
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac,nhel
   integer :: it ! quark order type
+  integer,parameter :: nevent_hel_filter=5
  
   call get_run_arguments()
   call compute_multichannel_symmetry_factor()
@@ -36,7 +37,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
   if (imode.eq.0 .or. imode.eq.2) then
-     ncalls0=-100
+     ncalls0=-100000
   else
      ncalls0=640000
   endif
@@ -211,11 +212,14 @@ contains
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
+
+!!$    if (debug .and. jac.lt.0d0) then
     if (debug ) then
        write (*,*) jac
        stop 1
     endif
     
+!!$12 continue
     all_evt=all_evt+1
 
     cuts_wgt=pass_cuts(next,p)
@@ -255,10 +259,22 @@ contains
        endif
     enddo
 
-    if (passed.eq.1)  call setup_helicity_filter()
-
     amp2=sum(amp2_hel(1:nhel))
+    
+    if (passed.le.nevent_hel_filter) then
+!!$       write (*,*) amp2
+       call setup_helicity_filter(passed)
+!!$       goto 12
+    endif
 
+
+!!$    if (passed.eq.2) then
+!!$       write (*,*) amp2_hel(1:nhel)
+!!$       write (*,*) nhel
+!!$       write (*,*) amp2*2
+!!$       stop 1
+!!$    endif
+    
     weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     
     if (amps%n_sing.ge.1) then
@@ -362,30 +378,41 @@ contains
     enddo
   end function pass_cuts
 
-  subroutine setup_helicity_filter()
+  subroutine setup_helicity_filter(nevent)
     implicit none
     real(kind=8) :: max_value
-    integer :: ih1,ih2
-    integer,dimension(nhel) :: include_hel
+    integer :: ih1,ih2,nevent
+    integer,dimension(nhel,nevent_hel_filter) :: include_hel
     ! filter zero helicities and helicities that are identical
-    include_hel=1
+    include_hel(1:nhel,nevent)=1
     max_value=maxval(amp2_hel(1:nhel))
     do ih1=1,nhel
-       if (include_hel(ih1).ne.1) cycle
-       if (amp2_hel(ih1)/max_value.lt.1d-20) then
+       if (include_hel(ih1,nevent).ne.1) cycle
+       if (amp2_hel(ih1)/max_value.lt.1d-12) then
           ! zero
-          include_hel(ih1)=0
+          include_hel(ih1,nevent)=0
        else
           do ih2=ih1+1,nhel
-             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/max_value.lt.1d-20) then
-                include_hel(ih2)=-ih1
-                include_hel(ih1)=include_hel(ih1)+1
+             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/max_value.lt.1d-12) then
+                include_hel(ih2,nevent)=-ih1
+                include_hel(ih1,nevent)=include_hel(ih1,nevent)+1
              endif
           enddo
        endif
     enddo
+!!$    write (*,*) include_hel
     
-    call amps%filter_helicity(next,nhel,include_hel)
+    if (nevent.lt.nevent_hel_filter) return
+    
+    do ih1=1,nhel
+       if (any(include_hel(ih1,2:nevent_hel_filter).ne.include_hel(ih1,1))) then
+          write (*,*) 'inconsistent helicity. Cannot setup helicity filter.'
+          write (*,*) ih1,nevent,':',include_hel(ih1,1:nevent_hel_filter)
+          stop 1
+       endif
+    enddo
+    
+    call amps%filter_helicity(next,nhel,include_hel(1,1))
     if (amps%n_qqbar.eq.2.and.amps%same_flav) then
        write (*,*) 'nhel was updated by the above filter. Fix this here '
        stop 1

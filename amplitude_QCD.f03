@@ -2258,6 +2258,9 @@ contains
       if (this%imode.eq.1) then
          ! Note: this must be done in the same order as the this%spins() are setup in 'setup_spin_list()'
          ihc=0
+!!$         write (*,*) this%n_cur_start
+!!$         write (*,*) this%n_cur_end
+!!$         stop 1
          do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
             do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
                ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
@@ -2270,6 +2273,7 @@ contains
                   this%amps(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
                                      this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
                endif
+!!$               write (*,*) ih,this%include_product(ih),size(this%include_product),ih1,ih2,this%amps(ihc)
             enddo
          enddo
 
@@ -3229,11 +3233,14 @@ contains
     include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
     allocate(include_product(nhel))
     include_product(1:nhel)=.false.
+
+!!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
     
     ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
     do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
        do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
           ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
+!!$          write (*,*) ih,ih1,ih2,include_hel(ih)
           if (include_hel(ih).ge.1) then
              include_current(this%n_cur_start(n-1)+ih1-1)=.true.
              include_current(this%n_cur_start(n  )+ih2-1)=.true.
@@ -3241,7 +3248,7 @@ contains
           endif
        enddo
     enddo
-
+!!$
 !!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
 !!$    write (*,*) include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
 !!$    stop 1
@@ -3261,6 +3268,8 @@ contains
           endif
        enddo
     enddo
+
+!!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
 
     deallocate(this%include_product)
     allocate(this%include_product(1:ihc))
