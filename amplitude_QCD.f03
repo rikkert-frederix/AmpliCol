@@ -2578,7 +2578,6 @@ contains
     n_vals(1:3,:)=0
     col_vals(1:3,1:max_keys,:)=0d0
     do iperm=1,iperm_upper
-<<<<<<< HEAD
        if (this%n_qqbar.eq.0) then
           iper(1:n)=[this%perm(1:n-1,iperm),n]
           gi_iperm = 1 ! dummy
@@ -2703,7 +2702,6 @@ contains
     ir=0
 
     do ri=0,lim
-<<<<<<< HEAD
        do iperm=1,this%nColOrd
           if (this%n_qqbar.eq.0) then
              iper(1:n)=[this%perm(1:n-1,iperm),n]
