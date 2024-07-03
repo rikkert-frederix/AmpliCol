@@ -2359,19 +2359,11 @@ contains
             do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
                ih=(ih2-1)*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)+ih1
                if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
-                  this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_r(1:4)*this%current_list(n)%val_r(1:4))
+                  this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
+                                                   this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
                else
-!!$                  this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_c(1:4,ih1)*this%current_list(n)%val_c(1:4,ih2))
                   this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
                                                  this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
-!!$                  write (*,*) ih,this%n_cur_start(n-1)+ih1-1,this%n_cur_start(n  )+ih2-1, &
-!!$                       this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4,1),&
-!!$                       this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4,1)
-               !write(*,*) 'holahola0'
-               !write(*,*) this%amps(this%helmap(ih))
-
-               !write(*,*) this%current_list(n)%val_c(1:4,ih2)
-               !write(*,*) this%current_list(this%n_cur)%val_c(1:4,ih1)
                endif
             enddo
          enddo
