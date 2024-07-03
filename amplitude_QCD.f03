@@ -2728,8 +2728,10 @@ contains
               else
                  ! COMPUTE color factors again
                   call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-                  col_fac(1:3)=col_fac(1:3)*2d0
-                  if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+                  if (use_symm_cm.and.this%n_qqbar.ne.2) then
+                     col_fac(1:3)=col_fac(1:3)*2d0
+                     if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+                  endif
               endif
 
               do iacc=1,3
