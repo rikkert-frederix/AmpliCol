@@ -137,9 +137,7 @@ contains
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
 
-    
     call simple_consistency_checks()
-
 
     ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
@@ -151,10 +149,14 @@ contains
     endif
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
+
+
   contains
+
+
     subroutine setup_spin_list()
       implicit none
-      integer :: ih1,ih2,ih,nc
+      integer :: ih1,ih2,ih,i
       allocate(this%spins(n,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
       ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
       do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
@@ -170,7 +172,6 @@ contains
          enddo
       enddo
     end subroutine setup_spin_list
-
     
     subroutine create_external_current(nc,ispin)
       implicit none
