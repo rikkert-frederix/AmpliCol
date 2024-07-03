@@ -25,6 +25,7 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
+     integer(kind=8),dimension(:,:),allocatable :: spins
      real(kind=8),dimension(:,:),allocatable :: pp
      real(kind=8),dimension(:,:,:),allocatable :: diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
@@ -144,10 +145,33 @@ contains
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call filter_dead_trees()
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
-    if (this%imode.eq.1) call create_helicity_map()
+    if (this%imode.eq.1) then
+!       call create_helicity_map()
+       call setup_spin_list()
+    endif
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
   contains
+    subroutine setup_spin_list()
+      implicit none
+      integer :: ih1,ih2,ih,nc
+      allocate(this%spins(n,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
+      do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+         do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
+            ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
+            do i=1,n
+               if (i.lt.n) then
+                  this%spins(order(i),ih)=this%current_list(this%n_cur_start(n-1)+ih1-1)%spin(i)
+               elseif (i.eq.n) then
+                  this%spins(order(i),ih)=this%current_list(this%n_cur_start(n  )+ih2-1)%spin(1)
+               endif
+            enddo
+         enddo
+      enddo
+    end subroutine setup_spin_list
+
+    
     subroutine create_external_current(nc,ispin)
       implicit none
       integer,intent(in) :: nc,ispin
@@ -1144,9 +1168,9 @@ contains
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
-!!$      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) then 
-!!$        return ! dead tree. Filter already here
-!!$      endif
+      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(this%n_cur_start(n))%type)) then 
+         return ! dead tree. Filter already here
+      endif
       this%n_vert=this%n_vert+1
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
@@ -2343,28 +2367,22 @@ contains
             if (btest(ibin,i-1)) this%pp(0:3,ip)=this%pp(0:3,ip)+p(0:3,i)
          enddo
       enddo
-         !this%pp(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-         !this%pp(0:3,4)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-         !this%pp(0:3,2)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
-         !this%pp(0:3,3)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
-
     end subroutine fill_momentum_array
+
     subroutine compute_amps_from_currents
       implicit none
       integer :: ind
-!!$      write (*,*) this%n_cur_start
-!!$      write (*,*) this%n_cur_end
-!!$      stop 1
       if (this%imode.eq.1) then
+         ! Note: this must be done in the same order as the this%spins() are setup in 'setup_spin_list()'
          do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
             do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
-               ih=(ih2-1)*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)+ih1
+               ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
                if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
-                  this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
-                                                   this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
+                  this%amps_r(ih)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
+                                      this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
                else
-                  this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
-                                                 this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
+                  this%amps(ih)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
+                                    this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
                endif
             enddo
          enddo
