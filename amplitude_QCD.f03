@@ -136,6 +136,7 @@ contains
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
 
+    
     call simple_consistency_checks()
 
 
@@ -968,7 +969,7 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       if (.not.valid_current_combination())  then
-        return
+         return
       endif
 
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
@@ -1143,9 +1144,9 @@ contains
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) then 
-        return ! dead tree. Filter already here
-      endif
+!!$      if (isize.eq.n-1 .and. ctype.ne.anti_current(this%current_list(n)%type)) then 
+!!$        return ! dead tree. Filter already here
+!!$      endif
       this%n_vert=this%n_vert+1
       this%interaction_list(this%n_vert)%type=itype
       this%interaction_list(this%n_vert)%currents(1)=ic1
