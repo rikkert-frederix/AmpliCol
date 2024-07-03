@@ -10,7 +10,7 @@ program matrix_integrate_QCD
   integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
   integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
-  integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf
+  integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf,hel
   integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8) :: s_cut(2),sqrts
@@ -138,6 +138,7 @@ program matrix_integrate_QCD
   ! number of helicities to sum over
   nhel=(amps%n_cur_end(next-1)-amps%n_cur_start(next-1)+1)*(amps%n_cur_end(next)-amps%n_cur_start(next)+1)
   allocate(amp2_hel(1:nhel))
+  allocate(hel(1:next))
 
   ! Not so relevant mint-module parameters: only used in special cases.
   call set_mint_module_special_parameters()
@@ -232,10 +233,10 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call amps%evaluate(next,p,mass,width,0,part)
+    call amps%evaluate(next,p,mass,width,hel,part)
 
     if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-      call amps_sf%evaluate(next,p,mass,width,0,part_sf)
+      call amps_sf%evaluate(next,p,mass,width,hel,part_sf)
       do ih=1,nhel
         if (it.eq.2) then
            amps%amps(ih)=(1d0/3d0)*amps%amps(ih)+amps_sf%amps(ih)

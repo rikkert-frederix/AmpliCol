@@ -162,12 +162,12 @@ program matrix_reweight
         endif
      enddo
 
-     call amps(1)%evaluate(next,p,mass,width,ihel,part)
+     call amps(1)%evaluate(next,p,mass,width,hel,part)
      if (amps(1)%n_qqbar.eq.2) then
-        call amps(2)%evaluate(next,p,mass,width,ihel,part)
+        call amps(2)%evaluate(next,p,mass,width,hel,part)
         if (amps(1)%same_flav) then
-          call amps(3)%evaluate(next,p,mass,width,ihel,part)
-          call amps(4)%evaluate(next,p,mass,width,ihel,part)
+          call amps(3)%evaluate(next,p,mass,width,hel,part)
+          call amps(4)%evaluate(next,p,mass,width,hel,part)
           
           amps(1)%amps(:)=amps(1)%amps(:)+(1d0/3d0)*amps(3)%amps(:)
           amps(2)%amps(:)=(1d0/3d0)*amps(2)%amps(:)+amps(4)%amps(:)
@@ -178,7 +178,7 @@ program matrix_reweight
      if (color_flow) then
        do i=2,2
         do k=1,next-2
-         call amps(i+k-1)%evaluate(next,p,mass,width,ihel,part)
+         call amps(i+k-1)%evaluate(next,p,mass,width,hel,part)
         enddo
        enddo
      endif

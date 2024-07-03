@@ -2087,8 +2087,8 @@ contains
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
-    integer :: n,hel
-    integer,dimension(n)::part
+    integer :: n
+    integer,dimension(n)::part,hel
     real(kind=8),dimension(n) :: mass,width
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip,imv
@@ -2150,11 +2150,12 @@ contains
              endif
 
              if (this%current_list(ic)%spin(1).eq.-9) then
-                if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
-                   ih_in=1  ! + helicity 
-                else
-                   ih_in=0  ! - helicity 
-                endif
+                ih_in=max(0,hel(this%current_list(ic)%order(1)))
+!!$                if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
+!!$                   ih_in=1  ! + helicity 
+!!$                else
+!!$                   ih_in=0  ! - helicity 
+!!$                endif
              else
                 ih_in=max(0,this%current_list(ic)%spin(1))
              endif
