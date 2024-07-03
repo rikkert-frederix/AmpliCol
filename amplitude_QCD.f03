@@ -38,8 +38,10 @@ module amplitude_QCD_mod
      integer,dimension(:,:,:),allocatable :: u1_lin_comb
      integer,dimension(:,:),allocatable :: buff
      logical :: same_flav
+     logical,dimension(:),allocatable :: include_product
    contains
-     procedure :: init,evaluate,init_col2
+     procedure,public :: init,evaluate,init_col2,filter_helicity
+     procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
   subroutine init(this,imode,n,orig_part,part,spin,mass,width,order,it)
@@ -141,7 +143,7 @@ contains
 
     ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
-    call filter_dead_trees()
+    call this%filter_dead_trees(n)
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
     if (this%imode.eq.1) then
 !       call create_helicity_map()
@@ -149,7 +151,6 @@ contains
     endif
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
-
 
   contains
 
@@ -171,6 +172,8 @@ contains
             enddo
          enddo
       enddo
+      allocate(this%include_product(1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      this%include_product(:)=.true.
     end subroutine setup_spin_list
     
     subroutine create_external_current(nc,ispin)
@@ -858,126 +861,6 @@ contains
          this%helmap(ih)=this%helmap(ih)+1
       enddo
     end subroutine create_helicity_map
-
-    subroutine filter_dead_trees()
-      ! some currents can be removed, since the "tree" starting from some of
-      ! the initial state particles might lead to a dead end with no possible
-      ! interactions for that current and the remaining external
-      ! particles. Hence, they do not need to be computed since they can not
-      ! lead to a valid Feynman diagram. To filter them out, one starts at the
-      ! end, and goes backwards through the list and see if there are any
-      ! currents that were not needed (i.e., they are not the input to a
-      ! vertex that is used anywhere).
-      implicit none
-      logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
-      integer,dimension(:),allocatable :: where_to_cur,where_to_ver
-      integer :: to_skip
-      allocate(is_needed_cur(this%n_cur))
-      allocate(is_needed_ver(this%n_vert))
-      allocate(where_to_cur(this%n_cur))
-      allocate(where_to_ver(this%n_vert))
-      ! assume nothing is needed
-      is_needed_cur(:)=.false.
-      is_needed_ver(:)=.false.
-      where_to_cur=0
-      where_to_ver=0
-      ! loop through the list backward: if we got to the end, i.e.,
-      ! nc.ge.this%n_cur_start(n-1), we know that it is a valid tree. This
-      ! means that all inputs to that final current are also needed. By moving
-      ! backwards through the list, we can filter out all the branches of the
-      ! tree that are needed. (The nc.le.this%n_cur_end(1) is needed only to
-      ! make sure that the current that corresponds to the n'th final state
-      ! particle is marked as needed, since that current does not enter any of
-      ! the trees: it is only needed to close the tree and get the amplitudes.)
-      do nc=this%n_cur,1,-1
-         if (is_needed_cur(nc) .or. nc.ge.this%n_cur_start(n-1) .or. nc.le.this%n_cur_end(1)) then
-            is_needed_cur(nc)=.true.
-            do iv=1,this%current_list(nc)%n_vert
-               is_needed_ver(this%current_list(nc)%vertices(iv))=.true.
-               is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(1))=.true.
-               is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(2))=.true.
-            enddo
-         endif
-      enddo
-      ! now we know which ones we can skip. Determine where to move the remaining currents
-      to_skip=0
-      do nc=1,this%n_cur
-         if (.not. is_needed_cur(nc)) then
-            to_skip=to_skip+1
-            cycle
-         endif
-         where_to_cur(nc)=nc-to_skip
-      enddo
-      to_skip=0
-      do iv=1,this%n_vert
-         if (.not. is_needed_ver(iv)) then
-            to_skip=to_skip+1
-            cycle
-         endif
-         where_to_ver(iv)=iv-to_skip
-      enddo
-      ! do the actual shifting of the currents in the list
-      do nc=1,this%n_cur
-         if (.not.is_needed_cur(nc)) cycle
-         this%current_list(where_to_cur(nc))=this%current_list(nc)
-         do iv=1,this%current_list(where_to_cur(nc))%n_vert
-            this%current_list(where_to_cur(nc))%vertices(iv)= &
-                 where_to_ver(this%current_list(where_to_cur(nc))%vertices(iv))
-         enddo
-      enddo
-      ! do the actual shifting of the interactions in the list
-      do iv=1,this%n_vert
-         if (.not.is_needed_ver(iv)) cycle
-         this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
-         this%interaction_list(where_to_ver(iv))%currents(1:2)= &
-              where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
-      enddo
-      ! and also the shifting of the auxiliary arrays and variables
-      do isize=1,n-1
-         do nc=this%n_cur_start(isize),this%n_cur
-            if (where_to_cur(nc).ne.0) then
-               this%n_cur_start(isize)=where_to_cur(nc)
-               exit
-            endif
-         enddo
-         do nc=this%n_cur_end(isize),1,-1
-            if (where_to_cur(nc).ne.0) then
-               this%n_cur_end(isize)=where_to_cur(nc)
-               exit
-            endif
-         enddo
-         if (isize.ge.2) then
-            do iv=this%n_vert_start(isize),this%n_vert
-               if (where_to_ver(iv).ne.0) then
-                  this%n_vert_start(isize)=where_to_ver(iv)
-                  exit
-               endif
-            enddo
-            do iv=this%n_vert_end(isize),1,-1
-               if (where_to_ver(iv).ne.0) then
-                  this%n_vert_end(isize)=where_to_ver(iv)
-                  exit
-               endif
-            enddo
-         endif
-      enddo
-      do nc=this%n_cur,1,-1
-         if (where_to_cur(nc).ne.0) then
-            this%n_cur=where_to_cur(nc)
-            exit
-         endif
-      enddo
-      do iv=this%n_vert,1,-1
-         if (where_to_ver(iv).ne.0) then
-            this%n_vert=where_to_ver(iv)
-            exit
-         endif
-      enddo
-      deallocate(is_needed_ver)
-      deallocate(is_needed_cur)
-      deallocate(where_to_ver)
-      deallocate(where_to_cur)
-    end subroutine filter_dead_trees
 
     integer function anti_current(ctype)
       implicit none
@@ -2159,8 +2042,6 @@ contains
              else
                 ih_in=max(0,this%current_list(ic)%spin(1))
              endif
-
-
              if (this%current_list(ic)%type.eq.21) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
@@ -2373,18 +2254,21 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: ind
+      integer :: ind,ih1,ih2,ih,ic,ihc
       if (this%imode.eq.1) then
          ! Note: this must be done in the same order as the this%spins() are setup in 'setup_spin_list()'
+         ihc=0
          do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
             do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
                ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
+               if (.not.this%include_product(ih)) cycle
+               ihc=ihc+1
                if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
-                  this%amps_r(ih)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
-                                      this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
+                  this%amps_r(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
+                                       this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
                else
-                  this%amps(ih)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
-                                    this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
+                  this%amps(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
+                                     this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
                endif
             enddo
          enddo
@@ -3328,5 +3212,195 @@ contains
     end subroutine convert_perm_color_flow
 
   end subroutine init_col2
+
+  subroutine filter_helicity(this,n,nhel,include_hel)
+    implicit none
+    class(amplitude_qcd) :: this
+    integer,intent(inout) :: nhel
+    integer,intent(in) :: n
+    integer,intent(in),dimension(nhel) :: include_hel
+    integer :: ih,ih1,ih2,ihc
+    logical,dimension(:),allocatable :: include_current,include_product
+
+    ! deallocate a bunch
+
+    allocate(include_current(this%n_cur))
+    include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
+    include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
+    allocate(include_product(nhel))
+    include_product(1:nhel)=.false.
+    
+    ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
+    do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+       do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
+          ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
+          if (include_hel(ih).ge.1) then
+             include_current(this%n_cur_start(n-1)+ih1-1)=.true.
+             include_current(this%n_cur_start(n  )+ih2-1)=.true.
+             include_product(ih)=.true.
+          endif
+       enddo
+    enddo
+
+!!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
+!!$    write (*,*) include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
+!!$    stop 1
+
+    ihc=0
+    nhel=0
+    do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+       if (.not.include_current(this%n_cur_start(n-1)+ih1-1)) cycle
+       do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
+          if (.not.include_current(this%n_cur_start(n)+ih2-1)) cycle
+          ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
+          ihc=ihc+1
+          include_product(ihc)=include_product(ih)
+          if (include_product(ihc)) then
+             nhel=nhel+1
+             this%spins(1:n,nhel)=this%spins(1:n,ih)
+          endif
+       enddo
+    enddo
+
+    deallocate(this%include_product)
+    allocate(this%include_product(1:ihc))
+    this%include_product(1:ihc)=include_product(1:ihc)
+    
+    call this%filter_dead_trees(n,include_current)
+    write (*,*) 'Total number of currents and vertices after filtering helicities',this%n_cur,this%n_vert,ihc,nhel
+
+  end subroutine filter_helicity
+
   
+  subroutine filter_dead_trees(this,n,include_current)
+    ! some currents can be removed, since the "tree" starting from some of
+    ! the initial state particles might lead to a dead end with no possible
+    ! interactions for that current and the remaining external
+    ! particles. Hence, they do not need to be computed since they can not
+    ! lead to a valid Feynman diagram. To filter them out, one starts at the
+    ! end, and goes backwards through the list and see if there are any
+    ! currents that were not needed (i.e., they are not the input to a
+    ! vertex that is used anywhere).
+    implicit none
+    class(amplitude_qcd) :: this
+    logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
+    integer,dimension(:),allocatable :: where_to_cur,where_to_ver
+    logical,dimension(*),optional :: include_current
+    integer :: to_skip,isize,nc,iv,n
+    allocate(is_needed_cur(this%n_cur))
+    allocate(is_needed_ver(this%n_vert))
+    allocate(where_to_cur(this%n_cur))
+    allocate(where_to_ver(this%n_vert))
+    ! assume nothing is needed
+    is_needed_cur(:)=.false.
+    is_needed_ver(:)=.false.
+    where_to_cur=0
+    where_to_ver=0
+    if (.not.present(include_current)) then
+       is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=.true.
+       is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=.true.
+    else
+       is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
+       is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
+    endif
+    ! loop through the list backward: if we got to the end, i.e.,
+    ! nc.ge.this%n_cur_start(n-1), we know that it is a valid tree. This
+    ! means that all inputs to that final current are also needed. By moving
+    ! backwards through the list, we can filter out all the branches of the
+    ! tree that are needed. (The nc.le.this%n_cur_end(1) is needed only to
+    ! make sure that the current that corresponds to the n'th final state
+    ! particle is marked as needed, since that current does not enter any of
+    ! the trees: it is only needed to close the tree and get the amplitudes.)
+    do nc=this%n_cur,1,-1
+       if (is_needed_cur(nc)) then
+          is_needed_cur(nc)=.true.
+          do iv=1,this%current_list(nc)%n_vert
+             is_needed_ver(this%current_list(nc)%vertices(iv))=.true.
+             is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(1))=.true.
+             is_needed_cur(this%interaction_list(this%current_list(nc)%vertices(iv))%currents(2))=.true.
+          enddo
+       endif
+    enddo
+    ! now we know which ones we can skip. Determine where to move the remaining currents
+    to_skip=0
+    do nc=1,this%n_cur
+       if (.not. is_needed_cur(nc)) then
+          to_skip=to_skip+1
+          cycle
+       endif
+       where_to_cur(nc)=nc-to_skip
+    enddo
+    to_skip=0
+    do iv=1,this%n_vert
+       if (.not. is_needed_ver(iv)) then
+          to_skip=to_skip+1
+          cycle
+       endif
+       where_to_ver(iv)=iv-to_skip
+    enddo
+    ! do the actual shifting of the currents in the list
+    do nc=1,this%n_cur
+       if (.not.is_needed_cur(nc)) cycle
+       this%current_list(where_to_cur(nc))=this%current_list(nc)
+       do iv=1,this%current_list(where_to_cur(nc))%n_vert
+          this%current_list(where_to_cur(nc))%vertices(iv)= &
+               where_to_ver(this%current_list(where_to_cur(nc))%vertices(iv))
+       enddo
+    enddo
+    ! do the actual shifting of the interactions in the list
+    do iv=1,this%n_vert
+       if (.not.is_needed_ver(iv)) cycle
+       this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+       this%interaction_list(where_to_ver(iv))%currents(1:2)= &
+            where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
+    enddo
+    ! and also the shifting of the auxiliary arrays and variables
+    do isize=1,n
+       do nc=this%n_cur_start(isize),this%n_cur
+          if (where_to_cur(nc).ne.0) then
+             this%n_cur_start(isize)=where_to_cur(nc)
+             exit
+          endif
+       enddo
+       do nc=this%n_cur_end(isize),1,-1
+          if (where_to_cur(nc).ne.0) then
+             this%n_cur_end(isize)=where_to_cur(nc)
+             exit
+          endif
+       enddo
+       if (isize.ge.2 .and. isize.le.n-1) then
+          do iv=this%n_vert_start(isize),this%n_vert
+             if (where_to_ver(iv).ne.0) then
+                this%n_vert_start(isize)=where_to_ver(iv)
+                exit
+             endif
+          enddo
+          do iv=this%n_vert_end(isize),1,-1
+             if (where_to_ver(iv).ne.0) then
+                this%n_vert_end(isize)=where_to_ver(iv)
+                exit
+             endif
+          enddo
+       endif
+    enddo
+    do nc=this%n_cur,1,-1
+       if (where_to_cur(nc).ne.0) then
+          this%n_cur=where_to_cur(nc)
+          exit
+       endif
+    enddo
+    do iv=this%n_vert,1,-1
+       if (where_to_ver(iv).ne.0) then
+          this%n_vert=where_to_ver(iv)
+          exit
+       endif
+    enddo
+    deallocate(is_needed_ver)
+    deallocate(is_needed_cur)
+    deallocate(where_to_ver)
+    deallocate(where_to_cur)
+  end subroutine filter_dead_trees
+
+
+
 end module amplitude_QCD_mod

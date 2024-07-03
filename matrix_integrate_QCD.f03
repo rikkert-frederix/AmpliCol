@@ -211,14 +211,11 @@ contains
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
-
-!!$    if (debug .and. jac.lt.0d0) then
     if (debug ) then
        write (*,*) jac
        stop 1
     endif
     
-
     all_evt=all_evt+1
 
     cuts_wgt=pass_cuts(next,p)
@@ -257,8 +254,11 @@ contains
           amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
        endif
     enddo
+
+    if (passed.eq.1)  call setup_helicity_filter()
+
     amp2=sum(amp2_hel(1:nhel))
-    
+
     weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     
     if (amps%n_sing.ge.1) then
@@ -361,6 +361,37 @@ contains
        endif
     enddo
   end function pass_cuts
+
+  subroutine setup_helicity_filter()
+    implicit none
+    real(kind=8) :: max_value
+    integer :: ih1,ih2
+    integer,dimension(nhel) :: include_hel
+    ! filter zero helicities and helicities that are identical
+    include_hel=1
+    max_value=maxval(amp2_hel(1:nhel))
+    do ih1=1,nhel
+       if (include_hel(ih1).ne.1) cycle
+       if (amp2_hel(ih1)/max_value.lt.1d-20) then
+          ! zero
+          include_hel(ih1)=0
+       else
+          do ih2=ih1+1,nhel
+             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/max_value.lt.1d-20) then
+                include_hel(ih2)=-ih1
+                include_hel(ih1)=include_hel(ih1)+1
+             endif
+          enddo
+       endif
+    enddo
+    
+    call amps%filter_helicity(next,nhel,include_hel)
+    if (amps%n_qqbar.eq.2.and.amps%same_flav) then
+       write (*,*) 'nhel was updated by the above filter. Fix this here '
+       stop 1
+       call amps_sf%filter_helicity(next,nhel,include_hel)
+    endif
+  end subroutine setup_helicity_filter
 
   subroutine define_symm_2qq(next,part,chan)
     implicit none
