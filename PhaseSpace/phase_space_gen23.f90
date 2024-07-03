@@ -8,7 +8,7 @@ module phase_space_gen23
   integer(kind=4),dimension(:,:),allocatable :: sets
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical :: t_channel,includePDF
-  real(kind=8) :: sqrtshat,sqrts,tau,ycm,ptcut,drcut
+  real(kind=8) :: sqrtshat,sqrts,ycm,ptcut,drcut
 
   ! TECHNIAL PARAMETERS
   ! vebose:
@@ -193,6 +193,7 @@ contains
     if (allocated(invm)) deallocate(invm)
     if (allocated(invm_min)) deallocate(invm_min)
     if (allocated(invm_max)) deallocate(invm_max)
+    if (allocated(ETmin)) deallocate(ETmin)
     if (allocated(pp)) deallocate(pp)
     if (allocated(p)) deallocate(p)
     if (allocated(x)) deallocate(x)
@@ -222,16 +223,18 @@ contains
 
   subroutine generate_initial_state
     implicit none
-    call generate_tau
-    call generate_y
+    real(kind=8) :: tau
+    call generate_tau(tau)
+    call generate_y(tau)
     sqrtshat=sqrt(tau)*sqrts
     xbjrk(1)=sqrt(tau)*exp(ycm)
     xbjrk(2)=sqrt(tau)*exp(-ycm)
     if (debug) write (*,*) 'sqrtshat :',sqrtshat,xbjrk(1:2),sqrtshat**2
   end subroutine generate_initial_state
 
-  subroutine generate_tau
+  subroutine generate_tau(tau)
     implicit none
+    real(kind=8),intent(out) :: tau
     real(kind=8) :: smin,smax,shat
     smin=max(invm_min(maskr(next)-3),ETmin(maskr(next)-3)**2)
     smax=sqrts**2
@@ -241,8 +244,9 @@ contains
     jac=jac/smax
   end subroutine generate_tau
   
-  subroutine generate_y
+  subroutine generate_y(tau)
     implicit none
+    real(kind=8),intent(in) :: tau
     real(kind=8) ::  ymin,ymax
     ymin= log(tau)/2d0
     ymax=-log(tau)/2d0
@@ -1956,9 +1960,9 @@ subroutine genpt_one_step(i,ir,ib,im1)
        power=power_in
        varmin=-var_max
        varmax=-var_min
-    elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (power.ne.0d0)) then
+    elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
        write (*,*) 'ERROR: in random_to_var one of the two limits '/&
-            &/'is negative',var_min,var_max
+            &/'is negative',var_min,var_max,power_in,jac,x
        write (*,*) 'using flat transformation'
        power=0d0
        varmin=var_min
