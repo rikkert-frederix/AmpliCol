@@ -28,7 +28,7 @@ program matrix_reweight
   use common
   use timings
   implicit none
-  integer :: i,j,col_acc,icol,ihel,hel_picked,irow,ic,iacc
+  integer :: i,j,col_acc,icol,irow,ic,iacc
   integer :: icol_mat,irow_mat,ri,ri_end,m,proc_num,iacc_in,k,skip 
   integer,dimension(:),allocatable :: hel,o,part,part_sf,orig_part,temp_part
   integer,dimension(:,:),allocatable :: spin
@@ -152,15 +152,6 @@ program matrix_reweight
      matrix2(1:3)=0d0
 
      call cpu_time(tBefore)
-     ! read helicity from event file
-     ihel=hel_picked
-     do i=1,next
-        if (btest(ihel-1,i-1)) then
-           hel(i)=1
-        else
-           hel(i)=0
-        endif
-     enddo
 
      call amps(1)%evaluate(next,p,mass,width,hel,part)
      if (amps(1)%n_qqbar.eq.2) then
@@ -517,7 +508,8 @@ contains
     real(kind=8) :: dum
     done=.false.
     read (iunit,*,err=99,end=99) dummy
-    read (iunit,*,err=99,end=99) dum,hel_picked,evt_wgt,wgt,amp2,weight
+    read (iunit,*,err=99,end=99) dum,evt_wgt,wgt,amp2,weight
+    read (iunit,*,err=99,end=99) hel(1:next)
     read (iunit,*,err=99,end=99) o(1:next)
     do i=1,next
        read (iunit,*,err=99,end=99) part(i),p(1:3,i),p(0,i)
