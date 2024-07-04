@@ -210,9 +210,11 @@ set linetype 6 lc rgb '#89b487' lw 3
 set linetype 7 lc rgb '#7c7056' lw 3
 unset xtics
 """
-    gnuplot_footer=r"""!ps2pdf "plots.ps" &> /dev/null
+    gnuplot_footer=r"""unset multiplot
+!ps2pdf "plots.ps" &> /dev/null
 """
-    gnuplot_middle="""set multiplot layout 3,3
+    gnuplot_middle="""unset multiplot
+set multiplot layout 3,3
 set xrange [-2:51]
 set size 0.4,0.5
 set origin 0,0.5
