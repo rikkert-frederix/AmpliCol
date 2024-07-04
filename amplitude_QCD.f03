@@ -2266,7 +2266,7 @@ contains
                ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
                if (.not.this%include_product(ih)) cycle
                ihc=ihc+1
-               if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
+               if (use_real_gluons .and. this%current_list(ih2)%type.eq.21) then
                   this%amps_r(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_r(1:4)*&
                                        this%current_list(this%n_cur_start(n  )+ih2-1)%val_r(1:4))
                else
@@ -2352,7 +2352,7 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
-      if (use_real_gluons) then
+      if (use_real_gluons .and. abs(this%current_list(ic)%type).eq.21) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
             if (this%current_list(ic)%vertex_sign(iv))then
