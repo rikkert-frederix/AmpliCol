@@ -2125,8 +2125,8 @@ contains
 
           elseif(this%interaction_list(iv)%type.eq.4) then
              if (use_real_gluons) then
-                call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
+                call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:4))
              else
                 call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2267,8 +2267,8 @@ contains
                if (.not.this%include_product(ih)) cycle
                ihc=ihc+1
                if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
-                  this%amps_r(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
-                                       this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
+                  this%amps_r(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_r(1:4)*&
+                                       this%current_list(this%n_cur_start(n  )+ih2-1)%val_r(1:4))
                else
                   this%amps(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
                                      this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
@@ -3223,12 +3223,22 @@ contains
     integer,intent(inout) :: nhel
     integer,intent(in) :: n
     integer,intent(inout),dimension(nhel) :: include_hel
-    integer :: ih,ih1,ih2,ihc,nspin,ispin,ic
+    integer :: ih,ih1,ih2,ihc,nspin,ispin,ic,iv
     logical,dimension(:),allocatable :: include_current,include_product
     integer,dimension(:,:,:),allocatable :: tmp_spin
 
     ! deallocate a bunch
-
+    do ic=1,this%n_cur
+       if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
+       if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
+    enddo
+    do iv=1,this%n_vert
+       if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
+       if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
+    enddo
+    if (allocated(this%amps)) deallocate(this%amps)
+    if (allocated(this%amps_r)) deallocate(this%amps_r)
+    
     allocate(include_current(this%n_cur))
     include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
     include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.

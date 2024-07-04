@@ -392,7 +392,8 @@ contains
     implicit none
     real(kind=8) :: max_value
     integer :: ih1,ih2,nevent
-    integer,dimension(nhel,nevent_hel_filter) :: include_hel
+    integer,dimension(:,:),allocatable,save :: include_hel
+    if (.not.allocated(include_hel)) allocate(include_hel(nhel,nevent_hel_filter))
     ! filter zero helicities and helicities that are identical
     include_hel(1:nhel,nevent)=1
     max_value=maxval(amp2_hel(1:nhel))
@@ -404,20 +405,20 @@ contains
        else
           do ih2=ih1+1,nhel
              if (abs(amp2_hel(ih1)-amp2_hel(ih2))/max_value.lt.1d-12) then
+                ! identical
                 include_hel(ih2,nevent)=-ih1
                 include_hel(ih1,nevent)=include_hel(ih1,nevent)+1
              endif
           enddo
        endif
     enddo
-!!$    write (*,*) include_hel
-    
+   
     if (nevent.lt.nevent_hel_filter) return
     
     do ih1=1,nhel
        if (any(include_hel(ih1,2:nevent_hel_filter).ne.include_hel(ih1,1))) then
           write (*,*) 'inconsistent helicity. Cannot setup helicity filter.'
-          write (*,*) ih1,nevent,':',include_hel(ih1,1:nevent_hel_filter)
+          write (*,*) ih1,nevent_hel_filter,':',include_hel(ih1,1:nevent_hel_filter)
           stop 1
        endif
     enddo
@@ -431,6 +432,7 @@ contains
     deallocate(hel_fac)
     allocate(hel_fac(nhel))
     hel_fac(1:nhel)=include_hel(1:nhel,1)
+    deallocate(include_hel)
   end subroutine setup_helicity_filter
 
   subroutine define_symm_2qq(next,part,chan)

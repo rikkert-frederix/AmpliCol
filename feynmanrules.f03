@@ -473,20 +473,6 @@ contains
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))  
   end subroutine QuarkGluontoQuark
 
-  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) ! from fvoxxx.f
-    implicit none
-    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
-    TMP1=wfg1(1)+wfg1(4)
-    TMP2=wfg1(1)-wfg1(4)
-    TMP3=wfg1(2)+cImag*wfg1(3)
-    TMP4=wfg1(2)-cImag*wfg1(3)
-    wfq(1)=prefact*(TMP1*wfq2(3)+TMP3*wfq2(4)) ! sl1 ! minus sign
-    wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
-    wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
-    wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
-  end subroutine GluonQuarktoQuark
   subroutine QuarkGluontoQuark_real(wfq1,wfg2,wfq)
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq
@@ -502,8 +488,39 @@ contains
     wfq(2)=prefact*(TMP2*wfq1(4)+TMP4*wfq1(3)) !sl2
     wfq(3)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2)) !sr1
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1)) !sr2
-  end subroutine QuarkGluontoQuark_Real
+  end subroutine QuarkGluontoQuark_real
 
+  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) ! from fvoxxx.f
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    wfq(1)=prefact*(TMP1*wfq2(3)+TMP3*wfq2(4)) ! sl1 ! minus sign
+    wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
+    wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
+    wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
+  end subroutine GluonQuarktoQuark
+
+  subroutine GluonQuarktoQuark_real(wfg1,wfq2,wfq) ! from fvoxxx.f
+    implicit none
+    complex(kind=8),dimension(4) :: wfq2,wfq
+    real(kind=8),dimension(4) :: wfg1
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8) :: TMP1,TMP2
+    complex(kind=8) :: TMP3,TMP4
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=dcmplx(wfg1(2),wfg1(3))
+    TMP4=dcmplx(wfg1(2),-wfg1(3))
+    wfq(1)=prefact*(TMP1*wfq2(3)+TMP3*wfq2(4)) ! sl1 ! minus sign
+    wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
+    wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
+    wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
+  end subroutine GluonQuarktoQuark_real
 
   subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) ! TV from fvixxx.f
     implicit none
