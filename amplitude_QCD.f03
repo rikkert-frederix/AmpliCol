@@ -25,7 +25,7 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
-     integer(kind=8),dimension(:,:),allocatable :: spins
+     integer,dimension(:,:,:),allocatable :: spins
      real(kind=8),dimension(:,:),allocatable :: pp
      real(kind=8),dimension(:,:,:),allocatable :: diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
@@ -158,16 +158,16 @@ contains
     subroutine setup_spin_list()
       implicit none
       integer :: ih1,ih2,ih,i
-      allocate(this%spins(n,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      allocate(this%spins(n,1,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
       ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
       do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
          do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
             ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
             do i=1,n
                if (i.lt.n) then
-                  this%spins(order(i),ih)=this%current_list(this%n_cur_start(n-1)+ih1-1)%spin(i)
+                  this%spins(order(i),1,ih)=this%current_list(this%n_cur_start(n-1)+ih1-1)%spin(i)
                elseif (i.eq.n) then
-                  this%spins(order(i),ih)=this%current_list(this%n_cur_start(n  )+ih2-1)%spin(1)
+                  this%spins(order(i),1,ih)=this%current_list(this%n_cur_start(n  )+ih2-1)%spin(1)
                endif
             enddo
          enddo
@@ -3222,9 +3222,10 @@ contains
     class(amplitude_qcd) :: this
     integer,intent(inout) :: nhel
     integer,intent(in) :: n
-    integer,intent(in),dimension(nhel) :: include_hel
-    integer :: ih,ih1,ih2,ihc
+    integer,intent(inout),dimension(nhel) :: include_hel
+    integer :: ih,ih1,ih2,ihc,nspin,ispin,ic
     logical,dimension(:),allocatable :: include_current,include_product
+    integer,dimension(:,:,:),allocatable :: tmp_spin
 
     ! deallocate a bunch
 
@@ -3237,6 +3238,7 @@ contains
 !!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
     
     ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
+    nspin=0
     do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
        do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
           ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
@@ -3245,9 +3247,13 @@ contains
              include_current(this%n_cur_start(n-1)+ih1-1)=.true.
              include_current(this%n_cur_start(n  )+ih2-1)=.true.
              include_product(ih)=.true.
+             nspin=nspin+1
           endif
        enddo
     enddo
+
+    allocate(tmp_spin(1:n,1:maxval(include_hel),nspin))
+    nspin=nhel
 !!$
 !!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
 !!$    write (*,*) include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
@@ -3264,11 +3270,29 @@ contains
           include_product(ihc)=include_product(ih)
           if (include_product(ihc)) then
              nhel=nhel+1
-             this%spins(1:n,nhel)=this%spins(1:n,ih)
+             tmp_spin(1:n,1,nhel)=this%spins(1:n,1,ih)
+             if (include_hel(ih).gt.1) then
+                ic=1
+                do ispin=ih+1,nspin
+                   if (-include_hel(ispin).eq.ih) then
+                      ic=ic+1
+                      if (ic.gt.include_hel(ih)) then
+                         write (*,*) 'inconsistent include_hel #1'
+                         stop 1
+                      endif
+                      tmp_spin(1:n,ic,nhel)=this%spins(1:n,1,ispin)
+                   endif
+                enddo
+             elseif (include_hel(ih).ne.1) then
+                write (*,*) 'inconsistent include_hel #2'
+                stop 1
+             endif
+             include_hel(nhel)=include_hel(ih)
           endif
        enddo
     enddo
-
+    deallocate(this%spins)
+    call move_alloc(tmp_spin,this%spins)
 !!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
 
     deallocate(this%include_product)

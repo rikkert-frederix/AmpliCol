@@ -10,7 +10,7 @@ program matrix_integrate_QCD
   integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
   integer(kind=8) :: sym_fac,iden
   real*4 :: tBefore,tAfter,tTot_A,tTot_B
-  integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf,hel
+  integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf,hel,hel_fac
   integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8) :: s_cut(2),sqrts
@@ -21,7 +21,8 @@ program matrix_integrate_QCD
   integer :: col_fac,nhel
   integer :: it ! quark order type
   integer,parameter :: nevent_hel_filter=5
- 
+  integer,dimension(2) :: hel_picked
+  
   call get_run_arguments()
   call compute_multichannel_symmetry_factor()
   call create_run_tag()
@@ -140,6 +141,9 @@ program matrix_integrate_QCD
   nhel=(amps%n_cur_end(next-1)-amps%n_cur_start(next-1)+1)*(amps%n_cur_end(next)-amps%n_cur_start(next)+1)
   allocate(amp2_hel(1:nhel))
   allocate(hel(1:next))
+  allocate(hel_fac(1:nhel))
+  hel_fac(1:nhel)=1
+  
 
   ! Not so relevant mint-module parameters: only used in special cases.
   call set_mint_module_special_parameters()
@@ -257,6 +261,7 @@ contains
        else
           amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
        endif
+       amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
     enddo
 
     amp2=sum(amp2_hel(1:nhel))
@@ -265,8 +270,13 @@ contains
 !!$       write (*,*) amp2
        call setup_helicity_filter(passed)
 !!$       goto 12
+       if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
+          ! since we update the helicities we need to compute when
+          ! passed==nevent_hel_filter, the unweighting of the helicities goes
+          ! wrong for this phase-space point. Hence, we need to skip it.
+          amp2=0d0
+       endif
     endif
-
 
 !!$    if (passed.eq.2) then
 !!$       write (*,*) amp2_hel(1:nhel)
@@ -416,8 +426,11 @@ contains
     if (amps%n_qqbar.eq.2.and.amps%same_flav) then
        write (*,*) 'nhel was updated by the above filter. Fix this here '
        stop 1
-       call amps_sf%filter_helicity(next,nhel,include_hel)
+       call amps_sf%filter_helicity(next,nhel,include_hel(1,1))
     endif
+    deallocate(hel_fac)
+    allocate(hel_fac(nhel))
+    hel_fac(1:nhel)=include_hel(1:nhel,1)
   end subroutine setup_helicity_filter
 
   subroutine define_symm_2qq(next,part,chan)
@@ -541,7 +554,7 @@ contains
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
     write (iunit,*) next,wgt,amp2*weight,amp2,weight
-    write (iunit,*) amps%spins(1:next,hel_picked)
+    write (iunit,*) amps%spins(1:next,hel_picked(1),hel_picked(2))
     write (iunit,'(100i3)') o(1:next)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
     ! compensate for reducing the number of integration channels (see
@@ -581,10 +594,13 @@ contains
           amp2_hel(i)=amp2_hel(i)+amp2_hel(i-1)
        endif
     enddo
-    hel_picked=i
-    if (hel_picked.gt.nhel) then
+    hel_picked(2)=i
+    if (hel_picked(2).gt.nhel) then
        write (*,*) 'Could not unweight helicity',hel_picked,nhel
        stop 1
+    endif
+    if (hel_fac(hel_picked(2)).gt.1) then
+       hel_picked(1)=1+int(ran2()*hel_fac(hel_picked(2)))
     endif
   end subroutine unwgt_helicity
   
