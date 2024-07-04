@@ -554,7 +554,7 @@ contains
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
     write (iunit,*) next,wgt,amp2*weight,amp2,weight
-    write (iunit,*) amps%spins(1:next,hel_picked(1),hel_picked(2))
+    write (iunit,'(100i3)') amps%spins(1:next,hel_picked(1),hel_picked(2))
     write (iunit,'(100i3)') o(1:next)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
     ! compensate for reducing the number of integration channels (see
