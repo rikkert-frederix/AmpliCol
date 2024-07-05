@@ -100,8 +100,8 @@ contains
 
     allocate(this%current_list(max_cur))
     allocate(this%interaction_list(max_vert))
-    allocate(this%n_cur_start(n-1))
-    allocate(this%n_cur_end(n-1))
+    allocate(this%n_cur_start(n))
+    allocate(this%n_cur_end(n))
     allocate(this%n_vert_start(2:n-1))
     allocate(this%n_vert_end(2:n-1))
    
@@ -114,6 +114,7 @@ contains
        if (isize.eq.1) then
           ! external currents
           do nc=1,n
+             if (nc.eq.n) this%n_cur_start(n)=this%n_cur+1
              this%n_cur=this%n_cur+1
              allocate(this%current_list(this%n_cur)%order(isize))
              this%current_list(this%n_cur)%order(1)=order(nc)
@@ -132,6 +133,7 @@ contains
              endif
              this%current_list(this%n_cur)%n_vert=0
 
+             if (nc.eq.n) this%n_cur_end(n)=this%n_cur
           enddo
        else
           do isplit=1,isize-1
@@ -2721,7 +2723,7 @@ contains
         jperm_lower=1
         if (use_symm_cm.and.this%n_qqbar.ne.2) jperm_lower = iperm
 
-        do jperm=jperm_lower,this%nColOrd ! only include upper triangle (i.e., loop starts at iperm instead of 1)
+        do jperm=jperm_lower,this%nColOrd
           do uj=1,uj_upper
              jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
             if (this%n_qqbar.eq.2 .and. uj.ne.ui) then
