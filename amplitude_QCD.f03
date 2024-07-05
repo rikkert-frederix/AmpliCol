@@ -578,7 +578,7 @@ contains
                   endif
                endif
             else
-               if (part(order(i)).le.-1 .and. part(order(i)).gt.-6) then
+               if (part(order(i)).le.-1 .and. part(order(i)).ge.-6) then
                   ! next should be a quark
                   if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).le.6)) then
                      write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
