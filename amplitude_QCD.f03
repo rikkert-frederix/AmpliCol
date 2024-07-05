@@ -738,7 +738,7 @@ contains
                   max_cur=max_cur+ifact 
                endif
                max_cur=max_cur+1
-               max_cur=max_cur+50 ! TO CHANGE
+               max_cur=max_cur+5250 ! TO CHANGE
          endif
       endif
     end subroutine set_max_cur
@@ -832,7 +832,7 @@ contains
                   mv=mv+fact/(factorial(n-isize-1))/dble(iden)
                enddo
             enddo
-            mv=10*mv ! TO CHANGE!
+            mv=100*mv ! TO CHANGE!
          endif
          max_vert=nint(mv)
       endif
@@ -2777,11 +2777,17 @@ contains
      
      ! First row
      row_first(1:n-this%n_sing)=iper_first(1:n-this%n_sing)
-     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(row_first)
+     if (this%n_qqbar.eq.2) then
+        row_first(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+        if (uj.ne.ui) call get_other_quark_order(row_first)
+     endif
 
      ! Row in consideration
      row_per(1:n-this%n_sing)=iper(1:n-this%n_sing)
-     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(row_per)
+     if (this%n_qqbar.eq.2) then
+        row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+        if (uj.ne.ui) call get_other_quark_order(row_per)
+     endif
 
      ! Column in consideration
      col_per(1:n-this%n_sing)=jper(1:n-this%n_sing)
@@ -2800,7 +2806,7 @@ contains
      enddo
 
      key=solve_dict(get_value(col_new(1:n)))
-
+     
      col_fac(1:3)=col_vals(1:3,key,gi_iperm)
    end subroutine get_col_fac
 
