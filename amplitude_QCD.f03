@@ -2583,8 +2583,8 @@ contains
           call get_u1_lin_comb
        endif
     elseif (this%n_qqbar.eq.2) then
-         lim = 0 ! dummy, needed for color-flow
-         iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
+       lim = 0 ! dummy, needed for color-flow
+       iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
     endif
     allocate(n_vals(1:3,iperm_upper))
     allocate(diff_vals(max_vals,1:3,iperm_upper))
@@ -2747,14 +2747,11 @@ contains
               do iacc=1,3
               if (col_fac(iacc).eq.0d0) cycle
               do ival=1,n_vals(iacc,gi_iperm)
-                    if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
-                         exit
-                    endif
+                 if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
               enddo 
 
               ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
               ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
-!!$           this%col_index(ic(ival,iacc,gi_iperm),ival,iacc,gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm 
               this%col_index(this%i_col_i(ival,iacc)+ic(ival,iacc,gi_iperm),gi_iperm)=(rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
               enddo
             enddo
@@ -2870,6 +2867,10 @@ contains
       integer :: iperm,i
       integer(kind=8) :: val,previous_val
       integer,dimension(:),allocatable :: iper,iper_in
+      if (this%n_sing.ne.0) then
+         write (*,*) 'fix create_perm_dict when there are color singlets'
+         stop 1
+      endif
       allocate(iper(1:n))
       allocate(iper_in(1:n))
       max_keys=factorial(n)
