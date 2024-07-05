@@ -568,9 +568,9 @@ contains
          do i=1,n
             if (i.eq.1 .or. i.eq.n) cycle
             if (order(i).eq.2) then
-               if (part(order(i)).ge.1 .and. part(order(i)).lt.6) then
+               if (part(order(i)).ge.1 .and. part(order(i)).le.6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).lt.6)) then
+                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).le.6)) then
                      write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
                      write (*,*) order
                      write (*,*) part
@@ -580,7 +580,7 @@ contains
             else
                if (part(order(i)).le.-1 .and. part(order(i)).gt.-6) then
                   ! next should be a quark
-                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).lt.6)) then
+                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).le.6)) then
                      write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
                      write (*,*) order
                      write (*,*) part
@@ -1103,12 +1103,12 @@ contains
       ! be used to close the amplitude instead
       if (n1.eq.1) then
          if (this%current_list(ic1)%order(n1).eq.order(n)) then
-                 return
+            return
           endif
       endif
       if (n2.eq.1) then
          if (this%current_list(ic2)%order(n2).eq.order(n)) then
-                 return
+            return
          endif
       endif
 
