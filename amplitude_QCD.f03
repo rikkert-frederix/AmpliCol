@@ -2574,7 +2574,7 @@ contains
        if (color_flow) then
           lim=1 ! for NLC only
           lim = 0 ! if U(1) amps generated separately
-          maxterms_u1 = 1d0
+          maxterms_u1 = 1
           do i=2,n-1
              maxterms_u1 = maxterms_u1 * (n-i)
           enddo
@@ -2788,8 +2788,8 @@ contains
 ! next line is already included in main loop. No need to do it again here
 !     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(col_per)
 
-     do i=1,n
-        do j=1,n
+     do i=1,n-this%n_sing
+        do j=1,n-this%n_sing
            if (col_per(i) .eq. row_per(j)) exit
         enddo
         if (.not.(abs(part(col_per(i))).le.6.and.abs(part(col_per(i))).ge.1)) then
