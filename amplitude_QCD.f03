@@ -2732,7 +2732,7 @@ contains
 
             do rj=0,lim
     
-              if (use_cm_dict) then
+              if (use_cm_dict.and.this%n_qqbar.ne.2) then
                  ! GET color factors from permuting first row
                  call get_col_fac(iper_first,iper,jper,ui,uj,gi_iperm,col_fac)
               else
@@ -2791,8 +2791,6 @@ contains
 
      ! Column in consideration
      col_per(1:n-this%n_sing)=jper(1:n-this%n_sing)
-! next line is already included in main loop. No need to do it again here
-!     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(col_per)
 
      do i=1,n-this%n_sing
         do j=1,n-this%n_sing
