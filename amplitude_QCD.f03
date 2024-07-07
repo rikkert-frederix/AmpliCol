@@ -2510,6 +2510,7 @@ contains
     integer :: key
     integer(kind=8),allocatable,dimension(:) :: perm_dict
     integer :: max_keys,jperm_lower
+    integer,allocatable,dimension(:,:) :: first_rows
     
     write (*,*) 'Initialising colour matrix ...'
 
@@ -2550,6 +2551,7 @@ contains
          allocate(this%i_col_i(max_vals,1:3))
          allocate(n_colour_elements(max_vals,1:3,iperm_upper))
          allocate(col_vals(1:3,max_keys,iperm_upper))
+         allocate(first_rows(1:n,iperm_upper))
     endif
 
 ! first check a single row in the colour matrix to determine how many
@@ -2581,6 +2583,7 @@ contains
            if (gi.eq.iperm-1) exit
          enddo
          gi_iperm = iperm
+         first_rows(1:n,gi_iperm) = iper
          uj_upper = 2
          ui = it
       endif
@@ -2773,9 +2776,9 @@ contains
           row_first(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,1),order(n)]
      elseif (this%n_qqbar.eq.2) then
           if (uj.eq.ui) then
-                row_first(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+                row_first(1:n-this%n_sing)=first_rows(1:n,gi_iperm)
           elseif (uj.ne.ui) then
-                row_first(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+                row_first(1:n-this%n_sing)=first_rows(1:n,gi_iperm)
                 call get_other_quark_order(row_first)
           endif
      endif
@@ -2788,9 +2791,9 @@ contains
           row_per(1:n-this%n_sing)=[order(1),this%perm(1:n-2-this%n_sing,iperm),order(n)]
      elseif (this%n_qqbar.eq.2) then
           if (uj.eq.ui) then
-                row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+                row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,iperm),order(n)]
           elseif (uj.ne.ui) then
-                row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+                row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,iperm),order(n)]
                 call get_other_quark_order(row_per)
           endif
      endif
