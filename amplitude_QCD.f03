@@ -284,7 +284,7 @@ contains
       if (n-4-this%n_sing.gt.0) then
       ord = this%current_list(nc)%order(2:n-1)
       do i=1,n-2
-        if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
+        if (is_quark(ord(i)).or.is_antiquark(ord(i))) then
               ord(i)=0
         endif
       enddo
@@ -355,10 +355,8 @@ contains
       nq=0; naq=0 ; nglu=0 ; nsing=0
       do i=1,n
          if (part(i).eq.21) nglu=nglu+1
-         if ((i.gt.2 .and. (part(i).ge.1 .and. part(i).le.6)) .or. &
-             (i.le.2 .and. (part(i).le.-1 .and. part(i).ge.-6))) nq=nq+1
-         if ((i.gt.2 .and. (part(i).le.-1 .and. part(i).ge.-6) ).or. &
-             (i.le.2 .and. (part(i).ge.1 .and. part(i).le.6))) naq=naq+1
+         if (is_quark(i)) nq=nq+1
+         if (is_antiquark(i)) naq=naq+1
          if (part(i).eq.22) nsing=nsing+1
       enddo
 
@@ -384,16 +382,14 @@ contains
             else
                order(iglu)=i
             endif
-         elseif((i.gt.2 .and. (part(i).ge.1 .and. part(i).le.6)) .or. &
-              (i.le.2 .and. (part(i).le.-1 .and. part(i).ge.-6))) then
+         elseif(is_quark(i)) then
             iq=iq+1
             if (iq.eq.1) then
                order(1)=i
             else
                order(n-1)=i
             endif
-         elseif ((i.gt.2 .and. (part(i).le.-1 .and. part(i).ge.-6) ).or. &
-              (i.le.2 .and. (part(i).ge.1 .and. part(i).le.6))) then
+         elseif (is_antiquark(i)) then
             iaq=iaq+1
             !order(n)=i ! for one-qq
             if (it.eq.1)then 
@@ -436,7 +432,6 @@ contains
       integer,dimension(6) :: quark_flav
       integer :: i,j,k,sgn
       integer,dimension(8) :: flav  ! fills the flavours of quarks it finds ( in abs)
-      integer,dimension(n) :: temp_part
 
       this%n_qqbar=0
       this%n_sing=0
@@ -465,48 +460,40 @@ contains
 
       if (any(flav(1:2*this%n_qqbar).ne.flav(1))) this%same_flav = .false.
 
-      allocate(this%quark_index(2*this%n_qqbar))
-
-      temp_part = part
-      do i=1,n
-       if ((i.le.2).and.(abs(temp_part(i)).le.6)) then
-               temp_part(i) = -temp_part(i)
-        endif
-      enddo
-
-      if (this%n_qqbar.ge.2) then
-      k=1
-      do i=1,n
-         if((temp_part(i).ge.1).and.(temp_part(i).le.6)) then
-           this%quark_index(k)=i
-           k=k+2
-         endif
-      enddo
-      k=2
-      do i=1,n
-         if ((temp_part(i).le.-1).and.(temp_part(i).ge.-6)) then
-         if (temp_part(i).eq.-temp_part(this%quark_index(1))) then
-           this%quark_index(k)=i
-         elseif (temp_part(i).eq.-temp_part(this%quark_index(3))) then
-           this%quark_index(k+2)=i
-         endif
-         endif
-      enddo
-
-      do i=1,n
-       if (k.ge.2) then
-       if ((temp_part(i).eq.-temp_part(this%quark_index(k-1)))) then
-          this%quark_index(k)=i
-          k=k+1
-          exit
-       endif
-       else
-          this%quark_index(k)=i
-       endif
-      enddo
-
+! Setup the quark_index. Labels where the quarks and anti-quarks are in the
+! process. Quarks are the odd entries (quark_index(1) and quark_index(3)),
+! while the anti-quarks are the even entries. If quark flavours are different,
+! quark_index(2) will be the anti-quark of quark_index(1) and quark_index(4)
+! the anti-quark of quark_index(3).
+      if (this%n_qqbar.ge.1) then
+         allocate(this%quark_index(2*this%n_qqbar))
+         this%quark_index=0 ! initialise all to zero
+         k=1
+         do i=1,n
+            if(is_quark(i)) then
+               ! found a quark
+               this%quark_index(k)=i
+               k=k+2
+            endif
+         enddo
+         do i=1,n
+            if (is_antiquark(i)) then
+               ! found an anti-quark. Find the corresponding quark in the
+               ! quark_index list.
+               do k=1,2*this%n_qqbar-1,2
+                  if (abs(part(this%quark_index(k))).eq.abs((part(i)))) then
+                     ! if there are identical quarks, the 'k+1' label could
+                     ! already have been filled. If that is the case, cycle to
+                     ! the next label
+                     if (this%quark_index(k+1).ne.0) cycle 
+                     this%quark_index(k+1)=i
+                     exit
+                  endif
+               enddo
+            endif
+         enddo
       endif
-
+      
       if (any(quark_flav(:).ne.0)) then
          write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
          write(*,*) quark_flav
@@ -532,60 +519,29 @@ contains
       enddo
 
       if (this%n_qqbar.gt.0) then
-         if (order(1).le.2) then
-            if (.not.(part(order(1)).le.-1 .and. part(order(1)).ge.-6)) then
-               write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
-               write (*,*) order
-               write (*,*) part
-               stop 1
-            endif
-         else
-            if (.not.(part(order(1)).ge.1 .and. part(order(1)).le.6)) then
-               write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
-               write (*,*) order
-               write (*,*) part
-               stop 1
-            endif
+         if (.not.(is_quark(order(1)))) then
+            write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
+            write (*,*) order
+            write (*,*) part
+            stop 1
          endif
-         if (order(n).le.2) then
-            if (.not.(part(order(n)).ge.1 .and. part(order(n)).le.6)) then
-               write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
-               write (*,*) order
-               write (*,*) part
-               stop 1
-            endif
-         else
-            if (.not.(part(order(n)).le.-1 .and. part(order(n)).ge.-6)) then
-               write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
-               write (*,*) order
-               write (*,*) part
-               stop 1
-            endif
+         if (.not.(is_antiquark(order(n)))) then
+            write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
+            write (*,*) order
+            write (*,*) part
+            stop 1
          endif
       endif
 
       if (this%n_qqbar.ge.2) then
-         do i=1,n
-            if (i.eq.1 .or. i.eq.n) cycle
-            if (order(i).eq.2) then
-               if (part(order(i)).ge.1 .and. part(order(i)).le.6) then
-                  ! next should be a quark
-                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).le.6)) then
-                     write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
-                     write (*,*) order
-                     write (*,*) part
-                     stop 1
-                  endif
-               endif
-            else
-               if (part(order(i)).le.-1 .and. part(order(i)).ge.-6) then
-                  ! next should be a quark
-                  if (.not.(part(order(i+1)).ge.1 .and. part(order(i+1)).le.6)) then
-                     write (*,*) 'ERROR: in the colour order, after a final state anti-quark should come a quark'
-                     write (*,*) order
-                     write (*,*) part
-                     stop 1
-                  endif
+         do i=2,n-1
+            if (is_antiquark(order(i))) then
+               ! next should be a quark
+               if (.not.(is_quark(order(i+1)))) then
+                  write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
+                  write (*,*) order
+                  write (*,*) part
+                  stop 1
                endif
             endif
          enddo
@@ -598,6 +554,10 @@ contains
       ! rough upper bound for the maximum number of currents
       implicit none
       integer :: isize,j,ifact
+      max_cur=factorial(n+1)*14
+      return
+      
+      
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          max_cur=0
          do isize=1,n-1
@@ -1007,7 +967,7 @@ contains
       if (.not.valid_current_combination())  then
         return
       endif
-
+      
       if (this%current_list(ic1)%type.eq.21 .and. this%current_list(ic2)%type.eq.21) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -1093,7 +1053,7 @@ contains
       ! 5. For anti-quark currents ???
       implicit none
       integer :: i,j,k,nc1,nc2
-      logical :: gluon_current,colour_singlet1,colour_singlet2
+      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark
       integer,dimension(isize) :: ip
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
@@ -1162,17 +1122,47 @@ contains
          if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
       endif
       if (.not. gluon_current) then
-         ! if quark is in there, it should be the very first particle
+         ! if the very first particle is in the current, it should be in the
+         ! first position. (Note that this must be a quark)
          if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
               this%current_list(ic1)%order(1).ne.order(1)) then
-              !stop 10
-              return
-         endif
-         if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) then
-            !stop 11
             return
          endif
+         if (any(this%current_list(ic2)%order(1:n2).eq.order(1))) then
+            return
+         endif
+
+         ! for two quark lines. Should be of the form "q g..g qbar q g..g qbar" or any subset thereof. 
+         ip(1:isize)=[this%current_list(ic1)%order(1:n1),this%current_list(ic2)%order(1:n2)]
+         found_quark=.false.
+         found_antiquark=.false.
+         do i=1,isize
+            if (is_quark(ip(i))) then
+               ! found a quark.
+               if (found_quark) then
+                  ! no anti-quark between two quarks
+                  return
+               endif
+               found_antiquark=.false.
+               found_quark=.true.
+            elseif (is_antiquark((ip(i)))) then
+               ! found an anti-quark
+               if (found_antiquark) then
+                  ! no quark between two anti-quarks
+                  return
+               endif
+               ! next one must be a quark:
+               if (i.lt.isize) then
+                  if (.not. (is_quark(ip(i+1)))) then
+                     return
+                  endif
+               endif
+               found_quark=.false.
+               found_antiquark=.true.
+            endif
+         enddo
       endif
+
       valid_current_combination=.true.
 
     end function valid_current_combination
@@ -1321,7 +1311,6 @@ contains
          do j=1,switch(2)
             do k=1,switch(3)
                nperm=nperm+1
-
                if (k.eq.1) then
                   ip(1:isize,nperm)=combined_currents(n1,n2,ip1(1:n1,i),ip2(1:n2,j),&
                        singlet_mv(0,nperm))
@@ -1330,11 +1319,18 @@ contains
                        singlet_mv(0,nperm))
                endif
                vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.2 .and. mod(n1,2).eq.0))
-               if (.not.valid_current_order(ip(1:isize,nperm))) nperm=nperm-1
+               if (.not.valid_current_order_excl_symmetry(ip(1:isize,nperm))) nperm=nperm-1
             enddo
          enddo
       enddo
 
+      if (nperm.eq.0) then
+         write (*,*) switch,ag1,ag2
+         write (*,*) this%current_list(ic1)%order(1:n1),quark_in_current(this%current_list(ic1)%order(1:n1),n1)
+         write (*,*) this%current_list(ic2)%order(1:n2),quark_in_current(this%current_list(ic2)%order(1:n2),n2)
+         write (*,*) ''
+      endif
+      
       iden=.true.
       if (all(singlet_mv(0,1:nperm).eq.singlet_mv(0,1))) then
          do i=2,nperm
@@ -1355,168 +1351,22 @@ contains
       endif
     end subroutine check_all_permutations
     
-    logical function valid_current_order(ip)
+    logical function valid_current_order_excl_symmetry(ip)
       ! Checks that ip(1:isize) is an order for a current to be considered
       ! when use_symmetry=.true. --> the smallest number needs to come before
-      ! the largest number in this list.
+      ! the largest number in this list. 
       implicit none
       integer :: i,j,maxi,mini,min_loc,max_loc,k,length
       integer,dimension(isize) :: ip,ip_q
       integer,dimension(2*this%n_qqbar) :: quarks
+
+      ! if there is a quark (or anti-quark) in the current, no symmetry can be
+      ! used. Hence, this is a valid order
+      if (popcnt(quark_in_current(ip,isize)).ge.1) then
+         valid_current_order_excl_symmetry=.true.
+         return
+      endif
       
-      if (this%n_qqbar.eq.1 .and. (any(ip(2:isize).eq.order(1)))) then
-         ! if there is a quark, it needs to be in the first position
-         valid_current_order=.false.
-         !stop 10
-         return
-      endif
-      if (this%n_qqbar.eq.1 .and. ip(1).eq.order(1)) then
-         ! if there is a quark, and it is part of the current (it must be at
-         ! position 1), then it is a valid order, since no symmetry can be
-         ! used.
-         valid_current_order=.true.
-         return
-      endif
-
-      k=1
-      do i=1,n
-         if (abs(part(order(i))).ge.1.and.abs(part(order(i))).le.6) then
-                 quarks(k)=order(i)
-                 k=k+1
-         endif
-      enddo
-
-      k=1
-      ip_q=0
-      if (this%n_qqbar.ge.2) then
-         do i=1,isize
-            if (any(quarks.eq.ip(i))) then
-                 ip_q(k)=ip(i)
-                 k=k+1
-            endif
-         enddo
-         length=k-1
-      endif
-
-
-      if (this%n_qqbar.ge.2) then
-         do i=1,4
-           if (ip_q(1).eq.quarks(i)) then
-              if (i+length-1.gt.4) then
-                 valid_current_order=.false.
-                 return
-              endif
-
-              if ((any(ip.eq.quarks(2))).and.(any(ip.eq.quarks(3)))) then ! gluons cannot be between the two internal quark pair in order
-                  do j=1,isize
-                     if (ip(j).eq.quarks(2)) then
-                        if (j.eq.isize) then
-                            valid_current_order=.false.
-                            return
-                        endif
-                        if (ip(j+1).ne.quarks(3)) then
-                                valid_current_order=.false.
-                                return
-                        endif
-                     endif    
-                  enddo
-              endif
-              if ((any(ip.eq.quarks(2))).and..not.(any(ip.eq.quarks(3)))) then ! gluons cannot be between the two internal quark pair in order
-                 if ((ip(isize).ne.quarks(2))) then
-                   valid_current_order=.false.
-                   return
-                 endif
-              endif
-              if ((any(ip.eq.quarks(3))).and..not.(any(ip.eq.quarks(2)))) then ! gluons cannot be between the two internal quark pair in order
-                 if ((ip(1).ne.quarks(3))) then
-                   valid_current_order=.false.
-                   return
-                 endif
-              endif
-
-
-              if (all(ip_q(1:length).eq.quarks(i:i+length-1))) then
-                  valid_current_order=.true.
-                  return
-              else
-                  valid_current_order=.false.
-                  return
-              endif
-              
-           endif
-         enddo
-      endif
-     
-      if (this%n_qqbar.eq.2) then
-      if (quark_in_current(ip,isize).le.4) then ! one quark only-> OK
-         valid_current_order=.true.
-         maxi=0
-         mini=100
-         do i=1,isize
-          if (ip(i).gt.maxi) then
-            maxi=ip(i)
-            max_loc=i
-           endif
-           if (ip(i).lt.mini) then
-            mini=ip(i)
-            min_loc=i
-           endif
-         enddo
-         if (min_loc.gt.max_loc) then
-           valid_current_order=.false.
-           return
-         endif
-         return
-      endif
-      if (quark_in_current(ip,isize).ge.11.and.&
-              quark_in_current(ip,isize).le.14) then ! three quarks -> OK
-         valid_current_order=.true.
-         maxi=0
-         mini=100
-         do i=1,isize
-          if (ip(i).gt.maxi) then
-            maxi=ip(i)
-            max_loc=i
-           endif
-           if (ip(i).lt.mini) then
-            mini=ip(i)
-            min_loc=i
-           endif
-        enddo
-        if (min_loc.gt.max_loc) then
-         valid_current_order=.false.
-         return
-        endif
-        return
-      endif
-      if ((quark_in_current(ip,isize).eq.5 &
-              .or.quark_in_current(ip,isize).eq.10))  then
-         valid_current_order=.true.
-         maxi=0
-         mini=100
-         do i=1,isize
-          if (ip(i).gt.maxi) then
-            maxi=ip(i)
-            max_loc=i
-           endif
-           if (ip(i).lt.mini) then
-            mini=ip(i)
-            min_loc=i
-           endif
-        enddo
-        if (min_loc.gt.max_loc) then
-         valid_current_order=.false.
-         return
-        endif
-      return
-      endif
-
-      if (quark_in_current(ip,isize).eq.15) then ! four quarks -> OK
-         valid_current_order=.true.
-         return
-      endif
-      endif
-
       ! This must be an all-gluon (or tensor) current. Here we take only one
       ! single order. Define it such that smallest label comes before the
       ! biggest. This must be compatible with what orders are skipped in
@@ -1534,126 +1384,24 @@ contains
          endif
       enddo
       if (min_loc.gt.max_loc) then
-         valid_current_order=.false.
+         valid_current_order_excl_symmetry=.false.
          return
       endif
-      valid_current_order=.true.
-    end function valid_current_order
+      valid_current_order_excl_symmetry=.true.
+    end function valid_current_order_excl_symmetry
 
     integer function quark_in_current(ip,isize)
+      ! binary function that checks which 'quark_index' is an external
+      ! particle part of the current. (i.e., It sets the first bit if
+      ! quark_index(1) is part of the current, the second bit if
+      ! quark_index(2) is part of the current, etc.)
       implicit none
-      integer :: isize,i,j
+      integer :: isize,i
       integer,dimension(isize) :: ip
-
       quark_in_current=0
-      do i=1,isize
-        ! q
-        if(ip(i).eq.this%quark_index(1).and.(.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(3))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=1
-            exit
-        endif
-        ! qx
-        if(ip(i).eq.this%quark_index(2).and.(.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(3))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=2
-            exit
-        endif
-        ! q'
-        if(ip(i).eq.this%quark_index(3).and.(.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=3
-            exit
-        endif
-        ! qx'
-        if(ip(i).eq.this%quark_index(4).and.(.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(3)))) then
-            quark_in_current=4
-            exit
-        endif
-        ! q-qx
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(3))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=5
-            exit
-        endif
-        ! q-q'
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(2))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=6
-            exit
-        endif
-        ! q-qx'
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(4)).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(2)))) then
-            quark_in_current=7
-            exit
-        endif
-        ! qx-q'
-        if(ip(i).eq.this%quark_index(2).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=8
-            exit
-        endif
-        ! qx-q'
-        if(ip(i).eq.this%quark_index(2).and.any(ip(1:isize).eq.this%quark_index(4)).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(3)))) then
-            quark_in_current=9
-            exit
-        endif
-        ! q'-qx'
-        if(ip(i).eq.this%quark_index(3).and.any(ip(1:isize).eq.this%quark_index(4)).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(1))).and.&
-               (.not.any(ip(1:isize).eq.this%quark_index(2)))) then
-            quark_in_current=10
-            exit
-        endif
-        ! q-qx-q'
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
-               any(ip(1:isize).eq.this%quark_index(3)).and.&
-              (.not.any(ip(1:isize).eq.this%quark_index(4)))) then
-            quark_in_current=11
-            exit
-        endif
-        ! q-qx-qx'
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
-               any(ip(1:isize).eq.this%quark_index(4)).and.&
-              (.not.any(ip(1:isize).eq.this%quark_index(3)))) then
-            quark_in_current=12
-            exit
-        endif
-        ! q-q'-qx'
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
-               any(ip(1:isize).eq.this%quark_index(4)).and.&
-              (.not.any(ip(1:isize).eq.this%quark_index(2)))) then
-            quark_in_current=13
-            exit
-        endif
-        ! qx-q'-qx'
-        if(ip(i).eq.this%quark_index(2).and.any(ip(1:isize).eq.this%quark_index(3)).and.&
-               any(ip(1:isize).eq.this%quark_index(4)).and.&
-              (.not.any(ip(1:isize).eq.this%quark_index(1)))) then
-            quark_in_current=14
-            exit
-        endif
-        ! q-qx-q'-qx'
-        if(ip(i).eq.this%quark_index(1).and.any(ip(1:isize).eq.this%quark_index(2)).and.&
-               any(ip(1:isize).eq.this%quark_index(3)).and.&
-               any(ip(1:isize).eq.this%quark_index(4))) then
-            quark_in_current=15
-            exit
-        endif
+      do i=1,2*this%n_qqbar
+         if (any(this%quark_index(i).eq.ip(1:isize))) quark_in_current=ibset(quark_in_current,i-1)
       enddo
-
     end function quark_in_current
 
 
@@ -1713,10 +1461,10 @@ contains
             call get_value(ip,-1,val)
          elseif (ctype.ge.1 .and. ctype.le.6) then
             ! quark current
-            call get_value(ip,1,val)
+            call get_value(ip,2*ctype-1,val)
          elseif (ctype.ge.-6 .and. ctype.le.-1) then
             ! anti-quark current
-            call get_value(ip,2,val)
+            call get_value(ip,2*abs(ctype),val)
          endif
 
          !do ic=1,this%n_cur
@@ -1762,10 +1510,11 @@ contains
       ! create a larger dictionary than strictly needed.
       implicit none
       integer :: size,i,j,key
-      integer(kind=8) :: val
+      integer(kind=8) :: val,previous_val
       integer,dimension(:),allocatable :: ips_in,ips
       key=n  ! skip the external currents.
       size=n
+      previous_val=0
       do isize=2,n-1
          size=size*(n-isize+1)
          allocate(ips_in(1:isize))
@@ -1780,123 +1529,158 @@ contains
                call get_next_iperm(isize,ips_in,ips,n)
                ips_in=ips
             endif
-            if ((.not.use_symmetry) .or. valid_current_order(ips_in)) then
-               if (any(ips_in(1:isize).eq.order(n))) cycle ! should not contain last closing particle 
-               if (this%n_qqbar.eq.0 .or. &
-                  (this%n_qqbar.eq.1.and.all(ips_in(1:isize).ne.order(1)))) then
-                  
-                  key=key+1
-                  call get_value(ips_in,0,val) ! add the gluon
-                  current_dict(key)=val
-                  if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
-                     key=key+1
-                     call get_value(ips_in,-1,val)
-                     current_dict(key)=val
-                  endif
-
-                elseif (this%n_qqbar.eq.2) then
-                     if ((this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(1)))).and.&
-                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(2)))).and.&
-                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(3)))).and.&
-                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4))))) then
-                        key=key+1
-                        call get_value(ips_in,0,val) ! add the gluon
-                        current_dict(key)=val
-                        if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
-                           key=key+1
-                           call get_value(ips_in,-1,val)
-                           current_dict(key)=val
-                        endif
-                      endif
-               endif
-
-               if (this%n_qqbar.eq.1 .and. ips_in(1).eq.order(1)) then
-                  key=key+1
-                  call get_value(ips_in,1,val) ! add a quark
-                  current_dict(key)=val
-               endif
-
-               if (this%n_qqbar.eq.2) then
-               if (quark_in_current(ips_in,isize).eq.1) then
-                  key=key+1
-                  call get_value(ips_in,1,val) ! add a quark
-                  current_dict(key)=val
-               endif
-               if (quark_in_current(ips_in,isize).eq.3) then
-                  key=key+1
-                  call get_value(ips_in,1,val) ! add a quark
-                  current_dict(key)=val
-               endif
-              
-               if (quark_in_current(ips_in,isize).eq.2) then
-                  key=key+1
-                  call get_value(ips_in,2,val) ! add a quark
-                  current_dict(key)=val
-               endif
-               if (quark_in_current(ips_in,isize).eq.4) then
-                  key=key+1
-                  call get_value(ips_in,2,val) ! add a quark
-                  current_dict(key)=val
-               endif
-
-               if (quark_in_current(ips_in,isize).eq.5) then
-                  key=key+1
-                  call get_value(ips_in,0,val) ! add the gluon
-                  current_dict(key)=val
-                  if (isize.ne.n-1) then ! add the tensor
-                     key=key+1
-                     call get_value(ips_in,-1,val)
-                     current_dict(key)=val
-                  endif
-               endif
-               if (quark_in_current(ips_in,isize).eq.10) then
-                  key=key+1
-                  call get_value(ips_in,0,val) ! add the gluon
-                  current_dict(key)=val
-                  if (isize.ne.n-1) then ! add the tensor
-                     key=key+1
-                     call get_value(ips_in,-1,val)
-                     current_dict(key)=val
-                  endif
-               endif
-
-               if (quark_in_current(ips_in,isize).eq.11) then
-                  key=key+1
-                  call get_value(ips_in,1,val) ! add a quark
-                  current_dict(key)=val
-               endif
-
-               if (quark_in_current(ips_in,isize).eq.12) then
-                  key=key+1
-                  call get_value(ips_in,2,val) ! add a a-quark
-                  current_dict(key)=val
-               endif
-
-               if (quark_in_current(ips_in,isize).eq.13) then
-                  key=key+1
-                  call get_value(ips_in,1,val) ! add a quark
-                  current_dict(key)=val
-               endif
-
-               if (quark_in_current(ips_in,isize).eq.14) then
-                  key=key+1
-                  call get_value(ips_in,1,val) ! add a a-quark
-                  current_dict(key)=val
-               endif
-
-               if (quark_in_current(ips_in,isize).eq.15) then
-                  key=key+1
-                  call get_value(ips_in,0,val) ! add the gluon
-                  current_dict(key)=val
-                  if (isize.ne.n-1) then ! add the tensor
-                     key=key+1
-                     call get_value(ips_in,-1,val)
-                     current_dict(key)=val
-                  endif
-               endif
-              endif
-
+            ! add the gluon:
+            key=key+1
+            call get_value(ips_in,0,val)
+            if (val.le.previous_val) then
+               write (*,*) 'inconsistent current dictionary #1',val,previous_val
+               stop 1
             endif
+            current_dict(key)=val
+            ! add the tensor
+            key=key+1
+            call get_value(ips_in,-1,val)
+            if (val.le.previous_val) then
+               write (*,*) 'inconsistent current dictionary #2',val,previous_val
+               stop 1
+            endif
+            current_dict(key)=val
+            ! add the quarks and anti-quarks
+            do j=1,6
+               key=key+1
+               call get_value(ips_in,2*j-1,val) ! quarks are the odd ones
+               if (val.le.previous_val) then
+                  write (*,*) 'inconsistent current dictionary #3',val,previous_val
+                  stop 1
+               endif
+               current_dict(key)=val
+               key=key+1
+               call get_value(ips_in,2*j,val)   ! anti-quarks are the even ones
+               if (val.le.previous_val) then
+                  write (*,*) 'inconsistent current dictionary #4',val,previous_val
+                  stop 1
+               endif
+               current_dict(key)=val
+            enddo
+!!$
+!!$
+!!$            
+!!$            if ((.not.use_symmetry) .or. valid_current_order_excl_symmetry(ips_in)) then
+!!$               if (any(ips_in(1:isize).eq.order(n))) cycle ! should not contain last closing particle 
+!!$               if (this%n_qqbar.eq.0 .or. &
+!!$                  (this%n_qqbar.eq.1.and.all(ips_in(1:isize).ne.order(1)))) then
+!!$                  
+!!$                  key=key+1
+!!$                  call get_value(ips_in,0,val) ! add the gluon
+!!$                  current_dict(key)=val
+!!$                  if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
+!!$                     key=key+1
+!!$                     call get_value(ips_in,-1,val)
+!!$                     current_dict(key)=val
+!!$                  endif
+!!$
+!!$                elseif (this%n_qqbar.eq.2) then
+!!$                     if ((this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(1)))).and.&
+!!$                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(2)))).and.&
+!!$                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(3)))).and.&
+!!$                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4))))) then
+!!$                        key=key+1
+!!$                        call get_value(ips_in,0,val) ! add the gluon
+!!$                        current_dict(key)=val
+!!$                        if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
+!!$                           key=key+1
+!!$                           call get_value(ips_in,-1,val)
+!!$                           current_dict(key)=val
+!!$                        endif
+!!$                      endif
+!!$               endif
+!!$
+!!$               if (this%n_qqbar.eq.1 .and. ips_in(1).eq.order(1)) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,1,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$
+!!$               if (this%n_qqbar.eq.2) then
+!!$               if (quark_in_current(ips_in,isize).eq.1) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,1,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$               if (quark_in_current(ips_in,isize).eq.3) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,1,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$              
+!!$               if (quark_in_current(ips_in,isize).eq.2) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,2,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$               if (quark_in_current(ips_in,isize).eq.4) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,2,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$
+!!$               if (quark_in_current(ips_in,isize).eq.5) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,0,val) ! add the gluon
+!!$                  current_dict(key)=val
+!!$                  if (isize.ne.n-1) then ! add the tensor
+!!$                     key=key+1
+!!$                     call get_value(ips_in,-1,val)
+!!$                     current_dict(key)=val
+!!$                  endif
+!!$               endif
+!!$               if (quark_in_current(ips_in,isize).eq.10) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,0,val) ! add the gluon
+!!$                  current_dict(key)=val
+!!$                  if (isize.ne.n-1) then ! add the tensor
+!!$                     key=key+1
+!!$                     call get_value(ips_in,-1,val)
+!!$                     current_dict(key)=val
+!!$                  endif
+!!$               endif
+!!$
+!!$               if (quark_in_current(ips_in,isize).eq.11) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,1,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$
+!!$               if (quark_in_current(ips_in,isize).eq.12) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,2,val) ! add a a-quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$
+!!$               if (quark_in_current(ips_in,isize).eq.13) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,1,val) ! add a quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$
+!!$               if (quark_in_current(ips_in,isize).eq.14) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,1,val) ! add a a-quark
+!!$                  current_dict(key)=val
+!!$               endif
+!!$
+!!$               if (quark_in_current(ips_in,isize).eq.15) then
+!!$                  key=key+1
+!!$                  call get_value(ips_in,0,val) ! add the gluon
+!!$                  current_dict(key)=val
+!!$                  if (isize.ne.n-1) then ! add the tensor
+!!$                     key=key+1
+!!$                     call get_value(ips_in,-1,val)
+!!$                     current_dict(key)=val
+!!$                  endif
+!!$               endif
+!!$              endif
+!!$            endif
          enddo
          deallocate(ips_in)
          deallocate(ips)
@@ -1923,18 +1707,13 @@ contains
       do j=1,isize
          val=val+int(ips(isize+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
       enddo
-      ! Take the types into account (we have only 4 types (gluon,
-      ! tensor and quark and anti-quark), so multiply by three (and add one for the
-      ! tensor and two for quark))
-      val=val*int(4,kind=8) ! gluon
+      ! Take the types into account (we have only 14 types (gluon,
+      ! tensor and 6 quarks and 6 anti-quarks):
+      val=val*int(14,kind=8) ! gluon
       if (itype.eq.-1) then
          val=val+int(1,kind=8) ! tensor
-      endif
-      if (itype.eq.1) then
-         val=val+int(2,kind=8) ! quark
-      endif
-      if (itype.eq.2) then
-         val=val+int(3,kind=8) ! anti-quark
+      elseif (itype.ge.1) then
+         val=val+int(itype+1,kind=8) ! quark or anti-quark
       endif
     end subroutine get_value
 
@@ -1946,7 +1725,7 @@ contains
       implicit none
       integer :: key,left,middle,right
       integer(kind=8) :: val
-      if (this%n_qqbar.le.1) then
+!!$      if (this%n_qqbar.le.1) then
       left=1
       right=max_key
       do while (left.le.right)
@@ -1960,17 +1739,17 @@ contains
             left=middle+1
          endif
       enddo
-
-      elseif (this%n_qqbar.eq.2) then
-        middle = 0
-        do middle=1,max_key
-         if (current_dict(middle).eq.val) then
-            key=middle
-            return
-         endif
-        enddo
-        key=0
-      endif
+!!$
+!!$      elseif (this%n_qqbar.eq.2) then
+!!$        middle = 0
+!!$        do middle=1,max_key
+!!$         if (current_dict(middle).eq.val) then
+!!$            key=middle
+!!$            return
+!!$         endif
+!!$        enddo
+!!$        key=0
+!!$      endif
     end subroutine solve_dict
 
     subroutine get_next_iperm(ip,ips_in,ips,n)
@@ -2058,6 +1837,28 @@ contains
          endif
       enddo
     end function all_singlet_current
+    logical function is_quark(io)
+      ! 'io' should be a label in the colour order
+      implicit none
+      integer :: io
+      if ( (io.le.2  .and. (part(io).le.-1 .and. part(io).ge.-6)) .or. &
+           (io.gt.2  .and. (part(io).ge. 1 .and. part(io).le. 6))) then
+         is_quark=.true.
+      else
+         is_quark=.false.
+      endif
+    end function is_quark
+    logical function is_antiquark(io)
+      ! 'io' should be a label in the colour order
+      implicit none
+      integer :: io
+      if ( (io.le.2  .and. (part(io).ge. 1 .and. part(io).le. 6)) .or. &
+           (io.gt.2  .and. (part(io).le.-1 .and. part(io).ge.-6))) then
+         is_antiquark=.true.
+      else
+         is_antiquark=.false.
+      endif
+    end function is_antiquark
   end subroutine init
 
 
@@ -2372,11 +2173,6 @@ contains
             if (btest(ibin,i-1)) this%pp(0:3,ip)=this%pp(0:3,ip)+p(0:3,i)
          enddo
       enddo
-         !this%pp(0:3,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-         !this%pp(0:3,4)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-         !this%pp(0:3,2)=(/0.5000000E+03,  0.1109243E+03,  0.4448308E+03, -0.1995529E+03/)
-         !this%pp(0:3,3)=(/0.5000000E+03, -0.1109243E+03, -0.4448308E+03,  0.1995529E+03/)
-
     end subroutine fill_momentum_array
     subroutine compute_amps_from_currents
       implicit none
@@ -2389,11 +2185,6 @@ contains
                   this%amps_r(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_r(1:4,ih1)*this%current_list(n)%val_r(1:4,ih2))
                else
                   this%amps(this%helmap(ih))=sum(this%current_list(this%n_cur)%val_c(1:4,ih1)*this%current_list(n)%val_c(1:4,ih2))
-               !write(*,*) 'holahola0'
-               !write(*,*) this%amps(this%helmap(ih))
-
-               !write(*,*) this%current_list(n)%val_c(1:4,ih2)
-               !write(*,*) this%current_list(this%n_cur)%val_c(1:4,ih1)
                endif
             enddo
          enddo
@@ -2627,16 +2418,13 @@ contains
                 if (this%n_qqbar.eq.2 .and. uj.ne.ui) then
                    call get_other_quark_order(jper)
                 endif
-
                 key=solve_dict(get_value(jper(1:n)))
-
                 do rj=0,lim
                    call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
                    if (use_symm_cm.and.this%n_qqbar.ne.2) then
                       col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
                       if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
                    endif
-
                    do iacc=1,3
                       if (col_fac(iacc).eq.0d0) cycle
                       col_vals(iacc,key,iperm)=col_fac(iacc)
@@ -2685,15 +2473,13 @@ contains
     allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     if (color_flow) then
-!!$      allocate(this%col_index(1:((n-1)*this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
-      allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
+       allocate(this%col_index(1:isum,iperm_upper))
+       allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
     else
-!!$       allocate(this%col_index(1:(this%nColOrd)**2,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
        allocate(this%col_index(1:isum,iperm_upper))
        allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
     endif
     this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
-!!$    this%col_index(1,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
     this%col_index(1,1:iperm_upper)=0
     allocate(this%n_col_vals(1:3,iperm_upper))
     this%n_col_vals(1:3,1:iperm_upper)=n_vals(1:3,1:iperm_upper)

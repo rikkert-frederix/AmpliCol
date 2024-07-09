@@ -52,7 +52,7 @@ program matrix_reweight
   allocate(mass(next))
   allocate(width(next))
   allocate(p(0:3,next))
-  allocate(iper_test(1:next-1)) ! needed for 2qq
+  allocate(iper_test(1:next)) ! needed for 2qq
 
   mass(1:next)=0d0
   width(1:next)=0d0
@@ -266,14 +266,13 @@ program matrix_reweight
         elseif (amps(1)%n_qqbar.eq.2) then
            do it=1,2
            do irow=1,amps(it)%nColOrd
-              if (next.ge.5) then
-              iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow)] !
-              do i=1,next-1
+              if (next.ge.5) then ! there is at least one gluon
+                 iper_test(1:next)=amps(it)%perm(1:next,irow) !
+!!$                 write (*,*) it,irow,':',iper_test(1:next)
+              do i=2,next-2
                 if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
-                 if (i.ne.1) then
-                   gi = i - 2
+                   gi = i - 2 ! number of gluons in the colour order between the first quark and anti-quark
                    exit
-                 endif
                 endif
               enddo
               gi_iperm = gi + 1
@@ -282,13 +281,11 @@ program matrix_reweight
               endif
               if (next.ge.5) then
                 if (irow.ge.2) then
-                  iper_test(1:next-1)=[amps(it)%perm(1:next-1,irow-1)] !
-                  do i=1,next-1
+                  iper_test(1:next)=amps(it)%perm(1:next,irow-1) !
+                  do i=2,next-2
                    if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
-                     if (i.ne.1) then
-                       gi = i - 2
+                       gi = i - 2 ! number of gluons in the colour order between the first quark and anti-quark
                        exit
-                     endif
                     endif
                   enddo
                   gi_prev = gi + 1
@@ -304,12 +301,13 @@ program matrix_reweight
                  amp2_c=(0d0,0d0)
                  ic_low = amps(it)%row_index(irow-1,i,iacc,gi_prev)+1
                  if(gi_prev.ne.gi_iperm) then
-                   ic_low = 1
+                    ic_low = 1
                  endif
                  ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
                  do ic = ic_low,ic_upp
 !!$                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
                     icol=amps(it)%col_index(amps(it)%i_col_i(i,iacc)+ic,gi_iperm)
+
                     if (icol.le.amps(it)%nColOrd) then
                         amp2_c=amp2_c+amps(1)%amps(icol)
                     else
@@ -329,6 +327,10 @@ program matrix_reweight
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
+!!$
+!!$     write (*,*) matrix2
+!!$     stop 1
+     
      call write_event(12)
   enddo
   
