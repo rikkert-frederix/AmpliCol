@@ -862,7 +862,7 @@ contains
     integer :: i,j
     nq=0
     naq=0
-    ! count the number of final state gluons
+    ! count the number of final state gluons and quarks
     do i=3,next
        if (part(i).eq.21) then
           ngl=ngl+1
@@ -943,6 +943,14 @@ contains
        endif
     elseif (nquarks.eq.4) then
        sym_fac=factorial8(ngl)
+       do i=1,6
+          if (nq(i).gt.0) then
+              sym_fac=sym_fac*nq(i)
+          endif
+          if (naq(i).gt.0) then
+              sym_fac=sym_fac*naq(i)
+          endif
+       enddo
     else        
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif

@@ -2554,6 +2554,7 @@ contains
     integer :: key
     integer(kind=8),allocatable,dimension(:) :: perm_dict
     integer :: max_keys,jperm_lower
+    integer,allocatable,dimension(:,:) :: first_rows
     
     write (*,*) 'Initialising colour matrix ...'
 
@@ -2591,6 +2592,7 @@ contains
     allocate(this%i_col_i(max_vals,1:3))
     allocate(n_colour_elements(max_vals,1:3,iperm_upper))
     allocate(col_vals(1:3,max_keys,iperm_upper))
+    allocate(first_rows(1:n,iperm_upper))
 
 ! first check a single row in the colour matrix to determine how many
 ! different colour factors there are
@@ -2612,6 +2614,7 @@ contains
              enddo
              if (gi.eq.iperm-1) exit
           enddo
+          first_rows(1:n,gi_iperm) = iper
           gi_iperm = iperm
           uj_upper = 2
           ui = it
@@ -2732,7 +2735,7 @@ contains
 
             do rj=0,lim
     
-              if (use_cm_dict.and.this%n_qqbar.ne.2) then
+              if (use_cm_dict) then
                  ! GET color factors from permuting first row
                  call get_col_fac(iper_first,iper,jper,ui,uj,gi_iperm,col_fac)
               else
@@ -2778,14 +2781,14 @@ contains
      ! First row
      row_first(1:n-this%n_sing)=iper_first(1:n-this%n_sing)
      if (this%n_qqbar.eq.2) then
-        row_first(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+        row_first(1:n-this%n_sing)=first_rows(1:n,gi_iperm)
         if (uj.ne.ui) call get_other_quark_order(row_first)
      endif
 
      ! Row in consideration
      row_per(1:n-this%n_sing)=iper(1:n-this%n_sing)
      if (this%n_qqbar.eq.2) then
-        row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,jperm),order(n)]
+        row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,iperm),order(n)]
         if (uj.ne.ui) call get_other_quark_order(row_per)
      endif
 
