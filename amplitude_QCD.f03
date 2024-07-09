@@ -2614,8 +2614,8 @@ contains
              enddo
              if (gi.eq.iperm-1) exit
           enddo
-          first_rows(1:n,gi_iperm) = iper
           gi_iperm = iperm
+          first_rows(1:n,gi_iperm) = iper
           uj_upper = 2
           ui = it
        endif
