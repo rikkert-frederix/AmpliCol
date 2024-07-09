@@ -359,22 +359,22 @@ contains
     amps%n_qqbar= 0
     amps(1)%same_flav=.true.
     do i=1,next
-     if (i.le.2) then
-        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-           flav(k) = abs(orig_part(i))
-           k= k+1
-           if (orig_part(i).lt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
-        endif
-     else
-        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-           flav(k) = abs(orig_part(i))
-           k= k+1
-           if (orig_part(i).gt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
-        endif
-     endif
-     enddo
+       if (i.le.2) then
+          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+             flav(k) = abs(orig_part(i))
+             k= k+1
+             if (orig_part(i).lt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
+          endif
+       else
+          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+             flav(k) = abs(orig_part(i))
+             k= k+1
+             if (orig_part(i).gt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
+          endif
+       endif
+    enddo
 
-     if (any(flav(1:2*amps(1)%n_qqbar).ne.flav(1))) amps(1)%same_flav = .false.
+    if (any(flav(1:2*amps(1)%n_qqbar).ne.flav(1))) amps(1)%same_flav = .false.
   end subroutine fill_quark_info
 
 
@@ -546,47 +546,44 @@ contains
     integer, dimension(next) :: part
     integer :: i,j,sgn
     logical :: first
-
     if (amps(1)%same_flav) then
-   
-
-    if (chan.eq.2) then
-     do i=1,next
-       if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
-          first=.true.
-          do j=i+1,next
-             if (i.le.2.and.j.le.2) sgn=-1
-             if (i.le.2.and.j.gt.2) sgn=+1
-             if (i.gt.2.and.j.gt.2) sgn=-1
-             if (part(j).eq.sgn*part(i).and..not.first) then
-                part(i) = sign(abs(part(i))+1,part(i))
-                part(j) = sgn*(part(i))
-                exit
+       if (chan.eq.2) then
+          do i=1,next
+             if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
+                first=.true.
+                do j=i+1,next
+                   if (i.le.2.and.j.le.2) sgn=-1
+                   if (i.le.2.and.j.gt.2) sgn=+1
+                   if (i.gt.2.and.j.gt.2) sgn=-1
+                   if (part(j).eq.sgn*part(i).and..not.first) then
+                      part(i) = sign(abs(part(i))+1,part(i))
+                      part(j) = sgn*(part(i))
+                      exit
+                   endif
+                   if (part(j).eq.sgn*part(i).and.first) then
+                      first = .false.
+                   endif
+                enddo
              endif
-             if (part(j).eq.sgn*part(i).and.first) then
-                first = .false.
+          enddo
+       elseif (chan.eq.1) then
+          do i=1,next
+             if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
+                do j=i+1,next
+                   if (i.le.2.and.j.le.2) sgn=-1
+                   if (i.le.2.and.j.gt.2) sgn=+1
+                   if (i.gt.2.and.j.gt.2) sgn=-1
+                   if (part(j).eq.sgn*part(i)) then
+                      part(i) = sign(abs(part(i))+1,part(i))
+                      part(j) = sgn*(part(i))
+                      exit
+                   endif
+                enddo
+                exit
              endif
           enddo
        endif
-     enddo
-    elseif (chan.eq.1) then
-      do i=1,next
-       if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
-          do j=i+1,next
-           if (i.le.2.and.j.le.2) sgn=-1
-           if (i.le.2.and.j.gt.2) sgn=+1
-           if (i.gt.2.and.j.gt.2) sgn=-1
-           if (part(j).eq.sgn*part(i)) then
-                part(i) = sign(abs(part(i))+1,part(i))
-                part(j) = sgn*(part(i))
-                exit
-           endif
-          enddo
-          exit
-        endif
-       enddo
-     endif
-   endif
+    endif
   end subroutine define_symm_2qq
 
 
