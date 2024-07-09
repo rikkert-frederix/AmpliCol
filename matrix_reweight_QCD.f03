@@ -68,7 +68,7 @@ program matrix_reweight
   call create_run_tag_and_open_files()
 
   call cpu_time(tBefore)
-
+  
   if (.not.allocated(part)) allocate(part(1:next))
   if (.not.allocated(part_sf)) allocate(part_sf(1:next))
   if (.not.allocated(orig_part)) allocate(orig_part(1:next))
@@ -90,55 +90,55 @@ program matrix_reweight
 
 
   if (amps(1)%n_qqbar.eq.2) then
-      do i=1,1  ! remaining amps for type-1
-         it = it + 1
-         call amps(2)%init(2,next,orig_part,part,mass,width,o,it)
-         col_acc=20
-         call amps(2)%init_col2(next,orig_part,o,it,col_acc)
-      enddo
-      !do i=2,next-4+1 ! amps for type-2
-      !   it = it + 1
-      !   call amps(it)%init(2,next,temp_part,o,it)
-      !   col_acc=20
-      !   call amps(it)%init_col2(next,temp_part,o,it,col_acc)
-      !enddo
+     do i=1,1  ! remaining amps for type-1
+        it = it + 1
+        call amps(2)%init(2,next,orig_part,part,mass,width,o,it)
+        col_acc=20
+        call amps(2)%init_col2(next,orig_part,o,it,col_acc)
+     enddo
+     !do i=2,next-4+1 ! amps for type-2
+     !   it = it + 1
+     !   call amps(it)%init(2,next,temp_part,o,it)
+     !   col_acc=20
+     !   call amps(it)%init_col2(next,temp_part,o,it,col_acc)
+     !enddo
   endif
 
   if (amps(1)%n_qqbar.eq.2.and.amps(1)%same_flav) then
-    part_sf(:)=orig_part(:)
-    call define_symm_2qq(next,part_sf,2)
-    it = 1
-    call amps(3)%init(2,next,orig_part,part_sf,mass,width,o,it)
-    col_acc=20
-    call amps(3)%init_col2(next,orig_part,o,it,col_acc)
-    
-    it = 2
-    call amps(4)%init(2,next,orig_part,part_sf,mass,width,o,it)
-    col_acc=20
-    call amps(4)%init_col2(next,orig_part,o,it,col_acc)
+     part_sf(:)=orig_part(:)
+     call define_symm_2qq(next,part_sf,2)
+     it = 1
+     call amps(3)%init(2,next,orig_part,part_sf,mass,width,o,it)
+     col_acc=20
+     call amps(3)%init_col2(next,orig_part,o,it,col_acc)
+
+     it = 2
+     call amps(4)%init(2,next,orig_part,part_sf,mass,width,o,it)
+     col_acc=20
+     call amps(4)%init_col2(next,orig_part,o,it,col_acc)
   endif
 
   if (color_flow) then
-        do i=2,2 ! TV: only single external U(1) for now!
-         skip = 1
-         do k=1,next-2 ! loop through alil gluons
-          temp_part = part
-          do j=1,next
-           if (temp_part(j).eq.21) then
-               if (j.le.skip) then
-                   cycle
-               endif
-               temp_part(j) = 22
-               skip = j
-               exit
-           endif           
+     do i=2,2 ! TV: only single external U(1) for now!
+        skip = 1
+        do k=1,next-2 ! loop through alil gluons
+           temp_part = part
+           do j=1,next
+              if (temp_part(j).eq.21) then
+                 if (j.le.skip) then
+                    cycle
+                 endif
+                 temp_part(j) = 22
+                 skip = j
+                 exit
+              endif
            enddo
            it = 0! dummy
-          call amps(i+k-1)%init(2,next,orig_part,temp_part,mass,width,o,it)
-          col_acc=20
-          call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
-         enddo
+           call amps(i+k-1)%init(2,next,orig_part,temp_part,mass,width,o,it)
+           col_acc=20
+           call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
         enddo
+     enddo
   endif
 
 
@@ -165,21 +165,21 @@ program matrix_reweight
      if (amps(1)%n_qqbar.eq.2) then
         call amps(2)%evaluate(next,p,mass,width,ihel,part)
         if (amps(1)%same_flav) then
-          call amps(3)%evaluate(next,p,mass,width,ihel,part)
-          call amps(4)%evaluate(next,p,mass,width,ihel,part)
-          
-          amps(1)%amps(:)=amps(1)%amps(:)+(1d0/3d0)*amps(3)%amps(:)
-          amps(2)%amps(:)=(1d0/3d0)*amps(2)%amps(:)+amps(4)%amps(:)
+           call amps(3)%evaluate(next,p,mass,width,ihel,part)
+           call amps(4)%evaluate(next,p,mass,width,ihel,part)
+
+           amps(1)%amps(:)=amps(1)%amps(:)+(1d0/3d0)*amps(3)%amps(:)
+           amps(2)%amps(:)=(1d0/3d0)*amps(2)%amps(:)+amps(4)%amps(:)
         endif
      endif
 
 
      if (color_flow) then
-       do i=2,2
-        do k=1,next-2
-         call amps(i+k-1)%evaluate(next,p,mass,width,ihel,part)
+        do i=2,2
+           do k=1,next-2
+              call amps(i+k-1)%evaluate(next,p,mass,width,ihel,part)
+           enddo
         enddo
-       enddo
      endif
 
      call cpu_time(tAfter)
@@ -231,94 +231,95 @@ program matrix_reweight
            if (color_flow) ri_end= 1 !next-2 for FC
            do ri=0,ri_end ! loop over no U(1) and one U(1) in the rows
               iacc_in=iacc
-           do k=1,ri*(next-2)+1
-              proc_num = ri+1+k-1
-              if (proc_num.gt.1) iacc_in=min(3,iacc+1)
-           do irow=1,amps(proc_num)%nColOrd
-              amp_col_c=(0d0,0d0)
-              irow_mat = irow
-              do i=1,amps(proc_num)%n_col_vals(iacc,1)
-                 amp2_c=(0d0,0d0)
-                 do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc,1)+1,amps(proc_num)%row_index(irow_mat,i,iacc,1)
+              do k=1,ri*(next-2)+1
+                 proc_num = ri+1+k-1
+                 if (proc_num.gt.1) iacc_in=min(3,iacc+1)
+                 do irow=1,amps(proc_num)%nColOrd
+                    amp_col_c=(0d0,0d0)
+                    irow_mat = irow
+                    do i=1,amps(proc_num)%n_col_vals(iacc,1)
+                       amp2_c=(0d0,0d0)
+                       do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc,1)+1,amps(proc_num)%row_index(irow_mat,i,iacc,1)
 !!$                    icol=amps(proc_num)%col_index(ic,i,iacc,1)
-                    icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc)+ic,1)
-                    icol_mat = icol
-                    if (proc_num.eq.1) then
-                       amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
-                    else
-                       if (icol_mat.eq.irow) then
-                          amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
+                          icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc)+ic,1)
+                          icol_mat = icol
+                          if (proc_num.eq.1) then
+                             amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
+                          else
+                             if (icol_mat.eq.irow) then
+                                amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
+                             endif
+                          endif
+                       enddo
+                       if (proc_num.gt.1) then
+                          amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)*(-1d0/3d0)
+                       else
+                          amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)
                        endif
-                    endif
+                    enddo
+                    matrix2(iacc_in)=matrix2(iacc_in)+dble(amp_col_c*conjg(amps(proc_num)%amps(irow)))
                  enddo
-                 if (proc_num.gt.1) then
-                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)*(-1d0/3d0)
-                 else
-                   amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)
-                 endif
               enddo
-              matrix2(iacc_in)=matrix2(iacc_in)+dble(amp_col_c*conjg(amps(proc_num)%amps(irow)))
-           enddo
-           enddo
            enddo
 
 
         elseif (amps(1)%n_qqbar.eq.2) then
            do it=1,2
-           do irow=1,amps(it)%nColOrd
-              if (next.ge.5) then ! there is at least one gluon
-                 iper_test(1:next)=amps(it)%perm(1:next,irow) !
+              do irow=1,amps(it)%nColOrd
+                 if (next.ge.5) then ! there is at least one gluon
+                    iper_test(1:next)=amps(it)%perm(1:next,irow) !
 !!$                 write (*,*) it,irow,':',iper_test(1:next)
-              do i=2,next-2
-                if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
-                   gi = i - 2 ! number of gluons in the colour order between the first quark and anti-quark
-                   exit
-                endif
-              enddo
-              gi_iperm = gi + 1
-              else
-                gi_iperm=1
-              endif
-              if (next.ge.5) then
-                if (irow.ge.2) then
-                  iper_test(1:next)=amps(it)%perm(1:next,irow-1) !
-                  do i=2,next-2
-                   if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
-                       gi = i - 2 ! number of gluons in the colour order between the first quark and anti-quark
-                       exit
-                    endif
-                  enddo
-                  gi_prev = gi + 1
-                else
-                  gi_prev = 1
-                endif
-              else
-                 gi_prev=1
-              endif
-
-              amp_col_c=(0d0,0d0)
-              do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
-                 amp2_c=(0d0,0d0)
-                 ic_low = amps(it)%row_index(irow-1,i,iacc,gi_prev)+1
-                 if(gi_prev.ne.gi_iperm) then
-                    ic_low = 1
+                    do i=2,next-2
+                       if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
+                          gi = i - 2 ! number of gluons in the colour order between the first quark and anti-quark
+                          exit
+                       endif
+                    enddo
+                    gi_iperm = gi + 1
+                 else
+                    gi_iperm=1
                  endif
-                 ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
-                 do ic = ic_low,ic_upp
-!!$                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
-                    icol=amps(it)%col_index(amps(it)%i_col_i(i,iacc)+ic,gi_iperm)
-
-                    if (icol.le.amps(it)%nColOrd) then
-                        amp2_c=amp2_c+amps(1)%amps(icol)
+                 if (next.ge.5) then
+                    if (irow.ge.2) then
+                       iper_test(1:next)=amps(it)%perm(1:next,irow-1) !
+                       do i=2,next-2
+                          if ((abs(part(iper_test(i))).ge.1.and.abs(part(iper_test(i))).le.6)) then
+                             gi = i - 2 ! number of gluons in the colour order between the first quark and anti-quark
+                             exit
+                          endif
+                       enddo
+                       gi_prev = gi + 1
                     else
-                        icol = icol -amps(it)%nColOrd
-                        amp2_c=amp2_c+amps(2)%amps(icol)
+                       gi_prev = 1
                     endif
+                 else
+                    gi_prev=1
+                 endif
+
+                 amp_col_c=(0d0,0d0)
+                 do i=1,amps(it)%n_col_vals(iacc,gi_iperm) 
+                    amp2_c=(0d0,0d0)
+                    ic_low = amps(it)%row_index(irow-1,i,iacc,gi_prev)+1
+                    if(gi_prev.ne.gi_iperm) then
+                       ic_low = 1
+                    endif
+                    ic_upp = amps(it)%row_index(irow,i,iacc,gi_iperm)
+                    do ic = ic_low,ic_upp
+!!$                    icol=amps(it)%col_index(ic,i,iacc,gi_iperm)
+                       icol=amps(it)%col_index(amps(it)%i_col_i(i,iacc)+ic,gi_iperm)
+
+                       if (icol.le.amps(it)%nColOrd) then
+                          amp2_c=amp2_c+amps(1)%amps(icol)
+                       else
+!!$                        if (iacc.eq.1) cycle
+                          icol = icol -amps(it)%nColOrd
+                          amp2_c=amp2_c+amps(2)%amps(icol)
+                       endif
+                    enddo
+                    amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc,gi_iperm)
                  enddo
-                 amp_col_c=amp_col_c+amp2_c*amps(it)%diff_col_vals(i,iacc,gi_iperm)
+                 matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
               enddo
-              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(it)%amps(irow)))
-           enddo
            enddo
         endif
 
@@ -327,10 +328,10 @@ program matrix_reweight
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
-!!$
+
 !!$     write (*,*) matrix2
 !!$     stop 1
-     
+
      call write_event(12)
   enddo
   
