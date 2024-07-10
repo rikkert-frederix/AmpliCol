@@ -233,6 +233,8 @@ contains
             call check_2qq_order(nc,ind)
             this%perm(1:n-this%n_sing,ind) = [this%current_list(nc)%order(1:n-1-this%n_sing),&
                  this%current_list(this%n_cur_start(n))%order(1)]
+!!$            this%perm(1:n-this%n_sing,nc-this%n_cur_start(n-1)+1)=[this%current_list(this%n_cur_start(1))%order(1),&
+!!$                 this%current_list(nc)%order(2:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
          enddo
       endif
     end subroutine allocate_and_fill_colour_permutations
@@ -244,33 +246,33 @@ contains
       integer,dimension(1:n-4-this%n_sing) :: gluons
 
       if (n-4-this%n_sing.gt.0) then
-      allocate(this%buff(1:n-2-this%n_sing,(n-2-this%n_sing)*factorial(n-4-this%n_sing))) ! for photons: change
-      this%buff(:,:)=0
+         allocate(this%buff(1:n-2-this%n_sing,(n-3-this%n_sing)*factorial(n-4-this%n_sing)))
 
-      k=1
-      do i=1,n
-         if (part(i).eq.21) then
-                 gluons(k)=i
-                 k=k+1
-          endif
-      enddo
+         k=1
+         do i=1,n
+            if (part(i).eq.21) then
+               gluons(k)=i
+               k=k+1
+            endif
+         enddo
 
-      m = 1
-      do i=1,n-2-this%n_sing-1
-         do j=1,n-4-this%n_sing
-           first(j) = j
+         m = 1
+         do i=0,n-4-this%n_sing ! loop over the number of gluons between the first quark and anti-quark in the order
+            do j=1,n-4-this%n_sing
+               first(j) = j
+            enddo
+            do k=1,factorial(n-4-this%n_sing) ! loop over all gluon permutations
+               call get_next_iperm(n-4-this%n_sing,first,perm_out,n-4-this%n_sing)
+               do q=1,n-4-this%n_sing
+                  perm_in(q) = gluons(perm_out(q))
+               enddo
+               this%buff(1:i,m) = perm_in(1:i) ! gluons between the first quark and anti-quark
+               this%buff(i+1:i+2,m)=0          ! the anti-quark and quark. 
+               this%buff(i+3:n-2-this%n_sing,m) = perm_in(i+1:n-4-this%n_sing) ! gluons between the second quark and anti-quark
+               first = perm_out
+               m = m+1
+            enddo
          enddo
-         do k=1,factorial(n-4-this%n_sing)
-           call get_next_iperm(n-4-this%n_sing,first,perm_out,n-4-this%n_sing)
-           do q=1,n-4-this%n_sing
-              perm_in(q) = gluons(perm_out(q))
-           enddo
-           this%buff(1:i-1,m) = perm_in(1:i-1)
-           this%buff(i+2:n-2-this%n_sing,m) = perm_in(i:n-4-this%n_sing)
-           first = perm_out
-           m = m+1
-         enddo
-      enddo
 
       endif
     end subroutine setup_buff_2qq
@@ -280,25 +282,26 @@ contains
       integer :: nc,ind
       integer :: i
       integer,dimension(1:n-2-this%n_sing) :: ord
-
-      if (n-4-this%n_sing.gt.0) then
-      ord = this%current_list(nc)%order(2:n-1)
-      do i=1,n-2
-        if (is_quark(ord(i)).or.is_antiquark(ord(i))) then
-              ord(i)=0
-        endif
-      enddo
-
-      do i=1,(n-2-this%n_sing)*factorial(n-4-this%n_sing)
-          if (all(this%buff(:,i).eq.ord)) then
-                  ind = i
-                  return
-          endif
-      enddo
-      
+      if (n-4-this%n_sing.gt.0) then ! there is at least one gluon
+         ord(1:n-2-this%n_sing) = this%current_list(nc)%order(2:n-1)
+         do i=1,n-2
+            if (is_quark(ord(i)).or.is_antiquark(ord(i))) then
+               ord(i)=0
+            endif
+         enddo
+         do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
+            if (all(this%buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
+               ind = i
+               return
+            endif
+         enddo
+         if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
+            write (*,*) 'check_2qq_order failed: order not found in list',i
+            write (*,*) nc,':',this%current_list(nc)%order(1:n)
+            stop 1
+         endif
       else
-      ind = 1 
-
+         ind = 1  ! no gluons. Only one color order, so this is trivial.
       endif
     end subroutine check_2qq_order
 
@@ -393,17 +396,17 @@ contains
             iaq=iaq+1
             !order(n)=i ! for one-qq
             if (it.eq.1)then 
-              if (iaq.eq.1) then
-               order(n)=i
-              else
-               order(n-2)=i
-              endif
+               if (iaq.eq.1) then
+                  order(n)=i
+               else
+                  order(n-2)=i
+               endif
             elseif (it.eq.2) then
-              if (iaq.eq.1) then
-               order(n-2)=i
-              else
-               order(n)=i
-              endif
+               if (iaq.eq.1) then
+                  order(n-2)=i
+               else
+                  order(n)=i
+               endif
             endif
          elseif (part(i).eq.22) then
             ising=ising+1
@@ -1041,16 +1044,21 @@ contains
       ! 0. All particles must be different in the two currents & final
       !    particle should never be part of the combined currents (it will be
       !    used to close the currents)
-      ! 1. For imode=1 or 3, we need to make sure that the colour order is compatible with the input colour order
-      ! 2. For imode=2 and use_symmetry=.true. --> skip one of the two colour orders if all gluons in current
+      ! 1. For imode=1 or 3, we need to make sure that the colour order is
+      !    compatible with the input colour order
+      ! 2. For imode=2 and use_symmetry=.true. --> skip one of the two colour
+      !    orders if all gluons in current
       ! 3. For colour singlets:
-      !  --> if one (or two) of the two currents is (are) a singlet, only include one of the two orders
-      !  --> order of singlets themselves should be ignored in this check: all must be included
-      ! 4. For quark currents:
-      ! --> Only the first of the two currents can be a quark current, and for
-      !     that current the first particle in the colour order must be a
-      !     quark.
-      ! 5. For anti-quark currents ???
+      !  --> if one (or two) of the two currents is (are) a singlet, only
+      !      include one of the two orders
+      !  --> order of singlets themselves should be ignored in this check: all
+      !      must be included
+      ! 5. If it is not a gluon current, and if the first particle (of the
+      !    colour order) is in the current, this must come in the first
+      !    place. Note that this is consistent with the 'it' parameter in
+      !    define_canonical_order() for the two-quark-line case.
+      ! 6. In general, the current must be of the format "q g..g qbar q g..g
+      !    qbar" or any subset thereof.
       implicit none
       integer :: i,j,k,nc1,nc2
       logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark
@@ -1109,12 +1117,6 @@ contains
          enddo
       endif
 
-      ! The second current cannot be a quark current
-      !if ( this%current_list(ic2)%type.ge.1 .and. this%current_list(ic2)%type.le.6) return
-      ! If the first current is a quark current, the first particle in the order must be the quark
-      !if ((this%current_list(ic1)%type.ge.1 .and. this%current_list(ic1)%type.le.6) .and. &
-      !     this%current_list(ic1)%order(1).ne.order(1)) return
-
       ! If using symmetry and the current is a combination of all external
       ! gluons, take only one of the two possible orders
       gluon_current=all_gluon_current(this%current_list(ic1)%bin+this%current_list(ic2)%bin)
@@ -1122,8 +1124,13 @@ contains
          if (maxval(this%current_list(ic1)%order(1:n1)).ge.maxval(this%current_list(ic2)%order(1:n2))) return
       endif
       if (.not. gluon_current) then
-         ! if the very first particle is in the current, it should be in the
-         ! first position. (Note that this must be a quark)
+         ! If the very first particle is in the current, it should be in the
+         ! first position. Note that this must be a quark! This also means
+         ! that for one *and* two-quark-line amplitudes, both the first and
+         ! final particle in the orders are fixed. Hence, for the
+         ! two-quark-line case only one of the two possibilities of the
+         ! quarks/anti-quarks ordering is considered. This is consistent with
+         ! the use of the 'it' variable in the 'define_canonical_color_order'.
          if (any(this%current_list(ic1)%order(1:n1).eq.order(1)) .and. &
               this%current_list(ic1)%order(1).ne.order(1)) then
             return
@@ -2031,8 +2038,8 @@ contains
 
                  elseif(this%interaction_list(iv)%type.eq.4) then
                     if (use_real_gluons) then
-                       call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
-                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4,ih2),&
+                       call GluonQuarktoQuark_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4,ih1),&
+                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4,ih2),&
                                                    this%interaction_list(iv)%val_c(1:4,ih))
                     else
                        call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4,ih1),&
@@ -2197,6 +2204,7 @@ contains
                if (this%n_qqbar.eq.2) then
                   call check_2qq_order(ic,ind)
                   this%amps(ind) = sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+!!$                  this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
                else        
                   this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
                endif     
@@ -2232,33 +2240,32 @@ contains
     end subroutine compute_amps_from_currents
 
     subroutine check_2qq_order(nc,ind)
+      use math_functions
       implicit none
       integer :: nc,ind
       integer :: i
       integer,dimension(1:n-2-this%n_sing) :: ord
-
-      if (n-4-this%n_sing.gt.0) then
-      ord = this%current_list(nc)%order(2:n-1)
-      do i=1,n-2
-        if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
-              ord(i)=0
-        endif
-      enddo
-
-      i = 1
-      do 
-          if (all(this%buff(:,i).eq.ord)) then
-                  ind = i
-                  return
-          endif
-          i = i+1
-      enddo
-
+      if (n-4-this%n_sing.gt.0) then ! there is at least one gluon
+         ord(1:n-2-this%n_sing) = this%current_list(nc)%order(2:n-1)
+         do i=1,n-2
+            if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
+               ord(i)=0
+            endif
+         enddo
+         do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
+            if (all(this%buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
+               ind = i
+               return
+            endif
+         enddo
+         if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
+            write (*,*) 'check_2qq_order failed: order not found in list',i
+            write (*,*) nc,':',this%current_list(nc)%order(1:n)
+            stop 1
+         endif
       else
-      ind = 1
-
+         ind = 1  ! no gluons. Only one color order, so this is trivial.
       endif
-
     end subroutine check_2qq_order
 
     subroutine combine_interactions(dim)
@@ -2417,9 +2424,7 @@ contains
           do jperm=1,this%nColOrd 
              do uj=1,uj_upper
                 jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
-                if (this%n_qqbar.eq.2 .and. uj.ne.ui) then
-                   call get_other_quark_order(jper)
-                endif
+                if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
                 key=solve_dict(get_value(jper(1:n)))
                 do rj=0,lim
                    call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
@@ -2510,9 +2515,7 @@ contains
           do jperm=jperm_lower,this%nColOrd
              do uj=1,uj_upper
                 jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
-                if (this%n_qqbar.eq.2 .and. uj.ne.ui) then
-                   call get_other_quark_order(jper)
-                endif
+                if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
 
                 do rj=0,lim
 
@@ -2562,16 +2565,11 @@ contains
      
      ! First row
      row_first(1:n-this%n_sing)=first_rows(1:n-this%n_sing,gi_iperm)
-     if (this%n_qqbar.eq.2) then
-        if (uj.ne.ui) call get_other_quark_order(row_first)
-     endif
+     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(row_first)
 
      ! Row in consideration
      row_per(1:n-this%n_sing)=iper(1:n-this%n_sing)
-     if (this%n_qqbar.eq.2) then
-        row_per(1:n-this%n_sing)=[this%perm(1:n-1-this%n_sing,iperm),order(n)]
-        if (uj.ne.ui) call get_other_quark_order(row_per)
-     endif
+     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(row_per)
 
      ! Column in consideration
      col_per(1:n-this%n_sing)=jper(1:n-this%n_sing)
