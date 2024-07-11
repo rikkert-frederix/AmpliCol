@@ -31,10 +31,10 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end,helmap, &
           pp_bin_to_i,pp_i_to_bin
      integer,dimension(:,:),allocatable ::  n_col_vals
-     integer,dimension(:,:),allocatable :: perm,i_col_i,col_index
+     integer,dimension(:,:),allocatable :: perm,col_index
      integer,dimension(:),allocatable :: quark_index
      integer,dimension(:,:,:,:),allocatable :: row_index
-     integer,dimension(:,:,:),allocatable :: u1_lin_comb
+     integer,dimension(:,:,:),allocatable :: u1_lin_comb,i_col_i
      integer,dimension(:,:),allocatable :: buff
      logical :: same_flav
    contains
@@ -2389,7 +2389,7 @@ contains
     endif
     allocate(n_vals(1:3,iperm_upper))
     allocate(diff_vals(max_vals,1:3,iperm_upper))
-    allocate(this%i_col_i(max_vals,1:3))
+    allocate(this%i_col_i(max_vals,1:3,iperm_upper))
     allocate(n_colour_elements(max_vals,1:3,iperm_upper))
     allocate(col_vals(1:3,max_keys,iperm_upper))
     allocate(first_rows(1:n,iperm_upper))
@@ -2464,13 +2464,13 @@ contains
     ! determine i_col_i:
     isum=1
     do iacc=1,3
-       do ival=1,n_vals(iacc,gi_iperm)
-          this%i_col_i(ival,iacc)=isum
-          isum=isum+n_colour_elements(ival,iacc,gi_iperm)*this%nColOrd
+       do gi_iperm=1,iperm_upper
+          do ival=1,n_vals(iacc,gi_iperm)
+             this%i_col_i(ival,iacc,gi_iperm)=isum
+             isum=isum+n_colour_elements(ival,iacc,gi_iperm)*this%nColOrd
+          enddo
        enddo
     enddo
-    if (this%n_qqbar.eq.2) isum=isum*2
-    
 
  ! Allocate the arrays now that we know their sizes
     allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
@@ -2539,7 +2539,7 @@ contains
 
                       ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
                       ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
-                      this%col_index(this%i_col_i(ival,iacc)+ic(ival,iacc,gi_iperm),gi_iperm)=&
+                      this%col_index(this%i_col_i(ival,iacc,gi_iperm)+ic(ival,iacc,gi_iperm),gi_iperm)=&
                            (rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
                    enddo
                 enddo
