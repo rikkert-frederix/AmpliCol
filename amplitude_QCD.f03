@@ -35,7 +35,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: quark_index
      integer,dimension(:,:,:,:),allocatable :: row_index
      integer,dimension(:,:,:),allocatable :: u1_lin_comb,i_col_i
-     integer,dimension(:,:),allocatable :: buff
+     integer,dimension(:),allocatable :: map_2qq_amps
      logical :: same_flav
    contains
      procedure :: init,evaluate,init_col2
@@ -228,26 +228,25 @@ contains
                  this%current_list(nc)%order(2:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
          enddo
       elseif (this%n_qqbar.eq.2) then
-         call setup_buff_2qq()
+         call setup_map_2qq_amps()
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            call check_2qq_order(nc,ind)
-            this%perm(1:n-this%n_sing,ind) = [this%current_list(nc)%order(1:n-1-this%n_sing),&
-                 this%current_list(this%n_cur_start(n))%order(1)]
-!!$            this%perm(1:n-this%n_sing,nc-this%n_cur_start(n-1)+1)=[this%current_list(this%n_cur_start(1))%order(1),&
-!!$                 this%current_list(nc)%order(2:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
+            this%perm(1:n-this%n_sing,this%map_2qq_amps(nc)) = &
+                 [this%current_list(nc)%order(1:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
          enddo
       endif
     end subroutine allocate_and_fill_colour_permutations
 
-    subroutine setup_buff_2qq
+    subroutine setup_map_2qq_amps
       implicit none
-      integer :: i,j,k,m,q
-      integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in
-      integer,dimension(1:n-4-this%n_sing) :: gluons
-
+      integer :: i,j,k,m,q,nc
+      integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in,gluons
+      integer,dimension(1:n-2-this%n_sing) :: ord
+      integer,dimension(1:n-2-this%n_sing,this%nColOrd) :: buff
+      
+      allocate(this%map_2qq_amps(this%nColOrd))
       if (n-4-this%n_sing.gt.0) then
-         allocate(this%buff(1:n-2-this%n_sing,(n-3-this%n_sing)*factorial(n-4-this%n_sing)))
 
+         ! first define 'buff', which will be the list of colour orders in canonical order
          k=1
          do i=1,n
             if (part(i).eq.21) then
@@ -255,7 +254,6 @@ contains
                k=k+1
             endif
          enddo
-
          m = 1
          do i=0,n-4-this%n_sing ! loop over the number of gluons between the first quark and anti-quark in the order
             do j=1,n-4-this%n_sing
@@ -266,44 +264,39 @@ contains
                do q=1,n-4-this%n_sing
                   perm_in(q) = gluons(perm_out(q))
                enddo
-               this%buff(1:i,m) = perm_in(1:i) ! gluons between the first quark and anti-quark
-               this%buff(i+1:i+2,m)=0          ! the anti-quark and quark. 
-               this%buff(i+3:n-2-this%n_sing,m) = perm_in(i+1:n-4-this%n_sing) ! gluons between the second quark and anti-quark
+               buff(1:i,m) = perm_in(1:i) ! gluons between the first quark and anti-quark
+               buff(i+1:i+2,m)=0          ! the anti-quark and quark. 
+               buff(i+3:n-2-this%n_sing,m) = perm_in(i+1:n-4-this%n_sing) ! gluons between the second quark and anti-quark
                first = perm_out
                m = m+1
             enddo
          enddo
 
-      endif
-    end subroutine setup_buff_2qq
-
-    subroutine check_2qq_order(nc,ind)
-      implicit none
-      integer :: nc,ind
-      integer :: i
-      integer,dimension(1:n-2-this%n_sing) :: ord
-      if (n-4-this%n_sing.gt.0) then ! there is at least one gluon
-         ord(1:n-2-this%n_sing) = this%current_list(nc)%order(2:n-1)
-         do i=1,n-2
-            if (is_quark(ord(i)).or.is_antiquark(ord(i))) then
-               ord(i)=0
+         ! then, setup the map from the order of the colour orders as they
+         ! appear in the amps to the canonical order as defined in 'buff'
+         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+            ord(1:n-2-this%n_sing) = this%current_list(nc)%order(2:n-1)
+            do i=1,n-2
+               if (is_quark(ord(i)).or.is_antiquark(ord(i))) then
+                  ord(i)=0
+               endif
+            enddo
+            do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
+               if (all(buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
+                  this%map_2qq_amps(nc) = i
+                  return
+               endif
+            enddo
+            if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
+               write (*,*) 'check_2qq_order failed: order not found in list',i
+               write (*,*) nc,':',this%current_list(nc)%order(1:n)
+               stop 1
             endif
          enddo
-         do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
-            if (all(this%buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
-               ind = i
-               return
-            endif
-         enddo
-         if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
-            write (*,*) 'check_2qq_order failed: order not found in list',i
-            write (*,*) nc,':',this%current_list(nc)%order(1:n)
-            stop 1
-         endif
       else
-         ind = 1  ! no gluons. Only one color order, so this is trivial.
+         this%map_2qq_amps(1)=1
       endif
-    end subroutine check_2qq_order
+    end subroutine setup_map_2qq_amps
 
     subroutine setup_momentum_array()
       implicit none
@@ -1569,125 +1562,6 @@ contains
                endif
                current_dict(key)=val
             enddo
-!!$
-!!$
-!!$            
-!!$            if ((.not.use_symmetry) .or. valid_current_order_excl_symmetry(ips_in)) then
-!!$               if (any(ips_in(1:isize).eq.order(n))) cycle ! should not contain last closing particle 
-!!$               if (this%n_qqbar.eq.0 .or. &
-!!$                  (this%n_qqbar.eq.1.and.all(ips_in(1:isize).ne.order(1)))) then
-!!$                  
-!!$                  key=key+1
-!!$                  call get_value(ips_in,0,val) ! add the gluon
-!!$                  current_dict(key)=val
-!!$                  if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
-!!$                     key=key+1
-!!$                     call get_value(ips_in,-1,val)
-!!$                     current_dict(key)=val
-!!$                  endif
-!!$
-!!$                elseif (this%n_qqbar.eq.2) then
-!!$                     if ((this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(1)))).and.&
-!!$                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(2)))).and.&
-!!$                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(3)))).and.&
-!!$                         (this%n_qqbar.eq.2.and.(.not.any(ips_in(1:isize).eq.this%quark_index(4))))) then
-!!$                        key=key+1
-!!$                        call get_value(ips_in,0,val) ! add the gluon
-!!$                        current_dict(key)=val
-!!$                        if (isize.ne.1 .and. isize.ne.n-1) then ! add the tensor
-!!$                           key=key+1
-!!$                           call get_value(ips_in,-1,val)
-!!$                           current_dict(key)=val
-!!$                        endif
-!!$                      endif
-!!$               endif
-!!$
-!!$               if (this%n_qqbar.eq.1 .and. ips_in(1).eq.order(1)) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,1,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$
-!!$               if (this%n_qqbar.eq.2) then
-!!$               if (quark_in_current(ips_in,isize).eq.1) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,1,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$               if (quark_in_current(ips_in,isize).eq.3) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,1,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$              
-!!$               if (quark_in_current(ips_in,isize).eq.2) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,2,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$               if (quark_in_current(ips_in,isize).eq.4) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,2,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$
-!!$               if (quark_in_current(ips_in,isize).eq.5) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,0,val) ! add the gluon
-!!$                  current_dict(key)=val
-!!$                  if (isize.ne.n-1) then ! add the tensor
-!!$                     key=key+1
-!!$                     call get_value(ips_in,-1,val)
-!!$                     current_dict(key)=val
-!!$                  endif
-!!$               endif
-!!$               if (quark_in_current(ips_in,isize).eq.10) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,0,val) ! add the gluon
-!!$                  current_dict(key)=val
-!!$                  if (isize.ne.n-1) then ! add the tensor
-!!$                     key=key+1
-!!$                     call get_value(ips_in,-1,val)
-!!$                     current_dict(key)=val
-!!$                  endif
-!!$               endif
-!!$
-!!$               if (quark_in_current(ips_in,isize).eq.11) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,1,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$
-!!$               if (quark_in_current(ips_in,isize).eq.12) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,2,val) ! add a a-quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$
-!!$               if (quark_in_current(ips_in,isize).eq.13) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,1,val) ! add a quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$
-!!$               if (quark_in_current(ips_in,isize).eq.14) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,1,val) ! add a a-quark
-!!$                  current_dict(key)=val
-!!$               endif
-!!$
-!!$               if (quark_in_current(ips_in,isize).eq.15) then
-!!$                  key=key+1
-!!$                  call get_value(ips_in,0,val) ! add the gluon
-!!$                  current_dict(key)=val
-!!$                  if (isize.ne.n-1) then ! add the tensor
-!!$                     key=key+1
-!!$                     call get_value(ips_in,-1,val)
-!!$                     current_dict(key)=val
-!!$                  endif
-!!$               endif
-!!$              endif
-!!$            endif
          enddo
          deallocate(ips_in)
          deallocate(ips)
@@ -1732,7 +1606,6 @@ contains
       implicit none
       integer :: key,left,middle,right
       integer(kind=8) :: val
-!!$      if (this%n_qqbar.le.1) then
       left=1
       right=max_key
       do while (left.le.right)
@@ -1746,17 +1619,6 @@ contains
             left=middle+1
          endif
       enddo
-!!$
-!!$      elseif (this%n_qqbar.eq.2) then
-!!$        middle = 0
-!!$        do middle=1,max_key
-!!$         if (current_dict(middle).eq.val) then
-!!$            key=middle
-!!$            return
-!!$         endif
-!!$        enddo
-!!$        key=0
-!!$      endif
     end subroutine solve_dict
 
     subroutine get_next_iperm(ip,ips_in,ips,n)
@@ -2202,9 +2064,8 @@ contains
                this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
             else
                if (this%n_qqbar.eq.2) then
-                  call check_2qq_order(ic,ind)
-                  this%amps(ind) = sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
-!!$                  this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
+                  this%amps(this%map_2qq_amps(ic)) = &
+                       sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
                else        
                   this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
                endif     
@@ -2238,35 +2099,6 @@ contains
          endif
       endif
     end subroutine compute_amps_from_currents
-
-    subroutine check_2qq_order(nc,ind)
-      use math_functions
-      implicit none
-      integer :: nc,ind
-      integer :: i
-      integer,dimension(1:n-2-this%n_sing) :: ord
-      if (n-4-this%n_sing.gt.0) then ! there is at least one gluon
-         ord(1:n-2-this%n_sing) = this%current_list(nc)%order(2:n-1)
-         do i=1,n-2
-            if ((abs(part(ord(i))).ge.1.and.abs(part(ord(i))).le.6)) then
-               ord(i)=0
-            endif
-         enddo
-         do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
-            if (all(this%buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
-               ind = i
-               return
-            endif
-         enddo
-         if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
-            write (*,*) 'check_2qq_order failed: order not found in list',i
-            write (*,*) nc,':',this%current_list(nc)%order(1:n)
-            stop 1
-         endif
-      else
-         ind = 1  ! no gluons. Only one color order, so this is trivial.
-      endif
-    end subroutine check_2qq_order
 
     subroutine combine_interactions(dim)
       implicit none
