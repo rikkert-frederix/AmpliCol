@@ -230,7 +230,7 @@ contains
       elseif (this%n_qqbar.eq.2) then
          call setup_map_2qq_amps()
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            this%perm(1:n-this%n_sing,this%map_2qq_amps(nc)) = &
+            this%perm(1:n-this%n_sing,this%map_2qq_amps(nc-this%n_cur_start(n-1)+1)) = &
                  [this%current_list(nc)%order(1:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
          enddo
       endif
@@ -283,8 +283,8 @@ contains
             enddo
             do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
                if (all(buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
-                  this%map_2qq_amps(nc) = i
-                  return
+                  this%map_2qq_amps(nc-this%n_cur_start(n-1)+1) = i
+                  exit
                endif
             enddo
             if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
@@ -2064,7 +2064,7 @@ contains
                this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4,1)*this%current_list(n)%val_r(1:4,1))
             else
                if (this%n_qqbar.eq.2) then
-                  this%amps(this%map_2qq_amps(ic)) = &
+                  this%amps(this%map_2qq_amps(ic-this%n_cur_start(n-1)+1)) = &
                        sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
                else        
                   this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4,1)*this%current_list(n)%val_c(1:4,1))
