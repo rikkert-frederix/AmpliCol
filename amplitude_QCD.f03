@@ -153,7 +153,6 @@ contains
 
     call simple_consistency_checks()
 
-
     ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call filter_dead_trees()
@@ -237,6 +236,7 @@ contains
     end subroutine allocate_and_fill_colour_permutations
 
     subroutine setup_map_2qq_amps
+      use math_functions
       implicit none
       integer :: i,j,k,m,q,nc
       integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in,gluons
@@ -550,152 +550,10 @@ contains
       ! rough upper bound for the maximum number of currents
       implicit none
       integer :: isize,j,ifact
-      max_cur=factorial(n+1)*14
-      return
-      
-      
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_cur=0
-         do isize=1,n-1
-            if (isize.eq.1 .or. isize.eq.n-1) then
-               max_cur=max_cur+(n-isize)
-            else
-               if (this%n_qqbar.eq.0) max_cur=max_cur+(n-isize)*2
-               if (this%n_qqbar.eq.1) max_cur=max_cur+((n-isize-1)*2+1)
-               if (this%n_qqbar.eq.2) then
-                 if (n-isize.ge.4) then
-                   max_cur = max_cur+(n-isize-3)*2+3 ! pure gluon currents
-                   max_cur=max_cur+3 ! gq + qq currents
-                 elseif (n-isize.ge.3) then
-                   max_cur=max_cur+3
-                 elseif (n-isize.ge.2) then
-                   max_cur=max_cur+1
-                 endif
-               endif
-            endif
-         enddo
-         max_cur=max_cur+1
-         if (this%n_sing.ge.1) max_cur=max_cur*this%n_sing
-         max_cur=max_cur*3 ! to REMOVE
-      elseif(this%imode.eq.2) then
-         if (this%n_qqbar.eq.0) then
-            ! for increasing isize:
-            ! - Number of gluon currents (remove the '/2' if use_symmetry=.false.):
-            !   (next-1) + ( (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ... )/2
-            ! - Number of tensor currents: 
-            !   same as for the gluons except that the first and final terms are absent
-            max_cur=0
-            do isize=1,n-1
-               ifact=n-1
-               do j=1,isize-1
-                  ifact=ifact*(n-1-j)
-               enddo
-               if (isize.eq.1) then
-                  max_cur=max_cur+ifact
-               elseif (isize.lt.n-1) then
-                  if (use_symmetry) then
-                     max_cur=max_cur+ifact
-                  else 
-                     max_cur=max_cur+ifact*2
-                  endif
-               else
-                  if (use_symmetry) then
-                     max_cur=max_cur+ifact/2
-                  else
-                     max_cur=max_cur+ifact
-                  endif
-               endif
-            enddo
-            max_cur=max_cur+1
-         elseif(this%n_qqbar.eq.1) then
-            ! for increasing isize:
-            ! -Number of gluon currents (remove the '/2' if use_symmetry=.false.):
-            !   (next-2) + ( (next-2)*(next-3) + (next-2)*(next-3)*(next-4) + ... )/2
-            ! - Number of tensor currents: 
-            !   same as for the gluons except that the first term is absent
-            !   (final is absent as well, but we only know that after the dead
-            !   tree-filtering)
-            ! - Number of quark currents:
-            !   1 + (next-1) + (next-1)*(next-2) + (next-1)*(next-2)*(next-3) + ...
-            max_cur=0
-            do isize=1,n-1
-               ! gluons and tensors
-               ifact=n-2
-               do j=1,isize-1
-                  ifact=ifact*(n-2-j)
-               enddo
-               if (isize.eq.1) then
-                  max_cur=max_cur+ifact
-               else
-                  if (use_symmetry) then
-                     max_cur=max_cur+ifact
-                  else 
-                     max_cur=max_cur+ifact*2
-                  endif
-               endif
-               ! quarks
-               ifact=1
-               do j=1,isize-1
-                  ifact=ifact*(n-1-j)
-               enddo
-               max_cur=max_cur+ifact
-            enddo
-            max_cur=max_cur+1
-
-         elseif (this%n_qqbar.eq.2) then
-            max_cur=0
-            do isize=1,n-1
-               ! gluons and tensors
-               ifact=n-4 ! n-4 gluons in total -> if no singlets around!!
-               do j=1,isize-1
-                  ifact=ifact*(n-4-j)
-               enddo
-               if (isize.eq.1) then
-                  max_cur=max_cur+ifact
-               else
-                  if (use_symmetry) then
-                     max_cur=max_cur+ifact
-                  else
-                     max_cur=max_cur+ifact*2
-                  endif
-               endif
-               ! single quark currents
-               ifact=1
-               do j=1,isize-1
-                  ifact=ifact*(n-4-j+1)
-               enddo
-               max_cur=max_cur+3*ifact ! factor 3 for 3 q/aq externals
-               enddo
-               ! double quark currents
-               if (isize.ge.2) then
-                  max_cur=max_cur+2*1 ! for q-aq of both flavors
-                  ifact=1
-                  do j=1,isize-1
-                    ifact=ifact*(n-4-j+1)
-                  enddo
-                  !max_cur=max_cur+2*ifact ! for both flavors
-               endif
-               ! three quark currents
-               if (isize.ge.3) then
-                  max_cur=max_cur+2*1 
-                  ifact=1
-                  do j=1,isize-1
-                    ifact=ifact*(n-4-j+1)
-                  enddo
-                  max_cur=max_cur+2*ifact ! for both flavors
-               endif
-               ! four quark currents
-               if (isize.ge.4) then
-                  max_cur=max_cur+1 ! only one 4-q
-                  ifact=1
-                  do j=1,isize-1
-                    ifact=ifact*(n-4-j+1)
-                  enddo
-                  max_cur=max_cur+ifact 
-               endif
-               max_cur=max_cur+1
-               max_cur=max_cur+5250 ! TO CHANGE
-         endif
+         max_cur=2*n*(n-1)
+      else
+         max_cur=factorial(n+1)*14
       endif
     end subroutine set_max_cur
 
@@ -792,6 +650,7 @@ contains
          endif
          max_vert=nint(mv)
       endif
+      
     end subroutine set_max_vert
 
     subroutine create_helicity_map()
@@ -1508,6 +1367,7 @@ contains
       ! that the val's are created in ascending order, and that we add an
       ! element to the dictionary for all possible val's. Hence, better to
       ! create a larger dictionary than strictly needed.
+      use math_functions
       implicit none
       integer :: size,i,j,key
       integer(kind=8) :: val,previous_val
@@ -1621,65 +1481,6 @@ contains
       enddo
     end subroutine solve_dict
 
-    subroutine get_next_iperm(ip,ips_in,ips,n)
-    ! Given a permutation ips_in, find the next one and return it through ips.
-    ! For example for ip=3 (length of permutation list), n=4 (elements to be
-    ! considered in the permutation) this gives
-    !
-    !    ips_in        ips
-    !-------------------------
-    !    1,2,3   -->   1,2,4
-    !    1,2,4   -->   1,3,2
-    !    1,3,2   -->   1,3,4
-    !    1,3,4   -->   1,4,2
-    !    1,4,2   -->   1,4,3
-    !    1,4,3   -->   2,1,3
-    !    2,1,3   -->   2,1,4
-    !    2,1,4   -->   2,3,1
-    !    2,3,1   -->   2,3,4
-    !    2,3,4   -->   2,4,1
-    !    2,4,1   -->   2,4,3
-    !    2,4,3   -->   3,1,2
-    !    3,1,2   -->   3,1,4
-    !    3,1,4   -->   3,2,1
-    !    3,2,1   -->   3,2,4
-    !    3,2,4   -->   4,1,2
-    !    4,1,2   -->   4,1,3
-    !    4,1,3   -->   4,2,1
-    !    4,2,1   -->   4,2,3
-    !    4,2,3   -->   4,3,1
-    !    4,3,1   -->   4,3,2
-    !    4,3,2   -->   XXXXX
-    !
-    ! Note that when giving non-sensical inputs (e.g., the last one in the
-    ! list above), the code either goes into an infinite loop, or returns some
-    ! bogus result. There is no check on the consistency of the input.
-      implicit none
-      integer :: ip,n,i_up,i,j
-      integer,dimension(ip) :: ips,ips_in
-      logical :: found
-      found=.false.
-      ips(1:ip)=ips_in(1:ip)
-      do i_up=ip,1,-1
-         do while (ips(i_up).lt.n)
-            ips(i_up)=ips(i_up)+1
-            if (any(ips(1:i_up-1).eq.ips(i_up))) cycle
-            found=.true.
-            exit
-         enddo
-         if (found) exit
-      enddo
-      do i=i_up+1,ip
-         do j=1,n
-            if (any(ips(1:i).eq.j)) then
-               continue
-            else
-               ips(i)=j
-               exit
-            endif
-         enddo
-      enddo
-    end subroutine get_next_iperm
     logical function all_gluon_current(bin)
       ! returns .true. only if all external particles related to the binary
       ! label 'bin' are gluons
@@ -2481,6 +2282,7 @@ contains
       ! must make sure that the val's are created in ascending order, and that
       ! we add an element to the dictionary for all possible val's. Hence,
       ! better to create a larger dictionary than strictly needed.
+      use math_functions
       implicit none
       integer :: iperm,i
       integer(kind=8) :: val,previous_val

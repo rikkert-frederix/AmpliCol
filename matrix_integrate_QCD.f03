@@ -859,7 +859,16 @@ contains
     implicit none
     integer :: ngl=0
     integer,dimension(6) :: nq,naq
-    integer :: i,j
+    integer,dimension(2) :: ng
+    integer :: i,j,tot_ord
+    character(len=1),dimension(:),allocatable :: ni1,ni2,ni1_i,ni2_i
+    integer :: ic,i_qq,iaq,i_ini,i_inv,i_swap,k,l,ip
+    integer,dimension(next) :: fgluons,ips,ips_out
+    logical :: same_flavour
+    logical,dimension(next) :: fgluon
+    integer,dimension(:,:),allocatable :: io_list,io
+
+    
     nq=0
     naq=0
     ! count the number of final state gluons and quarks
@@ -876,6 +885,7 @@ contains
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
+       tot_ord=factorial8(next-1)
        ! All gluon process. This assumes that the only channels we are
        ! including are strictly different. We distinguish them by considering
        ! how many (final state) gluons are attached to the two colour lines
@@ -899,6 +909,7 @@ contains
           sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
+       tot_ord=factorial8(next-2)
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
@@ -942,18 +953,166 @@ contains
           endif
        endif
     elseif (nquarks.eq.4) then
-       sym_fac=factorial8(ngl)
-       do i=1,6
-          if (nq(i).gt.0) then
-              sym_fac=sym_fac*nq(i)
-          endif
-          if (naq(i).gt.0) then
-              sym_fac=sym_fac*naq(i)
+       ! total number of potentially different orders: two ways of connecting
+       ! quarks, (n-4)! orderings for the gluons, n-3 ways for an order to
+       ! distribute the gluons among the two quark lines
+       tot_ord=2*factorial8(next-4)*(next-3)
+
+       do i=2,next-1
+          if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
+              (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+                   ! check if it would give the same result:
+             if (.not.(abs(o(i)).eq.abs(o(1)) .and. abs(o(i)).eq.abs(o(next)))) then
+                same_flavour=.true.
+             else
+                same_flavour=.false.
+             endif
+             exit
           endif
        enddo
+       
+       allocate(io_list(1:next,tot_ord))
+       allocate(io(1:next,5))
+       ic=0
+       ! 1. two ways of connecting quarks with anti-quarks
+       do_i_qq: do i_qq=1,2
+          io(1:next,1)=o(1:next)
+          if (i_qq.eq.2) then
+             if (.not. same_flavour) cycle
+             do i=2,next-1
+                if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
+                    (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+                   ! check if it would give the same result:
+                   if ( ((o(1   ).le.2 .and. o(i+1).gt.2) .or. (o(1   ).gt.2 .and. o(i+1).le.2)) .and. &
+                        ((o(next).le.2 .and. o(i  ).gt.2) .or. (o(next).gt.2 .and. o(i  ).le.2)) ) then
+                      ! not both initial or both final state
+                      cycle do_i_qq
+                   endif
+                   iaq=o(i)
+                   io(i,1)=o(next)
+                   io(next,1)=iaq
+                   exit
+                endif
+             enddo
+          endif
+          ! 2. invert order of two initial states
+          do i_ini=1,2
+             io(1:next,2)=io(1:next,1)
+             if (part(1).ne.part(2) .and. i_ini.eq.2) cycle
+             if (i_ini.eq.2) then
+                do i=1,next
+                   if (io(i,1).eq.1) then
+                      io(i,2)=2
+                   elseif (io(i,1).eq.2) then
+                      io(i,2)=1
+                   endif
+                enddo
+             endif
+             ! 3. invert order of both quark lines
+             do_i_inv: do i_inv=1,2
+                io(1:next,3)=io(1:next,2)
+                if (i_inv.eq.2) then
+                   ! invert order
+                   do i=2,next-1
+                      if ((io(i,2).gt.2 .and. part(io(i,2)).le.-1 .and. part(io(i,2)).ge.-6) .or. &
+                           (io(i,2).le.2 .and. part(io(i,2)).ge. 1 .and. part(io(i,2)).le. 6) ) then
+                         if ( ((io(1   ,2).le.2 .and. io(i  ,2).gt.2) .or. (io(1   ,2).gt.2 .and. io(i  ,2).le.2)) .or. &
+                              ((io(next,2).le.2 .and. io(i+1,2).gt.2) .or. (io(next,2).gt.2 .and. io(i+1,2).le.2)) ) then
+                            ! not both initial or both final state. Cannot invert order.
+                            cycle do_i_inv
+                         endif
+                         io(2:i-1,3)=io(i-1:2:-1,2)
+                         io(i+2:next-1,3)=io(next-1:i+2:-1,2)
+                         exit
+                      endif
+                   enddo
+                endif
+                ! 4. If both quark lines are similar (identical quarks and
+                ! FF+FF or IF+FI or FI+IF or FI+IF or IF+FI), we can swap the gluons from one line to the
+                ! other
+                do i_swap=1,2
+                   io(1:next,4)=io(1:next,3)
+                   if (i_swap.eq.2) then
+                      if (.not.same_flavour) cycle
+                      do i=2,next-1
+                         if ((io(i,3).gt.2 .and. part(io(i,3)).le.-1 .and. part(io(i,3)).ge.-6) .or. &
+                              (io(i,3).le.2 .and. part(io(i,3)).ge. 1 .and. part(io(i,3)).le. 6) ) then
+                            if ((io(1,3).gt.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).gt.2) .or. &
+                                (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) .or. &
+                                (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
+                                (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
+                                (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) ) then
+                               io(2:next-i-1,4)=io(i+2:next-1,3) ! gluons
+                               io(next-i:next-i+1,4)=io(i:i+1,3) ! qbarq
+                               io(2+next-i:next-1,4)=io(2:i-1,3) ! gluons
+                               exit
+                            endif
+                         endif
+                      enddo
+                      if (i.eq.next) cycle
+                   endif
+                   ! 5. permute all final state gluons
+                   k=0
+                   l=0
+                   do i=1,next
+                      if (part(io(i,4)).eq.21 .and. io(i,4).gt.2) then
+                         k=k+1
+                         fgluons(k)=io(i,4)
+                         fgluon(i)=.true.
+                      else
+                         fgluon(i)=.false.
+                      endif
+                   enddo
+                   io(1:next,5)=io(1:next,4)
+                   
+                   do ip=1,factorial(k)
+                      if (ip.eq.1) then
+                         do i=1,k
+                            ips(i)=i
+                         enddo
+                      else
+                         call get_next_iperm(k,ips,ips_out,k)
+                         ips(1:k)=ips_out(1:k)
+                      endif
+                      i=0
+                      l=1
+                      do
+                         i=i+1
+                         if (i.eq.next) exit
+                         if (fgluon(i)) then
+                            j=0
+                            do
+                               if (fgluon(i+j+1)) then
+                                  j=j+1
+                               else
+                                  exit
+                               endif
+                            enddo
+                            io(i:i+j,5)=fgluons(ips(l:l+j))
+                            l=l+j+1
+                            i=i+j
+                         endif
+                      enddo
+                      ! ---> if not yet in list of identical contributions, add it!
+                      do i=1,ic
+                         if (all(io(1:next,5).eq.io_list(1:next,i))) exit
+                      enddo
+                      if (i.eq.ic+1) then
+                         ! new identical contribution
+                         io_list(1:next,i)=io(1:next,5)
+                         ic=i
+                      endif
+                   enddo
+                enddo
+             enddo do_i_inv
+          enddo
+       enddo do_i_qq
+       sym_fac=ic
     else        
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
+    write (*,*) 'total number of orders is',tot_ord,' and multi-channel symmetry factor is',sym_fac,&
+         '. They should be the same when including all channels.'
   end subroutine compute_multichannel_symmetry_factor
 
   integer(kind=4) function ifindloc(a,n,i)
