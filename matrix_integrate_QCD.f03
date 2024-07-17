@@ -119,12 +119,12 @@ program matrix_integrate_QCD
   if (amps%n_qqbar.eq.2) then
     call define_symm_2qq(next,part,1)
   endif
-  call amps%init(1,next,orig_part,part,spin,mass,width,o,it)
+  call amps%init(1,next,part,spin,mass,width,o,it)
 
   if (amps%n_qqbar.eq.2.and.amps%same_flav) then
     part_sf(:) = orig_part(:)
     call define_symm_2qq(next,part_sf,2)
-    call amps_sf%init(1,next,orig_part,part_sf,spin,mass,width,o,it)
+    call amps_sf%init(1,next,part_sf,spin,mass,width,o,it)
   endif
 
   call cpu_time(tAfter)

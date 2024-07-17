@@ -44,14 +44,14 @@ module amplitude_QCD_mod
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,orig_part,part,spin,mass,width,order,it)
+  subroutine init(this,imode,n,spin,mass,width,order,it)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
     integer::n,imode
-    integer,dimension(n)::part,orig_part,order
+    integer,dimension(n)::part,order
     integer,dimension(0:3,n) :: spin
     real(kind=8),dimension(n) :: mass,width
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key,ispin
@@ -97,11 +97,6 @@ contains
        key_to_current(1:max_key)=0
        call cpu_time(tAfter)
        write (*,*) '   dictionary created ',tAfter-tBefore
-       if (max_key.ne.max_cur) then
-          write (*,*) 'Number of dictionary keys is expected to be identical to the maximum number of currents',&
-               max_key,max_cur
-          !stop 1
-       endif
     endif
 
     allocate(current_list_local(max_cur))
@@ -363,16 +358,6 @@ contains
          write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
          stop 1
       endif
-      if (((this%imode.eq.1 .or. this%imode.eq.3) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
-           ((this%imode.eq.2) .and. (this%n_qqbar.ne.0) .and. (this%nColOrd.ne.this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
-           ((this%imode.eq.2) .and. (this%n_qqbar.eq.0) .and. use_symmetry .and. &
-           (this%nColOrd.ne.2*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)))) &
-           then
-         write (*,*) 'The total number of colour orders to consider should be equal to the '// &
-              'number of max-size currents (except for all-gluon and using symmetry)', &
-              this%nColOrd,this%n_cur_start(n-1),this%n_cur_end(n-1),this%n_qqbar,use_symmetry
-         !stop 1
-      endif
     end subroutine simple_consistency_checks
   
     subroutine define_canonical_color_order(it)
@@ -473,21 +458,21 @@ contains
       k = 1
       do i=1,n
          if (i.le.2) then
-            if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-               quark_flav(abs(orig_part(i)))=quark_flav(abs(orig_part(i)))-sign(1,part(i))
-               flav(k) = abs(orig_part(i))
+            if (part(i).ne.21 .and. part(i).ne.22) then
+               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
+               flav(k) = abs(part(i))
                k= k+1
-               if (orig_part(i).lt.0) this%n_qqbar=this%n_qqbar+1
+               if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
             endif
          else
-            if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-               quark_flav(abs(orig_part(i)))=quark_flav(abs(orig_part(i)))+sign(1,orig_part(i))
-               flav(k) = abs(orig_part(i))
+            if (part(i).ne.21 .and. part(i).ne.22) then
+               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
+               flav(k) = abs(part(i))
                k= k+1
-               if (orig_part(i).gt.0) this%n_qqbar=this%n_qqbar+1
+               if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
             endif
          endif
-         if (orig_part(i).ne.21 .and. abs(orig_part(i)).gt.6) this%n_sing=this%n_sing+1
+         if (part(i).ne.21 .and. abs(part(i)).gt.6) this%n_sing=this%n_sing+1
       enddo
 
       if (any(flav(1:2*this%n_qqbar).ne.flav(1))) this%same_flav = .false.

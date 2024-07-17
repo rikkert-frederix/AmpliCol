@@ -85,7 +85,7 @@ program matrix_reweight
 
   call define_symm_2qq(next,part,1)
   it = 1
-  call amps(1)%init(2,next,orig_part,part,spin,mass,width,o,it)
+  call amps(1)%init(2,next,part,spin,mass,width,o,it)
   col_acc=20
   call amps(1)%init_col2(next,orig_part,o,it,col_acc)
 
@@ -93,7 +93,7 @@ program matrix_reweight
   if (amps(1)%n_qqbar.eq.2) then
      ! the other colour order with the two anti-quarks interchanged.
      it = 2
-     call amps(2)%init(2,next,orig_part,part,spin,mass,width,o,it)
+     call amps(2)%init(2,next,part,spin,mass,width,o,it)
      col_acc=20
      call amps(2)%init_col2(next,orig_part,o,it,col_acc)
   endif
@@ -102,12 +102,12 @@ program matrix_reweight
      part_sf(:)=orig_part(:)
      call define_symm_2qq(next,part_sf,2)
      it = 1
-     call amps(3)%init(2,next,orig_part,part_sf,spin,mass,width,o,it)
+     call amps(3)%init(2,next,part_sf,spin,mass,width,o,it)
      col_acc=20
      call amps(3)%init_col2(next,orig_part,o,it,col_acc)
 
      it = 2
-     call amps(4)%init(2,next,orig_part,part_sf,spin,mass,width,o,it)
+     call amps(4)%init(2,next,part_sf,spin,mass,width,o,it)
      col_acc=20
      call amps(4)%init_col2(next,orig_part,o,it,col_acc)
   endif
@@ -128,7 +128,7 @@ program matrix_reweight
               endif
            enddo
            it = 0! dummy
-           call amps(i+k-1)%init(2,next,orig_part,temp_part,spin,mass,width,o,it)
+           call amps(i+k-1)%init(2,next,temp_part,spin,mass,width,o,it)
            col_acc=20
            call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
         enddo
