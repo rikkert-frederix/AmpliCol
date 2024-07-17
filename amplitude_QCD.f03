@@ -40,7 +40,7 @@ module amplitude_QCD_mod
      logical :: same_flav
      logical,dimension(:),allocatable :: include_product
    contains
-     procedure,public :: init,evaluate,init_col2,filter_helicity
+     procedure,public :: init,evaluate,init_col,filter_helicity
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
@@ -54,7 +54,7 @@ contains
     integer,dimension(n)::part,order
     integer,dimension(0:3,n) :: spin
     real(kind=8),dimension(n) :: mass,width
-    integer :: isize,nc,isplit,n1,n2,ic1,ic2,iv,i,max_cur,max_vert,max_key,ispin
+    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
@@ -366,7 +366,6 @@ contains
       implicit none
       integer :: i
       integer :: nq,naq,nglu,nsing,iq,iaq,iglu,ising
-      integer,dimension(n) :: input
       integer :: it ! quark order type
 
       nq=0; naq=0 ; nglu=0 ; nsing=0
@@ -539,7 +538,6 @@ contains
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
       implicit none
-      integer :: isize,j,ifact
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          max_cur=2*n*(n-1)*2**n
       else
@@ -783,7 +781,7 @@ contains
       ! 6. In general, the current must be of the format "q g..g qbar q g..g
       !    qbar" or any subset thereof.
       implicit none
-      integer :: i,j,k,nc1,nc2
+      integer :: i,j,nc1,nc2
       logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark
       integer,dimension(isize) :: ip
       valid_current_combination=.false.
@@ -1111,9 +1109,8 @@ contains
       ! when use_symmetry=.true. --> the smallest number needs to come before
       ! the largest number in this list. 
       implicit none
-      integer :: i,j,maxi,mini,min_loc,max_loc,k,length
-      integer,dimension(isize) :: ip,ip_q
-      integer,dimension(2*this%n_qqbar) :: quarks
+      integer :: i,maxi,mini,min_loc,max_loc
+      integer,dimension(isize) :: ip
 
       ! if there is a quark (or anti-quark) in the current, no symmetry can be
       ! used. Hence, this is a valid order
@@ -1444,7 +1441,7 @@ contains
     integer,dimension(n)::part,hel
     real(kind=8),dimension(n) :: mass,width
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih1,ih2,ih,ih_in,ip,imv
+    integer :: ic,iv,isize,ih_in,ip
     integer :: ifinal
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
@@ -1530,7 +1527,7 @@ contains
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
              else
-                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih
+                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
              endif
           enddo
@@ -1682,36 +1679,7 @@ contains
     call compute_amps_from_currents
 
   contains
-    subroutine move_ih(imv,ih)
-      ! If there is a colour singlet, we need to be careful, since it is
-      ! always moved to the end of the color order. This might mess up the
-      ! helicity assignment when summing over helicities. Hence, we need to
-      ! move the helicity bit of the colour singlet to the end of 'ih' and
-      ! move all the other bits one step towards the beginning.
-      implicit none
-      integer,intent(inout) :: ih
-      integer,intent(in) :: imv
-      integer :: ihm1
-      integer :: ising
-      ! when not summing over helicities (or when ih=1 (i.e. all bits are
-      ! equal to zero)), there is nothing to do.
-      if (ih.eq.1) return
-      ihm1=ih-1
-      ! ising will contain the helicity bit of the colour singlet that has
-      ! been moved towards the end: this is the bit that needs to be put at
-      ! the end of 'ih'
-      call mvbits(ihm1,imv-1,1,ising,0)
-      ! move all the other bits one step towards the beginning
-      call mvbits(ihm1,imv, &
-                       popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
-                              this%current_list(this%interaction_list(iv)%currents(2))%bin)-imv, &
-                       ihm1,&
-                       imv-1)
-      ! place the colour singlet at the end
-      call mvbits(ising,0,1,ihm1,popcnt(this%current_list(this%interaction_list(iv)%currents(1))%bin+&
-                                        this%current_list(this%interaction_list(iv)%currents(2))%bin)-1)
-      ih=ihm1+1
-    end subroutine move_ih
+
     subroutine fill_momentum_array
       implicit none
       integer :: ip,ibin,i
@@ -1729,7 +1697,7 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: ind,ih1,ih2,ih,ic,ihc
+      integer :: ih1,ih2,ih,ic,ihc
       if (this%imode.eq.1) then
          ! Note: this must be done in the same order as the this%spins() are setup in 'setup_spin_list()'
          ihc=0
@@ -1846,13 +1814,13 @@ contains
     end subroutine include_aquark_propagator
   end subroutine evaluate
 
-  subroutine init_col2(this,n,part,order,it,col_acc)
+  subroutine init_col(this,n,part,it,col_acc)
     use color_algebra
     use math_functions
     implicit none
     class(amplitude_qcd) :: this
     integer :: col_acc,n
-    integer,dimension(n) :: order,iper,jper,part
+    integer,dimension(n) :: iper,jper,part
     integer :: iperm,jperm,ival,iacc,isum
     !integer,dimension(1:3) :: n_vals
     integer,allocatable,dimension(:,:) :: n_vals
@@ -1863,7 +1831,7 @@ contains
     real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
     real(kind=8),allocatable,dimension(:,:,:) :: col_vals
     integer,dimension(:,:,:),allocatable :: ic,ir,n_colour_elements
-    integer :: ri,rj,lim,y,t,maxterms_u1,i,j,gi
+    integer :: ri,rj,lim,maxterms_u1,i,j,gi
     integer :: ui,uj,uj_upper ! quark ordering type
     integer :: it ! quark order type (1 or 2)
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
@@ -2105,10 +2073,9 @@ contains
    subroutine get_other_quark_order(jper)
      implicit none
      integer,dimension(n) :: jper,temp_part,jper_new
-     integer :: i,j
+     integer :: i
      integer :: aq1,aq2
      logical first
-
      temp_part=part
      do i=1,n
         if (abs(part(i)).ge.1.and.abs(part(i)).le.6) then
@@ -2118,18 +2085,17 @@ contains
      first=.true.
      do i=1,n
         if (temp_part(jper(i)).le.-1..and.temp_part(jper(i)).ge.-6.and.first) then
-                aq1=i
-                first=.false.
+           aq1=i
+           first=.false.
         endif
         if (temp_part(jper(i)).le.-1.and.temp_part(jper(i)).ge.-6.and..not.first) then
-                aq2=i
+           aq2=i
         endif
      enddo
      jper_new = jper
      jper_new(aq1)=jper(aq2)
      jper_new(aq2)=jper(aq1)
      jper=jper_new
-
    end subroutine get_other_quark_order
 
    integer function solve_dict(val)
@@ -2137,7 +2103,7 @@ contains
      ! dictionary. Use a binary search algorithm. (This only works if the
      ! dictionary values are ordered, and all values only appear once).
      implicit none
-     integer :: key,left,middle,right
+     integer :: left,middle,right
      integer(kind=8) :: val
      left=1
      right=max_keys
@@ -2490,7 +2456,7 @@ contains
 
     subroutine get_u1_lin_comb
       implicit none
-      integer i,j,k,l,ii,m,top,add,num,j1,j2
+      integer i,j,k,l,ii,m
       integer,dimension(:),allocatable :: u1_rem,u1_test
       integer,dimension(1:n-2-this%n_sing) :: perm,temp_perm
 
@@ -2574,7 +2540,7 @@ contains
        jper_red(1:n) = dual_red(2,1:n)
     end subroutine convert_perm_color_flow
 
-  end subroutine init_col2
+  end subroutine init_col
 
   subroutine filter_helicity(this,n,nhel,include_hel)
     implicit none

@@ -615,10 +615,7 @@ contains
     integer,dimension(n-1) :: jper_q_up,jper_q_down,jper_q
     integer :: col_fac           ! color factor
     integer :: index,colfac,i,flip,m,k
-    integer, dimension(n-1) :: it,jt
     integer :: ri,rj
-    integer, dimension(ri+1) :: it_1,iper_q_1
-    integer, dimension(rj+1) :: jt_1,jper_q_1
     integer, dimension(n-1) :: itemp
 
     iper_q_up(1) = n-1
@@ -702,10 +699,7 @@ contains
     integer,dimension(n-2) :: jper_q_up,jper_q_down,jper_q
     integer :: col_fac           ! color factor
     integer :: index,colfac,u,flip,m,w
-    integer, dimension(n-1) :: it,jt
     integer :: ii_t,jj_t,ni_t,nj_t
-    integer, dimension(ni_t+1) :: it_1,iper_q_1
-    integer, dimension(nj_t+1) :: jt_1,jper_q_1
     integer, dimension(n-2) :: itemp
 
     if (ii_t .eq. 1) then
@@ -833,10 +827,7 @@ contains
     integer,dimension(n-2) :: jper_q_up,jper_q_down,jper_q
     integer :: col_fac           ! color factor
     integer :: index,colfac1,i,flip,m,k
-    integer, dimension(n-1) :: it,jt
     integer :: ii,jj,ni,nj
-    integer, dimension(ni+1) :: it_1,iper_q_1
-    integer, dimension(nj+1) :: jt_1,jper_q_1
     integer, dimension(n-2) :: itemp
 
 !!! It is assumed that the last next-4-ri/rj indices of iper,jper
@@ -1099,12 +1090,11 @@ contains
  
     integer,dimension(next-4) :: iper ! order in amplitude
     integer,dimension(next-4) :: jper ! order in conjugate amplitude
-    integer,dimension(next-4) :: jper_inv ! order in conjugate amplitude
     integer :: acc               ! is equal to 0,1,-1 or 99.
                                  ! 99 : LC contributions (NLC coefficient of that term is '-n')
                                  ! 1,-1 ; NLC contribution with positive/negative sign
                                  ! 0 : not a NLC contribution, but NNLC or further suppressed.
-    integer :: i,i1,i2,i3,i4,i5,sign,ii,jj,yy,tt
+    integer :: i,i1,i2,i3,i4,i5,sign,ii,jj,yy
     integer rri,rrj,iii,jjj
     integer,dimension(2*(next-4)) :: temp
     integer,dimension(next-4,2) :: index_i
@@ -1121,7 +1111,7 @@ contains
     integer,dimension(1:next-4-rri-1) :: itemp7
 
     logical disjoint
-    integer :: length,ind_i,ind_j
+    integer :: ind_i,ind_j
     integer,dimension(2*(next-4)-2) :: perm
     integer skipped
 
@@ -1483,12 +1473,11 @@ contains
 
     integer,dimension(next-4) :: iper ! order in amplitude
     integer,dimension(next-4) :: jper ! order in conjugate amplitude
-    integer,dimension(next-4) :: jper_inv ! order in conjugate amplitude
     integer :: acc               ! is equal to 0,1,-1 or 99.
                                  ! 99 : LC contributions (NLC coefficient of that term is '-n')
                                  ! 1,-1 ; NLC contribution with positive/negative sign
                                  ! 0 : not a NLC contribution, but NNLC or further suppressed.
-    integer :: i1,i2,i3,i4,i5,sign,i,j,yy,tt
+    integer :: i1,i2,i3,i4,i5,sign,i,j,yy
     integer ri,rj,ii,jj
     integer,dimension(2*(next-4)) :: temp
     integer,dimension(next-4,2) :: index_i
@@ -1504,7 +1493,7 @@ contains
     integer,dimension(1:next-4-ri-1) :: itemp7
 
     logical disjoint
-    integer :: length,ind_i,ind_j
+    integer :: ind_i,ind_j
     integer,dimension(2*(next-4)-2) :: perm
     integer skipped
 

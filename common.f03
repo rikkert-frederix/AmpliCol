@@ -1,24 +1,20 @@
 module common
   use amplitude_QCD_mod
   implicit none
+  ! coupling constants
   real*8,parameter  :: alphaS=0.119d0,alphaEW=0.00754677114d0
-  integer :: next,nfin_glu
 
-  type(amplitude_QCD) :: amps
-  type(amplitude_QCD) :: amps_sf
-
-  real*8 :: amp2,weight
-  real*8,dimension(:),allocatable :: amp2_hel
+  ! momenta, phase-space jacobian and Bjorken x's
   real(kind=8),dimension(:,:),allocatable,public :: p
   real(kind=8),public :: jac,xbjrk(2)
 
   ! timing
+  real*4 :: tBefore,tAfter,tTot_A,tTot_B
   real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
 
   ! technical
   logical,parameter :: smooth_cuts=.false.
   logical,parameter :: include_pdf=.true.
-  logical,parameter :: read_from_file=.false.
   
   ! counting events
   integer(kind=4) :: passed=0

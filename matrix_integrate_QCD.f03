@@ -7,9 +7,13 @@ program matrix_integrate_QCD
   use haag
   use math_functions
   implicit none
-  integer :: j,c_o,i,c_o_t,c_o_i,c_o_j,c_o_k
+  type(amplitude_QCD) :: amps
+  type(amplitude_QCD) :: amps_sf
+  integer :: next
+  real(kind=8) :: amp2,weight
+  real(kind=8),dimension(:),allocatable :: amp2_hel
+  integer :: j,c_o,i
   integer(kind=8) :: sym_fac,iden
-  real*4 :: tBefore,tAfter,tTot_A,tTot_B
   integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf,hel,hel_fac
   integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
@@ -22,6 +26,10 @@ program matrix_integrate_QCD
   integer :: it ! quark order type
   integer,parameter :: nevent_hel_filter=5
   integer,dimension(2) :: hel_picked
+  type process
+     integer,dimension(6) :: particles
+  end type process
+  type(process) :: proc
   
   call get_run_arguments()
   call compute_multichannel_symmetry_factor()
@@ -112,6 +120,8 @@ program matrix_integrate_QCD
      call set_ipdgs_for_PDF(ipdgs)
   endif
 
+  proc%particles(1:next)=part(1:next)
+  
   ! counting of quark flavours in process
   call fill_quark_info()
 
@@ -181,18 +191,17 @@ program matrix_integrate_QCD
   write(*,*) 'Number of numerical errors:',num_error
  
 contains
-  function integrand(x,vol,ifirst,f1)
+  real(kind=8) function integrand(x,vol,ifirst,f1)
     implicit none
-    real*8 :: integrand
     integer :: ifirst
-    real*8, dimension(ndim) :: x
-    real*8, dimension(nintegrals) :: f1
-    real*8, save :: val
-    integer :: iperm,ih
-    real*8 :: vol,cuts_wgt
-    real*8, parameter :: pi=3.14159265358979323846d0,conv=389379660d0
+    real(kind=8), dimension(ndim) :: x
+    real(kind=8), dimension(nintegrals) :: f1
+    real(kind=8), save :: val
+    integer :: ih
+    real(kind=8) :: vol,cuts_wgt
+    real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
-    double precision :: y,frac,steep,cuts_wgt_1,Q
+    real(kind=8) :: Q
    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
@@ -296,18 +305,16 @@ contains
     ! need to compensate with a symmetry factor
     val=val*sym_fac
 
-    call cpu_time(tAfter)
-    t_mat=t_mat+tAfter-tBefore
-    
     if (include_PDF) then
        call multiply_by_PDF_value(val)
     endif
-
     ! pass the result to the mint module
-
     f1(1)=abs(val)
     f1(2)=val
-
+    integrand=f1(2)
+    
+    call cpu_time(tAfter)
+    t_mat=t_mat+tAfter-tBefore
   end function integrand
 
   double precision function pass_cuts(n,p)
@@ -315,7 +322,7 @@ contains
     ! under pz -> -pz.
     implicit none
     integer :: i,j,n
-    real*8,dimension(0:3,n) :: p
+    real(kind=8),dimension(0:3,n) :: p
     double precision :: frac,y,steep
 
     pass_cuts=1d0
@@ -329,7 +336,6 @@ contains
           enddo
        enddo
     endif
-
 
     do i=3,n
        if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
@@ -404,7 +410,6 @@ contains
        endif
     enddo
 
-    
     if (nevent.lt.nevent_hel_filter) return
     
     do ih1=1,nhel
@@ -414,7 +419,6 @@ contains
           stop 1
        endif
     enddo
-
     nhel_sf=nhel
     allocate(include_hel_sf(1:nhel))
     include_hel_sf(1:nhel)=include_hel(1:nhel,1)
@@ -439,79 +443,76 @@ contains
     integer, dimension(next) :: part
     integer :: i,j,sgn
     logical :: first
-
     if (amps%same_flav) then
-    if (chan.eq.2) then
-     do i=1,next
-       if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
-          first=.true.
-          do j=i+1,next
-             if (i.le.2.and.j.le.2) sgn=-1
-             if (i.le.2.and.j.gt.2) sgn=+1
-             if (i.gt.2.and.j.gt.2) sgn=-1
-             if (part(j).eq.sgn*part(i).and..not.first) then
-                part(i) = sign(abs(orig_part(i))+1,orig_part(i))
-                part(j) = sgn*(part(i))
-                exit
+       if (chan.eq.2) then
+          do i=1,next
+             if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
+                first=.true.
+                do j=i+1,next
+                   if (i.le.2.and.j.le.2) sgn=-1
+                   if (i.le.2.and.j.gt.2) sgn=+1
+                   if (i.gt.2.and.j.gt.2) sgn=-1
+                   if (part(j).eq.sgn*part(i).and..not.first) then
+                      part(i) = sign(abs(orig_part(i))+1,orig_part(i))
+                      part(j) = sgn*(part(i))
+                      exit
+                   endif
+                   if (part(j).eq.sgn*part(i).and.first) then
+                      first = .false.
+                   endif
+                enddo
              endif
-             if (part(j).eq.sgn*part(i).and.first) then
-                first = .false.
+          enddo
+       elseif (chan.eq.1) then
+          do i=1,next
+             if (abs(orig_part(i)).gt.0.and.abs(orig_part(i)).lt.6) then
+                do j=i+1,next
+                   if (i.le.2.and.j.le.2) sgn=-1
+                   if (i.le.2.and.j.gt.2) sgn=+1
+                   if (i.gt.2.and.j.gt.2) sgn=-1
+                   if (orig_part(j).eq.sgn*orig_part(i)) then
+                      part(i) = sign(abs(orig_part(i))+1,orig_part(i))
+                      part(j) = sgn*(part(i))
+                      exit
+                   endif
+                enddo
+                exit
              endif
           enddo
        endif
-     enddo
-    elseif (chan.eq.1) then
-      do i=1,next
-       if (abs(orig_part(i)).gt.0.and.abs(orig_part(i)).lt.6) then
-          do j=i+1,next
-           if (i.le.2.and.j.le.2) sgn=-1
-           if (i.le.2.and.j.gt.2) sgn=+1
-           if (i.gt.2.and.j.gt.2) sgn=-1
-           if (orig_part(j).eq.sgn*orig_part(i)) then
-                part(i) = sign(abs(orig_part(i))+1,orig_part(i))
-                part(j) = sgn*(part(i))
-                exit
-           endif
-          enddo
-          exit
-        endif
-       enddo
-     endif
-   endif
+    endif
   end subroutine define_symm_2qq
 
   subroutine fill_quark_info()
     implicit none
     integer,dimension(8) :: flav
     integer :: k
-
     flav = 0
     k = 1
     amps%n_qqbar= 0
     amps%same_flav=.true.
     do i=1,next
-     if (i.le.2) then
-        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-           flav(k) = abs(orig_part(i))
-           k= k+1
-           if (orig_part(i).lt.0) amps%n_qqbar=amps%n_qqbar+1
-        endif
-     else
-        if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-           flav(k) = abs(orig_part(i))
-           k= k+1
-           if (orig_part(i).gt.0) amps%n_qqbar=amps%n_qqbar+1
-        endif
-     endif
-     enddo
-
-     if (any(flav(1:2*amps%n_qqbar).ne.flav(1))) amps%same_flav = .false.
+       if (i.le.2) then
+          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+             flav(k) = abs(orig_part(i))
+             k= k+1
+             if (orig_part(i).lt.0) amps%n_qqbar=amps%n_qqbar+1
+          endif
+       else
+          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
+             flav(k) = abs(orig_part(i))
+             k= k+1
+             if (orig_part(i).gt.0) amps%n_qqbar=amps%n_qqbar+1
+          endif
+       endif
+    enddo
+    if (any(flav(1:2*amps%n_qqbar).ne.flav(1))) amps%same_flav = .false.
   end subroutine fill_quark_info
   
-  real*8 function pt(p)
+  real(kind=8) function pt(p)
     ! transverse momentum of 'p'
     implicit none
-    real*8, dimension(0:3) :: p
+    real(kind=8), dimension(0:3) :: p
     pt=sqrt(p(1)**2+p(2)**2)
   end function pt
   
@@ -522,28 +523,28 @@ contains
     dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
   end function dot
 
-  real*8 function eta(p)
+  real(kind=8) function eta(p)
     ! pseudo-rapidity of 'p'
     implicit none
-    real*8, dimension(0:3) :: p
-    real*8 :: theta
+    real(kind=8), dimension(0:3) :: p
+    real(kind=8) :: theta
     theta=acos(p(3)/sqrt(p(1)**2+p(2)**2+p(3)**2))
     eta=-log(dtan(theta/2d0))
   end function eta
 
-  real*8 function delta_phi(p1,p2)
+  real(kind=8) function delta_phi(p1,p2)
     ! azimuthal difference of 'p1' and 'p2'
     implicit none
-    real*8, dimension(0:3) :: p1,p2
-    real*8 :: denom
+    real(kind=8), dimension(0:3) :: p1,p2
+    real(kind=8) :: denom
     denom=pt(p1)*pt(p2)
     delta_phi=acos((p1(1)*p2(1)+p1(2)*p2(2))/denom)
   end function delta_phi
 
-  real*8 function deltaR(p1,p2)
+  real(kind=8) function deltaR(p1,p2)
     ! Distance (Delta-R) between 'p1' and 'p2'
     implicit none
-    real*8, dimension(0:3) :: p1,p2
+    real(kind=8), dimension(0:3) :: p1,p2
     deltaR=sqrt(delta_phi(p1,p2)**2+(eta(p1)-eta(p2))**2)
   end function deltaR
 
@@ -582,8 +583,8 @@ contains
   subroutine unwgt_helicity
     implicit none
     integer :: i
-    real*8 :: random
-    real*8,external :: ran2
+    real(kind=8) :: random
+    real(kind=8),external :: ran2
     random=ran2()*amp2
     i=1
     do
@@ -607,7 +608,7 @@ contains
   subroutine get_run_arguments()
     implicit none
     integer :: argc
-    integer :: i,j,k
+    integer :: i,k
     character(len=256) :: argv
     logical :: found_1
     integer(kind=8) iseed
@@ -688,12 +689,6 @@ contains
              exit
           endif
        enddo
-    endif
-    
-    if (read_from_file) then
-       call read_process_from_file
-    !else
-    !   call get_process_from_arguments
     endif
 
     call setup_spin()
@@ -786,21 +781,6 @@ contains
        write (*,*) 'value too large to add to the run tag',inter
     endif
   end subroutine add_to_string
-  subroutine fill_string(string,size)
-    ! Fills the string 'string' with leading underscores until the string has
-    ! size 'size'. The declaration of the string must be at least size 'size'.
-    implicit none
-    character(len=string_len) :: string
-    integer :: size,n_to_add
-    if (size.gt.len(string)) then
-       write (*,*) 'Size greater than string',size,string
-       stop 1
-    endif
-    n_to_add=len(trim(string))+2-len(trim(string))
-    do i=1,n_to_add
-       string='_'//trim(adjustl(string))
-    enddo
-  end subroutine fill_string
 
   subroutine set_initial_state_average_factor(iden)
     implicit none
@@ -819,6 +799,7 @@ contains
        endif
     enddo
   end subroutine set_initial_state_average_factor
+  
   subroutine set_final_state_identical_particle_factor(iden)
     implicit none
     integer(kind=8),intent(inout) :: iden
@@ -926,7 +907,7 @@ contains
     implicit none
     real(kind=8),intent(inout) :: val
     real(kind=8) :: xmu_fac
-    real*8, dimension(-6:7,2) :: PDF
+    real(kind=8), dimension(-6:7,2) :: PDF
     ! Include the PDFs
     xmu_fac=91.188d0 ! factorisation scale
 
@@ -953,16 +934,14 @@ contains
     implicit none
     integer :: ngl=0
     integer,dimension(6) :: nq,naq
-    integer,dimension(2) :: ng
-    integer :: i,j,tot_ord
-    character(len=1),dimension(:),allocatable :: ni1,ni2,ni1_i,ni2_i
+    integer :: i,j
+    integer(kind=8) :: tot_ord
     integer :: ic,i_qq,iaq,i_ini,i_inv,i_swap,k,l,ip
     integer,dimension(next) :: fgluons,ips,ips_out
     logical :: same_flavour
     logical,dimension(next) :: fgluon
     integer,dimension(:,:),allocatable :: io_list,io
 
-    
     nq=0
     naq=0
     ! count the number of final state gluons and quarks
@@ -1219,401 +1198,5 @@ contains
        if (a(ifindloc).eq.i) return
     enddo
   end function ifindloc
-    
-  
-  subroutine read_process_from_file
-    implicit none
-    integer :: i,end,start,glu
-    integer,dimension(:),allocatable :: ord
-    open (unit=99, file='process.txt', status='old', action='read')
-    read(99, *) next
-    allocate(part(next))
-    allocate(o(next))
-    read(99, *) part
-    read(99, *) o
-    nquarks = 0
-    do i=1,next
-       if (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
-          nquarks=nquarks+1
-          if (i.le.2) part(i)=-part(i)
-       endif
-    enddo
-    if (nquarks.eq.0) then
-       do i=1,next
-          if (o(i).eq.1) start=i
-          if (o(i).eq.2) end=i
-       enddo
-       c_o_t=0
-       c_o_k=0
-       c_o_i=abs(end-start)-1
-       c_o_j=next-2-c_o_i
-       c_o=min(c_o_i,c_o_j)
-    elseif (nquarks.eq.2) then
-       do i=1,next
-          if (o(i).eq.1) start=i
-          if (o(i).eq.2) end=i
-       enddo
-       if (start.lt.end) then
-          c_o_t=1
-          if (start.ne.1) c_o_i=abs(start-1)-1
-          if (start.eq.1) c_o_i=next+1
-          if (end.ne.next) c_o_k=abs(next-end)-1
-          if (end.eq.next) c_o_k=next+1
-       endif
-       if (start.gt.end) then
-          c_o_t=2
-          if (end.ne.1) c_o_k=abs(end-1)-1
-          if (end.eq.1) c_o_k=next+1
-          if (start.ne.next) c_o_i=abs(next-start)-1
-          if (start.eq.next) c_o_i=next+1
-       endif
-       c_o_j=abs(start-end)-1
-    endif
-  end subroutine read_process_from_file
 
-  subroutine check_input_colour_order_consistency
-    ! Checks that the c_o_t, c_o_i, c_o_j, and c_o_k are in their correct
-    ! ranges.
-    implicit none
-    if (c_o_t.eq.0 .and. (c_o_j.gt.int((next-2)/2) .or. c_o_j.lt.0)) then
-       write (*,*) 'Inconsistent colour order #1', c_o_t,c_o_i,c_o_j,c_o_k
-       stop 1
-    elseif (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
-       if (c_o_t.ne.1 .and. c_o_t.ne.2) then
-          write (*,*) 'Inconsistent colour order #2a', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
-          write (*,*) 'Inconsistent colour order #2b', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-    elseif (c_o_i.eq.next+1) then
-       if (c_o_t.lt.1 .or. c_o_t.gt.4) then
-          write (*,*) 'Inconsistent colour order #3a', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_k.gt.next-3 .or. c_o_k.lt.0) then
-          write (*,*) 'Inconsistent colour order #3b', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_j.gt.next-3 .or. c_o_j.lt.0) then
-          write (*,*) 'Inconsistent colour order #3c', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_k+c_o_j.gt.next-3) then
-          write (*,*) 'Inconsistent colour order #3d', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-    elseif (c_o_k.eq.next+1) then
-       if (c_o_t.lt.1 .or. c_o_t.gt.4) then
-          write (*,*) 'Inconsistent colour order #4a', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_i.gt.next-3 .or. c_o_i.lt.0) then
-          write (*,*) 'Inconsistent colour order #4b', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_j.gt.next-3 .or. c_o_j.lt.0) then
-          write (*,*) 'Inconsistent colour order #4c', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_i+c_o_j.gt.next-3) then
-          write (*,*) 'Inconsistent colour order #4d', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-    elseif (c_o_t.ge.1) then
-       if (c_o_t.lt.1 .or. c_o_t.gt.8) then
-          write (*,*) 'Inconsistent colour order #5a', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_i.gt.next-4 .or. c_o_i.lt.0) then
-          write (*,*) 'Inconsistent colour order #5b', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_j.gt.next-4 .or. c_o_j.lt.0) then
-          write (*,*) 'Inconsistent colour order #5c', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_k.gt.next-4 .or. c_o_k.lt.0) then
-          write (*,*) 'Inconsistent colour order #5d', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-       if (c_o_i+c_o_j+c_o_k.gt.next-4) then
-          write (*,*) 'Inconsistent colour order #5e', c_o_t,c_o_i,c_o_j,c_o_k
-          stop 1
-       endif
-    endif
-  end subroutine check_input_colour_order_consistency
-  
-  subroutine get_process_from_arguments
-    implicit none
-    ! c_o_t == 0 --> all gluon process; c_o_j is the minimum between the
-    !                numbers of gluons on each of the two colour lines that
-    !                connect the two incoming gluons
-    !
-    ! c_o_t > 0 --> there is 1 qqbar particle:
-    !      c_o_i == n+1 && c_o_k == n+1 --> the two quarks are in the initial
-    !                state. (c_o_t==1 or 2 defines if it is qqbar->ngluons or
-    !                qbarq->ngluons). c_o_j defines the number of gluons that
-    !                are colour-ordered; hence if this is less than the number
-    !                of gluons in the process, the remaining ones are photons.
-    !
-    !      c_o_i == n+1 && c_o_k < n-2 --> left incoming particle is a quark
-    !                (if c_o_t==2) or anti-quark (if c_o_t==1) and the other
-    !                incoming particle a gluon (add 2 to c_o_t to make this a
-    !                photon). c_o_j defines the number of gluons between the
-    !                incoming (anti-)quark and the incoming gluon in the
-    !                colour order; c_o_k is the number of gluons between the
-    !                incoming gluon and the final state anti-quark.
-    !
-    !      c_o_i < n-2 && c_o_k == n+1 --> Same as previous, but with the
-    !                right-incoming particle the (anti-quark), and the
-    !                left-incoming the gluon.
-    !
-    !      c_o_i < n-2 && c_o_k < n-2 --> Both the quark and anti-quark are
-    !                final state. As before, c_o_i is the number of gluons in
-    !                the colour order between the left-incoming gluon and the
-    !                quark; c_o_k between the right-incoming gluon and the
-    !                anti-quark; and c_o_j the number of gluons between the
-    !                two incoming gluons. If c_o_t==2, the role of
-    !                left-incoming and right-incoming is interchanged. If
-    !                c_o_i+c_o_j+c_o_k < n-4, the remaining particles are
-    !                photons. Add 2 to c_o_t to make the left incoming initial
-    !                state particle a photon; Add 4 to c_o_t to make the right
-    !                incoming initial state particle a photon; add 6 to c_o_t
-    !                to make both incoming particles photons.
-    !
-    ! NOTE: for qqbar process, the colour order is such that the first
-    ! particle should be a quark (if final state) or anti-quark (if initial
-    ! state), while the last particle is that anti-quark (if final state) or
-    ! quark (if initial state). This is even true when there are photons
-    ! around: these photons are always put just before the final particle in
-    ! the colour (i.e., just before the anti-quark (if final state) or quark
-    ! (if initial state)). THE LATTER IS SOMEWHAT COUNTER-INTUITIVE, since the
-    ! photons shouldn't be part of the colour order whatsoever...
-    integer :: i,k
-    integer,dimension(:),allocatable :: ord
-    integer :: nsing
-    !call check_input_colour_order_consistency
-    if (c_o_t.eq.0) then
-       nquarks=0       
-    else
-       nquarks=2
-       ! count the number of colour-singlets:
-       if (c_o_i.eq.next+1 .and. c_o_k.eq.next+1) then
-          ! We gave next-2 final state gluons, of which c_o_j are colour-ordered
-          nsing=(next-2)-c_o_j
-       elseif(c_o_i.eq.next+1 .and. c_o_k.ne.next+1) then
-          ! We have next-3 final state gluons, of which (c_o_j+c_o_k) are colour-ordered
-          nsing=(next-3)-(c_o_j+c_o_k)
-       elseif(c_o_i.ne.next+1 .and. c_o_k.eq.next+1) then
-          ! We have next-3 final state gluons, of which (c_o_i+c_o_j) are colour-ordered
-          nsing=(next-3)-(c_o_i+c_o_j)
-       else
-          ! We have next-4 final state gluons, of which (c_o_i+c_o_j+c_o_k) are colour ordered
-          nsing=(next-4)-(c_o_i+c_o_j+c_o_k)
-       endif
-    endif
-       
-    allocate(part(next))
-    allocate(o(next))
-    allocate(ord(next))
-    if (nquarks.eq.2) then
-       if (c_o_i.eq.next+1.and.c_o_k.eq.next+1) then
-          if (c_o_t.eq.1) then
-             part(1)=-1
-             part(2)=1
-             ord(1)=1
-             ord(next)=2
-          elseif (c_o_t.eq.2) then
-             part(1)=1
-             part(2)=-1
-             ord(1)=2
-             ord(next)=1
-          endif
-          do i=3,next
-             if (i.le.c_o_j+2) then
-                part(i)=21
-             else
-                part(i)=22
-             endif
-          enddo
-          do i=2,next-1
-             ord(i)=i+1
-          enddo
-       elseif (c_o_i.eq.next+1.and.c_o_k.ne.next+1) then
-          if (mod(c_o_t,2).eq.1) then
-             part(1)=-1
-             if (c_o_t.eq.1) then
-                part(2)=21
-             else
-                part(2)=22
-             endif
-             part(3)=-1
-             ord(1)=1
-             ord(next)=3
-             ord(2+c_o_j)=2
-             k=4
-             do i=2,2+c_o_j-1
-                ord(i)=k
-                k=k+1
-             enddo
-             do i=2+c_o_j+1,next-1
-                ord(i)=k
-                k=k+1
-             enddo
-          elseif (mod(c_o_t,2).eq.0) then
-             part(1)=1
-             if (c_o_t.eq.2) then
-                part(2)=21
-             else
-                part(2)=22
-             endif
-             part(3)=1
-             ord(1)=3
-             ord(next)=1
-             ord(2+c_o_k)=2
-             k=4
-             do i=2,2+c_o_k-1
-                ord(i)=k
-                k=k+1
-             enddo
-             do i=2+c_o_k+1,next-1
-                ord(i)=k
-                k=k+1
-             enddo
-          endif
-          do i=4,next
-             if (i.le.c_o_j+c_o_k+3) then
-                part(i)=21
-             else
-                part(i)=22
-             endif
-          enddo
-       elseif (c_o_i.ne.next+1.and.c_o_k.eq.next+1) then
-          if (mod(c_o_t,2).eq.1) then
-             if (c_o_t.eq.1) then
-                part(1)=21
-             else
-                part(1)=22
-             endif
-             part(2)=1
-             part(3)=1
-             ord(1)=3
-             ord(next)=2
-             ord(2+c_o_i)=1
-             k=4
-             do i=2,2+c_o_i-1
-                ord(i)=k
-                k=k+1
-             enddo
-             do i=2+c_o_i+1,next-1
-                ord(i)=k
-                k=k+1
-             enddo
-          elseif (mod(c_o_t,2).eq.0) then
-             if (c_o_t.eq.2) then
-                part(1)=21
-             else
-                part(1)=22
-             endif
-             part(2)=-1
-             part(3)=-1
-             ord(1)=2
-             ord(next)=3
-             ord(2+c_o_j)=1
-             k=4
-             do i=2,2+c_o_j-1
-                ord(i)=k
-                k=k+1
-             enddo
-             do i=2+c_o_j+1,next-1
-                ord(i)=k
-                k=k+1
-             enddo
-          endif
-          do i=4,next
-             if (i.le.c_o_j+c_o_k+3) then
-                part(i)=21
-             else
-                part(i)=22
-             endif
-          enddo
-       else
-          if (c_o_t.le.2) then
-             part(1)=21
-             part(2)=21
-          elseif (c_o_t.le.4) then
-             part(1)=22
-             part(2)=21
-          elseif (c_o_t.le.6) then
-             part(1)=21
-             part(2)=22
-          elseif (c_o_t.le.8) then
-             part(1)=22
-             part(2)=22
-          endif
-          part(3)=1
-          part(4)=-1
-          do i=5,next
-             if (i.le.c_o_i+c_o_j+c_o_k+4) then
-                part(i)=21
-             else
-                part(i)=22
-             endif
-          enddo
-          ord(1)=3
-          ord(next)=4
-          if (mod(c_o_t,2).eq.1) then
-             ord(2+c_o_i)=1
-             ord(3+c_o_i+c_o_j)=2
-          else
-             ord(2+c_o_i)=2
-             ord(3+c_o_i+c_o_j)=1
-          endif
-          k=5
-          do i=2,2+c_o_i-1
-             ord(i)=k
-             k=k+1
-          enddo
-          do i=2+c_o_i+1,3+c_o_i+c_o_j-1
-             ord(i)=k
-             k=k+1
-          enddo
-          do i=3+c_o_i+c_o_j+1,next-1
-             ord(i)=k
-             k=k+1
-          enddo
-       endif
-    elseif (nquarks.eq.0) then
-       do i=1,next
-          part(i)=21
-       enddo
-       ord(1)=1
-       ord(2+c_o_j)=2
-       k=3
-       do i=2,2+c_o_j-1
-          ord(i)=k
-          k=k+1
-       enddo
-       do i=2+c_o_j+1,next
-          ord(i)=k
-          k=k+1
-       enddo
-       c_o=min(next-2-c_o_j,c_o_j)
-       if (c_o_j.lt.0 .or. c_o_j.gt.next-2) then
-          write(*,*) 'Incorrect colour order for all gluons: ',c_o_j
-          stop
-       elseif (c_o_i.gt.0 .or. c_o_k.gt.0) then
-          write(*,*) 'Incorrect colour order for all gluons (c_i and c_k must be 0): ',c_o_i,c_o_k
-          stop
-       endif
-    endif
-    o=ord
-    write (*,*) '******************************************'
-    write (*,*) 'Process is     ',part
-    write (*,*) 'Colour order is',o
-    write (*,*) '******************************************'
-  end subroutine get_process_from_arguments
-  
 end program matrix_integrate_QCD

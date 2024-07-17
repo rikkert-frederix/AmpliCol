@@ -4,13 +4,13 @@ module haag
   real(kind=8),parameter :: pi=3.1415926535897932d0
 
   real(kind=8),public :: s0
-  logical :: debug=.false.,  flat=.false.,  open=.false.
+  logical :: flat=.false.,  open=.false.
   logical,public :: flat_split=.false., a1_split=.false.
   real(kind=8),dimension(:),allocatable :: masses
   real(kind=8),public :: tot_mass
   real(kind=8),public :: mass_sum
   integer(kind=4) :: mm
-  integer(kind=4) :: ix, ndim
+  integer(kind=4) :: ix, ndim,next
 
   integer(kind=4),dimension(:),allocatable :: order
   real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x,sigma_ij
@@ -37,7 +37,6 @@ contains
     integer(kind=4),intent(in) :: n
     integer(kind=4),dimension(n),intent(in) :: o,part
     integer(kind=4),dimension(n) :: process
-    integer(kind=4) :: glu,end,start
     real(kind=8),intent(in) :: s_cut(2)
     real(kind=8),dimension(n),intent(in) :: m
     logical,intent(in) :: s_chan
@@ -230,19 +229,14 @@ contains
 
   subroutine generate_momenta
     implicit none
-    real(kind=8),dimension(0:3,next) :: q, qk, qlab
-    real(kind=8),dimension(0:3) :: qtot,qtotm, tot, bst, bst_back
-    real(kind=8) :: costheta,phi,sintheta,dum,scale,a_sum
-    integer(kind=4):: i, t,j,k,m,first,second
-    real(kind=8) :: sk, E, pz, pT, xy,kappa,Atilde,wsq,v,esum,R,min
+    real(kind=8),dimension(0:3,next) :: q, qk
+    integer(kind=4):: i
     real(kind=8),dimension(0:3) :: Qm,Qnm
-    real(kind=8) :: Qz,E1,E2,s1,s2,s,Qt,antenna,test,mass1,mass2,mass_in
+    real(kind=8) :: mass1,mass2,mass_in,R
     logical :: m1
     integer(kind=8),dimension(:),allocatable :: subperm1(:), subperm2(:),subperm,subperm_rest
     integer(kind=8),dimension(next-2) :: perm_final
-    real(kind=8),dimension(next-2) :: schan_ran,schan_ran_sorted
     real(kind=8),dimension(0:3) :: q1_ref,q2_ref
-
     integer :: parts
     real(kind=8),external :: ran2
 
@@ -480,10 +474,8 @@ endif
 
   subroutine generate_tau
     implicit none
-    integer :: i
     real(kind=8) :: smin,smax,shat
     smin=(next-2)*(next-3)*s0
-    !smin=invm_min(maskr(next)-3)
     smax=sqrts**2
     ix=ix+1
     call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
@@ -508,28 +500,20 @@ endif
     real(kind=8),dimension(0:3),intent(in) :: P, q1,q2
     real(kind=8),dimension(0:3),intent(out) :: p1, p2
     real(kind=8),intent(in) :: mass1,mass2
-    real(kind=8),dimension(0:3) :: qtot,qtotm,q1_cmf,q2_cmf,p1_cmf, p2_cmf,Pm,P_cmf
+    real(kind=8),dimension(0:3) :: q1_cmf,q2_cmf,p1_cmf, p2_cmf,Pm,P_cmf
     real(kind=8),dimension(0:3) :: qmir_cmf,qmir
-    real(kind=8),dimension(0:3) :: test1,test2,test_out
-    real(kind=8) :: esum,dum,costheta,sintheta,phi
-    real(kind=8) :: s1, s2, a1, a2, s, gs, a1max,a1min
+    real(kind=8) :: esum,costheta,sintheta
+    real(kind=8) :: s1, s2, a1, a2, s, gs
     integer :: i,k
-    real(kind=8):: h1,h
+    real(kind=8):: h
     real(kind=8),dimension(3) :: solution
-    real(kind=8) ::  plot,beta,a1cut,a2cut
+    real(kind=8) ::  beta,a1cut,a2cut
     integer :: maxn
     logical :: m1
-    real(kind=8) :: schan_ran
     real(kind=8) z_sign
-    real(kind=8),dimension(2) :: buff,min_point1,min_point2
-    double precision :: inv,w1,w2,w,R
+    double precision :: w1,w2,w,R
     integer :: term 
-    double precision,dimension(2) :: a2pm,a1pm
     real(kind=8),external :: ran2
-
-    real(kind=8) :: tmin,tmax,t1,t2,yr,pt2
-    real(kind=8),dimension(0:3) :: pass1,pass2
-    real(kind=8) :: pt2min,pt2max,pt,y,ymin,ymax
     integer :: parts
 
     !write(*,*) 'Particles to generate:',maskr(parts)
@@ -647,10 +631,9 @@ endif
 
   subroutine get_partial_weights(w1,w2,s,s1,s2,a1cut,a2cut,h,cos)
     implicit none
-    integer :: i
     real(kind=8) :: w1,w2
     real(kind=8) :: s,s1,s2,cos
-    real(kind=8) :: h1,a1min,a1max,a2min,a2max,f_h1,beta,dum,h
+    real(kind=8) :: h1,a1min,a1max,a2min,a2max,f_h1,h
     real(kind=8) :: a1cut,a2cut
     real(kind=8),dimension(3) :: buff
     real(kind=8) :: amin,amax,bmin,bmax
@@ -702,7 +685,7 @@ endif
   real(kind=8) function get_min_a2_bound(s,s1,s2,cos)
     implicit none
     real(kind=8),dimension(2) :: min_point1,min_point2
-    real(kind=8) :: a1,s,s1,s2,cos,sin,r,A
+    real(kind=8) :: s,s1,s2,cos,sin,r,A
     real(kind=8) :: p,q,a1plus,a1minus
 
     sin = dsqrt(1d0-cos**2)
@@ -725,7 +708,7 @@ endif
     real(kind=8) :: mass1,mass2
     real(kind=8) :: c1,c2,m,dum,s,s1,s2,E1,E2,phi,Qt,Qz
     real(kind=8) :: RHS,max,min,sum_w,R
-    real(kind=8),dimension(4) :: g1,g2,g3,d,e,w    
+    real(kind=8),dimension(4) :: g1,g2,g3,w    
     integer :: i,pick
     real(kind=8),external :: ran2
     real(kind=8) :: dm,a1,a1min,a1max,a2,comm,root,a1cut
@@ -847,7 +830,7 @@ endif
     integer :: k
     real(kind=8),intent(out) :: a1,s2
     real(kind=8) :: Lambda,Sigma,Delta,sigmak,smin,smax,smax_force
-    real(kind=8) :: A,B,C,R,gs,a2,mu,a1min,a1max,dum
+    real(kind=8) :: A,C,R,gs,a2,mu,a1min,a1max
     real(kind=8),dimension(0:3) :: q1_cmf,P_cmf
 
     Lambda = (tot_mass-mass_sum-s1)+(k-1)*(k-2)*s0/2D0
@@ -906,11 +889,9 @@ endif
     integer :: k
     real(kind=8),intent(out) :: s2
     real(kind=8),dimension(0:3) :: q1_cmf,P_cmf
-    real(kind=8) :: s,s1,A,B,C,dum,R,gs
+    real(kind=8) :: s,s1,A,B,C,R,gs
     real(kind=8) :: Lambda,Delta,Sigma,sigmak,Sigmaold,smin,smax,smax_force
-    double precision :: scut,inv
-
-    double precision :: p1,p2,p3,bb
+    double precision :: scut
 
     ! Include also initial momenta in the limits!
    
@@ -973,7 +954,7 @@ endif
     real(kind=8) :: s,s1,s2,cos
     logical :: m1
     real(kind=8) :: a1cut
-    real(kind=8) :: h1,h,h_in,a1min,a1max,a1max_force,f_h1,beta,dum
+    real(kind=8) :: h1,h,h_in,a1min,a1max,a1max_force,f_h1,beta
     real(kind=8),dimension(3) :: buff
     real(kind=8) :: Amin,Amax,Atilde,R,v,wsq,kappa
 
@@ -1063,7 +1044,7 @@ endif
     logical :: m1
     real(kind=8),intent(out) :: a1
     real(kind=8),dimension(2) :: a1pm
-    real(kind=8) :: a1maxbar,a1minbar,R,xy,a1max,a1min,dum
+    real(kind=8) :: a1maxbar,a1minbar,R,xy,a1max,a1min
 
     a1pm = a1_pm(a2,s,s1,s2,cos)
     a1min = a1pm(2)
@@ -1092,7 +1073,7 @@ endif
     logical :: m1
     real(kind=8),intent(out) :: a2
     real(kind=8),dimension(2) :: a2pm
-    real(kind=8) :: a2maxbar,a2minbar,R,xy,a2max,a2min,dum,a2max_force
+    real(kind=8) :: a2maxbar,a2minbar,R,xy,a2max,a2min,a2max_force
 
     a2pm = a2_pm(a1,s,s1,s2,cos)
     a2min = a2pm(2)
@@ -1167,12 +1148,12 @@ endif
     implicit none
     integer :: i,maxn
     real(kind=8),intent(out) :: a2
-    real(kind=8) :: a1,s,s1,s2,cos
+    real(kind=8) :: s,s1,s2,cos
     logical :: m1
     real(kind=8) :: a2cut
     real(kind=8) :: h1,a2min,a2max,f_h1,beta
     real(kind=8),dimension(3) :: buff
-    real(kind=8) :: Amin,Amax,Atilde,R,v,wsq,kappa
+    real(kind=8) :: Amin,Amax,Atilde,R,wsq,kappa
 
     h1=0d0
     a2max = 0.5d0*((1d0+(s2-s1)/s)+dsqrt(kallen(1d0,s1/s,s2/s)))
@@ -1635,11 +1616,10 @@ endif
           p_rot(0) = p(0)
   end subroutine
 
-  subroutine check_momenta(p,mass)
+  subroutine check_momenta(p)
      implicit none
      real(kind=8), dimension(0:3,next) :: p
      real(kind=8), dimension(0:3) :: tot_mom
-     real(kind=8), dimension(next) :: mass
      integer i 
      real(kind=8) :: curr_mass
 
@@ -1795,84 +1775,6 @@ endif
     pb(1:2)=p(1:2)
     pb(3)=p(3)*cosh(yb)-p(0)*sinh(yb)
   end subroutine boostz
-
-!!$  FUNCTION RN(IDUMMY)
-!!$      REAL*8 RN,RAN
-!!$      SAVE INIT
-!!$      DATA INIT /1/
-!!$      IF (INIT.EQ.1) THEN
-!!$        INIT=0
-!!$        CALL RMARIN(1802,9373)
-!!$      END IF
-!!$!*
-!!$  10  CALL RANMAR(RAN)
-!!$      IF (RAN.LT.1D-16) GOTO 10
-!!$      RN=RAN
-!!$!*
-!!$   END
-!!$
-!!$   SUBROUTINE RANMAR(RVEC)
-!!$!*     -----------------
-!!$!* Universal random number generator proposed by Marsaglia and Zaman
-!!$!* in report FSU-SCRI-87-50
-!!$!* In this version RVEC is a double precision variable.
-!!$      IMPLICIT REAL*8(A-H,O-Z)
-!!$      COMMON/ RASET1 / RANU(97),RANC,RANCD,RANCM
-!!$      COMMON/ RASET2 / IRANMR,JRANMR
-!!$      SAVE /RASET1/,/RASET2/
-!!$      UNI = RANU(IRANMR) - RANU(JRANMR)
-!!$      IF(UNI .LT. 0D0) UNI = UNI + 1D0
-!!$      RANU(IRANMR) = UNI
-!!$      IRANMR = IRANMR - 1
-!!$      JRANMR = JRANMR - 1
-!!$      IF(IRANMR .EQ. 0) IRANMR = 97
-!!$      IF(JRANMR .EQ. 0) JRANMR = 97
-!!$      RANC = RANC - RANCD
-!!$      IF(RANC .LT. 0D0) RANC = RANC + RANCM
-!!$      UNI = UNI - RANC
-!!$      IF(UNI .LT. 0D0) UNI = UNI + 1D0
-!!$      RVEC = UNI
-!!$   END
-!!$
-!!$   SUBROUTINE RMARIN(IJ,KL)
-!!$!*     -----------------
-!!$!* Initializing routine for RANMAR, must be called before generating
-!!$!* any pseudorandom numbers with RANMAR. The input values should be in
-!!$!* the ranges 0<=ij<=31328 ; 0<=kl<=30081
-!!$      IMPLICIT REAL*8(A-H,O-Z)
-!!$      COMMON/ RASET1 / RANU(97),RANC,RANCD,RANCM
-!!$      COMMON/ RASET2 / IRANMR,JRANMR
-!!$      SAVE /RASET1/,/RASET2/
-!!$!* This shows correspondence between the simplified input seeds IJ, KL
-!!$!* and the original Marsaglia-Zaman seeds I,J,K,L.
-!!$!* To get the standard values in the Marsaglia-Zaman paper (i=12,j=34
-!!$!* k=56,l=78) put ij=1802, kl=9373
-!!$      I = MOD( IJ/177 , 177 ) + 2
-!!$      J = MOD( IJ     , 177 ) + 2
-!!$      K = MOD( KL/169 , 178 ) + 1
-!!$      L = MOD( KL     , 169 )
-!!$      DO 300 II = 1 , 97
-!!$        S =  0D0
-!!$        T = .5D0
-!!$        DO 200 JJ = 1 , 24
-!!$          M = MOD( MOD(I*J,179)*K , 179 )
-!!$          I = J
-!!$          J = K
-!!$          K = M
-!!$          L = MOD( 53*L+1 , 169 )
-!!$          IF(MOD(L*M,64) .GE. 32) S = S + T
-!!$          T = .5D0*T
-!!$  200   CONTINUE
-!!$        RANU(II) = S
-!!$  300 CONTINUE
-!!$      RANC  =   362436D0 / 16777216D0
-!!$      RANCD =  7654321D0 / 16777216D0
-!!$      RANCM = 16777213D0 / 16777216D0
-!!$      IRANMR = 97
-!!$      JRANMR = 33
-!!$      END
-
-
 
 
 end module haag

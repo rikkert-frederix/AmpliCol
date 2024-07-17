@@ -1,14 +1,5 @@
 ! gfortran -ffast-math -O3 -o matrix_reweight random.f color_algebra.f95 amplitude_real.f03 math_functions.f03 feynmanrules.f03 amplitude_QCD.f03 matrix_reweight.f03
 
-module common
-  use amplitude_QCD_mod
-  implicit none
-  integer :: next
-  type(amplitude_QCD) :: amp_QCD
-  type(amplitude_QCD),dimension(:),allocatable :: amps
-  real(kind=8),dimension(:,:),allocatable :: p
-  integer,parameter :: string_len=150
-end module common
 module rw_events
   implicit none
   real(kind=8) :: wgt,evt_wgt,weight,amp2,rwgt_NLC,rwgt_full
@@ -25,23 +16,25 @@ end module arguments
 
 program matrix_reweight
   use math_functions
-  use common
+  use amplitude_QCD_mod
   use timings
   implicit none
+  integer :: next
+  type(amplitude_QCD),dimension(:),allocatable :: amps
+  real(kind=8),dimension(:,:),allocatable :: p
+  integer,parameter :: string_len=150
   integer :: i,j,col_acc,icol,irow,ic,iacc
-  integer :: icol_mat,irow_mat,ri,ri_end,m,proc_num,iacc_in,k,skip 
+  integer :: icol_mat,irow_mat,ri,ri_end,proc_num,iacc_in,k,skip 
   integer,dimension(:),allocatable :: hel,o,part,part_sf,orig_part,temp_part
   integer,dimension(:,:),allocatable :: spin
   real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: amp2,amp_col
   complex(kind=8) :: amp2_c,amp_col_c
   real(kind=8),dimension(:),allocatable :: mass,width
-  logical :: done,first
-  integer :: swap_q,swap_aq
+  logical :: done
   integer :: it,gi,gi_iperm,gi_prev ! type for 2qq process
   integer,dimension(:),allocatable :: iper_test
   integer :: ic_low,ic_upp
-  integer,dimension(8) :: flav
   character(len=string_len) :: tag,tag_read,add_arg=''
   
   call get_run_arguments()
@@ -87,7 +80,7 @@ program matrix_reweight
   it = 1
   call amps(1)%init(2,next,part,spin,mass,width,o,it)
   col_acc=20
-  call amps(1)%init_col2(next,orig_part,o,it,col_acc)
+  call amps(1)%init_col(next,orig_part,it,col_acc)
 
 
   if (amps(1)%n_qqbar.eq.2) then
@@ -97,7 +90,7 @@ program matrix_reweight
      it = 2
      call amps(2)%init(2,next,part,spin,mass,width,o,it)
      col_acc=20
-     call amps(2)%init_col2(next,orig_part,o,it,col_acc)
+     call amps(2)%init_col(next,orig_part,it,col_acc)
   endif
 
   if (amps(1)%n_qqbar.eq.2.and.amps(1)%same_flav) then
@@ -108,14 +101,14 @@ program matrix_reweight
      it = 1
      call amps(3)%init(2,next,part_sf,spin,mass,width,o,it)
      col_acc=20
-     call amps(3)%init_col2(next,orig_part,o,it,col_acc)
+     call amps(3)%init_col(next,orig_part,it,col_acc)
 
      amps(4)%n_qqbar=amps(1)%n_qqbar
      amps(4)%same_flav=amps(1)%same_flav
      it = 2
      call amps(4)%init(2,next,part_sf,spin,mass,width,o,it)
      col_acc=20
-     call amps(4)%init_col2(next,orig_part,o,it,col_acc)
+     call amps(4)%init_col(next,orig_part,it,col_acc)
   endif
 
   if (color_flow) then
@@ -136,7 +129,7 @@ program matrix_reweight
            it = 0! dummy
            call amps(i+k-1)%init(2,next,temp_part,spin,mass,width,o,it)
            col_acc=20
-           call amps(i+k-1)%init_col2(next,part,o,it,col_acc)
+           call amps(i+k-1)%init_col(next,part,it,col_acc)
         enddo
      enddo
   endif
@@ -361,7 +354,7 @@ contains
   subroutine get_run_arguments()
     use arguments
     implicit none
-    integer :: argc,nquarks
+    integer :: argc
     character(len=256) :: argv
     ! integration steps:
     ! imode=0  (Setting up grids)
@@ -424,8 +417,6 @@ contains
   subroutine create_run_tag_and_open_files()
     use arguments
     implicit none
-    character(len=1) :: s1
-    character(len=2) :: s2
     tag='_'       ! tag of current run
     tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
     call add_to_string(tag,next,.true.)
@@ -472,23 +463,6 @@ contains
        write (*,*) 'value too large to add to the run tag',inter
     endif
   end subroutine add_to_string
-
-  subroutine fill_string(string,size)
-    ! Fills the string 'string' with leading underscores until the string has
-    ! size 'size'. The declaration of the string must be at least size 'size'.
-    implicit none
-    character(len=string_len) :: string
-    integer :: size,n_to_add
-    if (size.gt.len(string)) then
-       write (*,*) 'Size greater than string',size,string
-       stop 1
-    endif
-    n_to_add=len(trim(string))+2-len(trim(string))
-    do i=1,n_to_add
-       string='_'//trim(adjustl(string))
-    enddo
-  end subroutine fill_string
-
 
   subroutine read_event(iunit,done)
     use rw_events

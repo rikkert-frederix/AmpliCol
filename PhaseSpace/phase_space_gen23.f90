@@ -1,7 +1,7 @@
 module phase_space_gen23
   use common
   private
-  integer(kind=4) :: ix,ndim
+  integer(kind=4) :: ix,ndim,next
   integer(kind=4),dimension(:),allocatable :: order
   real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x,ETmin
   real(kind=8),dimension(:,:),allocatable :: pp
@@ -59,7 +59,7 @@ contains
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
-    integer(kind=4),dimension(n) :: part,process
+    integer(kind=4),dimension(n) :: part
     sqrtshat=sqrtsh
     sqrts=sqrtsh
     t_channel=t_chan
@@ -540,11 +540,10 @@ contains
 ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
     implicit none
     integer(kind=4),intent(in) :: im1,i,ir,ib
-    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax,y,base,root,phi_rot,&
+    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
          etminir,etmini
     real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
     real(kind=8),external :: ran2
-    integer :: j
     if (popcnt(i).gt.1) then
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
        call shatminmax(i,ir,shatmin,shatmax)
@@ -718,16 +717,14 @@ contains
 ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
     implicit none
     integer(kind=4),intent(in) :: im1,i,ir,ib
-    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,Eirmax,pzmax,shatmin,shatmax,y,base,root,phi_rot,&
+    real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
          etminir,etmini
     real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
     real(kind=8),external :: ran2
-    integer :: j
     integer :: ic,irc,ibc,im1c
     common /current_step/ ic,irc,ibc,im1c
 
     integer,parameter :: n_try=1000
-    real(kind=8) :: xb1,xb2
     integer :: nb,icode
     real(kind=8),parameter :: xacc=1d-8
     real(kind=8),dimension(n_try) :: xbb1,xbb2
@@ -955,7 +952,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
     integer(kind=4),intent(in) :: i,ir,ib,im1
     real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,&
          xjac,cosphi,pt,root,denom,base,pre,ptiir
-    real(kind=8),dimension(0:3) :: pb,pim1,piir,pip,pim,prp,prm,pipr
+    real(kind=8),dimension(0:3) :: pim1,piir,pip,pim,prp,prm,pipr
     real(kind=8),external :: ran2
     logical :: use_plus
     if (invm(i).ne.0d0) then
@@ -1191,7 +1188,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
     ! One step in the usual MadGraph t-channel phase-space generation.
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib
-    real(kind=8) :: tmin,tmax,phi,pzmax,Eimax,Eirmax,Eir,Ei,shatmin,shatmax,base,etminir,root,y,etmini
+    real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini
     real(kind=8),dimension(0:3) :: piir,pib
     if (popcnt(i).gt.1) then
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -1281,7 +1278,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
     implicit none
     integer(kind=4),intent(in) :: i,ir,ib,im1
     real(kind=8) :: pt2,y,phi_rot,pt2min,pt2max,tmin,tmax,smin,smax,&
-         ea,eimax,mi,tr,siim1,mim1,eim1,pxim1,V,sqrtGG,base,root,yb
+         ea,mi,tr,siim1,mim1,eim1,pxim1,base,root,yb
     real(kind=8),dimension(0:3) :: piirr,pim1r,pib,piir,pim1,pii,pir
     real(kind=8),external :: ran2
     
@@ -2127,7 +2124,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
     real(kind=8),parameter :: tol=1d-8
-    real(kind=8) :: deter,deter_check
+    real(kind=8) :: deter
     logical :: success
     a(1:4,1)=(/ 0d0           , t_im1-shat_im1 , t_i-shat_i       , t_ip1-shat_ip1    /)
     a(1:4,2)=(/ t_im1-shat_im1, 2d0*t_im1      , t_i+t_im1-m_i_2  , t_im1+t_ip1-s_i   /)
@@ -2140,17 +2137,6 @@ subroutine genpt_one_step(i,ir,ib,im1)
     else
        gram_determinant4=1d0
     endif
-!!$    a(1:4,3)=(/ t_i-shat_i       , t_im1-shat_im1 , 0d0           , t_ip1-shat_ip1    /)
-!!$    a(1:4,1)=(/ t_i+t_im1-m_i_2  , 2d0*t_im1      , t_im1-shat_im1, t_im1+t_ip1-s_i   /)
-!!$    a(1:4,2)=(/ 2d0*t_i          , t_i+t_im1-m_i_2, t_i-shat_i    , t_i+t_ip1-m_ip1_2 /)
-!!$    a(1:4,4)=(/ t_i+t_ip1-m_ip1_2, t_im1+t_ip1-s_i, t_ip1-shat_ip1, 2d0*t_ip1         /)
-!!$    call LUPdecompose(a,n,tol,p,success)
-!!$    if (success) then
-!!$       call LUPdeterminant(a,p,n,deter_check)
-!!$       if (abs(deter/(-deter_check)-1d0).gt.1d-9) then
-!!$          write (*,*) deter,deter_check,deter/(-deter_check)-1d0
-!!$       endif
-!!$    endif
   end function gram_determinant4
   
 end module phase_space_gen23
