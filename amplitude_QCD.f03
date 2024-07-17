@@ -2658,15 +2658,12 @@ contains
     include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
     allocate(include_product(nhel))
     include_product(1:nhel)=.false.
-
-!!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
     
     ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
     nspin=0
     do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
        do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
           ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
-!!$          write (*,*) ih,ih1,ih2,include_hel(ih)
           if (include_hel(ih).ge.1) then
              include_current(this%n_cur_start(n-1)+ih1-1)=.true.
              include_current(this%n_cur_start(n  )+ih2-1)=.true.
@@ -2678,10 +2675,6 @@ contains
 
     allocate(tmp_spin(1:n,1:maxval(include_hel),nspin))
     nspin=nhel
-!!$
-!!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
-!!$    write (*,*) include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
-!!$    stop 1
 
     ihc=0
     nhel=0
@@ -2717,7 +2710,6 @@ contains
     enddo
     deallocate(this%spins)
     call move_alloc(tmp_spin,this%spins)
-!!$    write (*,*) include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
 
     deallocate(this%include_product)
     allocate(this%include_product(1:ihc))
