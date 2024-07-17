@@ -26,10 +26,6 @@ program matrix_integrate_QCD
   integer :: it ! quark order type
   integer,parameter :: nevent_hel_filter=5
   integer,dimension(2) :: hel_picked
-  type process
-     integer,dimension(6) :: particles
-  end type process
-  type(process) :: proc
   
   call get_run_arguments()
   call compute_multichannel_symmetry_factor()
@@ -120,8 +116,6 @@ program matrix_integrate_QCD
      call set_ipdgs_for_PDF(ipdgs)
   endif
 
-  proc%particles(1:next)=part(1:next)
-  
   ! counting of quark flavours in process
   call fill_quark_info()
 
