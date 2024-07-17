@@ -391,20 +391,21 @@ contains
   subroutine setup_helicity_filter(nevent)
     implicit none
     real(kind=8) :: max_value
-    integer :: ih1,ih2,nevent
+    integer :: ih1,ih2,nevent,nhel_sf
     integer,dimension(:,:),allocatable,save :: include_hel
+    integer,dimension(:),allocatable :: include_hel_sf
     if (.not.allocated(include_hel)) allocate(include_hel(nhel,nevent_hel_filter))
     ! filter zero helicities and helicities that are identical
     include_hel(1:nhel,nevent)=1
     max_value=maxval(amp2_hel(1:nhel))
     do ih1=1,nhel
        if (include_hel(ih1,nevent).ne.1) cycle
-       if (amp2_hel(ih1)/max_value.lt.1d-12) then
+       if (amp2_hel(ih1)/max_value.lt.1d-28) then
           ! zero
           include_hel(ih1,nevent)=0
        else
           do ih2=ih1+1,nhel
-             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/max_value.lt.1d-12) then
+             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
                 ! identical
                 include_hel(ih2,nevent)=-ih1
                 include_hel(ih1,nevent)=include_hel(ih1,nevent)+1
@@ -412,7 +413,8 @@ contains
           enddo
        endif
     enddo
-   
+
+    
     if (nevent.lt.nevent_hel_filter) return
     
     do ih1=1,nhel
@@ -422,17 +424,23 @@ contains
           stop 1
        endif
     enddo
-    
-    call amps%filter_helicity(next,nhel,include_hel(1,1))
+
+    nhel_sf=nhel
+    allocate(include_hel_sf(1:nhel))
+    include_hel_sf(1:nhel)=include_hel(1:nhel,1)
+    call amps%filter_helicity(next,nhel,include_hel(1,1)) ! this updates 'nhel' and 'include_hel'
     if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-       write (*,*) 'nhel was updated by the above filter. Fix this here '
-       stop 1
-       call amps_sf%filter_helicity(next,nhel,include_hel(1,1))
+       call amps_sf%filter_helicity(next,nhel_sf,include_hel_sf)
+       if (nhel.ne.nhel_sf) then
+          write (*,*) 'number of helicity not consistent',nhel,nhel_sf
+          stop 1
+       endif
     endif
     deallocate(hel_fac)
     allocate(hel_fac(nhel))
     hel_fac(1:nhel)=include_hel(1:nhel,1)
     deallocate(include_hel)
+    deallocate(include_hel_sf)
   end subroutine setup_helicity_filter
 
   subroutine define_symm_2qq(next,part,chan)
