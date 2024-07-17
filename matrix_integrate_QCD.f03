@@ -112,7 +112,6 @@ program matrix_integrate_QCD
      call set_ipdgs_for_PDF(ipdgs)
   endif
 
-
   ! counting of quark flavours in process
   call fill_quark_info()
 
@@ -122,9 +121,11 @@ program matrix_integrate_QCD
   call amps%init(1,next,part,spin,mass,width,o,it)
 
   if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-    part_sf(:) = orig_part(:)
-    call define_symm_2qq(next,part_sf,2)
-    call amps_sf%init(1,next,part_sf,spin,mass,width,o,it)
+     part_sf(:) = orig_part(:)
+     amps_sf%n_qqbar=amps%n_qqbar
+     amps_sf%same_flav=amps%same_flav
+     call define_symm_2qq(next,part_sf,2)
+     call amps_sf%init(1,next,part_sf,spin,mass,width,o,it)
   endif
 
   call cpu_time(tAfter)

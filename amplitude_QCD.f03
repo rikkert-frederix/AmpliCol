@@ -59,7 +59,7 @@ contains
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
     integer :: it ! quark order type
-
+    
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - all polarisation/helicity configurations'
@@ -446,37 +446,7 @@ contains
 
     subroutine check_input_consistency()
       implicit none
-      integer,dimension(6) :: quark_flav
-      integer :: i,j,k,sgn
-      integer,dimension(8) :: flav  ! fills the flavours of quarks it finds ( in abs)
-
-      this%n_qqbar=0
-      this%n_sing=0
-      quark_flav=0
-      this%same_flav=.true.
-      flav = 0
-      k = 1
-      do i=1,n
-         if (i.le.2) then
-            if (part(i).ne.21 .and. part(i).ne.22) then
-               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))-sign(1,part(i))
-               flav(k) = abs(part(i))
-               k= k+1
-               if (part(i).lt.0) this%n_qqbar=this%n_qqbar+1
-            endif
-         else
-            if (part(i).ne.21 .and. part(i).ne.22) then
-               quark_flav(abs(part(i)))=quark_flav(abs(part(i)))+sign(1,part(i))
-               flav(k) = abs(part(i))
-               k= k+1
-               if (part(i).gt.0) this%n_qqbar=this%n_qqbar+1
-            endif
-         endif
-         if (part(i).ne.21 .and. abs(part(i)).gt.6) this%n_sing=this%n_sing+1
-      enddo
-
-      if (any(flav(1:2*this%n_qqbar).ne.flav(1))) this%same_flav = .false.
-
+      integer :: i,j,k
 ! Setup the quark_index. Labels where the quarks and anti-quarks are in the
 ! process. Quarks are the odd entries (quark_index(1) and quark_index(3)),
 ! while the anti-quarks are the even entries. If quark flavours are different,
@@ -511,11 +481,6 @@ contains
          enddo
       endif
       
-      if (any(quark_flav(:).ne.0)) then
-         write (*,*) 'ERROR: inconsistent quark flavours',part(1:n)
-         write(*,*) quark_flav
-         stop 1
-      endif
       if (this%n_qqbar.gt.3) then
          write (*,*) 'ERROR: code only working for 0, 1 or 2 qqbar pairs',this%n_qqbar
          write (*,*) part
