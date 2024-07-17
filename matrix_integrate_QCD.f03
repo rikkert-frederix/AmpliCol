@@ -217,13 +217,11 @@ contains
     t_PS= t_PS +tAfter-tBefore
 
 
-!!$    if (debug .and. jac.lt.0d0) then
     if (debug ) then
        write (*,*) jac
        stop 1
     endif
     
-!!$12 continue
     all_evt=all_evt+1
 
     cuts_wgt=pass_cuts(next,p)
@@ -267,9 +265,7 @@ contains
     amp2=sum(amp2_hel(1:nhel))
     
     if (passed.le.nevent_hel_filter) then
-!!$       write (*,*) amp2
        call setup_helicity_filter(passed)
-!!$       goto 12
        if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
           ! passed==nevent_hel_filter, the unweighting of the helicities goes
@@ -277,13 +273,6 @@ contains
           amp2=0d0
        endif
     endif
-
-!!$    if (passed.eq.2) then
-!!$       write (*,*) amp2_hel(1:nhel)
-!!$       write (*,*) nhel
-!!$       write (*,*) amp2*2
-!!$       stop 1
-!!$    endif
     
     weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     

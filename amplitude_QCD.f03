@@ -1554,11 +1554,6 @@ contains
 
              if (this%current_list(ic)%spin(1).eq.-9) then
                 ih_in=max(0,hel(this%current_list(ic)%order(1)))
-!!$                if (btest(hel-1,this%current_list(ic)%order(1)-1)) then
-!!$                   ih_in=1  ! + helicity 
-!!$                else
-!!$                   ih_in=0  ! - helicity 
-!!$                endif
              else
                 ih_in=max(0,this%current_list(ic)%spin(1))
              endif
