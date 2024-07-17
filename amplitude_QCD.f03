@@ -44,7 +44,7 @@ module amplitude_QCD_mod
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,spin,mass,width,order,it)
+  subroutine init(this,imode,n,part,spin,mass,width,order,it)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
