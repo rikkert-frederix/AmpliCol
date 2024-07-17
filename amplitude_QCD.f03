@@ -2089,9 +2089,7 @@ contains
              do uj=1,uj_upper
                 jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
                 if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
-
                 do rj=0,lim
-
                    if (use_cm_dict) then
                       ! GET color factors from permuting first row
                       call get_col_fac(iper,jper,ui,uj,gi_iperm,col_fac)
@@ -2103,13 +2101,11 @@ contains
                          if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
                       endif
                    endif
-
                    do iacc=1,3
                       if (col_fac(iacc).eq.0d0) cycle
                       do ival=1,n_vals(iacc,gi_iperm)
                          if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
                       enddo
-
                       ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
                       ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
                       this%col_index(this%i_col_i(ival,iacc,gi_iperm)+ic(ival,iacc,gi_iperm),gi_iperm)=&
@@ -2118,7 +2114,6 @@ contains
                 enddo
              enddo
           enddo
-
           do iacc=1,3
              this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
           enddo
