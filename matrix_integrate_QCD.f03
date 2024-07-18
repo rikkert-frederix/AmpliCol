@@ -42,7 +42,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
   if (imode.eq.0 .or. imode.eq.2) then
-     ncalls0=-100000
+     ncalls0=-100
   else
      ncalls0=640000
   endif
