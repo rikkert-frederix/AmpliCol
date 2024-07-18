@@ -1099,7 +1099,7 @@ contains
                 do i_swap=1,2
                    io(1:next,4)=io(1:next,3)
                    if (i_swap.eq.2) then
-                      if (.not.same_flavour) cycle
+!!$                      if (.not.same_flavour) cycle
                       do i=2,next-1
                          if ((io(i,3).gt.2 .and. part(io(i,3)).le.-1 .and. part(io(i,3)).ge.-6) .or. &
                               (io(i,3).le.2 .and. part(io(i,3)).ge. 1 .and. part(io(i,3)).le. 6) ) then
