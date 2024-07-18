@@ -24,18 +24,14 @@ module amplitude_QCD_mod
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
-     integer,dimension(:,:,:),allocatable :: spins
      real(kind=8),dimension(:,:),allocatable :: pp
      real(kind=8),dimension(:,:,:),allocatable :: diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
-          pp_bin_to_i,pp_i_to_bin
-     integer,dimension(:,:),allocatable ::  n_col_vals
-     integer,dimension(:,:),allocatable :: perm,col_index
-     integer,dimension(:),allocatable :: quark_index
+          pp_bin_to_i,pp_i_to_bin,quark_index,map_2qq_amps
+     integer,dimension(:,:),allocatable :: n_col_vals,perm,col_index
+     integer,dimension(:,:,:),allocatable :: spins,i_col_i
      integer,dimension(:,:,:,:),allocatable :: row_index
-     integer,dimension(:,:,:),allocatable :: i_col_i
-     integer,dimension(:),allocatable :: map_2qq_amps
      logical :: same_flav
      logical,dimension(:),allocatable :: include_product
    contains
@@ -47,17 +43,16 @@ contains
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
-    type(current),dimension(:),allocatable :: current_list_local
-    type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer::n,imode
+    integer :: n,imode,it
     integer,dimension(n)::part,order
     integer,dimension(0:3,n) :: spin
     real(kind=8),dimension(n) :: mass,width
+    type(current),dimension(:),allocatable :: current_list_local
+    type(interaction),dimension(:),allocatable :: interaction_list_local
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin
     real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
-    integer :: it ! quark order type
     
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -80,7 +75,7 @@ contains
     call check_input_consistency()
 
     if (this%imode.eq.2) then
-       call define_canonical_color_order(it)
+       call define_canonical_color_order()
     else
        this%nColOrd=1
     endif
@@ -356,13 +351,11 @@ contains
       endif
     end subroutine simple_consistency_checks
   
-    subroutine define_canonical_color_order(it)
+    subroutine define_canonical_color_order()
       ! canonical order: (q,glu,glu,glu,singlet,singlet,qbar,q,qbar)
       use math_functions
       implicit none
-      integer :: i
-      integer :: nq,naq,nglu,nsing,iq,iaq,iglu,ising
-      integer :: it ! quark order type
+      integer :: i,nq,naq,nglu,nsing,iq,iaq,iglu,ising
 
       nq=0; naq=0 ; nglu=0 ; nsing=0
       do i=1,n
@@ -1143,8 +1136,7 @@ contains
     subroutine add_current(vertex_sign,cur_bin,ip,ctype,spin)
       implicit none
       logical :: vertex_sign
-      integer,dimension(isize) :: ip   ! permutation of the current
-      integer,dimension(isize) :: spin ! spin of the current
+      integer,dimension(isize) :: ip,spin   ! permutation and spin of the current
       integer :: ctype,cur_bin,ic,key
       integer(kind=8) :: val
       if (this%imode.eq.1 .or. this%imode.eq.3) then
@@ -1434,8 +1426,7 @@ contains
     integer,dimension(n)::part,hel
     real(kind=8),dimension(n) :: mass,width
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih_in,ip
-    integer :: ifinal
+    integer :: ic,iv,isize,ih_in,ip,ifinal
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -1809,27 +1800,17 @@ contains
     use math_functions
     implicit none
     class(amplitude_qcd) :: this
-    integer :: col_acc,n
+    integer,parameter :: max_vals=3000
+    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,ui,uj,uj_upper,it,iperm_upper,&
+         gi_iperm,key,max_keys,jperm_lower
     integer,dimension(n) :: iper,jper,part
-    integer :: iperm,jperm,ival,iacc,isum
-    !integer,dimension(1:3) :: n_vals
-    integer,allocatable,dimension(:,:) :: n_vals
-    integer,parameter :: max_vals=300
+    integer,dimension(:,:),allocatable :: n_vals,first_rows
     real(kind=8),dimension(1:3) :: col_fac
-    !real(kind=8),allocatable,dimension(:,:) :: col_fac
-    !real(kind=8),dimension(max_vals,1:3) :: diff_vals
-    real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
-    real(kind=8),allocatable,dimension(:,:,:) :: col_vals
+    real(kind=8),dimension(:,:,:),allocatable :: diff_vals
+    real(kind=8),dimension(:,:,:),allocatable :: col_vals
     integer,dimension(:,:,:),allocatable :: ic,ir,n_colour_elements
-    integer :: i,j,gi
-    integer :: ui,uj,uj_upper ! quark ordering type
-    integer :: it ! quark order type (1 or 2)
-    integer :: iperm_upper,gi_iperm  ! needed for 2qq
-    integer :: key
-    integer(kind=8),allocatable,dimension(:) :: perm_dict
-    integer :: max_keys,jperm_lower
-    integer,allocatable,dimension(:,:) :: first_rows
-    
+    integer(kind=8),dimension(:),allocatable :: perm_dict
+
     write (*,*) 'Initialising colour matrix ...'
 
     call create_perm_dict()
@@ -2035,8 +2016,7 @@ contains
    subroutine get_other_quark_order(jper)
      implicit none
      integer,dimension(n) :: jper,temp_part,jper_new
-     integer :: i
-     integer :: aq1,aq2
+     integer :: i,aq1,aq2
      logical first
      temp_part=part
      do i=1,n
@@ -2137,13 +2117,11 @@ contains
     subroutine compute_color_factor(col_acc,n,iper,jper,ui,uj,col_fac)
       use color_algebra
       implicit none
-      integer :: i,n,acc,col_acc,color_fac,k
+      integer :: i,n,acc,col_acc,color_fac,k,ui,uj,gi,gj
       real(kind=8),dimension(1:3) :: col_fac
       integer,dimension(n) :: iper,jper
       integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
       real(kind=16) :: col_factor
-      integer :: ui,uj ! for 2qq processes: type of quark ordering 
-      integer :: gi,gj ! for 2qq: number of gluons on first quark color line
       col_fac(1:3)=0d0
       if (col_acc.ge.0) then ! LC
          if (this%n_qqbar.eq.0) then
