@@ -24,7 +24,6 @@ program matrix_reweight
   real(kind=8),dimension(:,:),allocatable :: p
   integer,parameter :: string_len=150
   integer :: i,j,col_acc,icol,irow,ic,iacc
-  integer :: icol_mat,irow_mat,ri,ri_end,proc_num,iacc_in,k,skip 
   integer,dimension(:),allocatable :: hel,o,part,part_sf,orig_part,temp_part
   integer,dimension(:,:),allocatable :: spin
   real(kind=8),dimension(3) :: matrix2
@@ -111,29 +110,6 @@ program matrix_reweight
      call amps(4)%init_col(next,orig_part,it,col_acc)
   endif
 
-  if (color_flow) then
-     do i=2,2 ! TV: only single external U(1) for now!
-        skip = 1
-        do k=1,next-2 ! loop through alil gluons
-           temp_part = part
-           do j=1,next
-              if (temp_part(j).eq.21) then
-                 if (j.le.skip) then
-                    cycle
-                 endif
-                 temp_part(j) = 22
-                 skip = j
-                 exit
-              endif
-           enddo
-           it = 0! dummy
-           call amps(i+k-1)%init(2,next,temp_part,spin,mass,width,o,it)
-           col_acc=20
-           call amps(i+k-1)%init_col(next,part,it,col_acc)
-        enddo
-     enddo
-  endif
-
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
@@ -157,13 +133,6 @@ program matrix_reweight
      endif
 
 
-     if (color_flow) then
-        do i=2,2
-           do k=1,next-2
-              call amps(i+k-1)%evaluate(next,p,mass,width,hel,part)
-           enddo
-        enddo
-     endif
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -209,38 +178,17 @@ program matrix_reweight
 
 
         elseif (amps(1)%n_qqbar.eq.1) then
-           ri_end=0
-           if (color_flow) ri_end= 1 !next-2 for FC
-           do ri=0,ri_end ! loop over no U(1) and one U(1) in the rows
-              iacc_in=iacc
-              do k=1,ri*(next-2)+1
-                 proc_num = ri+1+k-1
-                 if (proc_num.gt.1) iacc_in=min(3,iacc+1)
-                 do irow=1,amps(proc_num)%nColOrd
-                    amp_col_c=(0d0,0d0)
-                    irow_mat = irow
-                    do i=1,amps(proc_num)%n_col_vals(iacc,1)
-                       amp2_c=(0d0,0d0)
-                       do ic=amps(proc_num)%row_index(irow_mat-1,i,iacc,1)+1,amps(proc_num)%row_index(irow_mat,i,iacc,1)
-                          icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc,1)+ic,1)
-                          icol_mat = icol
-                          if (proc_num.eq.1) then
-                             amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
-                          else
-                             if (icol_mat.eq.irow) then
-                                amp2_c=amp2_c+amps(proc_num)%amps(icol_mat)
-                             endif
-                          endif
-                       enddo
-                       if (proc_num.gt.1) then
-                          amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)*(-1d0/3d0)
-                       else
-                          amp_col_c=amp_col_c+amp2_c*amps(proc_num)%diff_col_vals(i,iacc,1)
-                       endif
-                    enddo
-                    matrix2(iacc_in)=matrix2(iacc_in)+dble(amp_col_c*conjg(amps(proc_num)%amps(irow)))
+           do irow=1,amps(1)%nColOrd
+              amp_col_c=(0d0,0d0)
+              do i=1,amps(1)%n_col_vals(iacc,1)
+                 amp2_c=(0d0,0d0)
+                 do ic=amps(1)%row_index(irow-1,i,iacc,1)+1,amps(1)%row_index(irow,i,iacc,1)
+                    icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc,1)+ic,1)
+                    amp2_c=amp2_c+amps(1)%amps(icol)
                  enddo
+                 amp_col_c=amp_col_c+amp2_c*amps(1)%diff_col_vals(i,iacc,1)
               enddo
+              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(1)%amps(irow)))
            enddo
 
 
@@ -354,7 +302,7 @@ contains
   subroutine get_run_arguments()
     use arguments
     implicit none
-    integer :: argc
+    integer :: argc,i,k
     character(len=256) :: argv
     ! integration steps:
     ! imode=0  (Setting up grids)

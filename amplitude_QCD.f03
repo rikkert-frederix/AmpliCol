@@ -2,7 +2,6 @@ module amplitude_QCD_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
-  logical,parameter :: color_flow=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
   type current
@@ -35,7 +34,7 @@ module amplitude_QCD_mod
      integer,dimension(:,:),allocatable :: perm,col_index
      integer,dimension(:),allocatable :: quark_index
      integer,dimension(:,:,:,:),allocatable :: row_index
-     integer,dimension(:,:,:),allocatable :: u1_lin_comb,i_col_i
+     integer,dimension(:,:,:),allocatable :: i_col_i
      integer,dimension(:),allocatable :: map_2qq_amps
      logical :: same_flav
      logical,dimension(:),allocatable :: include_product
@@ -143,14 +142,11 @@ contains
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call this%filter_dead_trees(n)
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
-    if (this%imode.eq.1) then
-       call setup_spin_list()
-    endif
+    if (this%imode.eq.1) call setup_spin_list()
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
     call setup_momentum_array()
 
   contains
-
 
     subroutine setup_spin_list()
       implicit none
@@ -1078,10 +1074,11 @@ contains
       enddo
 
       if (nperm.eq.0) then
+         write (*,*) 'No valid permutations. This should not happen'
          write (*,*) switch,ag1,ag2
          write (*,*) current_list_local(ic1)%order(1:n1),quark_in_current(current_list_local(ic1)%order(1:n1),n1)
          write (*,*) current_list_local(ic2)%order(1:n2),quark_in_current(current_list_local(ic2)%order(1:n2),n2)
-         write (*,*) ''
+         stop 1
       endif
       
       iden=.true.
@@ -1141,20 +1138,6 @@ contains
       endif
       valid_current_order_excl_symmetry=.true.
     end function valid_current_order_excl_symmetry
-
-    integer function quark_in_current(ip,isize)
-      ! binary function that checks which 'quark_index' is an external
-      ! particle part of the current. (i.e., It sets the first bit if
-      ! quark_index(1) is part of the current, the second bit if
-      ! quark_index(2) is part of the current, etc.)
-      implicit none
-      integer :: isize,i
-      integer,dimension(isize) :: ip
-      quark_in_current=0
-      do i=1,2*this%n_qqbar
-         if (any(this%quark_index(i).eq.ip(1:isize))) quark_in_current=ibset(quark_in_current,i-1)
-      enddo
-    end function quark_in_current
 
 
     subroutine add_current(vertex_sign,cur_bin,ip,ctype,spin)
@@ -1222,9 +1205,6 @@ contains
             call get_value(ip,2*abs(ctype),val)
          endif
 
-         !do ic=1,this%n_cur
-         !   if (cur_bin.eq.current_list_local(ic)%bin) return
-         !enddo
          call solve_dict(val,key)
          ic=key_to_current(key)
          if (ic.eq.0) then
@@ -1430,6 +1410,19 @@ contains
          is_antiquark=.false.
       endif
     end function is_antiquark
+    integer function quark_in_current(ip,isize)
+      ! binary function that checks which 'quark_index' is an external
+      ! particle part of the current. (i.e., It sets the first bit if
+      ! quark_index(1) is part of the current, the second bit if
+      ! quark_index(2) is part of the current, etc.)
+      implicit none
+      integer :: isize,i
+      integer,dimension(isize) :: ip
+      quark_in_current=0
+      do i=1,2*this%n_qqbar
+         if (any(this%quark_index(i).eq.ip(1:isize))) quark_in_current=ibset(quark_in_current,i-1)
+      enddo
+    end function quark_in_current
   end subroutine init
 
 
@@ -1643,7 +1636,6 @@ contains
           endif
        enddo
 
-
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
           if (this%current_list(ic)%type.eq.21) then
@@ -1672,9 +1664,7 @@ contains
              stop 1
           endif
        enddo
-
     enddo
-
 
     call compute_amps_from_currents
 
@@ -1831,7 +1821,7 @@ contains
     real(kind=8),allocatable,dimension(:,:,:) :: diff_vals
     real(kind=8),allocatable,dimension(:,:,:) :: col_vals
     integer,dimension(:,:,:),allocatable :: ic,ir,n_colour_elements
-    integer :: ri,rj,lim,maxterms_u1,i,j,gi
+    integer :: i,j,gi
     integer :: ui,uj,uj_upper ! quark ordering type
     integer :: it ! quark order type (1 or 2)
     integer :: iperm_upper,gi_iperm  ! needed for 2qq
@@ -1845,30 +1835,16 @@ contains
     call create_perm_dict()
 
     if (this%n_qqbar.eq.0) then
-       lim=0 ! dummy, needed for color-flow
        iperm_upper = 1 ! dummy, needed for 2qq
        gi_iperm = 1 ! dummy
        uj_upper = 1 ! dummy
        ui = 1 ! dummy
     elseif (this%n_qqbar.eq.1) then
-       lim=0 ! dummy, needed for color-flow
        iperm_upper = 1 ! dummy, needed for 2qq
        gi_iperm = 1 ! dummy
        uj_upper = 1 ! dummy
        ui = 1 ! dummy
-       if (color_flow) then
-          lim=1 ! for NLC only
-          lim = 0 ! if U(1) amps generated separately
-          maxterms_u1 = 1
-          do i=2,n-1
-             maxterms_u1 = maxterms_u1 * (n-i)
-          enddo
-          allocate(this%u1_lin_comb(1:this%nColOrd,1:maxterms_u1,1:(n-2)))
-          this%u1_lin_comb = 0
-          call get_u1_lin_comb
-       endif
     elseif (this%n_qqbar.eq.2) then
-       lim = 0 ! dummy, needed for color-flow
        iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
        uj_upper = 2
        ui = it
@@ -1905,44 +1881,40 @@ contains
           gi_iperm = iperm
        endif
        if (use_cm_dict) first_rows(1:n-this%n_sing,gi_iperm) = iper(1:n-this%n_sing)
-
-       do ri=0,lim ! number of U(1) gluons in amp
-          do jperm=1,this%nColOrd 
-             do uj=1,uj_upper
-                jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
-                if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
-                key=solve_dict(get_value(jper(1:n)))
-                do rj=0,lim
-                   call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-                   if (use_symm_cm.and.this%n_qqbar.ne.2) then
-                      col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-                      if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+       
+       do jperm=1,this%nColOrd 
+          do uj=1,uj_upper
+             jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
+             if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
+             key=solve_dict(get_value(jper(1:n)))
+             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ui,uj,col_fac)
+             if (use_symm_cm.and.this%n_qqbar.ne.2) then
+                col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+                if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
+             endif
+             do iacc=1,3
+                if (col_fac(iacc).eq.0d0) cycle
+                col_vals(iacc,key,iperm)=col_fac(iacc)
+                do ival=1,n_vals(iacc,gi_iperm)
+                   if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
+                      n_colour_elements(ival,iacc,gi_iperm)=n_colour_elements(ival,iacc,gi_iperm)+1
+                      exit
                    endif
-                   do iacc=1,3
-                      if (col_fac(iacc).eq.0d0) cycle
-                      col_vals(iacc,key,iperm)=col_fac(iacc)
-                      do ival=1,n_vals(iacc,gi_iperm)
-                         if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) then
-                            n_colour_elements(ival,iacc,gi_iperm)=n_colour_elements(ival,iacc,gi_iperm)+1
-                            exit
-                         endif
-                      enddo
-                      if (ival.ge.max_vals) then
-                         write (*,*) 'Too many different colour factors. Increase max_vals',&
-                              ival,n_vals(1:3,gi_iperm),max_vals
-                         stop 1
-                      elseif (ival.eq.n_vals(iacc,gi_iperm)+1) then
-                         ! new colour factor
-                         n_vals(iacc,gi_iperm)=ival
-                         diff_vals(ival,iacc,gi_iperm)=col_fac(iacc)
-                         n_colour_elements(ival,iacc,gi_iperm)=1
-                      endif
-                   enddo
                 enddo
+                if (ival.ge.max_vals) then
+                   write (*,*) 'Too many different colour factors. Increase max_vals',&
+                        ival,n_vals(1:3,gi_iperm),max_vals
+                   stop 1
+                elseif (ival.eq.n_vals(iacc,gi_iperm)+1) then
+                   ! new colour factor
+                   n_vals(iacc,gi_iperm)=ival
+                   diff_vals(ival,iacc,gi_iperm)=col_fac(iacc)
+                   n_colour_elements(ival,iacc,gi_iperm)=1
+                endif
              enddo
           enddo
        enddo
-
+       
        write (*,*) 'A single row in the colour matrix has',n_vals(1:3,gi_iperm),&
             ' different colour factors at LC, NLC and full colour, respectively'
     enddo
@@ -1961,13 +1933,8 @@ contains
  ! Allocate the arrays now that we know their sizes
     allocate(ic(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
     allocate(ir(1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper))
-    if (color_flow) then
-       allocate(this%col_index(1:isum,iperm_upper))
-       allocate(this%row_index(0:(n-1)*this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) ! for colour flow *(n-1)
-    else
-       allocate(this%col_index(1:isum,iperm_upper))
-       allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
-    endif
+    allocate(this%col_index(1:isum,iperm_upper))
+    allocate(this%row_index(0:this%nColOrd,1:maxval(n_vals(1:3,iperm_upper)),1:3,iperm_upper)) 
     this%row_index(0,1:maxval(n_vals(1:3,iperm_upper)),1:3,1:iperm_upper)=0
     this%col_index(1,1:iperm_upper)=0
     allocate(this%n_col_vals(1:3,iperm_upper))
@@ -1981,58 +1948,53 @@ contains
     ic=0
     ir=0
 
-    do ri=0,lim
-       do iperm=1,this%nColOrd
-          iper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,iperm)
-          if (this%n_qqbar.eq.2) then
-             ! find out what channel it belongs to, find gi
-             do i=2,n-2
-                if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
-                   gi = i - 2
-                   exit
-                endif
-             enddo
-             gi_iperm = gi + 1
-          endif
-
-          jperm_lower=1
-          if (use_symm_cm.and.this%n_qqbar.ne.2) jperm_lower = iperm
-
-          do jperm=jperm_lower,this%nColOrd
-             do uj=1,uj_upper
-                jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
-                if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
-                do rj=0,lim
-                   if (use_cm_dict) then
-                      ! GET color factors from permuting first row
-                      call get_col_fac(iper,jper,ui,uj,gi_iperm,col_fac)
-                   else
-                      ! COMPUTE color factors again
-                      call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
-                      if (use_symm_cm.and.this%n_qqbar.ne.2) then
-                         col_fac(1:3)=col_fac(1:3)*2d0
-                         if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
-                      endif
-                   endif
-                   do iacc=1,3
-                      if (col_fac(iacc).eq.0d0) cycle
-                      do ival=1,n_vals(iacc,gi_iperm)
-                         if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
-                      enddo
-                      ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
-                      ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
-                      this%col_index(this%i_col_i(ival,iacc,gi_iperm)+ic(ival,iacc,gi_iperm),gi_iperm)=&
-                           (rj*this%nColOrd)+((uj-1)*this%nColOrd)+jperm
-                   enddo
-                enddo
-             enddo
+    do iperm=1,this%nColOrd
+       iper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,iperm)
+       if (this%n_qqbar.eq.2) then
+          ! find out what channel it belongs to, find gi
+          do i=2,n-2
+             if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
+                gi = i - 2
+                exit
+             endif
           enddo
-          do iacc=1,3
-             this%row_index((ri*this%nColOrd)+iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
+          gi_iperm = gi + 1
+       endif
+
+       jperm_lower=1
+       if (use_symm_cm.and.this%n_qqbar.ne.2) jperm_lower = iperm
+
+       do jperm=jperm_lower,this%nColOrd
+          do uj=1,uj_upper
+             jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
+             if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(jper)
+             if (use_cm_dict) then
+                ! GET color factors from permuting first row
+                call get_col_fac(iper,jper,ui,uj,gi_iperm,col_fac)
+             else
+                ! COMPUTE color factors again
+                call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ui,uj,col_fac)
+                if (use_symm_cm.and.this%n_qqbar.ne.2) then
+                   col_fac(1:3)=col_fac(1:3)*2d0
+                   if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
+                endif
+             endif
+             do iacc=1,3
+                if (col_fac(iacc).eq.0d0) cycle
+                do ival=1,n_vals(iacc,gi_iperm)
+                   if (col_fac(iacc).eq.diff_vals(ival,iacc,gi_iperm)) exit
+                enddo
+                ic(ival,iacc,gi_iperm)=ic(ival,iacc,gi_iperm)+1
+                ir(ival,iacc,gi_iperm)=ir(ival,iacc,gi_iperm)+1
+                this%col_index(this%i_col_i(ival,iacc,gi_iperm)+ic(ival,iacc,gi_iperm),gi_iperm)=(uj-1)*this%nColOrd+jperm
+             enddo
           enddo
        enddo
+       do iacc=1,3
+          this%row_index(iperm,1:n_vals(iacc,gi_iperm),iacc,gi_iperm)=ir(1:n_vals(iacc,gi_iperm),iacc,gi_iperm)
+       enddo
     enddo
-   
+
     write (*,*) '... colour matrix initialised'
   contains
    subroutine get_col_fac(iper,jper,ui,uj,gi_iperm,col_fac)
@@ -2172,96 +2134,67 @@ contains
       enddo
     end function get_value
     
-    subroutine compute_color_factor(col_acc,n,iper,jper,ri,rj,ui,uj,col_fac,color_flow)
+    subroutine compute_color_factor(col_acc,n,iper,jper,ui,uj,col_fac)
       use color_algebra
       implicit none
       integer :: i,n,acc,col_acc,color_fac,k
       real(kind=8),dimension(1:3) :: col_fac
       integer,dimension(n) :: iper,jper
-      integer,dimension(n) :: iper_red, jper_red
       integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
-      logical :: color_flow
       real(kind=16) :: col_factor
-      integer :: ri,rj
       integer :: ui,uj ! for 2qq processes: type of quark ordering 
       integer :: gi,gj ! for 2qq: number of gluons on first quark color line
-
-      if (color_flow) then
-         if (this%n_qqbar.ne.0) then
-            col_fac=0d0
-            call convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
-            call color_flow_factor_1qqbar(n,iper_red,jper_red,ri,rj,color_fac)
-            if (col_acc.ge.0) then
-               if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
-                  col_fac(1)=dble(3**color_fac) ! U(3)xU(3) LC
-               endif
+      col_fac(1:3)=0d0
+      if (col_acc.ge.0) then ! LC
+         if (this%n_qqbar.eq.0) then
+            if (all(iper.eq.jper)) then
+               col_fac(1)=dble(3**n)
             endif
-
-            if (col_acc.ge.1) then
-               if (ri.eq.rj.and.ri.eq.0.and.all(iper.eq.jper)) then
-                  col_fac(2)=dble(3**color_fac) ! U(3)xU(3) LC
-               elseif (ri.eq.rj.and.ri.eq.0.and.color_fac.eq.(n-3)) then
-                  col_fac(2)=dble(3**color_fac) ! U(3)xU(3) NLC
-               ! comment out below...
-               !elseif (((ri.eq.1.and.ri.ne.rj).or.(rj.eq.1.and.ri.ne.rj)).and.color_fac.eq.(n-3)) then
-               !        col_fac(2)=-dble(3**color_fac)  ! U(1)xU(3) NLC
-               ! ... and set this to (-)* (otherwise it is (+)*
-               elseif (ri.eq.rj.and.ri.eq.1.and.color_fac.eq.(n-3)) then 
-                  col_fac(2)=-dble(3**color_fac) ! U(1)xU(1) NLC
-               endif
+         elseif (this%n_qqbar.eq.1) then
+            if (all(iper.eq.jper)) then
+               col_fac(1)=dble(3**(n-1))
             endif
-            if (col_acc.ge.2) then
-               if (mod(ri+rj,2).eq.0) col_fac(3)=dble(3d0**color_fac)
-               if (mod(ri+rj,2).eq.1) col_fac(3)=-dble(3d0**color_fac)
-            endif
-         else
-           col_fac=0d0
-           call color_flow_factor(n,jper,iper,color_fac)
-           if (color_fac.ge.n-2*min(col_acc,0)) then
-             col_fac(1)=dble(3**color_fac)
-           endif
-           if(color_fac.ge.n-2*min(col_acc,1)) then
-             col_fac(2)=dble(3**color_fac)
-           endif
-           if(color_fac.ge.n-2*col_acc) then
-             col_fac(3)=dble(3**color_fac)
-           endif
-         endif
-      else
-         col_fac(1:3)=0d0
-         if (col_acc.ge.0) then ! LC
-            if (this%n_qqbar.eq.0) then
-               if (all(iper.eq.jper)) then
-                  col_fac(1)=dble(3**n)
-               endif
-            elseif (this%n_qqbar.eq.1) then
-               if (all(iper.eq.jper)) then
-                  col_fac(1)=dble(3**(n-1))
-               endif
-            elseif (this%n_qqbar.eq.2) then
-               if (all(iper.eq.jper)) then
-                  if (ui.eq.uj.and.ui.eq.1) then
-                    col_fac(1)=dble(3**(n-2))
-                  elseif (ui.eq.uj.and.ui.eq.2.and..not.this%same_flav) then
-                    col_fac(1)=dble(3**(n-4))
-                  elseif (ui.eq.uj.and.ui.eq.2.and.this%same_flav) then
-                    col_fac(1)=dble(3**(n-2))
-                  endif
+         elseif (this%n_qqbar.eq.2) then
+            if (all(iper.eq.jper)) then
+               if (ui.eq.uj.and.ui.eq.1) then
+                  col_fac(1)=dble(3**(n-2))
+               elseif (ui.eq.uj.and.ui.eq.2.and..not.this%same_flav) then
+                  col_fac(1)=dble(3**(n-4))
+               elseif (ui.eq.uj.and.ui.eq.2.and.this%same_flav) then
+                  col_fac(1)=dble(3**(n-2))
                endif
             endif
          endif
-         if (col_acc.ge.1) then ! NLC
-            if (this%n_qqbar.eq.0) then
-               if (all(iper.eq.jper)) then
-                  col_fac(2) = dble(3**n - n * 3**(n-2))
-               else
-                  call check_NLC(n,jper,iper,acc)
-                  col_fac(2)=dble(acc*3**(n-2))
-               endif
-            elseif (this%n_qqbar.eq.1) then
-               if (all(iper.eq.jper)) then
-                  col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
-                  ! include the full expansion
+      endif
+      if (col_acc.ge.1) then ! NLC
+         if (this%n_qqbar.eq.0) then
+            if (all(iper.eq.jper)) then
+               col_fac(2) = dble(3**n - n * 3**(n-2))
+            else
+               call check_NLC(n,jper,iper,acc)
+               col_fac(2)=dble(acc*3**(n-2))
+            endif
+         elseif (this%n_qqbar.eq.1) then
+            if (all(iper.eq.jper)) then
+               col_fac(2) = dble(3**(n-1) - (n-2) * 3**(n-3))
+               ! include the full expansion
+               call Tr_allocate(n)
+               Tr(0,0,0)=1 ! one term
+               Tr(0,0,1)=1 ! that term is single string of matrices
+               Tr(0,1,1)=2*(n-2)
+               Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
+               Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
+               coef(1)=1d0
+               coef_Nc(:,:)=0
+               coef_Nc(0,1)=1
+               call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+               col_fac(2)=dble(col_factor)
+               call Tr_deallocate
+            else
+               call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
+               col_fac(2)=dble(acc*(3)**(n-3))
+               ! include the full expansion
+               if (acc.ne.0) then
                   call Tr_allocate(n)
                   Tr(0,0,0)=1 ! one term
                   Tr(0,0,1)=1 ! that term is single string of matrices
@@ -2274,154 +2207,130 @@ contains
                   call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
                   col_fac(2)=dble(col_factor)
                   call Tr_deallocate
-               else
-                  call check_NLC_1qqbar(n,jper(2:n-1),iper(2:n-1),acc)
-                  col_fac(2)=dble(acc*(3)**(n-3))
-                  ! include the full expansion
-                  if (acc.ne.0) then
-                     call Tr_allocate(n)
-                     Tr(0,0,0)=1 ! one term
-                     Tr(0,0,1)=1 ! that term is single string of matrices
-                     Tr(0,1,1)=2*(n-2)
-                     Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
-                     Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
-                     coef(1)=1d0
-                     coef_Nc(:,:)=0
-                     coef_Nc(0,1)=1
-                     call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-                     col_fac(2)=dble(col_factor)
-                     call Tr_deallocate
-                  endif
-               endif
-
-            elseif (this%n_qqbar.eq.2) then
-               do i=1,n-1
-                  if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
-                     if (i.ne.1) then
-                        gi = i - 2
-                        exit
-                     endif
-                  endif
-               enddo
-               do i=1,n-1
-                  if ((abs(part(jper(i))).ge.1.and.abs(part(jper(i))).le.6)) then
-                     if (i.ne.1) then
-                        gj = i - 2
-                        exit
-                     endif
-                  endif
-               enddo
-
-               k=1
-               do i=1,n
-                  if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) cycle
-                  iper_glu(k)=iper(i)
-                  k=k+1
-               enddo
-               k=1
-               do i=1,n
-                  if ((abs(part(jper(i))).ge.1.and.abs(part(jper(i))).le.6)) cycle
-                  jper_glu(k)=jper(i)
-                  k=k+1
-               enddo
-
-               call Tr_allocate(n)
-               call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
-               call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
-               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
-               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
-               if (this%same_flav) then
-                  call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
-                  if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
-                  if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
                endif
             endif
-         endif
-         if (col_acc.ge.2) then
+         elseif (this%n_qqbar.eq.2) then
+            do i=1,n-1
+               if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
+                  if (i.ne.1) then
+                     gi = i - 2
+                     exit
+                  endif
+               endif
+            enddo
+            do i=1,n-1
+               if ((abs(part(jper(i))).ge.1.and.abs(part(jper(i))).le.6)) then
+                  if (i.ne.1) then
+                     gj = i - 2
+                     exit
+                  endif
+               endif
+            enddo
+            k=1
+            do i=1,n
+               if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) cycle
+               iper_glu(k)=iper(i)
+               k=k+1
+            enddo
+            k=1
+            do i=1,n
+               if ((abs(part(jper(i))).ge.1.and.abs(part(jper(i))).le.6)) cycle
+               jper_glu(k)=jper(i)
+               k=k+1
+            enddo
             call Tr_allocate(n)
-            if (this%n_qqbar.eq.0) then
-               Tr(0,0,0)=1 ! one term
-               Tr(0,0,1)=2 ! that term is a product of two terms
-               Tr(0,1,1)=n ! both terms in the product are a trace with next matrices
-               Tr(0,2,1)=n
-               Tr(1:n,1,1)=iper(1:n) ! the order of the matrices in each term
-               Tr(1:n,2,1)=jper(1:n)
-               call Tr_complex_conjugate(2,1) ! take the complex conjugate of the jperm term
-               coef(1)=1d0
-               coef_Nc(:,:)=0
-               coef_Nc(0,1)=1
-               ! compute the colour factor by simplifying the colour string
-               call Tr_full_simplify(col_factor) 
-               col_fac(3)=0d0
-!!$               do i=n,n-2*min(col_acc,n),-1 
-!!$               do i=-1,n-2*min(col_acc,n),-1 
-               do i=n,max(n-2*col_acc,0),-1  ! do not include any Nc
-                                             ! contributions with negative
-                                             ! powers, since they must cancel.
-                  if (i.ge.0) then
-                     col_fac(3)=col_fac(3)+dble(coef_nc(i,0)*3**i)
-                  else
-                     col_fac(3)=col_fac(3)+coef_nc(i,0)*3d0**i
-                  endif
-               enddo
-            elseif (this%n_qqbar.eq.1) then
-               Tr(0,0,0)=1 ! one term
-               Tr(0,0,1)=1 ! that term is single string of matrices
-               Tr(0,1,1)=2*(n-2)
-               Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
-               Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
-               coef(1)=1d0
-               coef_Nc(:,:)=0
-               coef_Nc(0,1)=1
-               call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
-               col_fac(3)=dble(col_factor)
-
-             elseif (this%n_qqbar.eq.2) then
-                if (ui.eq.uj.and.ui.eq.1) then
-                   Tr(0,0,0)=1 ! one term
-                   Tr(0,0,1)=2
-                   Tr(0,1,1) = gi+gj  ! number of generators in first trace
-                   Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
-                   Tr(1:gi,1,1) = iper(2:2+gi-1)
-                   Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
-                   Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
-                   Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
-                   coef(1)=1d0
-                   call Tr_full_simplify(col_factor)
-                elseif ((ui.eq.2.and.uj.eq.1) .or. (ui.eq.1.and.uj.eq.2)) then
-                   Tr(0,0,0)=1 ! one term
-                   Tr(0,0,1)=1 ! a single trace
-                   Tr(0,1,1) = 2*(n-4) ! all gluon generators appear in the single trace
-                   Tr(1:gi,1,1) = iper(2:2+gi-1)
-                   Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
-                   Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
-                   Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
-                   if (.not.this%same_flav) then
-                      coef(1)=-1d0/3d0
-                   else
-                      coef(1)=-1d0
-                   endif
-                   call Tr_full_simplify(col_factor)
-                elseif (ui.eq.uj.and.ui.eq.2) then
-                   Tr(0,0,0) = 1 ! one term
-                   Tr(0,0,1) = 2 ! product of two traces
-                   Tr(0,1,1) = gi+gj  ! number of generators in first trace
-                   Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
-                   Tr(1:gi,1,1) = iper(2:2+gi-1)
-                   Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
-                   Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
-                   Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
-                   if (.not.this%same_flav) then
-                      coef(1)=1d0/9d0
-                   else
-                      coef(1)=1d0
-                   endif
-                   call Tr_full_simplify(col_factor)
-                endif
-                col_fac(3)=dble(col_factor)
+            call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
+            call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+            if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+            if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
+            if (this%same_flav) then
+               call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
             endif
-            call Tr_deallocate
          endif
+      endif
+      if (col_acc.ge.2) then
+         call Tr_allocate(n)
+         if (this%n_qqbar.eq.0) then
+            Tr(0,0,0)=1 ! one term
+            Tr(0,0,1)=2 ! that term is a product of two terms
+            Tr(0,1,1)=n ! both terms in the product are a trace with next matrices
+            Tr(0,2,1)=n
+            Tr(1:n,1,1)=iper(1:n) ! the order of the matrices in each term
+            Tr(1:n,2,1)=jper(1:n)
+            call Tr_complex_conjugate(2,1) ! take the complex conjugate of the jperm term
+            coef(1)=1d0
+            coef_Nc(:,:)=0
+            coef_Nc(0,1)=1
+            ! compute the colour factor by simplifying the colour string
+            call Tr_full_simplify(col_factor) 
+            col_fac(3)=0d0
+            do i=n,max(n-2*col_acc,0),-1  ! do not include any Nc
+                                          ! contributions with negative
+                                          ! powers, since they must cancel.
+               if (i.ge.0) then
+                  col_fac(3)=col_fac(3)+dble(coef_nc(i,0)*3**i)
+               else
+                  col_fac(3)=col_fac(3)+coef_nc(i,0)*3d0**i
+               endif
+            enddo
+         elseif (this%n_qqbar.eq.1) then
+            Tr(0,0,0)=1 ! one term
+            Tr(0,0,1)=1 ! that term is single string of matrices
+            Tr(0,1,1)=2*(n-2)
+            Tr(1:n-2,1,1)=iper(2:n-1) ! the order of the matrices in each term
+            Tr(n-1:2*(n-2),1,1)=jper(n-1:2:-1)
+            coef(1)=1d0
+            coef_Nc(:,:)=0
+            coef_Nc(0,1)=1
+            call Tr_full_simplify(col_factor) ! compute the colour factor by simplifying the product of traces
+            col_fac(3)=dble(col_factor)
+         elseif (this%n_qqbar.eq.2) then
+            if (ui.eq.uj.and.ui.eq.1) then
+               Tr(0,0,0)=1 ! one term
+               Tr(0,0,1)=2
+               Tr(0,1,1) = gi+gj  ! number of generators in first trace
+               Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
+               Tr(1:gi,1,1) = iper(2:2+gi-1)
+               Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
+               Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
+               Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
+               coef(1)=1d0
+               call Tr_full_simplify(col_factor)
+            elseif ((ui.eq.2.and.uj.eq.1) .or. (ui.eq.1.and.uj.eq.2)) then
+               Tr(0,0,0)=1 ! one term
+               Tr(0,0,1)=1 ! a single trace
+               Tr(0,1,1) = 2*(n-4) ! all gluon generators appear in the single trace
+               Tr(1:gi,1,1) = iper(2:2+gi-1)
+               Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
+               Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
+               Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
+               if (.not.this%same_flav) then
+                  coef(1)=-1d0/3d0
+               else
+                  coef(1)=-1d0
+               endif
+               call Tr_full_simplify(col_factor)
+            elseif (ui.eq.uj.and.ui.eq.2) then
+               Tr(0,0,0) = 1 ! one term
+               Tr(0,0,1) = 2 ! product of two traces
+               Tr(0,1,1) = gi+gj  ! number of generators in first trace
+               Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
+               Tr(1:gi,1,1) = iper(2:2+gi-1)
+               Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
+               Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
+               Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
+               if (.not.this%same_flav) then
+                  coef(1)=1d0/9d0
+               else
+                  coef(1)=1d0
+               endif
+               call Tr_full_simplify(col_factor)
+            endif
+            col_fac(3)=dble(col_factor)
+         endif
+         call Tr_deallocate
       endif
     end subroutine compute_color_factor
 
@@ -2435,110 +2344,23 @@ contains
       jmax(1:next-4)=-1
       do i=1,next-4
          do j=1,next-4
-          if ((iper(j).gt.imax(i)).and..not.(any(iper(j).eq.imax(1:i-1)))) imax(i)=iper(j)
-          if ((jper(j).gt.jmax(i)).and..not.(any(jper(j).eq.jmax(1:i-1)))) jmax(i)=jper(j)
+            if ((iper(j).gt.imax(i)).and..not.(any(iper(j).eq.imax(1:i-1)))) imax(i)=iper(j)
+            if ((jper(j).gt.jmax(i)).and..not.(any(jper(j).eq.jmax(1:i-1)))) jmax(i)=jper(j)
          enddo
       enddo
       ik=next-4
       jk=next-4
       do i=1,next-4
-       do j=1,next-4
-        if (iper(j).eq.imax(i)) then
-         iper_new(j) = next-4-i+1
-        endif
-        if (jper(j).eq.jmax(i)) then
-         jper_new(j) = next-4-i+1
-        endif
-       enddo
+         do j=1,next-4
+            if (iper(j).eq.imax(i)) then
+               iper_new(j) = next-4-i+1
+            endif
+            if (jper(j).eq.jmax(i)) then
+               jper_new(j) = next-4-i+1
+            endif
+         enddo
       enddo
     end subroutine convert_gluon_string
-
-
-    subroutine get_u1_lin_comb
-      implicit none
-      integer i,j,k,l,ii,m
-      integer,dimension(:),allocatable :: u1_rem,u1_test
-      integer,dimension(1:n-2-this%n_sing) :: perm,temp_perm
-
-      do i=1,this%nColOrd
-        do m=0,n-2 ! loop through all possible numbers of external U(1) gluons
-          if(allocated(u1_rem)) deallocate(u1_rem)
-          if(allocated(u1_test)) deallocate(u1_test)
-          allocate(u1_rem(1:n-2-this%n_sing-m))
-          allocate(u1_test(1:n-2-this%n_sing-m))
-          ii=1
-          perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,i)
-          u1_rem(1:n-2-this%n_sing-m) = perm(1:n-2-this%n_sing-m)
-
-          do j=1,this%nColOrd
-             temp_perm(1:n-2-this%n_sing) = this%perm(1:n-2-this%n_sing,j)
-             k=1
-             do l=1,n-2-this%n_sing-m+1
-               if (temp_perm(l).ne.perm(n-2-this%n_sing)) then
-                  u1_test(k) = temp_perm(l)
-                  k = k+1
-               endif
-             enddo
-
-             if ((all(u1_test.eq.u1_rem))) then
-              if (all(perm(n-2-this%n_sing-m+1:n-2-this%n_sing-1).eq.temp_perm(n-2-this%n_sing-m+2:n-2-this%n_sing)))  then
-                 this%u1_lin_comb(i,ii,m) = j
-                 ii = ii+1
-              endif
-             endif
-          enddo
-        enddo
-      enddo
-    end subroutine get_u1_lin_comb
-
-    subroutine convert_perm_color_flow(n,iper,jper,iper_red,jper_red)
-       implicit none
-       integer :: n,i,j,maxval,minval,low,upp,min_x,max_x
-       integer,dimension(n) :: iper,jper,iper_red,jper_red
-       integer,dimension(2,n) :: dual,dual_red
-
-       minval=100
-       maxval=-1
-       iper_red=0
-       jper_red=0
-       dual(1,1:n)=iper(1:n)
-       dual(2,1:n)=jper(1:n)
-       dual_red(1,:)=iper_red
-       dual_red(2,:)=jper_red
-       dual(1:2,1)=0
-       dual(1:2,n)=0
-
-       do j=1,2
-         minval=100
-         maxval=-1
-         low=1
-         upp=n-2
-         do
-         minval=100
-         maxval=-1
-         do i=2,n-1
-           if (dual(j,i).lt.minval.and.dual(j,i).ne.0) then
-               minval=dual(j,i)
-               min_x = i
-           endif
-           if (dual(j,i).gt.maxval.and.dual(j,i).ne.0) then
-              maxval=dual(j,i)
-              max_x = i
-           endif
-         enddo
-         dual_red(j,min_x)=low
-         dual_red(j,max_x)=upp
-         low=low+1
-         upp=upp-1
-         dual(j,min_x)=0
-         dual(j,max_x)=0
-         if (all(dual(j,:).eq.0)) exit
-         enddo
-       enddo
-
-       iper_red(1:n) = dual_red(1,1:n)
-       jper_red(1:n) = dual_red(2,1:n)
-    end subroutine convert_perm_color_flow
 
   end subroutine init_col
 
