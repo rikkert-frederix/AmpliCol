@@ -1028,8 +1028,7 @@ contains
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
               (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
-                   ! check if it would give the same result:
-             if (.not.(abs(o(i)).eq.abs(o(1)) .and. abs(o(i)).eq.abs(o(next)))) then
+             if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
                 same_flavour=.true.
              else
                 same_flavour=.false.
