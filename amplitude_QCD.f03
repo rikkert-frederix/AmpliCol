@@ -50,7 +50,6 @@ contains
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin
-    real(kind=4) :: tAfter,tBefore
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
     
@@ -84,13 +83,10 @@ contains
     call set_max_vert()
     
     if (this%imode.eq.2) then
-       call cpu_time(tBefore)
        allocate(current_dict(max_cur)) 
        call create_current_dict()
        allocate(key_to_current(max_key))
        key_to_current(1:max_key)=0
-       call cpu_time(tAfter)
-       write (*,*) '   dictionary created ',tAfter-tBefore
     endif
 
     allocate(current_list_local(max_cur))
