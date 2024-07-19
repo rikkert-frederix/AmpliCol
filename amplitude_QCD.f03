@@ -1013,29 +1013,28 @@ contains
       ! when use_symmetry=.true. --> the smallest number needs to come before
       ! the largest number in this list. 
       implicit none
-      type(current) :: new_current
+      type(current),intent(in) :: new_current
       integer :: i,maxi,mini,min_loc,max_loc
-      integer,dimension(isize) :: ip
-      ip(1:isize)=new_current%order(1:isize)
-      ! if there is a quark (or anti-quark) in the current, no symmetry can be
-      ! used. Hence, this is a valid order
-      if (quark_in_current(new_current,isize)) then
+      ! If it is not an all-gluon current, no symmetry can be used to reduce
+      ! the number of currents to compute and therefore we have to include
+      ! this current combination
+      if (.not.all_gluon_current(new_current,isize)) then
          valid_current_order_excl_symmetry=.true.
          return
       endif
-      ! This must be an all-gluon (or tensor) current. Here we take only one
-      ! single order. Define it such that smallest label comes before the
+      ! This is an all-gluon current. Here we take only one single
+      ! order. Define it such that smallest label comes before the
       ! biggest. This must be compatible with what orders are skipped in
       ! 'add_if_allowed_threevertex()'.
       maxi=0
       mini=100
       do i=1,isize
-         if (ip(i).gt.maxi) then
-            maxi=ip(i)
+         if (new_current%order(i).gt.maxi) then
+            maxi=new_current%order(i)
             max_loc=i
          endif
-         if (ip(i).lt.mini) then
-            mini=ip(i)
+         if (new_current%order(i).lt.mini) then
+            mini=new_current%order(i)
             min_loc=i
          endif
       enddo
@@ -1059,9 +1058,9 @@ contains
          do ic=1,this%n_cur
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
-            if (any(current_list_local(ic)%order(1:isize).ne.new_current%order(1:isize))) cycle
-            if (any(current_list_local(ic)%spin(1:isize).ne.new_current%spin(1:isize))) cycle
-            if (any(current_list_local(ic)%ext_type(1:isize).ne.new_current%ext_type(1:isize))) cycle
+            if (any(new_current%order(1:isize).ne.current_list_local(ic)%order(1:isize))) cycle
+            if (any(new_current%spin(1:isize).ne.current_list_local(ic)%spin(1:isize))) cycle
+            if (any(new_current%ext_type(1:isize).ne.current_list_local(ic)%ext_type(1:isize))) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
@@ -1107,7 +1106,6 @@ contains
             ! anti-quark current
             call get_value(ip,2*abs(ctype),val)
          endif
-
          call solve_dict(val,key)
          ic=key_to_current(key)
          if (ic.eq.0) then
