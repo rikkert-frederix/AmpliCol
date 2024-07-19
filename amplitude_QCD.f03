@@ -805,139 +805,164 @@ contains
       call add_all_currents(ctype)
     end subroutine add_vertex
 
-    function combine_currents_singlet_mv(n1,n2,ip1,ip2,singlet_mv)
-      ! just concatenate the two colour orders, except if there is a colour
-      ! singlet. Move the singlet to the end of the combined current order.
+    function combine_lists(current,singlet_mv)
+      ! just concatenate the two currents, except if there is a colour
+      ! singlet. Move the label of the singlet to the end of the combined
+      ! order.
       implicit none
-      integer,dimension(isize) :: combine_currents_singlet_mv
-      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2
-      integer,dimension(n1) :: ip1
-      integer,dimension(n2) :: ip2
+      integer,dimension(isize) :: combine_lists,current
+      integer,dimension(0:isize),intent(in) :: singlet_mv
+      integer :: imv
+      combine_lists(1:isize)=current(1:isize)
+      do imv=1,singlet_mv(0)
+         combine_lists(1:isize)=[combine_lists(1:singlet_mv(imv)-1), &
+                                 combine_lists(singlet_mv(imv)+1:isize-1),combine_lists(singlet_mv(imv))]
+      enddo
+    end function combine_lists
+
+    type(current) function combine_currents(ic1,ic2,ctype,singlet_mv,invert)
+      implicit none
+      integer,intent(in) :: ic1,ic2,ctype
+      integer,intent(in) :: invert
       integer,dimension(0:isize),intent(out) :: singlet_mv
+      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2
+      integer,dimension(isize) :: ord
+      integer,dimension(:),allocatable :: ord1,spin1,et1,ord2,spin2,et2
+      allocate(combine_currents%order(1:isize))
+      allocate(combine_currents%spin(1:isize))
+      allocate(combine_currents%ext_type(1:isize))
+      combine_currents%type=ctype
+      combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
+      n1=popcnt(current_list_local(ic1)%bin)
+      n2=popcnt(current_list_local(ic2)%bin)
+      allocate(ord1(n1))
+      allocate(spin1(n1))
+      allocate(et1(n1))
+      allocate(ord2(n2))
+      allocate(spin2(n2))
+      allocate(et2(n2))
+      if (btest(invert,0)) then
+         ord1(1:n1)=current_list_local(ic1)%order(n1:1:-1)
+         spin1(1:n1)=current_list_local(ic1)%spin(n1:1:-1)
+         et1(1:n1)=current_list_local(ic1)%ext_type(n1:1:-1)
+      else
+         ord1(1:n1)=current_list_local(ic1)%order(1:n1)
+         spin1(1:n1)=current_list_local(ic1)%spin(1:n1)
+         et1(1:n1)=current_list_local(ic1)%ext_type(1:n1)
+      endif
+      if (btest(invert,1)) then
+         ord2=current_list_local(ic2)%order(n2:1:-1)
+         spin2=current_list_local(ic2)%spin(n2:1:-1)
+         et2=current_list_local(ic2)%ext_type(n2:1:-1)
+      else
+         ord2=current_list_local(ic2)%order(1:n2)
+         spin2=current_list_local(ic2)%spin(1:n2)
+         et2=current_list_local(ic2)%ext_type(1:n2)
+      endif
       
       do i=1,n1
-         if (is_singlet(part(ip1(i)))) exit
+         if (is_singlet(et1(i))) exit
       enddo
       nc1=i-1
       do i=1,n2
-         if (is_singlet(part(ip2(i)))) exit
+         if (is_singlet(et2(i))) exit
       enddo
       nc2=i-1
-
-      combine_currents_singlet_mv(1:nc1+nc2)=[ip1(1:nc1),ip2(1:nc2)]
+      
+      ord(1:nc1+nc2)=[ord1(1:nc1),ord2(1:nc2)]
       if (nc1.eq.n1) then
-         ! No colour singlets or all colour singlets are in ip2
+         ! No colour singlets or all colour singlets are in ic2
          singlet_mv(0)=0
-         combine_currents_singlet_mv(nc1+nc2+1:n1+n2)=ip2(nc2+1:n2)
-         return
+         ord(nc1+nc2+1:n1+n2)=ord2(nc2+1:n2)
       elseif(nc2.eq.n2) then
-         ! Some colour singlets in ip1, but no in ip2
+         ! Some colour singlets in ic1, but no in ic2
          singlet_mv(0)=n1-nc1
          singlet_mv(1:singlet_mv(0))=nc1+1
-         combine_currents_singlet_mv(nc1+nc2+1:n1+n2)=ip1(nc1+1:n1)
-         return
+         ord(nc1+nc2+1:n1+n2)=ord1(nc1+1:n1)
       else
-         ! Some colour singlets in both ip1 and ip2
+         ! Some colour singlets in both ic1 and ic2
          singlet_mv(0)=0
          ns1=nc1+1
          ns2=nc2+1
          if (nc2.eq.0) then
-            ! Special case: no coloured particles in ip2
-            if (ip1(n1).lt.ip2(1)) then
+            ! Special case: no coloured particles in ic2
+            if (ord1(n1).lt.ord2(1)) then
                ! nothing to move
-               combine_currents_singlet_mv(1:n1+n2)=[ip1(1:n1),ip2(1:n2)]
+               ord(1:n1+n2)=[ord1(1:n1),ord2(1:n2)]
+               combine_currents%order(1:isize)=ord(1:isize)
+               combine_currents%spin(1:isize)=combine_lists([spin1(1:n1),spin2(1:n2)],singlet_mv)
+               combine_currents%ext_type(1:isize)=combine_lists([et1(1:n1),et2(1:n2)],singlet_mv)
                return
             endif
-            do while (ip1(ns1).lt.ip2(1))
+            do while (ord1(ns1).lt.ord2(1))
                ns1=ns1+1
             enddo
-            combine_currents_singlet_mv(nc1+1:ns1)=ip1(nc1+1:ns1)
+            ord(nc1+1:ns1)=ord1(nc1+1:ns1)
          endif
-         do while (ip2(ns2).lt.ip1(ns1))
+         do while (ord2(ns2).lt.ord1(ns1))
             ns2=ns2+1
             if (ns2.gt.n2) exit
          enddo
-         combine_currents_singlet_mv(ns1+nc2:ns1+ns2-2)=ip2(nc2+1:ns2-1)
+         ord(ns1+nc2:ns1+ns2-2)=ord2(nc2+1:ns2-1)
          do ipos=ns1+ns2-1,n1+n2
             if (ns1.gt.n1) then
                mv12=2
             elseif(ns2.gt.n2) then
                mv12=1
-            elseif(ip1(ns1).lt.ip2(ns2)) then
+            elseif(ord1(ns1).lt.ord2(ns2)) then
                mv12=1
             else
                mv12=2
             endif
             singlet_mv(0)=singlet_mv(0)+1
             if (mv12.eq.1) then
-               combine_currents_singlet_mv(ipos)=ip1(ns1)
+               ord(ipos)=ord1(ns1)
                singlet_mv(singlet_mv(0))=ns1 - (singlet_mv(0)-1)
                ns1=ns1+1
             elseif (mv12.eq.2) then
-               combine_currents_singlet_mv(ipos)=ip2(ns2)
+               ord(ipos)=ord2(ns2)
                singlet_mv(singlet_mv(0))=n1+ns2+1 - (singlet_mv(0)-1)
                ns2=ns2+1
             endif
          enddo
       endif
-    end function combine_currents_singlet_mv
-
-    function combine_currents(current,singlet_mv)
-      ! just concatenate the two currents, except if there is a colour
-      ! singlet. Move the label of the singlet to the end of the combined
-      ! order.
-      implicit none
-      integer,dimension(isize) :: combine_currents,current
-      integer,dimension(0:isize),intent(in) :: singlet_mv
-      integer :: imv
-      combine_currents(1:isize)=current(1:isize)
-      do imv=1,singlet_mv(0)
-         combine_currents(1:isize)=[combine_currents(1:singlet_mv(imv)-1), &
-                                 combine_currents(singlet_mv(imv)+1:isize-1),combine_currents(singlet_mv(imv))]
-      enddo
+      combine_currents%order(1:isize)=ord(1:isize)
+      combine_currents%spin(1:isize)=combine_lists([spin1(1:n1),spin2(1:n2)],singlet_mv)
+      combine_currents%ext_type(1:isize)=combine_lists([et1(1:n1),et2(1:n2)],singlet_mv)
     end function combine_currents
     
     subroutine add_all_currents(ctype)
       implicit none
       logical,dimension(8) :: vertex_sign
-      integer,dimension(isize,8) :: ip,spin,ext_type
-      integer :: i,cur_bin,ctype,nperm
+      integer :: i,ctype,nperm
       integer,dimension(0:isize) :: singlet_mv
+      type(current),dimension(8) :: new_currents
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
-         cur_bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
-         ip(1:isize,1)=combine_currents_singlet_mv(n1,n2,current_list_local(ic1)%order(1:n1), &
-              current_list_local(ic2)%order(1:n2),singlet_mv)
-         spin(1:isize,1)=combine_currents([current_list_local(ic1)%spin(1:n1), &
-              current_list_local(ic2)%spin(1:n2)],singlet_mv)
-         ext_type(1:isize,1)=combine_currents([current_list_local(ic1)%ext_type(1:n1), &
-              current_list_local(ic2)%ext_type(1:n2)],singlet_mv)
+         new_currents(1)=combine_currents(ic1,ic2,ctype,singlet_mv,0)
          interaction_list_local(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
-         call add_current(.false.,cur_bin,ip(1:isize,1),ctype,spin(1:isize,1),ext_type(1:isize,1))
+         call add_current(.false.,new_currents(1))
          return
       endif
-
       ! Need to consider all the possible permutations
-      call check_all_permutations(nperm,ip,vertex_sign,spin,ext_type)
-      cur_bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
+      call check_all_permutations(ctype,nperm,new_currents,vertex_sign)
       do i=1,nperm
-         call add_current(vertex_sign(i),cur_bin,ip(1:isize,i),ctype,spin(1:isize,i),ext_type(1:isize,i))
+         call add_current(vertex_sign(i),new_currents(i))
       enddo
     end subroutine add_all_currents
 
-    subroutine check_all_permutations(nperm,ip,vertex_sign,spin,ext_type)
+    subroutine check_all_permutations(ctype,nperm,new_currents,vertex_sign)
       ! If a current only contains (external) gluons, we can use symmetry to
       ! relate them to eachother. This subroutine checks all permutations,
       ! and, if they give a valid current order, adds that current to the list
       ! that should be included.
       implicit none
+      integer,intent(in) :: ctype
       integer,intent(out) :: nperm
-      integer,intent(out),dimension(isize,8) :: ip,spin,ext_type
+      type(current),dimension(8),intent(out) :: new_currents
       logical,intent(out),dimension(8) :: vertex_sign
-      integer,dimension(1:n1,2) :: ip1,spin1,ext_type1
-      integer,dimension(1:n2,2) :: ip2,spin2,ext_type2
       logical :: ag1,ag2,iden
       integer,dimension(3) :: switch
-      integer :: i,j,k
+      integer :: i,j,k,invert
       integer,dimension(0:isize,8) :: singlet_mv
       switch(1:3)=1
       ag1=all_gluon_current(current_list_local(ic1)%ext_type(1:n1),n1)
@@ -945,52 +970,24 @@ contains
       if (n1.ge.2 .and. ag1) switch(1)=2
       if (n2.ge.2 .and. ag2) switch(2)=2
       if (ag1 .and. ag2) switch(3)=2
-      ip1(1:n1,1)=current_list_local(ic1)%order(1:n1)
-      ip1(1:n1,2)=current_list_local(ic1)%order(n1:1:-1)
-      ip2(1:n2,1)=current_list_local(ic2)%order(1:n2)
-      ip2(1:n2,2)=current_list_local(ic2)%order(n2:1:-1)
-      spin1(1:n1,1)=current_list_local(ic1)%spin(1:n1)
-      spin1(1:n1,2)=current_list_local(ic1)%spin(n1:1:-1)
-      spin2(1:n2,1)=current_list_local(ic2)%spin(1:n2)
-      spin2(1:n2,2)=current_list_local(ic2)%spin(n2:1:-1)
-      ext_type1(1:n1,1)=current_list_local(ic1)%ext_type(1:n1)
-      ext_type1(1:n1,2)=current_list_local(ic1)%ext_type(n1:1:-1)
-      ext_type2(1:n2,1)=current_list_local(ic2)%ext_type(1:n2)
-      ext_type2(1:n2,2)=current_list_local(ic2)%ext_type(n2:1:-1)
       nperm=0
       do i=1,switch(1)
          do j=1,switch(2)
             do k=1,switch(3)
+               invert=0
+               if ((i.eq.2 .and. k.eq.1) .or. (j.eq.2 .and. k.eq.2)) invert=ibset(invert,0)
+               if ((i.eq.2 .and. k.eq.2) .or. (j.eq.2 .and. k.eq.1)) invert=ibset(invert,1)
                nperm=nperm+1
                if (k.eq.1) then
-                  ip(1:isize,nperm)=combine_currents_singlet_mv(n1,n2,ip1(1:n1,i),ip2(1:n2,j),&
-                       singlet_mv(0,nperm))
-                  spin(1:isize,nperm)=combine_currents([spin1(1:n1,i),spin2(1:n2,j)],&
-                       singlet_mv(0,nperm))
-                  ext_type(1:isize,nperm)=combine_currents([ext_type1(1:n1,i),ext_type2(1:n2,j)],&
-                       singlet_mv(0,nperm))
+                  new_currents(nperm)=combine_currents(ic1,ic2,ctype,singlet_mv(0,nperm),invert)
                else
-                  ip(1:isize,nperm)=combine_currents_singlet_mv(n2,n1,ip2(1:n2,j),ip1(1:n1,i),&
-                       singlet_mv(0,nperm))
-                  spin(1:isize,nperm)=combine_currents([spin2(1:n2,j),spin1(1:n1,i)],&
-                       singlet_mv(0,nperm))
-                  ext_type(1:isize,nperm)=combine_currents([ext_type2(1:n2,j),ext_type1(1:n1,i)],&
-                       singlet_mv(0,nperm))
+                  new_currents(nperm)=combine_currents(ic2,ic1,ctype,singlet_mv(0,nperm),invert)
                endif
                vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.2 .and. mod(n1,2).eq.0))
-               if (.not.valid_current_order_excl_symmetry(ip(1:isize,nperm))) nperm=nperm-1
+               if (.not.valid_current_order_excl_symmetry(new_currents(nperm))) nperm=nperm-1
             enddo
          enddo
       enddo
-
-      if (nperm.eq.0) then
-         write (*,*) 'No valid permutations. This should not happen'
-         write (*,*) switch,ag1,ag2
-         write (*,*) current_list_local(ic1)%order(1:n1),quark_in_current(current_list_local(ic1)%order(1:n1),n1)
-         write (*,*) current_list_local(ic2)%order(1:n2),quark_in_current(current_list_local(ic2)%order(1:n2),n2)
-         stop 1
-      endif
-      
       iden=.true.
       if (all(singlet_mv(0,1:nperm).eq.singlet_mv(0,1))) then
          do i=2,nperm
@@ -1011,21 +1008,21 @@ contains
       endif
     end subroutine check_all_permutations
     
-    logical function valid_current_order_excl_symmetry(ip)
+    logical function valid_current_order_excl_symmetry(new_current)
       ! Checks that ip(1:isize) is an order for a current to be considered
       ! when use_symmetry=.true. --> the smallest number needs to come before
       ! the largest number in this list. 
       implicit none
+      type(current) :: new_current
       integer :: i,maxi,mini,min_loc,max_loc
       integer,dimension(isize) :: ip
-
+      ip(1:isize)=new_current%order(1:isize)
       ! if there is a quark (or anti-quark) in the current, no symmetry can be
       ! used. Hence, this is a valid order
       if (popcnt(quark_in_current(ip,isize)).ge.1) then
          valid_current_order_excl_symmetry=.true.
          return
       endif
-      
       ! This must be an all-gluon (or tensor) current. Here we take only one
       ! single order. Define it such that smallest label comes before the
       ! biggest. This must be compatible with what orders are skipped in
@@ -1050,20 +1047,21 @@ contains
     end function valid_current_order_excl_symmetry
 
 
-    subroutine add_current(vertex_sign,cur_bin,ip,ctype,spin,ext_type)
+    subroutine add_current(vertex_sign,new_current)
       implicit none
+      type(current) :: new_current
       logical :: vertex_sign
       integer,dimension(isize) :: ip,spin,ext_type
-      integer :: ctype,cur_bin,ic,key
+      integer :: ctype,ic,key
       integer(kind=8) :: val
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
-            if (ctype.ne.current_list_local(ic)%type) cycle
-            if (cur_bin.ne.current_list_local(ic)%bin) cycle
-            if (any(current_list_local(ic)%order(1:isize).ne.ip(1:isize))) cycle
-            if (any(current_list_local(ic)%spin(1:isize).ne.spin(1:isize))) cycle
-            if (any(current_list_local(ic)%ext_type(1:isize).ne.ext_type(1:isize))) cycle
+            if (new_current%type.ne.current_list_local(ic)%type) cycle
+            if (new_current%bin.ne.current_list_local(ic)%bin) cycle
+            if (any(current_list_local(ic)%order(1:isize).ne.new_current%order(1:isize))) cycle
+            if (any(current_list_local(ic)%spin(1:isize).ne.new_current%spin(1:isize))) cycle
+            if (any(current_list_local(ic)%ext_type(1:isize).ne.new_current%ext_type(1:isize))) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
@@ -1071,14 +1069,7 @@ contains
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
-         allocate(current_list_local(this%n_cur)%order(isize))
-         current_list_local(this%n_cur)%order(1:isize)=ip(1:isize)
-         current_list_local(this%n_cur)%type=ctype
-         current_list_local(this%n_cur)%bin=cur_bin
-         allocate(current_list_local(this%n_cur)%spin(isize))
-         current_list_local(this%n_cur)%spin(1:isize)=spin(1:isize)
-         allocate(current_list_local(this%n_cur)%ext_type(isize))
-         current_list_local(this%n_cur)%ext_type(1:isize)=ext_type(1:isize)
+         current_list_local(this%n_cur)=new_current
          if (current_list_local(ic1)%mass.eq.current_list_local(ic2)%mass)  then
             current_list_local(this%n_cur)%mass=0d0
          else
@@ -1124,18 +1115,11 @@ contains
             this%n_cur=this%n_cur+1
             key_to_current(key)=this%n_cur
             ic=this%n_cur
-            allocate(current_list_local(ic)%order(isize))
-            current_list_local(ic)%order(1:isize)=ip(1:isize)
-            current_list_local(ic)%type=ctype
-            current_list_local(ic)%bin=cur_bin
-            allocate(current_list_local(ic)%spin(isize))
-            current_list_local(ic)%spin(1:isize)=spin(1:isize)
-            if (any(spin(1:isize).ne.-9)) then
+            current_list_local(ic)=new_current
+            if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
                write (*,*) 'trying to combine currents with different spin: not possible',spin(1:isize)
                stop 1
             endif
-            allocate(current_list_local(ic)%ext_type(isize))
-            current_list_local(ic)%ext_type(1:isize)=ext_type(1:isize)
             if (is_gluon(ctype)) then
                allocate(current_list_local(ic)%vertices(5*(isize-1)))
                allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
@@ -1281,7 +1265,6 @@ contains
       implicit none
       integer,intent(in) :: len
       integer,dimension(len),intent(in) :: ext_type
-      integer :: i
       if (any(ext_type(1:len).ne.21)) then
          all_gluon_current=.false.
       else
@@ -1320,7 +1303,6 @@ contains
       implicit none
       integer,intent(in) :: len
       integer,dimension(len),intent(in) :: ext_type
-      integer :: i
       if (any(ext_type(1:len).lt.22)) then
          all_singlet_current=.false.
       else
@@ -2082,7 +2064,7 @@ contains
     subroutine compute_color_factor(col_acc,n,iper,jper,ui,uj,col_fac)
       use color_algebra
       implicit none
-      integer :: i,n,acc,col_acc,color_fac,k,ui,uj,gi,gj
+      integer :: i,n,acc,col_acc,k,ui,uj,gi,gj
       real(kind=8),dimension(1:3) :: col_fac
       integer,dimension(n) :: iper,jper
       integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
