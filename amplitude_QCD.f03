@@ -543,98 +543,11 @@ contains
     subroutine set_max_vert()
       ! rough upper bound on the maximum number of interactions
       implicit none
-      integer :: isize,fact,iden,isplit,itens,fact2,next
-      real(kind=8) :: mv
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_vert=0
-         do isize=2,n-1
-            if (isize.eq.2) then
-               max_vert=max_vert+(n-isize)*3
-            else
-               max_vert=max_vert+isize*(n-isize)*3
-            endif
-         enddo
-         if (this%n_sing.ge.1) max_vert=max_vert*this%n_sing
-         max_vert=max_vert*2**(n-2) ! spins
+         max_vert=n**3*factorial(this%n_sing)*2**(n-2)
       elseif(this%imode.eq.2) then
-         ! gluon and tensor vertices
-         !
-         ! For example, for next=6, we have for the 3-gluon vertices. Note that
-         ! the denominators, i.e., symmetry factors due to inversion of the order
-         ! in the currents, reduces the amount by a factor 2*2*2 (due to
-         ! inversion of the combined current, and inversion of the two incoming
-         ! currents separately, with the latter only applicable if the incoming
-         ! currents contain more than 1 particle):
-         ! - to compute the currents with 2 particles combined: (1+1)/2 ===> 5!/3! /2 = 10
-         ! - to compute the currents with 3 particles combined: (1+2)/4+(2+1)/4 ===> 5!/2! /4 + 5!/2! /4 = 30
-         ! - to compute the currents with 4 particles combined: (1+3)/4+(2+2)/8+(3+1)/4 ===> 5!/1! /4 + 5!/1! /8 + 5!/1! /4 = 75
-         ! - to compute the currents with 5 particles combined: (1+4)/4+(2+3)/8+(3+2)/8+(4+1)/4 ===> 5!/0! /4 + 5!/0! /8 + 5!/0! /8 5!/0! /4 = 90
-         ! in total 205 3-gluon vertices.
-         !
-         ! To create the tensor particles, we need to double the amount of
-         ! vertices we have to compute for th 2-4 particles combined currents:
-         ! - 10+30+75 = 115 tensor creating currents.
-         !
-         ! To resolve the tensor particles we have more currents to choose from
-         ! when combining to 3-5 particles. Note that a single particle currents
-         ! cannot be a tensor currents and be careful not to include the
-         ! contributions for which *both* incoming currents are tensor particles:
-         ! - (1+2)/4+(2+1)/4 ===> 5!/2! /4 + 5!/2! /4 = 30
-         ! - (1+3)/4+2*(2+2)/8+(3+1)/4 ===> 5!/1! /4 + 2* 5!/1! /8 + 5!/1! /4 = 90
-         ! - (1+4)/4+2*(2+3)/8+2*(3+2)/8+(4+1)/4 ===> 5!/0! + 5!/0! + 5!/0! = 120
-         ! resulting into 240 tensor resolving vertices.
-         !
-         ! Hence a total of 205+115+240=560 3-vertices need to be computed for 6
-         ! gluon amplitudes.
-         if (this%n_qqbar.eq.0) then
-            next=n-1
-         elseif(this%n_qqbar.eq.1) then
-            next=n-2
-         elseif (this%n_qqbar.eq.2) then
-            next=n-4
-         endif
-         mv=0d0
-         fact=factorial(next)
-         do isize=2,next
-            fact2=fact/factorial(next-isize)
-            do isplit=1,isize-1
-               iden=2
-               itens=1
-               if (isplit.gt.1) iden=iden*2
-               if (isplit.lt.isize-1) iden=iden*2
-               if (isize.ne.n-1) then
-                  itens=itens+1
-               endif
-               if (isize.ne.2) then
-                  itens=itens+1
-                  if (isplit.gt.1 .and. isplit.lt.isize-1) itens=itens+1
-               endif
-               if (.not.use_symmetry) iden=1
-               mv=mv+fact2/dble(iden)*itens
-            enddo
-         enddo
-         ! add the quark vertices
-         if (this%n_qqbar.eq.1) then
-            do isize=2,n-1
-               do isplit=1,isize-1
-                  iden=1
-                  if (isplit.gt.1 .and. use_symmetry) iden=iden*2
-                  mv=mv+fact/(factorial(n-isize-1))/dble(iden)
-               enddo
-            enddo
-         elseif (this%n_qqbar.eq.2) then
-            do isize=2,n-1
-               do isplit=1,isize-1
-                  iden=1
-                  if (isplit.gt.1 .and. use_symmetry) iden=iden*2
-                  mv=mv+fact/(factorial(n-isize-1))/dble(iden)
-               enddo
-            enddo
-            mv=100*mv ! TO CHANGE!
-         endif
-         max_vert=nint(mv)
+         max_vert=factorial(n+1)*14
       endif
-      
     end subroutine set_max_vert
 
 
