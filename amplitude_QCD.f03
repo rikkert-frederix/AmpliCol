@@ -697,8 +697,8 @@ contains
          endif
       endif
 
-      colour_singlet1=all_singlet_current(current_list_local(ic1)%ext_type(1:n1),n1)
-      colour_singlet2=all_singlet_current(current_list_local(ic2)%ext_type(1:n2),n2)
+      colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
+      colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
       ! If the first current is a singlet and the second is not, it is not a valid order
       if (colour_singlet1 .and. (.not.colour_singlet2)) return
       ! If both currents are colour singlets, only consider one of the two. 
@@ -736,7 +736,7 @@ contains
 
       ! If using symmetry and the current is a combination of all external
       ! gluons, take only one of the two possible orders
-      gluon_current=all_gluon_current([current_list_local(ic1)%ext_type(1:n1),current_list_local(ic2)%ext_type(1:n2)],isize)
+      gluon_current=all_gluon_current(current_list_local(ic1),n1).and.all_gluon_current(current_list_local(ic2),n2)
       if (use_symmetry .and. this%imode.eq.2 .and. gluon_current) then
          if (maxval(current_list_local(ic1)%order(1:n1)).ge.maxval(current_list_local(ic2)%order(1:n2))) return
       endif
@@ -965,8 +965,8 @@ contains
       integer :: i,j,k,invert
       integer,dimension(0:isize,8) :: singlet_mv
       switch(1:3)=1
-      ag1=all_gluon_current(current_list_local(ic1)%ext_type(1:n1),n1)
-      ag2=all_gluon_current(current_list_local(ic2)%ext_type(1:n2),n2)
+      ag1=all_gluon_current(current_list_local(ic1),n1)
+      ag2=all_gluon_current(current_list_local(ic2),n2)
       if (n1.ge.2 .and. ag1) switch(1)=2
       if (n2.ge.2 .and. ag2) switch(2)=2
       if (ag1 .and. ag2) switch(3)=2
@@ -1019,7 +1019,7 @@ contains
       ip(1:isize)=new_current%order(1:isize)
       ! if there is a quark (or anti-quark) in the current, no symmetry can be
       ! used. Hence, this is a valid order
-      if (popcnt(quark_in_current(ip,isize)).ge.1) then
+      if (quark_in_current(new_current,isize)) then
          valid_current_order_excl_symmetry=.true.
          return
       endif
@@ -1260,12 +1260,12 @@ contains
       enddo
     end subroutine solve_dict
 
-    logical function all_gluon_current(ext_type,len)
+    logical function all_gluon_current(curr,len)
       ! returns .true. only if all external particles are gluons
       implicit none
+      type(current),intent(in) :: curr
       integer,intent(in) :: len
-      integer,dimension(len),intent(in) :: ext_type
-      if (any(ext_type(1:len).ne.21)) then
+      if (any(curr%ext_type(1:len).ne.21)) then
          all_gluon_current=.false.
       else
          all_gluon_current=.true.
@@ -1298,12 +1298,12 @@ contains
          is_singlet=.false.
       endif
     end function is_singlet
-    logical function all_singlet_current(ext_type,len)
+    logical function all_singlet_current(curr,len)
       ! returns .true. only if all external particles are colour singlets
       implicit none
+      type(current),intent(in) :: curr
       integer,intent(in) :: len
-      integer,dimension(len),intent(in) :: ext_type
-      if (any(ext_type(1:len).lt.22)) then
+      if (any(curr%ext_type(1:len).lt.22)) then
          all_singlet_current=.false.
       else
          all_singlet_current=.true.
@@ -1349,18 +1349,22 @@ contains
          is_antiquark=.false.
       endif
     end function is_antiquark
-    integer function quark_in_current(ip,isize)
+    logical function quark_in_current(curr,len)
       ! binary function that checks which 'quark_index' is an external
       ! particle part of the current. (i.e., It sets the first bit if
       ! quark_index(1) is part of the current, the second bit if
       ! quark_index(2) is part of the current, etc.)
       implicit none
-      integer :: isize,i
-      integer,dimension(isize) :: ip
-      quark_in_current=0
-      do i=1,2*this%n_qqbar
-         if (any(this%quark_index(i).eq.ip(1:isize))) quark_in_current=ibset(quark_in_current,i-1)
+      type(current),intent(in) :: curr
+      integer,intent(in) :: len
+      integer :: i
+      do i=1,len
+         if (is_quark(curr%ext_type(i)).or.is_antiquark(curr%ext_type(i))) then
+            quark_in_current=.true.
+            return
+         endif
       enddo
+      quark_in_current=.false.
     end function quark_in_current
   end subroutine init
 
