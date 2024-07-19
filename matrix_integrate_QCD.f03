@@ -251,7 +251,8 @@ contains
            amps%amps(ih)=amps%amps(ih)+(1d0/3d0)*amps_sf%amps(ih)
         endif
       enddo
-    endif
+   endif
+   
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
@@ -267,7 +268,7 @@ contains
     enddo
 
     amp2=sum(amp2_hel(1:nhel))
-    
+
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
        if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
@@ -306,7 +307,7 @@ contains
     f1(1)=abs(val)
     f1(2)=val
     integrand=f1(2)
-    
+
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end function integrand
