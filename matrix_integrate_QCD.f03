@@ -107,7 +107,6 @@ program matrix_integrate_QCD
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
-  it = 0 ! dummy
   orig_part(:)=part(:)
 
   if (include_pdf) then
@@ -122,14 +121,14 @@ program matrix_integrate_QCD
   if (amps%n_qqbar.eq.2) then
     call define_symm_2qq(next,part,1)
   endif
-  call amps%init(1,next,part,spin,mass,width,o,it)
+  call amps%init(1,next,part,spin,mass,width,o)
 
   if (amps%n_qqbar.eq.2.and.amps%same_flav) then
      part_sf(:) = orig_part(:)
      amps_sf%n_qqbar=amps%n_qqbar
      amps_sf%same_flav=amps%same_flav
      call define_symm_2qq(next,part_sf,2)
-     call amps_sf%init(1,next,part_sf,spin,mass,width,o,it)
+     call amps_sf%init(1,next,part_sf,spin,mass,width,o)
   endif
 
   call cpu_time(tAfter)
@@ -137,7 +136,9 @@ program matrix_integrate_QCD
 
   ! Compute the leading colour factor
   if (amps%n_qqbar.eq.2) then
-      if (abs(part(o(1))).ne.abs(part(o(next)))) it = 2
+     if (abs(part(o(1))).ne.abs(part(o(next)))) it = 2
+  else
+     it=0 ! dummy
   endif
 
   call compute_LC_colour_factor(col_fac,it)
