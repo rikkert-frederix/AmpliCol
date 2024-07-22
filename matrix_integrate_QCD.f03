@@ -22,7 +22,7 @@ program matrix_integrate_QCD
   character(len=80) :: filename
   integer(kind=4) :: integration, nquarks
   logical,dimension(-6:7,2) :: ipdgs
-  integer :: col_fac,nhel
+  integer :: col_fac
   integer :: it ! quark order type
   integer,parameter :: nevent_hel_filter=5
   integer,dimension(2) :: hel_picked
@@ -143,11 +143,10 @@ program matrix_integrate_QCD
   call compute_LC_colour_factor(col_fac,it)
   
   ! number of helicities to sum over
-  nhel=(amps%n_cur_end(next-1)-amps%n_cur_start(next-1)+1)*(amps%n_cur_end(next)-amps%n_cur_start(next)+1)
-  allocate(amp2_hel(1:nhel))
+  allocate(amp2_hel(1:amps%n_amps))
   allocate(hel(1:next))
-  allocate(hel_fac(1:nhel))
-  hel_fac(1:nhel)=1
+  allocate(hel_fac(1:amps%n_amps))
+  hel_fac(1:amps%n_amps)=1
   
 
   ! Not so relevant mint-module parameters: only used in special cases.
@@ -244,7 +243,7 @@ contains
 
     if (amps%n_qqbar.eq.2.and.amps%same_flav) then
       call amps_sf%evaluate(next,p,mass,width,hel,part_sf)
-      do ih=1,nhel
+      do ih=1,amps%n_amps
         if (it.eq.2) then
            amps%amps(ih)=(1d0/3d0)*amps%amps(ih)+amps_sf%amps(ih)
         else
@@ -257,8 +256,8 @@ contains
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
-    amp2_hel(1:nhel)=0d0
-    do ih=1,nhel
+    amp2_hel(1:amps%n_amps)=0d0
+    do ih=1,amps%n_amps
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
           amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
        else
@@ -266,8 +265,8 @@ contains
        endif
        amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
     enddo
-
-    amp2=sum(amp2_hel(1:nhel))
+    
+    amp2=sum(amp2_hel(1:amps%n_amps))
 
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
@@ -278,6 +277,9 @@ contains
           amp2=0d0
        endif
     endif
+
+
+!!$    if (passed.eq.10) stop 1
     
     weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     
@@ -382,20 +384,20 @@ contains
   subroutine setup_helicity_filter(nevent)
     implicit none
     real(kind=8) :: max_value
-    integer :: ih1,ih2,nevent,nhel_sf
+    integer :: ih1,ih2,nevent
     integer,dimension(:,:),allocatable,save :: include_hel
     integer,dimension(:),allocatable :: include_hel_sf
-    if (.not.allocated(include_hel)) allocate(include_hel(nhel,nevent_hel_filter))
+    if (.not.allocated(include_hel)) allocate(include_hel(amps%n_amps,nevent_hel_filter))
     ! filter zero helicities and helicities that are identical
-    include_hel(1:nhel,nevent)=1
-    max_value=maxval(amp2_hel(1:nhel))
-    do ih1=1,nhel
+    include_hel(1:amps%n_amps,nevent)=1
+    max_value=maxval(amp2_hel(1:amps%n_amps))
+    do ih1=1,amps%n_amps
        if (include_hel(ih1,nevent).ne.1) cycle
        if (amp2_hel(ih1)/max_value.lt.1d-28) then
           ! zero
           include_hel(ih1,nevent)=0
        else
-          do ih2=ih1+1,nhel
+          do ih2=ih1+1,amps%n_amps
              if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
                 ! identical
                 include_hel(ih2,nevent)=-ih1
@@ -407,29 +409,30 @@ contains
 
     if (nevent.lt.nevent_hel_filter) return
     
-    do ih1=1,nhel
+    do ih1=1,amps%n_amps
        if (any(include_hel(ih1,2:nevent_hel_filter).ne.include_hel(ih1,1))) then
           write (*,*) 'inconsistent helicity. Cannot setup helicity filter.'
           write (*,*) ih1,nevent_hel_filter,':',include_hel(ih1,1:nevent_hel_filter)
           stop 1
        endif
     enddo
-    nhel_sf=nhel
-    allocate(include_hel_sf(1:nhel))
-    include_hel_sf(1:nhel)=include_hel(1:nhel,1)
-    call amps%filter_helicity(next,nhel,include_hel(1,1)) ! this updates 'nhel' and 'include_hel'
+    if (amps%same_flav) then
+       allocate(include_hel_sf(1:amps_sf%n_amps))
+       include_hel_sf(1:amps_sf%n_amps)=include_hel(1:amps%n_amps,1)
+    endif
+    call amps%filter_helicity(next,include_hel(1,1)) ! this updates 'nhel' and 'include_hel'
     if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-       call amps_sf%filter_helicity(next,nhel_sf,include_hel_sf)
-       if (nhel.ne.nhel_sf) then
-          write (*,*) 'number of helicity not consistent',nhel,nhel_sf
+       call amps_sf%filter_helicity(next,include_hel_sf)
+       if (amps%n_amps.ne.amps_sf%n_amps) then
+          write (*,*) 'number of helicity not consistent',amps%n_amps,amps_sf%n_amps
           stop 1
        endif
     endif
     deallocate(hel_fac)
-    allocate(hel_fac(nhel))
-    hel_fac(1:nhel)=include_hel(1:nhel,1)
+    allocate(hel_fac(amps%n_amps))
+    hel_fac(1:amps%n_amps)=include_hel(1:amps%n_amps,1)
     deallocate(include_hel)
-    deallocate(include_hel_sf)
+    if (amps%same_flav) deallocate(include_hel_sf)
   end subroutine setup_helicity_filter
 
   subroutine define_symm_2qq(next,part,chan)
@@ -591,8 +594,8 @@ contains
        endif
     enddo
     hel_picked(2)=i
-    if (hel_picked(2).gt.nhel) then
-       write (*,*) 'Could not unweight helicity',hel_picked,nhel
+    if (hel_picked(2).gt.amps%n_amps) then
+       write (*,*) 'Could not unweight helicity',hel_picked,amps%n_amps
        stop 1
     endif
     if (hel_fac(hel_picked(2)).gt.1) then

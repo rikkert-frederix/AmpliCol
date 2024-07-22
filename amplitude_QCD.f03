@@ -26,14 +26,14 @@ module amplitude_QCD_mod
      real(kind=8),dimension(:),allocatable :: amps_r
      real(kind=8),dimension(:,:),allocatable :: pp
      real(kind=8),dimension(:,:,:),allocatable :: diff_col_vals
-     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing
+     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing,n_amps
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,quark_index,map_2qq_amps
-     integer,dimension(:,:),allocatable :: n_col_vals,perm,col_index
+     integer,dimension(:,:),allocatable :: n_col_vals,perm,col_index,curr2amp
      integer,dimension(:,:,:),allocatable :: spins,i_col_i
      integer,dimension(:,:,:,:),allocatable :: row_index
      logical :: same_flav
-     logical,dimension(:),allocatable :: include_product
+     logical,dimension(:),allocatable :: include_amp
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity
      procedure,private :: filter_dead_trees
@@ -125,7 +125,9 @@ contains
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
-
+    
+    call setup_currents_to_amps_map()
+    
     call simple_consistency_checks()
     call allocate_current_list_and_interaction_list()
 
@@ -138,26 +140,55 @@ contains
     call setup_momentum_array()
 
   contains
+    subroutine setup_currents_to_amps_map()
+      implicit none
+      integer :: icur,jcur
+      integer,dimension(:,:),allocatable :: curr2amp
+      allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      this%n_amps=0
+      do icur=0,this%n_cur_end(n-1)-this%n_cur_start(n-1)
+         do jcur=0,this%n_cur_end(n)-this%n_cur_start(n)
+            if ( current_list_local(this%n_cur_start(n-1)+icur)%type.ne. &
+                 anti_current(current_list_local(this%n_cur_start(n  )+jcur)%type) ) cycle
+            this%n_amps=this%n_amps+1
+            curr2amp(1,this%n_amps)=this%n_cur_start(n-1)+icur
+            curr2amp(2,this%n_amps)=this%n_cur_start(n  )+jcur
+         enddo
+      enddo
+      if (use_symmetry .and. this%n_qqbar.eq.0) then
+         allocate(this%curr2amp(1:2,1:2*this%n_amps))
+         this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
+         this%curr2amp(1:2,this%n_amps+1:2*this%n_amps)=curr2amp(1:2,1:this%n_amps)
+         this%n_amps=this%n_amps*2
+      else
+         allocate(this%curr2amp(1:2,1:this%n_amps))
+         this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
+      endif
+      if (this%imode.eq.3 .and. this%n_amps.ne.1) then
+         write (*,*) 'For this%imode==3, there should only be one amplitude',this%n_amps
+         write (*,*) this%n_cur_start
+         write (*,*) this%n_cur_end
+         stop 1
+      endif
+      allocate(this%include_amp(1:this%n_amps))
+      this%include_amp(:)=.true.
+    end subroutine setup_currents_to_amps_map
 
     subroutine setup_spin_list()
       implicit none
-      integer :: ih1,ih2,ih,i
-      allocate(this%spins(n,1,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-      ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
-      do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
-         do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
-            ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
-            do i=1,n
-               if (i.lt.n) then
-                  this%spins(order(i),1,ih)=this%current_list(this%n_cur_start(n-1)+ih1-1)%spin(i)
-               elseif (i.eq.n) then
-                  this%spins(order(i),1,ih)=this%current_list(this%n_cur_start(n  )+ih2-1)%spin(1)
-               endif
-            enddo
+      integer :: iamp,i
+      allocate(this%spins(n,1,1:this%n_amps))
+      do iamp=1,this%n_amps
+         do i=1,n
+            if (i.lt.n) then
+               this%spins(this%current_list(this%curr2amp(1,iamp))%order(i),1,iamp)= &
+                          this%current_list(this%curr2amp(1,iamp))%spin(i)
+            elseif (i.eq.n) then
+               this%spins(this%current_list(this%curr2amp(2,iamp))%order(1),1,iamp)= &
+                          this%current_list(this%curr2amp(2,iamp))%spin(1)
+            endif
          enddo
       enddo
-      allocate(this%include_product(1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-      this%include_product(:)=.true.
     end subroutine setup_spin_list
     
     subroutine create_external_current(nc,ispin)
@@ -183,70 +214,81 @@ contains
     
     subroutine allocate_and_fill_colour_permutations()
       implicit none
-      integer :: ind,nc
+      integer :: iamp!ind,nc
       ! allocate and fill the colour orders in 'this%perm'. These are simply
       ! the orders of the elements in the 'this%current_list' (with size n-1)
       ! together with the final element). Exception: when there are colour
       ! singlets, they will not be part of the this%perm (while they are part
       ! of the elements in the this%current_list.
       allocate(this%perm(1:n-this%n_sing,1:this%nColOrd))
-      if (this%n_cur_end(n).ne.this%n_cur_start(n)) then
-         write (*,*) 'More than one element to close the current. Not possible when imode==2'
-         write (*,*) this%n_cur_start
-         write (*,*) this%n_cur_end
+      if (this%n_amps.ne.this%nColOrd) then
+         write (*,*) 'For this%imode==2 the number of amplitudes and colour orders should be the same'
+         write (*,*) this%n_amps,this%nColOrd
          stop 1
-      elseif (is_singlet(this%current_list(this%n_cur_start(n))%type)) then
+      endif
+      if (is_singlet(this%current_list(this%n_cur_start(n))%type)) then
          write (*,*) 'Final current (that closes the amplitude) cannot be a colour singlet'
          write (*,*) this%current_list(this%n_cur_start(n))%type
          stop 1
       endif
-      if (((.not.use_symmetry .or. this%n_qqbar.ne.0)  .and. this%nColOrd.ne.(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
-           (use_symmetry .and. this%nColOrd.ne.2*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1) .and. this%n_qqbar.eq.0)) then
-         write (*,*) 'Number of expected colour orders not compatible with number of size n-1 currents'
-         write (*,*) use_symmetry,this%n_qqbar,this%nColOrd
-         write (*,*) this%n_cur_start
-         write (*,*) this%n_cur_end
-         stop 1
-      endif
-
-      if (this%n_qqbar.eq.0) then
-         if (this%n_sing.ne.0) then
-            write (*,*) 'For all-gluon processes, there should not be any colour singlets',this%n_sing
-            stop 1
-         endif
-         do nc=1,this%nColOrd
-            if ((.not.use_symmetry) .or. (use_symmetry .and. nc.le.this%nColOrd/2)) then
-               this%perm(1:n,nc)=[this%current_list(this%n_cur_start(n-1)-1+nc)%order(1:n-1),&
-                    this%current_list(this%n_cur_start(n))%order(1)]
-            elseif (use_symmetry .and. nc.gt.this%nColOrd/2) then
-               this%perm(1:n,nc)=[this%current_list(this%n_cur_start(n-1)-1+nc-this%nColOrd/2)%order(n-1:1:-1),&
-                    this%current_list(this%n_cur_start(n))%order(1)]
-            endif
-         enddo
-         return ! all gluons done: return
-      endif
-
-      ! The first particle in the order should be the quark. Double check that it is unique
-      do nc=this%n_cur_start(1)+1,this%n_cur_end(1)
-         if (this%current_list(nc)%order(1)  .eq. &
-              this%current_list(this%n_cur_start(1))%order(1)) then
-            write (*,*) 'First current is not unique. Not possible when imode==2'
-            write (*,*) (this%current_list(ind)%order(1),ind=this%n_cur_start(1),this%n_cur_end(1))
-            stop 1
+      do iamp=1,this%n_amps
+         this%perm(1:n-this%n_sing,iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing),&
+                                          this%current_list(this%curr2amp(2,iamp))%order(1)]
+         if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2) then
+            this%perm(1:n-this%n_sing,iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing:1:-1),&
+                                             this%current_list(this%curr2amp(2,iamp))%order(1)]
          endif
       enddo
-      ! First particle should not be a colour singlet
-      if (is_singlet(this%current_list(this%n_cur_start(1))%type)) then
-         write (*,*) 'First particle is a colour singlet. Not possible'
-         stop 1
-      endif
-      
-      if (this%n_qqbar.eq.1) then
-         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            this%perm(1:n-this%n_sing,nc-this%n_cur_start(n-1)+1)=[this%current_list(this%n_cur_start(1))%order(1),&
-                 this%current_list(nc)%order(2:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
-         enddo
-      elseif (this%n_qqbar.eq.2) then
+
+
+!!$      
+!!$     if (((.not.use_symmetry .or. this%n_qqbar.ne.0)  .and. this%nColOrd.ne.(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)) .or. &
+!!$           (use_symmetry .and. this%nColOrd.ne.2*(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1) .and. this%n_qqbar.eq.0)) then
+!!$         write (*,*) 'Number of expected colour orders not compatible with number of size n-1 currents'
+!!$         write (*,*) use_symmetry,this%n_qqbar,this%nColOrd
+!!$         write (*,*) this%n_cur_start
+!!$         write (*,*) this%n_cur_end
+!!$         stop 1
+!!$      endif
+!!$
+!!$      if (this%n_qqbar.eq.0) then
+!!$         if (this%n_sing.ne.0) then
+!!$            write (*,*) 'For all-gluon processes, there should not be any colour singlets',this%n_sing
+!!$            stop 1
+!!$         endif
+!!$         do nc=1,this%nColOrd
+!!$            if ((.not.use_symmetry) .or. (use_symmetry .and. nc.le.this%nColOrd/2)) then
+!!$               this%perm(1:n,nc)=[this%current_list(this%n_cur_start(n-1)-1+nc)%order(1:n-1),&
+!!$                    this%current_list(this%n_cur_start(n))%order(1)]
+!!$            elseif (use_symmetry .and. nc.gt.this%nColOrd/2) then
+!!$               this%perm(1:n,nc)=[this%current_list(this%n_cur_start(n-1)-1+nc-this%nColOrd/2)%order(n-1:1:-1),&
+!!$                    this%current_list(this%n_cur_start(n))%order(1)]
+!!$            endif
+!!$         enddo
+!!$         return ! all gluons done: return
+!!$      endif
+!!$
+!!$      ! The first particle in the order should be the quark. Double check that it is unique
+!!$      do nc=this%n_cur_start(1)+1,this%n_cur_end(1)
+!!$         if (this%current_list(nc)%order(1)  .eq. &
+!!$              this%current_list(this%n_cur_start(1))%order(1)) then
+!!$            write (*,*) 'First current is not unique. Not possible when imode==2'
+!!$            write (*,*) (this%current_list(ind)%order(1),ind=this%n_cur_start(1),this%n_cur_end(1))
+!!$            stop 1
+!!$         endif
+!!$      enddo
+!!$      ! First particle should not be a colour singlet
+!!$      if (is_singlet(this%current_list(this%n_cur_start(1))%type)) then
+!!$         write (*,*) 'First particle is a colour singlet. Not possible'
+!!$         stop 1
+!!$      endif
+!!$      
+!!$      if (this%n_qqbar.eq.1) then
+!!$         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
+!!$            this%perm(1:n-this%n_sing,nc-this%n_cur_start(n-1)+1)=[this%current_list(this%n_cur_start(1))%order(1),&
+!!$                 this%current_list(nc)%order(2:n-1-this%n_sing),this%current_list(this%n_cur_start(n))%order(1)]
+!!$         enddo
+      if (this%n_qqbar.eq.2) then
          call setup_map_2qq_amps()
          do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
             this%perm(1:n-this%n_sing,this%map_2qq_amps(nc-this%n_cur_start(n-1)+1)) = &
@@ -794,7 +836,7 @@ contains
     subroutine add_vertex(itype,ctype)
       implicit none
       integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(current_list_local(this%n_cur_start(n))%type)) then 
+      if (isize.eq.n-1 .and. ctype.ne.anti_current(current_list_local(this%n_cur_start(n))%type)) then
         return ! dead tree. Filter already here
       endif
       this%n_vert=this%n_vert+1
@@ -1048,10 +1090,9 @@ contains
 
     subroutine add_current(vertex_sign,new_current)
       implicit none
-      type(current) :: new_current
-      logical :: vertex_sign
-      integer,dimension(isize) :: ip,spin,ext_type
-      integer :: ctype,ic,key
+      type(current),intent(in) :: new_current
+      logical,intent(in) :: vertex_sign
+      integer :: ic,key
       integer(kind=8) :: val
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! Check if this interaction can be added to an existing current
@@ -1079,10 +1120,10 @@ contains
          else
             current_list_local(this%n_cur)%width=max(current_list_local(ic1)%width,current_list_local(ic2)%width)
          endif
-         if (is_gluon(ctype)) then
+         if (is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
-         elseif (is_tensor(ctype)) then
+         elseif (is_tensor(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(isize-1))
             allocate(current_list_local(this%n_cur)%vertex_sign(isize-1))
          else
@@ -1093,18 +1134,18 @@ contains
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
       elseif (this%imode.eq.2) then
-         if (is_gluon(ctype)) then
+         if (is_gluon(new_current%type)) then
             ! gluon current
-            call get_value(ip,0,val)
-         elseif (is_tensor(ctype)) then
+            call get_value(new_current%order,0,val)
+         elseif (is_tensor(new_current%type)) then
             ! tensor current
-            call get_value(ip,-1,val)
-         elseif (is_quark(ctype)) then
+            call get_value(new_current%order,-1,val)
+         elseif (is_quark(new_current%type)) then
             ! quark current
-            call get_value(ip,2*ctype-1,val)
-         elseif (is_antiquark(ctype)) then
+            call get_value(new_current%order,2*new_current%type-1,val)
+         elseif (is_antiquark(new_current%type)) then
             ! anti-quark current
-            call get_value(ip,2*abs(ctype),val)
+            call get_value(new_current%order,2*abs(new_current%type),val)
          endif
          call solve_dict(val,key)
          ic=key_to_current(key)
@@ -1115,13 +1156,14 @@ contains
             ic=this%n_cur
             current_list_local(ic)=new_current
             if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
-               write (*,*) 'trying to combine currents with different spin: not possible',spin(1:isize)
+               write (*,*) 'trying to combine currents with different spin: not possible',&
+                    current_list_local(ic)%spin(1:isize)
                stop 1
             endif
-            if (is_gluon(ctype)) then
+            if (is_gluon(new_current%type)) then
                allocate(current_list_local(ic)%vertices(5*(isize-1)))
                allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
-            elseif (is_gluon(ctype)) then
+            elseif (is_gluon(new_current%type)) then
                allocate(current_list_local(ic)%vertices(isize-1))
                allocate(current_list_local(ic)%vertex_sign(isize-1))
             else
@@ -1405,18 +1447,10 @@ contains
              allocate(this%interaction_list(iv)%val_c(1:4))
           endif
        enddo
-       if (this%imode.eq.1 .or. this%imode.eq.3) then
-          if (use_real_gluons .and. this%n_qqbar.eq.0) then
-             allocate(this%amps_r(1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-          else
-             allocate(this%amps(1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-          endif
-       elseif (this%imode.eq.2) then
-          if (use_real_gluons .and. this%n_qqbar.eq.0) then
-             allocate(this%amps_r(1:this%nColOrd))
-          else
-             allocate(this%amps(1:this%nColOrd))
-          endif
+       if (use_real_gluons .and. this%n_qqbar.eq.0) then
+          allocate(this%amps_r(1:this%n_amps))
+       else
+          allocate(this%amps(1:this%n_amps))
        endif
     endif
 
@@ -1627,65 +1661,98 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: ih1,ih2,ih,ic,ihc
-      if (this%imode.eq.1) then
-         ! Note: this must be done in the same order as the this%spins() are setup in 'setup_spin_list()'
-         ihc=0
-         do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
-            do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
-               ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
-               if (.not.this%include_product(ih)) cycle
-               ihc=ihc+1
-               if (use_real_gluons .and. this%current_list(ih2)%type.eq.21) then
-                  this%amps_r(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_r(1:4)*&
-                                       this%current_list(this%n_cur_start(n  )+ih2-1)%val_r(1:4))
-               else
-                  this%amps(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
-                                     this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
-               endif
-            enddo
-         enddo
-
-      elseif (this%imode.eq.2) then
-         do ic=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
-               this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4)*this%current_list(n)%val_r(1:4))
+      integer :: iamp,ih1,ih2,ih,ic,ihc
+      if (this%imode.eq.1 .or. this%imode.eq.3) then
+         do iamp=1,this%n_amps
+            if (use_real_gluons .and. this%n_qqbar.eq.0) then
+               this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
+                                     this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             else
-               if (this%n_qqbar.eq.2) then
-                  this%amps(this%map_2qq_amps(ic-this%n_cur_start(n-1)+1)) = &
-                       sum(this%current_list(ic)%val_c(1:4)*this%current_list(n)%val_c(1:4))
-               else        
-                  this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4)*this%current_list(n)%val_c(1:4))
-               endif     
+               this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                                   this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
             endif
          enddo
-
-         if (use_symmetry .and. this%n_qqbar.eq.0) then
-            do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
-               ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
-               if (use_real_gluons .and. this%n_qqbar.eq.0) then
-                  if (mod(n,2).eq.1) then
-                     this%amps_r(ic)=-this%amps_r(ip)
-                  else
-                     this%amps_r(ic)=this%amps_r(ip)
-                  endif
+      elseif(this%imode.eq.2) then
+         do iamp=1,this%n_amps
+            if (use_real_gluons .and. this%n_qqbar.eq.0) then
+               if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2) then
+                  this%amps_r(iamp)=-sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
+                                         this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
                else
-                  if (mod(n,2).eq.1) then
-                     this%amps(ic)=-this%amps(ip)
-                  else
-                     this%amps(ic)=this%amps(ip)
-                  endif
+                  this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
+                                        this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
                endif
-            enddo
-         endif
-
-      elseif (this%imode.eq.3) then
-         if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
-            this%amps_r(1)=sum(this%current_list(this%n_cur)%val_r(1:4)*this%current_list(n)%val_r(1:4))
-         else
-            this%amps(1)=sum(this%current_list(this%n_cur)%val_c(1:4)*this%current_list(n)%val_c(1:4))
-         endif
+            else
+               if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2) then
+                  this%amps(iamp)=-sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                                       this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+               else
+                  this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                                      this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+               endif
+            endif
+         enddo
       endif
+
+      
+!!$         
+!!$         ! Note: this must be done in the same order as the this%spins() are setup in 'setup_spin_list()'
+!!$         ihc=0
+!!$         do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
+!!$            do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
+!!$               ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
+!!$               if (.not.this%include_amp(ih)) cycle
+!!$               ihc=ihc+1
+!!$               if (use_real_gluons .and. this%current_list(ih2)%type.eq.21) then
+!!$                  this%amps_r(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_r(1:4)*&
+!!$                                       this%current_list(this%n_cur_start(n  )+ih2-1)%val_r(1:4))
+!!$               else
+!!$                  this%amps(ihc)=sum(this%current_list(this%n_cur_start(n-1)+ih1-1)%val_c(1:4)*&
+!!$                                     this%current_list(this%n_cur_start(n  )+ih2-1)%val_c(1:4))
+!!$               endif
+!!$            enddo
+!!$         enddo
+!!$
+!!$      elseif (this%imode.eq.2) then
+!!$         do ic=this%n_cur_start(n-1),this%n_cur_end(n-1)
+!!$            if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
+!!$               this%amps_r(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_r(1:4)*this%current_list(n)%val_r(1:4))
+!!$            else
+!!$               if (this%n_qqbar.eq.2) then
+!!$                  this%amps(this%map_2qq_amps(ic-this%n_cur_start(n-1)+1)) = &
+!!$                       sum(this%current_list(ic)%val_c(1:4)*this%current_list(n)%val_c(1:4))
+!!$               else        
+!!$                  this%amps(ic-this%n_cur_start(n-1)+1)=sum(this%current_list(ic)%val_c(1:4)*this%current_list(n)%val_c(1:4))
+!!$               endif     
+!!$            endif
+!!$         enddo
+!!$
+!!$         if (use_symmetry .and. this%n_qqbar.eq.0) then
+!!$            do ic=this%n_cur_end(n-1)-this%n_cur_start(n-1)+2, (this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*2
+!!$               ip=ic-(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)
+!!$               if (use_real_gluons .and. this%n_qqbar.eq.0) then
+!!$                  if (mod(n,2).eq.1) then
+!!$                     this%amps_r(ic)=-this%amps_r(ip)
+!!$                  else
+!!$                     this%amps_r(ic)=this%amps_r(ip)
+!!$                  endif
+!!$               else
+!!$                  if (mod(n,2).eq.1) then
+!!$                     this%amps(ic)=-this%amps(ip)
+!!$                  else
+!!$                     this%amps(ic)=this%amps(ip)
+!!$                  endif
+!!$               endif
+!!$            enddo
+!!$         endif
+!!$
+!!$      elseif (this%imode.eq.3) then
+!!$         if (use_real_gluons .and. this%current_list(n)%type.eq.21) then
+!!$            this%amps_r(1)=sum(this%current_list(this%n_cur)%val_r(1:4)*this%current_list(n)%val_r(1:4))
+!!$         else
+!!$            this%amps(1)=sum(this%current_list(this%n_cur)%val_c(1:4)*this%current_list(n)%val_c(1:4))
+!!$         endif
+!!$      endif
     end subroutine compute_amps_from_currents
 
     subroutine combine_interactions(dim)
@@ -2291,14 +2358,13 @@ contains
 
   end subroutine init_col
 
-  subroutine filter_helicity(this,n,nhel,include_hel)
+  subroutine filter_helicity(this,n,include_hel)
     implicit none
     class(amplitude_qcd) :: this
-    integer,intent(inout) :: nhel
     integer,intent(in) :: n
-    integer,intent(inout),dimension(nhel) :: include_hel
-    integer :: ih,ih1,ih2,ihc,nspin,ispin,ic,iv
-    logical,dimension(:),allocatable :: include_current,include_product
+    integer,intent(inout),dimension(this%n_amps) :: include_hel
+    integer :: nspin,ispin,ic,iv,iamp
+    logical,dimension(:),allocatable :: include_current
     integer,dimension(:,:,:),allocatable :: tmp_spin
 
     ! deallocate a bunch
@@ -2316,67 +2382,37 @@ contains
     allocate(include_current(this%n_cur))
     include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
     include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
-    allocate(include_product(nhel))
-    include_product(1:nhel)=.false.
+
+    this%include_amp(1:this%n_amps)=.false.
     
-    ! Note: this must be done in the same order as the amps() are computed in 'compute_amps_from_currents'
+    allocate(tmp_spin(1:n,1:maxval(include_hel),this%n_amps))
+
     nspin=0
-    do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
-       do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
-          ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
-          if (include_hel(ih).ge.1) then
-             include_current(this%n_cur_start(n-1)+ih1-1)=.true.
-             include_current(this%n_cur_start(n  )+ih2-1)=.true.
-             include_product(ih)=.true.
-             nspin=nspin+1
-          endif
-       enddo
-    enddo
-
-    allocate(tmp_spin(1:n,1:maxval(include_hel),nspin))
-    nspin=nhel
-
-    ihc=0
-    nhel=0
-    do ih1=1,this%n_cur_end(n-1)-this%n_cur_start(n-1)+1
-       if (.not.include_current(this%n_cur_start(n-1)+ih1-1)) cycle
-       do ih2=1,this%n_cur_end(n)-this%n_cur_start(n)+1
-          if (.not.include_current(this%n_cur_start(n)+ih2-1)) cycle
-          ih=(ih1-1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)+ih2
-          ihc=ihc+1
-          include_product(ihc)=include_product(ih)
-          if (include_product(ihc)) then
-             nhel=nhel+1
-             tmp_spin(1:n,1,nhel)=this%spins(1:n,1,ih)
-             if (include_hel(ih).gt.1) then
-                ic=1
-                do ispin=ih+1,nspin
-                   if (-include_hel(ispin).eq.ih) then
-                      ic=ic+1
-                      if (ic.gt.include_hel(ih)) then
-                         write (*,*) 'inconsistent include_hel #1'
-                         stop 1
-                      endif
-                      tmp_spin(1:n,ic,nhel)=this%spins(1:n,1,ispin)
-                   endif
-                enddo
-             elseif (include_hel(ih).ne.1) then
-                write (*,*) 'inconsistent include_hel #2'
-                stop 1
+    do iamp=1,this%n_amps
+       if (include_hel(iamp).ge.1) then
+          include_current(this%curr2amp(1,iamp))=.true.
+          include_current(this%curr2amp(2,iamp))=.true.
+          this%include_amp(iamp)=.true.
+          nspin=nspin+1
+          tmp_spin(1:n,1,nspin)=this%spins(1:n,1,iamp)
+          ic=1
+          do ispin=iamp+1,this%n_amps
+             if (-include_hel(ispin).eq.iamp) then
+                ic=ic+1
+                tmp_spin(1:n,ic,nspin)=this%spins(1:n,1,ispin)
              endif
-             include_hel(nhel)=include_hel(ih)
-          endif
-       enddo
+          enddo
+          include_hel(nspin)=include_hel(iamp)
+       endif
     enddo
-    deallocate(this%spins)
-    call move_alloc(tmp_spin,this%spins)
 
-    deallocate(this%include_product)
-    allocate(this%include_product(1:ihc))
-    this%include_product(1:ihc)=include_product(1:ihc)
-    
+    deallocate(this%spins)
+    allocate(this%spins(1:n,1:maxval(include_hel),nspin))
+    this%spins(1:n,1:maxval(include_hel),1:nspin)=tmp_spin(1:n,1:maxval(include_hel),1:nspin)
+
     call this%filter_dead_trees(n,include_current)
-    write (*,*) 'Total number of currents and vertices after filtering helicities',this%n_cur,this%n_vert,ihc,nhel
+    write (*,*) 'Total number of currents and vertices after filtering helicities',this%n_cur,this%n_vert,this%n_amps
+    deallocate(this%include_amp)
 
   end subroutine filter_helicity
 
@@ -2395,7 +2431,7 @@ contains
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n
+    integer :: to_skip,isize,nc,iv,n,iamp,i
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -2492,6 +2528,14 @@ contains
           enddo
        endif
     enddo
+    iamp=0
+    do i=1,this%n_amps
+       if (.not.this%include_amp(i)) cycle
+       iamp=iamp+1
+       this%curr2amp(1,iamp)=where_to_cur(this%curr2amp(1,i))
+       this%curr2amp(2,iamp)=where_to_cur(this%curr2amp(2,i))
+    enddo
+    this%n_amps=iamp
     do nc=this%n_cur,1,-1
        if (where_to_cur(nc).ne.0) then
           this%n_cur=where_to_cur(nc)
