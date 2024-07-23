@@ -3,7 +3,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
-  logical,parameter :: use_cm_dict=.false.
+  logical,parameter :: use_cm_dict=.true.
   type current
      integer :: type,bin,n_vert
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
@@ -212,7 +212,7 @@ contains
     
     subroutine allocate_and_fill_colour_permutations()
       implicit none
-      integer :: iamp
+      integer :: iamp,i
       ! allocate and fill the colour orders in 'this%perm'. These are simply
       ! the orders of the elements in the 'this%current_list' (with size n-1)
       ! together with the final element). Exception: when there are colour
@@ -235,6 +235,21 @@ contains
          if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2) then
             this%perm(1:n-this%n_sing,iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing:1:-1),&
                                              this%current_list(this%curr2amp(2,iamp))%order(1)]
+         endif
+         if (this%n_qqbar.eq.2) then
+            ! make sure that orders of the quarks is fixed among all
+            ! perm's. (The order of the anti-quarks may vary). Without this,
+            ! the computation of the colour factor will be incorrect.
+            if (iamp.eq.1) cycle
+            if (this%perm(1,iamp).ne.this%perm(1,1)) then
+               ! different order, switch the two colour strings:
+               do i=1,n-this%n_sing
+                  if (this%perm(i,iamp).eq.this%perm(1,1)) then
+                     this%perm(1:n-this%n_sing,iamp)=[this%perm(i:n-this%n_sing,iamp),this%perm(1:i-1,iamp)]
+                     exit
+                  endif
+               enddo
+            endif
          endif
       enddo
     end subroutine allocate_and_fill_colour_permutations
@@ -1676,113 +1691,95 @@ contains
     use math_functions
     implicit none
     class(amplitude_qcd) :: this
-    integer,parameter :: max_vals=3000
-    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,ui,uj,uj_upper,iperm_upper,&
-         gi_iperm,key,max_keys,jperm_lower,ui_upper
+    integer,parameter :: max_vals=10000
+    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,gj,ui,uj,uj_upper,iperm_upper,&
+         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique
     integer,dimension(n) :: iper,jper,part
     integer,dimension(:),allocatable :: n_vals
     real(kind=8),dimension(1:3) :: col_fac
     real(kind=8),dimension(:,:),allocatable :: diff_vals
     real(kind=8),dimension(:,:,:),allocatable :: col_vals
-    integer,dimension(:,:),allocatable :: ic,ir,n_colour_elements,first_rows
+    integer,dimension(:,:),allocatable :: ic,ir,n_colour_elements,unique_rows
     integer(kind=8),dimension(:),allocatable :: perm_dict
 
     write (*,*) 'Initialising colour matrix ...'
 
-    call create_perm_dict()
-
-    if (this%n_qqbar.eq.0) then
-       iperm_upper = 1 ! dummy, needed for 2qq
-       gi_iperm = 1 ! dummy
-       uj_upper = 1 ! dummy
-       ui_upper = 1 ! dummy
-       ui = 1 ! dummy
-    elseif (this%n_qqbar.eq.1) then
-       iperm_upper = 1 ! dummy, needed for 2qq
-       gi_iperm = 1 ! dummy
-       uj_upper = 1 ! dummy
-       ui_upper = 1 ! dummy
-       ui = 1 ! dummy
-    elseif (this%n_qqbar.eq.2) then
-       iperm_upper = (n-4)+1 ! number of gluon separations on two quark lines
-       uj_upper = 1
-       ui_upper = 2
-       ui=1
-    endif
     allocate(n_vals(1:3))
     allocate(diff_vals(max_vals,1:3))
     allocate(this%i_col_i(max_vals,1:3))
     allocate(n_colour_elements(max_vals,1:3))
+    
+    if (this%n_qqbar.eq.0 .or. this%n_qqbar.eq.1) then
+       n_unique_rows=1
+    elseif (this%n_qqbar.eq.2) then
+       n_unique_rows=(n-4)+1 ! number of gluon separations among the two quark lines
+       n_unique_rows=n_unique_rows*2 ! two ways of combining quarks with anti-quarks
+    else
+       write (*,*) 'Inconsistent number of quark pairs',this%n_qqbar
+       stop 1
+    endif
     if (use_cm_dict) then
-       allocate(col_vals(1:3,max_keys,ui_upper*iperm_upper))
-       allocate(first_rows(1:n,ui_upper*iperm_upper))
+       call create_perm_dict()
+       allocate(col_vals(1:3,max_keys,n_unique_rows))
+       allocate(unique_rows(1:n,n_unique_rows))
     endif
 
-! first check a single row in the colour matrix to determine how many
-! different colour factors there are. In the case of two quark lines, we need
-! to consider multiple rows corresponding to the number of gluons between the
-! first quark and anti-quark in the colour order.
+! first check the unique rows in the colour matrix to determine how many
+! different colour factors there are. This also sets up the library for the
+! colour factors if use_cm_dict=.true.
     n_vals(1:3)=0
     if (use_cm_dict) col_vals(1:3,1:max_keys,:)=0d0
-    do iperm=1,iperm_upper
-       do ui=1,ui_upper
-          if (this%n_qqbar.eq.0 .or. this%n_qqbar.eq.1) then
-             iper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,iperm)
-          elseif (this%n_qqbar.eq.2) then
-             ! Loop through all orders and find the first 'iper' with 'iperm-1'
-             ! gluons between the first quark and anti-quark in the colour order.
-             do j=1+(ui-1)*this%nColOrd/2,this%nColOrd/2+(ui-1)*this%nColOrd/2
-                iper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,j)
-                do i=2,n-2
-                   if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
-                      gi = i - 2 ! number of gluons between the first quark and anti-quark in the colour order
-                      exit
-                   endif
-                enddo
-                if (gi.eq.iperm-1) exit
-             enddo
-             gi_iperm = iperm
+    do iunique=1,n_unique_rows
+       if (this%n_qqbar.eq.0 .or. this%n_qqbar.eq.1) then
+          ! just take the first row: all rows are similar
+          irow=1
+       elseif (this%n_qqbar.eq.2) then
+          ! determine how the quarks are connected and how many gluons are on
+          ! each quark line and make sure that it is not similar to one
+          ! already considered
+          call get_unique_row(iunique,irow,gi,ui)
+       endif
+       iper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,irow)
+       if (use_cm_dict) unique_rows(1:n-this%n_sing,iunique) = iper(1:n-this%n_sing)
+       ! loop over the columns
+       do jperm=1,this%nColOrd
+          jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
+          if (this%n_qqbar.eq.2) then
+             ! determine how the quarks are connected
+             call determine_gi_ui(jper,gj,uj)
           endif
-          if (use_cm_dict) first_rows(1:n-this%n_sing,gi_iperm) = iper(1:n-this%n_sing)
-
-          do jperm=1,this%nColOrd 
-             jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
-             key=solve_dict(get_value(jper(1:n)))
-             if (jperm.le.this%nColOrd/2) then
-                uj=1
-             else
-                uj=2
+          call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ui,uj,col_fac)
+          if (use_symm_cm) then
+             col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
+             if (irow.eq.jperm) col_fac(1:3)=col_fac(1:3)*0.5d0 
+          endif
+          do iacc=1,3
+             if (col_fac(iacc).eq.0d0) cycle
+             if (use_cm_dict) then
+                key=solve_dict(get_value(jper(1:n)))
+                col_vals(iacc,key,iunique)=col_fac(iacc)
              endif
-             call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ui,uj,col_fac)
-             if (use_symm_cm.and.this%n_qqbar.ne.2) then
-                col_fac(1:3)=col_fac(1:3)*2d0 ! include a factor 2 for the off-diagonal terms
-                if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 
-             endif
-             do iacc=1,3
-                if (col_fac(iacc).eq.0d0) cycle
-                if (use_cm_dict) col_vals(iacc,key,iperm)=col_fac(iacc)
-                do ival=1,n_vals(iacc)
-                   if (col_fac(iacc).eq.diff_vals(ival,iacc)) then
-                      n_colour_elements(ival,iacc)=n_colour_elements(ival,iacc)+1
-                      exit
-                   endif
-                enddo
-                if (ival.ge.max_vals) then
-                   write (*,*) 'Too many different colour factors. Increase max_vals',&
-                        ival,n_vals(1:3),max_vals
-                   stop 1
-                elseif (ival.eq.n_vals(iacc)+1) then
-                   ! new colour factor
-                   n_vals(iacc)=ival
-                   diff_vals(ival,iacc)=col_fac(iacc)
-                   n_colour_elements(ival,iacc)=1
+             do ival=1,n_vals(iacc)
+                if (col_fac(iacc).eq.diff_vals(ival,iacc)) then
+                   n_colour_elements(ival,iacc)=n_colour_elements(ival,iacc)+1
+                   exit
                 endif
              enddo
+             if (ival.ge.max_vals) then
+                write (*,*) 'Too many different colour factors. Increase max_vals',&
+                     ival,n_vals(1:3),max_vals
+                stop 1
+             elseif (ival.eq.n_vals(iacc)+1) then
+                ! new colour factor
+                n_vals(iacc)=ival
+                diff_vals(ival,iacc)=col_fac(iacc)
+                n_colour_elements(ival,iacc)=1
+             endif
           enddo
-
-          write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
-               ' different colour factors at LC, NLC and full colour, respectively'
        enddo
+
+       write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
+            ' different colour factors at LC, NLC and full colour, respectively'
     enddo
     
     ! determine i_col_i:
@@ -1811,30 +1808,24 @@ contains
 ! Compute all the colour factors and fill the col_index and row_index arrays
     ic=0
     ir=0
-
     do iperm=1,this%nColOrd
        iper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,iperm)
-       jperm_lower=1
-       if (use_symm_cm.and.this%n_qqbar.ne.2) jperm_lower = iperm
+       if (this%n_qqbar.eq.2)  call determine_gi_ui(iper,gi,ui)
+       if (use_symm_cm) then
+          jperm_lower=iperm
+       else
+          jperm_lower=1
+       endif
        do jperm=jperm_lower,this%nColOrd
           jper(1:n-this%n_sing)=this%perm(1:n-this%n_sing,jperm)
+          if (this%n_qqbar.eq.2)  call determine_gi_ui(jper,gj,uj)
           if (use_cm_dict) then
              ! GET color factors from permuting first row
-             call get_col_fac(iper,jper,ui,uj,gi_iperm,col_fac)
+             call get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
           else
-             if (iperm.le.this%nColOrd/2) then
-                ui=1
-             else
-                ui=2
-             endif
-             if (jperm.le.this%nColOrd/2) then
-                uj=1
-             else
-                uj=2
-             endif
              ! COMPUTE color factors again
              call compute_color_factor(col_acc,n-this%n_sing,iper,jper,ui,uj,col_fac)
-             if (use_symm_cm.and.this%n_qqbar.ne.2) then
+             if (use_symm_cm) then
                 col_fac(1:3)=col_fac(1:3)*2d0
                 if (iperm.eq.jperm.and.ui.eq.uj) col_fac(1:3)=col_fac(1:3)*0.5d0 ! include a factor 2 for the off-diagonal terms
              endif
@@ -1860,25 +1851,56 @@ contains
 
     write (*,*) '... colour matrix initialised'
   contains
-   subroutine get_col_fac(iper,jper,ui,uj,gi_iperm,col_fac)
+    subroutine get_unique_row(iunique,irow,gi,ui)
+      implicit none
+      integer,intent(in) :: iunique
+      integer,intent(out) :: irow,gi,ui
+      do irow=1,this%nColOrd
+         call determine_gi_ui(this%perm(1,irow),gi,ui)
+         if (ui.eq.1 .and. gi.eq.iunique-1) return
+         if (ui.eq.2 .and. gi.eq.iunique-1-((n-4)+1)) return
+      enddo
+    end subroutine get_unique_row
+
+    subroutine determine_gi(iper,gi)
+      ! determine how many gluons are on the first quark line
+      implicit none
+      integer :: gi,i
+      integer,dimension(n) :: iper
+      do i=2,n-2
+         if ((abs(part(iper(i))).ge.1.and.abs(part(iper(i))).le.6)) then
+            gi = i - 2
+            return
+         endif
+      enddo
+    end subroutine determine_gi
+
+    subroutine determine_gi_ui(iper,gi,ui)
+      implicit none
+      integer :: ui,gi
+      integer,dimension(n) :: iper
+      call determine_gi(iper,gi)
+      if (abs(part(iper(2+gi))).eq.abs(part(iper(1)))) then
+         ui=2
+      else
+         ui=1
+      endif
+    end subroutine determine_gi_ui
+    
+   subroutine get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
      implicit none
-     integer,intent(in) :: gi_iperm,ui,uj
+     integer,intent(in) :: gi,gj,ui,uj
      integer,dimension(n),intent(in) :: iper,jper
      integer,dimension(n) :: col_new,row_first,row_per,col_per
-     integer :: i,j,key
+     integer :: i,j,key,iunique
      real(kind=8),dimension(1:3),intent(out) :: col_fac
-     
+     iunique=(gi+1)+(ui-1)*((n-4)+1)
      ! First row
-     row_first(1:n-this%n_sing)=first_rows(1:n-this%n_sing,gi_iperm)
-     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(row_first)
-
+     row_first(1:n-this%n_sing)=unique_rows(1:n-this%n_sing,iunique)
      ! Row in consideration
      row_per(1:n-this%n_sing)=iper(1:n-this%n_sing)
-     if (this%n_qqbar.eq.2 .and. uj.ne.ui) call get_other_quark_order(row_per)
-
      ! Column in consideration
      col_per(1:n-this%n_sing)=jper(1:n-this%n_sing)
-
      do i=1,n-this%n_sing
         do j=1,n-this%n_sing
            if (col_per(i) .eq. row_per(j)) exit
@@ -1889,10 +1911,8 @@ contains
           col_new(i) = col_per(i)
         endif
      enddo
-
      key=solve_dict(get_value(col_new(1:n)))
-     
-     col_fac(1:3)=col_vals(1:3,key,gi_iperm)
+     col_fac(1:3)=col_vals(1:3,key,iunique)
    end subroutine get_col_fac
 
    subroutine get_other_quark_order(jper)
@@ -1996,32 +2016,15 @@ contains
       enddo
     end function get_value
     
-    subroutine compute_color_factor(col_acc,n,iper,jper_in,ui,uj,col_fac)
+    subroutine compute_color_factor(col_acc,n,iper,jper,ui,uj,col_fac)
       use color_algebra
       implicit none
       integer :: i,n,acc,col_acc,k,ui,uj,gi,gj
       real(kind=8),dimension(1:3) :: col_fac
-      integer,dimension(n-this%n_sing) :: iper,jper_in,jper
+      integer,dimension(n-this%n_sing) :: iper,jper
       integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
       real(kind=16) :: col_factor
       col_fac(1:3)=0d0
-      if (this%n_qqbar.eq.2) then
-         ! make sure the *quarks* come in the same order in iper and jper (the
-         ! anti-quarks might be different order)
-         if (iper(1).eq.jper_in(1)) then
-            jper=jper_in
-         else
-            do i=1,n-this%n_sing
-               if (jper_in(i).eq.iper(1)) then
-                  jper(1:n-this%n_sing-i+1)=jper_in(i:n-this%n_sing)
-                  jper(n-this%n_sing-i+2:n-this%n_sing)=jper_in(1:i-1)
-                  exit
-               endif
-            enddo
-         endif
-      else
-         jper=jper_in
-      endif
       if (col_acc.ge.0) then ! LC
          if (this%n_qqbar.eq.0) then
             if (all(iper.eq.jper)) then
