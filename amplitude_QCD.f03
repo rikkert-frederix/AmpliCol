@@ -2208,14 +2208,11 @@ contains
        is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))
        is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))
     endif
-    ! loop through the list backward: if we got to the end, i.e.,
-    ! nc.ge.this%n_cur_start(n-1), we know that it is a valid tree. This
-    ! means that all inputs to that final current are also needed. By moving
-    ! backwards through the list, we can filter out all the branches of the
-    ! tree that are needed. (The nc.le.this%n_cur_end(1) is needed only to
-    ! make sure that the current that corresponds to the n'th final state
-    ! particle is marked as needed, since that current does not enter any of
-    ! the trees: it is only needed to close the tree and get the amplitudes.)
+    ! Since currents are created from previous ones, we should go backwards
+    ! throught the list. If we encounter a 'is_needed_cur=.true.', it means
+    ! that the (two, or more) currents that were combined to created that
+    ! current, are also 'needed'. This determines all the currents (and
+    ! vertices) that need to be kept.
     do nc=this%n_cur,1,-1
        if (is_needed_cur(nc)) then
           is_needed_cur(nc)=.true.
