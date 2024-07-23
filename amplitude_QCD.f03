@@ -27,7 +27,7 @@ module amplitude_QCD_mod
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing,n_amps
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
-          pp_bin_to_i,pp_i_to_bin,quark_index,map_2qq_amps,col_index,n_col_vals
+          pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical :: same_flav
@@ -124,21 +124,47 @@ contains
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
     
-    call setup_currents_to_amps_map()
-    
     call simple_consistency_checks()
+
+    call allocate_and_fill_currents_to_amps_map()
     call allocate_current_list_and_interaction_list()
 
     ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call this%filter_dead_trees(n)
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
-    if (this%imode.eq.1) call setup_spin_list()
+    if (this%imode.eq.1) call allocate_and_fill_spins()
     if (this%imode.eq.2) call allocate_and_fill_colour_permutations()
-    call setup_momentum_array()
-
+    call allocate_and_fill_momentum_array()
+    call deallocate_unneeded()
   contains
-    subroutine setup_currents_to_amps_map()
+
+    subroutine create_external_current(nc,ispin)
+      implicit none
+      integer,intent(in) :: nc,ispin
+      this%n_cur=this%n_cur+1
+      allocate(current_list_local(this%n_cur)%order(isize))
+      current_list_local(this%n_cur)%order(1)=order(nc)
+      current_list_local(this%n_cur)%mass=mass(order(nc))
+      current_list_local(this%n_cur)%width=width(order(nc))
+      if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then ! initial quark states
+         current_list_local(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
+      else
+         current_list_local(this%n_cur)%type=part(order(nc))
+      endif
+      allocate(current_list_local(this%n_cur)%ext_type(isize))
+      current_list_local(this%n_cur)%ext_type(1)=current_list_local(this%n_cur)%type
+      current_list_local(this%n_cur)%bin=ibset(0,order(nc)-1) ! give binary label
+      allocate(current_list_local(this%n_cur)%spin(isize))
+      current_list_local(this%n_cur)%spin=ispin
+      current_list_local(this%n_cur)%n_vert=0
+    end subroutine create_external_current
+    
+    subroutine allocate_and_fill_currents_to_amps_map()
+      ! The 'curr2amp(1:2,iamp)' variable lists which two currents (one of
+      ! size n-1 and one of size 1) result in the amplitude 'iamp'. This
+      ! subrouttine also sets the include_amp(iamp) to .true. for all
+      ! amplitudes
       implicit none
       integer :: icur,jcur
       integer,dimension(:,:),allocatable :: curr2amp
@@ -170,9 +196,9 @@ contains
       endif
       allocate(this%include_amp(1:this%n_amps))
       this%include_amp(:)=.true.
-    end subroutine setup_currents_to_amps_map
+    end subroutine allocate_and_fill_currents_to_amps_map
 
-    subroutine setup_spin_list()
+    subroutine allocate_and_fill_spins()
       implicit none
       integer :: iamp,i
       allocate(this%spins(n,1,1:this%n_amps))
@@ -187,28 +213,7 @@ contains
             endif
          enddo
       enddo
-    end subroutine setup_spin_list
-    
-    subroutine create_external_current(nc,ispin)
-      implicit none
-      integer,intent(in) :: nc,ispin
-      this%n_cur=this%n_cur+1
-      allocate(current_list_local(this%n_cur)%order(isize))
-      current_list_local(this%n_cur)%order(1)=order(nc)
-      current_list_local(this%n_cur)%mass=mass(order(nc))
-      current_list_local(this%n_cur)%width=width(order(nc))
-      if (order(nc).le.2 .and. abs(part(order(nc))).le.6) then ! initial quark states
-         current_list_local(this%n_cur)%type=anti_current(part(order(nc))) ! switch quark <--> anti-quark for initial states
-      else
-         current_list_local(this%n_cur)%type=part(order(nc))
-      endif
-      allocate(current_list_local(this%n_cur)%ext_type(isize))
-      current_list_local(this%n_cur)%ext_type(1)=current_list_local(this%n_cur)%type
-      current_list_local(this%n_cur)%bin=ibset(0,order(nc)-1) ! give binary label
-      allocate(current_list_local(this%n_cur)%spin(isize))
-      current_list_local(this%n_cur)%spin=ispin
-      current_list_local(this%n_cur)%n_vert=0
-    end subroutine create_external_current
+    end subroutine allocate_and_fill_spins
     
     subroutine allocate_and_fill_colour_permutations()
       implicit none
@@ -254,70 +259,7 @@ contains
       enddo
     end subroutine allocate_and_fill_colour_permutations
 
-    subroutine setup_map_2qq_amps
-      use math_functions
-      implicit none
-      integer :: i,j,k,m,q,nc
-      integer,dimension(1:n-4-this%n_sing) :: first,perm_out,perm_in,gluons
-      integer,dimension(1:n-2-this%n_sing) :: ord
-      integer,dimension(1:n-2-this%n_sing,this%nColOrd) :: buff
-      
-      allocate(this%map_2qq_amps(this%nColOrd))
-      if (n-4-this%n_sing.gt.0) then
-
-         ! first define 'buff', which will be the list of colour orders in canonical order
-         k=1
-         do i=1,n
-            if (is_gluon(part(i))) then
-               gluons(k)=i
-               k=k+1
-            endif
-         enddo
-         m = 1
-         do i=0,n-4-this%n_sing ! loop over the number of gluons between the first quark and anti-quark in the order
-            do j=1,n-4-this%n_sing
-               first(j) = j
-            enddo
-            do k=1,factorial(n-4-this%n_sing) ! loop over all gluon permutations
-               call get_next_iperm(n-4-this%n_sing,first,perm_out,n-4-this%n_sing)
-               do q=1,n-4-this%n_sing
-                  perm_in(q) = gluons(perm_out(q))
-               enddo
-               buff(1:i,m) = perm_in(1:i) ! gluons between the first quark and anti-quark
-               buff(i+1:i+2,m)=0          ! the anti-quark and quark. 
-               buff(i+3:n-2-this%n_sing,m) = perm_in(i+1:n-4-this%n_sing) ! gluons between the second quark and anti-quark
-               first = perm_out
-               m = m+1
-            enddo
-         enddo
-
-         ! then, setup the map from the order of the colour orders as they
-         ! appear in the amps to the canonical order as defined in 'buff'
-         do nc=this%n_cur_start(n-1),this%n_cur_end(n-1)
-            ord(1:n-2-this%n_sing) = this%current_list(nc)%order(2:n-1)
-            do i=1,n-2
-               if (is_quark_from_order(ord(i)).or.is_antiquark_from_order(ord(i))) then
-                  ord(i)=0
-               endif
-            enddo
-            do i=1,(n-3-this%n_sing)*factorial(n-4-this%n_sing)
-               if (all(buff(1:n-2-this%n_sing,i).eq.ord(1:n-2-this%n_sing))) then
-                  this%map_2qq_amps(nc-this%n_cur_start(n-1)+1) = i
-                  exit
-               endif
-            enddo
-            if (i.eq.(n-3-this%n_sing)*factorial(n-4-this%n_sing)+1) then
-               write (*,*) 'check_2qq_order failed: order not found in list',i
-               write (*,*) nc,':',this%current_list(nc)%order(1:n)
-               stop 1
-            endif
-         enddo
-      else
-         this%map_2qq_amps(1)=1
-      endif
-    end subroutine setup_map_2qq_amps
-
-    subroutine setup_momentum_array()
+    subroutine allocate_and_fill_momentum_array()
       implicit none
       integer :: ic
       integer,dimension(1:maskr(n)) :: pp_i_to_bin
@@ -334,7 +276,7 @@ contains
       allocate(this%pp(0:3,1:this%max_pp))
       allocate(this%pp_i_to_bin(this%max_pp))
       this%pp_i_to_bin(1:this%max_pp)=pp_i_to_bin(1:this%max_pp)
-    end subroutine setup_momentum_array
+    end subroutine allocate_and_fill_momentum_array
     
     subroutine simple_consistency_checks()
       implicit none
@@ -427,40 +369,6 @@ contains
       do i=1,n
          if (is_singlet(part(i))) this%n_sing=this%n_sing+1
       enddo
-! Setup the quark_index. Labels where the quarks and anti-quarks are in the
-! process. Quarks are the odd entries (quark_index(1) and quark_index(3)),
-! while the anti-quarks are the even entries. If quark flavours are different,
-! quark_index(2) will be the anti-quark of quark_index(1) and quark_index(4)
-! the anti-quark of quark_index(3).
-      if (this%n_qqbar.ge.1) then
-         allocate(this%quark_index(2*this%n_qqbar))
-         this%quark_index=0 ! initialise all to zero
-         k=1
-         do i=1,n
-            if(is_quark_from_order(i)) then
-               ! found a quark
-               this%quark_index(k)=i
-               k=k+2
-            endif
-         enddo
-         do i=1,n
-            if (is_antiquark_from_order(i)) then
-               ! found an anti-quark. Find the corresponding quark in the
-               ! quark_index list.
-               do k=1,2*this%n_qqbar-1,2
-                  if (abs(part(this%quark_index(k))).eq.abs((part(i)))) then
-                     ! if there are identical quarks, the 'k+1' label could
-                     ! already have been filled. If that is the case, cycle to
-                     ! the next label
-                     if (this%quark_index(k+1).ne.0) cycle 
-                     this%quark_index(k+1)=i
-                     exit
-                  endif
-               enddo
-            endif
-         enddo
-      endif
-      
       if (this%n_qqbar.gt.3) then
          write (*,*) 'ERROR: code only working for 0, 1 or 2 qqbar pairs',this%n_qqbar
          write (*,*) part
@@ -536,7 +444,6 @@ contains
       endif
     end subroutine set_max_vert
 
-
     subroutine allocate_current_list_and_interaction_list()
       ! allocate the minimum memory needed for the current_list and
       ! interaction_list to be able to perform the evaluate() procedure.
@@ -568,16 +475,6 @@ contains
       enddo
     end subroutine allocate_current_list_and_interaction_list
 
-    integer function anti_current(ctype)
-      implicit none
-      integer :: ctype
-      if (abs(ctype).le.6) then
-         anti_current=-ctype
-      else
-         anti_current=ctype
-      endif
-    end function anti_current
-
     subroutine add_if_allowed_threevertex()
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
@@ -585,59 +482,46 @@ contains
       if (.not.valid_current_combination())  then
          return
       endif
-      
       if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
          ! add the gluon-gluon to tensor vertex
          call add_vertex(1,-21)
-
       elseif (is_tensor(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add a tensor-gluon to gluon vertex
          call add_vertex(2,21)
-
       elseif (is_gluon(current_list_local(ic1)%type) .and. is_tensor(current_list_local(ic2)%type)) then
          ! add a gluon-tensor to gluon vertex
          call add_vertex(3,21)
-
       elseif (is_gluon(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a gluon-quark to quark vertex
          call add_vertex(4,current_list_local(ic2)%type)
-
       elseif (is_gluon(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a gluon-antiquark to antiquark vertex
          call add_vertex(5,current_list_local(ic2)%type)
-
       elseif (is_quark(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add a quark-gluon to quark vertex
          call add_vertex(6,current_list_local(ic1)%type)
-
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add a antiquark-gluon to antiquark vertex
          call add_vertex(7,current_list_local(ic1)%type)
-
       elseif (is_quark(current_list_local(ic1)%type) .and. &
            (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
          ! add a quark-antiquark to gluon vertex
          call add_vertex(8,21)
-
       elseif (is_antiquark(current_list_local(ic1)%type) .and. &
            (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
          ! add a antiquark-quark to gluon vertex
          call add_vertex(9,21)
-
       elseif (is_singlet(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a photon-quark to quark vertex
          call add_vertex(4,current_list_local(ic2)%type)
-
       elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
          ! add a quark-photon to quark vertex
          call add_vertex(6,current_list_local(ic1)%type)
-
       elseif (is_singlet(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a photon-antiquark to quark vertex
          call add_vertex(5,current_list_local(ic2)%type)
-
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
          ! add a antiquark-photon to quark vertex
          call add_vertex(7,current_list_local(ic1)%type)
@@ -673,7 +557,6 @@ contains
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) return
-      
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
@@ -687,6 +570,7 @@ contains
          endif
       endif
 
+      ! Check for colour singlets:
       colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
       ! If the first current is a singlet and the second is not, it is not a valid order
@@ -764,8 +648,8 @@ contains
          if (isize.eq.n-1 .and. .not.is_quark(et(1))) return
       endif
 
+      ! Got all the way to the end. This must be a valid current combination
       valid_current_combination=.true.
-
     end function valid_current_combination
     
     subroutine add_vertex(itype,ctype)
@@ -798,6 +682,11 @@ contains
     end function combine_lists
 
     type(current) function combine_currents(ic1,ic2,ctype,singlet_mv,invert)
+      ! combine the currents corresponding to ic1 and ic2 into a new current
+      ! of type 'ctype'. This also sets up 'singlet_mv' that determines how to
+      ! move the colour singlets to the correct position. If the first (or
+      ! second) bit of 'invert' is set to 1, the colour order of ic1 (or ic2)
+      ! is reversed before the two currents are combined.
       implicit none
       integer,intent(in) :: ic1,ic2,ctype
       integer,intent(in) :: invert
@@ -836,7 +725,9 @@ contains
          spin2=current_list_local(ic2)%spin(1:n2)
          et2=current_list_local(ic2)%ext_type(1:n2)
       endif
-      
+
+      ! nc1 and nc2 lists where the coloured particles end in currents ic1 and
+      ! ic2, respectively:
       do i=1,n1
          if (is_singlet(et1(i))) exit
       enddo
@@ -845,8 +736,11 @@ contains
          if (is_singlet(et2(i))) exit
       enddo
       nc2=i-1
-      
+
+      ! The order of the coloured particles can be concatinated:
       ord(1:nc1+nc2)=[ord1(1:nc1),ord2(1:nc2)]
+      ! Setup the singlet_mv and put the colour singlets in the right order in
+      ! the combined ord():
       if (nc1.eq.n1) then
          ! No colour singlets or all colour singlets are in ic2
          singlet_mv(0)=0
@@ -909,6 +803,10 @@ contains
     end function combine_currents
     
     subroutine add_all_currents(ctype)
+      ! combine currents ic1 and ic2 and add them to the list of currents to
+      ! compute. If use_symmetry=.true., need to consider all possible
+      ! permutations allowed under the symmetry (at most 8 if both ic1 and ic2
+      ! are made up of only gluons).
       implicit none
       logical,dimension(8) :: vertex_sign
       integer :: i,ctype,nperm
@@ -1024,6 +922,10 @@ contains
 
 
     subroutine add_current(vertex_sign,new_current)
+      ! Adds the 'new_current' to the list of currents to consider. If this
+      ! current has the same order (and type etc.) of an existing current, we
+      ! can add this current to that existing one. If not, add it to the end
+      ! of the list.
       implicit none
       type(current),intent(in) :: new_current
       logical,intent(in) :: vertex_sign
@@ -1235,6 +1137,15 @@ contains
       enddo
     end subroutine solve_dict
 
+    integer function anti_current(ctype)
+      implicit none
+      integer :: ctype
+      if (abs(ctype).le.6) then
+         anti_current=-ctype
+      else
+         anti_current=ctype
+      endif
+    end function anti_current
     logical function all_gluon_current(curr,len)
       ! returns .true. only if all external particles are gluons
       implicit none
@@ -1325,10 +1236,6 @@ contains
       endif
     end function is_antiquark
     logical function quark_in_current(curr,len)
-      ! binary function that checks which 'quark_index' is an external
-      ! particle part of the current. (i.e., It sets the first bit if
-      ! quark_index(1) is part of the current, the second bit if
-      ! quark_index(2) is part of the current, etc.)
       implicit none
       type(current),intent(in) :: curr
       integer,intent(in) :: len
@@ -1341,6 +1248,23 @@ contains
       enddo
       quark_in_current=.false.
     end function quark_in_current
+
+    subroutine deallocate_unneeded()
+      ! Deallocate some of the current_list information that will not be used
+      ! later. This saves a little memory.
+      implicit none
+      integer :: ic
+      do isize=1,n
+         do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+            if (allocated(this%current_list(ic)%ext_type)) deallocate(this%current_list(ic)%ext_type)
+            if (isize.ne.1 .and. isize.ne.n) then
+               if (allocated(this%current_list(ic)%spin)) deallocate(this%current_list(ic)%spin)
+               if (allocated(this%current_list(ic)%order)) deallocate(this%current_list(ic)%order)
+            endif
+         enddo
+      enddo
+    end subroutine deallocate_unneeded
+    
   end subroutine init
 
 
