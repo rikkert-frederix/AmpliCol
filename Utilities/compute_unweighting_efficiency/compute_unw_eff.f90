@@ -22,14 +22,20 @@ program plot_events
   ifile=11
   write(*,*) filename
   open(unit=ifile,file=filename,status='OLD')
-  allocate(character(len(trim(filename))) :: outfile)  ! Note the correct form
-  outfile=filename(7:)
-  do i=1,len(outfile)
-     if (outfile(i:i).eq.'l') exit
-  enddo
-  outfile=adjustl(outfile(1:i-2))
-  write(*,*) 'out_unwgt_'//outfile//'.txt'
-  outfile='out_unwgt_'//outfile//'.txt'
+  allocate(character(len(trim(filename))-1) :: outfile)  ! Note the correct form
+  i=index(filename,'events')
+  outfile(1:i-1)=filename(1:i-1)
+  outfile(i:i+9)='out_unwgt_'
+  outfile(i+10:)=filename(i+6:len(trim(filename))-9)//'.txt'
+  write (*,*) outfile
+  
+!!$  outfile=filename(7:)
+!!$  do i=1,len(outfile)
+!!$     if (outfile(i:i).eq.'l') exit
+!!$  enddo
+!!$  outfile=adjustl(outfile(1:i-2))
+!!$  write(*,*) 'out_unwgt_'//outfile//'.txt'
+!!$  outfile='out_unwgt_'//outfile//'.txt'
   open(unit=20,file=outfile)
   max_wgt=0d0
   do
