@@ -2000,15 +2000,54 @@ contains
                jper_glu(k)=jper(i)
                k=k+1
             enddo
-            call Tr_allocate(n)
             call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
-            call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
-            if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
-            if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
-            if (this%same_flav) then
+            if (.not.this%same_flav) then
+               call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
+            else
                call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
                if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
                if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
+            endif
+            ! include the full expansion
+            if (acc.ne.0) then
+               call Tr_allocate(n)
+               if (ui.eq.uj) then
+                  Tr(0,0,0)=1 ! one term
+                  Tr(0,0,1)=2
+                  Tr(0,1,1) = gi+gj  ! number of generators in first trace
+                  Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
+                  Tr(1:gi,1,1) = iper(2:2+gi-1)
+                  Tr(gi+1:gi+gj,1,1) = jper(2+gj-1:2:-1)
+                  Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
+                  Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
+                  if (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav) then
+                     coef(1)=1d0/9d0
+                  else
+                     coef(1)=1d0
+                  endif
+                  call Tr_full_simplify(col_factor)
+               elseif ((ui.eq.2 .and. uj.eq.1) .or. (ui.eq.1 .and. uj.eq.2)) then
+                  Tr(0,0,0)=1 ! one term
+                  Tr(0,0,1)=1 ! a single trace
+                  Tr(0,1,1) = 2*(n-4) ! all gluon generators appear in the single trace
+                  Tr(1:gi,1,1) = iper(2:2+gi-1)
+                  Tr(gi+1:gi+(n-4-gj),1,1) = jper(n-1:2+gj+2:-1)
+                  Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
+                  Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
+                  if (.not.this%same_flav) then
+                     coef(1)=-1d0/3d0
+                  else
+                     coef(1)=-1d0
+                  endif
+                  call Tr_full_simplify(col_factor)
+               else
+                  write (*,*) 'Inconsistent ui and uj',ui,uj
+                  stop 1
+               endif
+               col_fac(2)=dble(col_factor)
+               call Tr_deallocate
             endif
          endif
       endif
@@ -2310,7 +2349,5 @@ contains
     deallocate(where_to_ver)
     deallocate(where_to_cur)
   end subroutine filter_dead_trees
-
-
 
 end module amplitude_QCD_mod

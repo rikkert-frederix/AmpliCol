@@ -279,9 +279,6 @@ contains
        endif
     endif
 
-
-!!$    if (passed.eq.10) stop 1
-    
     weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     
     if (amps%n_sing.ge.1) then
@@ -601,6 +598,8 @@ contains
     endif
     if (hel_fac(hel_picked(2)).gt.1) then
        hel_picked(1)=1+int(ran2()*hel_fac(hel_picked(2)))
+    else
+       hel_picked(1)=1
     endif
   end subroutine unwgt_helicity
   
