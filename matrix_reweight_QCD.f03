@@ -78,23 +78,22 @@ program matrix_reweight
   call define_symm_2qq(next,part,1)
   call amps(1)%init(2,next,part,spin,mass,width,o)
   col_acc=20
-  call amps(1)%init_col(next,orig_part,col_acc)
+!!$  call amps(1)%init_col(next,orig_part,col_acc)
+  call amps(1)%init_col(next,part,col_acc)
 
   if (amps(1)%n_qqbar.eq.2.and.amps(1)%same_flav) then
      amps(3)%n_qqbar=amps(1)%n_qqbar
      amps(3)%same_flav=amps(1)%same_flav
      part_sf(:)=orig_part(:)
      call define_symm_2qq(next,part_sf,2)
-     call amps(3)%init(2,next,part_sf,spin,mass,width,o)
-     col_acc=20
-     call amps(3)%init_col(next,orig_part,col_acc)
+     call amps(3)%init(2,next,part_sf,spin,mass,width,o,amps(1))
   endif
 
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
-  do 
+  do
      call read_event(11,done)
      if (done) exit
      matrix2(1:3)=0d0
@@ -104,7 +103,7 @@ program matrix_reweight
      call amps(1)%evaluate(next,p,mass,width,hel,part)
      if (amps(1)%n_qqbar.eq.2 .and. amps(1)%same_flav) then
         call amps(3)%evaluate(next,p,mass,width,hel,part)
-        amps(1)%amps(:)=amps(1)%amps(:)+(1d0/3d0)*amps(3)%amps(:)
+        amps(1)%amps(:)=amps(1)%amps(:)+amps(3)%amps(:)
      endif
 
 

@@ -23,7 +23,7 @@ module amplitude_QCD_mod
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
-     real(kind=8),dimension(:),allocatable :: amps_r
+     real(kind=8),dimension(:),allocatable :: amps_r,amp_fac
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
      integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing,n_amps
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
@@ -37,7 +37,7 @@ module amplitude_QCD_mod
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,part,spin,mass,width,order)
+  subroutine init(this,imode,n,part,spin,mass,width,order,alt_amp)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
@@ -50,6 +50,7 @@ contains
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:),allocatable :: key_to_current
+    class(amplitude_QCD),optional :: alt_amp
     
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -126,7 +127,12 @@ contains
     
     call simple_consistency_checks()
 
-    call allocate_and_fill_currents_to_amps_map()
+    if (present(alt_amp)) then
+       call allocate_and_fill_currents_to_amps_map(alt_amp)
+    else
+       call allocate_and_fill_currents_to_amps_map()
+    endif
+    
     call allocate_current_list_and_interaction_list()
 
     ! All done. But there could be currents that are not needed. Filter them out
@@ -160,25 +166,57 @@ contains
       current_list_local(this%n_cur)%n_vert=0
     end subroutine create_external_current
     
-    subroutine allocate_and_fill_currents_to_amps_map()
+    subroutine allocate_and_fill_currents_to_amps_map(alt_amp)
       ! The 'curr2amp(1:2,iamp)' variable lists which two currents (one of
       ! size n-1 and one of size 1) result in the amplitude 'iamp'. This
       ! subrouttine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur
+      type(amplitude_QCD),optional :: alt_amp
+      integer :: icur,jcur,iamp,i
       integer,dimension(:,:),allocatable :: curr2amp
+      integer,dimension(n) :: ip
       allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
       this%n_amps=0
-      do icur=0,this%n_cur_end(n-1)-this%n_cur_start(n-1)
-         do jcur=0,this%n_cur_end(n)-this%n_cur_start(n)
-            if ( current_list_local(this%n_cur_start(n-1)+icur)%type.ne. &
-                 anti_current(current_list_local(this%n_cur_start(n  )+jcur)%type) ) cycle
-            this%n_amps=this%n_amps+1
-            curr2amp(1,this%n_amps)=this%n_cur_start(n-1)+icur
-            curr2amp(2,this%n_amps)=this%n_cur_start(n  )+jcur
+      if (.not.present(alt_amp)) then
+         do icur=0,this%n_cur_end(n-1)-this%n_cur_start(n-1)
+            do jcur=0,this%n_cur_end(n)-this%n_cur_start(n)
+               if ( current_list_local(this%n_cur_start(n-1)+icur)%type.ne. &
+                    anti_current(current_list_local(this%n_cur_start(n  )+jcur)%type) ) cycle
+               this%n_amps=this%n_amps+1
+               curr2amp(1,this%n_amps)=this%n_cur_start(n-1)+icur
+               curr2amp(2,this%n_amps)=this%n_cur_start(n  )+jcur
+            enddo
          enddo
-      enddo
+      else
+         do iamp=1,alt_amp%n_amps
+            ! force the same colour order as in alt_amp
+            do_curs: do icur=this%n_cur_start(n-1),this%n_cur_end(n-1)
+               do jcur=this%n_cur_start(n),this%n_cur_end(n)
+                  ip(1:n)=[current_list_local(icur)%order(1:n-1),current_list_local(jcur)%order(1)]
+                  if (alt_amp%perm(1,iamp).ne.ip(1)) then
+                     ! different order, switch the two colour strings:
+                     do i=1,n
+                        if (ip(i).eq.alt_amp%perm(1,iamp)) then
+                           ip(1:n)=[ip(i:n),ip(1:i-1)]
+                           exit
+                        endif
+                     enddo
+                  endif
+                  if (all(alt_amp%perm(1:n,iamp).eq.ip(1:n))) then
+                     exit do_curs
+                  endif
+               enddo
+            enddo do_curs
+            if (icur.gt.this%n_cur_end(n-1) .or. jcur.gt.this%n_cur_end(n)) then
+               write (*,*) 'permutation not found'
+               stop 1
+            endif
+            curr2amp(1,iamp)=icur
+            curr2amp(2,iamp)=jcur
+         enddo
+         this%n_amps=alt_amp%n_amps
+      endif
       if (use_symmetry .and. this%n_qqbar.eq.0) then
          allocate(this%curr2amp(1:2,1:2*this%n_amps))
          this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
@@ -234,6 +272,7 @@ contains
          write (*,*) this%current_list(this%n_cur_start(n))%type
          stop 1
       endif
+      if (this%same_flav) allocate(this%amp_fac(1:this%n_amps))
       do iamp=1,this%n_amps
          this%perm(1:n-this%n_sing,iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing),&
                                           this%current_list(this%curr2amp(2,iamp))%order(1)]
@@ -242,6 +281,16 @@ contains
                                              this%current_list(this%curr2amp(2,iamp))%order(1)]
          endif
          if (this%n_qqbar.eq.2) then
+            ! for the same-flavour case need to multiply by 1/3 if
+            ! different-flavour quarks are not connected
+            if (this%same_flav) then
+               if (abs(part(this%perm(1,iamp))).eq.abs(part(this%perm(n-this%n_sing,iamp)))) then
+                  this%amp_fac(iamp)=1d0
+               else
+                  this%amp_fac(iamp)=1d0/3d0
+               endif
+            endif
+            
             ! make sure that orders of the quarks is fixed among all
             ! perm's. (The order of the anti-quarks may vary). Without this,
             ! the computation of the colour factor will be incorrect.
@@ -1550,6 +1599,9 @@ contains
                                       this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                endif
             endif
+            if (this%n_qqbar.eq.2 .and. this%same_flav) then
+               this%amps(iamp)=this%amps(iamp)*this%amp_fac(iamp)
+            endif
          enddo
       endif
     end subroutine compute_amps_from_currents
@@ -1799,16 +1851,23 @@ contains
       enddo
     end subroutine determine_gi
 
+    subroutine determine_ui(iper,ui)
+      implicit none
+      integer :: ui
+      integer,dimension(n) :: iper
+      if (abs(part(iper(1))).eq.abs(part(iper(n-this%n_sing)))) then
+         ui=1
+      else
+         ui=2
+      endif
+    end subroutine determine_ui
+    
     subroutine determine_gi_ui(iper,gi,ui)
       implicit none
       integer :: ui,gi
       integer,dimension(n) :: iper
       call determine_gi(iper,gi)
-      if (abs(part(iper(2+gi))).eq.abs(part(iper(1)))) then
-         ui=2
-      else
-         ui=1
-      endif
+      call determine_ui(iper,ui)
     end subroutine determine_gi_ui
     
    subroutine get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
@@ -1818,7 +1877,11 @@ contains
      integer,dimension(n) :: col_new,row_first,row_per,col_per
      integer :: i,j,key,iunique
      real(kind=8),dimension(1:3),intent(out) :: col_fac
-     iunique=(gi+1)+(ui-1)*((n-4)+1)
+     if (this%n_qqbar.eq.2) then
+        iunique=(gi+1)+(ui-1)*((n-4)+1)
+     else
+        iunique=1
+     endif
      ! First row
      row_first(1:n-this%n_sing)=unique_rows(1:n-this%n_sing,iunique)
      ! Row in consideration
