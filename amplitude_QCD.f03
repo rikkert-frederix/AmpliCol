@@ -290,7 +290,6 @@ contains
                   this%amp_fac(iamp)=1d0/3d0
                endif
             endif
-            
             ! make sure that orders of the quarks is fixed among all
             ! perm's. (The order of the anti-quarks may vary). Without this,
             ! the computation of the colour factor will be incorrect.
