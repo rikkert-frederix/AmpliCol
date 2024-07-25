@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python
 
 import concurrent.futures
 import time
@@ -16,6 +16,10 @@ def run_fortran_program(executable, argument, output_file):
     Function to run a Fortran program with a given argument.
     """
     try:
+        evt_file='Outputs'+argument[-1]+'/events_'+argument[0]+'_2_'+'_'.join(argument[1:-1])+'.lhe'
+
+        subprocess.run(['gunzip']+[evt_file+'.gz'])
+
         result = subprocess.run([executable]+argument, capture_output=True, text=True)
 
         # Write the output to the file
@@ -23,6 +27,11 @@ def run_fortran_program(executable, argument, output_file):
             f_out.write(result.stdout)
             f_out.write(result.stderr)
 
+        subprocess.run(['gzip']+[evt_file])
+        subprocess.run(['Utilities/plot_events/plot_events'] + [evt_file+'.rwgt'])
+        subprocess.run(['Utilities/compute_unweighting_efficiency/compute_unw_eff'] + [evt_file+'.rwgt'])
+        subprocess.run(['gzip']+[evt_file+'.rwgt'])
+        
         return (argument, result.stdout, result.stderr)
     except Exception as e:
         print('NO')
@@ -32,16 +41,31 @@ def run_fortran_program(executable, argument, output_file):
 
 if __name__ == '__main__':
 
-    flavours={'4':['21 21 21 21',                        '21 21 1 -1',                        '-1 21 -1 21',                       '-1 1 21 21'                  ],
-              '5':['21 21 21 21 21',                     '21 21 1 -1 21',                     '-1 21 -1 21 21',                    '-1 1 21 21 21'               ],
-              '6':['21 21 21 21 21 21',                  '21 21 1 -1 21 21',                  '-1 21 -1 21 21 21',                 '-1 1 21 21 21 21'            ],
-              '7':['21 21 21 21 21 21 21',               '21 21 1 -1 21 21 21',               '-1 21 -1 21 21 21 21',              '-1 1 21 21 21 21 21'         ],
-              '8':['21 21 21 21 21 21 21 21',            '21 21 1 -1 21 21 21 21',            '-1 21 -1 21 21 21 21 21',           '-1 1 21 21 21 21 21 21'      ],
-              '9':['21 21 21 21 21 21 21 21 21',         '21 21 1 -1 21 21 21 21 21',         '-1 21 -1 21 21 21 21 21 21',        '-1 1 21 21 21 21 21 21 21'   ],
-             '10':['21 21 21 21 21 21 21 21 21 21',      '21 21 1 -1 21 21 21 21 21 21',      '-1 21 -1 21 21 21 21 21 21 21',     '-1 1 21 21 21 21 21 21 21 21']}
+    flavours={'4':['21 21 21 21'                  ,'21 21 1 -1'                  ,'-1 21 -1 21'                  ,'-1 1 21 21'                  ,
+                   '0'                            ,'0'                           ,'1 -1 1 -1'                    ,'1 1 1 1'                     ,
+                   '0'                            ,'0'                           ,'1 -1 2 -2'                    ,'1 2 1 2'                     ],
+              '5':['21 21 21 21 21'               ,'21 21 1 -1 21'               ,'-1 21 -1 21 21'               ,'-1 1 21 21 21'               ,
+                   '0'                            ,'1 21 1 1 -1'                 ,'1 -1 1 -1 21'                 ,'1 1 1 1 21'                  ,
+                   '0'                            ,'1 21 1 2 -2'                 ,'1 -1 2 -2 21'                 ,'1 2 1 2 21'                  ],
+              '6':['21 21 21 21 21 21'            ,'21 21 1 -1 21 21'            ,'-1 21 -1 21 21 21'            ,'-1 1 21 21 21 21'            ,
+                   '21 21 1 -1 1 -1'              ,'1 21 1 1 -1 21'              ,'1 -1 1 -1 21 21'              ,'1 1 1 1 21 21'               ,
+                   '21 21 1 -1 2 -2'              ,'1 21 1 2 -2 21'              ,'1 -1 2 -2 21 21'              ,'1 2 1 2 21 21'               ],
+              '7':['21 21 21 21 21 21 21'         ,'21 21 1 -1 21 21 21'         ,'-1 21 -1 21 21 21 21'         ,'-1 1 21 21 21 21 21'         ,
+                   '21 21 1 -1 1 -1 21'           ,'1 21 1 1 -1 21 21'           ,'1 -1 1 -1 21 21 21'           ,'1 1 1 1 21 21 21'            ,
+                   '21 21 1 -1 2 -2 21'           ,'1 21 1 2 -2 21 21'           ,'1 -1 2 -2 21 21 21'           ,'1 2 1 2 21 21 21'            ],
+              '8':['21 21 21 21 21 21 21 21'      ,'21 21 1 -1 21 21 21 21'      ,'-1 21 -1 21 21 21 21 21'      ,'-1 1 21 21 21 21 21 21'      ,
+                   '21 21 1 -1 1 -1 21 21'        ,'1 21 1 1 -1 21 21 21'        ,'1 -1 1 -1 21 21 21 21'        ,'1 1 1 1 21 21 21 21'         ,
+                   '21 21 1 -1 2 -2 21 21'        ,'1 21 1 2 -2 21 21 21'        ,'1 -1 2 -2 21 21 21 21'        ,'1 2 1 2 21 21 21 21'         ],
+              '9':['21 21 21 21 21 21 21 21 21'   ,'21 21 1 -1 21 21 21 21 21'   ,'-1 21 -1 21 21 21 21 21 21'   ,'-1 1 21 21 21 21 21 21 21'   ,
+                   '21 21 1 -1 1 -1 21 21 21'     ,'1 21 1 1 -1 21 21 21 21'     ,'1 -1 1 -1 21 21 21 21 21'     ,'1 1 1 1 21 21 21 21 21'      ,
+                   '21 21 1 -1 2 -2 21 21 21'     ,'1 21 1 2 -2 21 21 21 21'     ,'1 -1 2 -2 21 21 21 21 21'     ,'1 2 1 2 21 21 21 21 21'      ],
+             '10':['21 21 21 21 21 21 21 21 21 21','21 21 1 -1 21 21 21 21 21 21','-1 21 -1 21 21 21 21 21 21 21','-1 1 21 21 21 21 21 21 21 21',
+                   '0'                            ,'0'                           ,'0'                            ,'0'                           ,
+                   '0'                            ,'0'                           ,'0'                            ,'0'                           ]}
 
-    orders=[{},{},{},{}]
+    orders=[{},{},{},{},{},{},{},{},{},{},{},{}]
 
+    
     # gg -> (n-2)g
     orders[0]={'4':['1 2 3 4','1 3 2 4'],
                '5':['1 2 3 4 5','1 3 2 4 5'],
@@ -50,7 +74,7 @@ if __name__ == '__main__':
                '8':['1 2 3 4 5 6 7 8','1 3 2 4 5 6 7 8','1 3 4 2 5 6 7 8','1 3 4 5 2 6 7 8'],
                '9':['1 2 3 4 5 6 7 8 9','1 3 2 4 5 6 7 8 9','1 3 4 2 5 6 7 8 9','1 3 4 5 2 6 7 8 9'],
               '10':['1 2 3 4 5 6 7 8 9 10','1 3 2 4 5 6 7 8 9 10','1 3 4 2 5 6 7 8 9 10','1 3 4 5 2 6 7 8 9 10','1 3 4 5 6 2 7 8 9 10']
-              }
+    }
 
     # gg -> qqbar + (n-4)g
     orders[1]={'4':['3 1 2 4'],
@@ -68,7 +92,7 @@ if __name__ == '__main__':
                     '3 5 1 2 6 7 8 9 10 4','3 5 1 6 2 7 8 9 10 4','3 5 1 6 7 2 8 9 10 4','3 5 1 6 7 8 2 9 10 4','3 5 1 6 7 8 9 2 10 4',
                     '3 5 6 1 2 7 8 9 10 4','3 5 6 1 7 2 8 9 10 4','3 5 6 1 7 8 2 9 10 4',
                     '3 5 6 7 1 2 8 9 10 4']
-              }
+    }
 
     # qbar g -> qbar + (n-3)g
     orders[2]={'4':['1 2 4 3','1 4 2 3'],
@@ -81,7 +105,7 @@ if __name__ == '__main__':
                '9':['1 2 4 5 6 7 8 9 3','1 4 2 5 6 7 8 9 3','1 4 5 2 6 7 8 9 3',
                     '1 4 5 6 2 7 8 9 3','1 4 5 6 7 2 8 9 3','1 4 5 6 7 8 2 9 3','1 4 5 6 7 8 9 2 3'],
               '10':['1 2 4 5 6 7 8 9 10 3','1 4 2 5 6 7 8 9 10 3','1 4 5 2 6 7 8 9 10 3','1 4 5 6 2 7 8 9 10 3','1 4 5 6 7 2 8 9 10 3','1 4 5 6 7 8 2 9 10 3','1 4 5 6 7 8 9 2 10 3','1 4 5 6 7 8 9 10 2 3']
-              }
+    }
 
     # qbar q -> (n-2)g
     orders[3]={'4':['1 3 4 2'],
@@ -91,37 +115,182 @@ if __name__ == '__main__':
                '8':['1 3 4 5 6 7 8 2'],
                '9':['1 3 4 5 6 7 8 9 2'],
               '10':['1 3 4 5 6 7 8 9 10 2']
-              }
+    }
+    
+
+    # gg -> q qbar q qbar + (n-6)g
+    orders[4]={'6':['3 1 2 4 5 6','3 1 4 5 2 6'],
+               '7':['3 7 1 2 4 5 6','3 1 7 2 4 5 6','3 1 2 4 5 7 6','3 7 1 4 5 2 6'],  
+               '8':['3 8 7 1 2 4 5 6','3 7 1 8 2 4 5 6','3 7 1 2 8 4 5 6','3 7 1 2 4 5 8 6',
+                    '3 1 8 7 2 4 5 6','3 1 7 2 4 5 8 6',
+                    '3 1 2 4 5 8 7 6','3 8 7 1 4 5 2 6','3 7 1 8 4 5 2 6',
+                    '3 7 1 4 5 8 2 6','3 7 1 4 5 2 8 6'],
+               '9':['3 9 8 7 1 2 4 5 6','3 1 9 8 7 2 4 5 6','3 7 1 9 8 2 4 5 6','3 1 8 7 2 4 5 9 6',
+                    '3 8 7 1 9 2 4 5 6','3 7 1 8 2 4 5 9 6','3 1 7 2 4 5 9 8 6','3 8 7 1 2 4 5 9 6',
+                    '3 7 1 2 4 5 9 8 6','3 1 2 4 5 9 8 7 6','3 9 8 7 1 4 5 2 6','3 8 7 1 9 4 5 2 6',
+                    '3 8 7 1 4 5 9 2 6','3 8 7 1 4 5 2 9 6','3 7 1 8 4 5 9 2 6','3 8 7 1 2 9 4 5 6',
+                    '3 7 1 8 2 9 4 5 6','3 7 1 2 8 4 5 9 6']
+    }
+
+    # q g -> q q qbar + (n-5)g
+    orders[5]={'5':['3 1 4 2 5','3 2 1 4 5'],
+               '6':['3 1 4 2 6 5','3 1 4 6 2 5','3 2 1 4 6 5','3 6 1 4 2 5','3 2 6 1 4 5','3 6 2 1 4 5'],
+               '7':['3 1 4 2 6 7 5','3 1 4 6 2 7 5','3 1 4 6 7 2 5','3 2 1 4 6 7 5','3 6 1 4 2 7 5','3 6 1 4 7 2 5',
+                    '3 6 7 1 4 2 5','3 2 6 1 4 7 5','3 6 2 1 4 7 5','3 2 6 7 1 4 5','3 6 2 7 1 4 5','3 6 7 2 1 4 5'],
+               '8':['3 1 4 2 6 7 8 5','3 1 4 6 2 7 8 5','3 1 4 6 7 2 8 5','3 1 4 6 7 8 2 5',
+                    '3 2 1 4 6 7 8 5','3 6 1 4 2 7 8 5','3 6 1 4 7 2 8 5','3 6 1 4 7 8 2 5',
+                    '3 2 6 1 4 7 8 5','3 6 2 1 4 7 8 5','3 6 7 1 4 2 8 5','3 6 7 1 4 8 2 5',
+                    '3 2 6 7 1 4 8 5','3 6 2 7 1 4 8 5','3 6 7 2 1 4 8 5','3 6 7 8 1 4 2 5',
+                    '3 2 6 7 8 1 4 5','3 6 2 7 8 1 4 5','3 6 7 2 8 1 4 5','3 6 7 8 2 1 4 5'],
+               '9':['3 1 4 2 6 7 8 9 5','3 1 4 6 2 7 8 9 5','3 1 4 6 7 2 8 9 5','3 1 4 6 7 8 2 9 5','3 1 4 6 7 8 9 2 5',
+                    '3 2 1 4 6 7 8 9 5','3 6 1 4 2 7 8 9 5','3 6 1 4 7 2 8 9 5','3 6 1 4 7 8 2 9 5','3 6 1 4 7 8 9 2 5',
+                    '3 2 6 1 4 7 8 9 5','3 6 2 1 4 7 8 9 5','3 6 7 1 4 2 8 9 5','3 6 7 1 4 8 2 9 5','3 6 7 1 4 8 9 2 5',
+                    '3 2 6 7 1 4 8 9 5','3 6 2 7 1 4 8 9 5','3 6 7 2 1 4 8 9 5','3 6 7 8 1 4 2 9 5','3 6 7 8 1 4 9 2 5',
+                    '3 2 6 7 8 1 4 9 5','3 6 2 7 8 1 4 9 5','3 6 7 2 8 1 4 9 5','3 6 7 8 2 1 4 9 5','3 6 7 8 9 1 4 2 5',
+                    '3 2 6 7 8 9 1 4 5','3 6 2 7 8 9 1 4 5','3 6 7 2 8 9 1 4 5','3 6 7 8 2 9 1 4 5','3 6 7 8 9 2 1 4 5']
+    }
+
+    # q qbar -> q qbar + (n-4)g
+    orders[6]={'4':['2 1 3 4',
+                    '2 4 3 1'],
+               '5':['2 1 3 5 4','2 5 1 3 4',
+                    '2 4 3 5 1'],
+               '6':['2 1 3 5 6 4','2 5 1 3 6 4','2 5 6 1 3 4',
+                    '2 4 3 5 6 1','2 5 4 3 6 1'],
+               '7':['2 1 3 5 6 7 4','2 5 1 3 6 7 4','2 5 6 1 3 7 4','2 5 6 7 1 3 4',
+                    '2 4 3 5 6 7 1','2 5 4 3 6 7 1'],
+               '8':['2 1 3 5 6 7 8 4','2 5 1 3 6 7 8 4','2 5 6 1 3 7 8 4','2 5 6 7 1 3 8 4','2 5 6 7 8 1 3 4',
+                    '2 4 3 5 6 7 8 1','2 5 4 3 6 7 8 1','2 5 6 4 3 7 8 1'],
+               '9':['2 1 3 5 6 7 8 9 4','2 5 1 3 6 7 8 9 4','2 5 6 1 3 7 8 9 4','2 5 6 7 1 3 8 9 4','2 5 6 7 8 1 3 9 4','2 5 6 7 8 9 1 3 4',
+                    '2 4 3 5 6 7 8 9 1','2 5 4 3 6 7 8 9 1','2 5 6 4 3 7 8 9 1']
+    }
+    
+    # q q -> q q + (n-4)g
+    orders[7]={'4':['3 1 4 2'],
+               '5':['3 1 4 5 2'],
+               '6':['3 1 4 5 6 2','3 5 1 4 6 2'],
+               '7':['3 1 4 5 6 7 2','3 5 1 4 6 7 2'],
+               '8':['3 1 4 5 6 7 8 2','3 5 1 4 6 7 8 2','3 5 6 1 4 7 8 2'],
+               '9':['3 1 4 5 6 7 8 9 2','3 5 1 4 6 7 8 9 2','3 5 6 1 4 7 8 9 2']
+    }
+    
+    # gg -> q qbar q' qbar' + (n-6)g
+    orders[8]={'6':['3 1 2 4 5 6','3 1 4 5 2 6','3 1 2 6 5 4','3 1 6 5 2 4'],
+               '7':['3 7 1 2 4 5 6','3 1 7 2 4 5 6','3 1 2 4 5 7 6','3 7 1 4 5 2 6',
+                    '3 7 1 2 6 5 4','3 1 7 2 6 5 4','3 1 2 6 5 7 4','3 7 1 6 5 2 4'],
+               '8':['3 8 7 1 2 4 5 6','3 7 1 8 2 4 5 6','3 7 1 2 8 4 5 6','3 7 1 2 4 5 8 6',
+                    '3 1 8 7 2 4 5 6','3 1 7 2 4 5 8 6',
+                    '3 1 2 4 5 8 7 6','3 8 7 1 4 5 2 6','3 7 1 8 4 5 2 6',
+                    '3 7 1 4 5 8 2 6','3 7 1 4 5 2 8 6',
+                    '3 8 7 1 2 6 5 4','3 7 1 8 2 6 5 4','3 7 1 2 8 6 5 4','3 7 1 2 6 5 8 4',
+                    '3 1 8 7 2 6 5 4','3 1 7 2 6 5 8 4',
+                    '3 1 2 6 5 8 7 4','3 8 7 1 6 5 2 4','3 7 1 8 6 5 2 4',
+                    '3 7 1 6 5 8 2 4','3 7 1 6 5 2 8 4'],
+               '9':['3 9 8 7 1 2 4 5 6','3 1 9 8 7 2 4 5 6','3 7 1 9 8 2 4 5 6','3 1 8 7 2 4 5 9 6',
+                    '3 8 7 1 9 2 4 5 6','3 7 1 8 2 4 5 9 6','3 1 7 2 4 5 9 8 6','3 8 7 1 2 4 5 9 6',
+                    '3 7 1 2 4 5 9 8 6','3 1 2 4 5 9 8 7 6','3 9 8 7 1 4 5 2 6','3 8 7 1 9 4 5 2 6',
+                    '3 8 7 1 4 5 9 2 6','3 8 7 1 4 5 2 9 6','3 7 1 8 4 5 9 2 6','3 8 7 1 2 9 4 5 6',
+                    '3 7 1 8 2 9 4 5 6','3 7 1 2 8 4 5 9 6',
+                    '3 9 8 7 1 2 6 5 4','3 1 9 8 7 2 6 5 4','3 7 1 9 8 2 6 5 4','3 1 8 7 2 6 5 9 4',
+                    '3 8 7 1 9 2 6 5 4','3 7 1 8 2 6 5 9 4','3 1 7 2 6 5 9 8 4','3 8 7 1 2 6 5 9 4',
+                    '3 7 1 2 6 5 9 8 4','3 1 2 6 5 9 8 7 4','3 9 8 7 1 6 5 2 4','3 8 7 1 9 6 5 2 4',
+                    '3 8 7 1 6 5 9 2 4','3 8 7 1 6 5 2 9 4','3 7 1 8 6 5 9 2 4','3 8 7 1 2 9 6 5 4',
+                    '3 7 1 8 2 9 6 5 4','3 7 1 2 8 6 5 9 4']
+    }
+
+    # q g -> q q' qbar' + (n-5)g
+    orders[9]={'5':['3 1 4 2 5','3 2 1 4 5',
+                    '3 5 4 2 1','3 2 5 4 1'],
+               '6':['3 1 4 2 6 5','3 1 4 6 2 5','3 2 1 4 6 5','3 6 1 4 2 5','3 2 6 1 4 5','3 6 2 1 4 5',
+                    '3 5 4 2 6 1','3 5 4 6 2 1','3 2 5 4 6 1','3 6 5 4 2 1','3 2 6 5 4 1','3 6 2 5 4 1'],
+               '7':['3 1 4 2 6 7 5','3 1 4 6 2 7 5','3 1 4 6 7 2 5','3 2 1 4 6 7 5','3 6 1 4 2 7 5','3 6 1 4 7 2 5',
+                    '3 6 7 1 4 2 5','3 2 6 1 4 7 5','3 6 2 1 4 7 5','3 2 6 7 1 4 5','3 6 2 7 1 4 5','3 6 7 2 1 4 5',
+                    '3 5 4 2 6 7 1','3 5 4 6 2 7 1','3 5 4 6 7 2 1','3 2 5 4 6 7 1','3 6 5 4 2 7 1','3 6 5 4 7 2 1',
+                    '3 6 7 5 4 2 1','3 2 6 5 4 7 1','3 6 2 5 4 7 1','3 2 6 7 5 4 1','3 6 2 7 5 4 1','3 6 7 2 5 4 1'],
+               '8':['3 1 4 2 6 7 8 5','3 1 4 6 2 7 8 5','3 1 4 6 7 2 8 5','3 1 4 6 7 8 2 5',
+                    '3 2 1 4 6 7 8 5','3 6 1 4 2 7 8 5','3 6 1 4 7 2 8 5','3 6 1 4 7 8 2 5',
+                    '3 2 6 1 4 7 8 5','3 6 2 1 4 7 8 5','3 6 7 1 4 2 8 5','3 6 7 1 4 8 2 5',
+                    '3 2 6 7 1 4 8 5','3 6 2 7 1 4 8 5','3 6 7 2 1 4 8 5','3 6 7 8 1 4 2 5',
+                    '3 2 6 7 8 1 4 5','3 6 2 7 8 1 4 5','3 6 7 2 8 1 4 5','3 6 7 8 2 1 4 5',
+                    '3 5 4 2 6 7 8 1','3 5 4 6 2 7 8 1','3 5 4 6 7 2 8 1','3 5 4 6 7 8 2 1',
+                    '3 2 5 4 6 7 8 1','3 6 5 4 2 7 8 1','3 6 5 4 7 2 8 1','3 6 5 4 7 8 2 1',
+                    '3 2 6 5 4 7 8 1','3 6 2 5 4 7 8 1','3 6 7 5 4 2 8 1','3 6 7 5 4 8 2 1',
+                    '3 2 6 7 5 4 8 1','3 6 2 7 5 4 8 1','3 6 7 2 5 4 8 1','3 6 7 8 5 4 2 1',
+                    '3 2 6 7 8 5 4 1','3 6 2 7 8 5 4 1','3 6 7 2 8 5 4 1','3 6 7 8 2 5 4 1'],
+               '9':['3 1 4 2 6 7 8 9 5','3 1 4 6 2 7 8 9 5','3 1 4 6 7 2 8 9 5','3 1 4 6 7 8 2 9 5','3 1 4 6 7 8 9 2 5',
+                    '3 2 1 4 6 7 8 9 5','3 6 1 4 2 7 8 9 5','3 6 1 4 7 2 8 9 5','3 6 1 4 7 8 2 9 5','3 6 1 4 7 8 9 2 5',
+                    '3 2 6 1 4 7 8 9 5','3 6 2 1 4 7 8 9 5','3 6 7 1 4 2 8 9 5','3 6 7 1 4 8 2 9 5','3 6 7 1 4 8 9 2 5',
+                    '3 2 6 7 1 4 8 9 5','3 6 2 7 1 4 8 9 5','3 6 7 2 1 4 8 9 5','3 6 7 8 1 4 2 9 5','3 6 7 8 1 4 9 2 5',
+                    '3 2 6 7 8 1 4 9 5','3 6 2 7 8 1 4 9 5','3 6 7 2 8 1 4 9 5','3 6 7 8 2 1 4 9 5','3 6 7 8 9 1 4 2 5',
+                    '3 2 6 7 8 9 1 4 5','3 6 2 7 8 9 1 4 5','3 6 7 2 8 9 1 4 5','3 6 7 8 2 9 1 4 5','3 6 7 8 9 2 1 4 5',
+                    '3 5 4 2 6 7 8 9 1','3 5 4 6 2 7 8 9 1','3 5 4 6 7 2 8 9 1','3 5 4 6 7 8 2 9 1','3 5 4 6 7 8 9 2 1',
+                    '3 2 5 4 6 7 8 9 1','3 6 5 4 2 7 8 9 1','3 6 5 4 7 2 8 9 1','3 6 5 4 7 8 2 9 1','3 6 5 4 7 8 9 2 1',
+                    '3 2 6 5 4 7 8 9 1','3 6 2 5 4 7 8 9 1','3 6 7 5 4 2 8 9 1','3 6 7 5 4 8 2 9 1','3 6 7 5 4 8 9 2 1',
+                    '3 2 6 7 5 4 8 9 1','3 6 2 7 5 4 8 9 1','3 6 7 2 5 4 8 9 1','3 6 7 8 5 4 2 9 1','3 6 7 8 5 4 9 2 1',
+                    '3 2 6 7 8 5 4 9 1','3 6 2 7 8 5 4 9 1','3 6 7 2 8 5 4 9 1','3 6 7 8 2 5 4 9 1','3 6 7 8 9 5 4 2 1',
+                    '3 2 6 7 8 9 5 4 1','3 6 2 7 8 9 5 4 1','3 6 7 2 8 9 5 4 1','3 6 7 8 2 9 5 4 1','3 6 7 8 9 2 5 4 1']
+    }
+
+    # q qbar -> q' qbar' + (n-4)g
+    orders[10]={'4':['2 1 3 4',
+                     '2 4 3 1'],
+                '5':['2 1 3 5 4','2 5 1 3 4',
+                     '2 4 3 5 1'],
+                '6':['2 1 3 5 6 4','2 5 1 3 6 4','2 5 6 1 3 4',
+                     '2 4 3 5 6 1','2 5 4 3 6 1'],
+                '7':['2 1 3 5 6 7 4','2 5 1 3 6 7 4','2 5 6 1 3 7 4','2 5 6 7 1 3 4',
+                     '2 4 3 5 6 7 1','2 5 4 3 6 7 1'],
+                '8':['2 1 3 5 6 7 8 4','2 5 1 3 6 7 8 4','2 5 6 1 3 7 8 4','2 5 6 7 1 3 8 4','2 5 6 7 8 1 3 4',
+                     '2 4 3 5 6 7 8 1','2 5 4 3 6 7 8 1','2 5 6 4 3 7 8 1'],
+                '9':['2 1 3 5 6 7 8 9 4','2 5 1 3 6 7 8 9 4','2 5 6 1 3 7 8 9 4','2 5 6 7 1 3 8 9 4','2 5 6 7 8 1 3 9 4','2 5 6 7 8 9 1 3 4',
+                     '2 4 3 5 6 7 8 9 1','2 5 4 3 6 7 8 9 1','2 5 6 4 3 7 8 9 1']
+    }
+    
+    # q q' -> q q' + (n-4)g
+    orders[11]={'4':['3 1 4 2',
+                     '3 2 4 1'],
+                '5':['3 1 4 5 2',
+                     '3 2 4 5 1'],
+                '6':['3 1 4 5 6 2','3 5 1 4 6 2',
+                     '3 2 4 5 6 1','3 5 2 4 6 1'],
+                '7':['3 1 4 5 6 7 2','3 5 1 4 6 7 2',
+                     '3 2 4 5 6 7 1','3 5 2 4 6 7 1'],
+                '8':['3 1 4 5 6 7 8 2','3 5 1 4 6 7 8 2','3 5 6 1 4 7 8 2',
+                     '3 2 4 5 6 7 8 1','3 5 2 4 6 7 8 1','3 5 6 2 4 7 8 1'],
+                '9':['3 1 4 5 6 7 8 9 2','3 5 1 4 6 7 8 9 2','3 5 6 1 4 7 8 9 2',
+                     '3 2 4 5 6 7 8 9 1','3 5 2 4 6 7 8 9 1','3 5 6 2 4 7 8 9 1']
+    }
               
 
-    nexternal=['4','5','6','7']#,'8','9']
+    nexternal=['4','5','6','7','8','9']
     integrators=['1']#,'2','3','4']
-    seeds=['101']#,'102','103','104','105','106','107','108','109','110']
+    seeds=['101','102','103','104','105','106','107','108','109','110']
 
     # Number of workers (adjust to the number of CPU cores or desired level of parallelism)
-    max_workers = 8  # Change this to match the number of CPU cores you want to utilize
+    max_workers = 20  # Change this to match the number of CPU cores you want to utilize
+    initial_delay=3   # wait 'initial_delay' seconds between jobs for the first 'max_workers' jobs
 
-    executable='../../matrix_reweight_QCD'
+    executable='./matrix_reweight_QCD'
     # create the argument list
     arguments=[]
     outfiles=[]
     for n in nexternal:
         for iflav,flavour in enumerate(flavours[n]):
-            if (iflav >0):
-                break
+            if flavour == '0': continue
+            if iflav<4 or iflav>7 : continue
             for io,order in enumerate(orders[iflav][n]):
-                seed=seeds[0]
-                integrator=integrators[0]
-                add_arg='S'+seed+'I'+integrator
-                directory='./Outputs'+add_arg+'/Res_files/'
-                if not os.path.exists(directory):
-                    time.sleep(0.1)
-                    os.makedirs(directory)
-                output_file='./Outputs'+add_arg+'/log_rwgt_'+n+'_'+str(io)+'.txt'
-                outfiles.append(output_file)
-                args=list(chain.from_iterable([n,flavour.split(),order.split()]))+[add_arg]
-                print(args)
-                arguments.append(args)
+                for seed in seeds:
+                    integrator=integrators[0]
+                    add_arg='S'+seed+'I'+integrator
+                    directory='./Outputs'+add_arg+'/Res_files/'
+                    if not os.path.exists(directory):
+                        time.sleep(0.1)
+                        os.makedirs(directory)
+                    output_file='./Outputs'+add_arg+'/log_rwgt_'+n+'_'+str(io)+'_'+str(iflav)+'.txt'
+                    outfiles.append(output_file)
+                    args=list(chain.from_iterable([n,flavour.split(),order.split()]))+[add_arg]
+                    print(args,output_file)
+                    arguments.append(args)
 
     # Shared counter for completed jobs
     completed_jobs = 0
@@ -132,7 +301,13 @@ if __name__ == '__main__':
     # Use ProcessPoolExecutor for parallel execution
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks to the executor
-        future_to_argument = {executor.submit(run_fortran_program, executable, arg, outfile): arg for arg,outfile in zip(arguments,outfiles)}
+        future_to_argument={}
+        for i, (args,out_file) in enumerate(zip(arguments,outfiles)):
+            if i < max_workers:
+                future_to_argument[executor.submit(run_fortran_program, executable, args, out_file)] = args
+                time.sleep(initial_delay)
+            else:
+                future_to_argument[executor.submit(run_fortran_program, executable, args, out_file)] = args
 
         # Process results as they complete
         for future in concurrent.futures.as_completed(future_to_argument):
@@ -146,76 +321,4 @@ if __name__ == '__main__':
             with counter_lock:
                 completed_jobs += 1
                 print(f"Completed {completed_jobs}/{total_jobs} jobs.")
-
-
-# Plot the reweighted event files and collect data
-    for n in nexternal:
-        for iflav,flavour in enumerate(flavours[n]):
-            if (iflav >0):
-                break
-            for io,order in enumerate(orders[iflav][n]):
-                args=list(chain.from_iterable([n,'2',flavour.split()]))
-                iseed=seeds[0]
-                integrator=integrators[0]
-                add_arg='S'+seed+'I'+integrator
-                arguments.append(args)
-                proc_tag=''
-                tag=''
-                for el in args:
-                    proc_tag=proc_tag+'_'+str(el)
-                tag=proc_tag
-                for el in order:
-                    if (el !=' '):
-                        tag=tag+'_'+str(el)
-                cur_path = os.getcwd()
-                output_file = ' '+cur_path+'/Outputs'+add_arg+'/events'+proc_tag
-                execut='../../plot_events/plot_events.sh'
-                res = subprocess.run(execut+output_file+' '+proc_tag+' '+tag,shell=True)
-
-# Compute secondary unweighting efficiency
-    for n in nexternal:
-        for iflav,flavour in enumerate(flavours[n]):
-            if (iflav >0):
-                break
-            for io,order in enumerate(orders[iflav][n]):
-                args=list(chain.from_iterable([n,'2',flavour.split()]))
-                proc_tag=''
-                tag=''
-                for el in args:
-                    proc_tag=proc_tag+'_'+str(el)
-                tag=proc_tag
-                for el in order:
-                    if (el !=' '):
-                        tag=tag+'_'+str(el)
-                iseed=seeds[0]
-                integrator=integrators[0]
-                execut='../../compute_unweighting_efficiency/compute.sh'
-                cur_dir=os.getcwd()
-                output_file = ' '+cur_path+'/Outputs'+add_arg+'/events'+tag+'.lhe.rwgt'
-                file_src='./Outputs'+add_arg+'/events'+tag+'.lhe.rwgt'
-                file_dst='../../compute_unweighting_efficiency/events'+tag+'.lhe.rwgt'
-                file_name=' events'+tag+'.lhe.rwgt'
-                shutil.copyfile(file_src,file_dst)
-                res = subprocess.run(execut+file_name,shell=True)
-
-                # Move all files in place
-                out_file='../../compute_unweighting_efficiency/out_unwgt_'+tag+'.txt'
-                out_dst='../../plot_events/res_wgt_'+proc_tag+'/out_unwgt_'+tag+'.txt'
-                shutil.move(out_file,out_dst)
-                os.remove('../../compute_unweighting_efficiency/events'+tag+'.lhe.rwgt')
-                out_dir='../../plot_events/res_wgt_'+proc_tag
-                out_dst=os.getcwd()
-                try:
-                    shutil.move(out_dir,out_dst)
-                except:
-                    print('Directory exists already')
-                    #shutil.move(out_dir+'/*',out_dst)
-
-
-
-
-
-
-
-
 
