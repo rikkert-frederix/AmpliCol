@@ -19,21 +19,17 @@ program matrix_reweight
   use amplitude_QCD_mod
   use timings
   implicit none
-  integer :: next
-  type(amplitude_QCD),dimension(:),allocatable :: amps
-  real(kind=8),dimension(:,:),allocatable :: p
+  type(amplitude_QCD) :: amps
   integer,parameter :: string_len=150
-  integer :: i,j,col_acc,icol,irow,ic,iacc
-  integer,dimension(:),allocatable :: hel,o,part,part_sf,orig_part,temp_part
+  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next
+  integer,dimension(:),allocatable :: hel,o,part
   integer,dimension(:,:),allocatable :: spin
-  real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: amp2,amp_col
-  complex(kind=8) :: amp2_c,amp_col_c
+  real(kind=8),dimension(3) :: matrix2
   real(kind=8),dimension(:),allocatable :: mass,width
+  real(kind=8),dimension(:,:),allocatable :: p
+  complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
-  integer :: gi,gi_iperm,gi_prev ! type for 2qq process
-  integer,dimension(:),allocatable :: iper_test
-  integer :: ic_low,ic_upp
   character(len=string_len) :: tag,tag_read,add_arg=''
   
   call get_run_arguments()
@@ -45,7 +41,6 @@ program matrix_reweight
   allocate(mass(next))
   allocate(width(next))
   allocate(p(0:3,next))
-  allocate(iper_test(1:next)) ! needed for 2qq
 
   mass(1:next)=0d0
   width(1:next)=0d0
@@ -57,38 +52,22 @@ program matrix_reweight
 !  width(3:4)= 1.4915d0
 !  width(5)  = 0d0
 
-
   call create_run_tag_and_open_files()
 
   call cpu_time(tBefore)
 
   if (.not.allocated(part)) allocate(part(1:next))
-  if (.not.allocated(part_sf)) allocate(part_sf(1:next))
-  if (.not.allocated(orig_part)) allocate(orig_part(1:next))
-  if (.not.allocated(temp_part)) allocate(temp_part(1:next))
   call read_event(11,done)
   rewind(11)
 
-  allocate(amps((next-2)*(next-2))) 
-  orig_part(:)=part(:)
-
-  ! counting of quark flavours in process
-  call fill_quark_info()
-
-  call define_symm_2qq(next,part,1)
-  call amps(1)%init(2,next,part,spin,mass,width,o)
+  call amps%init(2,next,part,spin,mass,width,o)
   col_acc=20
-!!$  call amps(1)%init_col(next,orig_part,col_acc)
-  call amps(1)%init_col(next,part,col_acc)
-
-  if (amps(1)%n_qqbar.eq.2.and.amps(1)%same_flav) then
-     amps(3)%n_qqbar=amps(1)%n_qqbar
-     amps(3)%same_flav=amps(1)%same_flav
-     part_sf(:)=orig_part(:)
-     call define_symm_2qq(next,part_sf,2)
-     call amps(3)%init(2,next,part_sf,spin,mass,width,o,amps(1))
+  call amps%init_col(next,col_acc)
+  if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
+     nColOrd=amps%n_amps/2
+  else
+     nColOrd=amps%n_amps
   endif
-
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
@@ -100,69 +79,40 @@ program matrix_reweight
 
      call cpu_time(tBefore)
 
-     call amps(1)%evaluate(next,p,mass,width,hel,part)
-     if (amps(1)%n_qqbar.eq.2 .and. amps(1)%same_flav) then
-        call amps(3)%evaluate(next,p,mass,width,hel,part)
-        amps(1)%amps(:)=amps(1)%amps(:)+amps(3)%amps(:)
-     endif
-
-
+     call amps%evaluate(next,p,mass,width,hel)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
-
-!!! ###########################################     
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
-        if (amps(1)%n_qqbar.eq.0) then
-           do irow=1,amps(1)%n_amps
-              if (use_real_gluons) then
-                 amp_col=0d0
-              else
-                 amp_col_c=(0d0,0d0)
-              endif
-              do i=1,amps(1)%n_col_vals(iacc)
-                 if (use_real_gluons) then
-                    amp2=0d0
-                 else
-                    amp2_c=(0d0,0d0)
-                 endif
-                 do ic=amps(1)%row_index(irow-1,i,iacc)+1,amps(1)%row_index(irow,i,iacc)
-                    icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc)+ic)
-                    if (use_real_gluons) then
-                       amp2=amp2+amps(1)%amps_r(icol)
-                    else
-                       amp2_c=amp2_c+amps(1)%amps(icol)
-                    endif
+        if (amps%n_qqbar.eq.0 .and. use_real_gluons) then
+           ! same as in the 'else' below, except that all are real variables instead of complex. 
+           do irow=1,nColOrd
+              amp_col=0d0
+              do i=1,amps%n_col_vals(iacc)
+                 amp2=0d0
+                 do ic=amps%row_index(irow-1,i,iacc)+1,amps%row_index(irow,i,iacc)
+                    icol=amps%col_index(amps%i_col_i(i,iacc)+ic)
+                    amp2=amp2+amps%amps_r(icol)
                  enddo
-                 if (use_real_gluons) then
-                    amp_col=amp_col+amp2*amps(1)%diff_col_vals(i,iacc)
-                 else
-                    amp_col_c=amp_col_c+amp2_c*amps(1)%diff_col_vals(i,iacc)
-                 endif
+                 amp_col=amp_col+amp2*amps%diff_col_vals(i,iacc)
               enddo
-              if (use_real_gluons) then
-                 matrix2(iacc)=matrix2(iacc)+amp_col*amps(1)%amps_r(irow)
-              else
-                 matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(1)%amps(irow)))
-              endif
+              matrix2(iacc)=matrix2(iacc)+amp_col*amps%amps_r(irow)
            enddo
-
-
-        elseif (amps(1)%n_qqbar.eq.1 .or. amps(1)%n_qqbar.eq.2) then
-           do irow=1,amps(1)%n_amps
+        else
+           do irow=1,nColOrd
               amp_col_c=(0d0,0d0)
-              do i=1,amps(1)%n_col_vals(iacc)
+              do i=1,amps%n_col_vals(iacc)
                  amp2_c=(0d0,0d0)
-                 do ic=amps(1)%row_index(irow-1,i,iacc)+1,amps(1)%row_index(irow,i,iacc)
-                    icol=amps(1)%col_index(amps(1)%i_col_i(i,iacc)+ic)
-                    amp2_c=amp2_c+amps(1)%amps(icol)
+                 do ic=amps%row_index(irow-1,i,iacc)+1,amps%row_index(irow,i,iacc)
+                    icol=amps%col_index(amps%i_col_i(i,iacc)+ic)
+                    amp2_c=amp2_c+amps%amps(icol)
                  enddo
-                 amp_col_c=amp_col_c+amp2_c*amps(1)%diff_col_vals(i,iacc)
+                 amp_col_c=amp_col_c+amp2_c*amps%diff_col_vals(i,iacc)
               enddo
-              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(1)%amps(irow)))
+              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps%amps(irow)))
            enddo
         endif
         
@@ -188,34 +138,6 @@ program matrix_reweight
   write(*,*) 'Time spent in picking random colors',t_ran
   write(*,*) 'Total time:',t_all
 contains  
-
-  subroutine fill_quark_info()
-    implicit none
-    integer,dimension(8) :: flav
-    integer :: k
-
-    flav = 0
-    k = 1
-    amps%n_qqbar= 0
-    amps(1)%same_flav=.true.
-    do i=1,next
-       if (i.le.2) then
-          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-             flav(k) = abs(orig_part(i))
-             k= k+1
-             if (orig_part(i).lt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
-          endif
-       else
-          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-             flav(k) = abs(orig_part(i))
-             k= k+1
-             if (orig_part(i).gt.0) amps(1)%n_qqbar=amps(1)%n_qqbar+1
-          endif
-       endif
-    enddo
-
-    if (any(flav(1:2*amps(1)%n_qqbar).ne.flav(1))) amps(1)%same_flav = .false.
-  end subroutine fill_quark_info
 
 
   subroutine get_run_arguments()
@@ -374,51 +296,6 @@ contains
     write (iunit,*) '</event>'
   end subroutine write_event
 
-  subroutine define_symm_2qq(next,part,chan)
-    implicit none
-    integer :: next,chan
-    integer, dimension(next) :: part
-    integer :: i,j,sgn
-    logical :: first
-    if (amps(1)%same_flav) then
-       if (chan.eq.2) then
-          do i=1,next
-             if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
-                first=.true.
-                do j=i+1,next
-                   if (i.le.2.and.j.le.2) sgn=-1
-                   if (i.le.2.and.j.gt.2) sgn=+1
-                   if (i.gt.2.and.j.gt.2) sgn=-1
-                   if (part(j).eq.sgn*part(i).and..not.first) then
-                      part(i) = sign(abs(part(i))+1,part(i))
-                      part(j) = sgn*(part(i))
-                      exit
-                   endif
-                   if (part(j).eq.sgn*part(i).and.first) then
-                      first = .false.
-                   endif
-                enddo
-             endif
-          enddo
-       elseif (chan.eq.1) then
-          do i=1,next
-             if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
-                do j=i+1,next
-                   if (i.le.2.and.j.le.2) sgn=-1
-                   if (i.le.2.and.j.gt.2) sgn=+1
-                   if (i.gt.2.and.j.gt.2) sgn=-1
-                   if (part(j).eq.sgn*part(i)) then
-                      part(i) = sign(abs(part(i))+1,part(i))
-                      part(j) = sgn*(part(i))
-                      exit
-                   endif
-                enddo
-                exit
-             endif
-          enddo
-       endif
-    endif
-  end subroutine define_symm_2qq
 
 
 end program matrix_reweight

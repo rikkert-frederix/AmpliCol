@@ -8,23 +8,21 @@ program matrix_integrate_QCD
   use math_functions
   implicit none
   type(amplitude_QCD) :: amps
-  type(amplitude_QCD) :: amps_sf
   integer :: next
   real(kind=8) :: amp2,weight
   real(kind=8),dimension(:),allocatable :: amp2_hel
   integer :: j,c_o,i
   integer(kind=8) :: sym_fac,iden
-  integer(kind=4),dimension(:),allocatable :: o,part,orig_part,part_sf,hel,hel_fac
+  integer(kind=4),dimension(:),allocatable :: o,part,hel,hel_fac
   integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8) :: s_cut(2),sqrts
   logical :: t_chan
   character(len=80) :: filename
-  integer(kind=4) :: integration, nquarks
+  integer(kind=4) :: integration,nquarks,nhel
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac
-  integer :: it ! quark order type
-  integer,parameter :: nevent_hel_filter=5
+  integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
   
   call get_run_arguments()
@@ -107,7 +105,6 @@ program matrix_integrate_QCD
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
   call cpu_time(tBefore)
-  orig_part(:)=part(:)
 
   if (include_pdf) then
      ndim=ndim+2
@@ -115,39 +112,23 @@ program matrix_integrate_QCD
      call set_ipdgs_for_PDF(ipdgs)
   endif
 
-  ! counting of quark flavours in process
-  call fill_quark_info()
-
-  if (amps%n_qqbar.eq.2) then
-    call define_symm_2qq(next,part,1)
-  endif
   call amps%init(1,next,part,spin,mass,width,o)
-
-  if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-     part_sf(:) = orig_part(:)
-     amps_sf%n_qqbar=amps%n_qqbar
-     amps_sf%same_flav=amps%same_flav
-     call define_symm_2qq(next,part_sf,2)
-     call amps_sf%init(1,next,part_sf,spin,mass,width,o)
+  if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
+     nhel=amps%n_amps/2
+  else
+     nhel=amps%n_amps
   endif
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
-  ! Compute the leading colour factor
-  if (amps%n_qqbar.eq.2) then
-     if (abs(part(o(1))).ne.abs(part(o(next)))) it = 2
-  else
-     it=0 ! dummy
-  endif
-
-  call compute_LC_colour_factor(col_fac,it)
+  call compute_LC_colour_factor(col_fac)
   
   ! number of helicities to sum over
-  allocate(amp2_hel(1:amps%n_amps))
+  allocate(amp2_hel(1:nhel))
   allocate(hel(1:next))
-  allocate(hel_fac(1:amps%n_amps))
-  hel_fac(1:amps%n_amps)=1
+  allocate(hel_fac(1:nhel))
+  hel_fac(1:nhel)=1
   
 
   ! Not so relevant mint-module parameters: only used in special cases.
@@ -240,25 +221,14 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call amps%evaluate(next,p,mass,width,hel,part)
+    call amps%evaluate(next,p,mass,width,hel)
 
-    if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-      call amps_sf%evaluate(next,p,mass,width,hel,part_sf)
-      do ih=1,amps%n_amps
-        if (it.eq.2) then
-           amps%amps(ih)=(1d0/3d0)*amps%amps(ih)+amps_sf%amps(ih)
-        else
-           amps%amps(ih)=amps%amps(ih)+(1d0/3d0)*amps_sf%amps(ih)
-        endif
-      enddo
-   endif
-   
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
-    amp2_hel(1:amps%n_amps)=0d0
-    do ih=1,amps%n_amps
+    amp2_hel(1:nhel)=0d0
+    do ih=1,nhel
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
           amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
        else
@@ -266,9 +236,8 @@ contains
        endif
        amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
     enddo
+    amp2=sum(amp2_hel(1:nhel))
     
-    amp2=sum(amp2_hel(1:amps%n_amps))
-
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
        if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
@@ -383,128 +352,39 @@ contains
     implicit none
     real(kind=8) :: max_value
     integer :: ih1,ih2,nevent
-    integer,dimension(:,:),allocatable,save :: include_hel
-    integer,dimension(:),allocatable :: include_hel_sf
-    if (.not.allocated(include_hel)) allocate(include_hel(amps%n_amps,nevent_hel_filter))
+    integer,dimension(:),allocatable,save :: include_hel
+    if (.not.allocated(include_hel)) then
+       allocate(include_hel(nhel))
+       include_hel(1:nhel)=0
+    endif
     ! filter zero helicities and helicities that are identical
-    include_hel(1:amps%n_amps,nevent)=1
-    max_value=maxval(amp2_hel(1:amps%n_amps))
-    do ih1=1,amps%n_amps
-       if (include_hel(ih1,nevent).ne.1) cycle
-       if (amp2_hel(ih1)/max_value.lt.1d-28) then
+    max_value=maxval(amp2_hel(1:nhel))
+    do ih1=1,nhel
+       if (include_hel(ih1).ne.0) cycle
+       if (amp2_hel(ih1)/max_value.gt.1d-10) then
           ! zero
-          include_hel(ih1,nevent)=0
+          include_hel(ih1)=1
        else
-          do ih2=ih1+1,amps%n_amps
-             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
-                ! identical
-                include_hel(ih2,nevent)=-ih1
-                include_hel(ih1,nevent)=include_hel(ih1,nevent)+1
-             endif
-          enddo
+          cycle
        endif
+       do ih2=ih1+1,nhel
+          if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
+             ! identical
+             include_hel(ih2)=-ih1
+             include_hel(ih1)=include_hel(ih1)+1
+          endif
+       enddo
     enddo
 
     if (nevent.lt.nevent_hel_filter) return
-    
-    do ih1=1,amps%n_amps
-       if (any(include_hel(ih1,2:nevent_hel_filter).ne.include_hel(ih1,1))) then
-          write (*,*) 'inconsistent helicity. Cannot setup helicity filter.'
-          write (*,*) ih1,nevent_hel_filter,':',include_hel(ih1,1:nevent_hel_filter)
-          stop 1
-       endif
-    enddo
-    if (amps%same_flav) then
-       allocate(include_hel_sf(1:amps_sf%n_amps))
-       include_hel_sf(1:amps_sf%n_amps)=include_hel(1:amps%n_amps,1)
-    endif
-    call amps%filter_helicity(next,include_hel(1,1)) ! this updates 'nhel' and 'include_hel'
-    if (amps%n_qqbar.eq.2.and.amps%same_flav) then
-       call amps_sf%filter_helicity(next,include_hel_sf)
-       if (amps%n_amps.ne.amps_sf%n_amps) then
-          write (*,*) 'number of helicity not consistent',amps%n_amps,amps_sf%n_amps
-          stop 1
-       endif
-    endif
+
+    call amps%filter_helicity(next,nhel,include_hel) ! this updates 'nhel' and 'include_hel'
     deallocate(hel_fac)
-    allocate(hel_fac(amps%n_amps))
-    hel_fac(1:amps%n_amps)=include_hel(1:amps%n_amps,1)
+    allocate(hel_fac(nhel))
+    hel_fac(1:nhel)=include_hel(1:nhel)
     deallocate(include_hel)
-    if (amps%same_flav) deallocate(include_hel_sf)
   end subroutine setup_helicity_filter
 
-  subroutine define_symm_2qq(next,part,chan)
-    implicit none
-    integer :: next,chan
-    integer, dimension(next) :: part
-    integer :: i,j,sgn
-    logical :: first
-    if (amps%same_flav) then
-       if (chan.eq.2) then
-          do i=1,next
-             if (abs(part(i)).gt.0.and.abs(part(i)).lt.6) then
-                first=.true.
-                do j=i+1,next
-                   if (i.le.2.and.j.le.2) sgn=-1
-                   if (i.le.2.and.j.gt.2) sgn=+1
-                   if (i.gt.2.and.j.gt.2) sgn=-1
-                   if (part(j).eq.sgn*part(i).and..not.first) then
-                      part(i) = sign(abs(orig_part(i))+1,orig_part(i))
-                      part(j) = sgn*(part(i))
-                      exit
-                   endif
-                   if (part(j).eq.sgn*part(i).and.first) then
-                      first = .false.
-                   endif
-                enddo
-             endif
-          enddo
-       elseif (chan.eq.1) then
-          do i=1,next
-             if (abs(orig_part(i)).gt.0.and.abs(orig_part(i)).lt.6) then
-                do j=i+1,next
-                   if (i.le.2.and.j.le.2) sgn=-1
-                   if (i.le.2.and.j.gt.2) sgn=+1
-                   if (i.gt.2.and.j.gt.2) sgn=-1
-                   if (orig_part(j).eq.sgn*orig_part(i)) then
-                      part(i) = sign(abs(orig_part(i))+1,orig_part(i))
-                      part(j) = sgn*(part(i))
-                      exit
-                   endif
-                enddo
-                exit
-             endif
-          enddo
-       endif
-    endif
-  end subroutine define_symm_2qq
-
-  subroutine fill_quark_info()
-    implicit none
-    integer,dimension(8) :: flav
-    integer :: k
-    flav = 0
-    k = 1
-    amps%n_qqbar= 0
-    amps%same_flav=.true.
-    do i=1,next
-       if (i.le.2) then
-          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-             flav(k) = abs(orig_part(i))
-             k= k+1
-             if (orig_part(i).lt.0) amps%n_qqbar=amps%n_qqbar+1
-          endif
-       else
-          if (orig_part(i).ne.21 .and. orig_part(i).ne.22) then
-             flav(k) = abs(orig_part(i))
-             k= k+1
-             if (orig_part(i).gt.0) amps%n_qqbar=amps%n_qqbar+1
-          endif
-       endif
-    enddo
-    if (any(flav(1:2*amps%n_qqbar).ne.flav(1))) amps%same_flav = .false.
-  end subroutine fill_quark_info
-  
   real(kind=8) function pt(p)
     ! transverse momentum of 'p'
     implicit none
@@ -558,18 +438,18 @@ contains
     ! sym_fac()) assuming symmetric initial states, we need to randomly flip
     ! all z-components in those cases. Easiest to always do this if the two
     ! incoming particles are identical.
-    if (orig_part(1).ne.orig_part(2) .or. ran2().lt.0.5d0) then
+    if (part(1).ne.part(2) .or. ran2().lt.0.5d0) then
        ! do not flip
        do i=1,next
-          write (iunit,*) orig_part(i),p(1:3,i),p(0,i)
+          write (iunit,*) part(i),p(1:3,i),p(0,i)
        enddo
     else
        ! do flip
        do i=1,next
           if (i.le.2) then
-             write (iunit,*) orig_part(i),p(1:2,3-i),-p(3,3-i),p(0,3-i)
+             write (iunit,*) part(i),p(1:2,3-i),-p(3,3-i),p(0,3-i)
           else
-             write (iunit,*) orig_part(i),p(1:2,i),-p(3,i),p(0,i)
+             write (iunit,*) part(i),p(1:2,i),-p(3,i),p(0,i)
           endif
        enddo
     endif
@@ -592,8 +472,8 @@ contains
        endif
     enddo
     hel_picked(2)=i
-    if (hel_picked(2).gt.amps%n_amps) then
-       write (*,*) 'Could not unweight helicity',hel_picked,amps%n_amps
+    if (hel_picked(2).gt.nhel) then
+       write (*,*) 'Could not unweight helicity',hel_picked,nhel
        stop 1
     endif
     if (hel_fac(hel_picked(2)).gt.1) then
@@ -635,8 +515,6 @@ contains
                 stop 1
              endif
              allocate(part(1:next))
-             allocate(orig_part(1:next))
-             allocate(part_sf(1:next))
              allocate(o(1:next))
           endif
           do k=0,next-1
@@ -823,7 +701,7 @@ contains
     deallocate(iden_part)
   end subroutine set_final_state_identical_particle_factor
 
-  subroutine compute_LC_colour_factor(col_fac,it)
+  subroutine compute_LC_colour_factor(col_fac)
     implicit none
     integer,intent(inout) :: col_fac
     integer :: i,ifac
@@ -842,7 +720,7 @@ contains
             'colour factor is not an integer',ifac,fac
        stop 1
     endif
-    if (it.eq.2.and..not.amps%same_flav) then
+    if (abs(part(o(1))).ne.abs(part(o(next))) .and. .not.amps%same_flav) then
         ifac=(ifac-2) 
     endif
     col_fac=3**ifac
@@ -879,24 +757,24 @@ contains
     implicit none
     logical,dimension(-6:7,2) :: ipdgs
     ipdgs(-6:7,1:2)=.false.
-    if (orig_part(1).eq.21) then
+    if (part(1).eq.21) then
        ipdgs(0,1)=.true.    ! gluon is '0'
-    elseif (orig_part(1).eq.22) then
+    elseif (part(1).eq.22) then
        ipdgs(7,1)=.true.    ! photon is '7'
-    elseif (abs(orig_part(1)).ge.1 .and. abs(orig_part(1)).le.6) then
-       ipdgs(orig_part(1),1)=.true.
+    elseif (abs(part(1)).ge.1 .and. abs(part(1)).le.6) then
+       ipdgs(part(1),1)=.true.
     else
-       write (*,*) 'unknown PDF 1',orig_part(1)
+       write (*,*) 'unknown PDF 1',part(1)
        stop 1
     endif
-    if (orig_part(2).eq.21) then
+    if (part(2).eq.21) then
        ipdgs(0,2)=.true.    ! gluon is '0'
-    elseif (orig_part(2).eq.22) then
+    elseif (part(2).eq.22) then
        ipdgs(7,2)=.true.    ! photon is '7'
-    elseif (abs(orig_part(2)).ge.1 .and. abs(orig_part(2)).le.6) then
-       ipdgs(orig_part(2),2)=.true.
+    elseif (abs(part(2)).ge.1 .and. abs(part(2)).le.6) then
+       ipdgs(part(2),2)=.true.
     else
-       write (*,*) 'unknown PDF 2',orig_part(2)
+       write (*,*) 'unknown PDF 2',part(2)
        stop 1
     endif
   end subroutine set_ipdgs_for_PDF
@@ -911,20 +789,20 @@ contains
 
     call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
     call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
-    if (orig_part(1).eq.21) then
+    if (part(1).eq.21) then
        val=val*PDF(0,1)
-    elseif (orig_part(1).eq.22) then
+    elseif (part(1).eq.22) then
        val=val*PDF(7,1)
     else
-       !write(*,*) 'orig pdf',orig_part(1)
-       val=val*PDF(orig_part(1),1)
+       !write(*,*) 'orig pdf',part(1)
+       val=val*PDF(part(1),1)
     endif
-    if (orig_part(2).eq.21) then
+    if (part(2).eq.21) then
        val=val*PDF(0,2)
-    elseif (orig_part(2).eq.22) then
+    elseif (part(2).eq.22) then
        val=val*PDF(7,2)
     else
-       val=val*PDF(orig_part(2),2)
+       val=val*PDF(part(2),2)
     endif
   end subroutine multiply_by_PDF_value
   
