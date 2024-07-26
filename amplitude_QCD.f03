@@ -1700,7 +1700,7 @@ contains
       elseif(this%imode.eq.2) then
          do iamp=1,this%n_amps
             if (use_real_gluons .and. this%n_qqbar.eq.0) then
-               if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2) then
+               if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
                   this%amps_r(iamp)=-sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
                                          this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
                else
@@ -1708,7 +1708,7 @@ contains
                                         this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
                endif
             else
-               if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2) then
+               if (use_symmetry .and. this%n_qqbar.eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
                   this%amps(iamp)=-sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
                                        this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                else
