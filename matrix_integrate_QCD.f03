@@ -236,8 +236,6 @@ contains
        endif
        amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
     enddo
-
-    
     amp2=sum(amp2_hel(1:nhel))
     
     if (passed.le.nevent_hel_filter) then
@@ -361,7 +359,7 @@ contains
     max_value=maxval(amp2_hel(1:nhel))
     do ih1=1,nhel
        if (include_hel(ih1,nevent).ne.1) cycle
-       if (amp2_hel(ih1)/max_value.lt.1d-28) then
+       if (amp2_hel(ih1)/max_value.lt.1d-26) then
           ! zero
           include_hel(ih1,nevent)=0
        else

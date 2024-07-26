@@ -266,7 +266,7 @@ contains
             stop 1
          endif
       endif
-      if (use_symmetry .and. this%n_qqbar.eq.0) then
+      if (use_symmetry .and. this%n_qqbar.eq.0 .and. this%imode.eq.2) then
          allocate(this%curr2amp(1:2,1:2*this%n_amps))
          this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
          this%curr2amp(1:2,this%n_amps+1:2*this%n_amps)=curr2amp(1:2,1:this%n_amps)
