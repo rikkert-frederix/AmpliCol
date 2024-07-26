@@ -22,7 +22,7 @@ program matrix_integrate_QCD
   integer(kind=4) :: integration,nquarks,nhel
   logical,dimension(-6:7,2) :: ipdgs
   integer :: col_fac
-  integer,parameter :: nevent_hel_filter=5
+  integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
   
   call get_run_arguments()
@@ -352,40 +352,36 @@ contains
     implicit none
     real(kind=8) :: max_value
     integer :: ih1,ih2,nevent
-    integer,dimension(:,:),allocatable,save :: include_hel
-    if (.not.allocated(include_hel)) allocate(include_hel(nhel,nevent_hel_filter))
+    integer,dimension(:),allocatable,save :: include_hel
+    if (.not.allocated(include_hel)) then
+       allocate(include_hel(nhel))
+       include_hel(1:nhel)=0
+    endif
     ! filter zero helicities and helicities that are identical
-    include_hel(1:nhel,nevent)=1
     max_value=maxval(amp2_hel(1:nhel))
     do ih1=1,nhel
-       if (include_hel(ih1,nevent).ne.1) cycle
-       if (amp2_hel(ih1)/max_value.lt.1d-26) then
+       if (include_hel(ih1).ne.0) cycle
+       if (amp2_hel(ih1)/max_value.gt.1d-10) then
           ! zero
-          include_hel(ih1,nevent)=0
+          include_hel(ih1)=1
        else
-          do ih2=ih1+1,nhel
-             if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
-                ! identical
-                include_hel(ih2,nevent)=-ih1
-                include_hel(ih1,nevent)=include_hel(ih1,nevent)+1
-             endif
-          enddo
+          cycle
        endif
+       do ih2=ih1+1,nhel
+          if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
+             ! identical
+             include_hel(ih2)=-ih1
+             include_hel(ih1)=include_hel(ih1)+1
+          endif
+       enddo
     enddo
 
     if (nevent.lt.nevent_hel_filter) return
-    
-    do ih1=1,nhel
-       if (any(include_hel(ih1,2:nevent_hel_filter).ne.include_hel(ih1,1))) then
-          write (*,*) 'inconsistent helicity. Cannot setup helicity filter.'
-          write (*,*) ih1,nevent_hel_filter,':',include_hel(ih1,1:nevent_hel_filter)
-          stop 1
-       endif
-    enddo
-    call amps%filter_helicity(next,nhel,include_hel(1,1)) ! this updates 'nhel' and 'include_hel'
+
+    call amps%filter_helicity(next,nhel,include_hel) ! this updates 'nhel' and 'include_hel'
     deallocate(hel_fac)
     allocate(hel_fac(nhel))
-    hel_fac(1:nhel)=include_hel(1:nhel,1)
+    hel_fac(1:nhel)=include_hel(1:nhel)
     deallocate(include_hel)
   end subroutine setup_helicity_filter
 
