@@ -2539,12 +2539,14 @@ contains
           enddo
        endif
     enddo
-    do iamp=this%iproc_start(2),this%n_amps
-       if (where_to_amp(iamp).ne.0) then
-          this%iproc_start(2)=where_to_amp(iamp)
-          exit
-       endif
-    enddo
+    if (this%n_qqbar.eq.2 .and. this%same_flav) then
+       do iamp=this%iproc_start(2),this%n_amps
+          if (where_to_amp(iamp).ne.0) then
+             this%iproc_start(2)=where_to_amp(iamp)
+             exit
+          endif
+       enddo
+    endif
     do nc=this%n_cur,1,-1
        if (where_to_cur(nc).ne.0) then
           this%n_cur=where_to_cur(nc)
