@@ -201,7 +201,6 @@ contains
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
-
     if (debug ) then
        write (*,*) jac
        stop 1
@@ -237,7 +236,7 @@ contains
        amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
     enddo
     amp2=sum(amp2_hel(1:nhel))
-    
+
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
        if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
@@ -247,9 +246,9 @@ contains
           amp2=0d0
        endif
     endif
-
-    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
     
+    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
+
     if (amps%n_sing.ge.1) then
        do i=1,next
           if (abs(part(i)).le.6) then
@@ -362,7 +361,7 @@ contains
     do ih1=1,nhel
        if (include_hel(ih1).ne.0) cycle
        if (amp2_hel(ih1)/max_value.gt.1d-10) then
-          ! zero
+          ! non-zero
           include_hel(ih1)=1
        else
           cycle
