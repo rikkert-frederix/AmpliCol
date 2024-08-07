@@ -1115,8 +1115,22 @@ endif
         call random_to_var(x(ix),0d0,0d0,1d0,R,jac)
         xy = tan(-pi/2d0 * R)**2
         a2 = a2maxbar*a2minbar*(1d0+xy)/(a2minbar + xy*a2maxbar) - h
-        if ((a2min-a2)/a2min.le.1d-8.and.a2min-a2.gt.0d0) a2=a2min
-        if ((a2-a2max)/a2max.le.1d-8.and.a2-a2max.gt.0d0) a1=a2max
+        if (a2min-a2.gt.0d0) then
+           if (a2min.eq.0d0) then
+              write (*,*) 'division by zero in a2min',a2,a2min
+              stop 1
+           elseif ((a2min-a2)/a2min.le.1d-8) then
+              a2=a2min
+           endif
+        endif
+        if (a2-a2max.gt.0d0) then
+           if (a2max.eq.0d0) then
+              write (*,*) 'division by zero in a2max',a2,a2max
+              stop 1
+           elseif ((a2-a2max)/a2max.le.1d-8) then
+              a1=a2max
+           endif
+        endif
         jac = jac*a2
         soft = soft*(pi/2d0)
     elseif( ((i .eq. 0) .and. (maxn .eq. next-2)) .or. ((m1 .and. (i .le. 1)))) then

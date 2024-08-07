@@ -38,12 +38,15 @@ contains
 !!$       wf(2) = dcmplx( -hel*sqh )
 !!$       wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
 !!$    endif
-
-    if (p(0).gt.0d0) then
+    if (p(0).eq.0d0) then
+       write (*,*) 'Cannot generate external gluon with zero energy'
+       write (*,*) p
+       stop 1
+    elseif (p(0).gt.0d0) then
        hel = dble(2*ihel-1)
        pp = p(0)
        pt = sqrt(p(1)**2+p(2)**2)
-       wf(1) = dcmplx( rZero )
+       wf(1) = cZero
        wf(4) = dcmplx( hel*pt/pp*sqh )
        if ( pt.ne.rZero ) then
           pzpt = p(3)/(pp*pt)*sqh*hel
@@ -58,7 +61,7 @@ contains
        hel = dble(2*ihel-1)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
-       wf(1) = dcmplx( rZero )
+       wf(1) = cZero
        wf(4) = dcmplx( hel*pt/pp*sqh )
        if ( pt.ne.rZero ) then
           pzpt = -p(3)/(pp*pt)*sqh*hel
