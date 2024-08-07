@@ -10,7 +10,7 @@ amplitude_QCD.o matrix_reweight_QCD.o
 
 FC=gfortran
 FFLAGS=-ffast-math -O3
-#FFLAGS=-fbounds-check -g
+#FFLAGS=-fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 
 # Files for all executables
 
