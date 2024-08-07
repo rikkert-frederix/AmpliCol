@@ -534,9 +534,6 @@ endif
     real(kind=8),external :: ran2
     integer :: parts
 
-    !write(*,*) 'Particles to generate:',maskr(parts)
-    !write(*,*) 'ibset',ibset(0,2)
-
     k = maxn - i   !  k is the number of particles remaining to generate
     s1 = mass1**2     ! mass of the final state particle to be generated
     z_sign=sign(1d0,q2(3))
@@ -557,8 +554,8 @@ endif
 
     ! Split into the long (L) decomposition of the q1 (relevant for massive)
     beta = dsqrt(threedot(q1_cmf(1:3),q1_cmf(1:3)))/q1_cmf(0) ! needed only when massive
-    q1_cmf(1:3) = q1_cmf(1:3)/beta ! if massless, beta=1
-    if (mass1 .eq. 0d0) then
+    q1_cmf(1:3) = q1_cmf(1:3)/beta 
+    if (mass1 .eq. 0d0) then ! if massless, beta=1
        beta=1.d0
     endif
 
@@ -569,7 +566,6 @@ endif
     ! angles between q1,q2 in CMF_k frame
     costheta = threedot(q1_cmf(1:3),q2_cmf(1:3))/ &
             (sqrt(threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3))))
-    sintheta = dsqrt(1D0-costheta**2)
 
     !Generate s2
     if (m1 .and. (i .eq. 0)) then 
@@ -878,6 +874,14 @@ endif
         C = ((smax-A)/(smin-A))**R
         s2 = (smin-A)*C + A
         soft = soft*(log(smax-A)-log(smin-A))
+        if (smax-A.le.0d0) then
+           jac=-5d0
+           return 
+        endif
+        if (smin-A.le.0d0) then
+           jac=-6d0
+           return
+        endif
         gs = 1d0/(s2-Sigma)
         jac = jac/gs
         a1 = a1_m1(s,s1,s2,q1_cmf,P_cmf,k)
@@ -955,6 +959,14 @@ endif
        s2 = (A*(B - smin) + B*(smin - A)*C)/(B - smin + (smin-A)*C)
        soft = soft*(log((smax-Sigma)/(s-sigmak-smax))-&
                     log((smin-Sigma)/(s-sigmak-smin)))
+       if ((smax-Sigma)/(s-sigmak-smax).le.0d0) then
+            jac=-8d0
+            return
+       endif
+       if ((smin-Sigma)/(s-sigmak-smin).le.0d0) then
+            jac=-8d0
+            return
+       endif
        gs = (s-Sigmaold)/((s-sigmak-s2)*(s2-Sigma))
        jac = jac/gs
     endif
@@ -1029,7 +1041,7 @@ endif
         Atilde = (Amin**(1d0-R))*(Amax)**R
         kappa = - h1 + f_h1*(1d0+Atilde)/(1d0-Atilde)
         buff = f_func_term1(a1,cos,s,s1,s2,h)
-        if (v+kappa.eq.0d0) then
+        if (v+kappa.lt.h*1d-5) then
            a1=a1max
         else
            a1 = ((kappa**2) - wsq)/(2d0*(v+kappa))
@@ -1037,6 +1049,14 @@ endif
         if ((a1min-a1)/a1min.le.1d-6.and.a1min-a1.gt.0d0) a1=a1min 
         if ((a1-a1max)/a1max.le.1d-6.and.a1-a1max.gt.0d0) a1=a1max
         soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
+        if (Amax.le.0d0) then
+             jac=-9d0
+             return
+        endif
+        if (Amin.le.0d0) then
+             jac=-9d0
+             return
+        endif
         jac = jac*a1
         jac = jac*beta
       elseif (((i .eq. 0) .or. (m1 .and. (i .le. 1)))) then
