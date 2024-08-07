@@ -288,10 +288,12 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then
   if (mm .gt. 2) then
       call basic_antenna(q(0:3,subperm1(mm)),masses(subperm1(mm)),qk(0:3,mm-1),-1d0,&
          Qm,pp(:,ibset(0,1)),pp(:,ibset(0,0)),0,.false.,mm,parts)
+      if (jac.lt.0d0) return
       mass_sum=mass_sum+masses(subperm1(mm))
   else
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),qk(0:3,1),&
            masses(subperm1(1)),Qm,pp(:,ibset(0,1)),pp(:,ibset(0,0)),0,.false.,mm,parts)
+      if (jac.lt.0d0) return
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
@@ -299,12 +301,14 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then
   do i=1,mm-3
       call basic_antenna(q(0:3,subperm1(mm-i)),masses(subperm1(mm-i)),qk(0:3,mm-i-1),-1d0,&
            qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),pp(:,ibset(0,0)),i,.false.,mm,parts)
+      if (jac.lt.0d0) return
       mass_sum=mass_sum+masses(subperm1(mm-i))
   enddo
 
   if (mm .gt. 2) then
       call basic_antenna(q(0:3,subperm1(2)),masses(subperm1(2)),qk(0:3,1),masses(subperm1(1)),&
                qk(0:3,2),q(0:3,subperm1(3)),pp(:,ibset(0,0)),mm-2,.false.,mm,parts)
+      if (jac.lt.0d0) return
       mass_sum=mass_sum+masses(subperm1(2))
       mass_sum=mass_sum+masses(subperm1(1))
   endif
@@ -314,10 +318,12 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then
   if (next-2-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(next-2-mm)),masses(subperm2(next-2-mm)),qk(0:3,next-2-1),-1d0,&
            Qnm,pp(:,ibset(0,0)),pp(:,ibset(0,1)),0,.false.,next-2-mm,parts)
+      if (jac.lt.0d0) return
     mass_sum=mass_sum+masses(subperm2(next-2-mm))
   else
     call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),qk(0:3,next-2-1),&
         masses(subperm2(1)),Qnm,pp(:,ibset(0,0)),pp(:,ibset(0,1)),0,.false.,next-2-mm,parts)
+      if (jac.lt.0d0) return
     mass_sum=mass_sum+masses(subperm2(1))
     mass_sum=mass_sum+masses(subperm2(2))
   endif
@@ -325,12 +331,14 @@ if ((mm .gt. 1).and.(next-2-mm .gt. 1)) then
   do i=1,(next-2-mm)-3
     call basic_antenna(q(0:3,subperm2(next-2-mm-i)),masses(subperm2(next-2-mm-i)),qk(0:3,next-2-1-i),-1d0,&
                qk(0:3,next-2-i),q(0:3,subperm2(next-2-mm-i+1)),pp(:,ibset(0,1)),i,.false.,next-2-mm,parts)
+      if (jac.lt.0d0) return
     mass_sum=mass_sum+masses(subperm2(next-2-mm-i))
   enddo
 
   if (next-2-mm .gt. 2) then
     call basic_antenna(q(0:3,subperm2(2)),masses(subperm2(2)),qk(0:3,mm+1),masses(subperm2(1)),&
                qk(0:3,mm+2),q(0:3,subperm2(3)),pp(:,ibset(0,1)),next-2-mm-2,.false.,next-2-mm,parts)
+      if (jac.lt.0d0) return
     mass_sum=mass_sum+masses(subperm2(2))
     mass_sum=mass_sum+masses(subperm2(1))
   endif
@@ -369,32 +377,38 @@ elseif (((mm .eq. 1).or.(next-2-mm .eq. 1))) then
   if (next-2 .gt. 2) then
      call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),qk(0:3,next-2-1),-1d0,&
                   qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
+      if (jac.lt.0d0) return
      mass_sum=mass_sum+masses(subperm(1))
   else
      call basic_antenna(q(0:3,subperm(1)),masses(subperm(1)),qk(0:3,next-2-1),&
                  masses(subperm_rest(1)),qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
+      if (jac.lt.0d0) return
      mass_sum=mass_sum+masses(subperm(1))
      mass_sum=mass_sum+masses(subperm_rest(1))
   endif
   if (next-2 .gt. 3) then
        call basic_antenna(q(0:3,subperm_rest(next-2-1)),masses(subperm_rest(next-2-1)),qk(0:3,next-2-1-1),&
                  -1d0,qk(0:3,next-2-1),q2_ref,q1_ref,1,m1,next-2,parts)
+      if (jac.lt.0d0) return
        mass_sum=mass_sum+masses(subperm_rest(next-2-1))
   elseif (next-2 .eq. 3) then 
        call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),qk(0:3,next-2-2),&
          masses(subperm_rest(1)),qk(0:3,next-2-1),q2_ref,q1_ref,1,.false.,next-2,parts)
+      if (jac.lt.0d0) return
        mass_sum=mass_sum+masses(subperm_rest(2))
        mass_sum=mass_sum+masses(subperm_rest(1))
   endif
   do i=2,next-2-3
    call basic_antenna(q(0:3,subperm_rest(next-2-i)),masses(subperm_rest(next-2-i)),qk(0:3,next-2-i-1),-1d0,&
                   qk(0:3,next-2-i),q(0:3,subperm_rest(next-2-i+1)),q1_ref,i,.false.,next-2,parts)
+      if (jac.lt.0d0) return
    mass_sum=mass_sum+masses(subperm_rest(next-2-i))
   enddo
   if (next-2 .gt. 3) then
           call basic_antenna(q(0:3,subperm_rest(2)),masses(subperm_rest(2)),qk(0:3,1),&
                masses(subperm_rest(1)),qk(0:3,2),&
                q(0:3,subperm_rest(3)),q1_ref,next-2-2,.false.,next-2,parts)
+      if (jac.lt.0d0) return
      mass_sum=mass_sum+masses(subperm_rest(2))
      mass_sum=mass_sum+masses(subperm_rest(1))
   endif
@@ -424,23 +438,27 @@ else
   if (next-2 .gt. 2) then
      call basic_antenna(q(0:3,perm_final(next-2)),masses(perm_final(next-2)),qk(0:3,next-2-1),mass_in,&
                 qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
+     if (jac.lt.0d0) return
      mass_sum=mass_sum+masses(perm_final(next-2))**2
      parts = parts - ibset(0,perm_final(next-2)-1)
   else
      call basic_antenna(q(0:3,perm_final(next-2)),masses(perm_final(next-2)),qk(0:3,next-2-1),&
                masses(perm_final(1)),qk(0:3,next-2),q1_ref,q2_ref,0,m1,next-2,parts)
+     if (jac.lt.0d0) return
      mass_sum=mass_sum+masses(perm_final(next-2))**2
      parts = parts - ibset(0,perm_final(next-2)-1)
   endif
   do i=1,next-2-3
      call basic_antenna(q(0:3,perm_final(next-2-i)),masses(perm_final(next-2-i)),qk(0:3,next-2-i-1),&
                mass_in,qk(0:3,next-2-i),q(0:3,perm_final(next-2-i+1)),q2_ref,i,.false.,next-2,parts)
+     if (jac.lt.0d0) return
      mass_sum=mass_sum+masses(perm_final(next-2-i))**2
      parts = parts - ibset(0,perm_final(next-2-i)-1)
   enddo
   if (next-2 .gt. 2) then
         call basic_antenna(q(0:3,perm_final(2)),masses(perm_final(2)),qk(0:3,1),&
         masses(perm_final(1)),qk(0:3,2),q(0:3,perm_final(3)),q2_ref,next-2-2,.false.,next-2,parts)
+        if (jac.lt.0d0) return
         mass_sum=mass_sum+masses(perm_final(2))**2
         parts = parts - ibset(0,perm_final(2)-1)
   endif
@@ -525,7 +543,10 @@ endif
     s = (dot(P,P)) ! Incoming inv mass
 
     ! boost qi to CMF (P rest frame)
-    if (dot(P,P).le.0d0) return
+    if (dot(P,P).le.0d0) then
+       jac=-1d0
+       return
+    endif
     esum=dsqrt(dot(P,P))
     Pm(0)=P(0)
     Pm(1:3)=-P(1:3)
@@ -541,7 +562,10 @@ endif
        beta=1.d0
     endif
 
-    if (threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3)).eq.0d0) return
+    if (threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3)).eq.0d0) then
+       jac=-2d0
+       return
+    endif
     ! angles between q1,q2 in CMF_k frame
     costheta = threedot(q1_cmf(1:3),q2_cmf(1:3))/ &
             (sqrt(threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3))))
@@ -557,6 +581,7 @@ endif
     else
        if (k .ge. 3) then
          call generate_s2(k,s,s1,s2,q1_cmf,P_cmf)
+         if (jac.lt.0d0) return
        else
          s2 = mass2**2
          gs = 1d0
@@ -918,7 +943,10 @@ endif
 
     ! S limits exactly same as in COMIX! 
 
-    if (smin.gt.smax) return
+    if (smin.gt.smax) then
+       jac=-3d0
+       return
+    endif
 
     if ((.not.open) .and. (.not. flat)) then
        ix = ix +1
