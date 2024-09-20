@@ -1,0 +1,183 @@
+#!/usr/bin/env python
+
+# multi-jet
+
+
+import itertools
+import math
+
+
+def create_all_procs_from_unique_procs(proc,swap_ini,swap_qq):
+    all_procs = []
+    # Iterate over all permutations of the first two elements
+    for perm in itertools.permutations(proc, 2):
+        # Find the remaining elements
+        remaining = list(proc)
+        remaining.remove(perm[0])
+        remaining.remove(perm[1])
+        
+        # Sort the last three elements since order does not matter
+        remaining_sorted = tuple(sorted(remaining))
+        remaining_sorted_swap = tuple(sorted(swap_qq.get(i,i) for i in remaining))
+        
+        # Combine the permuted first two elements with the sorted last three elements
+        combined = perm+remaining_sorted #tuple(swap_ini.get(iperm,iperm) for iperm in perm) + remaining_sorted
+        combined_swap = tuple(swap_qq.get(iperm,iperm) for iperm in combined[0:2]) + remaining_sorted_swap
+
+        if (combined not in all_procs) and (combined_swap not in all_procs):
+            # Append to all_procs as a tuple
+            all_procs.append(combined)
+    return all_procs
+
+
+def is_valid_permutation(perm):
+    # Check the cyclic constraint: negative numbers must be followed by positive ones
+    n = len(perm)
+    for i in range(n):
+        if (perm[i] == 'qbar' or perm[i] == 'qpbar' ):  # If the current element is anti-quark
+            next_index = (i + 1) % n  # Cyclic next element
+            if (perm[next_index] != 'q' and perm[next_index] != 'qp' ):  # The next element must be positive
+                return False
+    return True
+
+def generate_permutations(arr,swap_qq):
+    # The first element stays fixed
+    first_element = arr[0]
+    rest_elements = arr[1:]
+    
+    valid_permutations = []
+    
+    # Generate all permutations for the remaining 6 elements
+    for perm in itertools.permutations(rest_elements):
+        # Form the new list with the fixed first element and permuted rest
+        full_perm = (first_element,) + perm
+        full_perm_swap = tuple(swap_qq.get(i,i) for i in full_perm)
+        
+        # Check if the permutation satisfies the cyclic constraint
+        if is_valid_permutation(full_perm):
+            if full_perm not in valid_permutations:
+                if arr[0]=='g' and arr[1]=='g':
+                    if full_perm_swap not in valid_permutations:
+                        valid_permutations.append(full_perm)
+                else:
+                    valid_permutations.append(full_perm)
+                
+    
+    return valid_permutations
+
+def convert_to_input(phase_space_order,perm,swap_ini,pso):
+    conversion={'g':'21','q':'1','qbar':'-1','qp':'2','qpbar':'-2'}
+
+    try:
+        shift=perm.index('q')
+    except ValueError:
+        shift=0
+
+    ini1=swap_ini[perm[0]]
+    ini2=swap_ini[perm[pso+1]]
+
+    input=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
+           
+    input=input+[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]]
+
+#    print('input',input,pso,shift)
+           
+
+    return input
+
+
+swap_ini={'g':'g',
+          'q':'qbar',
+          'qbar':'q',
+          'qp':'qpbar',
+          'qpbar':'qp'}
+swap_qq={'g':'g',
+         'q':'qp',
+         'qp':'q',
+         'qbar':'qpbar',
+         'qpbar':'qbar'}
+
+nfinal=4
+
+# multi-jet base processes (without gluons):
+#base_procs=[[],['q','qbar'],['q','q','qbar','qbar'],['q','qp','qbar','qpbar']]
+base_procs=[[],['q','qbar']]
+
+# extend the base_procs with additional gluons. These are all the unique procs
+unique_procs=[]
+for proc in base_procs:
+    while len(proc) < nfinal+2:
+        proc.append('g')
+    if (len(proc) == nfinal+2):
+        unique_procs.append(proc)
+
+base_proc={}
+all_procs=[]
+for i,proc in enumerate(unique_procs):
+    all_new_procs=create_all_procs_from_unique_procs(proc,swap_ini,swap_qq)
+    all_procs=all_procs+all_new_procs
+    for iproc in all_new_procs:
+        base_proc[iproc]=i
+
+# Get symmetry factor
+iden_fac={}
+expected_number={}
+for proc in all_procs:
+    i_fac=1
+    i_fac*=max(1,math.factorial(proc[2:].count('g')))
+    i_fac*=max(1,math.factorial(proc[2:].count('q')))
+    i_fac*=max(1,math.factorial(proc[2:].count('qbar')))
+    i_fac*=max(1,math.factorial(proc[2:].count('qp')))
+    i_fac*=max(1,math.factorial(proc[2:].count('qpbar')))
+    if proc[2:].count('q') == proc[2:].count('qbar') and proc[2:].count('q') == proc[2:].count('qp') and proc[2:].count('q') == proc[2:].count('qpbar') and proc[2:].count('q') == 1:
+        i_fac*=2
+    
+    iden_fac[proc]=i_fac
+    if base_proc[proc] == 0:
+        n_co=math.factorial(nfinal+1)
+    elif base_proc[proc] == 1:
+        n_co=math.factorial(nfinal)
+    elif base_proc[proc] == 2:
+        n_co=math.factorial(nfinal-2)*(nfinal-1)*2
+    elif base_proc[proc] == 3:
+        n_co=math.factorial(nfinal-2)*(nfinal-1)*2
+    if int(n_co/iden_fac[proc])*iden_fac[proc] != n_co:
+        print('Error: not an integer')
+        quit()
+    expected_number[proc]=int(n_co/iden_fac[proc])
+    
+
+order=[1]+[i for i in range(3,nfinal+3)]
+phase_space_order=[]
+
+for i in range(1,nfinal+2):
+    phase_space_order.append(tuple(order[:i]+[2]+order[i:]))
+
+pso_map = [{} for _ in phase_space_order]
+
+
+to_write=[[] for _ in phase_space_order]
+
+for i,proc in enumerate(all_procs):
+    print('looping through processes... ',proc)
+    icount=0
+    valid_perms=generate_permutations(proc,swap_qq)
+    for pso,psorder in enumerate(phase_space_order):
+        pso_map[pso][proc]=[]
+        for valid_perm in valid_perms:
+            if valid_perm[0]==proc[0] and valid_perm[pso+1]==proc[1]:
+                pso_map[pso][proc].append(valid_perm)
+                to_write[pso].append(convert_to_input(psorder,valid_perm,swap_ini,pso)+[' ']+[str(iden_fac[proc])])
+                icount=icount+1
+
+
+with open('processes.txt','w') as f:
+    for pso in to_write:
+        f.write(str(nfinal+2)+' '+str(len(pso))+'\n')
+        for ele in pso:
+            f.write(' '.join(ele)+'\n')
+        f.write('\n')
+        f.write('\n')
+        f.write('\n')
+        f.write('\n')
+
