@@ -26,6 +26,7 @@ program matrix_integrate_QCD
   integer,dimension(:),allocatable :: col_fac
   integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
+  integer :: iproc_picked
   
   call get_run_arguments()
   call setup_spin()
@@ -242,7 +243,7 @@ contains
        else
           amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
        endif
-       if (iproc.lt.nproc .and. iproc_start(iproc+1).eq.ih+1) then
+       if (iproc.lt.nproc .and. amps%iproc_start(iproc+1).eq.ih+1) then
           amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
           iproc=iproc+1
        endif
@@ -447,26 +448,26 @@ contains
     real(kind=8) :: wgt
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
-    write (iunit,*) next,wgt,amp2*weight,amp2,weight
+    write (iunit,*) next,wgt,amp2(iproc_picked)*weight,amp2(iproc_picked),weight
     write (iunit,'(100i3)') amps%spins(1:next,hel_picked(1),hel_picked(2))
-    write (iunit,'(100i3)') o(1:next)
+    write (iunit,'(100i3)') orders(1:next,iproc_picked)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
     ! compensate for reducing the number of integration channels assuming
     ! symmetric initial states, we need to randomly flip all z-components in
     ! those cases. Easiest to always do this if the two incoming particles are
     ! identical.
-    if (part(1).ne.part(2) .or. ran2().lt.0.5d0) then
+    if (processes(1,iproc_picked).ne.processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
        ! do not flip
        do i=1,next
-          write (iunit,*) part(i),p(1:3,i),p(0,i)
+          write (iunit,*) processes(i,iproc_picked),p(1:3,i),p(0,i)
        enddo
     else
        ! do flip
        do i=1,next
           if (i.le.2) then
-             write (iunit,*) part(i),p(1:2,3-i),-p(3,3-i),p(0,3-i)
+             write (iunit,*) processes(i,iproc_picked),p(1:2,3-i),-p(3,3-i),p(0,3-i)
           else
-             write (iunit,*) part(i),p(1:2,i),-p(3,i),p(0,i)
+             write (iunit,*) processes(i,iproc_picked),p(1:2,i),-p(3,i),p(0,i)
           endif
        enddo
     endif
@@ -493,6 +494,12 @@ contains
        write (*,*) 'Could not unweight helicity',hel_picked,nhel
        stop 1
     endif
+    do iproc_picked=1,nproc-1
+       if (amps%iproc_start(iproc_picked+1).ge.hel_picked(2)) then
+          hel_picked(2)=hel_picked(2)-amps%iproc_start(iproc_picked)+1
+       endif
+    enddo
+    
     if (hel_fac(hel_picked(2)).gt.1) then
        hel_picked(1)=1+int(ran2()*hel_fac(hel_picked(2)))
     else
