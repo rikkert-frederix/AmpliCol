@@ -235,15 +235,13 @@ contains
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
-    amp2_hel(1:nhel)=0d0
     iproc=1
     do ih=1,amps%n_amps
        if (use_real_gluons .and. amps%n_qqbar.eq.0) then
-          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih)
+          amp2_hel(ih)=amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih) *hel_fac(ih)
        else
-          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih)))
+          amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
        endif
-       amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
        if (iproc.lt.nproc .and. iproc_start(iproc+1).eq.ih+1) then
           amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
           iproc=iproc+1
