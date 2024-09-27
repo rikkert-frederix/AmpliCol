@@ -55,9 +55,6 @@ program matrix_integrate_QCD
 
   accuracy=0.00001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
-
-! relevant physics input parameters and initialisation of amplitudes
-
   ! setting energy
   sqrts=14000.d0
 
@@ -86,6 +83,8 @@ program matrix_integrate_QCD
 !  width(3:4) = 1.491500d0
 !  width(5) = 0d0
 
+
+  ! Initialise the phase-space parametrisation
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
@@ -100,14 +99,12 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
 
+  call cpu_time(tBefore)
+
   allocate(iden(nproc))
   iden(1:nproc)=1
   call set_final_state_identical_particle_factor() ! updates 'iden()'
   call set_initial_state_average_factor()          ! updates 'iden()'
-
-  ! initialize the amplitudes (sets up the imaps(), helicity maps,
-  ! colour factors, etc.)
-  call cpu_time(tBefore)
 
   if (include_pdf) then
      ndim=ndim+2
@@ -115,7 +112,12 @@ program matrix_integrate_QCD
      call set_ipdgs_for_PDF()
   endif
 
+  ! initialize the amplitudes. This creates the whole tree-structure from
+  ! which the amps%evaluation() can compute the amplitudes for given
+  ! phase-space points.
   call amps%init(1,next,nproc,processes,spin,mass,width,orders)
+
+  ! Total number of amplitudes is stored in 'nhel'
   if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
      nhel=amps%n_amps/2
      write (*,*) 'FIX THIS'
@@ -123,9 +125,6 @@ program matrix_integrate_QCD
   else
      nhel=sum(amps%n_amps(1:nproc))
   endif
-
-  call cpu_time(tAfter)
-  t_amp_init=t_amp_init+tAfter-tBefore
 
   allocate(col_fac(nproc))
   call compute_LC_colour_factor()  ! updates 'col_fac()'
@@ -137,6 +136,8 @@ program matrix_integrate_QCD
   allocate(hel_fac(1:nhel))
   hel_fac(1:nhel)=1
   
+  call cpu_time(tAfter)
+  t_amp_init=t_amp_init+tAfter-tBefore
 
   ! Not so relevant mint-module parameters: only used in special cases.
   call set_mint_module_special_parameters()
