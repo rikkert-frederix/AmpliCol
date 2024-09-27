@@ -134,11 +134,11 @@ contains
     
     call allocate_current_list_and_interaction_list()
 
-    ! All done. But there could be currents that are not needed. Filter them out
     if (this%imode.eq.1) call allocate_and_fill_spins()
     call allocate_and_fill_colour_permutations()
     call allocate_and_fill_momentum_array()
 
+    ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call this%filter_dead_trees(n)
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
@@ -178,7 +178,7 @@ contains
     subroutine allocate_and_fill_currents_to_amps_map()
       ! The 'curr2amp(1:2,iamp)' variable lists which two currents (one of
       ! size n-1 and one of size 1) result in the amplitude 'iamp'. This
-      ! subrouttine also sets the include_amp(iamp) to .true. for all
+      ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
       integer :: icur,jcur,iamp,jamp,i,j
