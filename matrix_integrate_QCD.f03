@@ -89,13 +89,13 @@ program matrix_integrate_QCD
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
-     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,.false.,include_pdf)
+     call gen23_init(sqrts,next,mass,orders(1,1),s_cut,pt_min,DRjj_min,.false.,include_pdf)
   elseif  (integration.eq.2) then
-     call haag_init(sqrts,next,mass,o,part,s_cut,t_chan,include_pdf)
+     call haag_init(sqrts,next,mass,orders(1,1),s_cut,t_chan,include_pdf)
   elseif (integration.eq.3) then
      call genpt_init(sqrts,next,mass,pt_min,eta_max,DRjj_min,include_pdf)
   elseif (integration.eq.4) then
-     call gen23_init(sqrts,next,mass,o,part,s_cut,pt_min,DRjj_min,.true.,include_pdf)
+     call gen23_init(sqrts,next,mass,orders(1,1),s_cut,pt_min,DRjj_min,.true.,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore

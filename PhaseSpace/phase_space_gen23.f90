@@ -28,7 +28,7 @@ module phase_space_gen23
   
   public :: gen23_init,gen23_phase_space
 contains
-  subroutine gen23_init(sqrtsh,n,m,o,part,s_cut,pt_cut,dr_cut,t_chan,include_pdf)
+  subroutine gen23_init(sqrtsh,n,m,o,s_cut,pt_cut,dr_cut,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
     ! INPUT
@@ -59,7 +59,6 @@ contains
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
-    integer(kind=4),dimension(n) :: part
     sqrtshat=sqrtsh
     sqrts=sqrtsh
     t_channel=t_chan

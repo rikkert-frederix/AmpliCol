@@ -18,7 +18,6 @@ module haag
   integer(kind=4),dimension(:,:),allocatable :: sets
   logical :: includePDF
   real(kind=8) :: sqrtshat,sqrts,tau,ycm
-  integer :: nquarks
 
   logical,parameter :: verbose=.true.
   logical,parameter :: exper=.false.
@@ -31,12 +30,11 @@ module haag
 
 contains
 
-  subroutine haag_init(sqrtsh,n,m,o,part,s_cut,s_chan,include_pdf)
+  subroutine haag_init(sqrtsh,n,m,o,s_cut,s_chan,include_pdf)
     implicit none
     real(kind=8),intent(in) :: sqrtsh
     integer(kind=4),intent(in) :: n
-    integer(kind=4),dimension(n),intent(in) :: o,part
-    integer(kind=4),dimension(n) :: process
+    integer(kind=4),dimension(n),intent(in) :: o
     real(kind=8),intent(in) :: s_cut(2)
     real(kind=8),dimension(n),intent(in) :: m
     logical,intent(in) :: s_chan
@@ -90,18 +88,6 @@ contains
              order(j+1)=o(1+mod(i+j-1,next))
           enddo
           exit
-       endif
-    enddo
-    process=part
-    nquarks=0
-    do i=1,next
-       ! Count number of quarks
-       if ((abs(process(i)).ge.1) .and. abs(process(i)).le.6) then
-           nquarks=nquarks+1
-       endif
-       ! charge conjugate process to all outgoing particles
-       if ((i.le.2) .and. ((abs(process(i)).ge.1) .and. abs(process(i)).le.6))  then
-          process(i)=-process(i)
        endif
     enddo
     if (verbose) write (*,*) 'Canonical order',order
