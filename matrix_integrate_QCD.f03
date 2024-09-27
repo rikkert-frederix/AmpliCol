@@ -123,7 +123,7 @@ program matrix_integrate_QCD
      write (*,*) 'FIX THIS'
      stop 1
   else
-     nhel=sum(amps%n_amps(1:nproc))
+     nhel=amps%n_amps
   endif
 
   allocate(col_fac(nproc))
@@ -236,19 +236,20 @@ contains
 
     call cpu_time(tBefore)
     amp2_hel(1:nhel)=0d0
-    ih=0
-    do iproc=1,nproc
-       do i=1,amps%n_amps(iproc)
-          ih=ih+1
-          if (use_real_gluons .and. amps%n_qqbar.eq.0) then
-             amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih)
-          else
-             amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih)))
-          endif
-          amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
-       enddo
-       amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+    iproc=1
+    do ih=1,amps%n_amps
+       if (use_real_gluons .and. amps%n_qqbar.eq.0) then
+          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih)
+       else
+          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih)))
+       endif
+       amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
+       if (iproc.lt.nproc .and. iproc_start(iproc+1).eq.ih+1) then
+          amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+          iproc=iproc+1
+       endif
     enddo
+    amp2(nproc)=sum(amp2_hel(amps%iproc_start(nproc):ih-1))
     
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
