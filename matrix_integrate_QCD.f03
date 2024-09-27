@@ -9,10 +9,12 @@ program matrix_integrate_QCD
   implicit none
   type(amplitude_QCD) :: amps
   integer :: next
-  real(kind=8) :: amp2,weight
-  real(kind=8),dimension(:),allocatable :: amp2_hel
-  integer :: j,c_o,i
-  integer(kind=8) :: sym_fac,iden
+  real(kind=8) :: weight
+  real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
+  integer :: j,c_o,i,nproc
+  integer,dimension(:,:),allocatable :: processes,orders
+  integer,dimension(:),allocatable :: multi_factor
+  integer(kind=8),dimension(:),allocatable :: iden
   integer(kind=4),dimension(:),allocatable :: o,part,hel,hel_fac
   integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
@@ -21,12 +23,12 @@ program matrix_integrate_QCD
   character(len=80) :: filename
   integer(kind=4) :: integration,nquarks,nhel
   logical,dimension(-6:7,2) :: ipdgs
-  integer :: col_fac
+  integer,dimension(:),allocatable :: col_fac
   integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
   
   call get_run_arguments()
-  call compute_multichannel_symmetry_factor()
+  call setup_spin()
   call create_run_tag()
 
   allocate(mass(next))
@@ -98,9 +100,10 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
 
-  iden=1
-  call set_final_state_identical_particle_factor(iden)
-  call set_initial_state_average_factor(iden)
+  allocate(iden(nproc))
+  iden(1:nproc)=1
+  call set_final_state_identical_particle_factor() ! updates 'iden()'
+  call set_initial_state_average_factor()          ! updates 'iden()'
 
   ! initialize the amplitudes (sets up the imaps(), helicity maps,
   ! colour factors, etc.)
@@ -109,21 +112,25 @@ program matrix_integrate_QCD
   if (include_pdf) then
      ndim=ndim+2
      call PDF_initialise
-     call set_ipdgs_for_PDF(ipdgs)
+     call set_ipdgs_for_PDF()
   endif
 
-  call amps%init(1,next,part,spin,mass,width,o)
+  call amps%init(1,next,nproc,processes,spin,mass,width,orders)
   if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
      nhel=amps%n_amps/2
+     write (*,*) 'FIX THIS'
+     stop 1
   else
-     nhel=amps%n_amps
+     nhel=sum(amps%n_amps(1:nproc))
   endif
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
 
-  call compute_LC_colour_factor(col_fac)
+  allocate(col_fac(nproc))
+  call compute_LC_colour_factor()  ! updates 'col_fac()'
   
+  allocate(amp2(nproc))
   ! number of helicities to sum over
   allocate(amp2_hel(1:nhel))
   allocate(hel(1:next))
@@ -171,19 +178,20 @@ contains
     integer :: ifirst
     real(kind=8), dimension(ndim) :: x
     real(kind=8), dimension(nintegrals) :: f1
-    real(kind=8), save :: val
-    integer :: ih
+    real(kind=8), dimension(:),allocatable,save :: val
+    integer :: ih,iproc,i
     real(kind=8) :: vol,cuts_wgt
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
     real(kind=8) :: Q
-   
+    if (.not.allocated(val)) allocate(val(1:nproc))
+    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
        ! use previously computed integrand
-       f1(1)=abs(val)
-       f1(2)=val
+       f1(1)=sum(abs(val(1:nproc)))
+       f1(2)=sum(val(1:nproc))
        return
     endif
     new_point=.true.
@@ -211,7 +219,7 @@ contains
     cuts_wgt=pass_cuts(next,p)
     if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
-       val=0d0
+       val(1:nproc)=0d0
        return
     endif
 
@@ -227,27 +235,31 @@ contains
 
     call cpu_time(tBefore)
     amp2_hel(1:nhel)=0d0
-    do ih=1,nhel
-       if (use_real_gluons .and. amps%n_qqbar.eq.0) then
-          amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac*amps%amps_r(ih)
-       else
-          amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac*dconjg(amps%amps(ih)))
-       endif
-       amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
+    ih=0
+    do iproc=1,nproc
+       do i=1,amps%n_amps(iproc)
+          ih=ih+1
+          if (use_real_gluons .and. amps%n_qqbar.eq.0) then
+             amp2_hel(ih)=amp2_hel(ih)+amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih)
+          else
+             amp2_hel(ih)=amp2_hel(ih)+dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih)))
+          endif
+          amp2_hel(ih)=amp2_hel(ih)*hel_fac(ih)
+       enddo
+       amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
     enddo
-    amp2=sum(amp2_hel(1:nhel))
-
+    
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
        if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
           ! passed==nevent_hel_filter, the unweighting of the helicities goes
           ! wrong for this phase-space point. Hence, we need to skip it.
-          amp2=0d0
+          amp2(1:nproc)=0d0
        endif
     endif
     
-    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)/dble(iden)*conv
+    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)*conv
 
     if (amps%n_sing.ge.1) then
        do i=1,next
@@ -259,21 +271,23 @@ contains
        weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**amps%n_sing
     endif
 
-    val=amp2*weight
+    val(1:nproc)=amp2(1:nproc)*weight/dble(iden(1:nproc))
 
     ! Apply the weight from the cuts
-    if (smooth_cuts) val=val*cuts_wgt
+    if (smooth_cuts) val(1:nproc)=val(1:nproc)*cuts_wgt
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
-    val=val*sym_fac
+    val(1:nproc)=val(1:nproc)*multi_factor(1:nproc)
 
     if (include_PDF) then
-       call multiply_by_PDF_value(val)
+       do iproc=1,nproc
+          call multiply_by_PDF_value(iproc,val(iproc))
+       enddo
     endif
     ! pass the result to the mint module
-    f1(1)=abs(val)
-    f1(2)=val
+    f1(1)=sum(abs(val(1:nproc)))
+    f1(2)=sum(val(1:nproc))
     integrand=f1(2)
 
     call cpu_time(tAfter)
@@ -350,7 +364,7 @@ contains
   subroutine setup_helicity_filter(nevent)
     implicit none
     real(kind=8) :: max_value
-    integer :: ih1,ih2,nevent
+    integer :: ih1,ih2,nevent,iproc1,iproc2
     integer,dimension(:),allocatable,save :: include_hel
     if (.not.allocated(include_hel)) then
        allocate(include_hel(nhel))
@@ -368,7 +382,11 @@ contains
        endif
        do ih2=ih1+1,nhel
           if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
-             ! identical
+             ! identical value. Now check that they belong to the same process
+             iproc1=1; do while (iproc1.lt.nproc .and. (amps%iproc_start(iproc1+1)-ih1).le.0) ; iproc1=iproc1+1 ; enddo
+             iproc2=1; do while (iproc2.lt.nproc .and. (amps%iproc_start(iproc2+1)-ih2).le.0) ; iproc2=iproc2+1 ; enddo
+             if (iproc1.ne.iproc2) cycle
+             ! identical process
              include_hel(ih2)=-ih1
              include_hel(ih1)=include_hel(ih1)+1
           endif
@@ -433,10 +451,10 @@ contains
     write (iunit,'(100i3)') amps%spins(1:next,hel_picked(1),hel_picked(2))
     write (iunit,'(100i3)') o(1:next)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
-    ! compensate for reducing the number of integration channels (see
-    ! sym_fac()) assuming symmetric initial states, we need to randomly flip
-    ! all z-components in those cases. Easiest to always do this if the two
-    ! incoming particles are identical.
+    ! compensate for reducing the number of integration channels assuming
+    ! symmetric initial states, we need to randomly flip all z-components in
+    ! those cases. Easiest to always do this if the two incoming particles are
+    ! identical.
     if (part(1).ne.part(2) .or. ran2().lt.0.5d0) then
        ! do not flip
        do i=1,next
@@ -460,7 +478,7 @@ contains
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
-    random=ran2()*amp2
+    random=ran2()*sum(amp2(1:nproc))
     i=1
     do
        if (amp2_hel(i).gt.random) then
@@ -485,9 +503,10 @@ contains
   subroutine get_run_arguments()
     implicit none
     integer :: argc
-    integer :: i,k
+    integer :: i,k,iproc
     character(len=256) :: argv
     logical :: found_1
+    integer(kind=8) :: sym_fac
     integer(kind=8) iseed
     common /to_seed/iseed
     iseed=0
@@ -497,7 +516,25 @@ contains
     ! imode=1  (computing bounding envelope)
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.le.10) then
+    if (argc.eq.2) then
+       do i=1,argc
+          CALL GET_COMMAND_ARGUMENT(i, argv)
+          if (i.eq.1) read(argv,*) integration
+          if (i.eq.2) read(argv,*) imode
+       enddo
+       open(unit=10,file='processes.txt',status='old')
+       read(10,*) next,nproc
+       allocate(processes(1:next,1:nproc))
+       allocate(orders(1:next,1:nproc))
+       allocate(multi_factor(1:nproc))
+       write (*,*) '****************************************************'
+       do iproc=1,nproc
+          read(10,*) processes(1:next,iproc),orders(1:next,iproc),multi_factor(iproc)
+          write(*,*) processes(1:next,iproc),'   ',orders(1:next,iproc),'   ',multi_factor(iproc)
+       enddo
+       write (*,*) '****************************************************'
+       close(10)
+    elseif (argc.le.10) then
        write(*,*) 'Inconsistent arguments:'
        write(*,*) '--------- Should be: --------'
        write(*,*) 'integration, mode, next, *process*, *order*'
@@ -533,71 +570,75 @@ contains
 99           continue             
           endif
        enddo
-    endif
-
-    write (*,*) '******************************************'
-    write (*,*) 'Process is     ',part
-    write (*,*) 'Colour order is',o
-    write (*,*) '******************************************'
-
-    nquarks = 0
-    do i=1,next
-       if ((abs(part(i)).ge.1).and.(abs(part(i)).le.6)) then
-          nquarks = nquarks + 1
-       endif
-    enddo
-    
-    if (nquarks.eq.0) then
-       ! count the number of gluons between '1' and '2' in the colour order
-       c_o=0
-       i=0
-       found_1=.false.
-       do
-          i=i+1
-          if (i.gt.next) i=1
-          if (found_1) c_o=c_o+1
-          if (o(i).eq.1) then
-             found_1=.true.
-          endif
-          if (o(i).eq.2 .and. found_1) then
-             c_o=c_o-1
-             exit
+       write (*,*) '******************************************'
+       write (*,*) 'Process is     ',part
+       write (*,*) 'Colour order is',o
+       write (*,*) '******************************************'
+       nquarks = 0
+       do i=1,next
+          if ((abs(part(i)).ge.1).and.(abs(part(i)).le.6)) then
+             nquarks = nquarks + 1
           endif
        enddo
-    endif
-
-    call setup_spin()
-    
-    ! basic checks:
-    if (next.lt.4) then
-       write (*,*) 'Not enough external particles',next
-       stop 1
-    endif
-    if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
-       write (*,*) 'Incorrect imode',imode
-       stop
-    endif
-
-    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
-       write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
-       stop
-    endif
-    if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
-       write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
-       stop
+       if (nquarks.eq.0) then
+          ! count the number of gluons between '1' and '2' in the colour order
+          c_o=0
+          i=0
+          found_1=.false.
+          do
+             i=i+1
+             if (i.gt.next) i=1
+             if (found_1) c_o=c_o+1
+             if (o(i).eq.1) then
+                found_1=.true.
+             endif
+             if (o(i).eq.2 .and. found_1) then
+                c_o=c_o-1
+                exit
+             endif
+          enddo
+       endif
+       ! basic checks:
+       if (next.lt.4) then
+          write (*,*) 'Not enough external particles',next
+          stop 1
+       endif
+       if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
+          write (*,*) 'Incorrect imode',imode
+          stop
+       endif
+       if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
+          write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
+          stop
+       endif
+       if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
+          write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
+          stop
+       endif
+       call compute_multichannel_symmetry_factor(sym_fac)
+       nproc=1
+       allocate(processes(1:next,nproc))
+       processes(1:next,1)=part(1:next)
+       allocate(orders(1:next,nproc))
+       orders(1:next,1)=o(1:next)
+       allocate(multi_factor(1))
+       multi_factor(1)=sym_fac
     endif
   end subroutine get_run_arguments
 
   subroutine setup_spin()
+    ! Use the first process in the processes() array to setup all the possible
+    ! spin states. Note that this assumes that all the processes() have the
+    ! same number of spin states
     implicit none
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
     do i=1,next
-       if (abs(part(i)).le.6 .or. part(i).eq.21 .or. part(i).eq.22) then
+       if (abs(processes(i,1)).le.6 .or. processes(i,1).eq.21 .or. processes(i,1).eq.22) then
           spin(0,i)=2   ! two spin states: '-1' and '1'
           spin(1,i)=-1
           spin(2,i)=1
        else
-          write (*,*) 'spin state not known',i,part(i)
+          write (*,*) 'spin state not known',i,processes(i,1)
           stop 1
        endif
     enddo
@@ -605,6 +646,7 @@ contains
   
   subroutine create_run_tag()
     implicit none
+    integer :: i1,i2,i
     tag='_'       ! tag of current run
     tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
 !    call add_to_string(tag,integration,.true.)
@@ -617,16 +659,26 @@ contains
     else
        call add_to_string(tag_read,imode,.true.)
     endif
-    do i=1,next
-       call add_to_string(tag,part(i),.true.)
-       call add_to_string(tag_read,part(i),.true.)
-    enddo
-    do i=1,next-1
-       call add_to_string(tag,o(i),.true.)
-       call add_to_string(tag_read,o(i),.true.)
-    enddo
-    call add_to_string(tag,o(next),.false.)
-    call add_to_string(tag_read,o(next),.false.)
+    if (allocated(part)) then
+       do i=1,next
+          call add_to_string(tag,part(i),.true.)
+          call add_to_string(tag_read,part(i),.true.)
+       enddo
+       do i=1,next-1
+          call add_to_string(tag,o(i),.true.)
+          call add_to_string(tag_read,o(i),.true.)
+       enddo
+       call add_to_string(tag,o(next),.false.)
+       call add_to_string(tag_read,o(next),.false.)
+    else
+        ! just to the first process; the should all give the same value for 'i'
+       i1=ifindloc(orders(1:next,1),next,1)
+       i2=ifindloc(orders(1:next,1),next,2)
+       i=i2-i1 -1
+       if (i.lt.0) i=i+next
+       call add_to_string(tag,i,.false.)
+       call add_to_string(tag_read,i,.false.)
+    endif
     write (*,*) 'File tag is: ',tag,'   ',add_arg
   end subroutine create_run_tag
 
@@ -657,72 +709,78 @@ contains
     endif
   end subroutine add_to_string
 
-  subroutine set_initial_state_average_factor(iden)
+  subroutine set_initial_state_average_factor()
     implicit none
-    integer(kind=8),intent(inout) :: iden
-    integer :: i
-    do i=1,2
-       if (part(i).eq.21) then
-          ! gluon: two polarisations and 8 colours
-          iden=iden*2*8
-       elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
-          ! (anti-)quark: two helicities and 3 colours
-          iden=iden*2*3
-       else
-          ! assume two helicities:
-          iden=iden*2
-       endif
+    integer :: i,iproc
+    do iproc=1,nproc
+       do i=1,2
+          if (processes(i,iproc).eq.21) then
+             ! gluon: two polarisations and 8 colours
+             iden(iproc)=iden(iproc)*2*8
+          elseif (abs(processes(i,iproc)).ge.1 .and. abs(processes(i,iproc)).le.6) then
+             ! (anti-)quark: two helicities and 3 colours
+             iden(iproc)=iden(iproc)*2*3
+          else
+             ! assume two spin states and no colour:
+             iden(iproc)=iden(iproc)*2
+          endif
+       enddo
     enddo
   end subroutine set_initial_state_average_factor
   
-  subroutine set_final_state_identical_particle_factor(iden)
+  subroutine set_final_state_identical_particle_factor()
     implicit none
-    integer(kind=8),intent(inout) :: iden
-    integer :: i,j,ni=0
+    integer :: i,j,ni,iproc
     integer,dimension(:,:),allocatable :: iden_part
     allocate(iden_part(1:next,2))
-    do i=3,next
-       do j=1,ni
-          if (iden_part(j,1).eq.part(i)) then
-             iden_part(j,2)=iden_part(j,2)+1
-             exit
+    do iproc=1,nproc
+       ni=0
+       do i=3,next
+          do j=1,ni
+             if (iden_part(j,1).eq.processes(i,iproc)) then
+                iden_part(j,2)=iden_part(j,2)+1
+                exit
+             endif
+          enddo
+          if (j.eq.ni+1) then
+             ni=ni+1
+             iden_part(j,1)=processes(i,iproc)
+             iden_part(j,2)=1
           endif
        enddo
-       if (j.eq.ni+1) then
-          ni=ni+1
-          iden_part(j,1)=part(i)
-          iden_part(j,2)=1
-       endif
-    enddo
-    do i=1,ni
-       iden=iden*factorial8(iden_part(i,2))
+       do i=1,ni
+          iden(iproc)=iden(iproc)*factorial8(iden_part(i,2))
+       enddo
     enddo
     deallocate(iden_part)
   end subroutine set_final_state_identical_particle_factor
 
-  subroutine compute_LC_colour_factor(col_fac)
+  subroutine compute_LC_colour_factor()
     implicit none
-    integer,intent(inout) :: col_fac
-    integer :: i,ifac
-    real(kind=8) :: fac=0d0
+    integer :: i,ifac,iproc
+    real(kind=8) :: fac
     integer :: it
-    do i=1,next
-       if (part(i).eq.21) then
-          fac=fac+1d0
-       elseif (abs(part(i)).ge.1 .and. abs(part(i)).le.6) then
-          fac=fac+0.5d0
+    do iproc=1,nproc
+       fac=0d0
+       do i=1,next
+          if (processes(i,iproc).eq.21) then
+             fac=fac+1d0
+          elseif (abs(processes(i,iproc)).ge.1 .and. abs(processes(i,iproc)).le.6) then
+             fac=fac+0.5d0
+          endif
+       enddo
+       ifac=nint(fac)
+       if (dble(ifac).ne.fac) then
+          write (*,*) 'There is some issue with the LC colour factor computation: '// &
+               'colour factor is not an integer',ifac,fac
+          stop 1
        endif
+       if (abs(processes(orders(1,iproc),iproc)).ne.abs(processes(orders(next,iproc),iproc)) &
+            .and. .not.amps%same_flav) then
+          ifac=(ifac-2) 
+       endif
+       col_fac(iproc)=3**ifac
     enddo
-    ifac=nint(fac)
-    if (dble(ifac).ne.fac) then
-       write (*,*) 'There is some issue with the LC colour factor computation: '// &
-            'colour factor is not an integer',ifac,fac
-       stop 1
-    endif
-    if (abs(part(o(1))).ne.abs(part(o(next))) .and. .not.amps%same_flav) then
-        ifac=(ifac-2) 
-    endif
-    col_fac=3**ifac
   end subroutine compute_LC_colour_factor
   
   subroutine set_mint_module_special_parameters()
@@ -752,35 +810,29 @@ contains
     only_virt=.false.
   end subroutine set_mint_module_special_parameters
   
-  subroutine set_ipdgs_for_PDF(ipdgs)
+  subroutine set_ipdgs_for_PDF()
+    ! determines for which flavours the PDFs should be evolved
     implicit none
-    logical,dimension(-6:7,2) :: ipdgs
+    integer :: iflav
     ipdgs(-6:7,1:2)=.false.
-    if (part(1).eq.21) then
-       ipdgs(0,1)=.true.    ! gluon is '0'
-    elseif (part(1).eq.22) then
-       ipdgs(7,1)=.true.    ! photon is '7'
-    elseif (abs(part(1)).ge.1 .and. abs(part(1)).le.6) then
-       ipdgs(part(1),1)=.true.
-    else
-       write (*,*) 'unknown PDF 1',part(1)
-       stop 1
-    endif
-    if (part(2).eq.21) then
-       ipdgs(0,2)=.true.    ! gluon is '0'
-    elseif (part(2).eq.22) then
-       ipdgs(7,2)=.true.    ! photon is '7'
-    elseif (abs(part(2)).ge.1 .and. abs(part(2)).le.6) then
-       ipdgs(part(2),2)=.true.
-    else
-       write (*,*) 'unknown PDF 2',part(2)
-       stop 1
-    endif
+    do iflav=-6,7
+       if (iflav.eq.0) then    ! gluon
+          if (any(processes(1,1:nproc).eq.21)) ipdgs(iflav,1)=.true.
+          if (any(processes(2,1:nproc).eq.21)) ipdgs(iflav,2)=.true.
+       elseif(iflav.eq.7) then ! photon
+          if (any(processes(1,1:nproc).eq.22)) ipdgs(iflav,1)=.true.
+          if (any(processes(2,1:nproc).eq.22)) ipdgs(iflav,2)=.true.
+       else                    ! quarks and anti-quarks
+          if (any(processes(1,1:nproc).eq.iflav)) ipdgs(iflav,1)=.true.
+          if (any(processes(2,1:nproc).eq.iflav)) ipdgs(iflav,2)=.true.
+       endif
+    enddo
   end subroutine set_ipdgs_for_PDF
   
-  subroutine multiply_by_PDF_value(val)
+  subroutine multiply_by_PDF_value(iproc,val)
     implicit none
     real(kind=8),intent(inout) :: val
+    integer,intent(in) :: iproc
     real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
     ! Include the PDFs
@@ -788,25 +840,26 @@ contains
 
     call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
     call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
-    if (part(1).eq.21) then
+
+    if (processes(1,iproc).eq.21) then
        val=val*PDF(0,1)
-    elseif (part(1).eq.22) then
+    elseif (processes(1,iproc).eq.22) then
        val=val*PDF(7,1)
     else
-       !write(*,*) 'orig pdf',part(1)
-       val=val*PDF(part(1),1)
+       val=val*PDF(processes(1,iproc),1)
     endif
-    if (part(2).eq.21) then
+    if (processes(2,iproc).eq.21) then
        val=val*PDF(0,2)
-    elseif (part(2).eq.22) then
+    elseif (processes(2,iproc).eq.22) then
        val=val*PDF(7,2)
     else
-       val=val*PDF(part(2),2)
+       val=val*PDF(processes(2,iproc),2)
     endif
   end subroutine multiply_by_PDF_value
   
-  subroutine compute_multichannel_symmetry_factor()
+  subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
+    integer(kind=8),intent(out) :: sym_fac
     integer :: ngl=0
     integer,dimension(6) :: nq,naq
     integer :: i,j
