@@ -279,7 +279,6 @@ contains
 
     ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
     if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
-       write(*,*) 'one 1'
        if (debug) write (*,*) 'two sets with at least two ',&
             & 'particles',popcnt(sets(0,1)),popcnt(sets(0,2))
        if (use_t_channel_at_start) then
@@ -291,7 +290,6 @@ contains
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
-       write(*,*) 'one 2'
        if (debug) write (*,*) 'special double t-channel (1)'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call double_t(set(1),set(2),1,2)
@@ -299,7 +297,6 @@ contains
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
-       write(*,*) 'one 3'
        if (debug) write (*,*) 'special double t-channel (2)'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call double_t(set(2),set(1),1,2)
@@ -307,7 +304,6 @@ contains
        pp(0:3,set(1)+1)=pp(0:3,2)-pp(0:3,set(2))
        invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
-       write(*,*) 'one 4'
        if (debug) write (*,*) '2->2 scattering with one particle in each set'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
 !!$       call gens_one_step(set(2),set(1))
@@ -340,7 +336,6 @@ contains
                 call gent_one_step(inext,set(i),3-i)
              else
 !!$                call gen23_one_step_v2(inext,set(i),3-i,im1)
-                write(*,*) '23 one step'
                 call gen23_one_step(inext,set(i),3-i,im1)
 !!$                call genpt_one_step(inext,set(i),3-i,im1)
 !!$                call gent_one_step_v2(inext,set(i),3-i,im1)
@@ -1198,7 +1193,6 @@ subroutine genpt_one_step(i,ir,ib,im1)
     real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini
     real(kind=8),dimension(0:3) :: piir,pib
     if (popcnt(i).gt.1) then
-       write(*,*) 'asszem nem'
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
        call shatminmax(i,ir,shatmin,shatmax)
        if (popcnt(i+ir).eq.next-2) then
@@ -1213,7 +1207,6 @@ subroutine genpt_one_step(i,ir,ib,im1)
     endif
 
     if (popcnt(ir).gt.1) then
-       write(*,*) 'ez sem'
        call shatminmax(ir,i,shatmin,shatmax)
        if (popcnt(i+ir).eq.next-2) then
           ! The energy of ir will be
