@@ -279,6 +279,7 @@ contains
 
     ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
     if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
+       write(*,*) 'one 1'
        if (debug) write (*,*) 'two sets with at least two ',&
             & 'particles',popcnt(sets(0,1)),popcnt(sets(0,2))
        if (use_t_channel_at_start) then
@@ -290,6 +291,7 @@ contains
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
+       write(*,*) 'one 2'
        if (debug) write (*,*) 'special double t-channel (1)'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call double_t(set(1),set(2),1,2)
@@ -297,6 +299,7 @@ contains
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
+       write(*,*) 'one 3'
        if (debug) write (*,*) 'special double t-channel (2)'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
        call double_t(set(2),set(1),1,2)
@@ -304,6 +307,7 @@ contains
        pp(0:3,set(1)+1)=pp(0:3,2)-pp(0:3,set(2))
        invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
     elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
+       write(*,*) 'one 4'
        if (debug) write (*,*) '2->2 scattering with one particle in each set'&
             &,popcnt(sets(0,1)),popcnt(sets(0,2))
 !!$       call gens_one_step(set(2),set(1))
@@ -312,6 +316,7 @@ contains
        pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
        invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
     endif
+
     do i=1,2
        if (popcnt(set(i)).le.1) cycle ! at least 2 particles in a set
        inext=ibset(0,sets(1,i)-1)
@@ -335,6 +340,7 @@ contains
                 call gent_one_step(inext,set(i),3-i)
              else
 !!$                call gen23_one_step_v2(inext,set(i),3-i,im1)
+                write(*,*) '23 one step'
                 call gen23_one_step(inext,set(i),3-i,im1)
 !!$                call genpt_one_step(inext,set(i),3-i,im1)
 !!$                call gent_one_step_v2(inext,set(i),3-i,im1)
@@ -391,6 +397,7 @@ contains
           write (*,*) 3-i,':',sets(:,3-i)
           stop 
        endif
+
        ! We need to get the momentum of the final particle of the set.
        pp(0:3,set(i))=pp(0:3,set(i)+inext+(3-i))+pp(0:3,(3-i))-pp(0:3,inext)
     enddo
@@ -1191,6 +1198,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
     real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini
     real(kind=8),dimension(0:3) :: piir,pib
     if (popcnt(i).gt.1) then
+       write(*,*) 'asszem nem'
        if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
        call shatminmax(i,ir,shatmin,shatmax)
        if (popcnt(i+ir).eq.next-2) then
@@ -1203,7 +1211,9 @@ subroutine genpt_one_step(i,ir,ib,im1)
        endif
        call generate_mass(i,shatmin,shatmax)
     endif
+
     if (popcnt(ir).gt.1) then
+       write(*,*) 'ez sem'
        call shatminmax(ir,i,shatmin,shatmax)
        if (popcnt(i+ir).eq.next-2) then
           ! The energy of ir will be
@@ -1214,6 +1224,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
        endif
        call generate_mass(ir,shatmin,shatmax)
     endif
+
     if (jac.le.0d0) return
     if (debug) then
        write (*,*) 't - i    ',i,invm(i),invm_min(i),invm_max(i)
@@ -1221,8 +1232,10 @@ subroutine genpt_one_step(i,ir,ib,im1)
     endif
 
     call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
+
     if (invm_max(ir+ib).ne.0d0) tmax=min(tmax,invm_max(ir+ib))
     if (invm_min(ir+ib).ne.0d0) tmin=max(tmin,invm_min(ir+ib))
+
     ! Make sure that the t-range is compatible with the pT cut. Since t is an
     ! invariant we can compute it in any frame. Let's use the frame in which
     ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
@@ -1232,12 +1245,12 @@ subroutine genpt_one_step(i,ir,ib,im1)
     call boostz(pp(0,i+ir),y,piir)
     call boostz(pp(0,ib),y,pib)
     if ( piir(1)**2+piir(2)**2.lt.etmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)-invm(i)))**2) )
+       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)**2-invm(i)))**2) )
     else
        etminir=max(etmin(ir),sqrt(invm(ir)))
     endif
     if ( piir(1)**2+piir(2)**2.lt.etmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)-invm(ir)))**2) )
+       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)**2-invm(ir)))**2) )
     else
        etmini=max(etmin(i),sqrt(invm(i)))
     endif
@@ -1261,6 +1274,7 @@ subroutine genpt_one_step(i,ir,ib,im1)
        return
     endif
     ix=ix+1
+
     call random_to_var(x(ix),ip,tmin,tmax,invm(ir+ib),jac)
     
     if (debug) then
