@@ -104,30 +104,30 @@ module mint_module
   character(len=13), parameter, dimension(nintegrals), private :: title=(/ &
                                                    'ABS integral ', & !  1
                                                    'Integral     ', & !  2
-                                                   'Virtual      ', & !  3
-                                                   'Virtual ratio', & !  4
-                                                   'ABS virtual  ', & !  5
-                                                   'Born         ', & !  6
-                                                   'V  1         ', & !  7
-                                                   'B  1         ', & !  8
-                                                   'V  2         ', & !  9
-                                                   'B  2         ', & ! 10
-                                                   'V  3         ', & ! 11
-                                                   'B  3         ', & ! 12
-                                                   'V  4         ', & ! 13
-                                                   'B  4         ', & ! 14
-                                                   'V  5         ', & ! 15
-                                                   'B  5         ', & ! 16
-                                                   'V  6         ', & ! 17
-                                                   'B  6         ', & ! 18
-                                                   'V  7         ', & ! 19
-                                                   'B  7         ', & ! 20
-                                                   'V  8         ', & ! 21
-                                                   'B  8         ', & ! 22
-                                                   'V  9         ', & ! 23
-                                                   'B  9         ', & ! 24
-                                                   'V 10         ', & ! 25
-                                                   'B 10         '/)  ! 26
+                                                   'process  1   ', & !  3
+                                                   'process  2   ', & !  4
+                                                   'process  3   ', & !  5
+                                                   'process  4   ', & !  6
+                                                   'process  5   ', & !  7
+                                                   'process  6   ', & !  8
+                                                   'process  7   ', & !  9
+                                                   'process  8   ', & ! 10
+                                                   'process  9   ', & ! 11
+                                                   'process 10   ', & ! 12
+                                                   'process 11   ', & ! 13
+                                                   'process 12   ', & ! 14
+                                                   'process 13   ', & ! 15
+                                                   'process 14   ', & ! 16
+                                                   'process 15   ', & ! 17
+                                                   'process 16   ', & ! 18
+                                                   'process 17   ', & ! 19
+                                                   'process 18   ', & ! 20
+                                                   'process 19   ', & ! 21
+                                                   'process 20   ', & ! 22
+                                                   'process 21   ', & ! 23
+                                                   'process 22   ', & ! 24
+                                                   'process 23   ', & ! 25
+                                                   'process 24   '/)  ! 26
 
 
   integer, private :: nit,nit_included,kpoint_iter,nint_used,nint_used_virt,min_it,ncalls,pass_cuts_point,ng,npg,k
