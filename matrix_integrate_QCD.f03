@@ -194,6 +194,7 @@ contains
        ! use previously computed integrand
        f1(1)=sum(abs(val(1:nproc)))
        f1(2)=sum(val(1:nproc))
+       f1(3:nproc+2)=val(1:nproc)
        return
     endif
     new_point=.true.
@@ -218,6 +219,11 @@ contains
     
     all_evt=all_evt+1
 
+    if (jac.lt.0d0) then
+       val(1:nproc)=0d0
+       return
+    endif
+    
     cuts_wgt=pass_cuts(next,p)
     if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
@@ -243,9 +249,11 @@ contains
        else
           amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
        endif
-       if (iproc.lt.nproc .and. amps%iproc_start(iproc+1).eq.ih+1) then
-          amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
-          iproc=iproc+1
+       if (iproc.lt.nproc) then
+          if (amps%iproc_start(iproc+1).eq.ih+1) then
+             amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+             iproc=iproc+1
+          endif
        endif
     enddo
     amp2(nproc)=sum(amp2_hel(amps%iproc_start(nproc):ih-1))
@@ -289,8 +297,8 @@ contains
     ! pass the result to the mint module
     f1(1)=sum(abs(val(1:nproc)))
     f1(2)=sum(val(1:nproc))
+    f1(3:nproc+2)=val(1:nproc)
     integrand=f1(2)
-
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end function integrand
@@ -316,13 +324,13 @@ contains
     endif
 
     do i=3,n
-       if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
+!!$       if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
          frac  = 0.9d0
          steep = 0.1d0
-       elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-         frac  = 0.8d0
-         steep = 0.1d0
-       endif
+!!$       elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
+!!$         frac  = 0.8d0
+!!$         steep = 0.1d0
+!!$       endif
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then
              pass_cuts=-1d0
