@@ -44,14 +44,14 @@ program matrix_reweight
 
   mass(1:next)=0d0
   width(1:next)=0d0
+  mass(1:2) = 0d0
+  mass(3:4) = 173d0
+!  mass(5) = 0d0
+  width(1:2) = 0d0
+  width(3:4) = 1.491500d0
+!  width(5) = 0d0
 
-!  mass(1:2)= 0d0
-!  mass(3:4)= 173.d0
-!  mass(5)  = 0d0
-!  width(1:2)= 0d0
-!  width(3:4)= 1.4915d0
-!  width(5)  = 0d0
-
+  
   call create_run_tag_and_open_files()
 
   call cpu_time(tBefore)

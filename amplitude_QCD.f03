@@ -1743,7 +1743,13 @@ contains
 
       else
          this%current_list(ic)%val_c(1:dim)=(0d0,0d0)
+         this%current_list(ic)%mass=0d0
+         this%current_list(ic)%width=0d0
+         if (abs(this%current_list(ic)%type).eq.6) this%current_list(ic)%mass=173d0
+         if (abs(this%current_list(ic)%type).eq.6) this%current_list(ic)%width=1.491500d0
+
          do iv=1,this%current_list(ic)%n_vert
+
             if (this%current_list(ic)%vertex_sign(iv))then
                this%current_list(ic)%val_c(1:dim)=&
                     this%current_list(ic)%val_c(1:dim)-this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim)
