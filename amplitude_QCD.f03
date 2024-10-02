@@ -5,7 +5,8 @@ module amplitude_QCD_mod
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
   type current
-     integer :: type,bin,n_vert,iproc
+     integer :: type,bin,n_vert
+     integer(kind=16) :: iproc
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:),allocatable :: val_c
@@ -25,7 +26,7 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r,amp_fac
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
-     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing,n_amps
+     integer :: n_cur,n_vert,imode,nColOrd,n_qqbar,max_pp,n_sing,n_amps,nprocs
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,same_flavour_sum
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes
@@ -37,20 +38,19 @@ module amplitude_QCD_mod
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,part,spin,mass,width,order,alt_amp)
+  subroutine init(this,imode,n,n_processes,part,spin,mass,width,order)
     use math_functions
     implicit none
     class(amplitude_QCD) :: this
     integer :: n,imode
-    integer,dimension(n) :: part,order
+    integer,dimension(n,n_processes) :: part,order
     integer,dimension(0:3,n) :: spin
     real(kind=8),dimension(n) :: mass,width
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,n_processes,iproc
+    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,n_processes,iproc,jproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
-    class(amplitude_QCD),optional :: alt_amp
     
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -103,14 +103,23 @@ contains
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
        if (isize.eq.1) then
           ! external currents
-          do nc=1,n
+          do nc=n,1,-1 ! create first the currents that close the amplitude
              if (nc.eq.n) this%n_cur_start(n)=this%n_cur+1
-             do iproc=1,n_processes
-                if (iproc.gt.1 .and. any(this%processes(order(nc),1:iproc-1).eq.this%processes(order(nc),iproc))) cycle
-                do ispin=1,spin(0,order(nc))
-                   call create_external_current(nc,spin(ispin,order(nc)),this%processes(order(nc),iproc))
+             do_iproc: do iproc=1,n_processes
+!!$                write (*,*) 'trying',nc,iproc,this%processes(order(nc,iproc),iproc)
+!!$                do jproc=1,iproc-1
+!!$                   if (order(nc,jproc).eq.order(nc,iproc) .and. &
+!!$                        this%processes(order(nc,jproc),jproc).eq.this%processes(order(nc,iproc),iproc)) cycle do_iproc
+!!$                   if (this%processes(order(nc,jproc),jproc).eq.this%processes(order(nc,iproc),iproc)) cycle do_iproc
+!!$                enddo
+!!$                write (*,*) nc,this%processes(order(nc,iproc),iproc)
+!!$                if (iproc.gt.1 .and. &
+!!$                     any(this%processes(order(nc,1:iproc-1),1:iproc-1).eq.this%processes(order(nc,iproc),iproc))) cycle
+                do ispin=1, spin(0,order(nc,iproc))
+                   call create_external_current(nc,iproc,spin(ispin,order(nc,iproc)),&
+                        this%processes(order(nc,iproc),iproc),order(nc,iproc))
                 enddo
-             enddo
+             enddo do_iproc
              if (nc.eq.n) this%n_cur_end(n)=this%n_cur
           enddo
        else
@@ -127,6 +136,8 @@ contains
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
+
+    this%nprocs=n_processes
     
     call simple_consistency_checks()
 
@@ -146,33 +157,74 @@ contains
     call deallocate_unneeded()
   contains
 
-    subroutine create_external_current(nc,ispin,ipart)
+    subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
       implicit none
-      integer,intent(in) :: nc,ispin,ipart
-      integer :: i
-      if (ipart.eq.0) return
+      integer,intent(in) :: nc,ispin,ipart,iorder,iproc
+      integer :: i,ic
+!!$      write (*,*) iorder,ispin,ipart
+      do ic=1,this%n_cur
+!!$         write (*,*) ic,current_list_local(ic)%order(1),current_list_local(ic)%spin(1),current_list_local(ic)%type
+         if (current_list_local(ic)%order(1).ne.iorder) cycle
+         if (current_list_local(ic)%mass.ne.mass(iorder)) cycle
+         if (current_list_local(ic)%width.ne.width(iorder)) cycle
+         if (iorder.le.2 .and. abs(ipart).le.6) then
+            if (current_list_local(ic)%type.ne.anti_current(ipart)) cycle
+         else
+            if (current_list_local(ic)%type.ne.ipart) cycle
+         endif
+         if (current_list_local(ic)%bin.ne.ibset(0,iorder-1)) cycle
+         if (current_list_local(ic)%spin(1).ne.ispin) cycle
+         ! existing current.
+!!$         write (*,*) 'existing',current_list_local(ic)%iproc
+         current_list_local(ic)%iproc=ibset(current_list_local(ic)%iproc,iproc-1)
+!!$         write (*,*) 'existing',current_list_local(ic)%iproc
+         return
+      enddo
+      ! new external current
+!!$      write (*,*) 'new current'
       this%n_cur=this%n_cur+1
       allocate(current_list_local(this%n_cur)%order(isize))
-      current_list_local(this%n_cur)%order(1)=order(nc)
-      current_list_local(this%n_cur)%mass=mass(order(nc))
-      current_list_local(this%n_cur)%width=width(order(nc))
-      if (order(nc).le.2 .and. abs(ipart).le.6) then ! initial quark states
+      current_list_local(this%n_cur)%order(1)=iorder
+      current_list_local(this%n_cur)%mass=mass(iorder)
+      current_list_local(this%n_cur)%width=width(iorder)
+      if (iorder.le.2 .and. abs(ipart).le.6) then ! initial quark states
          current_list_local(this%n_cur)%type=anti_current(ipart) ! switch quark <--> anti-quark for initial states
       else
          current_list_local(this%n_cur)%type=ipart
       endif
       allocate(current_list_local(this%n_cur)%ext_type(isize))
       current_list_local(this%n_cur)%ext_type(1)=current_list_local(this%n_cur)%type
-      current_list_local(this%n_cur)%bin=ibset(0,order(nc)-1) ! give binary label
+      current_list_local(this%n_cur)%bin=ibset(0,iorder-1) ! give binary label
       allocate(current_list_local(this%n_cur)%spin(isize))
-      current_list_local(this%n_cur)%spin=ispin
+      current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
       current_list_local(this%n_cur)%iproc=0
-      do i=1,n_processes
-         if (this%processes(order(nc),i).eq.ipart) then
-            current_list_local(this%n_cur)%iproc=ibset(current_list_local(this%n_cur)%iproc,i-1)
-         endif
-      enddo
+      current_list_local(this%n_cur)%iproc=ibset(0,iproc-1)
+!!$      
+!!$      if (ipart.eq.0) return
+!!$      write (*,*) 'new external current',nc,ispin,ipart,iorder
+!!$      this%n_cur=this%n_cur+1
+!!$      allocate(current_list_local(this%n_cur)%order(isize))
+!!$      current_list_local(this%n_cur)%order(1)=iorder
+!!$      current_list_local(this%n_cur)%mass=mass(iorder)
+!!$      current_list_local(this%n_cur)%width=width(iorder)
+!!$      if (iorder.le.2 .and. abs(ipart).le.6) then ! initial quark states
+!!$         current_list_local(this%n_cur)%type=anti_current(ipart) ! switch quark <--> anti-quark for initial states
+!!$      else
+!!$         current_list_local(this%n_cur)%type=ipart
+!!$      endif
+!!$      allocate(current_list_local(this%n_cur)%ext_type(isize))
+!!$      current_list_local(this%n_cur)%ext_type(1)=current_list_local(this%n_cur)%type
+!!$      current_list_local(this%n_cur)%bin=ibset(0,iorder-1) ! give binary label
+!!$      allocate(current_list_local(this%n_cur)%spin(isize))
+!!$      current_list_local(this%n_cur)%spin(1)=ispin
+!!$      current_list_local(this%n_cur)%n_vert=0
+!!$      current_list_local(this%n_cur)%iproc=0
+!!$      do i=1,n_processes
+!!$         if (this%processes(iorder,i).eq.ipart) then
+!!$            current_list_local(this%n_cur)%iproc=ibset(current_list_local(this%n_cur)%iproc,i-1)
+!!$         endif
+!!$      enddo
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -181,41 +233,59 @@ contains
       ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur,iamp,jamp,i,j
+      integer :: icur,jcur,iamp,jamp,i,j,iproc
+      integer(kind=16) :: proc
       integer,dimension(:,:),allocatable :: curr2amp
-      integer,dimension(n) :: iord,jord,ispn,jspn,proc
+      integer,dimension(n) :: iord,jord,ispn,jspn
       integer,dimension(n,n_processes) :: procs
       do j=1,n_processes
          do i=1,n
-            if (order(i).le.2) then
-               procs(i,j)=anti_current(this%processes(order(i),j))
+            if (order(i,j).le.2) then
+               procs(i,j)=anti_current(this%processes(order(i,j),j))
             else
-               procs(i,j)=this%processes(order(i),j)
+               procs(i,j)=this%processes(order(i,j),j)
             endif
          enddo
       enddo
       allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-      allocate(this%iproc_start(n_processes))
+      allocate(this%iproc_start(1:n_processes))
       this%n_amps=0
-      do i=1,n_processes
-         this%iproc_start(i)=this%n_amps+1
+      do iproc=1,n_processes
+         this%iproc_start(iproc)=this%n_amps+1
          do icur=this%n_cur_start(n-1),this%n_cur_end(n-1)
             do jcur=this%n_cur_start(n),this%n_cur_end(n)
+
                if ( current_list_local(icur)%type .ne. anti_current(current_list_local(jcur)%type) ) cycle
-               proc=0
-               do j=1,n-1
-                  if (current_list_local(icur)%order(j).gt.2) then
-                     proc(current_list_local(icur)%order(j))=current_list_local(icur)%ext_type(j)
-                  else
-                     proc(current_list_local(icur)%order(j))=anti_current(current_list_local(icur)%ext_type(j))
-                  endif
-               enddo
-               if (current_list_local(jcur)%order(1).gt.2) then
-                  proc(current_list_local(jcur)%order(1))=current_list_local(jcur)%ext_type(1)
-               else
-                  proc(current_list_local(jcur)%order(1))=anti_current(current_list_local(jcur)%ext_type(1))
+               
+               proc=iand(current_list_local(icur)%iproc,current_list_local(jcur)%iproc)
+               
+               if (popcnt(proc).eq.0) then
+                  ! combination of icur and jcur does not contribute to any of the processes
+                  cycle
+               elseif (popcnt(proc).ne.1) then
+                  write (*,*) 'A given amplitude should only contribute to one process'
+                  write (*,*) proc,icur,jcur,current_list_local(icur)%iproc,current_list_local(jcur)%iproc
+                  write (*,*) current_list_local(icur)%ext_type(1:n-1),current_list_local(jcur)%ext_type(1)
+                  stop 1
+               elseif (.not. btest(proc,iproc-1)) then
+                  ! one process, but it is not equal to process 'iproc'
+                  cycle
                endif
-               if (.not. all(this%processes(1:n,i).eq.proc(1:n))) cycle
+
+!!$               proc=0
+!!$               do j=1,n-1
+!!$                  if (current_list_local(icur)%order(j).gt.2) then
+!!$                     proc(current_list_local(icur)%order(j))=current_list_local(icur)%ext_type(j)
+!!$                  else
+!!$                     proc(current_list_local(icur)%order(j))=anti_current(current_list_local(icur)%ext_type(j))
+!!$                  endif
+!!$               enddo
+!!$               if (current_list_local(jcur)%order(1).gt.2) then
+!!$                  proc(current_list_local(jcur)%order(1))=current_list_local(jcur)%ext_type(1)
+!!$               else
+!!$                  proc(current_list_local(jcur)%order(1))=anti_current(current_list_local(jcur)%ext_type(1))
+!!$               endif
+!!$               if (.not. all(this%processes(1:n,iproc).eq.proc(1:n))) cycle
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
                curr2amp(2,this%n_amps)=jcur
@@ -304,7 +374,7 @@ contains
     
     subroutine allocate_and_fill_colour_permutations()
       implicit none
-      integer :: iamp,i
+      integer :: iamp,i,iproc
       ! allocate and fill the colour orders in 'this%perm'. These are simply
       ! the orders of the elements in the 'this%current_list' (with size n-1)
       ! together with the final element). Exception: when there are colour
@@ -395,10 +465,10 @@ contains
 
       nq=0; naq=0 ; nglu=0 ; nsing=0
       do i=1,n
-         if (is_gluon(part(i))) nglu=nglu+1
+         if (is_gluon(part(i,1))) nglu=nglu+1
          if (is_quark_from_order(i)) nq=nq+1
          if (is_antiquark_from_order(i)) naq=naq+1
-         if (is_singlet(part(i))) nsing=nsing+1
+         if (is_singlet(part(i,1))) nsing=nsing+1
       enddo
 
       if (nq.ne.naq) then
@@ -416,33 +486,33 @@ contains
       iq=0; iaq=0 ; iglu=0 ; ising=0
       order= 0
       do i=1,n
-         if (is_gluon(part(i))) then
+         if (is_gluon(part(i,1))) then
             iglu=iglu+1
             if (nq.ge.1) then
-               order(iglu+1)=i
+               order(iglu+1,1)=i
             else
-               order(iglu)=i
+               order(iglu,1)=i
             endif
          elseif(is_quark_from_order(i)) then
             iq=iq+1
             if (iq.eq.1) then
-               order(1)=i
+               order(1,1)=i
             else
-               order(n-1)=i
+               order(n-1,1)=i
             endif
          elseif (is_antiquark_from_order(i)) then
             iaq=iaq+1
             if (iaq.eq.1) then
-               order(n)=i
+               order(n,1)=i
             else
-               order(n-2)=i
+               order(n-2,1)=i
             endif
-         elseif (is_singlet(part(i))) then
+         elseif (is_singlet(part(i,1))) then
             ising=ising+1
             if(nq.ne.0) then
-               order(1+nglu+ising)=i
+               order(1+nglu+ising,1)=i
             else
-               order(nglu+ising)=i
+               order(nglu+ising,1)=i
             endif
          endif
       enddo
@@ -467,11 +537,11 @@ contains
       this%same_flav=.true.
       iflav=0
       do i=1,n
-         if (is_singlet(part(i))) this%n_sing=this%n_sing+1
-         if (is_quark(part(i)).or.is_antiquark(part(i))) then
+         if (is_singlet(part(i,1))) this%n_sing=this%n_sing+1
+         if (is_quark(part(i,1)).or.is_antiquark(part(i,1))) then
             this%n_qqbar=this%n_qqbar+1
-            if (iflav.eq.0) iflav=abs(part(i))
-            if (abs(part(i)).ne.iflav) this%same_flav=.false.
+            if (iflav.eq.0) iflav=abs(part(i,1))
+            if (abs(part(i,1)).ne.iflav) this%same_flav=.false.
          endif
       enddo
       this%n_qqbar=this%n_qqbar/2
@@ -482,13 +552,13 @@ contains
          stop 1
       endif
       if (imode.eq.1.or.imode.eq.3) then
-         if (any(order(:).gt.n) .or. any(order(:).lt.1)) then
+         if (any(order(:,1).gt.n) .or. any(order(:,1).lt.1)) then
             write (*,*) 'ERROR: inconsistent colour order. An element is too large or too small',order
             stop 1
          endif
          do i=1,n-1
             do j=i+1,n
-               if (order(i).eq.order(j)) then
+               if (order(i,1).eq.order(j,1)) then
                   write (*,*) 'ERROR: inconsistent colour order. An element appears twice',order
                   stop 1
                endif
@@ -496,13 +566,13 @@ contains
          enddo
 
          if (this%n_qqbar.gt.0) then
-            if (.not.(is_quark_from_order(order(1)))) then
+            if (.not.(is_quark_from_order(order(1,1)))) then
                write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                write (*,*) order
                write (*,*) part
                stop 1
             endif
-            if (.not.(is_antiquark_from_order(order(n)))) then
+            if (.not.(is_antiquark_from_order(order(n,1)))) then
                write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                write (*,*) order
                write (*,*) part
@@ -512,9 +582,9 @@ contains
 
          if (this%n_qqbar.ge.2) then
             do i=2,n-1
-               if (is_antiquark_from_order(order(i))) then
+               if (is_antiquark_from_order(order(i,1))) then
                   ! next should be a quark
-                  if (.not.(is_quark_from_order(order(i+1)))) then
+                  if (.not.(is_quark_from_order(order(i+1,1)))) then
                      write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
                      write (*,*) order
                      write (*,*) part
@@ -534,9 +604,9 @@ contains
          call define_symm_2qq(part,this%processes(1,1),1)
          call define_symm_2qq(part,this%processes(1,2),2)
       else
-         n_processes=1
+!!$         n_processes=1
          allocate(this%processes(n,n_processes))
-         this%processes(1:n,1)=part(1:n)
+         this%processes(1:n,1:n_processes)=part(1:n,1:n_processes)
       endif
     end subroutine check_input_consistency
 
@@ -715,20 +785,28 @@ contains
       !    qbar" or any subset thereof.
       implicit none
       integer :: i,j,nc1,nc2
-      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark
+      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,not_valid
       integer,dimension(isize) :: ip,et
       valid_current_combination=.false.
+
+
+      
+!!$      if (.not.btest(current_list_local(ic1)%iproc,0)) return
+!!$      if (.not.btest(current_list_local(ic2)%iproc,0)) return
+
+
+      
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) return
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
-         if (current_list_local(ic1)%order(n1).eq.order(n)) then
+         if (all(current_list_local(ic1)%order(n1).eq.order(n,1:n_processes))) then
             return
           endif
       endif
       if (n2.eq.1) then
-         if (current_list_local(ic2)%order(n2).eq.order(n)) then
+         if (all(current_list_local(ic2)%order(n2).eq.order(n,1:n_processes))) then
             return
          endif
       endif
@@ -762,15 +840,29 @@ contains
          enddo
          nc2=i-1
          ip(1:nc1+nc2)=[current_list_local(ic1)%order(1:nc1),current_list_local(ic2)%order(1:nc2)]
-         do j=1,n
-            if (order(j).eq.ip(1)) then
-               do i=2,nc1+nc2
-                  if (j-1+i.gt.n) return
-                  if (order(j-1+i).ne.ip(i)) return
-               enddo
-               exit
-            endif
-         enddo
+
+         not_valid=.true.
+         do_iproc: do iproc=1,n_processes
+
+            if (.not. btest(iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc),iproc-1)) cycle
+            if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,iproc)-1)) cycle
+!!$            write (*,*) iproc,':',ip(1:nc1+nc2),':',order(1:n,iproc),':',&
+!!$                 current_list_local(ic1)%iproc,current_list_local(ic2)%iproc
+            
+            do_j: do j=1,n
+               if (order(j,iproc).eq.ip(1)) then
+                  do i=2,nc1+nc2
+                     if (j-1+i.gt.n) exit do_j
+                     if (order(j-1+i,iproc).ne.ip(i)) exit do_j
+                  enddo
+                  not_valid=.false.
+                  exit do_iproc
+               endif
+            enddo do_j
+
+         enddo do_iproc
+!!$         write (*,*) 'returning',not_valid
+         if (not_valid) return
       endif
 
       ! If using symmetry and the current is a combination of all external
@@ -812,6 +904,8 @@ contains
          ! if the current is of length n-1, the first should be a quark
          if (isize.eq.n-1 .and. .not.is_quark(et(1))) return
       endif
+!!$
+!!$      write (*,*) 'VALID COMBINATION'
 
       ! Got all the way to the end. This must be a valid current combination
       valid_current_combination=.true.
@@ -819,9 +913,12 @@ contains
     
     subroutine add_vertex(itype,ctype)
       implicit none
-      integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(current_list_local(this%n_cur_start(n))%type)) then
-        return ! dead tree. Filter already here
+      integer :: itype,ctype,ic
+      if (isize.eq.n-1) then
+         do ic=this%n_cur_start(n),this%n_cur_end(n)
+            if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
+         enddo
+         if (ic.eq.this%n_cur_end(n)+1) return ! dead tree. Filter already here
       endif
       this%n_vert=this%n_vert+1
       interaction_list_local(this%n_vert)%type=itype
@@ -1097,6 +1194,8 @@ contains
       logical,intent(in) :: vertex_sign
       integer :: ic,key
       integer(kind=8) :: val
+!!$      write (*,*) 'new call',isize,new_current%type,new_current%bin,new_current%order(1:isize),&
+!!$           new_current%ext_type(1:isize),new_current%spin(1:isize),new_current%iproc
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
@@ -1110,6 +1209,7 @@ contains
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
             return
          enddo
+!!$         write (*,*) 'new current'
          ! Need a new current
          this%n_cur=this%n_cur+1
          current_list_local(this%n_cur)=new_current
@@ -1365,8 +1465,8 @@ contains
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io
-      if ( (io.le.2  .and. (part(io).le.-1 .and. part(io).ge.-6)) .or. &
-           (io.gt.2  .and. (part(io).ge. 1 .and. part(io).le. 6))) then
+      if ( (io.le.2  .and. (part(io,1).le.-1 .and. part(io,1).ge.-6)) .or. &
+           (io.gt.2  .and. (part(io,1).ge. 1 .and. part(io,1).le. 6))) then
          is_quark_from_order=.true.
       else
          is_quark_from_order=.false.
@@ -1385,8 +1485,8 @@ contains
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io
-      if ( (io.le.2  .and. (part(io).ge. 1 .and. part(io).le. 6)) .or. &
-           (io.gt.2  .and. (part(io).le.-1 .and. part(io).ge.-6))) then
+      if ( (io.le.2  .and. (part(io,1).ge. 1 .and. part(io,1).le. 6)) .or. &
+           (io.gt.2  .and. (part(io,1).le.-1 .and. part(io,1).ge.-6))) then
          is_antiquark_from_order=.true.
       else
          is_antiquark_from_order=.false.
@@ -2425,7 +2525,7 @@ contains
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver,where_to_amp
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n,iamp,i
+    integer :: to_skip,isize,nc,iv,n,iamp,i,iproc
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -2539,14 +2639,14 @@ contains
           enddo
        endif
     enddo
-    if (this%n_qqbar.eq.2 .and. this%same_flav) then
-       do iamp=this%iproc_start(2),this%n_amps
+    do iproc=2,this%nprocs
+       do iamp=this%iproc_start(iproc),this%n_amps
           if (where_to_amp(iamp).ne.0) then
-             this%iproc_start(2)=where_to_amp(iamp)
+             this%iproc_start(iproc)=where_to_amp(iamp)
              exit
           endif
        enddo
-    endif
+    enddo
     do nc=this%n_cur,1,-1
        if (where_to_cur(nc).ne.0) then
           this%n_cur=where_to_cur(nc)
