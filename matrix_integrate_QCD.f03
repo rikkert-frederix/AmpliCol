@@ -504,10 +504,9 @@ contains
     endif
     do iproc_picked=1,nproc-1
        if (amps%iproc_start(iproc_picked+1).ge.hel_picked(2)) then
-          hel_picked(2)=hel_picked(2)-amps%iproc_start(iproc_picked)+1
+          exit
        endif
     enddo
-    
     if (hel_fac(hel_picked(2)).gt.1) then
        hel_picked(1)=1+int(ran2()*hel_fac(hel_picked(2)))
     else
