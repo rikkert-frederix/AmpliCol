@@ -6,7 +6,7 @@ feynmanrules.o amplitude_QCD.o matrix_integrate_QCD.o common.o			\
 phase_space_genpt.o
 
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o	\
-amplitude_QCD.o matrix_reweight_QCD.o
+amplitude_QCD.o common.o matrix_reweight_QCD.o
 
 FC=gfortran
 FFLAGS=-ffast-math -O3
@@ -39,7 +39,7 @@ matrix_reweight_QCD: $(FILES_M_RWGT_QCD)
 clean:
 	rm -f *.o *.mod
 
-matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o
+matrix_reweight_QCD.o : amplitude_QCD.o common.o math_functions.o
 ranmar.o : mint_module.o
 phase_space_gen23.o : common.o LUPdecompose.o
 haag.o : common.o

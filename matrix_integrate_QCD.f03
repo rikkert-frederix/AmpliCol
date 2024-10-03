@@ -78,11 +78,9 @@ program matrix_integrate_QCD
   mass(1:next)=0d0
   width(1:next)=0d0
   mass(1:2) = 0d0
-  mass(3:4) = 173d0
-!  mass(5) = 0d0
+  mass(3:4) = mt
   width(1:2) = 0d0
-  width(3:4) = 1.491500d0
-!  width(5) = 0d0
+  width(3:4) = wt
 
   call cpu_time(tBefore)
   t_chan=.false.

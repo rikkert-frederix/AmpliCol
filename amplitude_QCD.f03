@@ -1728,7 +1728,7 @@ contains
 
     subroutine combine_interactions(dim)
       implicit none
-      integer :: dim,iv
+      integer :: dim,iv,i
       if (use_real_gluons .and. abs(this%current_list(ic)%type).eq.21) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
@@ -1745,11 +1745,13 @@ contains
          this%current_list(ic)%val_c(1:dim)=(0d0,0d0)
          this%current_list(ic)%mass=0d0
          this%current_list(ic)%width=0d0
-         if (abs(this%current_list(ic)%type).eq.6) this%current_list(ic)%mass=173d0
-         if (abs(this%current_list(ic)%type).eq.6) this%current_list(ic)%width=1.491500d0
-
+         do i=1,n
+           if (this%current_list(i)%type.eq.this%current_list(ic)%type) then
+                 this%current_list(ic)%mass=mass(this%current_list(i)%order(1))
+                 this%current_list(ic)%width=width(this%current_list(i)%order(1))
+           endif
+         enddo
          do iv=1,this%current_list(ic)%n_vert
-
             if (this%current_list(ic)%vertex_sign(iv))then
                this%current_list(ic)%val_c(1:dim)=&
                     this%current_list(ic)%val_c(1:dim)-this%interaction_list(this%current_list(ic)%vertices(iv))%val_c(1:dim)
