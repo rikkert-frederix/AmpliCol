@@ -4,7 +4,8 @@ module common
   ! coupling constants
   real*8,parameter  :: alphaS=0.119d0,alphaEW=0.00754677114d0
   ! masses,widths
-  real*8,parameter :: mt=0d0,wt=0d0
+  real*8,parameter :: mt=173d0,wt=1.4915d0
+  !real*8,parameter :: mt=0d0,wt=0d0
 
   ! momenta, phase-space jacobian and Bjorken x's
   real(kind=8),dimension(:,:),allocatable,public :: p

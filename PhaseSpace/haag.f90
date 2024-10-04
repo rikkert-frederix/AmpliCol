@@ -13,7 +13,7 @@ module haag
   integer(kind=4) :: ix, ndim,next
 
   integer(kind=4),dimension(:),allocatable :: order
-  real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x,sigma_ij
+  real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,x,sigma_ij,ETmin
   real(kind=8),dimension(:,:),allocatable :: pp
   integer(kind=4),dimension(:,:),allocatable :: sets
   logical :: includePDF
@@ -57,6 +57,7 @@ contains
     allocate(order(next))
     allocate(invm(maskr(next)))
     allocate(invm_min(maskr(next)))
+    allocate(ETmin(maskr(next)))
     allocate(invm_max(maskr(next)))
     allocate(sigma_ij(maskr(next)))
     allocate(pp(0:3,0:maskr(next)))
@@ -190,7 +191,24 @@ contains
           endif
        endif
     enddo
+    call setup_ETmin
   end subroutine setup_PS_cuts
+
+  subroutine setup_ETmin
+    ! Setup the minimum required (transverse) energy for each (combination of)
+    ! final state particle(s) in the collision c.o.m. frame. Based on the
+    ! masses and the ptcut (i.e., assumes that all pz=0 and pT=pTcut)
+    integer :: i,j
+    ETmin(1:maskr(next))=0d0
+    do i=1,maskr(next)
+       if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
+       do j=0,next-1
+          if (btest(i,j)) ETmin(i)=ETmin(i)+sqrt(invm(ibset(0,j))+ptcut**2)
+       enddo
+       ETmin(i)=max(ETmin(i),sqrt(invm_min(i)))
+    enddo
+  end subroutine setup_ETmin
+
 
   subroutine haag_deallocate
     implicit none
@@ -475,10 +493,6 @@ endif
     jac=jac*soft/((2d0*pi)**(3*(next-2)-4)) !wgt
     jac=jac/(2d0*sqrtshat**2)
 
-    !write(*,*) 'jac',jac
-
-
-
   end subroutine generate_momenta
 
   subroutine generate_initial_state
@@ -493,7 +507,8 @@ endif
   subroutine generate_tau
     implicit none
     real(kind=8) :: smin,smax,shat
-    smin=(next-2)*(next-3)*s0
+    !smin=(next-2)*(next-3)*s0
+    smin=max(invm_min(maskr(next)-3),ETmin(maskr(next)-3)**2)
     smax=sqrts**2
     ix=ix+1
     call random_to_var(x(ix),ip_shat,smin,smax,shat,jac)
@@ -577,11 +592,8 @@ endif
     else
        if (k .ge. 3) then
          call generate_s2(k,s,s1,s2,q1_cmf,P_cmf)
-         if (jac.lt.0d0) return
        else
          s2 = mass2**2
-         gs = 1d0
-         jac = jac/gs
        endif
     endif
 
@@ -624,6 +636,7 @@ endif
 
     elseif (abs(h).gt.0d0) then
         call generate_a1_term1(i,m1,maxn,s,s1,s2,costheta,a1cut,beta,h,a1)
+        if (jac.lt.0d0) return
         call generate_a2_term1(i,m1,maxn,a1,s,s1,s2,costheta,a2cut,h,a2)
     endif
 
@@ -657,7 +670,7 @@ endif
     real(kind=8) :: h1,a1min,a1max,a2min,a2max,f_h1,h
     real(kind=8) :: a1cut,a2cut
     real(kind=8),dimension(3) :: buff
-    real(kind=8) :: amin,amax,bmin,bmax
+    real(kind=8) :: amin,amax,bmin,bmax,beta
     
     h1=0d0
     a1max = 0.5d0*(1d0-(s2-s1)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
@@ -666,12 +679,12 @@ endif
        a1min=a1cut
     endif
 
-    buff = f_func_term1(-h1,cos,s,s1,s2,h)
+    buff = f_func_term1(-h1,cos,s,s1,s2,h,h1,beta)
     f_h1 = buff(2)
-    buff = f_func_term1(a1min,cos,s,s1,s2,h)
+    buff = f_func_term1(a1min,cos,s,s1,s2,h,h1,beta)
     Amin= (a1min+ h1 + buff(2)-f_h1) &
          /(a1min+ h1 + buff(2) +f_h1)
-    buff = f_func_term1(a1max,cos,s,s1,s2,h)
+    buff = f_func_term1(a1max,cos,s,s1,s2,h,h1,beta)
     Amax= (a1max + h1 + buff(2)-f_h1) &
           /(a1max + h1 + buff(2) +f_h1)
     w1 = (1d0/f_h1)*(log(Amax)-log(Amin))
@@ -975,8 +988,6 @@ endif
        ix = ix +1
        call random_to_var(x(ix),0d0,smin,smax,s2,jac)
        !soft = soft*(smax-smin)
-       gs = 1d0
-       jac = jac/gs
     endif
     if (open) then
        ix = ix +1
@@ -1006,9 +1017,11 @@ endif
     if (a1min .lt. 0d0) then ! just for numerical stability!
         a1min = 0d0
     endif
+    
     if ((a1cut.gt.a1min).and.(a1cut.lt.a1max)) then
         a1min = a1cut
     endif
+
     if (abs(h).gt.0) then
       a1max_force = 1d0 - a1cut*(maxn-i-1)
       if ((a1max_force.lt.a1max).and.(a1max_force.gt.a1min)) then
@@ -1016,38 +1029,54 @@ endif
       endif
     endif
 
-    buff = f_func_term1(-h1,cos,s,s1,s2,h)
+    a1min = a1min/beta - h1
+    a1max = a1max/beta - h1
+
+    buff = f_func_term1(-h1,cos,s,s1,s2,h,h1,beta)
     f_h1 = buff(2)
-    buff = f_func_term1(a1min,cos,s,s1,s2,h)
+    buff = f_func_term1(a1min,cos,s,s1,s2,h,h1,beta)
     Amin= (a1min+ h1 + buff(2)-f_h1) &
          /(a1min+ h1 + buff(2) +f_h1)
-    buff = f_func_term1(a1max,cos,s,s1,s2,h)
+    buff = f_func_term1(a1max,cos,s,s1,s2,h,h1,beta)
     Amax= (a1max + h1 + buff(2)-f_h1) &
           /(a1max + h1 + buff(2) +f_h1)
-
     ! Now generate a1, depending on which distribution
     if ((.not. open) .and. (.not. flat)) then
       if (( ((i .ne. 0) .and. (.not. m1)) .or. (maxn .ne. next-2))) then
         ! Sample with Pi^{-1/2} factor
         ix = ix + 1
         call random_to_var(x(ix),0d0,0d0,1d0,R,jac)
-        buff = f_func_term1(a1,cos,s,s1,s2,h)
+        buff = f_func_term1(a1,cos,s,s1,s2,h,h1,beta)
         v = buff(1)/2d0
-        buff = f_func_term1(0d0,cos,s,s1,s2,h)
+        buff = f_func_term1(0d0,cos,s,s1,s2,h,h1,beta)
         wsq = buff(2)**2  ! w^2
         if (Amin .le. 0d0) then
           Amin = Amax*1d-8 ! for numerical stability
         endif
         Atilde = (Amin**(1d0-R))*(Amax)**R
         kappa = - h1 + f_h1*(1d0+Atilde)/(1d0-Atilde)
-        buff = f_func_term1(a1,cos,s,s1,s2,h)
+       
         if (v+kappa.lt.h*1d-5) then
            a1=a1max
         else
            a1 = ((kappa**2) - wsq)/(2d0*(v+kappa))
         endif
+        if ((a1min-a1)/a1min.le.1d-6.and.a1min-a1.gt.0d0) a1=a1min
+        if ((a1-a1max)/a1max.le.1d-6.and.a1-a1max.gt.0d0) a1=a1max
+
+        a1=beta*(a1+h1)
+
+        a1min = beta*(a1min + h1)
+        a1max = beta*(a1max + h1)
+
         if ((a1min-a1)/a1min.le.1d-6.and.a1min-a1.gt.0d0) a1=a1min 
         if ((a1-a1max)/a1max.le.1d-6.and.a1-a1max.gt.0d0) a1=a1max
+
+        if ((a1.lt.a1min).or.(a1.gt.a1max)) then
+           jac=-1d0
+           num_error=num_error+1
+           return
+        endif
         soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
         if (Amax.le.0d0) then
              jac=-9d0
@@ -1058,7 +1087,8 @@ endif
              return
         endif
         jac = jac*a1
-        jac = jac*beta
+        jac = jac/beta
+
       elseif (((i .eq. 0) .or. (m1 .and. (i .le. 1)))) then
         ! Sample with 1/x 
         ix = ix + 1
@@ -1067,6 +1097,7 @@ endif
         !jac = jac*a1 
 
       endif
+
       if ((a1 .gt. a1max) .or. (a1 .lt. a1min)) then
               num_error = num_error+1
       endif
@@ -1075,13 +1106,15 @@ endif
     if ((flat)) then
       ix = ix +1
       call random_to_var(x(ix),0d0,a1min,a1max,a1,jac)
+      a1=beta*(a1+h1)
+      jac=jac/beta
       !soft = soft*(a1max-a1min)
     endif
     if (open) then
         ix = ix + 1
         call random_to_var(x(ix),-1d0,a1min,a1max,a1,jac)
         !soft = soft*log(a1max/a1min)
-        !jac = jac*a1
+        jac = jac*a1
     endif
   end subroutine generate_a1_term1
 
@@ -1153,7 +1186,6 @@ endif
 
     ! Pretty much same as COMIX, except h stuff
 
-
     ! Now generate a2
     if ((.not. open) .and. (.not. flat)) then
     if ((m1 .and. (i .ge. 2)) .or.&
@@ -1176,7 +1208,7 @@ endif
               write (*,*) 'division by zero in a2max',a2,a2max
               stop 1
            elseif ((a2-a2max)/a2max.le.1d-8) then
-              a1=a2max
+              a2=a2max
            endif
         endif
         jac = jac*a2
@@ -1190,7 +1222,7 @@ endif
     if (flat) then
       if ((m1 .and. (i .ge. 2)) .or.&
             ((.not. m1) .and. (maxn .eq. next-2) .and. (i .ge. 1))&
-            .or. (maxn .ne. n))  then
+            .or. (maxn .ne. next-2))  then
         ix = ix +1
         call random_to_var(x(ix),0d0,a2min,a2max,a2,jac)
         !soft = soft*(a2max-a2min)
@@ -1255,27 +1287,34 @@ endif
     endif
   end subroutine generate_a2_term2
 
-  function f_func_term1(a1,cos,s,s1,s2,h)
+  function f_func_term1(a1,cos,s,s1,s2,h,h1,beta)
     implicit none
     real(kind=8),dimension(3) :: f_func_term1
-    real(kind=8) :: beta, a1,cos,sin,s,s1,s2,lin_coeff,con_term,h
+    real(kind=8) :: term, a1,cos,sin,s,s1,s2,lin_coeff,con_term,h,beta,h1
     sin = dsqrt(1d0-cos**2)
-    beta = (1d0+(s2-s1)/s) + (1d0-(s2-s1)/s)*cos
+    term = (1d0+(s2-s1)/s) + (1d0-(s2-s1)/s)*cos
     if (h.gt.0d0) then ! Old approach
       if (cos.lt.0.999d0) then
-        lin_coeff = -cos*beta-sin**2+sin**2*(s2-s1)/s-2d0*h*cos
+        lin_coeff = (-cos*term-sin**2+sin**2*(s2-s1)/s-2d0*h*cos)/beta + 2d0*h1
       else
         ! use Taylor expansion around cos=1
-        lin_coeff = -beta-2d0*h + 2d0*(1-beta-h-(s2-s1)/s)*(cos-1d0)
+        lin_coeff = (-term-2d0*h + 2d0*(1-term-h-(s2-s1)/s)*(cos-1d0))/beta + 2d0*h1
       endif
-      con_term = 0.25d0*(beta**2) + h*beta + h**2 + (sin**2)*s1/s
+      con_term = (0.25d0*(term**2) + h*term + h**2 + (sin**2)*s1/s)/(beta**2) + h1**2 + 2d0*h1*lin_coeff/beta
+
     elseif (h.eq.0d0) then ! New approach
-      lin_coeff = (-cos*beta-sin**2+sin**2*(s2-s1)/s + beta)/(2d0-2d0*cos)
-      con_term = (0.25d0*(beta**2) + (sin**2)*s1/s)/(2d0-2d0*cos)
+      lin_coeff = (-cos*term-sin**2+sin**2*(s2-s1)/s + term)/(2d0-2d0*cos)
+      con_term = (0.25d0*(term**2) + (sin**2)*s1/s)/(2d0-2d0*cos)
     elseif (h.lt.0d0) then
-      lin_coeff = -cos*beta-sin**2+sin**2*(s2-s1)/s
-      con_term = 0.25d0*(beta**2) + (sin**2)*s1/s
+      lin_coeff = -cos*term-sin**2+sin**2*(s2-s1)/s
+      con_term = 0.25d0*(term**2) + (sin**2)*s1/s
     endif
+    if (a1**2 + lin_coeff*a1 + con_term.lt.0d0) then
+       jac=-1d0
+       num_error=num_error+1
+       return
+    endif
+
     f_func_term1 = (/lin_coeff,dsqrt(a1**2 + lin_coeff*a1 + con_term),con_term/)
   end function f_func_term1
 
@@ -1293,11 +1332,13 @@ endif
   function a2_pm(a1,s,s1,s2,c)
     ! cross-checked with pi function!
     implicit none
-    real(kind=8) :: comm,s1,s2,s,a1,a2plus,a2minus,c
+    real(kind=8) :: comm,s1,s2,s,a1,a2plus,a2minus,c,ent_sqr
     real(kind=8), dimension(2) :: a2_pm
     comm = 0.5*(1.+((s2-s1)/s)+c*(1.-2.*a1-(s2-s1)/s))
-    a2plus  = comm + dsqrt(1.-c**2)*dsqrt(a1*(1.-a1-(s2-s1)/s)-s1/s)
-    a2minus = comm - dsqrt(1.-c**2)*dsqrt(a1*(1.-a1-(s2-s1)/s)-s1/s)
+    ent_sqr=a1*(1.-a1-(s2-s1)/s)-s1/s
+    if ((a1*(1.-a1-(s2-s1)/s)-s1/s).lt.0d0 .and. abs(a1*(1.-a1-(s2-s1)/s)-s1/s).lt.1d-6) ent_sqr=0d0
+    a2plus  = comm + dsqrt(1.-c**2)*dsqrt(ent_sqr)
+    a2minus = comm - dsqrt(1.-c**2)*dsqrt(ent_sqr)
     a2_pm = (/a2plus,a2minus/)
   end function a2_pm
 
@@ -1361,7 +1402,6 @@ endif
            xxx = sgn*dsqrt(E**2-s1-y**2-z**2)
         endif
         p1 = (/E,xxx,y,z/)
-
         p2 = (/sqrt(s)-E,-xxx,-y,-z/)
         e_cmf = dsqrt(s)/2d0
         r1 = dot(P_cmf,P_cmf)/(2d0*dot(P_cmf,q1_cmf))
