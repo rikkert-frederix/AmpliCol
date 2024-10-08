@@ -290,9 +290,7 @@ contains
     val(1:nproc)=val(1:nproc)*multi_factor(1:nproc)
 
     if (include_PDF) then
-       do iproc=1,nproc
-          call multiply_by_PDF_value(iproc,val(iproc))
-       enddo
+       call multiply_by_PDF_value(val)
     endif
     ! pass the result to the mint module
     f1(1)=sum(abs(val(1:nproc)))
@@ -647,6 +645,7 @@ contains
     implicit none
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
     do i=1,next
+       ! only check the first process. They should all be the same
        if (abs(processes(i,1)).le.6 .or. processes(i,1).eq.21 .or. processes(i,1).eq.22) then
           spin(0,i)=2   ! two spin states: '-1' and '1'
           spin(1,i)=-1
@@ -843,10 +842,10 @@ contains
     enddo
   end subroutine set_ipdgs_for_PDF
   
-  subroutine multiply_by_PDF_value(iproc,val)
+  subroutine multiply_by_PDF_value(val)
     implicit none
-    real(kind=8),intent(inout) :: val
-    integer,intent(in) :: iproc
+    real(kind=8),intent(inout),dimension(*) :: val
+    integer :: iproc
     real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
     ! Include the PDFs
@@ -855,20 +854,22 @@ contains
     call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
     call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
 
-    if (processes(1,iproc).eq.21) then
-       val=val*PDF(0,1)
-    elseif (processes(1,iproc).eq.22) then
-       val=val*PDF(7,1)
-    else
-       val=val*PDF(processes(1,iproc),1)
-    endif
-    if (processes(2,iproc).eq.21) then
-       val=val*PDF(0,2)
-    elseif (processes(2,iproc).eq.22) then
-       val=val*PDF(7,2)
-    else
-       val=val*PDF(processes(2,iproc),2)
-    endif
+    do iproc=1,nproc
+       if (processes(1,iproc).eq.21) then
+          val(iproc)=val(iproc)*PDF(0,1)
+       elseif (processes(1,iproc).eq.22) then
+          val(iproc)=val(iproc)*PDF(7,1)
+       else
+          val(iproc)=val(iproc)*PDF(processes(1,iproc),1)
+       endif
+       if (processes(2,iproc).eq.21) then
+          val(iproc)=val(iproc)*PDF(0,2)
+       elseif (processes(2,iproc).eq.22) then
+          val(iproc)=val(iproc)*PDF(7,2)
+       else
+          val(iproc)=val(iproc)*PDF(processes(2,iproc),2)
+       endif
+    enddo
   end subroutine multiply_by_PDF_value
   
   subroutine compute_multichannel_symmetry_factor(sym_fac)

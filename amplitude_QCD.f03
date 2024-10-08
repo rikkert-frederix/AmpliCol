@@ -161,9 +161,7 @@ contains
       implicit none
       integer,intent(in) :: nc,ispin,ipart,iorder,iproc
       integer :: i,ic
-!!$      write (*,*) iorder,ispin,ipart
       do ic=1,this%n_cur
-!!$         write (*,*) ic,current_list_local(ic)%order(1),current_list_local(ic)%spin(1),current_list_local(ic)%type
          if (current_list_local(ic)%order(1).ne.iorder) cycle
          if (current_list_local(ic)%mass.ne.mass(iorder)) cycle
          if (current_list_local(ic)%width.ne.width(iorder)) cycle
@@ -175,13 +173,10 @@ contains
          if (current_list_local(ic)%bin.ne.ibset(0,iorder-1)) cycle
          if (current_list_local(ic)%spin(1).ne.ispin) cycle
          ! existing current.
-!!$         write (*,*) 'existing',current_list_local(ic)%iproc
          current_list_local(ic)%iproc=ibset(current_list_local(ic)%iproc,iproc-1)
-!!$         write (*,*) 'existing',current_list_local(ic)%iproc
          return
       enddo
       ! new external current
-!!$      write (*,*) 'new current'
       this%n_cur=this%n_cur+1
       allocate(current_list_local(this%n_cur)%order(isize))
       current_list_local(this%n_cur)%order(1)=iorder
@@ -200,31 +195,6 @@ contains
       current_list_local(this%n_cur)%n_vert=0
       current_list_local(this%n_cur)%iproc=0
       current_list_local(this%n_cur)%iproc=ibset(0,iproc-1)
-!!$      
-!!$      if (ipart.eq.0) return
-!!$      write (*,*) 'new external current',nc,ispin,ipart,iorder
-!!$      this%n_cur=this%n_cur+1
-!!$      allocate(current_list_local(this%n_cur)%order(isize))
-!!$      current_list_local(this%n_cur)%order(1)=iorder
-!!$      current_list_local(this%n_cur)%mass=mass(iorder)
-!!$      current_list_local(this%n_cur)%width=width(iorder)
-!!$      if (iorder.le.2 .and. abs(ipart).le.6) then ! initial quark states
-!!$         current_list_local(this%n_cur)%type=anti_current(ipart) ! switch quark <--> anti-quark for initial states
-!!$      else
-!!$         current_list_local(this%n_cur)%type=ipart
-!!$      endif
-!!$      allocate(current_list_local(this%n_cur)%ext_type(isize))
-!!$      current_list_local(this%n_cur)%ext_type(1)=current_list_local(this%n_cur)%type
-!!$      current_list_local(this%n_cur)%bin=ibset(0,iorder-1) ! give binary label
-!!$      allocate(current_list_local(this%n_cur)%spin(isize))
-!!$      current_list_local(this%n_cur)%spin(1)=ispin
-!!$      current_list_local(this%n_cur)%n_vert=0
-!!$      current_list_local(this%n_cur)%iproc=0
-!!$      do i=1,n_processes
-!!$         if (this%processes(iorder,i).eq.ipart) then
-!!$            current_list_local(this%n_cur)%iproc=ibset(current_list_local(this%n_cur)%iproc,i-1)
-!!$         endif
-!!$      enddo
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -254,11 +224,8 @@ contains
          this%iproc_start(iproc)=this%n_amps+1
          do icur=this%n_cur_start(n-1),this%n_cur_end(n-1)
             do jcur=this%n_cur_start(n),this%n_cur_end(n)
-
                if ( current_list_local(icur)%type .ne. anti_current(current_list_local(jcur)%type) ) cycle
-               
                proc=iand(current_list_local(icur)%iproc,current_list_local(jcur)%iproc)
-               
                if (popcnt(proc).eq.0) then
                   ! combination of icur and jcur does not contribute to any of the processes
                   cycle
@@ -271,21 +238,6 @@ contains
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
-
-!!$               proc=0
-!!$               do j=1,n-1
-!!$                  if (current_list_local(icur)%order(j).gt.2) then
-!!$                     proc(current_list_local(icur)%order(j))=current_list_local(icur)%ext_type(j)
-!!$                  else
-!!$                     proc(current_list_local(icur)%order(j))=anti_current(current_list_local(icur)%ext_type(j))
-!!$                  endif
-!!$               enddo
-!!$               if (current_list_local(jcur)%order(1).gt.2) then
-!!$                  proc(current_list_local(jcur)%order(1))=current_list_local(jcur)%ext_type(1)
-!!$               else
-!!$                  proc(current_list_local(jcur)%order(1))=anti_current(current_list_local(jcur)%ext_type(1))
-!!$               endif
-!!$               if (.not. all(this%processes(1:n,iproc).eq.proc(1:n))) cycle
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
                curr2amp(2,this%n_amps)=jcur
@@ -788,14 +740,6 @@ contains
       logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,not_valid
       integer,dimension(isize) :: ip,et
       valid_current_combination=.false.
-
-
-      
-!!$      if (.not.btest(current_list_local(ic1)%iproc,0)) return
-!!$      if (.not.btest(current_list_local(ic2)%iproc,0)) return
-
-
-      
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) return
       ! final particle should never be part of any combined currents: it will
@@ -843,12 +787,8 @@ contains
 
          not_valid=.true.
          do_iproc: do iproc=1,n_processes
-
             if (.not. btest(iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc),iproc-1)) cycle
             if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,iproc)-1)) cycle
-!!$            write (*,*) iproc,':',ip(1:nc1+nc2),':',order(1:n,iproc),':',&
-!!$                 current_list_local(ic1)%iproc,current_list_local(ic2)%iproc
-            
             do_j: do j=1,n
                if (order(j,iproc).eq.ip(1)) then
                   do i=2,nc1+nc2
@@ -859,9 +799,7 @@ contains
                   exit do_iproc
                endif
             enddo do_j
-
          enddo do_iproc
-!!$         write (*,*) 'returning',not_valid
          if (not_valid) return
       endif
 
@@ -904,9 +842,6 @@ contains
          ! if the current is of length n-1, the first should be a quark
          if (isize.eq.n-1 .and. .not.is_quark(et(1))) return
       endif
-!!$
-!!$      write (*,*) 'VALID COMBINATION'
-
       ! Got all the way to the end. This must be a valid current combination
       valid_current_combination=.true.
     end function valid_current_combination
@@ -1194,8 +1129,6 @@ contains
       logical,intent(in) :: vertex_sign
       integer :: ic,key
       integer(kind=8) :: val
-!!$      write (*,*) 'new call',isize,new_current%type,new_current%bin,new_current%order(1:isize),&
-!!$           new_current%ext_type(1:isize),new_current%spin(1:isize),new_current%iproc
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
@@ -1209,7 +1142,6 @@ contains
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
             return
          enddo
-!!$         write (*,*) 'new current'
          ! Need a new current
          this%n_cur=this%n_cur+1
          current_list_local(this%n_cur)=new_current
