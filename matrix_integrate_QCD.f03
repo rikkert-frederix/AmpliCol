@@ -119,13 +119,7 @@ program matrix_integrate_QCD
   call amps%init(1,next,nproc,processes,spin,mass,width,orders)
 
   ! Total number of amplitudes is stored in 'nhel'
-  if (amps%n_qqbar(1).eq.2 .and. amps%same_flav(1)) then
-     nhel=amps%n_amps/2
-     write (*,*) 'FIX THIS'
-     stop 1
-  else
-     nhel=amps%n_amps
-  endif
+  nhel=amps%n_amps
 
   allocate(col_fac(nproc))
   call compute_LC_colour_factor()  ! updates 'col_fac()'
@@ -243,17 +237,23 @@ contains
 
     call cpu_time(tBefore)
     iproc=1
-    do ih=1,amps%n_amps
-       if (use_real_gluons .and. amps%n_qqbar(1).eq.0) then
+    if (use_real_gluons .and. all(amps%n_qqbar(1:amps%nprocs).eq.0)) then
+       do ih=1,amps%n_amps
           amp2_hel(ih)=amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih) *hel_fac(ih)
-       else
+          if (amps%iproc_start(iproc+1).eq.ih+1) then
+             amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+             iproc=iproc+1
+          endif
+       enddo
+    else
+       do ih=1,amps%n_amps
           amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
-       endif
-       if (amps%iproc_start(iproc+1).eq.ih+1) then
-          amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
-          iproc=iproc+1
-       endif
-    enddo
+          if (amps%iproc_start(iproc+1).eq.ih+1) then
+             amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+             iproc=iproc+1
+          endif
+       enddo
+    endif
     
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
@@ -396,9 +396,14 @@ contains
           endif
        enddo
     enddo
-
+    
     if (nevent.lt.nevent_hel_filter) return
 
+    ih2=0
+    do ih1=1,nhel
+       if (include_hel(ih1).gt.0) ih2=ih2+1
+    enddo
+    
     call amps%filter_helicity(next,nhel,include_hel) ! this updates 'nhel' and 'include_hel'
     deallocate(hel_fac)
     allocate(hel_fac(nhel))
@@ -786,8 +791,8 @@ contains
           stop 1
        endif
        if (abs(processes(orders(1,iproc),iproc)).ne.abs(processes(orders(next,iproc),iproc)) &
-            .and. .not.amps%same_flav(1)) then
-          ifac=(ifac-2)
+            .and. .not.amps%same_flav(iproc)) then
+          ifac=ifac-2
        endif
        col_fac(iproc)=3**ifac
     enddo
