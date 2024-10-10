@@ -69,7 +69,7 @@ module mint_module
   integer, parameter, private :: nintervals=32    ! max number of intervals in the integration grids
   integer, parameter, public  :: ndimmax=60       ! max number of dimensions of the integral
   integer, parameter, public  :: n_ave_virt=10    ! max number of grids to set up to approx virtual
-  integer, parameter, public  :: nintegrals=26    ! number of integrals to keep track of
+  integer, parameter, public  :: nintegrals=128   ! number of integrals to keep track of
   integer, parameter, private :: nintervals_virt=8! max number of intervals in the grids for the approx virtual
   integer, parameter, private :: min_inter=4      ! minimal number of intervals
   integer, parameter, private :: min_it0=4        ! minimal number of iterations in the mint step 0 phase
@@ -101,35 +101,7 @@ module mint_module
 
 ! private variables
   logical,parameter,private  :: fixed_points_pass_cuts=.true.,aggressive_channel_combination=.false.
-  character(len=13), parameter, dimension(nintegrals), private :: title=(/ &
-                                                   'ABS integral ', & !  1
-                                                   'Integral     ', & !  2
-                                                   'process  1   ', & !  3
-                                                   'process  2   ', & !  4
-                                                   'process  3   ', & !  5
-                                                   'process  4   ', & !  6
-                                                   'process  5   ', & !  7
-                                                   'process  6   ', & !  8
-                                                   'process  7   ', & !  9
-                                                   'process  8   ', & ! 10
-                                                   'process  9   ', & ! 11
-                                                   'process 10   ', & ! 12
-                                                   'process 11   ', & ! 13
-                                                   'process 12   ', & ! 14
-                                                   'process 13   ', & ! 15
-                                                   'process 14   ', & ! 16
-                                                   'process 15   ', & ! 17
-                                                   'process 16   ', & ! 18
-                                                   'process 17   ', & ! 19
-                                                   'process 18   ', & ! 20
-                                                   'process 19   ', & ! 21
-                                                   'process 20   ', & ! 22
-                                                   'process 21   ', & ! 23
-                                                   'process 22   ', & ! 24
-                                                   'process 23   ', & ! 25
-                                                   'process 24   '/)  ! 26
-
-
+  character(len=13),save,dimension(nintegrals), private :: title
   integer, private :: nit,nit_included,kpoint_iter,nint_used,nint_used_virt,min_it,ncalls,pass_cuts_point,ng,npg,k
   integer, dimension(ndimmax), private :: icell,ncell
   integer, dimension(nintegrals), private :: non_zero_point,ntotcalls,ntotcallsalliter
@@ -232,6 +204,7 @@ contains
 
   subroutine initialise_mint
     implicit none
+    call fill_titles
     if (imode.ne.0) call read_grids_from_file
     call setup_basic_mint
     if (imode.eq.0) then
@@ -245,6 +218,18 @@ contains
     call setup_common
   end subroutine initialise_mint
 
+  subroutine fill_titles
+    implicit none
+    integer :: i
+    character*4 :: number
+    title(1)='ABS integral '
+    title(2)='Integral     '
+    do i=1,nintegrals-2
+       write(number,'(i4)') i
+       title(i+2)='process '//trim(adjustl(number))
+    enddo
+  end subroutine fill_titles
+  
   subroutine setup_basic_mint
     implicit none
     ! if ncalls0 is greater than 0, use the default running, i.e. do not
