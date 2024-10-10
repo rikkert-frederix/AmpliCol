@@ -119,7 +119,7 @@ program matrix_integrate_QCD
   call amps%init(1,next,nproc,processes,spin,mass,width,orders)
 
   ! Total number of amplitudes is stored in 'nhel'
-  if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
+  if (amps%n_qqbar(1).eq.2 .and. amps%same_flav(1)) then
      nhel=amps%n_amps/2
      write (*,*) 'FIX THIS'
      stop 1
@@ -244,7 +244,7 @@ contains
     call cpu_time(tBefore)
     iproc=1
     do ih=1,amps%n_amps
-       if (use_real_gluons .and. amps%n_qqbar.eq.0) then
+       if (use_real_gluons .and. amps%n_qqbar(1).eq.0) then
           amp2_hel(ih)=amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih) *hel_fac(ih)
        else
           amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
@@ -265,16 +265,16 @@ contains
        endif
     endif
     
-    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing)*conv
+    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing(1))*conv
 
-    if (amps%n_sing.ge.1) then
+    if (amps%n_sing(1).ge.1) then
        do i=1,next
           if (abs(part(i)).le.6) then
              if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
              if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
           endif
        enddo
-       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**amps%n_sing
+       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**amps%n_sing(1)
     endif
 
     val(1:nproc)=amp2(1:nproc)*weight/dble(iden(1:nproc))
@@ -539,7 +539,7 @@ contains
        write (*,*) '****************************************************'
        do iproc=1,nproc
           read(10,*) processes(1:next,iproc),orders(1:next,iproc),multi_factor(iproc)
-          write(*,*) processes(1:next,iproc),'   ',orders(1:next,iproc),'   ',multi_factor(iproc)
+          write(*,*) iproc,':',processes(1:next,iproc),'   ',orders(1:next,iproc),'   ',multi_factor(iproc)
        enddo
        write (*,*) '****************************************************'
        close(10)
@@ -786,7 +786,7 @@ contains
           stop 1
        endif
        if (abs(processes(orders(1,iproc),iproc)).ne.abs(processes(orders(next,iproc),iproc)) &
-            .and. .not.amps%same_flav) then
+            .and. .not.amps%same_flav(1)) then
           ifac=(ifac-2)
        endif
        col_fac(iproc)=3**ifac
