@@ -105,21 +105,12 @@ contains
           ! external currents
           do nc=n,1,-1 ! create first the currents that close the amplitude
              if (nc.eq.n) this%n_cur_start(n)=this%n_cur+1
-             do_iproc: do iproc=1,n_processes
-!!$                write (*,*) 'trying',nc,iproc,this%processes(order(nc,iproc),iproc)
-!!$                do jproc=1,iproc-1
-!!$                   if (order(nc,jproc).eq.order(nc,iproc) .and. &
-!!$                        this%processes(order(nc,jproc),jproc).eq.this%processes(order(nc,iproc),iproc)) cycle do_iproc
-!!$                   if (this%processes(order(nc,jproc),jproc).eq.this%processes(order(nc,iproc),iproc)) cycle do_iproc
-!!$                enddo
-!!$                write (*,*) nc,this%processes(order(nc,iproc),iproc)
-!!$                if (iproc.gt.1 .and. &
-!!$                     any(this%processes(order(nc,1:iproc-1),1:iproc-1).eq.this%processes(order(nc,iproc),iproc))) cycle
+             do iproc=1,n_processes
                 do ispin=1, spin(0,order(nc,iproc))
                    call create_external_current(nc,iproc,spin(ispin,order(nc,iproc)),&
                         this%processes(order(nc,iproc),iproc),order(nc,iproc))
                 enddo
-             enddo do_iproc
+             enddo
              if (nc.eq.n) this%n_cur_end(n)=this%n_cur
           enddo
        else
@@ -194,7 +185,7 @@ contains
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
       current_list_local(this%n_cur)%iproc=0
-      current_list_local(this%n_cur)%iproc=ibset(0,iproc-1)
+      current_list_local(this%n_cur)%iproc=ibset(int(0,kind=16),iproc-1)
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -218,7 +209,7 @@ contains
          enddo
       enddo
       allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
-      allocate(this%iproc_start(1:n_processes))
+      allocate(this%iproc_start(1:n_processes+1))
       this%n_amps=0
       do iproc=1,n_processes
          this%iproc_start(iproc)=this%n_amps+1
@@ -244,7 +235,8 @@ contains
             enddo
          enddo
       enddo
-      
+      this%iproc_start(n_processes+1)=this%n_amps+1
+
       if (this%n_qqbar.eq.2 .and. this%same_flav) then
          if (n_processes.ne.2) then
             write (*,*) 'For two-quark-line same-flavour amplitudes, there should be 2 processes'
@@ -486,14 +478,15 @@ contains
       integer :: i,j,k,iflav
       this%n_sing=0
       this%n_qqbar=0
-      this%same_flav=.true.
+!!$      this%same_flav=.true.
+      this%same_flav=.false.
       iflav=0
       do i=1,n
          if (is_singlet(part(i,1))) this%n_sing=this%n_sing+1
          if (is_quark(part(i,1)).or.is_antiquark(part(i,1))) then
             this%n_qqbar=this%n_qqbar+1
             if (iflav.eq.0) iflav=abs(part(i,1))
-            if (abs(part(i,1)).ne.iflav) this%same_flav=.false.
+!!$            if (abs(part(i,1)).ne.iflav) this%same_flav=.false.
          endif
       enddo
       this%n_qqbar=this%n_qqbar/2
@@ -622,7 +615,7 @@ contains
       ! rough upper bound on the maximum number of interactions
       implicit none
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_vert=n**3*factorial(this%n_sing)*2**(n-2)
+         max_vert=n**3*factorial(this%n_sing)*2**(n-2)*10
       elseif(this%imode.eq.2) then
          max_vert=factorial(n+1)*14
       endif
@@ -2597,6 +2590,7 @@ contains
           exit
        endif
     enddo
+    this%iproc_start(this%nprocs+1)=this%n_amps+1
     deallocate(is_needed_ver)
     deallocate(is_needed_cur)
     deallocate(where_to_ver)

@@ -43,7 +43,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
   if (imode.eq.0 .or. imode.eq.2) then
-     ncalls0=-100
+     ncalls0=-100000
   else
      ncalls0=640000
   endif
@@ -249,14 +249,11 @@ contains
        else
           amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
        endif
-       if (iproc.lt.nproc) then
-          if (amps%iproc_start(iproc+1).eq.ih+1) then
-             amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
-             iproc=iproc+1
-          endif
+       if (amps%iproc_start(iproc+1).eq.ih+1) then
+          amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+          iproc=iproc+1
        endif
     enddo
-    amp2(nproc)=sum(amp2_hel(amps%iproc_start(nproc):ih-1))
     
     if (passed.le.nevent_hel_filter) then
        call setup_helicity_filter(passed)
@@ -790,7 +787,7 @@ contains
        endif
        if (abs(processes(orders(1,iproc),iproc)).ne.abs(processes(orders(next,iproc),iproc)) &
             .and. .not.amps%same_flav) then
-          ifac=(ifac-2) 
+          ifac=(ifac-2)
        endif
        col_fac(iproc)=3**ifac
     enddo
