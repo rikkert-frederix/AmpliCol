@@ -222,7 +222,7 @@ contains
             enddo
          enddo
       enddo
-      
+
       if (this%n_qqbar.eq.2 .and. this%same_flav) then
          if (n_processes.ne.2) then
             write (*,*) 'For two-quark-line same-flavour amplitudes, there should be 2 processes'
@@ -819,9 +819,12 @@ contains
     
     subroutine add_vertex(itype,ctype)
       implicit none
-      integer :: itype,ctype
-      if (isize.eq.n-1 .and. ctype.ne.anti_current(current_list_local(this%n_cur_start(n))%type)) then
-        return ! dead tree. Filter already here
+      integer :: itype,ctype,ic
+      if (isize.eq.n-1) then
+         do ic=this%n_cur_start(n),this%n_cur_end(n)
+            if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
+         enddo
+         if (ic.eq.this%n_cur_end(n)+1) return ! dead tree. Filter already here
       endif
       this%n_vert=this%n_vert+1
       interaction_list_local(this%n_vert)%type=itype
