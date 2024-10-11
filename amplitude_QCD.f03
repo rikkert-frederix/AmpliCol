@@ -846,7 +846,8 @@ contains
       
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
-         ! order.
+         ! order. First, find where the singlets are, since they do not matter
+         ! for the colour order
          do i=1,n1
             if (is_singlet(current_list_local(ic1)%ext_type(i))) exit
          enddo
@@ -856,23 +857,27 @@ contains
          enddo
          nc2=i-1
          ip(1:nc1+nc2)=[current_list_local(ic1)%order(1:nc1),current_list_local(ic2)%order(1:nc2)]
-
+         ! do they actual checking:
          not_valid=.true.
          do_iproc: do iproc=1,n_processes
+            ! check that both currents contribute to the iproc process:
             if (.not. btest(iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc),iproc-1)) cycle
+            ! check that the final particle is not part of the combined
+            ! current (it will be used to close the amplitude instead):
             if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,iproc)-1)) cycle
+            ! Check if they are compatible with the colour order of the iproc:
             do_j: do j=1,n
                if (order(j,iproc).eq.ip(1)) then
                   do i=2,nc1+nc2
                      if (j-1+i.gt.n) exit do_j
                      if (order(j-1+i,iproc).ne.ip(i)) exit do_j
                   enddo
-                  not_valid=.false.
+                  not_valid=.false. ! it's compatible with the input colour order of iproc
                   exit do_iproc
                endif
             enddo do_j
          enddo do_iproc
-         if (not_valid) return
+         if (not_valid) return ! not compatible with any of the iprocs
       endif
 
       ! If using symmetry and the current is a combination of all external
