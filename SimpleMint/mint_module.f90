@@ -1203,7 +1203,9 @@ contains
     do kint=1,nint_used
        if(nhits(kint,kdim,kchan).ne.0) then
 !     take logarithm to help convergence (taken from LO dsample.f)
-          if (xacc(kint,kdim,kchan).lt.(1d0-1d-12)*total) then
+          if (xacc(kint,kdim,kchan).lt.1d-12*total) then
+             xacc(kint,kdim,kchan)=0d0
+          elseif (xacc(kint,kdim,kchan).lt.(1d0-1d-12)*total) then
              xacc(kint,kdim,kchan)=((xacc(kint,kdim,kchan)/total-1d0)/log(xacc(kint,kdim,kchan)/total))**1.5
           else
              xacc(kint,kdim,kchan)=1d0
