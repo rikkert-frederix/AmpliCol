@@ -13,12 +13,14 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
   integer :: j,c_o,i,nproc
   integer,dimension(:,:),allocatable :: processes,orders
-  integer,dimension(:),allocatable :: multi_factor
+  integer,dimension(:,:,:),allocatable :: iden_processes
+  integer,dimension(:),allocatable :: multi_factor,iden_iproc
   integer(kind=8),dimension(:),allocatable :: iden
   integer(kind=4),dimension(:),allocatable :: o,part,hel,hel_fac
   integer(kind=4),dimension(:,:),allocatable :: spin
   real(kind=8),dimension(:),allocatable :: mass,width
-  real(kind=8) :: s_cut(2),sqrts
+  real(kind=8),dimension(:,:),allocatable :: val_procs
+  real(kind=8) :: s_cut(2),sqrts,evt_sign
   logical :: t_chan
   character(len=80) :: filename
   integer(kind=4) :: integration,nquarks,nhel
@@ -26,7 +28,7 @@ program matrix_integrate_QCD
   integer,dimension(:),allocatable :: col_fac
   integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
-  integer :: iproc_picked
+  integer :: iproc_picked,iproc_iden_picked
   
   call get_run_arguments()
   call setup_spin()
@@ -148,8 +150,9 @@ program matrix_integrate_QCD
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        call unwgt_helicity     ! pick a random helicity
-        call write_event(11,ans(1,0))
+        call unwgt_process      ! pick a random process
+        call unwgt_helicity     ! pick a random helicity for the process picked
+        call write_event(11,sign(ans(1,0),evt_sign))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -174,25 +177,29 @@ contains
     integer :: ifirst
     real(kind=8), dimension(ndim) :: x
     real(kind=8), dimension(nintegrals) :: f1
-    real(kind=8), dimension(:),allocatable,save :: val
+    real(kind=8), dimension(:),allocatable,save :: val,val_abs
     integer :: ih,iproc,i
     real(kind=8) :: vol,cuts_wgt
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real*4 :: tBefore,tAfter
     real(kind=8) :: Q
-    if (.not.allocated(val)) allocate(val(1:nproc))
+    if (.not.allocated(val)) then
+       allocate(val(1:nproc))
+       allocate(val_abs(1:nproc))
+    endif
     
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
        ! use previously computed integrand
-       f1(1)=sum(abs(val(1:nproc)))
+       f1(1)=sum(val_abs(1:nproc))
        f1(2)=sum(val(1:nproc))
        f1(3:nproc+2)=val(1:nproc)
        return
     endif
     new_point=.true.
     pass_cuts_check=.true.
+    val_abs(1:nproc)=0d0
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
@@ -286,14 +293,13 @@ contains
     ! need to compensate with a symmetry factor
     val(1:nproc)=val(1:nproc)*multi_factor(1:nproc)
 
-    if (include_PDF) then
-       call multiply_by_PDF_value(val)
-    endif
+    call include_PDF_and_identical_procs(val,val_abs)
+
     ! pass the result to the mint module
-    f1(1)=sum(abs(val(1:nproc)))
+    f1(1)=sum(val_abs(1:nproc))
     f1(2)=sum(val(1:nproc))
     f1(3:nproc+2)=val(1:nproc)
-    integrand=f1(2)
+    integrand=f1(1)
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end function integrand
@@ -467,28 +473,73 @@ contains
     if (processes(1,iproc_picked).ne.processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
        ! do not flip
        do i=1,next
-          write (iunit,*) processes(i,iproc_picked),p(1:3,i),p(0,i)
+          write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),p(1:3,i),p(0,i)
        enddo
     else
        ! do flip
        do i=1,next
           if (i.le.2) then
-             write (iunit,*) processes(i,iproc_picked),p(1:2,3-i),-p(3,3-i),p(0,3-i)
+             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),p(1:2,3-i),-p(3,3-i),p(0,3-i)
           else
-             write (iunit,*) processes(i,iproc_picked),p(1:2,i),-p(3,i),p(0,i)
+             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),p(1:2,i),-p(3,i),p(0,i)
           endif
        enddo
     endif
     write (iunit,*) '</event>'
   end subroutine write_event
 
+  subroutine unwgt_process
+    implicit none
+    integer :: i,iproc
+    real(kind=8) :: random,accum,target
+    real(kind=8),external :: ran2
+    target=0d0
+    do iproc=1,nproc
+       do i=1,iden_iproc(iproc)
+          target=target+abs(val_procs(i,iproc))
+       enddo
+    enddo
+    random=ran2()*target
+    iproc=1
+    i=1
+    accum=abs(val_procs(i,iproc))
+    do
+       if (accum.gt.random) then
+          exit
+       else
+          i=i+1
+          if (i.gt.iden_iproc(iproc)) then
+             i=1
+             iproc=iproc+1
+          endif
+          accum=accum+abs(val_procs(i,iproc))
+       endif
+    enddo
+    iproc_picked=iproc
+    iproc_iden_picked=i
+    if (iproc_picked.gt.amps%nprocs) then
+       write (*,*) "Could not unweight process",iproc_picked,amps%nprocs
+       stop 1
+    endif
+    if (iproc_iden_picked.gt.iden_iproc(iproc)) then
+       write (*,*) "Could not unweight process",iproc,iproc_iden_picked,iden_iproc(iproc)
+       stop 1
+    endif
+    if (val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
+       evt_sign=-1d0
+    else
+       evt_sign=+1d0
+    endif
+  end subroutine unwgt_process
+  
+
   subroutine unwgt_helicity
     implicit none
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
-    random=ran2()*sum(amp2(1:nproc))
-    i=1
+    random=ran2()*amp2(iproc_picked)
+    i=amps%iproc_start(iproc_picked)
     do
        if (amp2_hel(i).gt.random) then
           exit
@@ -498,15 +549,11 @@ contains
        endif
     enddo
     hel_picked(2)=i
-    if (hel_picked(2).gt.nhel) then
-       write (*,*) 'Could not unweight helicity',hel_picked,nhel
+    if (hel_picked(2).lt.amps%iproc_start(iproc_picked) .or. hel_picked(2).ge.amps%iproc_start(iproc_picked+1)) then
+       write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,amps%iproc_start(iproc_picked),&
+            amps%iproc_start(iproc_picked+1)
        stop 1
     endif
-    do iproc_picked=1,nproc-1
-       if (amps%iproc_start(iproc_picked+1).ge.hel_picked(2)) then
-          exit
-       endif
-    enddo
     if (hel_fac(hel_picked(2)).gt.1) then
        hel_picked(1)=1+int(ran2()*hel_fac(hel_picked(2)))
     else
@@ -546,6 +593,7 @@ contains
           read(10,*) processes(1:next,iproc),orders(1:next,iproc),multi_factor(iproc)
           write(*,*) iproc,':',processes(1:next,iproc),'   ',orders(1:next,iproc),'   ',multi_factor(iproc)
        enddo
+       call define_identical_procs
        write (*,*) '****************************************************'
        close(10)
     elseif (argc.le.10) then
@@ -637,6 +685,11 @@ contains
        orders(1:next,1)=o(1:next)
        allocate(multi_factor(1))
        multi_factor(1)=sym_fac
+       allocate(iden_iproc(1))
+       iden_iproc(1)=1
+       allocate(val_procs(1,1))
+       allocate(iden_processes(1:next,1,1))
+       iden_processes(1:next,1,1)=processes(1:next,1)
     endif
   end subroutine get_run_arguments
 
@@ -828,51 +881,100 @@ contains
   subroutine set_ipdgs_for_PDF()
     ! determines for which flavours the PDFs should be evolved
     implicit none
-    integer :: iflav
+    integer :: iflav,iproc
     ipdgs(-6:7,1:2)=.false.
     do iflav=-6,7
-       if (iflav.eq.0) then    ! gluon
-          if (any(processes(1,1:nproc).eq.21)) ipdgs(iflav,1)=.true.
-          if (any(processes(2,1:nproc).eq.21)) ipdgs(iflav,2)=.true.
-       elseif(iflav.eq.7) then ! photon
-          if (any(processes(1,1:nproc).eq.22)) ipdgs(iflav,1)=.true.
-          if (any(processes(2,1:nproc).eq.22)) ipdgs(iflav,2)=.true.
-       else                    ! quarks and anti-quarks
-          if (any(processes(1,1:nproc).eq.iflav)) ipdgs(iflav,1)=.true.
-          if (any(processes(2,1:nproc).eq.iflav)) ipdgs(iflav,2)=.true.
-       endif
+       do iproc=1,nproc
+          if (iflav.eq.0) then    ! gluon
+             if (any(iden_processes(1,1:iden_iproc(iproc),iproc).eq.21)) ipdgs(iflav,1)=.true.
+             if (any(iden_processes(2,1:iden_iproc(iproc),iproc).eq.21)) ipdgs(iflav,2)=.true.
+          elseif(iflav.eq.7) then ! photon
+             if (any(iden_processes(1,1:iden_iproc(iproc),iproc).eq.22)) ipdgs(iflav,1)=.true.
+             if (any(iden_processes(2,1:iden_iproc(iproc),iproc).eq.22)) ipdgs(iflav,2)=.true.
+          else                    ! quarks and anti-quarks
+             if (any(iden_processes(1,1:iden_iproc(iproc),iproc).eq.iflav)) ipdgs(iflav,1)=.true.
+             if (any(iden_processes(2,1:iden_iproc(iproc),iproc).eq.iflav)) ipdgs(iflav,2)=.true.
+          endif
+       enddo
     enddo
   end subroutine set_ipdgs_for_PDF
-  
-  subroutine multiply_by_PDF_value(val)
+
+  subroutine include_PDF_and_identical_procs(val,val_abs)
     implicit none
     real(kind=8),intent(inout),dimension(*) :: val
-    integer :: iproc
+    real(kind=8),intent(inout),dimension(*) :: val_abs
+    integer :: iproc,ip
     real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
-    ! Include the PDFs
-    xmu_fac=91.188d0 ! factorisation scale
-
-    call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
-    call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
-
+    if (include_pdf) then
+       ! Include the PDFs
+       xmu_fac=91.188d0 ! factorisation scale
+       call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
+       call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+    endif
     do iproc=1,nproc
-       if (processes(1,iproc).eq.21) then
-          val(iproc)=val(iproc)*PDF(0,1)
-       elseif (processes(1,iproc).eq.22) then
-          val(iproc)=val(iproc)*PDF(7,1)
-       else
-          val(iproc)=val(iproc)*PDF(processes(1,iproc),1)
+       val_procs(1:iden_iproc(iproc),iproc)=val(iproc)
+       if (include_pdf) then
+          do ip=1,iden_iproc(iproc)
+             ! first incoming particle
+             if (iden_processes(1,ip,iproc).eq.21) then
+                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(0,1)
+             elseif(iden_processes(1,ip,iproc).eq.22) then
+                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(7,1)
+             else
+                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(iden_processes(1,ip,iproc),1)
+             endif
+             ! second incoming particle
+             if (iden_processes(2,ip,iproc).eq.21) then
+                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(0,2)
+             elseif(iden_processes(2,ip,iproc).eq.22) then
+                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(7,2)
+             else
+                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(iden_processes(2,ip,iproc),2)
+             endif
+          enddo
        endif
-       if (processes(2,iproc).eq.21) then
-          val(iproc)=val(iproc)*PDF(0,2)
-       elseif (processes(2,iproc).eq.22) then
-          val(iproc)=val(iproc)*PDF(7,2)
-       else
-          val(iproc)=val(iproc)*PDF(processes(2,iproc),2)
+       val(iproc)=sum(val_procs(1:iden_iproc(iproc),iproc))
+       val_abs(iproc)=sum(abs(val_procs(1:iden_iproc(iproc),iproc)))
+    enddo
+  end subroutine include_PDF_and_identical_procs
+
+  subroutine define_identical_procs
+    implicit none
+    integer :: iproc,ip,n
+    ! first fill the number of identical processes per iproc (so that we can
+    ! allocate the array with the right size)
+    allocate(iden_iproc(1:nproc))
+    do iproc=1,nproc
+       iden_iproc(iproc)=1
+       if (any(abs(processes(1:next,iproc)).eq.1)) then
+          iden_iproc(iproc)=iden_iproc(iproc)*5
+       endif
+       if (any(abs(processes(1:next,iproc)).eq.2)) then
+          iden_iproc(iproc)=iden_iproc(iproc)*4
        endif
     enddo
-  end subroutine multiply_by_PDF_value
+    allocate(val_procs(1:maxval(iden_iproc(1:nproc)),1:nproc))
+    allocate(iden_processes(1:next,1:maxval(iden_iproc(1:nproc)),1:nproc))
+    ! Loop again and actually fill the iden_processes()
+    do iproc=1,nproc
+       do ip=0,iden_iproc(iproc)-1
+          do n=1,next
+             if (abs(processes(n,iproc)).eq.1) then
+                iden_processes(n,ip+1,iproc)=sign(mod(ip,5)+1,processes(n,iproc))
+             elseif (abs(processes(n,iproc)).eq.2) then
+                if (mod(ip,5)+1.eq.ip/5+2) then
+                   iden_processes(n,ip+1,iproc)=sign(1,processes(n,iproc))
+                else
+                   iden_processes(n,ip+1,iproc)=sign(ip/5+2,processes(n,iproc))
+                endif
+             else
+                iden_processes(n,ip+1,iproc)=processes(n,iproc)
+             endif
+          enddo
+       enddo
+    enddo
+  end subroutine define_identical_procs
   
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
