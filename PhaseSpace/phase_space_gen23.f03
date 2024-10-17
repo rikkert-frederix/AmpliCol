@@ -4,20 +4,19 @@ module phase_space_gen23_mod
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
      private
-     integer(kind=4) :: ix,ndim,next
+     integer(kind=4) :: ndim,next
      integer(kind=4),dimension(:),allocatable :: order
      real(kind=8),dimension(:,:),allocatable :: pp
      integer(kind=4),dimension(:,:),allocatable :: sets
      real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
      logical :: t_channel
-     real(kind=8) :: sqrtshat,ycm,ptcut,drcut
+     real(kind=8) :: sqrtshat,drcut,sqrts
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
   end type phase_space_gen23
   private
   logical :: includePDF
-  real(kind=8) :: sqrts
   ! TECHNIAL PARAMETERS
   ! vebose:
   logical,parameter :: verbose=.false.
@@ -29,13 +28,13 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: pi=3.1415926535897932d0
 
 contains
-  subroutine gen23_init(this,sqrtsh,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
     ! INPUT
     ! Sqrt(s-hat), i.e, the collision energy
-    real(kind=8),intent(in) :: sqrtsh
+    real(kind=8),intent(in) :: sqrts
     ! number of particles (initial state + final state)
     integer(kind=4),intent(in) :: n
     ! the colour order:
@@ -61,8 +60,9 @@ contains
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
-    this%sqrtshat=sqrtsh
-    sqrts=sqrtsh
+    real(kind=8) :: ptcut
+    this%sqrtshat=sqrts
+    this%sqrts=sqrts
     this%t_channel=t_chan
     if (verbose) then
        write (*,*) 'Setting up',n,'particle phase-space'
@@ -99,10 +99,10 @@ contains
     if (verbose) write (*,*) 'masses:',m(1:n)
     if (pt_cut.gt.0d0) then
        this%drcut=dr_cut
-       this%ptcut=pt_cut
+       ptcut=pt_cut
     else
        this%drcut=0d0
-       this%ptcut=0d0
+       ptcut=0d0
     endif
     call setup_PS_cuts(s_cut)
     ! Bring the colour order to a canonical order (first in the list
@@ -181,7 +181,7 @@ contains
       do i=1,maskr(this%next)
          if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
          do j=0,this%next-1
-            if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+this%ptcut**2)
+            if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+ptcut**2)
          enddo
          this%ETmin(i)=max(this%ETmin(i),sqrt(this%invm_min(i)))
       enddo
@@ -206,17 +206,18 @@ contains
     implicit none
     class(phase_space_gen23),intent(inout) :: this
     real(kind=8),dimension(99),intent(in) :: xx
-    integer(kind=4) :: i
+    integer(kind=4) :: i,ix
+    real(kind=8) :: ycm
     this%x(1:this%ndim)=xx(1:this%ndim)
     jac=1d0
-    this%ix=0
+    ix=0
     if (includePDF) call generate_initial_state
     call generate_momenta
     do i=1,this%next
        if (includePDF) then
           ! Note: 'ycm' is the rapidity needed to go from lab to CM
           ! frame. Hence, here we boost from CM to lab frame with '-ycm'
-          call boostz(this%pp(0:3,ibset(0,i-1)),-this%ycm,p(0:3,i))
+          call boostz(this%pp(0:3,ibset(0,i-1)),-ycm,p(0:3,i))
        else
           p(0:3,i)=this%pp(0:3,ibset(0,i-1))
        endif
@@ -227,9 +228,9 @@ contains
       real(kind=8) :: tau
       call generate_tau(tau)
       call generate_y(tau)
-      this%sqrtshat=sqrt(tau)*sqrts
-      xbjrk(1)=sqrt(tau)*exp(this%ycm)
-      xbjrk(2)=sqrt(tau)*exp(-this%ycm)
+      this%sqrtshat=sqrt(tau)*this%sqrts
+      xbjrk(1)=sqrt(tau)*exp(ycm)
+      xbjrk(2)=sqrt(tau)*exp(-ycm)
       if (debug) write (*,*) 'sqrtshat :',this%sqrtshat,xbjrk(1:2),this%sqrtshat**2
     end subroutine generate_initial_state
 
@@ -238,9 +239,9 @@ contains
       real(kind=8),intent(out) :: tau
       real(kind=8) :: smin,smax,shat
       smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
-      smax=sqrts**2
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip_shat,smin,smax,shat,jac)
+      smax=this%sqrts**2
+      ix=ix+1
+      call random_to_var(this%x(ix),ip_shat,smin,smax,shat,jac)
       tau=shat/smax
       jac=jac/smax
     end subroutine generate_tau
@@ -251,8 +252,8 @@ contains
       real(kind=8) ::  ymin,ymax
       ymin= log(tau)/2d0
       ymax=-log(tau)/2d0
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),0d0,ymin,ymax,this%ycm,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),0d0,ymin,ymax,ycm,jac)
     end subroutine generate_y
 
     subroutine generate_momenta
@@ -410,8 +411,8 @@ contains
       integer(kind=4) :: i,i1,i2,i1b,i2b
       real(kind=8),dimension(0:3) :: ptot
       write (*,*) 'Momenta check:'
-      if (this%ix.ne.this%ndim) then
-         write (*,*) 'ERROR: number of random numbers used not consistent',this%ix,this%ndim
+      if (ix.ne.this%ndim) then
+         write (*,*) 'ERROR: number of random numbers used not consistent',ix,this%ndim
          stop 1
       endif
       ptot(0:3)=0d0
@@ -469,8 +470,8 @@ contains
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,tmin,tmax,this%invm(i+ia),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ia),jac)
 
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,this%invm(i+ia),tmin,tmax
@@ -491,14 +492,14 @@ contains
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,tmin,tmax,this%invm(i+ib),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ib),jac)
 
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,this%invm(i+ib),tmin,tmax
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),0d0,0d0,2d0*pi,phi,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,jac)
       if (debug) then
          write (*,*) 'dt- phi',phi
       endif
@@ -596,8 +597,8 @@ contains
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,tmin,tmax,this%invm(ir+ib),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),jac)
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
@@ -634,8 +635,8 @@ contains
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,smin,smax,this%invm(i+im1),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),jac)
 
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
@@ -783,8 +784,8 @@ contains
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,tmin,tmax,this%invm(ir+ib),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),jac)
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
@@ -836,8 +837,8 @@ contains
          endif
       endif
 
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,smin,smax,this%invm(i+im1),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),jac)
 
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
@@ -968,8 +969,8 @@ contains
          return
       endif
 
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,pt2min,pt2max,pt2,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,jac)
       pt=sqrt(pt2)
 
       if (debug) then
@@ -989,8 +990,8 @@ contains
       endif
       phimin=0d0
 
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),0d0,phimin,phimax,phi,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),0d0,phimin,phimax,phi,jac)
       if (ran2().lt.0.5d0) phi=-phi
       jac=jac*2d0
 
@@ -1043,8 +1044,8 @@ contains
          return
       endif
 
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,shatmin,shatmax,this%invm(i+im1),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(i+im1),jac)
 
       if (debug) then
          write (*,*) 'shat - i+im1',i+im1,this%invm(i+im1),shatmin,shatmax
@@ -1250,14 +1251,14 @@ contains
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,tmin,tmax,this%invm(ir+ib),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),jac)
 
       if (debug) then
          write (*,*) 't- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),0d0,0d0,2d0*pi,phi,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,jac)
       call gentcms(this%pp(0,ib+ir+i),this%pp(0,ib),this%invm(ib+ir),phi,sqrt(this%invm(i)) &
            &,sqrt(this%invm(ir)),this%pp(0,i),this%pp(0,ib+ir))
       this%pp(0:3,ir)=this%pp(0:3,ib+ir+i)+this%pp(0:3,ib)-this%pp(0:3,i)
@@ -1292,8 +1293,8 @@ contains
          return
       endif
 
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,pt2min,pt2max,pt2,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,jac)
 
       if (debug) then
          write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
@@ -1334,8 +1335,8 @@ contains
 
 
       ! generate t
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,tmin,tmax,this%invm(ib+i),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ib+i),jac)
 
       if (debug) then
          write (*,*) 'pt2 - ib+i',ib+i,this%invm(ib+i),tmin,tmax
@@ -1359,8 +1360,8 @@ contains
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),ip,smin,smax,this%invm(i+im1),jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),jac)
 
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
@@ -1560,10 +1561,10 @@ contains
       endif
       if (jac.le.0d0) return
       esum=sqrt(this%invm(i+ir))
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),0d0,-1d0,1d0,costh,jac)
-      this%ix=this%ix+1
-      call random_to_var(this%x(this%ix),0d0,0d0,2d0*pi,phi,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),0d0,-1d0,1d0,costh,jac)
+      ix=ix+1
+      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,jac)
       call mom2cx(esum,sqrt(this%invm(i)),sqrt(this%invm(ir)),costh,phi,p_i,p_ir)
       call boostm(p_i,p(0:3,i+ir),esum,this%pp(0:3,i))
       call boostm(p_ir,p(0:3,i+ir),esum,this%pp(0:3,ir))
@@ -1590,9 +1591,9 @@ contains
          if (debug) write (*,*) 'shatmin.ge.shatmax',i,shatmin,shatmax
          return
       endif
-      this%ix=this%ix+1
-!!$          call random_to_var(this%x(this%ix),ip,shatmin,shatmax,this%invm(j1),jac)
-      call random_to_var(this%x(this%ix),-0.5d0,shatmin,shatmax,this%invm(i),jac)
+      ix=ix+1
+!!$          call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(j1),jac)
+      call random_to_var(this%x(ix),-0.5d0,shatmin,shatmax,this%invm(i),jac)
     end subroutine generate_mass
 
 

@@ -4,7 +4,7 @@ module phase_space_genpt_mod
   implicit none
   type,extends(phase_space_type),public :: phase_space_genpt
      integer(kind=4) :: next
-     real(kind=8) :: sqrts,tau,ptcut,ycut,DRcut
+     real(kind=8) :: sqrts,ptcut,ycut,DRcut
    contains
      procedure :: init => genpt_init
      procedure :: generate_momenta => genpt_generate_momenta
@@ -17,12 +17,12 @@ module phase_space_genpt_mod
                                   ! 3 = uses invariant mass with previous particle
                                   ! 4 = uses cos(theta) with previous particle
 contains
-  subroutine genpt_init(this,sqrtsh,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
     ! INPUT
     ! Sqrt(s-hat), i.e, the collision energy
-    real(kind=8),intent(in) :: sqrtsh
+    real(kind=8),intent(in) :: sqrts
     ! number of particles (initial state + final state)
     integer(kind=4),intent(in) :: n
     ! rapidity and pT cut on all final state particles
@@ -36,7 +36,7 @@ contains
     this%ptcut=pt_cut
     this%ycut=rap_cut
     this%DRcut=DR_cut
-    this%sqrts=sqrtsh
+    this%sqrts=sqrts
     this%next=n
     if (.not.include_pdf) then
        write (*,*) 'genpt phase-space only with include_pdf=.true.'
@@ -66,7 +66,7 @@ contains
     class(phase_space_genpt),intent(inout) :: this
     real(kind=8),dimension(99),intent(in) :: xx
     real(kind=8) :: pt2min,pt2max,pt2,ymin,ymax,y,phimin,phimax,phi&
-         &,ycm,drmin,drmax,dr,phi2,invmmin,invmmax,invm
+         &,ycm,drmin,drmax,dr,phi2,invmmin,invmmax,invm,tau
     real(kind=8) :: costheta,costhetamin,costhetamax,theta,pzmax
     integer(kind=4) :: i,ix
     real(kind=8),dimension(0:3) :: ptot,pb
@@ -278,10 +278,10 @@ contains
 
     ! initial states
     ptot(0:3)=sum(p(0:3,3:this%next),dim=2)
-    this%tau=dot(ptot,ptot)/this%sqrts**2
+    tau=dot(ptot,ptot)/this%sqrts**2
     ycm=log((ptot(0)+ptot(3))/(ptot(0)-ptot(3)))/2d0
-    xbjrk(1)=sqrt(this%tau)*exp(ycm)
-    xbjrk(2)=sqrt(this%tau)*exp(-ycm)
+    xbjrk(1)=sqrt(tau)*exp(ycm)
+    xbjrk(2)=sqrt(tau)*exp(-ycm)
     if (xbjrk(1).ge.1d0 .or. xbjrk(2).ge.1d0) then
        jac=-1d0
        return
@@ -302,7 +302,7 @@ contains
     ! Add factors of 2*pi
     jac=jac/((2d0*pi)**(3*(this%next-2)-4))
     ! Add flux factor
-    jac=jac/(2d0*this%tau*this%sqrts**2)
+    jac=jac/(2d0*tau*this%sqrts**2)
   contains
     subroutine fill_momentum_pt2cosphi(pt2,costheta,phi,p,jac)
       implicit none
