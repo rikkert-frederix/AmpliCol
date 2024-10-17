@@ -6,8 +6,10 @@ program matrix_integrate_QCD
   use phase_space_genpt
   use haag
   use math_functions
+  use particles
   implicit none
   type(amplitude_QCD) :: amps
+  type(physics_model) :: phys_model
   integer :: next
   real(kind=8) :: weight
   real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
@@ -31,11 +33,18 @@ program matrix_integrate_QCD
   integer :: iproc_picked,iproc_iden_picked
   
   call get_run_arguments()
-  call setup_spin()
-  call create_run_tag()
+
+  call phys_model%init_part(173d0,1.491500d0)
 
   allocate(mass(next))
   allocate(width(next))
+  do i=1,next
+     mass(i)=phys_model%get_mass(part(i))
+     width(i)=phys_model%get_width(part(i))
+  enddo
+  call setup_spin()
+  call create_run_tag()
+
 
   call cpu_time(tTot_B)
 
@@ -76,9 +85,6 @@ program matrix_integrate_QCD
   if (sqrt_s_min.gt.0d0) then
      s_cut(1:2)=sqrt_s_min**2
   endif
-
-  mass(1:next)=0d0
-  width(1:next)=0d0
 !  mass(1:2) = 0d0
 !  mass(3:4) = 173d0
 !  mass(5) = 0d0
@@ -118,7 +124,7 @@ program matrix_integrate_QCD
   ! initialize the amplitudes. This creates the whole tree-structure from
   ! which the amps%evaluation() can compute the amplitudes for given
   ! phase-space points.
-  call amps%init(1,next,nproc,processes,spin,mass,width,orders)
+  call amps%init(1,next,nproc,processes,spin,orders,phys_model)
 
   ! Total number of amplitudes is stored in 'nhel'
   nhel=amps%n_amps
@@ -237,7 +243,7 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call amps%evaluate(next,p,mass,width,hel)
+    call amps%evaluate(next,p,hel)
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -701,12 +707,12 @@ contains
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
     do i=1,next
        ! only check the first process. They should all be the same
-       if (abs(processes(i,1)).le.6 .or. processes(i,1).eq.21 .or. processes(i,1).eq.22) then
-          spin(0,i)=2   ! two spin states: '-1' and '1'
+       spin(0,i)=phys_model%get_spin(processes(i,1))
+       if (spin(0,i).eq.2) then
           spin(1,i)=-1
           spin(2,i)=1
        else
-          write (*,*) 'spin state not known',i,processes(i,1)
+          write (*,*) 'spin state not known',i,processes(i,1),spin(0,i)
           stop 1
        endif
     enddo

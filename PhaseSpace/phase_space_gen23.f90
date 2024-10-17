@@ -570,12 +570,12 @@ contains
     call boostz(pp(0,i+ir),y,piir)
     call boostz(pp(0,ib),y,pib)
     if ( piir(1)**2+piir(2)**2.lt.etmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)-invm(i)))**2) )
+       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)**2-invm(i)))**2) )
     else
        etminir=max(etmin(ir),sqrt(invm(ir)))
     endif
     if ( piir(1)**2+piir(2)**2.lt.etmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)-invm(ir)))**2) )
+       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)**2-invm(ir)))**2) )
     else
        etmini=max(etmin(i),sqrt(invm(i)))
     endif
@@ -759,12 +759,12 @@ contains
     call boostz(pp(0,ib),y,pib)
     
     if ( piir(1)**2+piir(2)**2.lt.etmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)-invm(i)))**2) )
+       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)**2-invm(i)))**2) )
     else
        etminir=max(etmin(ir),sqrt(invm(ir)))
     endif
     if ( piir(1)**2+piir(2)**2.lt.etmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)-invm(ir)))**2) )
+       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)**2-invm(ir)))**2) )
     else
        etmini=max(etmin(i),sqrt(invm(i)))
     endif
@@ -1231,12 +1231,12 @@ subroutine genpt_one_step(i,ir,ib,im1)
     call boostz(pp(0,i+ir),y,piir)
     call boostz(pp(0,ib),y,pib)
     if ( piir(1)**2+piir(2)**2.lt.etmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)-invm(i)))**2) )
+       etminir=max(etmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(i)**2-invm(i)))**2) )
     else
        etminir=max(etmin(ir),sqrt(invm(ir)))
     endif
     if ( piir(1)**2+piir(2)**2.lt.etmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)-invm(ir)))**2) )
+       etmini=max(etmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(etmin(ir)**2-invm(ir)))**2) )
     else
        etmini=max(etmin(i),sqrt(invm(i)))
     endif

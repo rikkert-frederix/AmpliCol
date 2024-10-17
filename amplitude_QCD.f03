@@ -38,14 +38,15 @@ module amplitude_QCD_mod
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,mass,width,order)
+  subroutine init(this,imode,n,n_processes,part,spin,order,pm)
     use math_functions
+    use particles
     implicit none
     class(amplitude_QCD) :: this
+    class(physics_model) :: pm
     integer :: n,imode
     integer,dimension(n,n_processes) :: part,order
     integer,dimension(0:3,n) :: spin
-    real(kind=8),dimension(n) :: mass,width
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,n_processes,iproc,jproc
@@ -173,13 +174,13 @@ contains
       this%n_cur=this%n_cur+1
       allocate(current_list_local(this%n_cur)%order(isize))
       current_list_local(this%n_cur)%order(1)=iorder
-      current_list_local(this%n_cur)%mass=mass(iorder)
-      current_list_local(this%n_cur)%width=width(iorder)
       if (iorder.le.2 .and. abs(ipart).le.6) then ! initial quark states
          current_list_local(this%n_cur)%type=anti_current(ipart) ! switch quark <--> anti-quark for initial states
       else
          current_list_local(this%n_cur)%type=ipart
       endif
+      current_list_local(this%n_cur)%mass=pm%get_mass(current_list_local(this%n_cur)%type)
+      current_list_local(this%n_cur)%width=pm%get_width(current_list_local(this%n_cur)%type)
       allocate(current_list_local(this%n_cur)%ext_type(isize))
       current_list_local(this%n_cur)%ext_type(1)=current_list_local(this%n_cur)%type
       current_list_local(this%n_cur)%bin=ibset(0,iorder-1) ! give binary label
@@ -1222,16 +1223,8 @@ contains
          ! Need a new current
          this%n_cur=this%n_cur+1
          current_list_local(this%n_cur)=new_current
-         if (current_list_local(ic1)%mass.eq.current_list_local(ic2)%mass)  then
-            current_list_local(this%n_cur)%mass=0d0
-         else
-            current_list_local(this%n_cur)%mass=max(current_list_local(ic1)%mass,current_list_local(ic2)%mass)
-         endif
-         if (current_list_local(ic1)%width.eq.current_list_local(ic2)%width)  then
-            current_list_local(this%n_cur)%width=0d0
-         else
-            current_list_local(this%n_cur)%width=max(current_list_local(ic1)%width,current_list_local(ic2)%width)
-         endif
+         current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
+         current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
          if (is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
@@ -1267,6 +1260,8 @@ contains
             key_to_current(key,new_current%iproc)=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
+            current_list_local(ic)%mass=pm%get_mass(new_current%type)
+            current_list_local(ic)%width=pm%get_width(new_current%type)
             if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
                write (*,*) 'trying to combine currents with different spin: not possible',&
                     current_list_local(ic)%spin(1:isize)
@@ -1543,13 +1538,12 @@ contains
   end subroutine init
 
 
-  subroutine evaluate(this,n,p,mass,width,hel)
+  subroutine evaluate(this,n,p,hel)
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
     integer :: n
     integer,dimension(n)::hel
-    real(kind=8),dimension(n) :: mass,width
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ip,ifinal
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
@@ -1850,7 +1844,7 @@ contains
 
     subroutine combine_interactions(dim)
       implicit none
-      integer :: dim,iv
+      integer :: dim,iv,i
       if (use_real_gluons .and. abs(this%current_list(ic)%type).eq.21) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert

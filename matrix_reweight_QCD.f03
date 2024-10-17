@@ -18,15 +18,16 @@ program matrix_reweight
   use math_functions
   use amplitude_QCD_mod
   use timings
+  use particles
   implicit none
   type(amplitude_QCD) :: amps
+  type(physics_model) :: phys_model
   integer,parameter :: string_len=150
   integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next
   integer,dimension(:),allocatable :: hel,o,part
   integer,dimension(:,:),allocatable :: spin
   real(kind=8) :: amp2,amp_col
   real(kind=8),dimension(3) :: matrix2
-  real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8),dimension(:,:),allocatable :: p
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
@@ -34,23 +35,15 @@ program matrix_reweight
   
   call get_run_arguments()
 
+  call phys_model%init_part(173d0,1.491500d0)
+  call setup_spin()
+    
+  
   call cpu_time(tTot_B)
 
   if (.not.allocated(o)) allocate(o(next))
   allocate(hel(next))
-  allocate(mass(next))
-  allocate(width(next))
   allocate(p(0:3,next))
-
-  mass(1:next)=0d0
-  width(1:next)=0d0
-
-!  mass(1:2)= 0d0
-!  mass(3:4)= 173.d0
-!  mass(5)  = 0d0
-!  width(1:2)= 0d0
-!  width(3:4)= 1.4915d0
-!  width(5)  = 0d0
 
   call create_run_tag_and_open_files()
 
@@ -60,7 +53,7 @@ program matrix_reweight
   call read_event(11,done)
   rewind(11)
 
-  call amps%init(2,next,part,spin,mass,width,o)
+  call amps%init(2,next,part,spin,o,phys_model)
   col_acc=20
   call amps%init_col(next,col_acc)
   if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
@@ -79,7 +72,7 @@ program matrix_reweight
 
      call cpu_time(tBefore)
 
-     call amps%evaluate(next,p,mass,width,hel)
+     call amps%evaluate(next,p,hel)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -186,8 +179,6 @@ contains
        enddo
     endif
 
-    call setup_spin()
-    
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
