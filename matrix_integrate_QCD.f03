@@ -211,19 +211,19 @@ contains
     t_PS= t_PS +tAfter-tBefore
 
     if (debug ) then
-       write (*,*) jac
+       write (*,*) phase_space%jac
        stop 1
     endif
     
     all_evt=all_evt+1
 
-    if (jac.lt.0d0) then
+    if (phase_space%jac.lt.0d0) then
        val(1:nproc)=0d0
        return
     endif
     
-    cuts_wgt=pass_cuts(next,p)
-    if ((jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
+    cuts_wgt=pass_cuts(next,phase_space%p)
+    if ((phase_space%jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
        val(1:nproc)=0d0
        return
@@ -234,7 +234,7 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call amps%evaluate(next,p,hel)
+    call amps%evaluate(next,phase_space%p,hel)
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -269,7 +269,7 @@ contains
        endif
     endif
     
-    weight=vol*jac*(4*pi*alphas)**(next-2-amps%n_sing(1))*conv
+    weight=vol*phase_space%jac*(4*pi*alphas)**(next-2-amps%n_sing(1))*conv
 
     if (amps%n_sing(1).ge.1) then
        do i=1,next
@@ -471,15 +471,17 @@ contains
     if (processes(1,iproc_picked).ne.processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
        ! do not flip
        do i=1,next
-          write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),p(1:3,i),p(0,i)
+          write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),phase_space%p(1:3,i),phase_space%p(0,i)
        enddo
     else
        ! do flip
        do i=1,next
           if (i.le.2) then
-             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),p(1:2,3-i),-p(3,3-i),p(0,3-i)
+             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),&
+                  phase_space%p(1:2,3-i),-phase_space%p(3,3-i),phase_space%p(0,3-i)
           else
-             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),p(1:2,i),-p(3,i),p(0,i)
+             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),&
+                  phase_space%p(1:2,i),-phase_space%p(3,i),phase_space%p(0,i)
           endif
        enddo
     endif
@@ -925,8 +927,8 @@ contains
     if (include_pdf) then
        ! Include the PDFs
        xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,ipdgs(-6,1),xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,ipdgs(-6,2),xbjrk(2),xmu_fac,PDF(-6,2))
+       call PDF_eval(1,ipdgs(-6,1),phase_space%xbjrk(1),xmu_fac,PDF(-6,1))
+       call PDF_eval(1,ipdgs(-6,2),phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
     do iproc=1,nproc
        val_procs(1:iden_iproc(iproc),iproc)=val(iproc)

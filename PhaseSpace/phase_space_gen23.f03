@@ -3,14 +3,6 @@ module phase_space_gen23_mod
   use phase_space_base
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
-     private
-     integer(kind=4) :: ndim,next
-     integer(kind=4),dimension(:),allocatable :: order
-     real(kind=8),dimension(:,:),allocatable :: pp
-     integer(kind=4),dimension(:,:),allocatable :: sets
-     real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
-     logical :: t_channel
-     real(kind=8) :: sqrtshat,drcut,sqrts
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
@@ -82,7 +74,7 @@ contains
     allocate(this%invm_max(maskr(this%next)))
     allocate(this%pp(0:3,0:maskr(this%next)))
     this%pp(0:3,0:maskr(this%next))=0d0
-    allocate(p(0:3,this%next))
+    allocate(this%p(0:3,this%next))
     allocate(this%x(this%ndim))
     allocate(this%sets(0:this%next-2,2))
     ! masses of external particles
@@ -195,7 +187,7 @@ contains
       if (allocated(this%invm_max)) deallocate(this%invm_max)
       if (allocated(this%ETmin)) deallocate(this%ETmin)
       if (allocated(this%pp)) deallocate(this%pp)
-      if (allocated(p)) deallocate(p)
+      if (allocated(this%p)) deallocate(this%p)
       if (allocated(this%x)) deallocate(this%x)
       if (allocated(this%sets)) deallocate(this%sets)
     end subroutine gen23_deallocate
@@ -209,7 +201,7 @@ contains
     integer(kind=4) :: i,ix
     real(kind=8) :: ycm
     this%x(1:this%ndim)=xx(1:this%ndim)
-    jac=1d0
+    this%jac=1d0
     ix=0
     if (includePDF) call generate_initial_state
     call generate_momenta
@@ -217,9 +209,9 @@ contains
        if (includePDF) then
           ! Note: 'ycm' is the rapidity needed to go from lab to CM
           ! frame. Hence, here we boost from CM to lab frame with '-ycm'
-          call boostz(this%pp(0:3,ibset(0,i-1)),-ycm,p(0:3,i))
+          call boostz(this%pp(0:3,ibset(0,i-1)),-ycm,this%p(0:3,i))
        else
-          p(0:3,i)=this%pp(0:3,ibset(0,i-1))
+          this%p(0:3,i)=this%pp(0:3,ibset(0,i-1))
        endif
     enddo
   contains
@@ -229,9 +221,9 @@ contains
       call generate_tau(tau)
       call generate_y(tau)
       this%sqrtshat=sqrt(tau)*this%sqrts
-      xbjrk(1)=sqrt(tau)*exp(ycm)
-      xbjrk(2)=sqrt(tau)*exp(-ycm)
-      if (debug) write (*,*) 'sqrtshat :',this%sqrtshat,xbjrk(1:2),this%sqrtshat**2
+      this%xbjrk(1)=sqrt(tau)*exp(ycm)
+      this%xbjrk(2)=sqrt(tau)*exp(-ycm)
+      if (debug) write (*,*) 'sqrtshat :',this%sqrtshat,this%xbjrk(1:2),this%sqrtshat**2
     end subroutine generate_initial_state
 
     subroutine generate_tau(tau)
@@ -241,9 +233,9 @@ contains
       smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
       smax=this%sqrts**2
       ix=ix+1
-      call random_to_var(this%x(ix),ip_shat,smin,smax,shat,jac)
+      call random_to_var(this%x(ix),ip_shat,smin,smax,shat,this%jac)
       tau=shat/smax
-      jac=jac/smax
+      this%jac=this%jac/smax
     end subroutine generate_tau
 
     subroutine generate_y(tau)
@@ -253,7 +245,7 @@ contains
       ymin= log(tau)/2d0
       ymax=-log(tau)/2d0
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,ymin,ymax,ycm,jac)
+      call random_to_var(this%x(ix),0d0,ymin,ymax,ycm,this%jac)
     end subroutine generate_y
 
     subroutine generate_momenta
@@ -288,21 +280,21 @@ contains
          else
             call gens_one_step(set(2),set(1))
          endif
-         if (jac.le.0d0) return
+         if (this%jac.le.0d0) return
          this%pp(0:3,set(2)+2)=this%pp(0:3,1)-this%pp(0:3,set(1))
          this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'special double t-channel (1)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t(set(1),set(2),1,2)
-         if (jac.le.0d0) return
+         if (this%jac.le.0d0) return
          this%pp(0:3,set(2)+2)=this%pp(0:3,1)-this%pp(0:3,set(1))
          this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) 'special double t-channel (2)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t(set(2),set(1),1,2)
-         if (jac.le.0d0) return
+         if (this%jac.le.0d0) return
          this%pp(0:3,set(1)+1)=this%pp(0:3,2)-this%pp(0:3,set(2))
          this%invm(set(1)+1)=dot(this%pp(0:3,set(1)+1),this%pp(0:3,set(1)+1))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
@@ -310,7 +302,7 @@ contains
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
 !!$       call gens_one_step(set(2),set(1))
          call gent_one_step(set(2),set(1),1)
-         if (jac.le.0d0) return
+         if (this%jac.le.0d0) return
          this%pp(0:3,set(2)+2)=this%pp(0:3,1)-this%pp(0:3,set(1))
          this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
       endif
@@ -323,7 +315,7 @@ contains
             if (debug) write (*,*) 'At least 3 particles in a set',&
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step(set(i),inext,i)
-            if (jac.le.0d0) return
+            if (this%jac.le.0d0) return
             this%pp(0:3,(3-i)+set(i)+inext)=this%pp(0:3,i)-this%pp(0:3,this%sets(0,(3-i)))
             this%invm((3-i)+set(i)+inext)=dot(this%pp(0:3,(3-i)+set(i)+inext),this%pp(0:3,(3-i)+set(i)+inext))
             this%pp(0:3,(3-i)+set(i))=this%pp(0:3,i)-this%pp(0:3,this%sets(0,(3-i)))-this%pp(0:3,inext)
@@ -341,7 +333,7 @@ contains
 !!$                call genpt_one_step(inext,set(i),3-i,im1)
 !!$                call gent_one_step_v2(inext,set(i),3-i,im1)
                endif
-               if (jac.le.0d0) return
+               if (this%jac.le.0d0) return
             enddo
             inext=ibset(0,this%sets(j,i)-1)
             im1=ibset(0,this%sets(j-1,i)-1)
@@ -353,7 +345,7 @@ contains
                call gen23_one_step(inext,set(i),3-i,im1)
 !!$             call genpt_one_step(inext,set(i),3-i,im1)
             endif
-            if (jac.le.0d0) return
+            if (this%jac.le.0d0) return
 !!$          inext=ibset(0,this%sets(j+1,i)-1)
 !!$          im1=ibset(0,this%sets(j,i)-1)
 !!$          set(i)=set(i)-inext
@@ -363,7 +355,7 @@ contains
 !!$!!$             call gen23_one_step_v2(inext,set(i),3-i,im1)
 !!$             call gen23_one_step(inext,set(i),3-i,im1)
 !!$          endif
-!!$          if (jac.le.0d0) return
+!!$          if (this%jac.le.0d0) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).ne.0) then
             ! Exactly 2 particles in a set (and the other set contains at least one)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
@@ -379,14 +371,14 @@ contains
             else
                call gen23_one_step(set(i),inext,i,im1)
             endif
-            if (jac.le.0d0) return
+            if (this%jac.le.0d0) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).eq.0) then
             ! Exactly 2 particles in a set (and the other set contains none)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
                  & 'the other set contains none)', &
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step(set(i),inext,i)
-            if (jac.le.0d0) return
+            if (this%jac.le.0d0) return
          else
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
@@ -399,9 +391,9 @@ contains
       if (debug) call test_momenta
 
       ! Add factors of 2*pi
-      jac=jac/((2d0*pi)**(3*(this%next-2)-4))
+      this%jac=this%jac/((2d0*pi)**(3*(this%next-2)-4))
       ! Add flux factor
-      jac=jac/(2d0*this%sqrtshat**2)
+      this%jac=this%jac/(2d0*this%sqrtshat**2)
 
     end subroutine generate_momenta
 
@@ -466,12 +458,12 @@ contains
       tmax=min(tmax,this%invm(i)-this%sqrtshat*(Eimax-pzmax))
 
       if (tmin.ge.tmax) then
-         jac=-1d0
+         this%jac=-1d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ia),jac)
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ia),this%jac)
 
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,this%invm(i+ia),tmin,tmax
@@ -488,18 +480,18 @@ contains
       tmax=min(tmax,this%invm(i)-this%sqrtshat**2*(this%ETmin(i)**2/(this%invm(i)-this%invm(i+ia))))
 
       if (tmin.ge.tmax) then
-         jac=-2d0
+         this%jac=-2d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ib),jac)
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ib),this%jac)
 
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,this%invm(i+ib),tmin,tmax
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,jac)
+      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
       if (debug) then
          write (*,*) 'dt- phi',phi
       endif
@@ -529,7 +521,7 @@ contains
               &,this%invm(ia+ib),this%invm(i +ia),this%invm(i+ib),this%invm(i)
          stop
       endif
-      jac = jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,0d0)))
+      this%jac = this%jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,0d0)))
     end subroutine double_t
 
     subroutine gen23_one_step(i,ir,ib,im1)
@@ -553,7 +545,7 @@ contains
          call shatminmax(ir,i,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
-      if (jac.le.0d0) return
+      if (this%jac.le.0d0) return
       if (debug) then
          write (*,*) '23- i    ',i,this%invm(i)
          write (*,*) '23- ir   ',ir,this%invm(ir)
@@ -586,19 +578,19 @@ contains
       root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
-         jac=-33d0
+         this%jac=-33d0
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
       tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
       tmax=min(tmax,this%invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
-         jac=-3d0
+         this%jac=-3d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),jac)
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),this%jac)
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
@@ -631,12 +623,12 @@ contains
       endif
 
       if (smin.ge.smax) then
-         jac=-4d0
+         this%jac=-4d0
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),jac)
+      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),this%jac)
 
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
@@ -671,14 +663,14 @@ contains
          this%pp(0:3,i)=pi1(0:3)
          this%pp(0:3,ir)=pr1(0:3)
          this%pp(0:3,ib+ir)=ppibir1(0:3)
-         jac=jac/2d0
+         this%jac=this%jac/2d0
       elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
          this%pp(0:3,i)=pi2(0:3)
          this%pp(0:3,ir)=pr2(0:3)
          this%pp(0:3,ib+ir)=ppibir2(0:3)
-         jac=jac/2d0
+         this%jac=this%jac/2d0
       else
-         jac=-19d0
+         this%jac=-19d0
          if (debug) then
             write (*,*) 'piir',this%pp(0:3,i+ir)
             write (*,*) 'pim1',this%pp(0:3,im1)
@@ -693,16 +685,16 @@ contains
          return
       endif
 
-      ! Compute the Jacobian
+      ! Compute the This%Jacobian
       gram4=gram_determinant4(this%invm(ir+i+im1),this%invm(ir+ib),this%invm(ir+i+ib)&
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
          write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
-         jac=-5d0
+         this%jac=-5d0
          return
       endif
-      jac=jac/(8d0*sqrt(-gram4))
+      this%jac=this%jac/(8d0*sqrt(-gram4))
     end subroutine gen23_one_step
 
 
@@ -740,7 +732,7 @@ contains
          call shatminmax(ir,i,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
-      if (jac.le.0d0) return
+      if (this%jac.le.0d0) return
       if (debug) then
          write (*,*) '23- ir   ',ir,this%invm(ir),shatmin,shatmax,sqrt(this%invm(ir))
       endif
@@ -773,19 +765,19 @@ contains
       root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
-         jac=-33d0
+         this%jac=-33d0
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
       tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
       tmax=min(tmax,this%invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
-         jac=-3d0
+         this%jac=-3d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),jac)
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),this%jac)
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
@@ -815,7 +807,7 @@ contains
       endif
 
       if (smin.ge.smax) then
-         jac=-4d0
+         this%jac=-4d0
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
@@ -838,7 +830,7 @@ contains
       endif
 
       ix=ix+1
-      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),jac)
+      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),this%jac)
 
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
@@ -873,14 +865,14 @@ contains
          this%pp(0:3,i)=pi1(0:3)
          this%pp(0:3,ir)=pr1(0:3)
          this%pp(0:3,ib+ir)=ppibir1(0:3)
-         jac=jac/2d0
+         this%jac=this%jac/2d0
       elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
          this%pp(0:3,i)=pi2(0:3)
          this%pp(0:3,ir)=pr2(0:3)
          this%pp(0:3,ib+ir)=ppibir2(0:3)
-         jac=jac/2d0
+         this%jac=this%jac/2d0
       else
-         jac=-19d0
+         this%jac=-19d0
          if (debug) then
             write (*,*) 'nb',nb
             write (*,*) 'piir',this%pp(0:3,i+ir)
@@ -896,16 +888,16 @@ contains
          return
       endif
 
-      ! Compute the Jacobian
+      ! Compute the This%Jacobian
       gram4=gram_determinant4(this%invm(ir+i+im1),this%invm(ir+ib),this%invm(ir+i+ib)&
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
          write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
-         jac=-5d0
+         this%jac=-5d0
          return
       endif
-      jac=jac/(8d0*sqrt(-gram4))
+      this%jac=this%jac/(8d0*sqrt(-gram4))
 
 
 
@@ -965,12 +957,12 @@ contains
       pt2max=min((piir(0)-this%ETmin(ir))**2-this%invm(i),0.25d0*(piir(0)+ptiir)**2)
       if (pt2min.gt.pt2max) then
          if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
-         jac=-14d0
+         this%jac=-14d0
          return
       endif
 
       ix=ix+1
-      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,jac)
+      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,this%jac)
       pt=sqrt(pt2)
 
       if (debug) then
@@ -991,9 +983,9 @@ contains
       phimin=0d0
 
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,phimin,phimax,phi,jac)
+      call random_to_var(this%x(ix),0d0,phimin,phimax,phi,this%jac)
       if (ran2().lt.0.5d0) phi=-phi
-      jac=jac*2d0
+      this%jac=this%jac*2d0
 
       if (debug) then
          write (*,*) 'phi - i  ',i,phi,phimin,phimax
@@ -1040,12 +1032,12 @@ contains
 
       if (shatmin.gt.shatmax) then
          if (debug) write (*,*) shatmin,shatmax,2d0*pt*pim1(0)*(1d0-cos(this%drcut))
-         jac=-13d0
+         this%jac=-13d0
          return
       endif
 
       ix=ix+1
-      call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(i+im1),jac)
+      call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(i+im1),this%jac)
 
       if (debug) then
          write (*,*) 'shat - i+im1',i+im1,this%invm(i+im1),shatmin,shatmax
@@ -1054,10 +1046,10 @@ contains
       ! fill momentum, assuming that previous particle is along the x-axis.
       call fill_momentum_ptinvmphi(pt,this%invm(i+im1),phi,pim1(0),pipr(0),xjac)
       if (xjac.lt.0d0) then
-         jac=xjac
+         this%jac=xjac
          return
       endif
-      jac=jac*xjac
+      this%jac=this%jac*xjac
 
       ! rotate about the z-axis
       phi_rot=atan(this%pp(2,im1)/this%pp(1,im1))
@@ -1079,7 +1071,7 @@ contains
          else
             use_plus=.false.
          endif
-         jac=jac*2d0
+         this%jac=this%jac*2d0
       elseif ( prp(0)**2-prp(3)**2 .ge. this%ETmin(ir)**2 .and. &
            dot(prp(0:3),prp(0:3)) .ge. 0d0 &
            ) then
@@ -1094,7 +1086,7 @@ contains
          ! is smaller than zero for both configurations (i.e., for both
          ! +pz and -pz). This boundary has not been implemented
          ! consistently. In that case we simply return.
-         jac=-21d0
+         this%jac=-21d0
          return
       endif
 
@@ -1106,7 +1098,7 @@ contains
       endif
 
       this%pp(0:3,ir)=this%pp(0:3,ir+i)-this%pp(0:3,i)
-      jac=jac/dble(4)
+      this%jac=this%jac/dble(4)
       this%invm(ir)=dot(this%pp(0:3,ir),this%pp(0:3,ir))
       if (debug) then
          write (*,*) 'pp(ir+i+im1)',this%pp(0:3,ir+i+im1),this%invm(ir+i+im1)
@@ -1117,7 +1109,7 @@ contains
          write (*,*) ''
       endif
       if (this%invm(ir).lt.0d0) then
-         jac=-12d0
+         this%jac=-12d0
          return
       endif
       ! fill t-channel stuff to be safe.
@@ -1207,7 +1199,7 @@ contains
          endif
          call generate_mass(ir,shatmin,shatmax)
       endif
-      if (jac.le.0d0) return
+      if (this%jac.le.0d0) return
       if (debug) then
          write (*,*) 't - i    ',i,this%invm(i),this%invm_min(i),this%invm_max(i)
          write (*,*) 't - ir   ',ir,this%invm(ir)
@@ -1240,29 +1232,29 @@ contains
       root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
-         jac=-33d0
+         this%jac=-33d0
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
       tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
       tmax=min(tmax,this%invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
-         jac=-3d0
+         this%jac=-3d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),jac)
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),this%jac)
 
       if (debug) then
          write (*,*) 't- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,jac)
+      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
       call gentcms(this%pp(0,ib+ir+i),this%pp(0,ib),this%invm(ib+ir),phi,sqrt(this%invm(i)) &
            &,sqrt(this%invm(ir)),this%pp(0,i),this%pp(0,ib+ir))
       this%pp(0:3,ir)=this%pp(0:3,ib+ir+i)+this%pp(0:3,ib)-this%pp(0:3,i)
-      jac = jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,this%invm(ir+i+ib))))
+      this%jac = this%jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,this%invm(ir+i+ib))))
     end subroutine gent_one_step
 
     subroutine gent_one_step_v2(i,ir,ib,im1)
@@ -1289,12 +1281,12 @@ contains
            0.25d0*(piir(0)+sqrt(piir(1)**2+piir(2)**2))**2)
       if (pt2min.gt.pt2max) then
          if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
-         jac=-14d0
+         this%jac=-14d0
          return
       endif
 
       ix=ix+1
-      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,jac)
+      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,this%jac)
 
       if (debug) then
          write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
@@ -1321,14 +1313,14 @@ contains
       root=(piir(0)-sqrt(pt2+this%invm(i))-this%ETmin(ir))*(piir(0)+sqrt(pt2+this%invm(i))-this%ETmin(ir))*&
            (piir(0)-sqrt(pt2+this%invm(i))+this%ETmin(ir))*(piir(0)+sqrt(pt2+this%invm(i))+this%ETmin(ir))
       if (root.lt.0d0) then
-         jac=-33d0
+         this%jac=-33d0
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
       tmin=this%invm(i)-pib(0)/piir(0)*(base+sqrt(root))
       tmax=this%invm(i)-pib(0)/piir(0)*(base-sqrt(root))
       if (tmin.ge.tmax) then
-         jac=-3d0
+         this%jac=-3d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -1336,7 +1328,7 @@ contains
 
       ! generate t
       ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ib+i),jac)
+      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ib+i),this%jac)
 
       if (debug) then
          write (*,*) 'pt2 - ib+i',ib+i,this%invm(ib+i),tmin,tmax
@@ -1356,12 +1348,12 @@ contains
       smax=2*pii(0)*eim1+mi**2+mim1**2+2d0*sqrt(pt2)*pxim1
 
       if (smin.ge.smax) then
-         jac=-4d0
+         this%jac=-4d0
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
       ix=ix+1
-      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),jac)
+      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),this%jac)
 
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
@@ -1374,13 +1366,13 @@ contains
            (4*Ea*eim1*(mi**2 + pt2))/(mi**2 - tr) + (eim1*(mi**2 - tr))/Ea)/(4.*pxim1)
 
       if (pii(1)**2.gt.pt2) then
-         jac=-101d0
+         this%jac=-101d0
          return
       endif
 
       pii(2)=sqrt(pt2-pii(1)**2)
       if (ran2().gt.0.5d0) pii(2)=-pii(2)
-      jac=jac*2d0
+      this%jac=this%jac*2d0
 
 
 
@@ -1393,11 +1385,11 @@ contains
       this%pp(0:3,ir+ib)=this%pp(0:3,ir)-this%pp(0:3,ib)
       this%invm(ir+ib)=dot(this%pp(0:3,ir+ib),this%pp(0:3,ir+ib))
 
-      jac=jac*(1d0/abs(8*Ea*pxim1*pii(2)*(-1d0 + pii(3)/pii(0))))*2d0/pii(0)
-      jac=jac/4d0
+      this%jac=this%jac*(1d0/abs(8*Ea*pxim1*pii(2)*(-1d0 + pii(3)/pii(0))))*2d0/pii(0)
+      this%jac=this%jac/4d0
 
       if (this%invm(ir).lt.0d0 .or. this%pp(0,ir).lt.this%ETmin(ir)) then
-         jac=-102d0
+         this%jac=-102d0
          return
       endif
 
@@ -1519,7 +1511,7 @@ contains
       p1(0) = MAX((ESUM+ED)*0.5d0,0.d0)
       if (esum+ed.le.0d0) then
          write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
-         jac=-8d0
+         this%jac=-8d0
          return
          write (*,*) pa(0:3)
          write (*,*) pb(0:3)
@@ -1559,16 +1551,16 @@ contains
          call shatminmax(ir,i,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
-      if (jac.le.0d0) return
+      if (this%jac.le.0d0) return
       esum=sqrt(this%invm(i+ir))
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,-1d0,1d0,costh,jac)
+      call random_to_var(this%x(ix),0d0,-1d0,1d0,costh,this%jac)
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,jac)
+      call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
       call mom2cx(esum,sqrt(this%invm(i)),sqrt(this%invm(ir)),costh,phi,p_i,p_ir)
-      call boostm(p_i,p(0:3,i+ir),esum,this%pp(0:3,i))
-      call boostm(p_ir,p(0:3,i+ir),esum,this%pp(0:3,ir))
-      jac=jac*sqrt(lambda(this%invm(i+ir),this%invm(i),this%invm(ir)))/(8d0*this%invm(i+ir))
+      call boostm(p_i,this%pp(0:3,i+ir),esum,this%pp(0:3,i))
+      call boostm(p_ir,this%pp(0:3,i+ir),esum,this%pp(0:3,ir))
+      this%jac=this%jac*sqrt(lambda(this%invm(i+ir),this%invm(i),this%invm(ir)))/(8d0*this%invm(i+ir))
       ! fill t-channel stuff to be safe.
       this%pp(0:3,i+1)=this%pp(0:3,i)-this%pp(0:3,1)
       this%pp(0:3,i+2)=this%pp(0:3,i)-this%pp(0:3,2)
@@ -1587,13 +1579,13 @@ contains
       if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
       if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
       if (shatmin.ge.shatmax) then
-         jac=-7d0
+         this%jac=-7d0
          if (debug) write (*,*) 'shatmin.ge.shatmax',i,shatmin,shatmax
          return
       endif
       ix=ix+1
-!!$          call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(j1),jac)
-      call random_to_var(this%x(ix),-0.5d0,shatmin,shatmax,this%invm(i),jac)
+!!$          call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(j1),this%jac)
+      call random_to_var(this%x(ix),-0.5d0,shatmin,shatmax,this%invm(i),this%jac)
     end subroutine generate_mass
 
 
@@ -1738,7 +1730,7 @@ contains
       p1(0) = MAX((ESUM+ED)*0.5d0,0.d0)
       if (esum+ed.le.0d0) then
          write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
-         jac=-8d0
+         this%jac=-8d0
          return
          write (*,*) pa(0:3)
          write (*,*) pb(0:3)
@@ -1784,7 +1776,7 @@ contains
       ! determine magnitude of Pii in cms frame (from dhelas routine mom2cx)
       ESUM2 = dot(ptot,ptot)
       if (esum2 .le. 0d0) then
-         jac=-9d0
+         this%jac=-9d0
          write (*,*) "error :: must be time-like momentum in gentcms2",esum2
          return
          stop 1
@@ -1824,7 +1816,7 @@ contains
       Pii(0) = MAX((ESUM+ED)*0.5d0,0.d0)
       if (esum+ed.le.0d0) then
          write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
-         jac=-10d0
+         this%jac=-10d0
          return
          stop 1
       endif
@@ -1832,7 +1824,7 @@ contains
       pt2=pp2-Pii(3)**2
       if (pt2/esum2.lt.-tiny) then
          write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
-         jac=-11d0
+         this%jac=-11d0
          return
          stop 1
       elseif (pt2.lt.0d0) then

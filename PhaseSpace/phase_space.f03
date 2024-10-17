@@ -2,12 +2,20 @@ module phase_space_base
   implicit none
   ! define an abstract base for the phase_space types
   type,abstract :: phase_space_type
+     real(kind=8),dimension(:,:),allocatable,public :: p
+     real(kind=8),public :: jac,xbjrk(2)
+     real(kind=8) :: s0,tot_mass,sqrtshat,sqrts,drcut,ptcut,ycut
+     real(kind=8),dimension(:),allocatable :: masses
+     integer(kind=4) :: ndim,next
+     integer(kind=4),dimension(:,:),allocatable :: sets
+     real(kind=8),dimension(:,:),allocatable :: pp
+     real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
+     integer(kind=4),dimension(:),allocatable :: order
+     logical :: t_channel
    contains
      procedure(phase_space_interface_init),deferred :: init
      procedure(phase_space_interface_generate_momenta),deferred :: generate_momenta
   end type phase_space_type
-  real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac,xbjrk(2)
   
   ! Declare the abstract interface for the procedures
   abstract interface
