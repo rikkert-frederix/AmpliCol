@@ -5,13 +5,8 @@ LUPdecompose.o phase_space_gen23.o haag.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
 phase_space_genpt.o
 
-<<<<<<< HEAD
-FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o	\
-amplitude_QCD.o common.o matrix_reweight_QCD.o
-=======
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
->>>>>>> origin/master
 
 FC=gfortran
 FFLAGS=-ffast-math -O3

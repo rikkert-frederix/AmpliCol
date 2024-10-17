@@ -6,7 +6,8 @@ module rw_events
 end module rw_events
 module timings
   implicit none
-  real(kind=4) :: t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_ran=0.
+  real(kind=4) :: tBefore,tAfter,tTot_A=0.,tTot_B=0.,t_amp=0.,t_amp_init=0.,&
+       t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
 end module timings
 module arguments
   implicit none
@@ -14,7 +15,6 @@ module arguments
 end module arguments
 
 program matrix_reweight
-  use common
   use math_functions
   use amplitude_QCD_mod
   use timings
@@ -28,6 +28,7 @@ program matrix_reweight
   integer,dimension(:,:),allocatable :: spin
   real(kind=8) :: amp2,amp_col
   real(kind=8),dimension(3) :: matrix2
+  real(kind=8),dimension(:,:),allocatable :: p
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
   character(len=string_len) :: tag,tag_read,add_arg=''
