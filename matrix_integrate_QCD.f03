@@ -10,7 +10,7 @@ program matrix_integrate_QCD
   implicit none
   type(amplitude_QCD) :: amps
   type(physics_model) :: phys_model
-  integer :: next
+  integer :: next,iproc
   real(kind=8) :: weight
   real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
   integer :: j,c_o,i,nproc
@@ -39,8 +39,15 @@ program matrix_integrate_QCD
   allocate(mass(next))
   allocate(width(next))
   do i=1,next
-     mass(i)=phys_model%get_mass(part(i))
-     width(i)=phys_model%get_width(part(i))
+     mass(i)=phys_model%get_mass(processes(i,1))
+     width(i)=phys_model%get_width(processes(i,1))
+     do iproc=2,nproc
+        if (mass(i).ne.phys_model%get_mass(processes(i,iproc)) .or. &
+             width(i).ne.phys_model%get_width(processes(i,iproc))) then
+           write (*,*) 'masses and widths not compatible among processes'
+           stop 1
+        endif
+     enddo
   enddo
   call setup_spin()
   call create_run_tag()
@@ -338,6 +345,7 @@ contains
 !!$         frac  = 0.8d0
 !!$         steep = 0.1d0
 !!$       endif
+         
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then
              pass_cuts=-1d0
@@ -666,19 +674,6 @@ contains
              endif
           enddo
        endif
-       ! basic checks:
-       if (next.lt.4) then
-          write (*,*) 'Not enough external particles',next
-          stop 1
-       endif
-       if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
-          write (*,*) 'Incorrect imode',imode
-          stop
-       endif
-       if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
-          write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
-          stop
-       endif
        if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
           write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
           stop
@@ -697,6 +692,19 @@ contains
        allocate(iden_processes(1:next,1,1))
        iden_processes(1:next,1,1)=processes(1:next,1)
     endif
+    ! basic checks:
+    if (next.lt.4) then
+       write (*,*) 'Not enough external particles',next
+       stop 1
+    endif
+    if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
+       write (*,*) 'Incorrect imode',imode
+       stop
+    endif
+    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
+       write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
+       stop
+    endif
   end subroutine get_run_arguments
 
   subroutine setup_spin()
@@ -704,9 +712,9 @@ contains
     ! spin states. Note that this assumes that all the processes() have the
     ! same number of spin states
     implicit none
+    integer :: i,iproc
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
     do i=1,next
-       ! only check the first process. They should all be the same
        spin(0,i)=phys_model%get_spin(processes(i,1))
        if (spin(0,i).eq.2) then
           spin(1,i)=-1
@@ -715,6 +723,14 @@ contains
           write (*,*) 'spin state not known',i,processes(i,1),spin(0,i)
           stop 1
        endif
+    enddo
+    do iproc=2,nproc
+       do i=1,next
+          if (spin(0,i).ne.phys_model%get_spin(processes(i,iproc))) then
+             write (*,*) 'Spin states of particles in different processes not compatible',iproc
+             stop 1
+          endif
+       enddo
     enddo
   end subroutine setup_spin
   
