@@ -6,8 +6,10 @@ program matrix_integrate_QCD
   use phase_space_genpt
   use haag
   use math_functions
+  use particles
   implicit none
   type(amplitude_QCD) :: amps
+  type(physics_model) :: phys_model
   integer :: next
   real(kind=8) :: amp2,weight
   real(kind=8),dimension(:),allocatable :: amp2_hel
@@ -26,11 +28,21 @@ program matrix_integrate_QCD
   integer,dimension(2) :: hel_picked
   
   call get_run_arguments()
-  call compute_multichannel_symmetry_factor()
-  call create_run_tag()
+
+  call phys_model%init_part(173d0,1.491500d0)
 
   allocate(mass(next))
   allocate(width(next))
+  do i=1,next
+     mass(i)=phys_model%get_mass(part(i))
+     width(i)=phys_model%get_width(part(i))
+  enddo
+  call setup_spin()
+  
+
+  call compute_multichannel_symmetry_factor()
+  call create_run_tag()
+
 
   call cpu_time(tTot_B)
 
@@ -75,13 +87,6 @@ program matrix_integrate_QCD
      s_cut(1:2)=sqrt_s_min**2
   endif
 
-  mass(1:next)=0d0
-  width(1:next)=0d0
-  mass(1:2) = 0d0
-  mass(3:4) = mt
-  width(1:2) = 0d0
-  width(3:4) = wt
-
   call cpu_time(tBefore)
   t_chan=.false.
   if (integration.eq.1) then
@@ -110,7 +115,7 @@ program matrix_integrate_QCD
      call set_ipdgs_for_PDF(ipdgs)
   endif
 
-  call amps%init(1,next,part,spin,mass,width,o)
+  call amps%init(1,next,part,spin,o,phys_model)
   if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
      nhel=amps%n_amps/2
   else
@@ -218,7 +223,7 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call amps%evaluate(next,p,mass,width,hel)
+    call amps%evaluate(next,p,hel)
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -563,8 +568,6 @@ contains
           endif
        enddo
     endif
-
-    call setup_spin()
     
     ! basic checks:
     if (next.lt.4) then
@@ -590,12 +593,12 @@ contains
     implicit none
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
     do i=1,next
-       if (abs(part(i)).le.6 .or. part(i).eq.21 .or. part(i).eq.22) then
-          spin(0,i)=2   ! two spin states: '-1' and '1'
+       spin(0,i)=phys_model%get_spin(part(i))
+       if (spin(0,i).eq.2) then
           spin(1,i)=-1
           spin(2,i)=1
        else
-          write (*,*) 'spin state not known',i,part(i)
+          write (*,*) 'spin state not known',i,part(i),spin(0,i)
           stop 1
        endif
     enddo
