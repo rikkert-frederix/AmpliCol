@@ -1,9 +1,9 @@
 .DEFAULT_GOAL := matrix_integrate_QCD
 
-FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o		\
-LUPdecompose.o phase_space_gen23.o haag.o color_algebra.o math_functions.o	\
+FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o	\
+LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
-phase_space_genpt.o
+phase_space_genpt.o phase_space_haag.o
 
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
@@ -28,6 +28,8 @@ FFLAGS=-ffast-math -O3
 	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
 %.o: PhaseSpace/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
+%.o: PhaseSpace/%.f03
+	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 
 
 matrix_integrate_QCD:  $(FILES_M_INT_QCD)
@@ -41,8 +43,9 @@ clean:
 
 matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o particles.o
 ranmar.o : mint_module.o
-phase_space_gen23.o : common.o LUPdecompose.o
-haag.o : common.o
+phase_space_gen23.o : phase_space.o LUPdecompose.o
+phase_space_genpt.o : phase_space.o
+haag.o : phase_space.o
 amplitude_QCD.o : math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o haag.o mint_module.o common.o math_functions.o phase_space_genpt.o particles.o
+matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o
 common.o : amplitude_QCD.o

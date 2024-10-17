@@ -1,5 +1,12 @@
-module phase_space_gen23
-  use common
+module phase_space_gen23_mod
+!  use common
+  use phase_space_base
+  implicit none
+  type,extends(phase_space_type),public :: phase_space_gen23
+   contains
+     procedure :: init => gen23_init
+     procedure :: generate_momenta => gen23_generate_momenta
+  end type phase_space_gen23
   private
   integer(kind=4) :: ix,ndim,next
   integer(kind=4),dimension(:),allocatable :: order
@@ -26,11 +33,12 @@ module phase_space_gen23
   ! of 2*pi and flux factor)
   !  real(kind=8),public :: jac
 
-  public :: gen23_init,gen23_phase_space
+!  public :: gen23_init,gen23_generate_momenta
 contains
-  subroutine gen23_init(sqrtsh,n,m,o,s_cut,pt_cut,dr_cut,t_chan,include_pdf)
+  subroutine gen23_init(this,sqrtsh,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
+    class(phase_space_gen23),intent(inout) :: this
     ! INPUT
     ! Sqrt(s-hat), i.e, the collision energy
     real(kind=8),intent(in) :: sqrtsh
@@ -42,7 +50,7 @@ contains
     ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
     ! an initial and a final state particle; s_cut(2) is between two final
     ! state particles.
-    real(kind=8),intent(in) :: s_cut(2),pt_cut,dr_cut
+    real(kind=8),intent(in) :: s_cut(2),pt_cut,dr_cut,rap_cut,sqrt_s_min
     ! masses of all the particles. The two incoming particles must be
     ! massless.
     real(kind=8),dimension(n),intent(in) :: m
@@ -198,9 +206,11 @@ contains
       if (allocated(sets)) deallocate(sets)
     end subroutine gen23_deallocate
   end subroutine gen23_init
-  subroutine gen23_phase_space(xx)
+
+  subroutine gen23_generate_momenta(this,xx)
     ! Wrapper for the routine that generates the momenta.
     implicit none
+    class(phase_space_gen23),intent(inout) :: this
     real(kind=8),dimension(99),intent(in) :: xx
     integer(kind=4) :: i
     x(1:ndim)=xx(1:ndim)
@@ -462,7 +472,6 @@ contains
 
       if (tmin.ge.tmax) then
          jac=-1d0
-         num_error=num_error+1
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -485,7 +494,6 @@ contains
 
       if (tmin.ge.tmax) then
          jac=-2d0
-         num_error=num_error+1
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -584,7 +592,6 @@ contains
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
          jac=-33d0
-         num_error=num_error+1
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
@@ -592,7 +599,6 @@ contains
       tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
          jac=-3d0
-         num_error=num_error+1
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -629,7 +635,6 @@ contains
 
       if (smin.ge.smax) then
          jac=-4d0
-         num_error=num_error+1
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
@@ -698,7 +703,6 @@ contains
       if (gram4.ge.0d0) then 
          write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
          jac=-5d0
-         num_error=num_error+1
          return
       endif
       jac=jac/(8d0*sqrt(-gram4))
@@ -773,7 +777,6 @@ contains
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
          jac=-33d0
-         num_error=num_error+1
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
@@ -781,7 +784,6 @@ contains
       tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
          jac=-3d0
-         num_error=num_error+1
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -815,7 +817,6 @@ contains
 
       if (smin.ge.smax) then
          jac=-4d0
-         num_error=num_error+1
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
@@ -903,7 +904,6 @@ contains
       if (gram4.ge.0d0) then 
          write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
          jac=-5d0
-         num_error=num_error+1
          return
       endif
       jac=jac/(8d0*sqrt(-gram4))
@@ -1042,7 +1042,6 @@ contains
       if (shatmin.gt.shatmax) then
          if (debug) write (*,*) shatmin,shatmax,2d0*pt*pim1(0)*(1d0-cos(drcut))
          jac=-13d0
-         num_error=num_error+1
          return
       endif
 
@@ -1097,7 +1096,6 @@ contains
          ! +pz and -pz). This boundary has not been implemented
          ! consistently. In that case we simply return.
          jac=-21d0
-         num_error=num_error+1
          return
       endif
 
@@ -1121,7 +1119,6 @@ contains
       endif
       if (invm(ir).lt.0d0) then
          jac=-12d0
-         num_error=num_error+1
          return
       endif
       ! fill t-channel stuff to be safe.
@@ -1245,7 +1242,6 @@ contains
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
          jac=-33d0
-         num_error=num_error+1
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
@@ -1253,7 +1249,6 @@ contains
       tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
       if (tmin.ge.tmax) then
          jac=-3d0
-         num_error=num_error+1
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -1328,7 +1323,6 @@ contains
            (piir(0)-sqrt(pt2+invm(i))+Etmin(ir))*(piir(0)+sqrt(pt2+invm(i))+Etmin(ir))
       if (root.lt.0d0) then
          jac=-33d0
-         num_error=num_error+1
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
@@ -1336,7 +1330,6 @@ contains
       tmax=invm(i)-pib(0)/piir(0)*(base-sqrt(root))
       if (tmin.ge.tmax) then
          jac=-3d0
-         num_error=num_error+1
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
@@ -1365,7 +1358,6 @@ contains
 
       if (smin.ge.smax) then
          jac=-4d0
-         num_error=num_error+1
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
@@ -1529,7 +1521,6 @@ contains
       if (esum+ed.le.0d0) then
          write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
          jac=-8d0
-         num_error=num_error+1
          return
          write (*,*) pa(0:3)
          write (*,*) pb(0:3)
@@ -1598,7 +1589,6 @@ contains
       if (invm_max(i).ne.0d0) shatmax=min(shatmax,invm_max(i))
       if (shatmin.ge.shatmax) then
          jac=-7d0
-         num_error=num_error+1
          if (debug) write (*,*) 'shatmin.ge.shatmax',i,shatmin,shatmax
          return
       endif
@@ -1750,7 +1740,6 @@ contains
       if (esum+ed.le.0d0) then
          write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
          jac=-8d0
-         num_error=num_error+1
          return
          write (*,*) pa(0:3)
          write (*,*) pb(0:3)
@@ -1797,7 +1786,6 @@ contains
       ESUM2 = dot(ptot,ptot)
       if (esum2 .le. 0d0) then
          jac=-9d0
-         num_error=num_error+1
          write (*,*) "error :: must be time-like momentum in gentcms2",esum2
          return
          stop 1
@@ -1838,7 +1826,6 @@ contains
       if (esum+ed.le.0d0) then
          write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
          jac=-10d0
-         num_error=num_error+1
          return
          stop 1
       endif
@@ -1847,7 +1834,6 @@ contains
       if (pt2/esum2.lt.-tiny) then
          write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
          jac=-11d0
-         num_error=num_error+1
          return
          stop 1
       elseif (pt2.lt.0d0) then
@@ -2135,5 +2121,5 @@ contains
          gram_determinant4=1d0
       endif
     end function gram_determinant4
-  end subroutine gen23_phase_space
-end module phase_space_gen23
+  end subroutine gen23_generate_momenta
+end module phase_space_gen23_mod

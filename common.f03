@@ -2,15 +2,11 @@ module common
   use amplitude_QCD_mod
   implicit none
   ! coupling constants
-  real*8,parameter  :: alphaS=0.119d0,alphaEW=0.00754677114d0
-
-  ! momenta, phase-space jacobian and Bjorken x's
-  real(kind=8),dimension(:,:),allocatable,public :: p
-  real(kind=8),public :: jac,xbjrk(2)
+  real(kind=8),parameter  :: alphaS=0.119d0,alphaEW=0.00754677114d0
 
   ! timing
-  real*4 :: tBefore,tAfter,tTot_A,tTot_B
-  real*4 :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
+  real(kind=4) :: tBefore,tAfter,tTot_A,tTot_B
+  real(kind=4) :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
 
   ! technical
   logical,parameter :: smooth_cuts=.false.
@@ -19,13 +15,12 @@ module common
   ! counting events
   integer(kind=4) :: passed=0
   integer(kind=4) :: all_evt=0
-  integer(kind=4) :: num_error=0
 
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
-  real*8,parameter :: pT_min     = 30d0
-  real*8,parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
-  real*8,parameter :: eta_max    = 6d0
-  real*8,parameter :: sqrt_s_min = -1d0
+  real(kind=8),parameter :: pT_min     = 30d0
+  real(kind=8),parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
+  real(kind=8),parameter :: eta_max    = 6d0
+  real(kind=8),parameter :: sqrt_s_min = -1d0
   
 end module common
 

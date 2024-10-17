@@ -2,14 +2,16 @@
 program matrix_integrate_QCD
   use common
   use mint_module
-  use phase_space_gen23
-  use phase_space_genpt
-  use haag
+  use phase_space_base
+  use phase_space_gen23_mod
+  use phase_space_genpt_mod
+  use phase_space_haag_mod
   use math_functions
   use particles
   implicit none
   type(amplitude_QCD) :: amps
   type(physics_model) :: phys_model
+  class(phase_space_type),allocatable :: phase_space
   integer :: next,iproc
   real(kind=8) :: weight
   real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
@@ -92,25 +94,14 @@ program matrix_integrate_QCD
   if (sqrt_s_min.gt.0d0) then
      s_cut(1:2)=sqrt_s_min**2
   endif
-!  mass(1:2) = 0d0
-!  mass(3:4) = 173d0
-!  mass(5) = 0d0
-!  width(1:2) = 0d0
-!  width(3:4) = 1.491500d0
-!  width(5) = 0d0
-
 
   ! Initialise the phase-space parametrisation
   call cpu_time(tBefore)
   t_chan=.false.
-  if (integration.eq.1) then
-     call gen23_init(sqrts,next,mass,orders(1,1),s_cut,pt_min,DRjj_min,.false.,include_pdf)
-  elseif  (integration.eq.2) then
-     call haag_init(sqrts,next,mass,orders(1,1),s_cut,t_chan,include_pdf)
-  elseif (integration.eq.3) then
-     call genpt_init(sqrts,next,mass,pt_min,eta_max,DRjj_min,include_pdf)
+  if (integration.ge.1 .and. integration.le.3) then
+     call phase_space%init(sqrts,next,mass,orders(1,1),s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
   elseif (integration.eq.4) then
-     call gen23_init(sqrts,next,mass,orders(1,1),s_cut,pt_min,DRjj_min,.true.,include_pdf)
+     call phase_space%init(sqrts,next,mass,orders(1,1),s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
   endif
   call cpu_time(tAfter)
   t_PS_init=t_PS_init+tAfter-tBefore
@@ -182,7 +173,6 @@ program matrix_integrate_QCD
   write(*,*) 'Number of events:',all_evt
   write(*,*) 'Number passing cuts:',passed
   write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
-  write(*,*) 'Number of numerical errors:',num_error
  
 contains
   real(kind=8) function integrand(x,vol,ifirst,f1)
@@ -194,7 +184,7 @@ contains
     integer :: ih,iproc,i
     real(kind=8) :: vol,cuts_wgt
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real*4 :: tBefore,tAfter
+    real(kind=4) :: tBefore,tAfter
     real(kind=8) :: Q
     if (.not.allocated(val)) then
        allocate(val(1:nproc))
@@ -216,13 +206,7 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    if (integration.eq.1 .or. integration.eq.4)then
-       call gen23_phase_space(x)
-    elseif (integration.eq.2) then
-        call PS_haag(x)
-    elseif (integration.eq.3) then
-        call genpt_phase_space(x)
-    endif
+    call phase_space%generate_momenta(x)
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
@@ -704,6 +688,16 @@ contains
     if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
        write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
        stop
+    else
+       if (integration.eq.1) then
+          allocate(phase_space_gen23 :: phase_space)
+       elseif  (integration.eq.2) then
+          allocate(phase_space_haag :: phase_space)
+       elseif (integration.eq.3) then
+          allocate(phase_space_genpt :: phase_space)
+       elseif (integration.eq.4) then
+          allocate(phase_space_gen23 :: phase_space)
+       endif
     endif
   end subroutine get_run_arguments
 
