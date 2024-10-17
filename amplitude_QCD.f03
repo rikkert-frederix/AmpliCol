@@ -157,8 +157,6 @@ contains
       integer :: i,ic
       do ic=1,this%n_cur
          if (current_list_local(ic)%order(1).ne.iorder) cycle
-         if (current_list_local(ic)%mass.ne.mass(iorder)) cycle
-         if (current_list_local(ic)%width.ne.width(iorder)) cycle
          if (iorder.le.2 .and. abs(ipart).le.6) then
             if (current_list_local(ic)%type.ne.anti_current(ipart)) cycle
          else
