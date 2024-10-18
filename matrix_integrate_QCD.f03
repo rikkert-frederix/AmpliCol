@@ -9,64 +9,64 @@ program matrix_integrate_QCD
   use math_functions
   use particles
   implicit none
-  type(amplitude_QCD) :: amps
   type(physics_model) :: phys_model
-  class(phase_space_type),allocatable :: phase_space
   integer :: next,iproc
   real(kind=8) :: weight
-  real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
-  integer :: j,c_o,i,nproc
-  integer,dimension(:,:),allocatable :: processes,orders
-  integer,dimension(:,:,:),allocatable :: iden_processes
-  integer,dimension(:),allocatable :: multi_factor,iden_iproc
-  integer(kind=8),dimension(:),allocatable :: iden
-  integer(kind=4),dimension(:),allocatable :: o,part,hel,hel_fac
-  integer(kind=4),dimension(:,:),allocatable :: spin
+  integer :: j,c_o,i
+  integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass,width
-  real(kind=8),dimension(:,:),allocatable :: val_procs
   real(kind=8) :: s_cut(2),sqrts,evt_sign
-  logical :: t_chan
   character(len=80) :: filename
-  integer(kind=4) :: integration,nquarks,nhel
-  logical,dimension(-6:7,2) :: ipdgs
-  integer,dimension(:),allocatable :: col_fac
+  integer(kind=4) :: integration,nquarks
   integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
   integer :: iproc_picked,iproc_iden_picked
+
+
+  integer :: ngroups,igroup
   
+  type phase_space_order_group
+     type(amplitude_QCD) :: amps
+     class(phase_space_type),allocatable :: phase_space
+     integer,dimension(:,:),allocatable :: processes,orders
+     integer,dimension(:),allocatable :: multi_factor,iden_iproc
+     integer :: nproc
+     real(kind=8),dimension(:,:),allocatable :: val_procs
+     integer,dimension(:,:,:),allocatable :: iden_processes
+     integer(kind=4),dimension(:,:),allocatable :: spin
+     integer(kind=8),dimension(:),allocatable :: iden
+     logical,dimension(-6:7,2) :: ipdgs
+     integer(kind=4) :: nhel
+     integer,dimension(:),allocatable :: col_fac
+     real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
+     integer(kind=4),dimension(:),allocatable :: hel,hel_fac
+     integer(kind=4) :: passed=0,all_evt=0
+     integer,dimension(:),allocatable :: include_hel
+  end type phase_space_order_group
+  type(phase_space_order_group),dimension(:),allocatable :: pgl
+
+  call cpu_time(tTot_B)
   call get_run_arguments()
+
+  ! Not so relevant mint-module parameters: only used in special cases.
+  call set_mint_module_special_parameters()
+  nchans=ngroups ! overwrite the number of mint-channels to the number of
+                 ! needed integration channels.
 
   call phys_model%init_part(173d0,1.491500d0)
 
-  allocate(mass(next))
-  allocate(width(next))
-  do i=1,next
-     mass(i)=phys_model%get_mass(processes(i,1))
-     width(i)=phys_model%get_width(processes(i,1))
-     do iproc=2,nproc
-        if (mass(i).ne.phys_model%get_mass(processes(i,iproc)) .or. &
-             width(i).ne.phys_model%get_width(processes(i,iproc))) then
-           write (*,*) 'masses and widths not compatible among processes'
-           stop 1
-        endif
-     enddo
-  enddo
-  call setup_spin()
   call create_run_tag()
 
-
-  call cpu_time(tTot_B)
-
-! relevant input parameters for integration
+  ! relevant input parameters for integration
   ! Number of events to generate. (If negative, start
   ! from a small number of points and double it each
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
-  if (imode.eq.0 .or. imode.eq.2) then
+!!$  if (imode.eq.0 .or. imode.eq.2) then
      ncalls0=-100000
-  else
-     ncalls0=640000
-  endif
+!!$  else
+!!$     ncalls0=640000
+!!$  endif
 
   ndim=3*(next-2)-4   ! Number of dimensions of the integration.
 
@@ -74,7 +74,7 @@ program matrix_integrate_QCD
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
-  accuracy=0.00001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+  accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
 
   ! setting energy
   sqrts=14000.d0
@@ -95,53 +95,89 @@ program matrix_integrate_QCD
      s_cut(1:2)=sqrt_s_min**2
   endif
 
-  ! Initialise the phase-space parametrisation
-  call cpu_time(tBefore)
-  t_chan=.false.
-  if (integration.ge.1 .and. integration.le.3) then
-     call phase_space%init(sqrts,next,mass,orders(1,1),s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
-  elseif (integration.eq.4) then
-     call phase_space%init(sqrts,next,mass,orders(1,1),s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
-  endif
-  call cpu_time(tAfter)
-  t_PS_init=t_PS_init+tAfter-tBefore
-
-  call cpu_time(tBefore)
-
-  allocate(iden(nproc))
-  iden(1:nproc)=1
-  call set_final_state_identical_particle_factor() ! updates 'iden()'
-  call set_initial_state_average_factor()          ! updates 'iden()'
-
   if (include_pdf) then
      ndim=ndim+2
      call PDF_initialise
-     call set_ipdgs_for_PDF()
   endif
-
-  ! initialize the amplitudes. This creates the whole tree-structure from
-  ! which the amps%evaluation() can compute the amplitudes for given
-  ! phase-space points.
-  call amps%init(1,next,nproc,processes,spin,orders,phys_model)
-
-  ! Total number of amplitudes is stored in 'nhel'
-  nhel=amps%n_amps
-
-  allocate(col_fac(nproc))
-  call compute_LC_colour_factor()  ! updates 'col_fac()'
   
-  allocate(amp2(nproc))
-  ! number of helicities to sum over
-  allocate(amp2_hel(1:nhel))
-  allocate(hel(1:next))
-  allocate(hel_fac(1:nhel))
-  hel_fac(1:nhel)=1
-  
-  call cpu_time(tAfter)
-  t_amp_init=t_amp_init+tAfter-tBefore
 
-  ! Not so relevant mint-module parameters: only used in special cases.
-  call set_mint_module_special_parameters()
+  
+  do igroup=1,ngroups
+     ! allocate the amplitudes and the phase-space for each of the integration channels
+     if (integration.eq.1) then
+        allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
+     elseif  (integration.eq.2) then
+        allocate(phase_space_haag :: pgl(igroup)%phase_space)
+     elseif (integration.eq.3) then
+        allocate(phase_space_genpt :: pgl(igroup)%phase_space)
+     elseif (integration.eq.4) then
+        allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
+     endif
+
+     allocate(mass(next))
+     allocate(width(next))
+     do i=1,next
+        mass(i)=phys_model%get_mass(pgl(igroup)%processes(i,1))
+        width(i)=phys_model%get_width(pgl(igroup)%processes(i,1))
+        do iproc=2,pgl(igroup)%nproc
+           if (mass(i).ne.phys_model%get_mass(pgl(igroup)%processes(i,iproc)) .or. &
+                width(i).ne.phys_model%get_width(pgl(igroup)%processes(i,iproc))) then
+              write (*,*) 'masses and widths not compatible among processes'
+              stop 1
+           endif
+        enddo
+     enddo
+     call setup_spin(pgl(igroup))
+
+     ! Initialise the phase-space parametrisation
+     call cpu_time(tBefore)
+     if (integration.ge.1 .and. integration.le.3) then
+        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
+     elseif (integration.eq.4) then
+        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+     endif
+     call cpu_time(tAfter)
+     t_PS_init=t_PS_init+tAfter-tBefore
+     deallocate(mass)
+     deallocate(width)
+
+
+     allocate(pgl(igroup)%iden(pgl(igroup)%nproc))
+     pgl(igroup)%iden(1:pgl(igroup)%nproc)=1
+     call set_final_state_identical_particle_factor(pgl(igroup)) ! updates 'iden()'
+     call set_initial_state_average_factor(pgl(igroup))          ! updates 'iden()'
+
+     if (include_pdf) then
+        call set_ipdgs_for_PDF(pgl(igroup))
+     endif
+
+     ! initialize the amplitudes. This creates the whole tree-structure from
+     ! which the amps%evaluation() can compute the amplitudes for given
+     ! phase-space points.
+     call cpu_time(tBefore)
+     call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%orders,phys_model)
+     
+     call cpu_time(tAfter)
+     t_amp_init=t_amp_init+tAfter-tBefore
+
+     ! Total number of amplitudes is stored in 'nhel'
+     pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
+
+     allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
+     call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
+  
+     allocate(pgl(igroup)%amp2(pgl(igroup)%nproc))
+     ! number of helicities to sum over
+     allocate(pgl(igroup)%amp2_hel(1:pgl(igroup)%nhel))
+     allocate(pgl(igroup)%hel(1:next))
+     allocate(pgl(igroup)%hel_fac(1:pgl(igroup)%nhel))
+     pgl(igroup)%hel_fac(1:pgl(igroup)%nhel)=1
+
+  enddo ! loop over phase-space-order groups
+  
+
 
   if (imode.le.1) then
      ! grid setup, or computation of upper bounding envelope
@@ -170,9 +206,9 @@ program matrix_integrate_QCD
   write(*,*) 'Time spent in amplitude evaluation',t_Amp
   write(*,*) 'Time spent in squaring amplitudes',t_mat
   write(*,*) 'Total time:',t_all
-  write(*,*) 'Number of events:',all_evt
-  write(*,*) 'Number passing cuts:',passed
-  write(*,*) 'Fraction passing:',float(passed)/float(all_evt)
+  write(*,*) 'Number of events:',pgl(1:ngroups)%all_evt
+  write(*,*) 'Number passing cuts:',pgl(1:ngroups)%passed
+  write(*,*) 'Fraction passing:',float(pgl(1:ngroups)%passed)/float(pgl(1:ngroups)%all_evt)
  
 contains
   real(kind=8) function integrand(x,vol,ifirst,f1)
@@ -187,115 +223,118 @@ contains
     real(kind=4) :: tBefore,tAfter
     real(kind=8) :: Q
     if (.not.allocated(val)) then
-       allocate(val(1:nproc))
-       allocate(val_abs(1:nproc))
+       allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
+       allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
     endif
-    
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
     if (ifirst.eq.2) then
        ! use previously computed integrand
-       f1(1)=sum(val_abs(1:nproc))
-       f1(2)=sum(val(1:nproc))
-       f1(3:nproc+2)=val(1:nproc)
+       f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
+       f1(2)=sum(val(1:pgl(ichan)%nproc))
+       f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
        return
     endif
     new_point=.true.
     pass_cuts_check=.true.
-    val_abs(1:nproc)=0d0
+    val_abs(1:pgl(ichan)%nproc)=0d0
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    call phase_space%generate_momenta(x)
+    call pgl(ichan)%phase_space%generate_momenta(x)
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
 
     if (debug ) then
-       write (*,*) phase_space%jac
+       write (*,*) pgl(ichan)%phase_space%jac
        stop 1
     endif
     
-    all_evt=all_evt+1
+    pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
 
-    if (phase_space%jac.lt.0d0) then
-       val(1:nproc)=0d0
+    if (pgl(ichan)%phase_space%jac.lt.0d0) then
+       val(1:pgl(ichan)%nproc)=0d0
        return
     endif
     
-    cuts_wgt=pass_cuts(next,phase_space%p)
-    if ((phase_space%jac.lt.0d0) .or. (smooth_cuts .and. cuts_wgt.lt.0d0) .or. (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
+    cuts_wgt=pass_cuts(next,pgl(ichan)%phase_space%p)
+    if ((pgl(ichan)%phase_space%jac.lt.0d0) .or. &
+         (smooth_cuts .and. cuts_wgt.lt.0d0) .or. &
+         (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
        pass_cuts_check=.false.
-       val(1:nproc)=0d0
+       val(1:pgl(ichan)%nproc)=0d0
        return
     endif
 
-    passed = passed + 1
+    pgl(ichan)%passed = pgl(ichan)%passed + 1
 
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call amps%evaluate(next,phase_space%p,hel)
+    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel)
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
     iproc=1
-    if (use_real_gluons .and. all(amps%n_qqbar(1:amps%nprocs).eq.0)) then
-       do ih=1,amps%n_amps
-          amp2_hel(ih)=amps%amps_r(ih)*col_fac(iproc)*amps%amps_r(ih) *hel_fac(ih)
-          if (amps%iproc_start(iproc+1).eq.ih+1) then
-             amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+    if (use_real_gluons .and. all(pgl(ichan)%amps%n_qqbar(1:pgl(ichan)%amps%nprocs).eq.0)) then
+       do ih=1,pgl(ichan)%amps%n_amps
+          pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps%amps_r(ih)*pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps%amps_r(ih)*&
+               pgl(ichan)%hel_fac(ih)
+          if (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih+1) then
+             pgl(ichan)%amp2(iproc)=sum(pgl(ichan)%amp2_hel(pgl(ichan)%amps%iproc_start(iproc):ih))
              iproc=iproc+1
           endif
        enddo
     else
-       do ih=1,amps%n_amps
-          amp2_hel(ih)=dble(amps%amps(ih)*col_fac(iproc)*dconjg(amps%amps(ih))) *hel_fac(ih)
-          if (amps%iproc_start(iproc+1).eq.ih+1) then
-             amp2(iproc)=sum(amp2_hel(amps%iproc_start(iproc):ih))
+       do ih=1,pgl(ichan)%amps%n_amps
+          pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
+               pgl(ichan)%hel_fac(ih)
+          if (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih+1) then
+             pgl(ichan)%amp2(iproc)=sum(pgl(ichan)%amp2_hel(pgl(ichan)%amps%iproc_start(iproc):ih))
              iproc=iproc+1
           endif
        enddo
     endif
     
-    if (passed.le.nevent_hel_filter) then
-       call setup_helicity_filter(passed)
-       if (imode.eq.2 .and. passed.eq.nevent_hel_filter) then
+    if (pgl(ichan)%passed.le.nevent_hel_filter) then
+       call setup_helicity_filter(pgl(ichan))
+       if (imode.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
           ! passed==nevent_hel_filter, the unweighting of the helicities goes
           ! wrong for this phase-space point. Hence, we need to skip it.
-          amp2(1:nproc)=0d0
+          pgl(ichan)%amp2(1:pgl(ichan)%nproc)=0d0
        endif
     endif
     
-    weight=vol*phase_space%jac*(4*pi*alphas)**(next-2-amps%n_sing(1))*conv
+    weight=vol*pgl(ichan)%phase_space%jac*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))*conv
 
-    if (amps%n_sing(1).ge.1) then
+    if (pgl(ichan)%amps%n_sing(1).ge.1) then
        do i=1,next
           if (abs(part(i)).le.6) then
              if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
              if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
           endif
        enddo
-       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**amps%n_sing(1)
+       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
     endif
 
-    val(1:nproc)=amp2(1:nproc)*weight/dble(iden(1:nproc))
+    val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
     ! Apply the weight from the cuts
-    if (smooth_cuts) val(1:nproc)=val(1:nproc)*cuts_wgt
+    if (smooth_cuts) val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*cuts_wgt
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
-    val(1:nproc)=val(1:nproc)*multi_factor(1:nproc)
+    val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*pgl(ichan)%multi_factor(1:pgl(ichan)%nproc)
 
-    call include_PDF_and_identical_procs(val,val_abs)
+    call include_PDF_and_identical_procs(val,val_abs,pgl(ichan))
 
     ! pass the result to the mint module
-    f1(1)=sum(val_abs(1:nproc))
-    f1(2)=sum(val(1:nproc))
-    f1(3:nproc+2)=val(1:nproc)
+    f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
+    f1(2)=sum(val(1:pgl(ichan)%nproc))
+    f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
     integrand=f1(1)
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
@@ -369,50 +408,50 @@ contains
     enddo
   end function pass_cuts
 
-  subroutine setup_helicity_filter(nevent)
+  subroutine setup_helicity_filter(pgl)
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     real(kind=8) :: max_value
-    integer :: ih1,ih2,nevent,iproc1,iproc2
-    integer,dimension(:),allocatable,save :: include_hel
-    if (.not.allocated(include_hel)) then
-       allocate(include_hel(nhel))
-       include_hel(1:nhel)=0
+    integer :: ih1,ih2,iproc1,iproc2
+    if (.not.allocated(pgl%include_hel)) then
+       allocate(pgl%include_hel(pgl%nhel))
+       pgl%include_hel(1:pgl%nhel)=0
     endif
     ! filter zero helicities and helicities that are identical
-    max_value=maxval(amp2_hel(1:nhel))
-    do ih1=1,nhel
-       if (include_hel(ih1).ne.0) cycle
-       if (amp2_hel(ih1)/max_value.gt.1d-10) then
+    max_value=maxval(pgl%amp2_hel(1:pgl%nhel))
+    do ih1=1,pgl%nhel
+       if (pgl%include_hel(ih1).ne.0) cycle
+       if (pgl%amp2_hel(ih1)/max_value.gt.1d-10) then
           ! non-zero
-          include_hel(ih1)=1
+          pgl%include_hel(ih1)=1
        else
           cycle
        endif
-       do ih2=ih1+1,nhel
-          if (abs(amp2_hel(ih1)-amp2_hel(ih2))/abs(amp2_hel(ih1)+amp2_hel(ih2)).lt.1d-10) then
+       do ih2=ih1+1,pgl%nhel
+          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-10) then
              ! identical value. Now check that they belong to the same process
-             iproc1=1; do while (iproc1.lt.nproc .and. (amps%iproc_start(iproc1+1)-ih1).le.0) ; iproc1=iproc1+1 ; enddo
-             iproc2=1; do while (iproc2.lt.nproc .and. (amps%iproc_start(iproc2+1)-ih2).le.0) ; iproc2=iproc2+1 ; enddo
+             iproc1=1; do while (iproc1.lt.pgl%nproc .and. (pgl%amps%iproc_start(iproc1+1)-ih1).le.0) ; iproc1=iproc1+1 ; enddo
+             iproc2=1; do while (iproc2.lt.pgl%nproc .and. (pgl%amps%iproc_start(iproc2+1)-ih2).le.0) ; iproc2=iproc2+1 ; enddo
              if (iproc1.ne.iproc2) cycle
              ! identical process
-             include_hel(ih2)=-ih1
-             include_hel(ih1)=include_hel(ih1)+1
+             pgl%include_hel(ih2)=-ih1
+             pgl%include_hel(ih1)=pgl%include_hel(ih1)+1
           endif
        enddo
     enddo
     
-    if (nevent.lt.nevent_hel_filter) return
+    if (pgl%passed.lt.nevent_hel_filter) return
 
     ih2=0
-    do ih1=1,nhel
-       if (include_hel(ih1).gt.0) ih2=ih2+1
+    do ih1=1,pgl%nhel
+       if (pgl%include_hel(ih1).gt.0) ih2=ih2+1
     enddo
     
-    call amps%filter_helicity(next,nhel,include_hel) ! this updates 'nhel' and 'include_hel'
-    deallocate(hel_fac)
-    allocate(hel_fac(nhel))
-    hel_fac(1:nhel)=include_hel(1:nhel)
-    deallocate(include_hel)
+    call pgl%amps%filter_helicity(next,pgl%nhel,pgl%include_hel) ! this updates 'nhel' and 'include_hel'
+    deallocate(pgl%hel_fac)
+    allocate(pgl%hel_fac(pgl%nhel))
+    pgl%hel_fac(1:pgl%nhel)=pgl%include_hel(1:pgl%nhel)
+    deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
   real(kind=8) function pt(p)
@@ -460,28 +499,29 @@ contains
     real(kind=8) :: wgt
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
-    write (iunit,*) next,wgt,amp2(iproc_picked)*weight,amp2(iproc_picked),weight
-    write (iunit,'(100i3)') amps%spins(1:next,hel_picked(1),hel_picked(2))
-    write (iunit,'(100i3)') orders(1:next,iproc_picked)
+    write (iunit,*) next,wgt,pgl(ichan)%amp2(iproc_picked)*weight,pgl(ichan)%amp2(iproc_picked),weight
+    write (iunit,'(100i3)') pgl(ichan)%amps%spins(1:next,hel_picked(1),hel_picked(2))
+    write (iunit,'(100i3)') pgl(ichan)%orders(1:next,iproc_picked)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
     ! compensate for reducing the number of integration channels assuming
     ! symmetric initial states, we need to randomly flip all z-components in
     ! those cases. Easiest to always do this if the two incoming particles are
     ! identical.
-    if (processes(1,iproc_picked).ne.processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
+    if (pgl(ichan)%processes(1,iproc_picked).ne.pgl(ichan)%processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
        ! do not flip
        do i=1,next
-          write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),phase_space%p(1:3,i),phase_space%p(0,i)
+          write (iunit,*) pgl(ichan)%iden_processes(i,iproc_iden_picked,iproc_picked),&
+               pgl(ichan)%phase_space%p(1:3,i),pgl(ichan)%phase_space%p(0,i)
        enddo
     else
        ! do flip
        do i=1,next
           if (i.le.2) then
-             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  phase_space%p(1:2,3-i),-phase_space%p(3,3-i),phase_space%p(0,3-i)
+             write (iunit,*) pgl(ichan)%iden_processes(i,iproc_iden_picked,iproc_picked),&
+                  pgl(ichan)%phase_space%p(1:2,3-i),-pgl(ichan)%phase_space%p(3,3-i),pgl(ichan)%phase_space%p(0,3-i)
           else
-             write (iunit,*) iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  phase_space%p(1:2,i),-phase_space%p(3,i),phase_space%p(0,i)
+             write (iunit,*) pgl(ichan)%iden_processes(i,iproc_iden_picked,iproc_picked),&
+                  pgl(ichan)%phase_space%p(1:2,i),-pgl(ichan)%phase_space%p(3,i),pgl(ichan)%phase_space%p(0,i)
           endif
        enddo
     endif
@@ -494,38 +534,38 @@ contains
     real(kind=8) :: random,accum,target
     real(kind=8),external :: ran2
     target=0d0
-    do iproc=1,nproc
-       do i=1,iden_iproc(iproc)
-          target=target+abs(val_procs(i,iproc))
+    do iproc=1,pgl(ichan)%nproc
+       do i=1,pgl(ichan)%iden_iproc(iproc)
+          target=target+abs(pgl(ichan)%val_procs(i,iproc))
        enddo
     enddo
     random=ran2()*target
     iproc=1
     i=1
-    accum=abs(val_procs(i,iproc))
+    accum=abs(pgl(ichan)%val_procs(i,iproc))
     do
        if (accum.gt.random) then
           exit
        else
           i=i+1
-          if (i.gt.iden_iproc(iproc)) then
+          if (i.gt.pgl(ichan)%iden_iproc(iproc)) then
              i=1
              iproc=iproc+1
           endif
-          accum=accum+abs(val_procs(i,iproc))
+          accum=accum+abs(pgl(ichan)%val_procs(i,iproc))
        endif
     enddo
     iproc_picked=iproc
     iproc_iden_picked=i
-    if (iproc_picked.gt.amps%nprocs) then
-       write (*,*) "Could not unweight process",iproc_picked,amps%nprocs
+    if (iproc_picked.gt.pgl(ichan)%amps%nprocs) then
+       write (*,*) "Could not unweight process",iproc_picked,pgl(ichan)%amps%nprocs
        stop 1
     endif
-    if (iproc_iden_picked.gt.iden_iproc(iproc)) then
-       write (*,*) "Could not unweight process",iproc,iproc_iden_picked,iden_iproc(iproc)
+    if (iproc_iden_picked.gt.pgl(ichan)%iden_iproc(iproc)) then
+       write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl(ichan)%iden_iproc(iproc)
        stop 1
     endif
-    if (val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
+    if (pgl(ichan)%val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
        evt_sign=-1d0
     else
        evt_sign=+1d0
@@ -538,24 +578,25 @@ contains
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
-    random=ran2()*amp2(iproc_picked)
-    i=amps%iproc_start(iproc_picked)
+    random=ran2()*pgl(ichan)%amp2(iproc_picked)
+    i=pgl(ichan)%amps%iproc_start(iproc_picked)
     do
-       if (amp2_hel(i).gt.random) then
+       if (pgl(ichan)%amp2_hel(i).gt.random) then
           exit
        else
           i=i+1
-          amp2_hel(i)=amp2_hel(i)+amp2_hel(i-1)
+          pgl(ichan)%amp2_hel(i)=pgl(ichan)%amp2_hel(i)+pgl(ichan)%amp2_hel(i-1)
        endif
     enddo
     hel_picked(2)=i
-    if (hel_picked(2).lt.amps%iproc_start(iproc_picked) .or. hel_picked(2).ge.amps%iproc_start(iproc_picked+1)) then
-       write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,amps%iproc_start(iproc_picked),&
-            amps%iproc_start(iproc_picked+1)
+    if ( hel_picked(2).lt.pgl(ichan)%amps%iproc_start(iproc_picked) .or. &
+         hel_picked(2).ge.pgl(ichan)%amps%iproc_start(iproc_picked+1)) then
+       write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,pgl(ichan)%amps%iproc_start(iproc_picked),&
+            pgl(ichan)%amps%iproc_start(iproc_picked+1)
        stop 1
     endif
-    if (hel_fac(hel_picked(2)).gt.1) then
-       hel_picked(1)=1+int(ran2()*hel_fac(hel_picked(2)))
+    if (pgl(ichan)%hel_fac(hel_picked(2)).gt.1) then
+       hel_picked(1)=1+int(ran2()*pgl(ichan)%hel_fac(hel_picked(2)))
     else
        hel_picked(1)=1
     endif
@@ -584,17 +625,29 @@ contains
           if (i.eq.2) read(argv,*) imode
        enddo
        open(unit=10,file='processes.txt',status='old')
-       read(10,*) next,nproc
-       allocate(processes(1:next,1:nproc))
-       allocate(orders(1:next,1:nproc))
-       allocate(multi_factor(1:nproc))
-       write (*,*) '****************************************************'
-       do iproc=1,nproc
-          read(10,*) processes(1:next,iproc),orders(1:next,iproc),multi_factor(iproc)
-          write(*,*) iproc,':',processes(1:next,iproc),'   ',orders(1:next,iproc),'   ',multi_factor(iproc)
+       read (10,*) ngroups
+       allocate(pgl(ngroups))
+       read (10,*) 
+       do igroup=1,ngroups
+          read(10,*) next,pgl(igroup)%nproc
+          allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%orders(1:next,1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%multi_factor(1:pgl(igroup)%nproc))
+          write (*,*) '****************************************************'
+          do iproc=1,pgl(igroup)%nproc
+             read(10,*) pgl(igroup)%processes(1:next,iproc),&
+                  pgl(igroup)%orders(1:next,iproc),pgl(igroup)%multi_factor(iproc)
+             write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),'   ',&
+                  pgl(igroup)%orders(1:next,iproc),'   ',pgl(igroup)%multi_factor(iproc)
+          enddo
+          call define_identical_procs(pgl(igroup))
+          write (*,*) '****************************************************'
+          read(10,*)
+          read(10,*)
+          read(10,*)
+          read(10,*)
        enddo
-       call define_identical_procs
-       write (*,*) '****************************************************'
+999    continue
        close(10)
     elseif (argc.le.10) then
        write(*,*) 'Inconsistent arguments:'
@@ -602,6 +655,8 @@ contains
        write(*,*) 'integration, mode, next, *process*, *order*'
        stop 2
     else
+       ngroups=1
+       allocate(pgl(ngroups))
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) integration
@@ -665,18 +720,18 @@ contains
           stop
        endif
        call compute_multichannel_symmetry_factor(sym_fac)
-       nproc=1
-       allocate(processes(1:next,nproc))
-       processes(1:next,1)=part(1:next)
-       allocate(orders(1:next,nproc))
-       orders(1:next,1)=o(1:next)
-       allocate(multi_factor(1))
-       multi_factor(1)=sym_fac
-       allocate(iden_iproc(1))
-       iden_iproc(1)=1
-       allocate(val_procs(1,1))
-       allocate(iden_processes(1:next,1,1))
-       iden_processes(1:next,1,1)=processes(1:next,1)
+       pgl(1)%nproc=1
+       allocate(pgl(1)%processes(1:next,pgl(1)%nproc))
+       pgl(1)%processes(1:next,1)=part(1:next)
+       allocate(pgl(1)%orders(1:next,pgl(1)%nproc))
+       pgl(1)%orders(1:next,1)=o(1:next)
+       allocate(pgl(1)%multi_factor(1))
+       pgl(1)%multi_factor(1)=sym_fac
+       allocate(pgl(1)%iden_iproc(1))
+       pgl(1)%iden_iproc(1)=1
+       allocate(pgl(1)%val_procs(1,1))
+       allocate(pgl(1)%iden_processes(1:next,1,1))
+       pgl(1)%iden_processes(1:next,1,1)=pgl(1)%processes(1:next,1)
     endif
     ! basic checks:
     if (next.lt.4) then
@@ -690,39 +745,30 @@ contains
     if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
        write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
        stop
-    else
-       if (integration.eq.1) then
-          allocate(phase_space_gen23 :: phase_space)
-       elseif  (integration.eq.2) then
-          allocate(phase_space_haag :: phase_space)
-       elseif (integration.eq.3) then
-          allocate(phase_space_genpt :: phase_space)
-       elseif (integration.eq.4) then
-          allocate(phase_space_gen23 :: phase_space)
-       endif
     endif
   end subroutine get_run_arguments
 
-  subroutine setup_spin()
+  subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible
     ! spin states. Note that this assumes that all the processes() have the
     ! same number of spin states
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,iproc
-    if (.not. allocated(spin)) allocate(spin(0:3,1:next))
+    if (.not. allocated(pgl%spin)) allocate(pgl%spin(0:3,1:next))
     do i=1,next
-       spin(0,i)=phys_model%get_spin(processes(i,1))
-       if (spin(0,i).eq.2) then
-          spin(1,i)=-1
-          spin(2,i)=1
+       pgl%spin(0,i)=phys_model%get_spin(pgl%processes(i,1))
+       if (pgl%spin(0,i).eq.2) then
+          pgl%spin(1,i)=-1
+          pgl%spin(2,i)=1
        else
-          write (*,*) 'spin state not known',i,processes(i,1),spin(0,i)
+          write (*,*) 'spin state not known',i,pgl%processes(i,1),pgl%spin(0,i)
           stop 1
        endif
     enddo
-    do iproc=2,nproc
+    do iproc=2,pgl%nproc
        do i=1,next
-          if (spin(0,i).ne.phys_model%get_spin(processes(i,iproc))) then
+          if (pgl%spin(0,i).ne.phys_model%get_spin(pgl%processes(i,iproc))) then
              write (*,*) 'Spin states of particles in different processes not compatible',iproc
              stop 1
           endif
@@ -757,13 +803,13 @@ contains
        call add_to_string(tag,o(next),.false.)
        call add_to_string(tag_read,o(next),.false.)
     else
-        ! just to the first process; the should all give the same value for 'i'
-       i1=ifindloc(orders(1:next,1),next,1)
-       i2=ifindloc(orders(1:next,1),next,2)
-       i=i2-i1 -1
-       if (i.lt.0) i=i+next
-       call add_to_string(tag,i,.false.)
-       call add_to_string(tag_read,i,.false.)
+!!$        ! just to the first process; the should all give the same value for 'i'
+!!$       i1=ifindloc(orders(1:next,1),next,1)
+!!$       i2=ifindloc(orders(1:next,1),next,2)
+!!$       i=i2-i1 -1
+!!$       if (i.lt.0) i=i+next
+!!$       call add_to_string(tag,i,.false.)
+!!$       call add_to_string(tag_read,i,.false.)
     endif
     write (*,*) 'File tag is: ',tag,'   ',add_arg
   end subroutine create_run_tag
@@ -795,63 +841,66 @@ contains
     endif
   end subroutine add_to_string
 
-  subroutine set_initial_state_average_factor()
+  subroutine set_initial_state_average_factor(pgl)
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,iproc
-    do iproc=1,nproc
+    do iproc=1,pgl%nproc
        do i=1,2
-          if (processes(i,iproc).eq.21) then
+          if (pgl%processes(i,iproc).eq.21) then
              ! gluon: two polarisations and 8 colours
-             iden(iproc)=iden(iproc)*2*8
-          elseif (abs(processes(i,iproc)).ge.1 .and. abs(processes(i,iproc)).le.6) then
+             pgl%iden(iproc)=pgl%iden(iproc)*2*8
+          elseif (abs(pgl%processes(i,iproc)).ge.1 .and. abs(pgl%processes(i,iproc)).le.6) then
              ! (anti-)quark: two helicities and 3 colours
-             iden(iproc)=iden(iproc)*2*3
+             pgl%iden(iproc)=pgl%iden(iproc)*2*3
           else
              ! assume two spin states and no colour:
-             iden(iproc)=iden(iproc)*2
+             pgl%iden(iproc)=pgl%iden(iproc)*2
           endif
        enddo
     enddo
   end subroutine set_initial_state_average_factor
   
-  subroutine set_final_state_identical_particle_factor()
+  subroutine set_final_state_identical_particle_factor(pgl)
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,j,ni,iproc
     integer,dimension(:,:),allocatable :: iden_part
     allocate(iden_part(1:next,2))
-    do iproc=1,nproc
+    do iproc=1,pgl%nproc
        ni=0
        do i=3,next
           do j=1,ni
-             if (iden_part(j,1).eq.processes(i,iproc)) then
+             if (iden_part(j,1).eq.pgl%processes(i,iproc)) then
                 iden_part(j,2)=iden_part(j,2)+1
                 exit
              endif
           enddo
           if (j.eq.ni+1) then
              ni=ni+1
-             iden_part(j,1)=processes(i,iproc)
+             iden_part(j,1)=pgl%processes(i,iproc)
              iden_part(j,2)=1
           endif
        enddo
        do i=1,ni
-          iden(iproc)=iden(iproc)*factorial8(iden_part(i,2))
+          pgl%iden(iproc)=pgl%iden(iproc)*factorial8(iden_part(i,2))
        enddo
     enddo
     deallocate(iden_part)
   end subroutine set_final_state_identical_particle_factor
 
-  subroutine compute_LC_colour_factor()
+  subroutine compute_LC_colour_factor(pgl)
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,ifac,iproc
     real(kind=8) :: fac
     integer :: it
-    do iproc=1,nproc
+    do iproc=1,pgl%nproc
        fac=0d0
        do i=1,next
-          if (processes(i,iproc).eq.21) then
+          if (pgl%processes(i,iproc).eq.21) then
              fac=fac+1d0
-          elseif (abs(processes(i,iproc)).ge.1 .and. abs(processes(i,iproc)).le.6) then
+          elseif (abs(pgl%processes(i,iproc)).ge.1 .and. abs(pgl%processes(i,iproc)).le.6) then
              fac=fac+0.5d0
           endif
        enddo
@@ -861,17 +910,17 @@ contains
                'colour factor is not an integer',ifac,fac
           stop 1
        endif
-       if (abs(processes(orders(1,iproc),iproc)).ne.abs(processes(orders(next,iproc),iproc)) &
-            .and. .not.amps%same_flav(iproc)) then
+       if (abs(pgl%processes(pgl%orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%orders(next,iproc),iproc)) &
+            .and. .not.pgl%amps%same_flav(iproc)) then
           ifac=ifac-2
        endif
-       col_fac(iproc)=3**ifac
+       pgl%col_fac(iproc)=3**ifac
     enddo
   end subroutine compute_LC_colour_factor
   
   subroutine set_mint_module_special_parameters()
     ! these parameters need to be set for the mint-module to work correctly,
-    ! but are irrelevant for any LO process
+    ! but are irrelevant for any LO process; except for 'nchans'!)
     implicit none
     fixed_order=.false.
     nlo_ps=.true.
@@ -896,29 +945,31 @@ contains
     only_virt=.false.
   end subroutine set_mint_module_special_parameters
   
-  subroutine set_ipdgs_for_PDF()
+  subroutine set_ipdgs_for_PDF(pgl)
     ! determines for which flavours the PDFs should be evolved
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     integer :: iflav,iproc
-    ipdgs(-6:7,1:2)=.false.
+    pgl%ipdgs(-6:7,1:2)=.false.
     do iflav=-6,7
-       do iproc=1,nproc
+       do iproc=1,pgl%nproc
           if (iflav.eq.0) then    ! gluon
-             if (any(iden_processes(1,1:iden_iproc(iproc),iproc).eq.21)) ipdgs(iflav,1)=.true.
-             if (any(iden_processes(2,1:iden_iproc(iproc),iproc).eq.21)) ipdgs(iflav,2)=.true.
+             if (any(pgl%iden_processes(1,1:pgl%iden_iproc(iproc),iproc).eq.21)) pgl%ipdgs(iflav,1)=.true.
+             if (any(pgl%iden_processes(2,1:pgl%iden_iproc(iproc),iproc).eq.21)) pgl%ipdgs(iflav,2)=.true.
           elseif(iflav.eq.7) then ! photon
-             if (any(iden_processes(1,1:iden_iproc(iproc),iproc).eq.22)) ipdgs(iflav,1)=.true.
-             if (any(iden_processes(2,1:iden_iproc(iproc),iproc).eq.22)) ipdgs(iflav,2)=.true.
+             if (any(pgl%iden_processes(1,1:pgl%iden_iproc(iproc),iproc).eq.22)) pgl%ipdgs(iflav,1)=.true.
+             if (any(pgl%iden_processes(2,1:pgl%iden_iproc(iproc),iproc).eq.22)) pgl%ipdgs(iflav,2)=.true.
           else                    ! quarks and anti-quarks
-             if (any(iden_processes(1,1:iden_iproc(iproc),iproc).eq.iflav)) ipdgs(iflav,1)=.true.
-             if (any(iden_processes(2,1:iden_iproc(iproc),iproc).eq.iflav)) ipdgs(iflav,2)=.true.
+             if (any(pgl%iden_processes(1,1:pgl%iden_iproc(iproc),iproc).eq.iflav)) pgl%ipdgs(iflav,1)=.true.
+             if (any(pgl%iden_processes(2,1:pgl%iden_iproc(iproc),iproc).eq.iflav)) pgl%ipdgs(iflav,2)=.true.
           endif
        enddo
     enddo
   end subroutine set_ipdgs_for_PDF
 
-  subroutine include_PDF_and_identical_procs(val,val_abs)
+  subroutine include_PDF_and_identical_procs(val,val_abs,pgl)
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     real(kind=8),intent(inout),dimension(*) :: val
     real(kind=8),intent(inout),dimension(*) :: val_abs
     integer :: iproc,ip
@@ -927,67 +978,68 @@ contains
     if (include_pdf) then
        ! Include the PDFs
        xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,ipdgs(-6,1),phase_space%xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,ipdgs(-6,2),phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
+       call PDF_eval(1,pgl%ipdgs(-6,1),pgl%phase_space%xbjrk(1),xmu_fac,PDF(-6,1))
+       call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
-    do iproc=1,nproc
-       val_procs(1:iden_iproc(iproc),iproc)=val(iproc)
+    do iproc=1,pgl%nproc
+       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)
        if (include_pdf) then
-          do ip=1,iden_iproc(iproc)
+          do ip=1,pgl%iden_iproc(iproc)
              ! first incoming particle
-             if (iden_processes(1,ip,iproc).eq.21) then
-                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(0,1)
-             elseif(iden_processes(1,ip,iproc).eq.22) then
-                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(7,1)
+             if (pgl%iden_processes(1,ip,iproc).eq.21) then
+                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(0,1)
+             elseif(pgl%iden_processes(1,ip,iproc).eq.22) then
+                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(7,1)
              else
-                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(iden_processes(1,ip,iproc),1)
+                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(pgl%iden_processes(1,ip,iproc),1)
              endif
              ! second incoming particle
-             if (iden_processes(2,ip,iproc).eq.21) then
-                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(0,2)
-             elseif(iden_processes(2,ip,iproc).eq.22) then
-                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(7,2)
+             if (pgl%iden_processes(2,ip,iproc).eq.21) then
+                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(0,2)
+             elseif(pgl%iden_processes(2,ip,iproc).eq.22) then
+                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(7,2)
              else
-                val_procs(ip,iproc)=val_procs(ip,iproc)*PDF(iden_processes(2,ip,iproc),2)
+                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(pgl%iden_processes(2,ip,iproc),2)
              endif
           enddo
        endif
-       val(iproc)=sum(val_procs(1:iden_iproc(iproc),iproc))
-       val_abs(iproc)=sum(abs(val_procs(1:iden_iproc(iproc),iproc)))
+       val(iproc)=sum(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc))
+       val_abs(iproc)=sum(abs(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)))
     enddo
   end subroutine include_PDF_and_identical_procs
 
-  subroutine define_identical_procs
+  subroutine define_identical_procs(pgl)
     implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
     integer :: iproc,ip,n
     ! first fill the number of identical processes per iproc (so that we can
     ! allocate the array with the right size)
-    allocate(iden_iproc(1:nproc))
-    do iproc=1,nproc
-       iden_iproc(iproc)=1
-       if (any(abs(processes(1:next,iproc)).eq.1)) then
-          iden_iproc(iproc)=iden_iproc(iproc)*5
+    allocate(pgl%iden_iproc(1:pgl%nproc))
+    do iproc=1,pgl%nproc
+       pgl%iden_iproc(iproc)=1
+       if (any(abs(pgl%processes(1:next,iproc)).eq.1)) then
+          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*5
        endif
-       if (any(abs(processes(1:next,iproc)).eq.2)) then
-          iden_iproc(iproc)=iden_iproc(iproc)*4
+       if (any(abs(pgl%processes(1:next,iproc)).eq.2)) then
+          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*4
        endif
     enddo
-    allocate(val_procs(1:maxval(iden_iproc(1:nproc)),1:nproc))
-    allocate(iden_processes(1:next,1:maxval(iden_iproc(1:nproc)),1:nproc))
+    allocate(pgl%val_procs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
+    allocate(pgl%iden_processes(1:next,1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
     ! Loop again and actually fill the iden_processes()
-    do iproc=1,nproc
-       do ip=0,iden_iproc(iproc)-1
+    do iproc=1,pgl%nproc
+       do ip=0,pgl%iden_iproc(iproc)-1
           do n=1,next
-             if (abs(processes(n,iproc)).eq.1) then
-                iden_processes(n,ip+1,iproc)=sign(mod(ip,5)+1,processes(n,iproc))
-             elseif (abs(processes(n,iproc)).eq.2) then
+             if (abs(pgl%processes(n,iproc)).eq.1) then
+                pgl%iden_processes(n,ip+1,iproc)=sign(mod(ip,5)+1,pgl%processes(n,iproc))
+             elseif (abs(pgl%processes(n,iproc)).eq.2) then
                 if (mod(ip,5)+1.eq.ip/5+2) then
-                   iden_processes(n,ip+1,iproc)=sign(1,processes(n,iproc))
+                   pgl%iden_processes(n,ip+1,iproc)=sign(1,pgl%processes(n,iproc))
                 else
-                   iden_processes(n,ip+1,iproc)=sign(ip/5+2,processes(n,iproc))
+                   pgl%iden_processes(n,ip+1,iproc)=sign(ip/5+2,pgl%processes(n,iproc))
                 endif
              else
-                iden_processes(n,ip+1,iproc)=processes(n,iproc)
+                pgl%iden_processes(n,ip+1,iproc)=pgl%processes(n,iproc)
              endif
           enddo
        enddo

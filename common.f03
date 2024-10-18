@@ -12,10 +12,6 @@ module common
   logical,parameter :: smooth_cuts=.false.
   logical,parameter :: include_pdf=.true.
   
-  ! counting events
-  integer(kind=4) :: passed=0
-  integer(kind=4) :: all_evt=0
-
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   real(kind=8),parameter :: pT_min     = 30d0
   real(kind=8),parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0

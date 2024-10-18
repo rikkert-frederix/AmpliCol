@@ -274,7 +274,7 @@ contains
        call HwU_accum_iter(.true.,ntotcalls(1),HwU_values)
     endif
     if (imode.eq.0) then
-       call update_virtual_fraction
+!!$       call update_virtual_fraction
        call update_integration_grids
     endif
     call check_desired_accuracy(iterations_done)
@@ -432,7 +432,7 @@ contains
     if(nit.eq.1) then ! first iteration
        ans(1:nintegrals,0:nchans)=vtot(1:nintegrals,0:nchans)
        unc(1:nintegrals,0:nchans)=etot(1:nintegrals,0:nchans)
-       ans_chan(0:nchans)=ans(1,0:nchans)
+       ans_chan(0:nchans)=ans(2,0:nchans)
        write (*,'(a,1x,e10.4)') 'Chi^2 per d.o.f.',0d0
     else
        do kchan=nchans,0,-1 ! go backwards so that kchan=0 goes last
@@ -455,7 +455,7 @@ contains
                 chi2(i,kchan)=chi2(i,kchan)+(vtot(i,kchan)-ans(i,kchan))**2/etot(i,kchan)**2
              endif
           enddo
-          ans_chan(kchan)=ans(1,kchan)
+          ans_chan(kchan)=ans(2,kchan)
        enddo
        write (*,'(a,1x,e10.4)') 'Chi^2=',(vtot(1,0)-ans(1,0))**2/etot(1,0)**2
     endif
@@ -629,9 +629,9 @@ contains
     do i=1,nintegrals
 ! Number of phase-space points used
        ntotcalls(i)=ncalls*kpoint_iter
-! Special for the computation of the 'computed virtual'
-       if (i.eq.4 .and. non_zero_point(i).ne.0 ) &
-            ntotcalls(i) = non_zero_point(i)
+!!$! Special for the computation of the 'computed virtual'
+!!$       if (i.eq.4 .and. non_zero_point(i).ne.0 ) &
+!!$            ntotcalls(i) = non_zero_point(i)
     enddo
     
     if (.not.double_events) then
@@ -949,29 +949,22 @@ contains
     else
        if (imode.eq.0) then
           open(unit=58,file='Outputs'//trim(adjustl(add_arg))//'/Res_files/res'//trim(adjustl(tag)),status='unknown')
-          write(58,*)'Final result [ABS]:',ans(1,1),' +/-',unc(1,1)
-          write(58,*)'Final result:',ans(2,1),' +/-',unc(2,1)
+          write(58,*)'Final result [ABS]:',ans(1,0),' +/-',unc(1,0)
+          write(58,*)'Final result:',ans(2,0),' +/-',unc(2,0)
           close(58)
-          write(*,*)'Final result [ABS]:',ans(1,1),' +/-',unc(1,1)
-          write(*,*)'Final result:',ans(2,1),' +/-',unc(2,1)
-          write(*,*)'chi**2 per D.o.F.:',chi2(1,1)
+          write(*,*)'Final result [ABS]:',ans(1,0),' +/-',unc(1,0)
+          write(*,*)'Final result:',ans(2,0),' +/-',unc(2,0)
+          write(*,*)'chi**2 per D.o.F.:',chi2(1,0)
        elseif (imode.eq.1) then
-! If integrating the virtuals alone, we include the virtuals in
-! ans(1). Therefore, no need to have them in ans(5) and we have to set
-! them to zero.
-          if (only_virt) then
-             ans(3,1)=0d0 ! virtual Xsec
-             ans(5,1)=0d0 ! ABS virtual Xsec
-          endif
           open(unit=58,file='Outputs'//trim(adjustl(add_arg))//'/Res_files/res'//trim(adjustl(tag)),status='unknown')
-          write(58,*)'Final result [ABS]:',ans(1,1)+ans(5,1),' +/-',sqrt(unc(1,1)**2+unc(5,1)**2)
-          write(58,*)'Final result:',ans(2,1),' +/-',unc(2,1)
+          write(58,*)'Final result [ABS]:',ans(1,0),' +/-',sqrt(unc(1,0)**2)
+          write(58,*)'Final result:',ans(2,0),' +/-',unc(2,0)
           close(58)
-          write(*,*)'Final result [ABS]:',ans(1,1)+ans(5,1),' +/-',sqrt(unc(1,1)**2+unc(5,1)**2)
-          write(*,*)'Final result:',ans(2,1),' +/-',unc(2,1)
-          write(*,*)'chi**2 per D.o.F.:',chi2(1,1)
+          write(*,*)'Final result [ABS]:',ans(1,0),' +/-',sqrt(unc(1,1)**2)
+          write(*,*)'Final result:',ans(2,0),' +/-',unc(2,0)
+          write(*,*)'chi**2 per D.o.F.:',chi2(1,0)
           open(unit=58,file='Outputs'//trim(adjustl(add_arg))//'/Res_files/results'//trim(adjustl(tag))//'.dat',status='unknown')
-          write(58,*)ans(1,1)+ans(5,1),unc(2,1),0d0,0,0,0,0,0d0,0d0,ans(2,1) 
+          write(58,*) ans(1,0),unc(2,0),0d0,0,0,0,0,0d0,0d0,ans(2,0) 
           close(58)
        else
           continue
@@ -986,7 +979,7 @@ contains
        np=sum(nhits(1:nint_used,1,kchan))
        write (*,250) 'channel',kchan,':',iconfigs(kchan) &
             ,regridded(kchan),np,nhits_in_grids(kchan)   &
-            ,ans_chan(kchan),ans(2,kchan),virtual_fraction(kchan)
+            ,ans_chan(kchan),unc(2,kchan),virtual_fraction(kchan)
     enddo
     call flush(6)
     return
@@ -999,8 +992,8 @@ contains
     even_rn=.false.
     min_it=min_it1
     call reset_upper_bounding_envelope
-    ans_chan(1:nchans)=ans(1,1:nchans)
-    ans_chan(0)=sum(ans(1,1:nchans))
+    ans_chan(1:nchans)=ans(2,1:nchans)
+    ans_chan(0)=sum(ans(2,1:nchans))
   end subroutine setup_imode_1
 
   subroutine reset_upper_bounding_envelope
@@ -1016,7 +1009,7 @@ contains
           stop 1
        endif
        do kint=1,nintcurr
-          ymax(kint,kdim,1:nchans)=ans(1,1:nchans)**(1d0/ndim)
+          ymax(kint,kdim,1:nchans)=ans(2,1:nchans)**(1d0/ndim)
        enddo
     enddo
     ymax_virt(1:nchans)=ans(5,1:nchans)
@@ -1027,8 +1020,8 @@ contains
     even_rn=.true.
     imode=0
     min_it=min_it0
-    ans_chan(1:nchans)=ans(1,1:nchans)
-    ans_chan(0)=sum(ans(1,1:nchans))
+    ans_chan(1:nchans)=ans(2,1:nchans)
+    ans_chan(0)=sum(ans(2,1:nchans))
   end subroutine setup_imode_m1
   
   subroutine setup_imode_0
