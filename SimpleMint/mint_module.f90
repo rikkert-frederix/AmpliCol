@@ -432,7 +432,7 @@ contains
     if(nit.eq.1) then ! first iteration
        ans(1:nintegrals,0:nchans)=vtot(1:nintegrals,0:nchans)
        unc(1:nintegrals,0:nchans)=etot(1:nintegrals,0:nchans)
-       ans_chan(0:nchans)=ans(2,0:nchans)
+       ans_chan(0:nchans)=ans(1,0:nchans)
        write (*,'(a,1x,e10.4)') 'Chi^2 per d.o.f.',0d0
     else
        do kchan=nchans,0,-1 ! go backwards so that kchan=0 goes last
@@ -455,13 +455,13 @@ contains
                 chi2(i,kchan)=chi2(i,kchan)+(vtot(i,kchan)-ans(i,kchan))**2/etot(i,kchan)**2
              endif
           enddo
-          ans_chan(kchan)=ans(2,kchan)
+          ans_chan(kchan)=ans(1,kchan)
        enddo
        write (*,'(a,1x,e10.4)') 'Chi^2=',(vtot(1,0)-ans(1,0))**2/etot(1,0)**2
     endif
     nit_included=nit_included+1
     call print_results_accumulated
-    cross_section=ans(2,0)
+    cross_section=ans(1,0)
   end subroutine combine_iterations
 
   subroutine print_results_accumulated
@@ -979,7 +979,7 @@ contains
        np=sum(nhits(1:nint_used,1,kchan))
        write (*,250) 'channel',kchan,':',iconfigs(kchan) &
             ,regridded(kchan),np,nhits_in_grids(kchan)   &
-            ,ans_chan(kchan),unc(2,kchan),virtual_fraction(kchan)
+            ,ans_chan(kchan),unc(1,kchan),virtual_fraction(kchan)
     enddo
     call flush(6)
     return
@@ -992,8 +992,8 @@ contains
     even_rn=.false.
     min_it=min_it1
     call reset_upper_bounding_envelope
-    ans_chan(1:nchans)=ans(2,1:nchans)
-    ans_chan(0)=sum(ans(2,1:nchans))
+    ans_chan(1:nchans)=ans(1,1:nchans)
+    ans_chan(0)=sum(ans(1,1:nchans))
   end subroutine setup_imode_1
 
   subroutine reset_upper_bounding_envelope
@@ -1009,7 +1009,7 @@ contains
           stop 1
        endif
        do kint=1,nintcurr
-          ymax(kint,kdim,1:nchans)=ans(2,1:nchans)**(1d0/ndim)
+          ymax(kint,kdim,1:nchans)=ans(1,1:nchans)**(1d0/ndim)
        enddo
     enddo
     ymax_virt(1:nchans)=ans(5,1:nchans)
@@ -1020,8 +1020,8 @@ contains
     even_rn=.true.
     imode=0
     min_it=min_it0
-    ans_chan(1:nchans)=ans(2,1:nchans)
-    ans_chan(0)=sum(ans(2,1:nchans))
+    ans_chan(1:nchans)=ans(1,1:nchans)
+    ans_chan(0)=sum(ans(1,1:nchans))
   end subroutine setup_imode_m1
   
   subroutine setup_imode_0
@@ -1107,8 +1107,8 @@ contains
     integer :: i,j,k,kchan,idum
     character(len=3) :: dummy
     open (unit=12, file='Outputs'//trim(adjustl(add_arg))//'/Res_files/mint_grids'//trim(adjustl(tag_read)),status='old')
-    ans(1:2,0)=0d0
-    unc(1:2,0)=0d0
+    ans(1,0)=0d0
+    unc(1,0)=0d0
     do kchan=1,nchans
        do j=0,nintervals
           read (12,*) dummy,(xgrid(j,i,kchan),i=1,ndim)
@@ -1131,17 +1131,14 @@ contains
        read (12,*) dummy,idum,idum,nhits_in_grids(kchan)
        read (12,*) dummy,virtual_fraction(kchan),average_virtual(0,kchan)
        ans(1,0)=ans(1,0)+ans(1,kchan)
-       ans(2,0)=ans(2,0)+ans(2,kchan)
        unc(1,0)=unc(1,0)+unc(1,kchan)**2
-       unc(2,0)=unc(2,0)+unc(2,kchan)**2
     enddo
     read (12,*) dummy,(ifold(i),i=1,ndim)
     unc(1,0)=sqrt(unc(1,0))
-    unc(2,0)=sqrt(unc(2,0))
     close (12)
 ! check for zero cross-section: if restoring grids corresponding to
 ! sigma=0, just terminate the run
-    if (imode.ne.0.and.ans(2,0).eq.0d0.and.unc(2,0).eq.0d0) then
+    if (imode.ne.0.and.ans(1,0).eq.0d0.and.unc(1,0).eq.0d0) then
        call initplot()
        call close_run_zero_res
        stop 0
@@ -1673,6 +1670,7 @@ contains
 !!$       write (*,*) 'ERROR in mint_module: for event generation, can do only 1 channel at a time',nchans
 !!$       stop 1
 !!$    endif
+    ans_chan(0:nchans)=ans(1,0:nchans)
     even_rn=.false.
     nint_used=nintervals
     nint_used_virt=nintervals_virt
