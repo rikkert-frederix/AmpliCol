@@ -108,7 +108,7 @@ module mint_module
   integer, dimension(nintervals,ndimmax,maxchannels), private :: nhits
   integer, dimension(maxchannels), private :: nhits_in_grids
   integer, dimension(nintervals_virt,ndimmax,0:n_ave_virt,maxchannels), private :: nvirt,nvirt_acc
-  integer, dimension(13), private :: gen_counters
+  integer, dimension(13,maxchannels), private :: gen_counters
   logical, private :: double_events,reset,even_rn,firsttime
   logical, dimension(maxchannels), private :: regridded
   double precision, dimension(0:nintervals,ndimmax,maxchannels), private :: xgrid,xacc
@@ -461,7 +461,7 @@ contains
     endif
     nit_included=nit_included+1
     call print_results_accumulated
-    cross_section=ans(1,0)
+    cross_section=ans(2,0)
   end subroutine combine_iterations
 
   subroutine print_results_accumulated
@@ -1107,8 +1107,8 @@ contains
     integer :: i,j,k,kchan,idum
     character(len=3) :: dummy
     open (unit=12, file='Outputs'//trim(adjustl(add_arg))//'/Res_files/mint_grids'//trim(adjustl(tag_read)),status='old')
-    ans(1,0)=0d0
-    unc(1,0)=0d0
+    ans(1:2,0)=0d0
+    unc(1:2,0)=0d0
     do kchan=1,nchans
        do j=0,nintervals
           read (12,*) dummy,(xgrid(j,i,kchan),i=1,ndim)
@@ -1131,14 +1131,17 @@ contains
        read (12,*) dummy,idum,idum,nhits_in_grids(kchan)
        read (12,*) dummy,virtual_fraction(kchan),average_virtual(0,kchan)
        ans(1,0)=ans(1,0)+ans(1,kchan)
+       ans(2,0)=ans(2,0)+ans(2,kchan)
        unc(1,0)=unc(1,0)+unc(1,kchan)**2
+       unc(2,0)=unc(2,0)+unc(2,kchan)**2
     enddo
     read (12,*) dummy,(ifold(i),i=1,ndim)
     unc(1,0)=sqrt(unc(1,0))
+    unc(2,0)=sqrt(unc(2,0))
     close (12)
 ! check for zero cross-section: if restoring grids corresponding to
 ! sigma=0, just terminate the run
-    if (imode.ne.0.and.ans(1,0).eq.0d0.and.unc(1,0).eq.0d0) then
+    if (imode.ne.0.and.ans(2,0).eq.0d0.and.unc(2,0).eq.0d0) then
        call initplot()
        call close_run_zero_res
        stop 0
@@ -1549,6 +1552,7 @@ contains
     elseif(gen_mode.eq.3) then
        call print_gen_counters
     elseif(gen_mode.eq.1) then
+       call get_channel
        call increase_gen_counters_before(vn)
 10     continue
        new_point=.true.
@@ -1571,14 +1575,14 @@ contains
   subroutine increase_gen_counters_middle(vn)
     implicit none
     integer :: vn
-    gen_counters(3)=gen_counters(3)+1
+    gen_counters(3,ichan)=gen_counters(3,ichan)+1
     if (vn.eq.1) then
-       gen_counters(5)=gen_counters(5)+1
+       gen_counters(5,ichan)=gen_counters(5,ichan)+1
     else
-       gen_counters(6)=gen_counters(6)+1
+       gen_counters(6,ichan)=gen_counters(6,ichan)+1
     endif
     if (f(1).eq.0d0) then
-       gen_counters(4)=gen_counters(4)+1
+       gen_counters(4,ichan)=gen_counters(4,ichan)+1
     endif
   end subroutine increase_gen_counters_middle
   
@@ -1586,9 +1590,9 @@ contains
     implicit none
     integer :: vn
     if (vn.eq.1) then
-       gen_counters(1)=gen_counters(1)+1
+       gen_counters(1,ichan)=gen_counters(1,ichan)+1
     else
-       gen_counters(2)=gen_counters(2)+1
+       gen_counters(2,ichan)=gen_counters(2,ichan)+1
     endif
   end subroutine increase_gen_counters_before
 
@@ -1596,11 +1600,11 @@ contains
     implicit none
     integer :: vn
     if (vn.eq.2) then
-       gen_counters(11)=gen_counters(11)+1
+       gen_counters(11,ichan)=gen_counters(11,ichan)+1
     elseif (vn.eq.1) then
-       gen_counters(12)=gen_counters(12)+1
+       gen_counters(12,ichan)=gen_counters(12,ichan)+1
     elseif (vn.eq.3) then
-       gen_counters(13)=gen_counters(13)+1
+       gen_counters(13,ichan)=gen_counters(13,ichan)+1
     endif
   end subroutine increase_gen_counters_end
 
@@ -1610,16 +1614,16 @@ contains
     integer :: vn
     if (f(1).gt.upper_bound) then
        if (vn.eq.2) then
-          gen_counters(7)=gen_counters(7)+1
+          gen_counters(7,ichan)=gen_counters(7,ichan)+1
        elseif (vn.eq.1) then
-          gen_counters(8)=gen_counters(8)+1
+          gen_counters(8,ichan)=gen_counters(8,ichan)+1
        elseif(vn.eq.3) then
-          gen_counters(9)=gen_counters(9)+1
+          gen_counters(9,ichan)=gen_counters(9,ichan)+1
        endif
     endif
     upper_bound=upper_bound*ran3(.false.)
     if (upper_bound.gt.f(1)) then
-       gen_counters(10)=gen_counters(10)+1
+       gen_counters(10,ichan)=gen_counters(10,ichan)+1
        found_point=.false.
     else
        found_point=.true.
@@ -1641,7 +1645,6 @@ contains
     integer, dimension(ndimmax) :: kfold
     double precision :: vol,r
     double precision, dimension(ndimmax) :: x
-    call get_channel
     do kdim=1,ndim
        nintcurr=nintervals/ifold(kdim)
        r=ran3(.false.)
@@ -1666,10 +1669,10 @@ contains
     implicit none
     integer :: kdim,kint
     integer :: nintcurr
-    if (nchans.ne.1) then
-       write (*,*) 'ERROR in mint_module: for event generation, can do only 1 channel at a time',nchans
-       stop 1
-    endif
+!!$    if (nchans.ne.1) then
+!!$       write (*,*) 'ERROR in mint_module: for event generation, can do only 1 channel at a time',nchans
+!!$       stop 1
+!!$    endif
     even_rn=.false.
     nint_used=nintervals
     nint_used_virt=nintervals_virt
@@ -1683,32 +1686,34 @@ contains
           xmmm(kint,kdim,1:nchans)=xmmm(kint,kdim,1:nchans)/xmmm(nintcurr,kdim,1:nchans)
        enddo
     enddo
-    gen_counters(1:13)=0
+    gen_counters(1:13,1:nchans)=0
   end subroutine initialise_mint_gen
 
   subroutine print_gen_counters
     implicit none
     double precision :: unwgt_eff, unwgt_eff_virt
-    if (gen_counters( 3).ne.0) write (*,*) 'another call to the function:',gen_counters(3)
-    if (gen_counters(11).ne.0) write (*,*) 'events generated, novi:',gen_counters(11)
-    if (gen_counters(12).ne.0) write (*,*) 'events generated, virt:',gen_counters(12)
-    if (gen_counters(13).ne.0) write (*,*) 'events generated, born:',gen_counters(13)
-    if (gen_counters( 7).ne.0) write (*,*) 'upper bound failure, novi:',gen_counters(7)
-    if (gen_counters( 8).ne.0) write (*,*) 'upper bound failure, virt:',gen_counters(8)
-    if (gen_counters( 9).ne.0) write (*,*) 'upper bound failure, born:',gen_counters(9)
-    if (gen_counters(10).ne.0) write (*,*) 'vetoed calls in inclusive cross section:',gen_counters(10)
-    if (gen_counters( 4).ne.0) write (*,*) 'failed generation cuts:',gen_counters(4)
-    if(gen_counters(6).ne.0) then
-       unwgt_eff=dble(gen_counters(2))/dble(gen_counters(6))
-    else
-       unwgt_eff=-1d0
-    endif
-    if(gen_counters(5).ne.0) then
-       unwgt_eff_virt=dble(gen_counters(1))/dble(gen_counters(5))
-    else
-       unwgt_eff_virt=-1d0
-    endif
-    write (*,*) 'Generation efficiencies:',unwgt_eff,unwgt_eff_virt
+    if (any(gen_counters( 3,1:nchans).ne.0)) write (*,*) 'another call to the function:',gen_counters(3,1:nchans)
+    if (any(gen_counters(11,1:nchans).ne.0)) write (*,*) 'events generated, novi:',gen_counters(11,1:nchans)
+    if (any(gen_counters(12,1:nchans).ne.0)) write (*,*) 'events generated, virt:',gen_counters(12,1:nchans)
+    if (any(gen_counters(13,1:nchans).ne.0)) write (*,*) 'events generated, born:',gen_counters(13,1:nchans)
+    if (any(gen_counters( 7,1:nchans).ne.0)) write (*,*) 'upper bound failure, novi:',gen_counters(7,1:nchans)
+    if (any(gen_counters( 8,1:nchans).ne.0)) write (*,*) 'upper bound failure, virt:',gen_counters(8,1:nchans)
+    if (any(gen_counters( 9,1:nchans).ne.0)) write (*,*) 'upper bound failure, born:',gen_counters(9,1:nchans)
+    if (any(gen_counters(10,1:nchans).ne.0)) write (*,*) 'vetoed calls in inclusive cross section:',gen_counters(10,1:nchans)
+    if (any(gen_counters( 4,1:nchans).ne.0)) write (*,*) 'failed generation cuts:',gen_counters(4,1:nchans)
+    do ichan=1,nchans
+       if(gen_counters(6,ichan).ne.0) then
+          unwgt_eff=dble(gen_counters(2,ichan))/dble(gen_counters(6,ichan))
+       else
+          unwgt_eff=-1d0
+       endif
+       if(gen_counters(5,ichan).ne.0) then
+          unwgt_eff_virt=dble(gen_counters(1,ichan))/dble(gen_counters(5,ichan))
+       else
+          unwgt_eff_virt=-1d0
+       endif
+       write (*,*) 'Generation efficiencies:',ichan,unwgt_eff,unwgt_eff_virt
+    enddo
   end subroutine print_gen_counters
 
   subroutine initplot
