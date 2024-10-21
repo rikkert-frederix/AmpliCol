@@ -21,9 +21,8 @@ program matrix_integrate_QCD
   integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
   integer :: iproc_picked,iproc_iden_picked
-
-
   integer :: ngroups,igroup
+  logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
   
   type phase_space_order_group
      type(amplitude_QCD) :: amps
@@ -76,8 +75,10 @@ program matrix_integrate_QCD
 
   if (imode.eq.0) then
      accuracy=0.02d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     write_amps_to_file=.true.
   else
      accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.001d0)
+     read_amps_from_file=.true.
   endif
 
   ! setting energy
@@ -104,7 +105,10 @@ program matrix_integrate_QCD
      call PDF_initialise
   endif
   
-
+  if (read_amps_from_file .or. write_amps_to_file) then
+       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes'//trim(adjustl(tag))//'.bin',&
+            unit=32,access='stream',form='unformatted',status='UNKNOWN')
+  endif
   
   do igroup=1,ngroups
      ! allocate the amplitudes and the phase-space for each of the integration channels
@@ -161,7 +165,14 @@ program matrix_integrate_QCD
      ! which the amps%evaluation() can compute the amplitudes for given
      ! phase-space points.
      call cpu_time(tBefore)
-     call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%orders,phys_model)
+     if (read_amps_from_file) then
+        call pgl(igroup)%amps%read_init_amps_from_file(next,32)
+     else
+        call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%orders,phys_model)
+     endif
+     if (write_amps_to_file) then
+        call pgl(igroup)%amps%write_init_amps_to_file(next,32)
+     endif
      
      call cpu_time(tAfter)
      t_amp_init=t_amp_init+tAfter-tBefore
@@ -181,7 +192,9 @@ program matrix_integrate_QCD
 
   enddo ! loop over phase-space-order groups
   
-
+  if (read_amps_from_file .or. write_amps_to_file) then
+     close(32)
+  endif
 
   if (imode.le.1) then
      ! grid setup, or computation of upper bounding envelope

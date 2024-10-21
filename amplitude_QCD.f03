@@ -21,12 +21,12 @@ module amplitude_QCD_mod
      real(kind=8),dimension(:),allocatable :: val_r
   end type interaction
   type amplitude_QCD
+     integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
-     integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
@@ -34,7 +34,7 @@ module amplitude_QCD_mod
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
    contains
-     procedure,public :: init,evaluate,init_col,filter_helicity
+     procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
@@ -1535,7 +1535,153 @@ contains
     
   end subroutine init
 
+  subroutine write_init_amps_to_file(this,n,iunit)
+    implicit none
+    class(amplitude_QCD) :: this
+    integer :: n,iunit,ic,iv,isize,iamp,iproc
+    write (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs
+    write (iunit) this%n_cur_start(1:n)
+    write (iunit) this%n_cur_end(1:n)
+    write (iunit) this%n_vert_start(2:n-1)
+    write (iunit) this%n_vert_end(2:n-1)
+    ! current_list
+    do isize=1,n-1
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          write (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
+               this%current_list(ic)%iproc,this%current_list(ic)%mass,this%current_list(ic)%width
+          write (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
+          write (iunit) this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)
+          if (isize.eq.1 .or. isize.eq.n)  write (iunit) this%current_list(ic)%order(1),this%current_list(ic)%spin(1)
+       enddo
+    enddo
+    ! interaction_list
+    do iv=1,this%n_vert
+       write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),&
+            this%interaction_list(iv)%singlet_mv(0)
+       write (iunit) this%interaction_list(iv)%singlet_mv(1:this%interaction_list(iv)%singlet_mv(0))
+    enddo
+    ! momenta array
+    write (iunit) this%pp_bin_to_i(1:maskr(n))
+    write (iunit) this%pp_i_to_bin(1:this%max_pp)
+    ! process specific information
+    do iproc=1,this%nprocs
+       write (iunit) this%iproc_start(iproc),this%same_flav(iproc),this%same_flavour_proc_map(iproc,1:2),&
+            this%n_qqbar(iproc),this%n_sing(iproc)
+       write (iunit) this%processes(1:n,iproc)
+    enddo
+    write(iunit) this%iproc_start(this%nprocs+1)
+    ! amp specific information
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2)
+          write (iunit) this%spins(1:n,1,iamp)
+          write (iunit) this%perm(1:n-this%n_sing(1),iamp)
+          if (.not.this%same_flav(iproc)) write (iunit) this%curr2amp(1:2,iamp)
+       enddo
+    enddo
+  end subroutine write_init_amps_to_file
 
+  subroutine read_init_amps_from_file(this,n,iunit)
+    implicit none
+    class(amplitude_QCD) :: this
+    integer :: n,iunit,ic,iv,isize,iamp,iproc,itmp
+    call deallocate_all()
+    read (iunit) this%n_cur,this%n_vert,this%imode,this%nColOrd,this%max_pp,this%n_amps,this%nprocs
+    allocate(this%n_cur_start(1:n))
+    allocate(this%n_cur_end(1:n))
+    read (iunit) this%n_cur_start(1:n)
+    read (iunit) this%n_cur_end(1:n)
+    allocate(this%n_vert_start(2:n-1))
+    allocate(this%n_vert_end(2:n-1))
+    read (iunit) this%n_vert_start(2:n-1)
+    read (iunit) this%n_vert_end(2:n-1)
+    ! current_list
+    allocate(this%current_list(this%n_cur))
+    do isize=1,n-1
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          read (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
+               this%current_list(ic)%iproc,this%current_list(ic)%mass,this%current_list(ic)%width
+          allocate(this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert))
+          allocate(this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert))
+          read (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
+          read (iunit) this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)
+          if (isize.eq.1 .or. isize.eq.n) then
+             allocate(this%current_list(ic)%order(1))
+             allocate(this%current_list(ic)%spin(1))
+             read (iunit) this%current_list(ic)%order(1),this%current_list(ic)%spin(1)
+          endif
+       enddo
+    enddo
+    ! interaction_list
+    allocate(this%interaction_list(1:this%n_vert))
+    do iv=1,this%n_vert
+       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),itmp
+       allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
+       this%interaction_list(iv)%singlet_mv(0)=itmp
+       read (iunit) this%interaction_list(iv)%singlet_mv(1:itmp)
+    enddo
+    ! momenta array
+    allocate(this%pp_bin_to_i(1:maskr(n)))
+    allocate(this%pp_i_to_bin(1:this%max_pp))
+    allocate(this%pp(0:3,1:this%max_pp))
+    read (iunit) this%pp_bin_to_i(1:maskr(n))
+    read (iunit) this%pp_i_to_bin(1:this%max_pp)
+    ! process specific information
+    allocate(this%iproc_start(1:this%nprocs+1))
+    allocate(this%same_flav(1:this%nprocs))
+    allocate(this%same_flavour_proc_map(1:this%nprocs,1:2))
+    allocate(this%n_qqbar(1:this%nprocs))
+    allocate(this%n_sing(1:this%nprocs))
+    allocate(this%processes(1:n,1:this%nprocs))
+    do iproc=1,this%nprocs
+       read (iunit) this%iproc_start(iproc),this%same_flav(iproc),this%same_flavour_proc_map(iproc,1:2),&
+            this%n_qqbar(iproc),this%n_sing(iproc)
+       read (iunit) this%processes(1:n,iproc)
+    enddo
+    read(iunit) this%iproc_start(this%nprocs+1)
+    ! amp specific information
+    allocate(this%include_amp(1:this%n_amps))
+    allocate(this%same_flavour_sum(1:this%n_amps,1:2))
+    allocate(this%spins(1:n,1,1:this%n_amps))
+    allocate(this%perm(1:n-this%n_sing(1),1:this%n_amps))
+    do iproc=1,this%nprocs
+       if (this%same_flav(iproc)) exit
+    enddo
+    allocate(this%curr2amp(1:2,1:this%iproc_start(iproc)-1))
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2)
+          read (iunit) this%spins(1:n,1,iamp)
+          read (iunit) this%perm(1:n-this%n_sing(1),iamp)
+          if (.not.this%same_flav(iproc)) read (iunit) this%curr2amp(1:2,iamp)
+       enddo
+    enddo
+  contains
+    subroutine deallocate_all()
+      implicit none
+      if (allocated(this%n_cur_start)) deallocate(this%n_cur_start)
+      if (allocated(this%n_cur_end)) deallocate(this%n_cur_end)
+      if (allocated(this%n_vert_start)) deallocate(this%n_vert_start)
+      if (allocated(this%n_vert_end)) deallocate(this%n_vert_end)
+      if (allocated(this%current_list)) deallocate(this%current_list)
+      if (allocated(this%interaction_list)) deallocate(this%interaction_list)
+      if (allocated(this%pp)) deallocate(this%pp)
+      if (allocated(this%pp_bin_to_i)) deallocate(this%pp_bin_to_i)
+      if (allocated(this%pp_i_to_bin)) deallocate(this%pp_i_to_bin)
+      if (allocated(this%iproc_start)) deallocate(this%iproc_start)
+      if (allocated(this%same_flav)) deallocate(this%same_flav)
+      if (allocated(this%same_flavour_proc_map)) deallocate(this%same_flavour_proc_map)
+      if (allocated(this%n_qqbar)) deallocate(this%n_qqbar)
+      if (allocated(this%n_sing)) deallocate(this%n_sing)
+      if (allocated(this%processes)) deallocate(this%processes)
+      if (allocated(this%include_amp)) deallocate(this%include_amp)
+      if (allocated(this%same_flavour_sum)) deallocate(this%same_flavour_sum)
+      if (allocated(this%spins)) deallocate(this%spins)
+      if (allocated(this%perm)) deallocate(this%perm)
+      if (allocated(this%curr2amp)) deallocate(this%curr2amp)
+    end subroutine deallocate_all
+  end subroutine read_init_amps_from_file
+  
   subroutine evaluate(this,n,p,hel)
     use FeynmanRules
     implicit none

@@ -53,10 +53,10 @@ program matrix_reweight
   call read_event(11,done)
   rewind(11)
 
-  call amps%init(2,next,part,spin,o,phys_model)
+  call amps%init(2,next,1,part,spin,o,phys_model)
   col_acc=20
   call amps%init_col(next,col_acc)
-  if (amps%n_qqbar.eq.2 .and. amps%same_flav) then
+  if (amps%n_qqbar(1).eq.2 .and. amps%same_flav(1)) then
      nColOrd=amps%n_amps/2
   else
      nColOrd=amps%n_amps
@@ -80,7 +80,7 @@ program matrix_reweight
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
-        if (amps%n_qqbar.eq.0 .and. use_real_gluons) then
+        if (amps%n_qqbar(1).eq.0 .and. use_real_gluons) then
            ! same as in the 'else' below, except that all are real variables instead of complex. 
            do irow=1,nColOrd
               amp_col=0d0
