@@ -62,11 +62,11 @@ contains
        done=.true.
        return
     endif
-    read (iunit,*,err=99,end=99) next,evt_wgt,wgt,amp2,weight
-    read (iunit,*,err=99,end=99) dum
-    read (iunit,*) dum,dum,dum
-    read (iunit,*) evt_wgt_LC,evt_wgt_NLC,evt_wgt_full
+    read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
     read (iunit,*) dum ! helicity
+    read (iunit,*) dum ! color
+    read (iunit,*) dum,dum
+    read (iunit,*) evt_wgt_LC,evt_wgt_NLC,evt_wgt_full
     if (.not.allocated(p)) allocate(p(0:3,next))
     do i=1,next
        read (iunit,*,err=99,end=99) dum,p(1:3,i),p(0,i)

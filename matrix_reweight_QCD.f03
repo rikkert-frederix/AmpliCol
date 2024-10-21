@@ -24,8 +24,8 @@ program matrix_reweight
   type(physics_model) :: phys_model
   integer,parameter :: string_len=150
   integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next
-  integer,dimension(:),allocatable :: hel,o,part
-  integer,dimension(:,:),allocatable :: spin
+  integer,dimension(:),allocatable :: hel
+  integer,dimension(:,:),allocatable :: spin,o,part
   real(kind=8) :: amp2,amp_col
   real(kind=8),dimension(3) :: matrix2
   real(kind=8),dimension(:,:),allocatable :: p
@@ -35,23 +35,17 @@ program matrix_reweight
   
   call get_run_arguments()
 
+  call cpu_time(tTot_B)
+  
   call phys_model%init_part(173d0,1.491500d0)
   call setup_spin()
-    
-  
-  call cpu_time(tTot_B)
 
-  if (.not.allocated(o)) allocate(o(next))
-  allocate(hel(next))
-  allocate(p(0:3,next))
-
-  call create_run_tag_and_open_files()
-
-  call cpu_time(tBefore)
-
-  if (.not.allocated(part)) allocate(part(1:next))
+  ! read one event to determine 'next' and allocate the required arrays.
   call read_event(11,done)
   rewind(11)
+  
+
+  call cpu_time(tBefore)
 
   call amps%init(2,next,1,part,spin,o,phys_model)
   col_acc=20
@@ -115,6 +109,9 @@ program matrix_reweight
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
 
+     write (*,*) 'matrix2:', matrix2
+     stop 1
+     
      call write_event(12)
   enddo
   
@@ -137,7 +134,7 @@ contains
     use arguments
     implicit none
     integer :: argc,i,k
-    character(len=256) :: argv
+    character(len=256) :: argv,filename
     ! integration steps:
     ! imode=0  (Setting up grids)
     ! imode=-1 (same as imode=0, but starting from existing grids)
@@ -145,11 +142,18 @@ contains
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
 
-    if (argc.le.8) then
+    if (argc.eq.1) then
+       call get_command_argument(1,argv)
+       read(argv,'(a)') filename
+       open(unit=11,file=filename,status='old')
+       open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
+    elseif (argc.le.8) then
        write(*,*) 'Inconsistent arguments:'
        write(*,*) '--------- Should be: --------'
        write(*,*) 'next, *process*, *order*'
-       stop 2
+       write(*,*) '--------- or: ---------------'
+       write(*,*) 'event_file_name_to_reweight'
+       stop 1
     else
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
@@ -159,17 +163,17 @@ contains
                 write (*,*) 'Need at least 4 particles (2->2 scattering)',next
                 stop 1
              endif
-             allocate(part(1:next))
-             allocate(o(1:next))
+             allocate(part(1:next,1))
+             allocate(o(1:next,1))
           endif
           do k=0,next-1
              if (i.eq.2+k) then
-                read(argv,*) part(k+1)
+                read(argv,*) part(k+1,1)
              endif
           enddo
           do k=0,next-1
              if (i.eq.2+next+k) then
-                read(argv,*) o(k+1)
+                read(argv,*) o(k+1,1)
              endif
           enddo
           if (argc.eq.1+2*next +1 .and. i.eq.argc) then
@@ -177,12 +181,13 @@ contains
              read(argv,*) add_arg
           endif
        enddo
+       if (next.lt.4) then
+          write (*,*) 'Not enough external particles',next
+          stop 1
+       endif
+       call create_run_tag_and_open_files()
     endif
-
-    if (next.lt.4) then
-       write (*,*) 'Not enough external particles',next
-       stop 1
-    endif
+    
   end subroutine get_run_arguments
 
   subroutine setup_spin()
@@ -204,15 +209,15 @@ contains
     call add_to_string(tag,2,.true.)
     call add_to_string(tag_read,2,.true.)
     do i=1,next
-       call add_to_string(tag,part(i),.true.)
-       call add_to_string(tag_read,part(i),.true.)
+       call add_to_string(tag,part(i,1),.true.)
+       call add_to_string(tag_read,part(i,1),.true.)
     enddo
     do i=1,next-1
-       call add_to_string(tag,o(i),.true.)
-       call add_to_string(tag_read,o(i),.true.)
+       call add_to_string(tag,o(i,1),.true.)
+       call add_to_string(tag_read,o(i,1),.true.)
     enddo
-    call add_to_string(tag,o(next),.false.)
-    call add_to_string(tag_read,o(next),.false.)
+    call add_to_string(tag,o(next,1),.false.)
+    call add_to_string(tag_read,o(next,1),.false.)
     open(unit=11,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe',status='old')
     open(unit=12,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
@@ -253,11 +258,17 @@ contains
     real(kind=8) :: dum
     done=.false.
     read (iunit,*,err=99,end=99) dummy
-    read (iunit,*,err=99,end=99) dum,evt_wgt,wgt,amp2,weight
-    read (iunit,*,err=99,end=99) hel(1:next)
-    read (iunit,*,err=99,end=99) o(1:next)
+    read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
+    if (.not. allocated(hel)) then
+       allocate(o(next,1))
+       allocate(part(next,1))
+       allocate(hel(next))
+       allocate(p(0:3,next))
+    endif
+       read (iunit,*,err=99,end=99) hel(1:next)
+    read (iunit,*,err=99,end=99) o(1:next,1)
     do i=1,next
-       read (iunit,*,err=99,end=99) part(i),p(1:3,i),p(0,i)
+       read (iunit,*,err=99,end=99) part(i,1),p(1:3,i),p(0,i)
     enddo
     read (iunit,*,err=99,end=99) dummy
     return
@@ -272,17 +283,13 @@ contains
     rwgt_NLC=matrix2(2)/matrix2(1)
     rwgt_full=matrix2(3)/matrix2(1)
     write (iunit,*) '<event>'
-    write (iunit,*) next,evt_wgt,wgt,matrix2,weight
-    write (iunit,'(100i3)') o(1:next)
-    write (iunit,*) rwgt_full,rwgt_NLC,matrix2(1),matrix2(2),matrix2(3)
-    write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
+    write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
     write (iunit,'(100i3)') hel(1:next)
+    write (iunit,'(100i3)') o(1:next,1)
+    write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)
+    write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
     do i=1,next
-       if (i.le.2) then
-          write (iunit,*) part(i),p(1:3,i),p(0,i)
-       else
-          write (iunit,*) part(i),p(1:3,i),p(0,i)
-       endif
+       write (iunit,*) part(i,1),p(1:3,i),p(0,i)
     enddo
     write (iunit,*) '</event>'
   end subroutine write_event

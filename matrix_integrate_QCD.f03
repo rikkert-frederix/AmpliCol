@@ -516,7 +516,7 @@ contains
     real(kind=8) :: wgt
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
-    write (iunit,*) next,wgt,pgl(ichan)%amp2(iproc_picked)*weight,pgl(ichan)%amp2(iproc_picked),weight
+    write (iunit,*) next,wgt!,pgl(ichan)%amp2(iproc_picked)*weight,pgl(ichan)%amp2(iproc_picked),weight
     write (iunit,'(100i3)') pgl(ichan)%amps%spins(1:next,hel_picked(1),hel_picked(2))
     write (iunit,'(100i3)') pgl(ichan)%orders(1:next,iproc_picked)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
