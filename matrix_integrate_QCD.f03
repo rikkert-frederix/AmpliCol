@@ -106,7 +106,7 @@ program matrix_integrate_QCD
   endif
   
   if (read_amps_from_file .or. write_amps_to_file) then
-       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes'//trim(adjustl(tag))//'.bin',&
+       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
             unit=32,access='stream',form='unformatted',status='UNKNOWN')
   endif
   

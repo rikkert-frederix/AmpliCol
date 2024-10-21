@@ -242,7 +242,7 @@ contains
     else
        ! if ncalls0.le.0, reset it and double the events per iteration
        if (fixed_points_pass_cuts) then
-          ncalls0=625
+          ncalls0=625*nchans
        else
           ncalls0=80*ndim*(nchans/3+1)
        endif
