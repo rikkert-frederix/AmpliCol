@@ -53,7 +53,7 @@ contains
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,n_processes,iproc,jproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
-    
+
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - all polarisation/helicity configurations'
@@ -344,7 +344,7 @@ contains
     
     subroutine allocate_and_fill_colour_permutations()
       implicit none
-      integer :: iamp,i,iproc
+      integer :: iamp,i,iproc,iamp_to_compare
       ! allocate and fill the colour orders in 'this%perm'. These are simply
       ! the orders of the elements in the 'this%current_list' (with size n-1)
       ! together with the final element). Exception: when there are colour
@@ -357,6 +357,11 @@ contains
          stop 1
       endif
       do iproc=1,this%nprocs
+         if (this%imode.ne.2) then
+            iamp_to_compare=this%iproc_start(iproc)
+         else
+            iamp_to_compare=1
+         endif
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
             if (.not.this%same_flav(iproc)) then
                this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
@@ -369,11 +374,11 @@ contains
                   ! make sure that orders of the quarks is fixed among all
                   ! perm's. (The order of the anti-quarks may vary). Without
                   ! this, the computation of the colour factor will be incorrect.
-                  if (iamp.eq.this%iproc_start(iproc)) cycle
-                  if (this%perm(1,iamp).ne.this%perm(1,this%iproc_start(iproc))) then
+                  if (iamp.eq.iamp_to_compare) cycle
+                  if (this%perm(1,iamp).ne.this%perm(1,iamp_to_compare)) then
                      ! different order, switch the two colour strings:
                      do i=1,n-this%n_sing(1)
-                        if (this%perm(i,iamp).eq.this%perm(1,this%iproc_start(iproc))) then
+                        if (this%perm(i,iamp).eq.this%perm(1,iamp_to_compare)) then
                            this%perm(1:n-this%n_sing(1),iamp)=[this%perm(i:n-this%n_sing(1),iamp),this%perm(1:i-1,iamp)]
                            exit
                         endif

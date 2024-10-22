@@ -39,14 +39,13 @@ program matrix_reweight
   call cpu_time(tTot_B)
   
   call phys_model%init_part(173d0,1.491500d0)
-  call setup_spin()
 
   ! read one event to determine 'next' and allocate the required arrays.
   call read_event(11,done)
   rewind(11)
   nprocs=1
   processes(1:next,1)=part(1:next,1)
-
+  call setup_spin()
   call cpu_time(tBefore)
 
   write (*,*) 'init amps for',part(1:next,1)
@@ -123,8 +122,11 @@ program matrix_reweight
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
 
-     write (*,*) 'matrix2:', matrix2(1),matrix2(2:3)/matrix2(1),iproc,amps(iproc)%iproc_start
-!!$     if (amps(iproc)%nprocs.eq.3) stop 1
+     write (*,*) 'matrix2:', matrix2(1),matrix2(2:3)/matrix2(1)
+!!$     do irow=ioff+1,ioff+amps(iproc)%nColOrd
+!!$        write (*,*) amps(iproc)%perm(1:next,irow),amps(iproc)%amps(irow)
+!!$     enddo
+!!$     stop 1
      
      call write_event(12)
   enddo
