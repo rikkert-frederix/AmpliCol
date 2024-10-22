@@ -20,11 +20,11 @@ program matrix_reweight
   use timings
   use particles
   implicit none
-  integer,parameter :: max_proc=128
+  integer,parameter :: max_proc=1280
   type(amplitude_QCD),dimension(max_proc) :: amps
   type(physics_model) :: phys_model
   integer,parameter :: string_len=150
-  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc
+  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff
   integer,dimension(:),allocatable :: hel
   integer,dimension(:,:),allocatable :: spin,o,part,processes
   real(kind=8) :: amp2,amp_col
@@ -80,6 +80,7 @@ program matrix_reweight
      call cpu_time(tBefore)
 
      call amps(iproc)%evaluate(next,p,hel)
+     ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -89,30 +90,30 @@ program matrix_reweight
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
         if (amps(iproc)%n_qqbar(1).eq.0 .and. use_real_gluons) then
            ! same as in the 'else' below, except that all are real variables instead of complex. 
-           do irow=1,amps(iproc)%n_amps!nColOrd
+           do irow=1,amps(iproc)%nColOrd
               amp_col=0d0
               do i=1,amps(iproc)%n_col_vals(iacc)
                  amp2=0d0
                  do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
                     icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
-                    amp2=amp2+amps(iproc)%amps_r(icol)
+                    amp2=amp2+amps(iproc)%amps_r(ioff+icol)
                  enddo
                  amp_col=amp_col+amp2*amps(iproc)%diff_col_vals(i,iacc)
               enddo
-              matrix2(iacc)=matrix2(iacc)+amp_col*amps(iproc)%amps_r(irow)
+              matrix2(iacc)=matrix2(iacc)+amp_col*amps(iproc)%amps_r(ioff+irow)
            enddo
         else
-           do irow=1,amps(iproc)%n_amps!nColOrd
+           do irow=1,amps(iproc)%nColOrd
               amp_col_c=(0d0,0d0)
               do i=1,amps(iproc)%n_col_vals(iacc)
                  amp2_c=(0d0,0d0)
                  do ic=amps(iproc)%row_index(irow-1,i,iacc)+1,amps(iproc)%row_index(irow,i,iacc)
                     icol=amps(iproc)%col_index(amps(iproc)%i_col_i(i,iacc)+ic)
-                    amp2_c=amp2_c+amps(iproc)%amps(icol)
+                    amp2_c=amp2_c+amps(iproc)%amps(ioff+icol)
                  enddo
                  amp_col_c=amp_col_c+amp2_c*amps(iproc)%diff_col_vals(i,iacc)
               enddo
-              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(irow)))
+              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
            enddo
         endif
         
@@ -122,7 +123,8 @@ program matrix_reweight
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
 
-     write (*,*) 'matrix2:', matrix2(1),matrix2(2:3)/matrix2(1),iproc
+     write (*,*) 'matrix2:', matrix2(1),matrix2(2:3)/matrix2(1),iproc,amps(iproc)%iproc_start
+!!$     if (amps(iproc)%nprocs.eq.3) stop 1
      
      call write_event(12)
   enddo
