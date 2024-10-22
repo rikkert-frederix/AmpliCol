@@ -98,7 +98,7 @@ contains
    
     this%n_cur=0
     this%n_vert=0
-
+    
     do isize=1,n-1
        this%n_cur_start(isize)=this%n_cur+1
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
@@ -289,10 +289,7 @@ contains
             stop 1
          endif
       enddo
-      this%iproc_start(n_processes+1)=this%n_amps+1
 
-      allocate(this%same_flavour_sum(this%n_amps,2))
-      this%same_flavour_sum(1:this%n_amps,1:2)=same_flavour_sum(1:this%n_amps,1:2)
       if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. this%imode.eq.2) then
          allocate(this%curr2amp(1:2,1:2*this%n_amps))
          this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
@@ -308,6 +305,11 @@ contains
          write (*,*) this%n_cur_end
          stop 1
       endif
+
+      allocate(this%same_flavour_sum(this%n_amps,2))
+      this%same_flavour_sum(1:this%n_amps,1:2)=same_flavour_sum(1:this%n_amps,1:2)
+      this%iproc_start(n_processes+1)=this%n_amps+1
+
       allocate(this%include_amp(1:this%n_amps))
       this%include_amp(:)=.true.
     end subroutine allocate_and_fill_currents_to_amps_map
@@ -1725,7 +1727,7 @@ contains
           allocate(this%amps(1:this%n_amps))
        endif
     endif
-
+    
     call fill_momentum_array()
    
     do isize=1,n-1
@@ -1938,14 +1940,14 @@ contains
          if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
             do iamp=1,this%n_amps
                this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                    this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
+                                     this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             enddo
          else
             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
                      this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                          this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                   else
                      ! same-flavour amps are build from two different-flavour amps
                      if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
