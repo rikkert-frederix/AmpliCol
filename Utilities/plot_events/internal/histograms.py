@@ -3015,6 +3015,10 @@ plot \\"""
         # Add a margin on upper and lower bound.
         ymax = ymax + 0.2 * (ymax - ymin)
         ymin = ymin - 0.2 * (ymax - ymin)
+
+        ymax=1.5
+        ymin=0.5
+        
         replacement_dic['unset label'] = 'unset label'
         replacement_dic['ymin'] = ymin
         replacement_dic['ymax'] = ymax
@@ -3174,6 +3178,10 @@ plot \\"""
         # Add a margin on upper and lower bound.
         ymax = ymax + 0.2 * (ymax - ymin)
         ymin = ymin - 0.2 * (ymax - ymin)
+
+        ymax=1.5
+        ymin=0.5
+
         replacement_dic['unset label'] = 'unset label'
         replacement_dic['ymin'] = ymin
         replacement_dic['ymax'] = ymax

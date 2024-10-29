@@ -13,6 +13,7 @@ program plot_events
   real(kind=8) :: evt_wgt_LC,evt_wgt_NLC,evt_wgt_full,rwgt_factor
   integer :: next
   character(len=256) :: argv
+  integer,dimension(20) :: ipdg
 
   CALL GET_COMMAND_ARGUMENT(1, argv)
   read(argv,'(a)') filename
@@ -44,7 +45,7 @@ contains
 
   subroutine plot_event()
     implicit none
-    call analysis_fill(next,p,evt_wgt_LC,evt_wgt_NLC,evt_wgt_full)
+    call analysis_fill(next,p,ipdg(1),evt_wgt_LC,evt_wgt_NLC,evt_wgt_full)
   end subroutine plot_event
 
   subroutine read_event(iunit,done)
@@ -69,7 +70,7 @@ contains
     read (iunit,*) evt_wgt_LC,evt_wgt_NLC,evt_wgt_full
     if (.not.allocated(p)) allocate(p(0:3,next))
     do i=1,next
-       read (iunit,*,err=99,end=99) dum,p(1:3,i),p(0,i)
+       read (iunit,*,err=99,end=99) ipdg(i),p(1:3,i),p(0,i)
     enddo
     read (iunit,*,err=99,end=99) dummy
     return

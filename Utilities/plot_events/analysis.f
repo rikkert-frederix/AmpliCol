@@ -48,11 +48,11 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
 
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-      subroutine analysis_fill(nexternal,p,evt_wgt_LC,evt_wgt_NLC
+      subroutine analysis_fill(nexternal,p,ipdg,evt_wgt_LC,evt_wgt_NLC
      $     ,evt_wgt_full)
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       implicit none
-      integer nexternal
+      integer nexternal,ipdg(nexternal)
       double precision p(0:3,nexternal),evt_wgt_LC(1),evt_wgt_NLC(1)
      $     ,evt_wgt_full(1),www(1)
 
