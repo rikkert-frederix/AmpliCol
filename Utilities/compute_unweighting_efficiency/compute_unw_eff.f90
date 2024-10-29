@@ -11,7 +11,7 @@ program plot_events
   character*50 weights_info(10)
   double precision dummy
   real(kind=8),dimension(:,:),allocatable :: p
-  real(kind=8) :: evt_wgt_LC,evt_wgt_NLC,evt_wgt_full,rwgt_factor,unw_eff(3),max_wgt(3)
+  real(kind=8) :: evt_wgt,rwgt_NLC,rwgt_full,rwgt_factor,unw_eff(3),max_wgt(3)
   integer :: next
   integer :: argc
   character(len=456) :: argv
@@ -38,29 +38,29 @@ program plot_events
 !!$  outfile='out_unwgt_'//outfile//'.txt'
   open(unit=20,file=outfile)
   max_wgt=0d0
-  do
+  do 
      call read_event(ifile,done)
      if (done) exit
-     if (evt_wgt_full.lt.0d0) then
+     if (evt_wgt.lt.0d0) then
         write (*,*) 'Found negative weight. Stopping...'
         stop
      endif
-     max_wgt(1)=max(max_wgt(1),evt_wgt_full/evt_wgt_LC)
-     max_wgt(2)=max(max_wgt(2),evt_wgt_NLC/evt_wgt_LC)
-     max_wgt(3)=max(max_wgt(3),evt_wgt_full/evt_wgt_NLC)
+     max_wgt(1)=max(max_wgt(1),rwgt_full)
+     max_wgt(2)=max(max_wgt(2),rwgt_NLC)
+     max_wgt(3)=max(max_wgt(3),rwgt_full/rwgt_NLC)
   enddo
 
   rewind(ifile)
 
   unw_eff=0d0
   nPSpoints=0
-  do
+  do 
      call read_event(ifile,done)
      if (done) exit
      nPSpoints=nPSpoints+1
-     unw_eff(1)=unw_eff(1)+(evt_wgt_full/evt_wgt_LC)/max_wgt(1)
-     unw_eff(2)=unw_eff(2)+(evt_wgt_NLC/evt_wgt_LC)/max_wgt(2)
-     unw_eff(3)=unw_eff(3)+(evt_wgt_full/evt_wgt_NLC)/max_wgt(3)
+     unw_eff(1)=unw_eff(1)+rwgt_full/max_wgt(1)
+     unw_eff(2)=unw_eff(2)+rwgt_NLC/max_wgt(2)
+     unw_eff(3)=unw_eff(3)+(rwgt_full/rwgt_NLC)/max_wgt(3)
   enddo
 
   if (nPSpoints.gt.0) then
@@ -76,31 +76,23 @@ program plot_events
   close(20)
 
 contains
-  subroutine read_event(iunit,done)
+    subroutine read_event(iunit,done)
     implicit none
-    integer :: i,iunit
+    integer :: i,iunit,idum
     logical :: done
-    character(len=100) :: dummy
-    character(len=15) :: dummy2
-    real(kind=8) :: dum,evt_wgt,wgt,amp2,weight
+    character :: dummy
+    real(kind=8) :: dum
     done=.false.
     read (iunit,*,err=99,end=99) dummy
-    if (index(dummy,'REWEIGHT_FACTOR').ne.0) then
-       backspace(iunit)
-       read(iunit,*) dummy2,rwgt_factor
-       done=.true.
-       return
-    endif
-    read (iunit,*,err=99,end=99) next,evt_wgt,wgt,amp2,weight
-    read (iunit,*,err=99,end=99) dum
-    read (iunit,*) dum,dum,dum
-    read (iunit,*) evt_wgt_LC,evt_wgt_NLC,evt_wgt_full
-    read (iunit,*) dum ! helicity
-    if (.not.allocated(p)) allocate(p(0:3,next))
+    read (iunit,*,err=99) next,evt_wgt!,wgt,amp2,weight
+    read (iunit,*,err=99) idum
+    read (iunit,*,err=99) idum
+    read (iunit,*,err=99) rwgt_full,rwgt_NLC
+    read (iunit,*,err=99) dum
     do i=1,next
-       read (iunit,*,err=99,end=99) dum,p(1:3,i),p(0,i)
+       read (iunit,*,err=99) idum
     enddo
-    read (iunit,*,err=99,end=99) dummy
+    read (iunit,*,err=99) dummy
     return
 99  done=.true.
   end subroutine read_event

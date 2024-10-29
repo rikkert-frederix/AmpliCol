@@ -63,13 +63,21 @@ contains
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
        wf(4) = dcmplx( hel*pt/pp*sqh )
+!!$       if ( pt.ne.rZero ) then
+!!$          pzpt = -p(3)/(pp*pt)*sqh*hel
+!!$          wf(2) = dcmplx( p(1)*pzpt , -ifinal*p(2)/pt*sqh )
+!!$          wf(3) = dcmplx( p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+!!$       else
+!!$          wf(2) = dcmplx( -hel*sqh )
+!!$          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+!!$       endif
        if ( pt.ne.rZero ) then
           pzpt = -p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-          wf(3) = dcmplx( p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+          wf(2) = dcmplx( p(1)*pzpt ,  ifinal*p(2)/pt*sqh )
+          wf(3) = dcmplx( p(2)*pzpt , -ifinal*p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , -ifinal*sign(sqh,p(3)) )
        endif
     endif
   

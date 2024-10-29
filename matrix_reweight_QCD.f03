@@ -3,6 +3,8 @@
 module rw_events
   implicit none
   real(kind=8) :: wgt,evt_wgt,weight,amp2,rwgt_NLC,rwgt_full
+  integer,dimension(:),allocatable :: helicity,col_order,iPDG
+  real(kind=8),dimension(:,:),allocatable :: momenta
 end module rw_events
 module timings
   implicit none
@@ -52,11 +54,6 @@ program matrix_reweight
   call amps(1)%init(2,next,1,part,spin,o,phys_model)
   col_acc=20
   call amps(1)%init_col(next,col_acc)
-!!$  if (amps%n_qqbar(1).eq.2 .and. amps%same_flav(1)) then
-!!$     nColOrd=amps%n_amps/2
-!!$  else
-!!$     nColOrd=amps%n_amps
-!!$  endif
 
   call cpu_time(tAfter)
   t_amp_init=t_amp_init+tAfter-tBefore
@@ -77,7 +74,7 @@ program matrix_reweight
      matrix2(1:3)=0d0
 
      call cpu_time(tBefore)
-
+     
      call amps(iproc)%evaluate(next,p,hel)
      ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
 
@@ -121,13 +118,6 @@ program matrix_reweight
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
-
-     write (*,*) 'matrix2:', matrix2(1),matrix2(2:3)/matrix2(1)
-!!$     do irow=ioff+1,ioff+amps(iproc)%nColOrd
-!!$        write (*,*) amps(iproc)%perm(1:next,irow),amps(iproc)%amps(irow)
-!!$     enddo
-!!$     stop 1
-     
      call write_event(12)
   enddo
   
@@ -277,22 +267,172 @@ contains
     read (iunit,*,err=99,end=99) dummy
     read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
     if (.not. allocated(hel)) then
+       allocate(momenta(0:3,1:next))
+       allocate(helicity(1:next))
+       allocate(col_order(1:next))
+       allocate(iPDG(1:next))
        allocate(o(next,1))
        allocate(part(next,1))
        allocate(processes(next,max_proc))
        allocate(hel(next))
        allocate(p(0:3,next))
     endif
-       read (iunit,*,err=99,end=99) hel(1:next)
-    read (iunit,*,err=99,end=99) o(1:next,1)
+    read (iunit,*,err=99,end=99) helicity(1:next)
+    read (iunit,*,err=99,end=99) col_order(1:next)
     do i=1,next
-       read (iunit,*,err=99,end=99) part(i,1),p(1:3,i),p(0,i)
+       read (iunit,*,err=99,end=99) iPDG(i),momenta(1:3,i),momenta(0,i)
     enddo
+    call map_to_canonical_form()
     read (iunit,*,err=99,end=99) dummy
     return
 99  done=.true.
   end subroutine read_event
 
+  subroutine map_to_canonical_form()
+    ! first quarks, then anti-quarks, then gluons
+    use rw_events
+    implicit none
+    logical :: sf
+    integer :: iflav,i,nqq,iflip
+    ! count the quarks, anti-quarks and gluons. And check if there is more
+    ! than one quark line if they are of the same flavour or not.
+    sf=.true.
+    iflav=0
+    nqq=0
+    do i=1,next
+       if (is_quark(iPDG(i)) .or. is_antiquark(iPDG(i))) then
+          nqq=nqq+1
+          if (iflav.eq.0) iflav=abs(iPDG(i))
+          if (abs(iPDG(i)).ne.iflav) then
+             sf=.false.
+             iflav=min(abs(iPDG(i)),iflav)
+          endif
+       endif
+    enddo
+    nqq=nqq/2
+    if (nqq.lt.2) sf=.false.
+    part(1:next,1)=iPDG(1:next)
+    hel(1:next)=helicity(1:next)
+    o(1:next,1)=col_order(1:next)
+    p(0:3,1:next)=momenta(0:3,1:next)
+    if (nqq.eq.0) then
+       continue ! nothing to do
+    elseif (nqq.eq.1) then
+       do i=1,next
+          if ((i.le.2 .and. is_antiquark(part(i,1))) .or. (i.gt.2 .and. is_quark(part(i,1)))) then
+             ! found the quark
+             if (i.ne.1) call flip_one(i,1) ! move quark to position 1
+          endif
+       enddo
+       do i=1,next
+          if ((i.le.2 .and. is_quark(part(i,1))) .or. (i.gt.2 .and. is_antiquark(part(i,1)))) then
+             ! found the anti-quark
+             if (i.ne.2) call flip_one(i,2) ! move anti-quark to position 2
+          endif
+       enddo
+       ! overwrite the PDGs of the quark and anti-quark
+       part(1,1)=-1
+       part(2,1)=1
+    elseif (nqq.eq.2) then
+       if (sf) then
+          iflip=1
+          do i=1,next
+             if ((i.le.2 .and. is_antiquark(part(i,1))) .or. (i.gt.2 .and. is_quark(part(i,1)))) then
+                ! found quark
+                if (i.ne.iflip) then
+                   call flip_one(i,iflip)
+                endif
+                iflip=iflip+1
+             endif
+          enddo
+          iflip=3
+          do i=1,next
+             if ((i.le.2 .and. is_quark(part(i,1))) .or. (i.gt.2 .and. is_antiquark(part(i,1)))) then
+                ! found anti-quark
+                if (i.ne.iflip) then
+                   call flip_one(i,iflip)
+                endif
+                iflip=iflip+1
+             endif
+          enddo
+          ! overwrite the PDGs of the quark and anti-quark
+          part(1:4,1)=-1
+       else
+          iflip=1
+          do i=1,next
+             if ((i.le.2 .and. is_antiquark(part(i,1))) .or. (i.gt.2 .and. is_quark(part(i,1)))) then
+                ! found quark
+                if (i.ne.iflip) then
+                   call flip_one(i,iflip)
+                endif
+                iflip=iflip+1
+             endif
+          enddo
+          do i=1,next
+             if ((i.le.2 .and. is_quark(part(i,1))) .or. (i.gt.2 .and. is_antiquark(part(i,1)))) then
+                ! found anti-quark
+                if (abs(part(i,1)).eq.abs(part(1,1))) then
+                   if (i.ne.3) then
+                      call flip_one(i,3)
+                   endif
+                else
+                   if (i.ne.4) then
+                      call flip_one(i,4)
+                   endif
+                endif
+             endif
+          enddo
+          ! overwrite the PDGs of the quark and anti-quark
+          part(1,1)=-1
+          part(2,1)=-2
+          part(3,1)=-1
+          part(4,1)=-2
+       endif
+    endif
+  end subroutine map_to_canonical_form
+
+  subroutine flip_one(i,j)
+    use rw_events
+    implicit none
+    integer :: i,j,icross,itmp
+    real(kind=8) :: dtmp
+    if ((i.le.2 .and. j.gt.2) .or. (i.gt.2 .and. j.le.2)) then
+       icross=-1
+    else
+       icross=1
+    endif
+    ! PDG code:
+    itmp=part(i,1)
+    if (icross .eq. -1) then
+       part(i,1)=phys_model%get_antipart(part(j,1))
+       part(j,1)=phys_model%get_antipart(itmp)
+    else
+       part(i,1)=part(j,1)
+       part(j,1)=itmp
+    endif
+    ! helicity:
+    itmp=hel(i)
+       hel(i)=hel(j)
+       hel(j)=itmp
+    ! colour order (should not be used):
+    !!!THIS IS WRONG!!!!
+    itmp=o(i,1)
+    o(i,1)=o(j,1)
+    o(j,1)=itmp
+    ! 4-momentum:
+    dtmp=p(0,i)
+    p(0,i)=icross*p(0,j)
+    p(0,j)=icross*dtmp
+    dtmp=p(1,i)
+    p(1,i)=icross*p(1,j)
+    p(1,j)=icross*dtmp
+    dtmp=p(2,i)
+    p(2,i)=icross*p(2,j)
+    p(2,j)=icross*dtmp
+    dtmp=p(3,i)
+    p(3,i)=icross*p(3,j)
+    p(3,j)=icross*dtmp
+  end subroutine flip_one
 
   subroutine write_event(iunit)
     use rw_events
@@ -302,12 +442,12 @@ contains
     rwgt_full=matrix2(3)/matrix2(1)
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
-    write (iunit,'(100i3)') hel(1:next)
-    write (iunit,'(100i3)') o(1:next,1)
+    write (iunit,'(100i3)') helicity(1:next)
+    write (iunit,'(100i3)') col_order(1:next)
     write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)
     write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
     do i=1,next
-       write (iunit,*) part(i,1),p(1:3,i),p(0,i)
+       write (iunit,*) iPDG(i),momenta(1:3,i),momenta(0,i)
     enddo
     write (iunit,*) '</event>'
   end subroutine write_event

@@ -42,15 +42,15 @@ contains
     use math_functions
     use particles
     implicit none
-    class(amplitude_QCD) :: this
-    class(physics_model) :: pm
-    integer :: n,imode
-    integer,dimension(n,n_processes) :: part,o
+    class(amplitude_QCD),intent(inout) :: this
+    type(physics_model),intent(in) :: pm
+    integer,intent(in) :: n,imode,n_processes
+    integer,dimension(n,n_processes),intent(in) :: part,o
+    integer,dimension(0:3,n),intent(in) :: spin
     integer,dimension(:,:),allocatable :: order
-    integer,dimension(0:3,n) :: spin
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,n_processes,iproc,jproc
+    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc,jproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
 
@@ -150,6 +150,7 @@ contains
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
 
     call deallocate_unneeded()
+
   contains
 
     subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
@@ -711,17 +712,17 @@ contains
       enddo
       if (chan.eq.1) then
          ! change the 2nd quark and an anti-quark in the process
-         part_out(connection(1,2))=sign(abs(part_out(connection(1,2)))+1,part_out(connection(1,2)))
-         part_out(connection(2,2))=sign(abs(part_out(connection(2,2)))+1,part_out(connection(2,2)))
+         part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),5)+1,part_out(connection(1,2)))
+         part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),5)+1,part_out(connection(2,2)))
       elseif(chan.eq.2) then
          ! change the mixed quark and an anti-quark in the process; leave the
          ! first (anti-)quark unchanged.
          if (connection(1,1).eq.ifirst) then
-            part_out(connection(1,2))=sign(abs(part_out(connection(1,2)))+1,part_out(connection(1,2)))
-            part_out(connection(2,1))=sign(abs(part_out(connection(2,1)))+1,part_out(connection(2,1)))
+            part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),5)+1,part_out(connection(1,2)))
+            part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),5)+1,part_out(connection(2,1)))
          else
-            part_out(connection(1,1))=sign(abs(part_out(connection(1,1)))+1,part_out(connection(1,1)))
-            part_out(connection(2,2))=sign(abs(part_out(connection(2,2)))+1,part_out(connection(2,2)))
+            part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),5)+1,part_out(connection(1,1)))
+            part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),5)+1,part_out(connection(2,2)))
          endif
       endif
     end subroutine define_symm_2qq
@@ -768,6 +769,7 @@ contains
             endif
          enddo
       enddo
+      deallocate(current_list_local)
       allocate(this%interaction_list(1:this%n_vert))
       do iv=1,this%n_vert
          this%interaction_list(iv)=interaction_list_local(iv)
@@ -776,6 +778,7 @@ contains
          this%interaction_list(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0))=&
               interaction_list_local(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0))
       enddo
+      deallocate(interaction_list_local)
     end subroutine allocate_current_list_and_interaction_list
 
     subroutine add_if_allowed_threevertex()
@@ -1473,33 +1476,6 @@ contains
          all_gluon_current=.true.
       endif
     end function all_gluon_current
-    logical function is_gluon(i)
-      implicit none
-      integer :: i
-      if (i.eq.21) then
-         is_gluon=.true.
-      else
-         is_gluon=.false.
-      endif
-    end function is_gluon
-    logical function is_tensor(i)
-      implicit none
-      integer :: i
-      if (i.eq.-21) then
-         is_tensor=.true.
-      else
-         is_tensor=.false.
-      endif
-    end function is_tensor
-    logical function is_singlet(i)
-      implicit none
-      integer :: i
-      if (abs(i).ge.22) then
-         is_singlet=.true.
-      else
-         is_singlet=.false.
-      endif
-    end function is_singlet
     logical function all_singlet_current(curr,len)
       ! returns .true. only if all external particles are colour singlets
       implicit none
@@ -1522,15 +1498,6 @@ contains
          is_quark_from_order=.false.
       endif
     end function is_quark_from_order
-    logical function is_quark(i)
-      implicit none
-      integer :: i
-      if (i.ge.1 .and. i.le.6) then
-         is_quark=.true.
-      else
-         is_quark=.false.
-      endif
-    end function is_quark
     logical function is_antiquark_from_order(io,iproc)
       ! 'io' should be a label in the colour order
       implicit none
@@ -1542,15 +1509,6 @@ contains
          is_antiquark_from_order=.false.
       endif
     end function is_antiquark_from_order
-    logical function is_antiquark(i)
-      implicit none
-      integer :: i
-      if (i.le.-1 .and. i.ge.-6) then
-         is_antiquark=.true.
-      else
-         is_antiquark=.false.
-      endif
-    end function is_antiquark
     logical function quark_in_current(curr,len)
       implicit none
       type(current),intent(in) :: curr
@@ -1579,6 +1537,11 @@ contains
             endif
          enddo
       enddo
+      deallocate(order)
+      if (this%imode.eq.2) then
+         deallocate(current_dict)
+         deallocate(key_to_current)
+      endif
     end subroutine deallocate_unneeded
     
   end subroutine init
@@ -1780,11 +1743,11 @@ contains
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
-             if (this%current_list(ic)%order(1).le.2) then
-                ifinal=-1
-             else
+!!$             if (this%current_list(ic)%order(1).le.2) then
+!!$                ifinal=-1
+!!$             else
                 ifinal=1
-             endif
+!!$             endif
 
              if (this%current_list(ic)%spin(1).eq.-9) then
                 ih_in=max(0,hel(this%current_list(ic)%order(1)))

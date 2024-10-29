@@ -8,7 +8,7 @@ module particles
      type(particle),dimension(:),allocatable :: particle_list
      integer :: npart
    contains
-     procedure,public :: init_part,get_mass,get_width,get_spin
+     procedure,public :: init_part,get_mass,get_width,get_spin,get_antipart
   end type physics_model
 contains
   subroutine init_part(this,tmass,twidth)
@@ -57,6 +57,22 @@ contains
     this%particle_list(9)%anti_type=22
     
   end subroutine init_part
+  integer function get_antipart(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg
+    do i=1,this%npart
+       if (this%particle_list(i)%type.eq.ipdg) then
+          get_antipart=this%particle_list(i)%anti_type
+          return
+       elseif (this%particle_list(i)%anti_type.eq.ipdg) then
+          get_antipart=this%particle_list(i)%type
+          return
+       endif
+    enddo
+    write (*,*) 'Particle not in model (mass)',ipdg
+    stop 1
+  end function get_antipart
   real(kind=8) function get_mass(this,ipdg)
     implicit none
     class(physics_model) :: this
@@ -100,4 +116,46 @@ contains
     write (*,*) 'Particle not in model (spin)',ipdg
     stop 1
   end function get_spin
+  logical function is_quark(iPDG)
+    integer :: iPDG
+    if (iPDG.ge.1 .and. iPDG.le.6) then
+       is_quark=.true.
+    else
+       is_quark=.false.
+    endif
+  end function is_quark
+  logical function is_antiquark(iPDG)
+    integer :: iPDG
+    if (iPDG.le.-1 .and. iPDG.ge.-6) then
+       is_antiquark=.true.
+    else
+       is_antiquark=.false.
+    endif
+  end function is_antiquark
+  logical function is_gluon(iPDG)
+    integer :: iPDG
+    if (iPDG.eq.21) then
+       is_gluon=.true.
+    else
+       is_gluon=.false.
+    endif
+  end function is_gluon
+  logical function is_tensor(i)
+    implicit none
+    integer :: i
+    if (i.eq.-21) then
+       is_tensor=.true.
+    else
+       is_tensor=.false.
+    endif
+  end function is_tensor
+  logical function is_singlet(i)
+    implicit none
+    integer :: i
+    if (abs(i).ge.22) then
+       is_singlet=.true.
+    else
+       is_singlet=.false.
+    endif
+  end function is_singlet
 end module particles
