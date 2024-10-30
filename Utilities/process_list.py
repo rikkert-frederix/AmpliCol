@@ -97,11 +97,12 @@ swap_qq={'g':'g',
          'qbar':'qpbar',
          'qpbar':'qbar'}
 
-nfinal=4
+nfinal=3
 
 # multi-jet base processes (without gluons):
-#base_procs=[[],['q','qbar'],['q','q','qbar','qbar'],['q','qp','qbar','qpbar']]
-base_procs=[[],['q','qbar']]
+base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
+#base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar']]
+#base_procs=[['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
 
 # extend the base_procs with additional gluons. These are all the unique procs
 unique_procs=[]
@@ -172,6 +173,8 @@ for i,proc in enumerate(all_procs):
 
 
 with open('processes.txt','w') as f:
+    f.write(str(len(to_write))+'\n')
+    f.write('\n')
     for pso in to_write:
         f.write(str(nfinal+2)+' '+str(len(pso))+'\n')
         for ele in pso:
