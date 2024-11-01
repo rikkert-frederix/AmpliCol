@@ -17,11 +17,11 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: mass,width
   real(kind=8) :: s_cut(2),sqrts,evt_sign
   character(len=80) :: filename
-  integer(kind=4) :: integration,nquarks
+  integer(kind=4) :: PS_choice,nquarks
   integer,parameter :: nevent_hel_filter=10
   integer,dimension(2) :: hel_picked
   integer :: iproc_picked,iproc_iden_picked
-  integer :: ngroups,igroup
+  integer :: ngroups,igroup,integration_step
   logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
   
   type phase_space_order_group
@@ -61,7 +61,7 @@ program matrix_integrate_QCD
   ! from a small number of points and double it each
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
-!!$  if (imode.eq.0 .or. imode.eq.2) then
+!!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
      ncalls0=-100000
 !!$  else
 !!$     ncalls0=640000
@@ -73,7 +73,7 @@ program matrix_integrate_QCD
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
-  if (imode.eq.0) then
+  if (integration_step.eq.0) then
      accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
@@ -112,13 +112,13 @@ program matrix_integrate_QCD
   
   do igroup=1,ngroups
      ! allocate the amplitudes and the phase-space for each of the integration channels
-     if (integration.eq.1) then
+     if (PS_choice.eq.1) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
-     elseif  (integration.eq.2) then
+     elseif  (PS_choice.eq.2) then
         allocate(phase_space_haag :: pgl(igroup)%phase_space)
-     elseif (integration.eq.3) then
+     elseif (PS_choice.eq.3) then
         allocate(phase_space_genpt :: pgl(igroup)%phase_space)
-     elseif (integration.eq.4) then
+     elseif (PS_choice.eq.4) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
      endif
 
@@ -139,10 +139,10 @@ program matrix_integrate_QCD
 
      ! Initialise the phase-space parametrisation
      call cpu_time(tBefore)
-     if (integration.ge.1 .and. integration.le.3) then
+     if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
              s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
-     elseif (integration.eq.4) then
+     elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
              s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
      endif
@@ -196,7 +196,7 @@ program matrix_integrate_QCD
      close(32)
   endif
 
-  if (imode.le.1) then
+  if (integration_step.le.1) then
      ! grid setup, or computation of upper bounding envelope
      call mint(integrand)
   else
@@ -317,7 +317,7 @@ contains
     
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
-       if (imode.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
+       if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
           ! passed==nevent_hel_filter, the unweighting of the helicities goes
           ! wrong for this phase-space point. Hence, we need to skip it.
@@ -393,7 +393,7 @@ contains
           endif
           if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
              y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
-             if (imode.le.0) then
+             if (integration_step.le.0) then
                !if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
                   pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
                !elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
@@ -630,18 +630,19 @@ contains
     common /to_seed/iseed
     iseed=0
     ! integration steps:
-    ! imode=0  (Setting up grids)
-    ! imode=-1 (same as imode=0, but starting from existing grids)
-    ! imode=1  (computing bounding envelope)
-    ! imode=2  (event generation)
+    ! integration_step=0  (Setting up grids)
+    ! integration_step=-1 (same as integration_step=0, but starting from existing grids)
+    ! integration_step=1  (computing bounding envelope)
+    ! integration_step=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.eq.2) then
+    if (argc.eq.3) then
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) integration
-          if (i.eq.2) read(argv,*) imode
+          if (i.eq.1) read(argv,*) filename
+          if (i.eq.2) read(argv,*) PS_choice
+          if (i.eq.3) read(argv,*) integration_step
        enddo
-       open(unit=10,file='processes.txt',status='old')
+       open(unit=10,file=filename,status='old')
        read (10,*) ngroups
        allocate(pgl(ngroups))
        read (10,*) 
@@ -669,15 +670,15 @@ contains
     elseif (argc.le.10) then
        write(*,*) 'Inconsistent arguments:'
        write(*,*) '--------- Should be: --------'
-       write(*,*) 'integration, mode, next, *process*, *order*'
+       write(*,*) 'PS_choice, mode, next, *process*, *order*'
        stop 2
     else
        ngroups=1
        allocate(pgl(ngroups))
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) integration
-          if (i.eq.2) read(argv,*) imode
+          if (i.eq.1) read(argv,*) PS_choice
+          if (i.eq.2) read(argv,*) integration_step
           if (i.eq.3) then
              read(argv,*) next
              if (next.le.3) then
@@ -755,12 +756,14 @@ contains
        write (*,*) 'Not enough external particles',next
        stop 1
     endif
-    if (imode.ne.0 .and. imode.ne.1 .and. imode.ne.2) then
-       write (*,*) 'Incorrect imode',imode
+    if (integration_step.ne.0 .and. integration_step.ne.1 .and. integration_step.ne.2) then
+       write (*,*) 'Incorrect integration_step',integration_step
        stop
+    else
+       imode=integration_step ! imode is used in MINT
     endif
-    if (integration.ne.1 .and. integration.ne.2 .and. integration.ne.3 .and. integration.ne.4) then
-       write (*,*) 'Integration modes only 1, 2, 3 or 4',integration
+    if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
+       write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice
        stop
     endif
   end subroutine get_run_arguments
@@ -797,16 +800,16 @@ contains
     implicit none
     integer :: i1,i2,i
     tag='_'       ! tag of current run
-    tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
-!    call add_to_string(tag,integration,.true.)
-!    call add_to_string(tag_read,integration,.true.)
+    tag_read='_'  ! same as 'tag', but with previous integration_step (i.e., defines the file to read the integration grids from)
+!    call add_to_string(tag,PS_choice,.true.)
+!    call add_to_string(tag_read,PS_choice,.true.)
     call add_to_string(tag,next,.true.)
     call add_to_string(tag_read,next,.true.)
-    call add_to_string(tag,imode,.true.)
-    if(imode.gt.0) then
-       call add_to_string(tag_read,imode-1,.true.)
+    call add_to_string(tag,integration_step,.true.)
+    if(integration_step.gt.0) then
+       call add_to_string(tag_read,integration_step-1,.true.)
     else
-       call add_to_string(tag_read,imode,.true.)
+       call add_to_string(tag_read,integration_step,.true.)
     endif
     if (allocated(part)) then
        do i=1,next
