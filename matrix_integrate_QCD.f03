@@ -69,15 +69,15 @@ program matrix_integrate_QCD
 
   ndim=3*(next-2)-4   ! Number of dimensions of the integration.
 
-  itmax=14         ! Number of iterations. (If ncalls0 < 0, the
+  itmax=16         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
   if (imode.eq.0) then
-     accuracy=0.02d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
-     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.001d0)
+     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
      read_amps_from_file=.true.
   endif
 
