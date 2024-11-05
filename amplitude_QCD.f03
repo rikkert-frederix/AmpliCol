@@ -150,7 +150,6 @@ contains
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
 
     call deallocate_unneeded()
-
   contains
 
     subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
@@ -890,7 +889,7 @@ contains
             return
          else
             valid_current_combination=.true.
-            return ! no need to check further: below is ony checks about the colours
+            return ! no need to check further: below are only checks about the colours
          endif
       endif
       
@@ -1001,7 +1000,7 @@ contains
       combine_lists(1:isize)=current(1:isize)
       do imv=1,singlet_mv(0)
          combine_lists(1:isize)=[combine_lists(1:singlet_mv(imv)-1), &
-                                 combine_lists(singlet_mv(imv)+1:isize-1),combine_lists(singlet_mv(imv))]
+                                 combine_lists(singlet_mv(imv)+1:isize),combine_lists(singlet_mv(imv))]
       enddo
     end function combine_lists
 
@@ -2083,7 +2082,7 @@ contains
     class(amplitude_qcd) :: this
     integer,parameter :: max_vals=10000
     integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,gj,ui,uj,uj_upper,iperm_upper,&
-         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique,iproc,ioff
+         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique,iproc,ioff,nOrd
     integer,dimension(n) :: iper,jper,part
     integer,dimension(:),allocatable :: n_vals
     real(kind=8),dimension(1:3) :: col_fac
@@ -2102,7 +2101,7 @@ contains
     endif
     part(1:n)=this%processes(1:n,1)
     ioff=this%iproc_start(iproc)-1
-    
+    nOrd=n-this%n_sing(iproc)
 
     allocate(n_vals(1:3))
     allocate(diff_vals(max_vals,1:3))
@@ -2139,16 +2138,16 @@ contains
           ! already considered
           call get_unique_row(iunique,irow,gi,ui)
        endif
-       iper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+irow)
-       if (use_cm_dict) unique_rows(1:n-this%n_sing(iproc),iunique) = iper(1:n-this%n_sing(iproc))
+       iper(1:nOrd)=this%perm(1:nOrd,ioff+irow)
+       if (use_cm_dict) unique_rows(1:nOrd,iunique) = iper(1:nOrd)
        ! loop over the columns
        do jperm=1,this%nColOrd
-          jper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+jperm)
+          jper(1:nOrd)=this%perm(1:nOrd,ioff+jperm)
           if (this%n_qqbar(iproc).eq.2) then
              ! determine how the quarks are connected
              call determine_gi_ui(jper,gj,uj)
           endif
-          call compute_color_factor(col_acc,n-this%n_sing(iproc),iper,jper,ui,uj,gi,gj,col_fac)
+          call compute_color_factor(col_acc,nOrd,iper,jper,ui,uj,gi,gj,col_fac)
           if (use_symm_cm) then
              ! include a factor 2 for the off-diagonal terms
              if (irow.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 
@@ -2156,7 +2155,7 @@ contains
           do iacc=1,3
              if (col_fac(iacc).eq.0d0) cycle
              if (use_cm_dict) then
-                key=solve_dict(get_value(jper(1:n)))
+                key=solve_dict(get_value(nOrd,jper(1:nOrd)))
                 col_vals(iacc,key,iunique)=col_fac(iacc)
              endif
              do ival=1,n_vals(iacc)
@@ -2208,7 +2207,7 @@ contains
     ic=0
     ir=0
     do iperm=1,this%nColOrd
-       iper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+iperm)
+       iper(1:nOrd)=this%perm(1:nOrd,ioff+iperm)
        if (this%n_qqbar(iproc).eq.2)  call determine_gi_ui(iper,gi,ui)
        if (use_symm_cm) then
           jperm_lower=iperm
@@ -2216,14 +2215,14 @@ contains
           jperm_lower=1
        endif
        do jperm=jperm_lower,this%nColOrd
-          jper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+jperm)
+          jper(1:nOrd)=this%perm(1:nOrd,ioff+jperm)
           if (this%n_qqbar(iproc).eq.2)  call determine_gi_ui(jper,gj,uj)
           if (use_cm_dict) then
              ! GET color factors from permuting first row
              call get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
           else
              ! COMPUTE color factors again
-             call compute_color_factor(col_acc,n-this%n_sing(iproc),iper,jper,ui,uj,gi,gj,col_fac)
+             call compute_color_factor(col_acc,nOrd,iper,jper,ui,uj,gi,gj,col_fac)
              if (use_symm_cm) then
                 ! include a factor 2 for the off-diagonal terms
                 if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0
@@ -2307,14 +2306,14 @@ contains
         iunique=1
      endif
      ! First row
-     row_first(1:n-this%n_sing(iproc))=unique_rows(1:n-this%n_sing(iproc),iunique)
+     row_first(1:nOrd)=unique_rows(1:nOrd,iunique)
      ! Row in consideration
-     row_per(1:n-this%n_sing(iproc))=iper(1:n-this%n_sing(iproc))
+     row_per(1:nOrd)=iper(1:nOrd)
      ! Column in consideration
-     col_per(1:n-this%n_sing(iproc))=jper(1:n-this%n_sing(iproc))
+     col_per(1:nOrd)=jper(1:nOrd)
      ! Map one into the other
-     do i=1,n-this%n_sing(iproc)
-        do j=1,n-this%n_sing(iproc)
+     do i=1,nOrd
+        do j=1,nOrd
            if (col_per(i) .eq. row_per(j)) exit
         enddo
         if (.not.(abs(part(col_per(i))).le.6.and.abs(part(col_per(i))).ge.1)) then
@@ -2323,7 +2322,7 @@ contains
           col_new(i) = col_per(i)
         endif
      enddo
-     key=solve_dict(get_value(col_new(1:n)))
+     key=solve_dict(get_value(nOrd,col_new(1:nOrd)))
      col_fac(1:3)=col_vals(1:3,key,iunique)
    end subroutine get_col_fac
 
@@ -2361,43 +2360,40 @@ contains
       integer :: iperm,i
       integer(kind=8) :: val,previous_val
       integer,dimension(:),allocatable :: iper,iper_in
-      if (this%n_sing(iproc).ne.0) then
-         write (*,*) 'fix create_perm_dict when there are color singlets'
-         stop 1
-      endif
-      allocate(iper(1:n))
-      allocate(iper_in(1:n))
-      max_keys=factorial(n)
+      allocate(iper(1:nOrd))
+      allocate(iper_in(1:nOrd))
+      max_keys=factorial(n)/factorial(n-nOrd)
       allocate(perm_dict(1:max_keys))
-      do i=1,n
+      do i=1,nOrd
          iper(i)=i
       enddo
       previous_val=0
       do iperm=1,max_keys
-         val=get_value(iper(1:n))
+         val=get_value(nOrd,iper(1:nOrd))
          if (val.le.previous_val) then
             write (*,*) 'In create_perm_dict need to get values in ascending order',val,previous_val
+            write (*,*) iper(1:nOrd)
             stop 1
          else
             previous_val=val
          endif
          perm_dict(iperm)=val
          iper_in=iper
-         call get_next_iperm(n,iper_in,iper,n)
+         call get_next_iperm(nOrd,iper_in,iper,n)
       enddo
       deallocate(iper)
     end subroutine create_perm_dict
 
-    integer(kind=8) function get_value(iper)
+    integer(kind=8) function get_value(nOrd,iper)
       ! Give a unique identifier based on the colour order. Simply convert the
       ! list to an integer with base equal to the number of elements in the
       ! order.
       implicit none
-      integer :: j
-      integer,dimension(1:n) :: iper
+      integer :: j,nOrd
+      integer,dimension(1:nOrd) :: iper
       get_value=0
-      do j=1,n
-         get_value=get_value+int(iper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
+      do j=1,nOrd
+         get_value=get_value+int(iper(nOrd+1-j),kind=8)*int(nOrd+1,kind=8)**int(j-1,kind=8)
       enddo
     end function get_value
     
