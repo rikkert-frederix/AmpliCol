@@ -2393,7 +2393,7 @@ contains
       integer,dimension(1:nOrd) :: iper
       get_value=0
       do j=1,nOrd
-         get_value=get_value+int(iper(nOrd+1-j),kind=8)*int(nOrd+1,kind=8)**int(j-1,kind=8)
+         get_value=get_value+int(iper(nOrd+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
       enddo
     end function get_value
     
@@ -2402,7 +2402,7 @@ contains
       implicit none
       integer :: i,n,acc,col_acc,k,ui,uj,gi,gj
       real(kind=8),dimension(1:3) :: col_fac
-      integer,dimension(n-this%n_sing(iproc)) :: iper,jper
+      integer,dimension(n) :: iper,jper
       integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
       real(kind=16) :: col_factor
       col_fac(1:3)=0d0
