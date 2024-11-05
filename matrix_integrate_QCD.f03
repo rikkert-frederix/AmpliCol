@@ -638,7 +638,7 @@ contains
     if (argc.eq.3) then
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) filename
+          if (i.eq.1) read(argv,'(a)') filename
           if (i.eq.2) read(argv,*) PS_choice
           if (i.eq.3) read(argv,*) integration_step
        enddo
