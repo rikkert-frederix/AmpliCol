@@ -11,6 +11,7 @@ def create_all_procs_from_unique_procs(proc,swap_ini,swap_qq):
     all_procs = []
     # Iterate over all permutations of the first two elements
     for perm in itertools.permutations(proc, 2):
+        if perm[0] not in proton or perm[1] not in proton : continue
         # Find the remaining elements
         remaining = list(proc)
         remaining.remove(perm[0])
@@ -36,7 +37,11 @@ def is_valid_permutation(perm):
     for i in range(n):
         if (perm[i] == 'qbar' or perm[i] == 'qpbar' ):  # If the current element is anti-quark
             next_index = (i + 1) % n  # Cyclic next element
-            if (perm[next_index] != 'q' and perm[next_index] != 'qp' ):  # The next element must be positive
+            if (perm[next_index] != 'q' and perm[next_index] != 'qp' ):  # next element must be quark
+                return False
+        if perm[i] == 'a' :
+            next_index = (i + 1) % n  # Cyclic next element
+            if (perm[next_index] != 'qbar' and perm[next_index] != 'qpbar' ):  # next element must be anti-quark
                 return False
     return True
 
@@ -66,7 +71,7 @@ def generate_permutations(arr,swap_qq):
     return valid_permutations
 
 def convert_to_input(phase_space_order,perm,swap_ini,pso):
-    conversion={'g':'21','q':'1','qbar':'-1','qp':'2','qpbar':'-2'}
+    conversion={'g':'21','q':'1','qbar':'-1','qp':'2','qpbar':'-2','a':'22'}
 
     try:
         shift=perm.index('q')
@@ -90,19 +95,24 @@ swap_ini={'g':'g',
           'q':'qbar',
           'qbar':'q',
           'qp':'qpbar',
-          'qpbar':'qp'}
+          'qpbar':'qp',
+          'a':'a'}
 swap_qq={'g':'g',
          'q':'qp',
          'qp':'q',
          'qbar':'qpbar',
-         'qpbar':'qbar'}
+         'qpbar':'qbar',
+         'a':'a'}
 
 nfinal=3
 
 # multi-jet base processes (without gluons):
-base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
+#base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
 #base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar']]
 #base_procs=[['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
+base_procs=[['q','qbar','a']]
+
+proton=['g','q','qp','qbar','qpbar']
 
 # extend the base_procs with additional gluons. These are all the unique procs
 unique_procs=[]
@@ -130,6 +140,7 @@ for proc in all_procs:
     i_fac*=max(1,math.factorial(proc[2:].count('qbar')))
     i_fac*=max(1,math.factorial(proc[2:].count('qp')))
     i_fac*=max(1,math.factorial(proc[2:].count('qpbar')))
+    i_fac*=max(1,math.factorial(proc[2:].count('a')))
     if proc[2:].count('q') == proc[2:].count('qbar') and proc[2:].count('q') == proc[2:].count('qp') and proc[2:].count('q') == proc[2:].count('qpbar') and proc[2:].count('q') == 1:
         i_fac*=2
     
@@ -161,7 +172,6 @@ to_write=[[] for _ in phase_space_order]
 
 for i,proc in enumerate(all_procs):
     print('looping through processes... ',proc)
-    icount=0
     valid_perms=generate_permutations(proc,swap_qq)
     for pso,psorder in enumerate(phase_space_order):
         pso_map[pso][proc]=[]
@@ -169,7 +179,6 @@ for i,proc in enumerate(all_procs):
             if valid_perm[0]==proc[0] and valid_perm[pso+1]==proc[1]:
                 pso_map[pso][proc].append(valid_perm)
                 to_write[pso].append(convert_to_input(psorder,valid_perm,swap_ini,pso)+[' ']+[str(iden_fac[proc])])
-                icount=icount+1
 
 
 with open('processes.txt','w') as f:
