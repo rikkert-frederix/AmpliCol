@@ -960,7 +960,7 @@ contains
           write(58,*)'Final result [ABS]:',ans(1,0),' +/-',sqrt(unc(1,0)**2)
           write(58,*)'Final result:',ans(2,0),' +/-',unc(2,0)
           close(58)
-          write(*,*)'Final result [ABS]:',ans(1,0),' +/-',sqrt(unc(1,1)**2)
+          write(*,*)'Final result [ABS]:',ans(1,0),' +/-',sqrt(unc(1,0)**2)
           write(*,*)'Final result:',ans(2,0),' +/-',unc(2,0)
           write(*,*)'chi**2 per D.o.F.:',chi2(1,0)
           open(unit=58,file='Outputs'//trim(adjustl(add_arg))//'/Res_files/results'//trim(adjustl(tag))//'.dat',status='unknown')
