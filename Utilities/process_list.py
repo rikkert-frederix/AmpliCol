@@ -41,7 +41,7 @@ def is_valid_permutation(perm):
                 return False
         if perm[i] == 'a' :
             next_index = (i + 1) % n  # Cyclic next element
-            if (perm[next_index] != 'qbar' and perm[next_index] != 'qpbar' ):  # next element must be anti-quark
+            if (perm[next_index] != 'qbar' and perm[next_index] != 'qpbar'  and perm[next_index] != 'a' ):  # next element must be anti-quark or another singlet
                 return False
     return True
 
@@ -104,13 +104,14 @@ swap_qq={'g':'g',
          'qpbar':'qbar',
          'a':'a'}
 
-nfinal=3
+nfinal=4
 
 # multi-jet base processes (without gluons):
 #base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
 #base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar']]
 #base_procs=[['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
-base_procs=[['q','qbar','a']]
+base_procs=[['q','qbar','a','a']]
+#base_procs=[['q','qbar']]
 
 proton=['g','q','qp','qbar','qpbar']
 
@@ -140,7 +141,6 @@ for proc in all_procs:
     i_fac*=max(1,math.factorial(proc[2:].count('qbar')))
     i_fac*=max(1,math.factorial(proc[2:].count('qp')))
     i_fac*=max(1,math.factorial(proc[2:].count('qpbar')))
-    i_fac*=max(1,math.factorial(proc[2:].count('a')))
     if proc[2:].count('q') == proc[2:].count('qbar') and proc[2:].count('q') == proc[2:].count('qp') and proc[2:].count('q') == proc[2:].count('qpbar') and proc[2:].count('q') == 1:
         i_fac*=2
     
