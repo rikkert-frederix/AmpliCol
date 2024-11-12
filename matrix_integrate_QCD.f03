@@ -141,10 +141,10 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
      elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
      endif
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
