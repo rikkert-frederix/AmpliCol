@@ -814,7 +814,7 @@ contains
     integer(kind=8) :: tot_ord
     integer :: ic,i_qq,iaq,i_ini,i_inv,i_swap,k,l,ip
     integer,dimension(next) :: fgluons,ips,ips_out
-    logical :: same_flavour,light_flavour
+    logical :: same_flavour
     logical,dimension(next) :: fgluon
     integer,dimension(:,:),allocatable :: io_list,io
 
@@ -919,18 +919,6 @@ contains
           endif
        enddo
        
-       do i=2,next-1
-          if (abs(part(o(i))).le.6 .and. abs(part(o(i))).ge.1) then
-            if (mass(i).eq.0d0) then
-              light_flavour=.true.
-            else
-              light_flavour=.false.
-              exit
-            endif
-          endif
-          light_flavour=.true.
-       enddo
-
        allocate(io_list(1:next,tot_ord))
        allocate(io(1:next,5))
        ic=0
@@ -993,8 +981,7 @@ contains
                 do i_swap=1,2
                    io(1:next,4)=io(1:next,3)
                    if (i_swap.eq.2) then
-!!$                      if (.not.same_flavour) cycle
-                      if (.not. light_flavour) cycle
+                      if (.not.same_flavour) cycle
                       do i=2,next-1
                          if ((io(i,3).gt.2 .and. part(io(i,3)).le.-1 .and. part(io(i,3)).ge.-6) .or. &
                               (io(i,3).le.2 .and. part(io(i,3)).ge. 1 .and. part(io(i,3)).le. 6) ) then
