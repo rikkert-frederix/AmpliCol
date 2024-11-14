@@ -1,13 +1,13 @@
-! gfortran -fbounds-check -o test_QCD math_functions.f03 color_algebra.f95 feynmanrules.f03 amplitude_QCD.f03 amplitude_real.f03 test_QCD.f03 
+! gfortran -fbounds-check -o test_QCD math_functions.f03 color_algebra.f95 feynmanrules.f03 particles.f03 amplitude_QCD.f03 test_QCD.f03 
 
 program test_QCD
-  use amplitude_mod
   use amplitude_QCD_mod
   use color_algebra
+  use particles
   implicit none
   type(amplitude_QCD),dimension(:),allocatable :: amps
   type(amplitude_QCD) :: amps_col
-  type(amplitude_cache) :: ampplitudes_cache
+  type(physics_model) :: phys_model
   integer :: n
   integer,dimension(:,:),allocatable :: part
   real(kind=8),dimension(:),allocatable :: mass,width
@@ -15,7 +15,7 @@ program test_QCD
   integer :: i,ih,iden,iperm,jperm,nperm,nperm_upp
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8) :: amp2,t
-  real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.118d0,alphaEW=7.547E-003
+  real(kind=8),parameter :: pi=3.14159265358979323846d0,alphas=0.119d0,alphaEW=7.547E-003
   real(kind=8),dimension(:,:),allocatable :: col_fac
   complex(kind=8) :: ztemp
   logical :: one_qq, single_perm,photon, two_qq,heavy,same_flav
@@ -25,25 +25,24 @@ program test_QCD
   integer :: it ! quark order
   real(kind=8) :: top_mass
   logical :: heavy_initial
+  integer(kind=4),dimension(:,:),allocatable :: spin
+  integer(kind=4),dimension(:),allocatable :: hel
 
-  n=6
+  n=4
   one_qq=.false.
   photon=.false.
 
-  two_qq=.true.
+  two_qq=.false.
   heavy=.false.
 
   heavy_initial=.false.
-  same_flav=.true.
+  same_flav=.false.
 
   single_perm = .false.
   
   allocate(part(n,2))
   allocate(mass(n))
   allocate(width(n))
-
-  mass(1:n)=0d0
-  width(1:n)=0d0
 
   if (n.eq.4) then
      if (one_qq) then
@@ -72,6 +71,7 @@ program test_QCD
 
   allocate(order(n,nperm))
   allocate(helmap(2**n,nperm))
+  allocate(hel(1:n))
   allocate(amps(nperm))
   allocate(col_fac(nperm,nperm))
 
@@ -332,17 +332,15 @@ program test_QCD
 
        if (heavy) then
          nperm=6
-         part(1:n,1)=[21,21,-6,6,21]
-         order(1:n,1)= [4,1,2,5,3]
-         order(1:n,2)= [4,1,5,2,3]
-         order(1:n,3)= [4,2,1,5,3]
-         order(1:n,4)= [4,2,5,1,3]
-         order(1:n,5)= [4,5,1,2,3]
-         order(1:n,6)= [4,5,2,1,3]
+         part(1:n,1)=[21,21,6,-6,21]
+         order(1:n,1)= [3,1,2,5,4]
+         order(1:n,2)= [3,1,5,2,4]
+         order(1:n,3)= [3,2,1,5,4]
+         order(1:n,4)= [3,2,5,1,4]
+         order(1:n,5)= [3,5,1,2,4]
+         order(1:n,6)= [3,5,2,1,4]
          iden=8*8*2*2
 
-         mass(1:n)=[0d0,0d0,173d0,173d0,0d0]
-         width(1:n)=[0d0,0d0,1.4915d0,1.4915d0,0d0]
        endif
 
        if (heavy_initial) then
@@ -462,11 +460,7 @@ program test_QCD
          order(1:n,24)= [3,6,5,2,1,4]
          iden=8*8*2*2
          iden=iden*2
-
-         mass(1:n)=[0d0,0d0,173d0,173d0,0d0,0d0]
-         width(1:n)=[0d0,0d0,1.4915d0,1.4915d0,0d0,0d0]
        endif
-
      endif
 
      if (two_qq) then
@@ -507,11 +501,8 @@ program test_QCD
          order(1:n,12)=[1,6,4,3,5,2]
          iden=iden*2
 
-         top_mass=173.d0
-
-         mass(1:n)=[0d0,0d0,top_mass,top_mass,0d0,0d0]
-         width(1:n)=[0d0,0d0,1.4915d0,1.4915d0,0d0,0d0]
          endif
+         
          if (same_flav) then
            nperm=12
            !for dxd-dxdgg
@@ -711,25 +702,21 @@ program test_QCD
          order(1:n,119)= [1,6,5,4,3,2]
          order(1:n,120)= [1,6,5,4,2,3]
          iden=iden*4*3*2
-
-
-
-
      endif
-
-
-
-
   endif
+
+  call phys_model%init_part(173d0,1.491500d0)
+  call setup_spin()
+
 
   it = 0 ! dummy
   if (single_perm) then
     call cpu_time(tBefore) 
-    call amps_col%init(2,n,part(:,1),part(:,1),mass,width,order(1:n,1),it)
+    call amps_col%init(2,n,part(:,1),spin,order(1:n,iperm),phys_model)
     call cpu_time(tAfter)
     t_init = tAfter-tBefore
     call cpu_time(tBefore)
-    call amps_col%evaluate(n,p,mass,width,5,part(:,1))
+    call amps_col%evaluate(n,p,hel)
     call cpu_time(tAfter)
     t_eval = tAfter-tBefore
   else
@@ -738,20 +725,21 @@ program test_QCD
     do iperm=1,nperm_upp
      if (iperm.le.nperm) then
        call cpu_time(tBefore)
-       call amps(iperm)%init(1,n,part(:,1),part(:,1),mass,width,order(1:n,iperm),it)
+       call amps(iperm)%init(1,n,part(:,1),spin,order(1:n,iperm),phys_model)
        call cpu_time(tAfter)
        t_init=tAfter-tBefore
        call cpu_time(tBefore)
-       call amps(iperm)%evaluate(n,p,mass,width,0,part(:,1))
+       call amps(iperm)%evaluate(n,p,hel)
        call cpu_time(tAfter)
        t_eval=tAfter-tBefore
+
      elseif (iperm.gt.nperm) then
        call cpu_time(tBefore)
-       call amps(iperm)%init(1,n,part(:,2),part(:,2),mass,width,order(1:n,iperm),it)
+       call amps(iperm)%init(1,n,part(:,2),spin,order(1:n,iperm),phys_model)
        call cpu_time(tAfter)
        t_init=tAfter-tBefore
        call cpu_time(tBefore)
-       call amps(iperm)%evaluate(n,p,mass,width,0,part(:,2))
+       call amps(iperm)%evaluate(n,p,hel)
        call cpu_time(tAfter)
        t_eval=tAfter-tBefore
      endif
@@ -769,12 +757,6 @@ program test_QCD
     endif
   endif
 
-!  do i = 1, amps_col%nColOrd
-!     write (*,*) amps_col%amps(i),amps_col%perm(1:n,i)
-!  enddo
-  
-!  stop
-
   call Tr_allocate(n)
   do jperm=1,nperm
      do iperm=1,nperm
@@ -791,52 +773,28 @@ program test_QCD
   enddo
 
 
-  !do iperm=1,nperm
-  !    write(*,*) 'iperm',iperm
-  !    write(*,*) amps(iperm)%amps(10)
-  !    do jperm=1,nperm
-  !       write(*,*) 'jperm',jperm
-  !       write(*,*) 'color ',col_fac(iperm,jperm)
-  !    enddo
-  !enddo
+  ! Print LC conribution only
+  do jperm=1,nperm    ! loop over permutations of conjugated amplitude
+     t=0d0
+     do ih=1,2**n
+        ztemp=amps(jperm)%amps(ih)*(4*pi*alphas)**(n-2)/dble(iden)*81 !col_fac(jperm,jperm)
+        t=t+dble(ztemp*dconjg(amps(jperm)%amps(ih)))
+     enddo
+     write(*,*) 'T',t
+  enddo
 
   amp2=0d0
   if (.not.single_perm)then
     do ih=1,2**n
      t=0d0
-     !if (ih.ne.6) cycle
-     !write(*,*) '**********************'
-     !write(*,*) 'ih',ih
-     !do i=1,n
-     !   if (btest(ih-1,i-1)) then
-     !      write(*,*) 'hel +1'
-     !   else
-     !      write(*,*) 'hel -1'
-     !   endif
-     !enddo
-     !write(*,*) amps(1)%amps(ih)
-     !write(*,*) amps(2)%amps(ih)
      do jperm=1,nperm    ! loop over permutations of conjugated amplitude
         ztemp=(0d0,0d0)
         do iperm=1,nperm ! loop over permutations of amplitude
-           !write(*,*) 'added',iperm,jperm
-           !write(*,*) 'helmap: ',amps(iperm)%helmap(ih)
-           !if (jperm.eq.iperm) then
-           !  col_fac=27d0
              ztemp=ztemp+amps(iperm)%amps(ih) *col_fac(iperm,jperm)*(4*pi*alphas)**(n-2)
-      !     write(*,*) '****'
-             !write(*,*) 'color',col_fac(iperm,jperm)
-             !write(*,*) iperm,jperm
-        !write(*,*) amps(iperm)%amps(ih)*(4*pi*alphas)**(n-2)*col_fac(iperm,jperm)*dconjg(amps(jperm)%amps(ih))
-           !endif
         enddo
-
-        !write(*,*) 'total ztemp',ztemp
         t=t+dble(ztemp*dconjg(amps(jperm)%amps(ih)))
-        !write(*,*) 'closing with amp',dconjg(amps(jperm)%amps(ih))
      enddo
      amp2=amp2+t
-     !write(*,*) 'T',T
     enddo
   else
     t=0d0
@@ -1123,5 +1081,22 @@ contains
     endif
 
   end subroutine get_perm_params
+
+  subroutine setup_spin()
+    implicit none
+
+    if (.not. allocated(spin)) allocate(spin(0:3,1:n))
+    do i=1,n
+       spin(0,i)=phys_model%get_spin(part(i,1))
+
+       if (spin(0,i).eq.2) then
+          spin(1,i)=-1
+          spin(2,i)=1
+       else
+          write (*,*) 'spin state not known',i,part(i,1),spin(0,i)
+          stop 1
+       endif
+    enddo
+  end subroutine setup_spin
 
 end program test_QCD
