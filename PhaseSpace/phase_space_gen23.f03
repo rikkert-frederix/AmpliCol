@@ -20,7 +20,7 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: pi=3.1415926535897932d0
 
 contains
-  subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,part)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -30,7 +30,8 @@ contains
     ! number of particles (initial state + final state)
     integer(kind=4),intent(in) :: n
     ! the colour order:
-    integer(kind=4),dimension(n),intent(in) :: o
+    integer(kind=4),dimension(n),intent(in) :: o,part
+    integer(kind=4),dimension(n) :: ord_temp
     ! cut on the minimum invariant mass of all pairs of particles,
     ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
     ! an initial and a final state particle; s_cut(2) is between two final
@@ -51,7 +52,7 @@ contains
     logical,intent(in) :: t_chan
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
-    integer(kind=4) :: i,j
+    integer(kind=4) :: i,j,ns
     real(kind=8) :: ptcut
     this%sqrtshat=sqrts
     this%sqrts=sqrts
@@ -76,7 +77,7 @@ contains
     this%pp(0:3,0:maskr(this%next))=0d0
     allocate(this%p(0:3,this%next))
     allocate(this%x(this%ndim))
-    allocate(this%sets(0:this%next-2,2))
+    allocate(this%sets(0:this%next-2,3))
     ! masses of external particles
     do i=1,n
        if ((i.eq.1 .or. i.eq.2) .and. m(i).ne.0d0) then
@@ -107,15 +108,38 @@ contains
           exit
        endif
     enddo
+
+    ! move all singlets to the end of the order
+    ord_temp=this%order
+    ns=0
     this%sets=0
+    do i=1,this%next
+       if (part(this%order(i)).ne.21.and.abs(part(this%order(i))).gt.6.and.&
+           this%order(i).gt.2) then
+            ord_temp(this%next-ns)=this%order(i)
+            ns=ns+1
+       endif
+    enddo
+    this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
+    do j=this%next-ns+1,this%next
+        this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
+    enddo
+    j=1
+    do i=1,this%next
+       if (part(this%order(i)).eq.21.or.abs(part(this%order(i))).le.6.) then
+            ord_temp(j)=this%order(i)
+            j=j+1
+       endif
+    enddo
+    this%order=ord_temp
     i=0
-    do i=2,this%next
+    do i=2,this%next-ns
        if (this%order(i).eq.2) then
-          do j=i+1,this%next
+          do j=i+1,this%next-ns
              this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
           enddo
           this%sets(1:i-2,1)=this%order(2:i-1)
-          this%sets(1:this%next-i,2)=this%order(i+1:this%next)
+          this%sets(1:this%next-ns-i,2)=this%order(i+1:this%next-ns)
           exit
        endif
        this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
@@ -123,6 +147,7 @@ contains
     if (verbose) then
        write (*,*) "set 1:",this%sets(:,1)
        write (*,*) "set 2:",this%sets(:,2)
+       write (*,*) "set 3:",this%sets(:,3)
     endif
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
@@ -251,7 +276,7 @@ contains
     subroutine generate_momenta
       implicit none
       integer(kind=4) :: i,j,inext,im1
-      integer(kind=4),dimension(2) :: set
+      integer(kind=4),dimension(3) :: set
       logical,parameter :: use_t_channel_at_start=.true.
 
       ! incoming momenta
@@ -270,6 +295,7 @@ contains
 
       set(1)=this%sets(0,1)
       set(2)=this%sets(0,2)
+      set(3)=this%sets(0,3)
 
       ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
       if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then

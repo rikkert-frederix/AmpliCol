@@ -15,7 +15,7 @@ module phase_space_genpt_mod
                                   ! 3 = uses invariant mass with previous particle
                                   ! 4 = uses cos(theta) with previous particle
 contains
-  subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf,part)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
     ! INPUT
@@ -28,7 +28,7 @@ contains
     ! masses of all the particles. The two incoming particles must be
     ! massless.
     real(kind=8),dimension(n),intent(in) :: m
-    integer,dimension(n),intent(in) :: o
+    integer,dimension(n),intent(in) :: o,part
     real(kind=8),dimension(2),intent(in) :: s_cut
     logical,intent(in) :: include_pdf,t_chan
     this%ptcut=pt_cut

@@ -22,12 +22,12 @@ module phase_space_haag_mod
 
 contains
 
-  subroutine haag_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine haag_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,part)
     implicit none
     class(phase_space_haag),intent(inout) :: this
     real(kind=8),intent(in) :: sqrts
     integer(kind=4),intent(in) :: n
-    integer(kind=4),dimension(n),intent(in) :: o
+    integer(kind=4),dimension(n),intent(in) :: o,part
     real(kind=8),intent(in) :: s_cut(2),pt_cut,rap_cut,dr_cut,sqrt_s_min
     real(kind=8),dimension(n),intent(in) :: m
     logical,intent(in) :: t_chan
