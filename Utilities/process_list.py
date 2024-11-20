@@ -7,7 +7,7 @@ import itertools
 import math
 
 
-def create_all_procs_from_unique_procs(proc,swap_ini,swap_qq):
+def create_all_procs_from_unique_procs(proc,swap_qq):
     all_procs = []
     # Iterate over all permutations of the first two elements
     for perm in itertools.permutations(proc, 2):
@@ -22,7 +22,7 @@ def create_all_procs_from_unique_procs(proc,swap_ini,swap_qq):
         remaining_sorted_swap = tuple(sorted(swap_qq.get(i,i) for i in remaining))
         
         # Combine the permuted first two elements with the sorted last three elements
-        combined = perm+remaining_sorted #tuple(swap_ini.get(iperm,iperm) for iperm in perm) + remaining_sorted
+        combined = perm+remaining_sorted
         combined_swap = tuple(swap_qq.get(iperm,iperm) for iperm in combined[0:2]) + remaining_sorted_swap
 
         if (combined not in all_procs) and (combined_swap not in all_procs):
@@ -70,32 +70,75 @@ def generate_permutations(arr,swap_qq):
     
     return valid_permutations
 
-def convert_to_input(phase_space_order,perm,swap_ini,pso):
-    conversion={'g':'21','q':'1','qbar':'-1','qp':'2','qpbar':'-2','a':'22'}
+def particle(part):
+    return(int(conversion[swap_ini[part]]))
+    
 
+def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
     try:
         shift=perm.index('q')
     except ValueError:
         shift=0
 
-    ini1=swap_ini[perm[0]]
-    ini2=swap_ini[perm[pso+1]]
-
-    input=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
+    flavour_scheme={'q':['d','u','s','c','b'],
+                    'qbar':['dbar','ubar','sbar','cbar','bbar'],
+                    'qp':['d','u','s','c','b'],
+                    'qpbar':['dbar','ubar','sbar','cbar','bbar']}
+        
+    all_proc=[]
+    if 'q' in perm or 'qbar' in perm:
+        for i,q in enumerate(flavour_scheme['q']):
+            new_list1=[item for item in perm]
+            new_list1=[flavour_scheme['q'][i] if item == 'q' else item for item in new_list1]
+            new_list1=[flavour_scheme['qbar'][i] if item == 'qbar' else item for item in new_list1]
+            if 'qp' in new_list1 or 'qpbar' in new_list1:
+                for j,qp in enumerate(flavour_scheme['qp']):
+                    if flavour_scheme['qp'][j] == flavour_scheme['q'][i] : continue
+                    new_list2=[item for item in new_list1]
+                    new_list2=[flavour_scheme['qp'][j] if item == 'qp' else item for item in new_list2]
+                    new_list2=[flavour_scheme['qpbar'][j] if item == 'qpbar' else item for item in new_list2]
+                    all_proc.append(new_list2)
+            else:
+                all_proc.append(new_list1)
+    else:
+        all_proc.append(perm)
+    
+    input=[str(len(all_proc))+'\n']
+    for perm in all_proc:
+        if sorted(perm,key=particle) not in unique_procs: unique_procs.append(sorted(perm,key=particle))
+        ini1=swap_ini[perm[0]]
+        ini2=swap_ini[perm[pso+1]]
+        input+=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
            
-    input=input+[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]]
+        input+=[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]] + ['\n']
 
+#    print(unique_procs)
+        
 #    print('input',input,pso,shift)
            
 
     return input
 
 
+conversion={'g':'21',
+            'd':'1','dbar':'-1',
+            'u':'2','ubar':'-2',
+            's':'3','sbar':'-3',
+            'c':'4','cbar':'-4',
+            'b':'5','bbar':'-5',
+            't':'6','tbar':'-6',
+            'a':'22'}
 swap_ini={'g':'g',
-          'q':'qbar',
-          'qbar':'q',
-          'qp':'qpbar',
-          'qpbar':'qp',
+          'd':'dbar',
+          'dbar':'d',
+          'u':'ubar',
+          'ubar':'u',
+          's':'sbar',
+          'sbar':'s',
+          'c':'cbar',
+          'cbar':'c',
+          'b':'bbar',
+          'bbar':'b',
           'a':'a'}
 swap_qq={'g':'g',
          'q':'qp',
@@ -107,11 +150,15 @@ swap_qq={'g':'g',
 nfinal=4
 
 # multi-jet base processes (without gluons):
-#base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
+base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
 #base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar']]
 #base_procs=[['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
-base_procs=[['q','qbar','a','a']]
 #base_procs=[['q','qbar']]
+
+# Add a photon
+for proc in base_procs:
+    proc.append('a')
+
 
 proton=['g','q','qp','qbar','qpbar']
 
@@ -126,7 +173,7 @@ for proc in base_procs:
 base_proc={}
 all_procs=[]
 for i,proc in enumerate(unique_procs):
-    all_new_procs=create_all_procs_from_unique_procs(proc,swap_ini,swap_qq)
+    all_new_procs=create_all_procs_from_unique_procs(proc,swap_qq)
     all_procs=all_procs+all_new_procs
     for iproc in all_new_procs:
         base_proc[iproc]=i
@@ -170,6 +217,8 @@ pso_map = [{} for _ in phase_space_order]
 
 to_write=[[] for _ in phase_space_order]
 
+
+unique_procs=[]
 for i,proc in enumerate(all_procs):
     print('looping through processes... ',proc)
     valid_perms=generate_permutations(proc,swap_qq)
@@ -178,10 +227,15 @@ for i,proc in enumerate(all_procs):
         for valid_perm in valid_perms:
             if valid_perm[0]==proc[0] and valid_perm[pso+1]==proc[1]:
                 pso_map[pso][proc].append(valid_perm)
-                to_write[pso].append(convert_to_input(psorder,valid_perm,swap_ini,pso)+[' ']+[str(iden_fac[proc])])
+                to_write[pso].append(convert_to_input(psorder,valid_perm,swap_ini,pso,unique_procs)+[' ']+[str(iden_fac[proc])])
 
 
 with open('processes.txt','w') as f:
+    f.write(str(nfinal+2)+' '+str(len(unique_procs))+'\n')
+    for proc in unique_procs:
+        f.write(' '.join([conversion[ele] for ele in proc])+'\n')
+    f.write('\n')
+    f.write('\n')
     f.write(str(len(to_write))+'\n')
     f.write('\n')
     for pso in to_write:
