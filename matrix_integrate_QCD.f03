@@ -23,6 +23,8 @@ program matrix_integrate_QCD
   integer :: iproc_picked,iproc_iden_picked
   integer :: ngroups,igroup,integration_step
   logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
+  integer :: nproc_unique
+  integer,dimension(:,:),allocatable :: unique_procs
   
   type phase_space_order_group
      type(amplitude_QCD) :: amps
@@ -104,6 +106,10 @@ program matrix_integrate_QCD
      ndim=ndim+2
      call PDF_initialise
   endif
+
+  
+  call check_unique_processes()
+
   
   if (read_amps_from_file .or. write_amps_to_file) then
        open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
@@ -114,7 +120,7 @@ program matrix_integrate_QCD
      ! allocate the amplitudes and the phase-space for each of the integration channels
      if (PS_choice.eq.1) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
-     elseif  (PS_choice.eq.2) then
+     elseif (PS_choice.eq.2) then
         allocate(phase_space_haag :: pgl(igroup)%phase_space)
      elseif (PS_choice.eq.3) then
         allocate(phase_space_genpt :: pgl(igroup)%phase_space)
@@ -141,11 +147,11 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf,&
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf,&
              pgl(igroup)%iden_processes)
      elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf,&
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf,&
              pgl(igroup)%iden_processes)
      endif
      call cpu_time(tAfter)
@@ -230,6 +236,155 @@ program matrix_integrate_QCD
   write(*,*) 'Fraction passing:',float(pgl(1:ngroups)%passed)/float(pgl(1:ngroups)%all_evt)
  
 contains
+  subroutine check_unique_processes()
+    implicit none
+    integer :: i,iproc,ievent,ih,nqq
+    integer,parameter :: nevent=10
+    real(kind=8),dimension(:,:),allocatable :: amp2
+    real(kind=8),dimension(:),allocatable :: mass,width,unique_map_value
+    integer,dimension(:),allocatable :: unique_map
+    real(kind=8),dimension(ndim) :: x
+    real(kind=8),external :: ran2
+    type(phase_space_order_group) :: pgl_unique
+    allocate(phase_space_gen23 :: pgl_unique%phase_space)
+    allocate(pgl_unique%processes(next,nproc_unique))
+    allocate(pgl_unique%orders(next,nproc_unique))
+    allocate(mass(next))
+    allocate(width(next))
+    pgl_unique%nproc=nproc_unique
+    pgl_unique%processes=unique_procs
+    do i=1,next
+        mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
+        width(i)=phys_model%get_width(pgl_unique%processes(i,1))
+        do iproc=2,pgl_unique%nproc
+           if ( mass(i).ne.phys_model%get_mass(pgl_unique%processes(i,iproc)) .or. &
+                width(i).ne.phys_model%get_width(pgl_unique%processes(i,iproc))) then
+              write (*,*) 'masses and widths not compatible among processes'
+              stop 1
+           endif
+        enddo
+     enddo
+     call setup_spin(pgl_unique)
+
+     do iproc=1,pgl_unique%nproc
+        nqq=0
+        do i=1,next
+           if (abs(pgl_unique%processes(i,iproc)).le.6) then
+              nqq=nqq+1
+           endif
+        enddo
+        nqq=nqq
+        do i=1,next
+           if (nqq.eq.0) then
+              pgl_unique%orders(i,iproc)=i
+           elseif (nqq.eq.2) then
+              if (i.eq.1) then
+                 pgl_unique%orders(i,iproc)=i
+              elseif (i.lt.next) then
+                 pgl_unique%orders(i,iproc)=i+1
+              elseif(i.eq.next) then
+                 pgl_unique%orders(i,iproc)=2
+              endif
+           elseif (nqq.eq.4) then
+              if (i.eq.1) then
+                 pgl_unique%orders(i,iproc)=i
+              elseif (i.eq.2) then
+                 pgl_unique%orders(i,iproc)=4
+              elseif (i.eq.3) then
+                 pgl_unique%orders(i,iproc)=2
+              elseif (i.le.next-1) then
+                 pgl_unique%orders(i,iproc)=i+1
+              elseif(i.eq.next) then
+                 pgl_unique%orders(i,iproc)=3
+              endif
+           endif
+           if (i.le.2) then
+              if (abs(pgl_unique%processes(i,iproc)).le.6) then
+                 pgl_unique%processes(i,iproc)=-pgl_unique%processes(i,iproc)
+              endif
+           endif
+        enddo
+     enddo
+
+     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%orders(1,1),&
+          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+
+     call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,pgl_unique%spin,pgl_unique%orders,phys_model)
+     
+     allocate(amp2(nevent,pgl_unique%nproc))
+
+     ievent=0
+     do while (ievent.lt.nevent)
+        do i=1,ndim
+           x(i)=ran2()
+        enddo
+        call pgl_unique%phase_space%generate_momenta(x)
+        if (pgl_unique%phase_space%jac.lt.0d0) cycle
+        ievent=ievent+1
+        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel)
+        iproc=1
+        amp2(ievent,:)=0d0
+        if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
+           do ih=1,pgl_unique%amps%n_amps
+              amp2(ievent,iproc)=amp2(ievent,iproc)+pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
+              if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
+           enddo
+        else
+           do ih=1,pgl_unique%amps%n_amps
+              amp2(ievent,iproc)=amp2(ievent,iproc)+dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
+              if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
+           enddo
+        endif
+     enddo
+     write (*,*) pgl_unique%amps%iproc_start
+     ! check 10 PS points. No need to find the identical ones.
+     do i=1,pgl_unique%nproc
+        write (*,*) amp2(1:nevent,i),pgl_unique%processes(1:next,i),pgl_unique%orders(1:next,i)
+     enddo
+
+     allocate(unique_map(1:pgl_unique%nproc))
+     allocate(unique_map_value(1:pgl_unique%nproc))
+     call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
+
+     write (*,*) 'COMPUTED 10 PS POINTS'
+     stop 1
+     
+     deallocate(pgl_unique%spin)
+     deallocate(pgl_unique%phase_space)
+     deallocate(amp2)
+   end subroutine check_unique_processes
+
+   subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
+     implicit none
+     type(phase_space_order_group) :: pgl
+     integer :: nevent
+     real(kind=8),dimension(nevent,pgl%nproc) :: amp2
+     real(kind=8),dimension(pgl%nproc) :: unique_map_value
+     integer,dimension(pgl%nproc) :: unique_map
+     integer :: i,j,n
+     real(kind=8),dimension(nevent) :: ratio
+     real(kind=8) :: ave
+     real(kind=8),parameter :: tiny=1d-6
+     unique_map=-1d0
+     do i=1,pgl%nproc
+        do j=1,i-1
+           ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
+           ave=sum(ratio(1:nevent))/nevent
+           if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
+              unique_map_value(i)=ave
+              unique_map(i)=j
+              exit
+           endif
+        enddo
+        if (j.eq.i) then
+           unique_map(i)=-1
+           unique_map_value(i)=1d0
+        endif
+     enddo
+     write (*,*) unique_map
+     write (*,*) unique_map_value
+   end subroutine find_unique
+  
   real(kind=8) function integrand(x,vol,ifirst,f1)
     implicit none
     integer :: ifirst
@@ -330,13 +485,7 @@ contains
     weight=vol*pgl(ichan)%phase_space%jac*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))*conv
 
     if (pgl(ichan)%amps%n_sing(1).ge.1) then
-       do i=1,next
-          if (abs(part(i)).le.6) then
-             if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
-             if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
-          endif
-       enddo
-       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
+       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
     endif
 
     val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
@@ -645,8 +794,18 @@ contains
           if (i.eq.3) read(argv,*) integration_step
        enddo
        open(unit=10,file=filename,status='old')
+       read (10,*) next,nproc_unique
+       allocate(unique_procs(1:next,1:nproc_unique))
+       do iproc=1,nproc_unique
+          read(10,*) unique_procs(1:next,iproc)
+       enddo
+       read(10,*)
+       read(10,*)
        read (10,*) ngroups
        allocate(pgl(ngroups))
+
+       return
+       
        read (10,*) 
        do igroup=1,ngroups
           read(10,*) next,pgl(igroup)%nproc
@@ -1039,12 +1198,12 @@ contains
     allocate(pgl%iden_iproc(1:pgl%nproc))
     do iproc=1,pgl%nproc
        pgl%iden_iproc(iproc)=1
-       if (any(abs(pgl%processes(1:next,iproc)).eq.1)) then
-          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*5
-       endif
-       if (any(abs(pgl%processes(1:next,iproc)).eq.2)) then
-          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*4
-       endif
+!!$       if (any(abs(pgl%processes(1:next,iproc)).eq.1)) then
+!!$          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*5
+!!$       endif
+!!$       if (any(abs(pgl%processes(1:next,iproc)).eq.2)) then
+!!$          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*4
+!!$       endif
     enddo
     allocate(pgl%val_procs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
     allocate(pgl%iden_processes(1:next,1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
@@ -1071,7 +1230,7 @@ contains
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
     integer(kind=8),intent(out) :: sym_fac
-    integer :: ngl=0
+    integer :: ngl=0,nsing=0,ncol
     integer,dimension(6) :: nq,naq
     integer :: i,j
     integer(kind=8) :: tot_ord
@@ -1089,15 +1248,17 @@ contains
           ngl=ngl+1
        endif
        do j=1,6
-         if (part(i).eq.j) nq(j)=nq(j)+1
-         if (part(i).eq.-j) naq(j)=naq(j)+1
+          if (part(i).eq.j) nq(j)=nq(j)+1
+          if (part(i).eq.-j) naq(j)=naq(j)+1
        enddo
+       if (abs(part(i)).gt.6 .and. part(i).ne.21) nsing=nsing+1
     enddo
+    ncol=next-nsing
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
-       tot_ord=factorial8(next-1)
+       tot_ord=factorial8(ncol-1)
        ! All gluon process. This assumes that the only channels we are
        ! including are strictly different. We distinguish them by considering
        ! how many (final state) gluons are attached to the two colour lines
@@ -1121,7 +1282,7 @@ contains
           sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
-       tot_ord=factorial8(next-2)
+       tot_ord=factorial8(ncol-2)
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
@@ -1168,7 +1329,7 @@ contains
        ! total number of potentially different orders: two ways of connecting
        ! quarks, (n-4)! orderings for the gluons, n-3 ways for an order to
        ! distribute the gluons among the two quark lines
-       tot_ord=2*factorial8(next-4)*(next-3)
+       tot_ord=2*factorial8(ncol-4)*(ncol-3)
 
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
