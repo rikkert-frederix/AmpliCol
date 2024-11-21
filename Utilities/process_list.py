@@ -71,7 +71,7 @@ def generate_permutations(arr,swap_qq):
     return valid_permutations
 
 def particle(part):
-    return(int(conversion[swap_ini[part]]))
+    return(canonical_order[swap_ini[part]])
     
 
 def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
@@ -119,6 +119,20 @@ def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
 
     return input
 
+canonical_order={'dbar':1,
+                 'ubar':2,
+                 'sbar':3,
+                 'cbar':4,
+                 'bbar':5,
+                 'tbar':6,
+                 'd':7,
+                 'u':8,
+                 's':9,
+                 'c':10,
+                 'b':11,
+                 't':12,
+                 'g':13,
+                 'a':14}
 
 conversion={'g':'21',
             'd':'1','dbar':'-1',
