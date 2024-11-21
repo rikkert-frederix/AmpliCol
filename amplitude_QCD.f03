@@ -978,11 +978,16 @@ contains
                   return
                endif
                ! next one must be a quark:
-               if (i.lt.isize) then
-                  if (.not. (is_quark(et(i+1)))) then
+               j=i
+               do while (j.lt.isize)
+                  if (is_singlet(et(j+1))) then
+                     j=j+1
+                  elseif (.not.(is_quark(j+1))) then
                      return
+                  else
+                     exit
                   endif
-               endif
+               enddo
                found_quark=.false.
                found_antiquark=.true.
             endif
