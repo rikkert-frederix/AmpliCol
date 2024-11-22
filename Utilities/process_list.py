@@ -165,7 +165,7 @@ nfinal=4
 # multi-jet base processes (without gluons):
 base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
 #base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar']]
-#base_procs=[['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
+#base_procs=[['q','qp','qbar','qpbar']]
 #base_procs=[['q','qbar']]
 
 # Add a photon
@@ -242,7 +242,10 @@ for i,proc in enumerate(all_procs):
                 pso_map[pso][proc].append(valid_perm)
                 fprocs=convert_to_input(psorder,valid_perm,swap_ini,pso,unique_procs)
                 for fproc in fprocs:
-                    to_write[pso].append(fproc+[' ']+[str(iden_fac[proc])])
+                    indices1 = sorted([i+1 for i, x in enumerate(fproc) if x == "22"])
+                    indices2 = sorted([int(x) for x in fproc[len(fproc)-len(indices1)-1:len(fproc)-1]])
+                    if indices1 == indices2 :
+                        to_write[pso].append(fproc+[' ']+[str(iden_fac[proc])])
 
 
 with open('processes.txt','w') as f:
