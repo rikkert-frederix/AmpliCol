@@ -47,16 +47,6 @@ program matrix_integrate_QCD
   type(phase_space_order_group),dimension(:),allocatable :: pgl
 
   call cpu_time(tTot_B)
-  call get_run_arguments()
-
-  ! Not so relevant mint-module parameters: only used in special cases.
-  call set_mint_module_special_parameters()
-  nchans=ngroups ! overwrite the number of mint-channels to the number of
-                 ! needed integration channels.
-
-  call phys_model%init_part(173d0,1.491500d0)
-
-  call create_run_tag()
 
   ! relevant input parameters for integration
   ! Number of events to generate. (If negative, start
@@ -107,9 +97,16 @@ program matrix_integrate_QCD
      call PDF_initialise
   endif
 
-  
-  call check_unique_processes()
+  call phys_model%init_part(173d0,1.491500d0)
 
+  call get_run_arguments()
+
+  ! Not so relevant mint-module parameters: only used in special cases.
+  call set_mint_module_special_parameters()
+  nchans=ngroups ! overwrite the number of mint-channels to the number of
+                 ! needed integration channels.
+
+  call create_run_tag()
   
   if (read_amps_from_file .or. write_amps_to_file) then
        open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
@@ -336,11 +333,6 @@ contains
               if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
            enddo
         endif
-     enddo
-     write (*,*) pgl_unique%amps%iproc_start
-     ! check 10 PS points. No need to find the identical ones.
-     do i=1,pgl_unique%nproc
-        write (*,*) amp2(1:nevent,i),pgl_unique%processes(1:next,i),pgl_unique%orders(1:next,i)
      enddo
 
      allocate(unique_map(1:pgl_unique%nproc))
@@ -805,6 +797,8 @@ contains
        read (10,*) ngroups
        allocate(pgl(ngroups))
 
+       call check_unique_processes()
+       
        return
        
        read (10,*) 

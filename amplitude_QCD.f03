@@ -635,12 +635,6 @@ contains
             endif
             call define_symm_2qq(this%processes(1,iproc),part_sf(1,1),1)
             call define_symm_2qq(this%processes(1,iproc),part_sf(1,2),2)
-!!$
-!!$            write (*,*) iproc
-!!$            write (*,*) this%processes(1:n,iproc)
-!!$            write (*,*) part_sf(1:n,1)
-!!$            write (*,*) part_sf(1:n,2)
-!!$            
             do jproc=1,iproc-1
                if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
                jord(1:n)=order(1:n,jproc)
