@@ -254,7 +254,7 @@ with open('processes.txt','w') as f:
     f.write(str(len(to_write))+'\n')
     f.write('\n')
     for pso in to_write:
-        f.write(str(nfinal+2)+' '+str(len(pso))+'\n')
+        f.write(str(len(pso))+'\n')
         for ele in pso:
             f.write(' '.join(ele)+'\n')
         f.write('\n')
