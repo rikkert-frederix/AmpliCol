@@ -105,16 +105,15 @@ def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
     
     input=[str(len(all_proc))+'\n']
     for perm in all_proc:
-        if sorted(perm,key=particle) not in unique_procs: unique_procs.append(sorted(perm,key=particle))
+        sperm=sorted(perm,key=particle)
+        if sperm not in unique_procs:
+            unique_procs.append(sperm)
+            if sperm[2] != sperm[3] and canonical_order[sperm[2]] < 13 and canonical_order[sperm[3]] < 13:
+                unique_procs.append(sperm[0:2]+[sperm[3]]+[sperm[2]]+sperm[4:])
         ini1=swap_ini[perm[0]]
         ini2=swap_ini[perm[pso+1]]
         input+=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
-           
         input+=[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]] + ['\n']
-
-#    print(unique_procs)
-        
-#    print('input',input,pso,shift)
            
 
     return input

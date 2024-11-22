@@ -246,7 +246,7 @@ contains
     real(kind=8),dimension(ndim) :: x
     real(kind=8),external :: ran2
     type(phase_space_order_group) :: pgl_unique
-    allocate(phase_space_gen23 :: pgl_unique%phase_space)
+    allocate(phase_space_genpt :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%orders(next,nproc_unique))
     allocate(mass(next))
@@ -305,9 +305,10 @@ contains
            endif
         enddo
      enddo
-
+     
      call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%orders(1,1),&
-          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf, &
+          pgl_unique%iden_processes)
 
      call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,pgl_unique%spin,pgl_unique%orders,phys_model)
      
