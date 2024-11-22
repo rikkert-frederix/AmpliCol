@@ -11,7 +11,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false.
+  logical,parameter :: verbose=.true.,eff_photon_int=.false.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
@@ -109,10 +109,11 @@ contains
        endif
     enddo
 
-    ! move all singlets to the end of the order
-    ord_temp=this%order
     ns=0
     this%sets=0
+    ! move all singlets to the end of the order
+    if (eff_photon_int) then
+    ord_temp=this%order
     do i=1,this%next
        if (part(this%order(i)).ne.21.and.abs(part(this%order(i))).gt.6.and.&
            this%order(i).gt.2) then
@@ -132,6 +133,8 @@ contains
        endif
     enddo
     this%order=ord_temp
+    endif
+
     i=0
     do i=2,this%next-ns
        if (this%order(i).eq.2) then
@@ -297,6 +300,30 @@ contains
       set(2)=this%sets(0,2)
       set(3)=this%sets(0,3)
 
+      do i=1,popcnt(set(3))
+         inext=ibset(0,this%sets(i,3)-1)
+         set(3)=set(3)-inext
+      if (popcnt(set(1)+set(2)+set(3)).eq.1) then
+         call gent_one_step(inext,set(1)+set(2)+set(3),1)
+         if (this%jac.le.0d0) return
+         this%pp(0:3,set(1)+set(2)+set(3)+2)=this%pp(0:3,1)-this%pp(0:3,inext)
+         this%invm(set(1)+set(2)+set(3)+2)=dot(this%pp(0:3,set(1)+set(2)+set(3)+2),this%pp(0:3,set(1)+set(2)+set(3)+2))
+         !do j=1,this%next
+         !   write(*,*) j,this%pp(0:3,2**(j-1))
+         !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
+         !enddo
+      else
+         call double_t(inext,set(1)+set(2)+set(3),1,2)
+         if (this%jac.le.0d0) return
+         this%pp(0:3,set(1)+set(2)+set(3)+1)=this%pp(0:3,2)-this%pp(0:3,inext)
+         this%invm(set(1)+set(2)+set(3)+1)=dot(this%pp(0:3,set(1)+set(2)+set(3)+1),this%pp(0:3,set(1)+set(2)+set(3)+1))
+         !do j=1,this%next
+         !   write(*,*) j,this%pp(0:3,2**(j-1))
+         !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
+         !enddo
+      endif    
+      enddo
+
       ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
       if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'two sets with at least two ',&
@@ -332,6 +359,7 @@ contains
          this%pp(0:3,set(2)+2)=this%pp(0:3,1)-this%pp(0:3,set(1))
          this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
       endif
+
       do i=1,2
          if (popcnt(set(i)).le.1) cycle ! at least 2 particles in a set
          inext=ibset(0,this%sets(1,i)-1)
@@ -414,6 +442,7 @@ contains
          ! We need to get the momentum of the final particle of the set.
          this%pp(0:3,set(i))=this%pp(0:3,set(i)+inext+(3-i))+this%pp(0:3,(3-i))-this%pp(0:3,inext)
       enddo
+
       if (debug) call test_momenta
 
       ! Add factors of 2*pi
@@ -1276,6 +1305,7 @@ contains
          write (*,*) 't- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
       ix=ix+1
+
       call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
       call gentcms(this%pp(0,ib+ir+i),this%pp(0,ib),this%invm(ib+ir),phi,sqrt(this%invm(i)) &
            &,sqrt(this%invm(ir)),this%pp(0,i),this%pp(0,ib+ir))
