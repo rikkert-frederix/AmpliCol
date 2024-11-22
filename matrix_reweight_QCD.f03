@@ -271,9 +271,9 @@ contains
        allocate(helicity(1:next))
        allocate(col_order(1:next))
        allocate(iPDG(1:next))
-       allocate(o(next,1))
-       allocate(part(next,1))
-       allocate(processes(next,max_proc))
+       if (.not.allocated(o)) allocate(o(next,1))
+       if (.not.allocated(part)) allocate(part(next,1))
+       if (.not.allocated(processes)) allocate(processes(next,max_proc))
        allocate(hel(next))
        allocate(p(0:3,next))
     endif
