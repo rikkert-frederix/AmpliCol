@@ -951,11 +951,11 @@ contains
 
   subroutine add_to_process_list(process,order,factor)
     implicit none
-    integer,dimension(next) :: process,order,process_mapped,process_unique
+    integer,dimension(next) :: process,order,process_mapped,process_unique,invertmap
     integer :: factor
     real(kind=8) :: multi_factor
-    call map_to_canonical_form(process,process_mapped)
-    call get_unique_process(process,process_mapped,process_unique,multi_factor)
+    call map_to_canonical_form(process,process_mapped,invertmap)
+    call get_unique_process(process,process_mapped,process_unique,multi_factor,invertmap)
     multi_factor=multi_factor*factor
     call add_to_unique_process_list(process,process_unique,order,multi_factor)
   end subroutine add_to_process_list
@@ -986,9 +986,9 @@ contains
   end subroutine add_to_unique_process_list
 
   
-  subroutine get_unique_process(process,process_mapped,process_unique,multi_factor)
+  subroutine get_unique_process(process,process_mapped,process_unique,multi_factor,invertmap)
     implicit none
-    integer,dimension(next) :: process,process_mapped,process_unique
+    integer,dimension(next) :: process,process_mapped,process_unique,invertmap
     integer :: iproc,map_from,map_to,i,j
     real(kind=8) :: multi_factor
     do iproc=1,pgl_unique%nproc
@@ -1003,24 +1003,29 @@ contains
     multi_factor=unique_map_value(iproc)
     if (unique_map(iproc).gt.0) then
        do i=1,next
-          map_from=abs(pgl_unique%processes(i,iproc))
-          map_to=abs(pgl_unique%processes(i,unique_map(iproc)))
-          do j=1,next
-             if (abs(process(j)).eq.map_from) &
-                  process_unique(j)=sign(map_to,process(j))
-          enddo
+          if ((i.le.2 .and. invertmap(i).gt.2) .or. (i.gt.2 .and. invertmap(i).le.2)) then
+             process_unique(i)=phys_model%get_antipart(pgl_unique%processes(invertmap(i),unique_map(iproc)))
+          else
+             process_unique(i)=pgl_unique%processes(invertmap(i),unique_map(iproc))
+          endif
        enddo
     else
-       process_unique(1:next)=process(1:next)
+       do i=1,next
+          if ((i.le.2 .and. invertmap(i).gt.2) .or. (i.gt.2 .and. invertmap(i).le.2)) then
+             process_unique(i)=phys_model%get_antipart(pgl_unique%processes(invertmap(i),iproc))
+          else
+             process_unique(i)=pgl_unique%processes(invertmap(i),iproc)
+          endif
+       enddo
     endif
   end subroutine get_unique_process
 
-  subroutine map_to_canonical_form(process,part)
+  subroutine map_to_canonical_form(process,part,invertmap)
     ! first quarks, then anti-quarks, then gluons, and finally singlets
     implicit none
-    integer,dimension(next) :: process,part
+    integer,dimension(next) :: process,part,invertmap
     logical :: sf
-    integer :: iflav,i,nqq,iflip
+    integer :: iflav,i,nqq,iflip,tmp
     ! count the quarks, anti-quarks and gluons. And check if there is more
     ! than one quark line if they are of the same flavour or not.
     sf=.true.
@@ -1035,6 +1040,7 @@ contains
              iflav=min(abs(process(i)),iflav)
           endif
        endif
+       invertmap(i)=i
     enddo
     nqq=nqq/2
     if (nqq.lt.2) sf=.false.
@@ -1045,13 +1051,17 @@ contains
        do i=1,next
           if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
              ! found the quark
-             if (i.ne.1) call flip_one(part,i,1) ! move quark to position 1
+             if (i.ne.1) then
+                call flip_one(part,i,1,invertmap,.true.) ! move quark to position 1
+             endif
           endif
        enddo
        do i=1,next
           if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
              ! found the anti-quark
-             if (i.ne.2) call flip_one(part,i,2) ! move anti-quark to position 2
+             if (i.ne.2) then
+                call flip_one(part,i,2,invertmap,.true.) ! move anti-quark to position 2
+             endif
           endif
        enddo
     elseif (nqq.eq.2) then
@@ -1061,7 +1071,7 @@ contains
              if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
                 ! found quark
                 if (i.ne.iflip) then
-                   call flip_one(part,i,iflip)
+                   call flip_one(part,i,iflip,invertmap,.true.)
                 endif
                 iflip=iflip+1
              endif
@@ -1071,7 +1081,7 @@ contains
              if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
                 ! found anti-quark
                 if (i.ne.iflip) then
-                   call flip_one(part,i,iflip)
+                   call flip_one(part,i,iflip,invertmap,.true.)
                 endif
                 iflip=iflip+1
              endif
@@ -1082,7 +1092,7 @@ contains
              if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
                 ! found quark
                 if (i.ne.iflip) then
-                   call flip_one(part,i,iflip)
+                   call flip_one(part,i,iflip,invertmap,.true.)
                 endif
                 iflip=iflip+1
              endif
@@ -1092,19 +1102,19 @@ contains
                 ! found anti-quark
                 if (abs(part(i)).eq.abs(part(1))) then
                    if (i.ne.3) then
-                      call flip_one(part,i,3)
+                      call flip_one(part,i,3,invertmap,.true.)
                    endif
                 else
                    if (i.ne.4) then
-                      call flip_one(part,i,4)
+                      call flip_one(part,i,4,invertmap,.true.)
                    endif
                 endif
              endif
           enddo
           ! flip if pdg's are not ordered
           if (abs(part(1)).gt.abs(part(2))) then
-             call flip_one(part,1,2)
-             call flip_one(part,3,4)
+             call flip_one(part,1,2,invertmap,.false.)
+             call flip_one(part,3,4,invertmap,.false.)
           endif
        endif
     endif
@@ -1112,17 +1122,20 @@ contains
     do i=next,1,-1
        if (is_singlet(part(i))) then
           ! found a color singlet, move to the end
-          if (i.ne.iflip) call flip_one(part,i,iflip)
+          if (i.ne.iflip) then
+             call flip_one(part,i,iflip,invertmap,.true.)
+          endif
           iflip=iflip-1
        endif
     enddo
   end subroutine map_to_canonical_form
 
-  subroutine flip_one(part,i,j)
+  subroutine flip_one(part,i,j,invertmap,to_invert)
     implicit none
-    integer :: i,j,icross,itmp
-    integer,dimension(next) :: part
+    integer :: i,j,icross,itmp,k,l
+    integer,dimension(next) :: part,invertmap
     real(kind=8) :: dtmp
+    logical :: to_invert
     if ((i.le.2 .and. j.gt.2) .or. (i.gt.2 .and. j.le.2)) then
        icross=-1
     else
@@ -1136,6 +1149,16 @@ contains
     else
        part(i)=part(j)
        part(j)=itmp
+    endif
+    if (to_invert) then
+       do k=1,next
+          if (invertmap(k).eq.i) exit
+       enddo
+       do l=1,next
+          if (invertmap(l).eq.j) exit
+       enddo
+       invertmap(l)=i
+       invertmap(k)=j
     endif
   end subroutine flip_one
   
