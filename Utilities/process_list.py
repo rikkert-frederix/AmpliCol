@@ -103,7 +103,7 @@ def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
     else:
         all_proc.append(perm)
     
-    input=[str(len(all_proc))+'\n']
+    input=[]
     for perm in all_proc:
         sperm=sorted(perm,key=particle)
         if sperm not in unique_procs:
@@ -112,9 +112,9 @@ def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
                 unique_procs.append(sperm[0:2]+[sperm[3]]+[sperm[2]]+sperm[4:])
         ini1=swap_ini[perm[0]]
         ini2=swap_ini[perm[pso+1]]
-        input+=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
-        input+=[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]] + ['\n']
-           
+        process=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
+        process+=[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]]# + ['\n']
+        input.append(process)
 
     return input
 
@@ -240,7 +240,9 @@ for i,proc in enumerate(all_procs):
         for valid_perm in valid_perms:
             if valid_perm[0]==proc[0] and valid_perm[pso+1]==proc[1]:
                 pso_map[pso][proc].append(valid_perm)
-                to_write[pso].append(convert_to_input(psorder,valid_perm,swap_ini,pso,unique_procs)+[' ']+[str(iden_fac[proc])])
+                fprocs=convert_to_input(psorder,valid_perm,swap_ini,pso,unique_procs)
+                for fproc in fprocs:
+                    to_write[pso].append(fproc+[' ']+[str(iden_fac[proc])])
 
 
 with open('processes.txt','w') as f:

@@ -334,13 +334,9 @@ contains
            enddo
         endif
      enddo
-
      allocate(unique_map(1:pgl_unique%nproc))
      allocate(unique_map_value(1:pgl_unique%nproc))
      call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
-
-     write (*,*) 'COMPUTED 10 PS POINTS'
-     stop 1
      
      deallocate(pgl_unique%spin)
      deallocate(pgl_unique%phase_space)
@@ -792,12 +788,12 @@ contains
        do iproc=1,nproc_unique
           read(10,*) unique_procs(1:next,iproc)
        enddo
+       call check_unique_processes()
        read(10,*)
        read(10,*)
        read (10,*) ngroups
        allocate(pgl(ngroups))
 
-       call check_unique_processes()
        
        return
        
