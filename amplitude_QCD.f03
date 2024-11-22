@@ -246,11 +246,9 @@ contains
          if (.not. this%same_flav(iproc)) cycle
          this%iproc_start(iproc)=this%n_amps+1
          do iamp=this%iproc_start(this%same_flavour_proc_map(iproc,1)),this%iproc_start(this%same_flavour_proc_map(iproc,1)+1)-1
-            if (same_flavour_sum(iamp,1).eq.0) cycle
             iord=[current_list_local(curr2amp(1,iamp))%order(1:n-1),current_list_local(curr2amp(2,iamp))%order(1)]
             ispn=[current_list_local(curr2amp(1,iamp))%spin(1:n-1) ,current_list_local(curr2amp(2,iamp))%spin(1) ]
             do jamp=this%iproc_start(this%same_flavour_proc_map(iproc,2)),this%iproc_start(this%same_flavour_proc_map(iproc,2)+1)-1
-               if (same_flavour_sum(jamp,2).eq.0) cycle
                ! if they have the same colour order and spins, they need to be added together
                jord=[current_list_local(curr2amp(1,jamp))%order(1:n-1),current_list_local(curr2amp(2,jamp))%order(1)]
                jspn=[current_list_local(curr2amp(1,jamp))%spin(1:n-1) ,current_list_local(curr2amp(2,jamp))%spin(1) ]
@@ -275,8 +273,6 @@ contains
                   same_flavour_sum(this%n_amps,1)=jamp ! in jamp, the different-flavour quarks are connected    
                   same_flavour_sum(this%n_amps,2)=iamp ! in iamp, the different-flavour quarks are not connected
                endif
-               same_flavour_sum(iamp,1:2)=0
-               same_flavour_sum(jamp,1:2)=0
                exit
             enddo
             if (jamp.gt.this%n_amps) then
@@ -387,7 +383,7 @@ contains
                   endif
                endif
             else
-               this%perm(1:n,iamp)=this%perm(1:n,this%same_flavour_sum(iamp,1))
+               this%perm(1:n-this%n_sing(1),iamp)=this%perm(1:n-this%n_sing(1),this%same_flavour_sum(iamp,1))
             endif
          enddo
       enddo
@@ -711,18 +707,36 @@ contains
          endif
       enddo
       if (chan.eq.1) then
-         ! change the 2nd quark and an anti-quark in the process
-         part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),5)+1,part_out(connection(1,2)))
-         part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),5)+1,part_out(connection(2,2)))
-      elseif(chan.eq.2) then
-         ! change the mixed quark and an anti-quark in the process; leave the
-         ! first (anti-)quark unchanged.
-         if (connection(1,1).eq.ifirst) then
-            part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),5)+1,part_out(connection(1,2)))
-            part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),5)+1,part_out(connection(2,1)))
+         if (abs(part_out(connection(1,1))).lt.4) then
+            ! change the 2nd quark and an anti-quark in the process
+            part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),4)+2,part_out(connection(1,2)))
+            part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),4)+2,part_out(connection(2,2)))
          else
-            part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),5)+1,part_out(connection(1,1)))
-            part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),5)+1,part_out(connection(2,2)))
+            ! change the 1st quark and an anti-quark in the process
+            part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),4)+2,part_out(connection(1,1)))
+            part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),4)+2,part_out(connection(2,1)))
+         endif
+      elseif(chan.eq.2) then
+         if (abs(part_out(connection(1,1))).lt.4) then
+            ! change the mixed quark and an anti-quark in the process; leave the
+            ! first (anti-)quark unchanged.
+            if (connection(1,1).eq.ifirst) then
+               part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),4)+2,part_out(connection(1,2)))
+               part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),4)+2,part_out(connection(2,1)))
+            else
+               part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),4)+2,part_out(connection(1,1)))
+               part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),4)+2,part_out(connection(2,2)))
+            endif
+         else
+            ! change the mixed quark and an anti-quark in the process; leave the
+            ! second (anti-)quark unchanged.
+            if (connection(1,1).eq.ifirst) then
+               part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),4)+2,part_out(connection(1,1)))
+               part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),4)+2,part_out(connection(2,2)))
+            else
+               part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),4)+2,part_out(connection(1,2)))
+               part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),4)+2,part_out(connection(2,1)))
+            endif
          endif
       endif
     end subroutine define_symm_2qq
@@ -978,11 +992,16 @@ contains
                   return
                endif
                ! next one must be a quark:
-               if (i.lt.isize) then
-                  if (.not. (is_quark(et(i+1)))) then
+               j=i
+               do while (j.lt.isize)
+                  if (is_singlet(et(j+1))) then
+                     j=j+1
+                  elseif (.not.(is_quark(j+1))) then
                      return
+                  else
+                     exit
                   endif
-               endif
+               enddo
                found_quark=.false.
                found_antiquark=.true.
             endif

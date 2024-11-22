@@ -45,16 +45,6 @@ program matrix_integrate_QCD
   type(phase_space_order_group),dimension(:),allocatable :: pgl
 
   call cpu_time(tTot_B)
-  call get_run_arguments()
-
-  ! Not so relevant mint-module parameters: only used in special cases.
-  call set_mint_module_special_parameters()
-  nchans=ngroups ! overwrite the number of mint-channels to the number of
-                 ! needed integration channels.
-
-  call phys_model%init_part(173d0,1.491500d0)
-
-  call create_run_tag()
 
   ! relevant input parameters for integration
   ! Number of events to generate. (If negative, start
@@ -104,6 +94,17 @@ program matrix_integrate_QCD
      ndim=ndim+2
      call PDF_initialise
   endif
+
+  call phys_model%init_part(173d0,1.491500d0)
+
+  call get_run_arguments()
+
+  ! Not so relevant mint-module parameters: only used in special cases.
+  call set_mint_module_special_parameters()
+  nchans=ngroups ! overwrite the number of mint-channels to the number of
+                 ! needed integration channels.
+
+  call create_run_tag()
   
   if (read_amps_from_file .or. write_amps_to_file) then
        open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
@@ -230,6 +231,147 @@ program matrix_integrate_QCD
   write(*,*) 'Fraction passing:',float(pgl(1:ngroups)%passed)/float(pgl(1:ngroups)%all_evt)
  
 contains
+  subroutine check_unique_processes()
+    implicit none
+    integer :: i,iproc,ievent,ih,nqq
+    integer,parameter :: nevent=10
+    real(kind=8),dimension(:,:),allocatable :: amp2
+    real(kind=8),dimension(:),allocatable :: mass,width,unique_map_value
+    integer,dimension(:),allocatable :: unique_map
+    real(kind=8),dimension(ndim) :: x
+    real(kind=8),external :: ran2
+    type(phase_space_order_group) :: pgl_unique
+    allocate(phase_space_genpt :: pgl_unique%phase_space)
+    allocate(pgl_unique%processes(next,nproc_unique))
+    allocate(pgl_unique%orders(next,nproc_unique))
+    allocate(mass(next))
+    allocate(width(next))
+    pgl_unique%nproc=nproc_unique
+    pgl_unique%processes=unique_procs
+    do i=1,next
+        mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
+        width(i)=phys_model%get_width(pgl_unique%processes(i,1))
+        do iproc=2,pgl_unique%nproc
+           if ( mass(i).ne.phys_model%get_mass(pgl_unique%processes(i,iproc)) .or. &
+                width(i).ne.phys_model%get_width(pgl_unique%processes(i,iproc))) then
+              write (*,*) 'masses and widths not compatible among processes'
+              stop 1
+           endif
+        enddo
+     enddo
+     call setup_spin(pgl_unique)
+
+     do iproc=1,pgl_unique%nproc
+        nqq=0
+        do i=1,next
+           if (abs(pgl_unique%processes(i,iproc)).le.6) then
+              nqq=nqq+1
+           endif
+        enddo
+        nqq=nqq
+        do i=1,next
+           if (nqq.eq.0) then
+              pgl_unique%orders(i,iproc)=i
+           elseif (nqq.eq.2) then
+              if (i.eq.1) then
+                 pgl_unique%orders(i,iproc)=i
+              elseif (i.lt.next) then
+                 pgl_unique%orders(i,iproc)=i+1
+              elseif(i.eq.next) then
+                 pgl_unique%orders(i,iproc)=2
+              endif
+           elseif (nqq.eq.4) then
+              if (i.eq.1) then
+                 pgl_unique%orders(i,iproc)=i
+              elseif (i.eq.2) then
+                 pgl_unique%orders(i,iproc)=4
+              elseif (i.eq.3) then
+                 pgl_unique%orders(i,iproc)=2
+              elseif (i.le.next-1) then
+                 pgl_unique%orders(i,iproc)=i+1
+              elseif(i.eq.next) then
+                 pgl_unique%orders(i,iproc)=3
+              endif
+           endif
+           if (i.le.2) then
+              if (abs(pgl_unique%processes(i,iproc)).le.6) then
+                 pgl_unique%processes(i,iproc)=-pgl_unique%processes(i,iproc)
+              endif
+           endif
+        enddo
+     enddo
+     
+     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%orders(1,1),&
+          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf, &
+          pgl_unique%iden_processes)
+
+     call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,pgl_unique%spin,pgl_unique%orders,phys_model)
+     
+     allocate(amp2(nevent,pgl_unique%nproc))
+
+     ievent=0
+     do while (ievent.lt.nevent)
+        do i=1,ndim
+           x(i)=ran2()
+        enddo
+        call pgl_unique%phase_space%generate_momenta(x)
+        if (pgl_unique%phase_space%jac.lt.0d0) cycle
+        ievent=ievent+1
+        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel)
+        iproc=1
+        amp2(ievent,:)=0d0
+        if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
+           do ih=1,pgl_unique%amps%n_amps
+              amp2(ievent,iproc)=amp2(ievent,iproc)+pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
+              if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
+           enddo
+        else
+           do ih=1,pgl_unique%amps%n_amps
+              amp2(ievent,iproc)=amp2(ievent,iproc)+dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
+              if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
+           enddo
+        endif
+     enddo
+     allocate(unique_map(1:pgl_unique%nproc))
+     allocate(unique_map_value(1:pgl_unique%nproc))
+     call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
+     
+     deallocate(pgl_unique%spin)
+     deallocate(pgl_unique%phase_space)
+     deallocate(amp2)
+   end subroutine check_unique_processes
+
+   subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
+     implicit none
+     type(phase_space_order_group) :: pgl
+     integer :: nevent
+     real(kind=8),dimension(nevent,pgl%nproc) :: amp2
+     real(kind=8),dimension(pgl%nproc) :: unique_map_value
+     integer,dimension(pgl%nproc) :: unique_map
+     integer :: i,j,n
+     real(kind=8),dimension(nevent) :: ratio
+     real(kind=8) :: ave
+     real(kind=8),parameter :: tiny=1d-6
+     unique_map=-1d0
+     do i=1,pgl%nproc
+        do j=1,i-1
+           ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
+           ave=sum(ratio(1:nevent))/nevent
+           if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
+              unique_map_value(i)=ave
+              unique_map(i)=j
+              exit
+           endif
+        enddo
+        if (j.eq.i) then
+           unique_map(i)=-1
+           unique_map_value(i)=1d0
+        endif
+     enddo
+     write (*,*) unique_map
+     write (*,*) unique_map_value
+   end subroutine find_unique
+  
   real(kind=8) function integrand(x,vol,ifirst,f1)
     implicit none
     integer :: ifirst
@@ -639,8 +781,20 @@ contains
           if (i.eq.3) read(argv,*) integration_step
        enddo
        open(unit=10,file=filename,status='old')
+       read (10,*) next,nproc_unique
+       allocate(unique_procs(1:next,1:nproc_unique))
+       do iproc=1,nproc_unique
+          read(10,*) unique_procs(1:next,iproc)
+       enddo
+       call check_unique_processes()
+       read(10,*)
+       read(10,*)
        read (10,*) ngroups
        allocate(pgl(ngroups))
+
+       
+       return
+       
        read (10,*) 
        do igroup=1,ngroups
           read(10,*) next,pgl(igroup)%nproc

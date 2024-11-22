@@ -71,7 +71,7 @@ def generate_permutations(arr,swap_qq):
     return valid_permutations
 
 def particle(part):
-    return(int(conversion[swap_ini[part]]))
+    return(canonical_order[swap_ini[part]])
     
 
 def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
@@ -103,22 +103,35 @@ def convert_to_input(phase_space_order,perm,swap_ini,pso,unique_procs):
     else:
         all_proc.append(perm)
     
-    input=[str(len(all_proc))+'\n']
+    input=[]
     for perm in all_proc:
-        if sorted(perm,key=particle) not in unique_procs: unique_procs.append(sorted(perm,key=particle))
+        sperm=sorted(perm,key=particle)
+        if sperm not in unique_procs:
+            unique_procs.append(sperm)
+            if sperm[2] != sperm[3] and canonical_order[sperm[2]] < 13 and canonical_order[sperm[3]] < 13:
+                unique_procs.append(sperm[0:2]+[sperm[3]]+[sperm[2]]+sperm[4:])
         ini1=swap_ini[perm[0]]
         ini2=swap_ini[perm[pso+1]]
-        input+=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
-           
-        input+=[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]] + ['\n']
-
-#    print(unique_procs)
-        
-#    print('input',input,pso,shift)
-           
+        process=[conversion[ini1]]+[conversion[ini2]]+[conversion[perm[i]] for i in range(1,pso+1)]+[conversion[perm[i]] for i in range(pso+2,len(perm))]
+        process+=[' ']+[str(i) for i in phase_space_order[shift:]]+[str(i) for i in phase_space_order[:shift]]# + ['\n']
+        input.append(process)
 
     return input
 
+canonical_order={'dbar':1,
+                 'ubar':2,
+                 'sbar':3,
+                 'cbar':4,
+                 'bbar':5,
+                 'tbar':6,
+                 'd':7,
+                 'u':8,
+                 's':9,
+                 'c':10,
+                 'b':11,
+                 't':12,
+                 'g':13,
+                 'a':14}
 
 conversion={'g':'21',
             'd':'1','dbar':'-1',
@@ -227,7 +240,9 @@ for i,proc in enumerate(all_procs):
         for valid_perm in valid_perms:
             if valid_perm[0]==proc[0] and valid_perm[pso+1]==proc[1]:
                 pso_map[pso][proc].append(valid_perm)
-                to_write[pso].append(convert_to_input(psorder,valid_perm,swap_ini,pso,unique_procs)+[' ']+[str(iden_fac[proc])])
+                fprocs=convert_to_input(psorder,valid_perm,swap_ini,pso,unique_procs)
+                for fproc in fprocs:
+                    to_write[pso].append(fproc+[' ']+[str(iden_fac[proc])])
 
 
 with open('processes.txt','w') as f:
