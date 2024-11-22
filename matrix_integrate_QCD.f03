@@ -25,12 +25,17 @@ program matrix_integrate_QCD
   logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
   integer :: nproc_unique
   integer,dimension(:,:),allocatable :: unique_procs
+  integer :: nprocs
+  integer,dimension(:),allocatable :: iden_iproc
+  integer,dimension(:,:),allocatable :: processes,orders
+  integer,dimension(:,:,:),allocatable :: iden_processes
+  real(kind=8),dimension(:,:),allocatable :: factors
   
   type phase_space_order_group
      type(amplitude_QCD) :: amps
      class(phase_space_type),allocatable :: phase_space
-     integer,dimension(:,:),allocatable :: processes,orders
-     integer,dimension(:),allocatable :: multi_factor,iden_iproc
+     integer,dimension(:,:),allocatable :: multi_factor,processes,orders
+     integer,dimension(:),allocatable :: iden_iproc
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs
      integer,dimension(:,:,:),allocatable :: iden_processes
@@ -45,6 +50,9 @@ program matrix_integrate_QCD
      integer,dimension(:),allocatable :: include_hel
   end type phase_space_order_group
   type(phase_space_order_group),dimension(:),allocatable :: pgl
+  type(phase_space_order_group),allocatable :: pgl_unique
+  real(kind=8),dimension(:),allocatable :: unique_map_value
+  integer,dimension(:),allocatable :: unique_map
 
   call cpu_time(tTot_B)
 
@@ -59,7 +67,6 @@ program matrix_integrate_QCD
 !!$     ncalls0=640000
 !!$  endif
 
-  ndim=3*(next-2)-4   ! Number of dimensions of the integration.
 
   itmax=16         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
@@ -92,10 +99,7 @@ program matrix_integrate_QCD
      s_cut(1:2)=sqrt_s_min**2
   endif
 
-  if (include_pdf) then
-     ndim=ndim+2
-     call PDF_initialise
-  endif
+  if (include_pdf) call PDF_initialise
 
   call phys_model%init_part(173d0,1.491500d0)
 
@@ -238,11 +242,9 @@ contains
     integer :: i,iproc,ievent,ih,nqq
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
-    real(kind=8),dimension(:),allocatable :: mass,width,unique_map_value
-    integer,dimension(:),allocatable :: unique_map
+    real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(ndim) :: x
     real(kind=8),external :: ran2
-    type(phase_space_order_group) :: pgl_unique
     allocate(phase_space_genpt :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%orders(next,nproc_unique))
@@ -296,13 +298,11 @@ contains
               endif
            endif
            if (i.le.2) then
-              if (abs(pgl_unique%processes(i,iproc)).le.6) then
-                 pgl_unique%processes(i,iproc)=-pgl_unique%processes(i,iproc)
-              endif
+              pgl_unique%processes(i,iproc)=phys_model%get_antipart(pgl_unique%processes(i,iproc))
            endif
         enddo
      enddo
-     
+
      call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%orders(1,1),&
           s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf, &
           pgl_unique%iden_processes)
@@ -337,7 +337,11 @@ contains
      allocate(unique_map(1:pgl_unique%nproc))
      allocate(unique_map_value(1:pgl_unique%nproc))
      call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
-     
+
+     do iproc=1,pgl_unique%nproc
+        write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:next,iproc)
+     enddo
+
      deallocate(pgl_unique%spin)
      deallocate(pgl_unique%phase_space)
      deallocate(amp2)
@@ -370,8 +374,6 @@ contains
            unique_map_value(i)=1d0
         endif
      enddo
-     write (*,*) unique_map
-     write (*,*) unique_map_value
    end subroutine find_unique
   
   real(kind=8) function integrand(x,vol,ifirst,f1)
@@ -481,10 +483,6 @@ contains
 
     ! Apply the weight from the cuts
     if (smooth_cuts) val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*cuts_wgt
-
-    ! Since we only need to include a subset of all the colour-orderings, we
-    ! need to compensate with a symmetry factor
-    val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*pgl(ichan)%multi_factor(1:pgl(ichan)%nproc)
 
     call include_PDF_and_identical_procs(val,val_abs,pgl(ichan))
 
@@ -767,6 +765,8 @@ contains
     logical :: found_1
     integer(kind=8) :: sym_fac
     integer(kind=8) iseed
+    integer,dimension(:),allocatable :: process,order
+    integer :: factor,nproc_in_group
     common /to_seed/iseed
     iseed=0
     ! integration steps:
@@ -784,39 +784,66 @@ contains
        enddo
        open(unit=10,file=filename,status='old')
        read (10,*) next,nproc_unique
+       ndim=3*(next-2)-4
+       if (include_pdf) ndim=ndim+2
        allocate(unique_procs(1:next,1:nproc_unique))
        do iproc=1,nproc_unique
           read(10,*) unique_procs(1:next,iproc)
        enddo
+       allocate(pgl_unique)
        call check_unique_processes()
        read(10,*)
        read(10,*)
        read (10,*) ngroups
        allocate(pgl(ngroups))
 
-       
-       return
+       allocate(process(1:next))
+       allocate(order(1:next))
        
        read (10,*) 
        do igroup=1,ngroups
-          read(10,*) next,pgl(igroup)%nproc
+          nprocs=0
+          read(10,*) nproc_in_group
+          allocate(iden_iproc(nproc_in_group))
+          allocate(processes(1:next,nproc_in_group))
+          allocate(orders(1:next,nproc_in_group))
+          allocate(iden_processes(1:next,nproc_in_group,nproc_in_group))
+          allocate(factors(nproc_in_group,nproc_in_group))
+          do iproc=1,nproc_in_group
+             read(10,*) process(1:next),order(1:next),factor
+             call add_to_process_list(process,order,factor)
+          enddo
+          pgl(igroup)%nproc=nprocs
           allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
           allocate(pgl(igroup)%orders(1:next,1:pgl(igroup)%nproc))
-          allocate(pgl(igroup)%multi_factor(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%multi_factor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
+          pgl(igroup)%orders(1:next,1:pgl(igroup)%nproc)=orders(1:next,1:pgl(igroup)%nproc)
+          pgl(igroup)%multi_factor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
+               factors(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
+          pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc)=iden_iproc(1:pgl(igroup)%nproc)
+          pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
+               iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
+          deallocate(iden_iproc)
+          deallocate(processes)
+          deallocate(orders)
+          deallocate(iden_processes)
+          deallocate(factors)
           write (*,*) '****************************************************'
           do iproc=1,pgl(igroup)%nproc
-             read(10,*) pgl(igroup)%processes(1:next,iproc),&
-                  pgl(igroup)%orders(1:next,iproc),pgl(igroup)%multi_factor(iproc)
-             write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),'   ',&
-                  pgl(igroup)%orders(1:next,iproc),'   ',pgl(igroup)%multi_factor(iproc)
+             write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
+                  pgl(igroup)%orders(1:next,iproc),' ; ',pgl(igroup)%iden_iproc(iproc)
           enddo
-          call define_identical_procs(pgl(igroup))
           write (*,*) '****************************************************'
           read(10,*)
           read(10,*)
           read(10,*)
           read(10,*)
        enddo
+       deallocate(pgl_unique)
 999    continue
        close(10)
     elseif (argc.le.10) then
@@ -837,6 +864,8 @@ contains
                 write (*,*) 'Need at least 4 particles (2->2 scattering)',next
                 stop 1
              endif
+             ndim=3*(next-2)-4
+             if (include_pdf) ndim=ndim+2
              allocate(part(1:next))
              allocate(o(1:next))
           endif
@@ -895,8 +924,8 @@ contains
        pgl(1)%processes(1:next,1)=part(1:next)
        allocate(pgl(1)%orders(1:next,pgl(1)%nproc))
        pgl(1)%orders(1:next,1)=o(1:next)
-       allocate(pgl(1)%multi_factor(1))
-       pgl(1)%multi_factor(1)=sym_fac
+       allocate(pgl(1)%multi_factor(1,1))
+       pgl(1)%multi_factor(1,1)=sym_fac
        allocate(pgl(1)%iden_iproc(1))
        pgl(1)%iden_iproc(1)=1
        allocate(pgl(1)%val_procs(1,1))
@@ -920,6 +949,197 @@ contains
     endif
   end subroutine get_run_arguments
 
+  subroutine add_to_process_list(process,order,factor)
+    implicit none
+    integer,dimension(next) :: process,order,process_mapped,process_unique
+    integer :: factor
+    real(kind=8) :: multi_factor
+    call map_to_canonical_form(process,process_mapped)
+    call get_unique_process(process,process_mapped,process_unique,multi_factor)
+    multi_factor=multi_factor*factor
+    call add_to_unique_process_list(process,process_unique,order,multi_factor)
+  end subroutine add_to_process_list
+
+  subroutine add_to_unique_process_list(process,process_unique,order,multi_factor)
+    implicit none
+    integer,dimension(next) :: process,process_unique,order
+    real(kind=8) :: multi_factor
+    integer :: iproc
+    do iproc=1,nprocs
+       if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
+            .and. all(order(1:next).eq.orders(1:next,iproc))) exit
+    enddo
+    if (iproc.gt.nprocs) then
+       ! new matrix element to generate
+       nprocs=nprocs+1
+       processes(1:next,iproc)=process_unique(1:next)
+       orders(1:next,iproc)=order(1:next)
+       iden_iproc(iproc)=1
+       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
+       factors(iden_iproc(iproc),iproc)=multi_factor
+    else
+       ! identical to another matrix element
+       iden_iproc(iproc)=iden_iproc(iproc)+1
+       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
+       factors(iden_iproc(iproc),iproc)=multi_factor
+    endif
+  end subroutine add_to_unique_process_list
+
+  
+  subroutine get_unique_process(process,process_mapped,process_unique,multi_factor)
+    implicit none
+    integer,dimension(next) :: process,process_mapped,process_unique
+    integer :: iproc,map_from,map_to,i,j
+    real(kind=8) :: multi_factor
+    do iproc=1,pgl_unique%nproc
+       if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
+    enddo
+    if (iproc.gt.pgl_unique%nproc) then
+       write (*,*) 'Process not found'
+       write (*,*) process(1:next)
+       write (*,*) process_mapped(1:next)
+       stop 1
+    endif
+    multi_factor=unique_map_value(iproc)
+    if (unique_map(iproc).gt.0) then
+       do i=1,next
+          map_from=abs(pgl_unique%processes(i,iproc))
+          map_to=abs(pgl_unique%processes(i,unique_map(iproc)))
+          do j=1,next
+             if (abs(process(j)).eq.map_from) &
+                  process_unique(j)=sign(map_to,process(j))
+          enddo
+       enddo
+    else
+       process_unique(1:next)=process(1:next)
+    endif
+  end subroutine get_unique_process
+
+  subroutine map_to_canonical_form(process,part)
+    ! first quarks, then anti-quarks, then gluons, and finally singlets
+    implicit none
+    integer,dimension(next) :: process,part
+    logical :: sf
+    integer :: iflav,i,nqq,iflip
+    ! count the quarks, anti-quarks and gluons. And check if there is more
+    ! than one quark line if they are of the same flavour or not.
+    sf=.true.
+    iflav=0
+    nqq=0
+    do i=1,next
+       if (is_quark(process(i)) .or. is_antiquark(process(i))) then
+          nqq=nqq+1
+          if (iflav.eq.0) iflav=abs(process(i))
+          if (abs(process(i)).ne.iflav) then
+             sf=.false.
+             iflav=min(abs(process(i)),iflav)
+          endif
+       endif
+    enddo
+    nqq=nqq/2
+    if (nqq.lt.2) sf=.false.
+    part(1:next)=process(1:next)
+    if (nqq.eq.0) then
+       continue ! nothing to do
+    elseif (nqq.eq.1) then
+       do i=1,next
+          if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
+             ! found the quark
+             if (i.ne.1) call flip_one(part,i,1) ! move quark to position 1
+          endif
+       enddo
+       do i=1,next
+          if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
+             ! found the anti-quark
+             if (i.ne.2) call flip_one(part,i,2) ! move anti-quark to position 2
+          endif
+       enddo
+    elseif (nqq.eq.2) then
+       if (sf) then
+          iflip=1
+          do i=1,next
+             if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
+                ! found quark
+                if (i.ne.iflip) then
+                   call flip_one(part,i,iflip)
+                endif
+                iflip=iflip+1
+             endif
+          enddo
+          iflip=3
+          do i=1,next
+             if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
+                ! found anti-quark
+                if (i.ne.iflip) then
+                   call flip_one(part,i,iflip)
+                endif
+                iflip=iflip+1
+             endif
+          enddo
+       else
+          iflip=1
+          do i=1,next
+             if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
+                ! found quark
+                if (i.ne.iflip) then
+                   call flip_one(part,i,iflip)
+                endif
+                iflip=iflip+1
+             endif
+          enddo
+          do i=1,next
+             if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
+                ! found anti-quark
+                if (abs(part(i)).eq.abs(part(1))) then
+                   if (i.ne.3) then
+                      call flip_one(part,i,3)
+                   endif
+                else
+                   if (i.ne.4) then
+                      call flip_one(part,i,4)
+                   endif
+                endif
+             endif
+          enddo
+          ! flip if pdg's are not ordered
+          if (abs(part(1)).gt.abs(part(2))) then
+             call flip_one(part,1,2)
+             call flip_one(part,3,4)
+          endif
+       endif
+    endif
+    iflip=next
+    do i=next,1,-1
+       if (is_singlet(part(i))) then
+          ! found a color singlet, move to the end
+          if (i.ne.iflip) call flip_one(part,i,iflip)
+          iflip=iflip-1
+       endif
+    enddo
+  end subroutine map_to_canonical_form
+
+  subroutine flip_one(part,i,j)
+    implicit none
+    integer :: i,j,icross,itmp
+    integer,dimension(next) :: part
+    real(kind=8) :: dtmp
+    if ((i.le.2 .and. j.gt.2) .or. (i.gt.2 .and. j.le.2)) then
+       icross=-1
+    else
+       icross=1
+    endif
+    ! PDG code:
+    itmp=part(i)
+    if (icross .eq. -1) then
+       part(i)=phys_model%get_antipart(part(j))
+       part(j)=phys_model%get_antipart(itmp)
+    else
+       part(i)=part(j)
+       part(j)=itmp
+    endif
+  end subroutine flip_one
+  
+  
   subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible
     ! spin states. Note that this assumes that all the processes() have the
@@ -1154,7 +1374,7 @@ contains
        call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
     do iproc=1,pgl%nproc
-       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)
+       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)*pgl%multi_factor(1:pgl%iden_iproc(iproc),iproc)
        if (include_pdf) then
           do ip=1,pgl%iden_iproc(iproc)
              ! first incoming particle
@@ -1179,44 +1399,6 @@ contains
        val_abs(iproc)=sum(abs(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)))
     enddo
   end subroutine include_PDF_and_identical_procs
-
-  subroutine define_identical_procs(pgl)
-    implicit none
-    type(phase_space_order_group),intent(inout) :: pgl
-    integer :: iproc,ip,n
-    ! first fill the number of identical processes per iproc (so that we can
-    ! allocate the array with the right size)
-    allocate(pgl%iden_iproc(1:pgl%nproc))
-    do iproc=1,pgl%nproc
-       pgl%iden_iproc(iproc)=1
-!!$       if (any(abs(pgl%processes(1:next,iproc)).eq.1)) then
-!!$          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*5
-!!$       endif
-!!$       if (any(abs(pgl%processes(1:next,iproc)).eq.2)) then
-!!$          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*4
-!!$       endif
-    enddo
-    allocate(pgl%val_procs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
-    allocate(pgl%iden_processes(1:next,1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
-    ! Loop again and actually fill the iden_processes()
-    do iproc=1,pgl%nproc
-       do ip=0,pgl%iden_iproc(iproc)-1
-          do n=1,next
-             if (abs(pgl%processes(n,iproc)).eq.1) then
-                pgl%iden_processes(n,ip+1,iproc)=sign(mod(ip,5)+1,pgl%processes(n,iproc))
-             elseif (abs(pgl%processes(n,iproc)).eq.2) then
-                if (mod(ip,5)+1.eq.ip/5+2) then
-                   pgl%iden_processes(n,ip+1,iproc)=sign(1,pgl%processes(n,iproc))
-                else
-                   pgl%iden_processes(n,ip+1,iproc)=sign(ip/5+2,pgl%processes(n,iproc))
-                endif
-             else
-                pgl%iden_processes(n,ip+1,iproc)=pgl%processes(n,iproc)
-             endif
-          enddo
-       enddo
-    enddo
-  end subroutine define_identical_procs
   
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
