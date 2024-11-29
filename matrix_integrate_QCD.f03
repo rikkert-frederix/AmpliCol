@@ -62,7 +62,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-100000
+     ncalls0=-1000
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
@@ -106,7 +106,7 @@ program matrix_integrate_QCD
   endif
   
   if (read_amps_from_file .or. write_amps_to_file) then
-       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
+       open(file='amplitudes.bin',&
             unit=32,access='stream',form='unformatted',status='UNKNOWN')
   endif
   
@@ -203,7 +203,7 @@ program matrix_integrate_QCD
      ! actual (unweighted) event generation
      call read_grids_from_file
      call gen(integrand,0,-1) ! initialise counters
-     filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
+     filename='events'//trim(adjustl(tag))//'.lhe'
      open(unit=11,file=filename,status='unknown')
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event

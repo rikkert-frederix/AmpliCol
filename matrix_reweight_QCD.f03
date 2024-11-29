@@ -225,8 +225,8 @@ contains
     enddo
     call add_to_string(tag,o(next,1),.false.)
     call add_to_string(tag_read,o(next,1),.false.)
-    open(unit=11,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe',status='old')
-    open(unit=12,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
+    open(unit=11,file='events'//trim(adjustl(tag))//'.lhe',status='old')
+    open(unit=12,file='events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
   end subroutine create_run_tag_and_open_files
 
   subroutine add_to_string(string,inter,add_underscore)
