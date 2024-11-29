@@ -100,10 +100,9 @@ swap_qq={'g':'g',
 nfinal=3
 
 # multi-jet base processes (without gluons):
-#base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
+base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
 #base_procs=[[],['q','qbar'],['q','qp','qbar','qpbar']]
 #base_procs=[['q','qp','qbar','qpbar'],['q','q','qbar','qbar']]
-base_procs=[[]] # only gluons
 
 # extend the base_procs with additional gluons. These are all the unique procs
 unique_procs=[]
