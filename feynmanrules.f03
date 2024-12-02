@@ -576,28 +576,28 @@ contains
     wfg(2)=( TMP4 + TMP3 )*prefact
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
     wfg(4)=(-TMP1 + TMP2 )*prefact
-!!$    wfg(1)=( wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) + wfq1(2)*wfq2(4))*prefact
-!!$    wfg(2)=(-wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) + wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*prefact
-!!$    wfg(3)=( wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) - wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*cImag*prefact
-!!$    wfg(4)=(-wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) - wfq1(2)*wfq2(4))*prefact
+    wfg(1)=( wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) + wfq1(2)*wfq2(4))*prefact
+    wfg(2)=(-wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) + wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*prefact
+    wfg(3)=( wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) - wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*cImag*prefact
+    wfg(4)=(-wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) - wfq1(2)*wfq2(4))*prefact
   end subroutine QuarkAquarktoGluon
   subroutine AquarKQuarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
-    TMP1=wfq1(3)*wfq2(1)+wfq1(2)*wfq2(4)
-    TMP2=wfq1(4)*wfq2(2)+wfq1(1)*wfq2(3)
-    TMP3=wfq1(2)*wfq2(3)-wfq1(4)*wfq2(1)
-    TMP4=wfq1(1)*wfq2(4)-wfq1(3)*wfq2(2)
+    TMP1=wfq2(3)*wfq1(1)+wfq2(2)*wfq1(4)
+    TMP2=wfq2(4)*wfq1(2)+wfq2(1)*wfq1(3)
+    TMP3=wfq2(2)*wfq1(3)-wfq2(4)*wfq1(1)
+    TMP4=wfq2(1)*wfq1(4)-wfq2(3)*wfq1(2)
     wfg(1)=( TMP1 + TMP2 )*prefact
     wfg(2)=( TMP4 + TMP3 )*prefact
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
     wfg(4)=(-TMP1 + TMP2 )*prefact
-!!$    wfg(1)=( wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) + wfq2(2)*wfq1(4))*prefact
-!!$    wfg(2)=(-wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) + wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*prefact
-!!$    wfg(3)=( wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) - wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*cImag*prefact
-!!$    wfg(4)=(-wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) - wfq2(2)*wfq1(4))*prefact
+!    wfg(1)=( wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) + wfq2(2)*wfq1(4))*prefact
+!    wfg(2)=(-wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) + wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*prefact
+!    wfg(3)=( wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) - wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*cImag*prefact
+!    wfg(4)=(-wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) - wfq2(2)*wfq1(4))*prefact
   end subroutine AquarkQuarktoGluon
 
 
