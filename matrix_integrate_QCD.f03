@@ -1464,7 +1464,7 @@ contains
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
     integer(kind=8),intent(out) :: sym_fac
-    integer :: ngl=0
+    integer :: ngl=0,ngl_tot=0
     integer,dimension(6) :: nq,naq
     integer :: i,j
     integer(kind=8) :: tot_ord
@@ -1486,11 +1486,16 @@ contains
          if (part(i).eq.-j) naq(j)=naq(j)+1
        enddo
     enddo
+    do i=1,next
+       if (part(i).eq.21) then
+          ngl_tot=ngl_tot+1
+       endif
+    enddo
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
-       tot_ord=factorial8(next-1)
+       tot_ord=factorial8(ngl_tot-1)
        ! All gluon process. This assumes that the only channels we are
        ! including are strictly different. We distinguish them by considering
        ! how many (final state) gluons are attached to the two colour lines
@@ -1514,7 +1519,7 @@ contains
           sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
-       tot_ord=factorial8(next-2)
+       tot_ord=factorial8(ngl_tot)
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
@@ -1561,7 +1566,7 @@ contains
        ! total number of potentially different orders: two ways of connecting
        ! quarks, (n-4)! orderings for the gluons, n-3 ways for an order to
        ! distribute the gluons among the two quark lines
-       tot_ord=2*factorial8(next-4)*(next-3)
+       tot_ord=2*factorial8(ngl_tot)*(ngl_tot+1)
 
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
@@ -1637,7 +1642,7 @@ contains
                 do i_swap=1,2
                    io(1:next,4)=io(1:next,3)
                    if (i_swap.eq.2) then
-!!$                      if (.not.same_flavour) cycle
+                      if (.not.same_flavour) cycle
                       do i=2,next-1
                          if ((io(i,3).gt.2 .and. part(io(i,3)).le.-1 .and. part(io(i,3)).ge.-6) .or. &
                               (io(i,3).le.2 .and. part(io(i,3)).ge. 1 .and. part(io(i,3)).le. 6) ) then
