@@ -576,10 +576,10 @@ contains
     wfg(2)=( TMP4 + TMP3 )*prefact
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
     wfg(4)=(-TMP1 + TMP2 )*prefact
-    wfg(1)=( wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) + wfq1(2)*wfq2(4))*prefact
-    wfg(2)=(-wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) + wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*prefact
-    wfg(3)=( wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) - wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*cImag*prefact
-    wfg(4)=(-wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) - wfq1(2)*wfq2(4))*prefact
+!    wfg(1)=( wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) + wfq1(2)*wfq2(4))*prefact
+!    wfg(2)=(-wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) + wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*prefact
+!    wfg(3)=( wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) - wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*cImag*prefact
+!    wfg(4)=(-wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) - wfq1(2)*wfq2(4))*prefact
   end subroutine QuarkAquarktoGluon
   subroutine AquarKQuarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
     implicit none
