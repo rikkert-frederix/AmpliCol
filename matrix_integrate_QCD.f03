@@ -148,11 +148,11 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf,&
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf,&
              pgl(igroup)%iden_processes)
      elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf,&
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf,&
              pgl(igroup)%iden_processes)
      endif
      call cpu_time(tAfter)
@@ -278,7 +278,7 @@ contains
               pgl_unique%orders(i,iproc)=i
            elseif (nqq.eq.2) then
               if (i.eq.1) then
-                 pgl_unique%orders(i,iproc)=i
+                 pgl_unique%orders(i,iproc)=1
               elseif (i.lt.next) then
                  pgl_unique%orders(i,iproc)=i+1
               elseif(i.eq.next) then
@@ -286,7 +286,7 @@ contains
               endif
            elseif (nqq.eq.4) then
               if (i.eq.1) then
-                 pgl_unique%orders(i,iproc)=i
+                 pgl_unique%orders(i,iproc)=1
               elseif (i.eq.2) then
                  pgl_unique%orders(i,iproc)=4
               elseif (i.eq.3) then

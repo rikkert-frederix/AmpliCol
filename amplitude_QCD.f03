@@ -512,7 +512,7 @@ contains
     
     subroutine check_input_consistency()
       implicit none
-      integer :: i,j,k,iflav,iproc,jproc,idum
+      integer :: i,j,k,iflav,iproc,jproc,idum,ichan
       integer,dimension(n,2) :: part_sf
       integer,dimension(n) :: jord
       logical :: sf
@@ -633,44 +633,30 @@ contains
                write (*,*) iproc,':',this%processes(1:n,iproc)
                stop 1
             endif
-            call define_symm_2qq(this%processes(1,iproc),part_sf(1,1),1)
-            call define_symm_2qq(this%processes(1,iproc),part_sf(1,2),2)
-            do jproc=1,iproc-1
-               if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
-               jord(1:n)=order(1:n,jproc)
-               if (jord(1).ne.order(1,iproc)) then
-                  ! different order of the quarks, switch the two colour strings:
-                  do i=1,n
-                     if (jord(i).eq.order(1,iproc)) then
-                        jord(1:n)=[jord(i:n),jord(1:i-1)]
-                        exit
-                     endif
-                  enddo
-               endif
-               if (any(jord(1:n).ne.order(1:n,iproc))) cycle
-               if (all(this%processes(1:n,jproc).eq.part_sf(1:n,1))) then
-                  if (this%same_flavour_proc_map(iproc,1).ne.0) then
-                     write (*,*) 'ERROR: double mapping 1'
-                     write (*,*) iproc,part_sf(1:n,1),order(1:n,iproc)
-                     write (*,*) jproc,this%processes(1:n,jproc),order(1:n,jproc)
-                     stop 1
+            do ichan=1,2
+               call define_symm_2qq(this%processes(1,iproc),part_sf(1,1),ichan)
+               do jproc=1,iproc-1
+                  if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
+                  jord(1:n)=order(1:n,jproc)
+                  if (jord(1).ne.order(1,iproc)) then
+                     ! different order of the quarks, switch the two colour strings:
+                     do i=1,n
+                        if (jord(i).eq.order(1,iproc)) then
+                           jord(1:n)=[jord(i:n),jord(1:i-1)]
+                           exit
+                        endif
+                     enddo
                   endif
-                  this%same_flavour_proc_map(iproc,1)=jproc
-               endif
-               if (all(this%processes(1:n,jproc).eq.part_sf(1:n,2))) then
-                  if (this%same_flavour_proc_map(iproc,2).ne.0) then
-                     write (*,*) 'ERROR: double mapping 2'
-                     write (*,*) iproc,part_sf(1:n,2),order(1:n,iproc)
-                     write (*,*) jproc,this%processes(1:n,jproc),order(1:n,jproc)
-                     stop 1
+                  if (any(jord(1:n).ne.order(1:n,iproc))) cycle
+                  if (all(this%processes(1:n,jproc).eq.part_sf(1:n,1))) then
+                     this%same_flavour_proc_map(iproc,ichan)=jproc
+                  elseif (all(this%processes(1:n,jproc).eq.part_sf(1:n,2))) then
+                     this%same_flavour_proc_map(iproc,ichan)=jproc
                   endif
-                  this%same_flavour_proc_map(iproc,2)=jproc
-               endif
+               enddo
             enddo
             if (any(this%same_flavour_proc_map(iproc,1:2).eq.0)) then
                write (*,*) 'Same flavour process not found',iproc
-               write (*,*) part_sf(1:n,1),':',order(1:n,iproc)
-               write (*,*) part_sf(1:n,2),':',order(1:n,iproc)
                stop 1
             endif
          endif
@@ -680,63 +666,58 @@ contains
     subroutine define_symm_2qq(part_in,part_out,chan)
       implicit none
       integer :: chan
-      integer, dimension(n) :: part_in,part_out
+      integer,dimension(n) :: part_in,part_out1
+      integer,dimension(n,2) :: part_out
       integer :: i,iq,ia,ifirst
       integer,dimension(2,2) :: connection
-      part_out=part_in
+      part_out1=part_in
+      part_out(1:n,1)=part_in
+      part_out(1:n,2)=part_in
       iq=0
       ia=0
       ifirst=0
       do i=1,n
-         if (i.le.2 .and. is_quark(part_out(i))) then
+         if (i.le.2 .and. is_quark(part_out1(i))) then
             ia=ia+1
             connection(2,ia)=i
             if (ifirst.eq.0) ifirst=i
-         elseif(i.le.2 .and. is_antiquark(part_out(i))) then
+         elseif(i.le.2 .and. is_antiquark(part_out1(i))) then
             iq=iq+1
             connection(1,iq)=i
             if (ifirst.eq.0) ifirst=i
-         elseif (i.gt.2 .and. is_quark(part_out(i))) then
+         elseif (i.gt.2 .and. is_quark(part_out1(i))) then
             iq=iq+1
             connection(1,iq)=i
             if (ifirst.eq.0) ifirst=i
-         elseif (i.gt.2 .and. is_antiquark(part_out(i))) then
+         elseif (i.gt.2 .and. is_antiquark(part_out1(i))) then
             ia=ia+1
             connection(2,ia)=i
             if (ifirst.eq.0) ifirst=i
          endif
       enddo
       if (chan.eq.1) then
-         if (abs(part_out(connection(1,1))).lt.4) then
             ! change the 2nd quark and an anti-quark in the process
-            part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),4)+2,part_out(connection(1,2)))
-            part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),4)+2,part_out(connection(2,2)))
-         else
+            part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+1,part_out1(connection(1,2)))
+            part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+1,part_out1(connection(2,2)))
             ! change the 1st quark and an anti-quark in the process
-            part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),4)+2,part_out(connection(1,1)))
-            part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),4)+2,part_out(connection(2,1)))
-         endif
+            part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+1,part_out1(connection(1,1)))
+            part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+1,part_out1(connection(2,1)))
+
       elseif(chan.eq.2) then
-         if (abs(part_out(connection(1,1))).lt.4) then
+         if (abs(part_out1(connection(1,1))).lt.4) then
             ! change the mixed quark and an anti-quark in the process; leave the
             ! first (anti-)quark unchanged.
-            if (connection(1,1).eq.ifirst) then
-               part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),4)+2,part_out(connection(1,2)))
-               part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),4)+2,part_out(connection(2,1)))
-            else
-               part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),4)+2,part_out(connection(1,1)))
-               part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),4)+2,part_out(connection(2,2)))
-            endif
+               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+1,part_out1(connection(1,2)))
+               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+1,part_out1(connection(2,1)))
+               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+1,part_out1(connection(1,1)))
+               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+1,part_out1(connection(2,2)))
          else
             ! change the mixed quark and an anti-quark in the process; leave the
             ! second (anti-)quark unchanged.
-            if (connection(1,1).eq.ifirst) then
-               part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),4)+2,part_out(connection(1,1)))
-               part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),4)+2,part_out(connection(2,2)))
-            else
-               part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),4)+2,part_out(connection(1,2)))
-               part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),4)+2,part_out(connection(2,1)))
-            endif
+               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+1,part_out1(connection(1,1)))
+               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+1,part_out1(connection(2,2)))
+               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+1,part_out1(connection(1,2)))
+               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+1,part_out1(connection(2,1)))
          endif
       endif
     end subroutine define_symm_2qq
@@ -746,7 +727,7 @@ contains
       ! rough upper bound for the maximum number of currents
       implicit none
       if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_cur=2*n*(n-1)*2**n
+         max_cur=2*n*(n-1)*2**n*10
       else
          max_cur=factorial(n+1)*14
       endif
