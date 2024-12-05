@@ -9,7 +9,7 @@ import copy
 
 
 
-def create_all_procs_from_unique_procs(proc):
+def create_all_procs_from_base_procs(proc):
     # given a flavour configuration, list all subprocesses that can be
     # obtained from that flavour configuration. Effectively, this
     # means looping over all possible pairs of initial state
@@ -96,18 +96,30 @@ if nfinal+2 >= len(color_singlets)+4 :
     # different-flavour
     for i,q in enumerate(flavour_scheme[:-1]):
         for qp in flavour_scheme[i+1:]:
-            base_procs.append([q,q+'bar',qp,qp+'bar'])
+            base_procs.append([q,qp,q+'bar',qp+'bar'])
     # same-flavour (put after different flavour)
     for q in flavour_scheme:
-        base_procs.append([q,q+'bar',q,q+'bar'])
+        base_procs.append([q,q,q+'bar',q+'bar'])
 
 # add the gluons
 for proc in base_procs:
     while len(proc) < nfinal+2 -len(color_singlets):
         proc.append('g')
 
-
 unique_procs=copy.deepcopy(base_procs)
+# add the 2qq_df processes with the two incoming particles interchanged
+i=0
+while i < len(unique_procs):
+    proc = unique_procs[i]
+    if proc[0] in quarks and proc[1] in quarks and proc[0] != proc[1]:
+        swapped_proc=proc[:]
+        swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
+        unique_procs.insert(i+1,swapped_proc)
+        i+=1
+    i+=1
+        
+    
+# add the colour singlets
 for proc in unique_procs:
     for s in color_singlets:
         proc.append(s)
@@ -115,7 +127,7 @@ for proc in unique_procs:
         
 all_procs=[]
 for proc in base_procs:
-    all_procs+=create_all_procs_from_unique_procs(proc)
+    all_procs+=create_all_procs_from_base_procs(proc)
 
     
 # Get symmetry factor
