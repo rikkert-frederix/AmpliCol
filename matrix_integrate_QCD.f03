@@ -1558,6 +1558,9 @@ contains
           ! iii, with symmetry factor (ngluon-2)!*2
           ! Hence
           sym_fac=factorial8(ngl)*2
+          if (ngl.gt.0) then
+               sym_fac=factorial8(ngl)*2
+          endif
           if (ifindloc(o,next,1).ne.next-ifindloc(o,next,2)+1) then
              sym_fac=sym_fac*2
           endif
