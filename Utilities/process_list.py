@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-# multi-jet
-
 
 import itertools
 import math
@@ -33,7 +31,10 @@ def create_all_procs_from_base_procs(proc):
             all_procs.append(combined)
     return all_procs
 
-def generate_unique_final_state_permutations(arr):
+def generate_unique_final_state_permutations(proc):
+    # take all the permutations of the final state particles in
+    # 'proc', and add it to the 'all_procs' list if it wasn't there
+    # already.
     all_procs=[]
     for perm in itertools.permutations(proc[2:]):
         combined=[proc[0]]+[proc[1]]+list(perm)
@@ -43,10 +44,15 @@ def generate_unique_final_state_permutations(arr):
 
 
 def order_permutation_with_psorder(order,perm):
+    # Take a process 'perm' and order it according to the phase-space
+    # ordering 'order'
     return [perm[i-1] for i in order]
 
 def valid_perm(perm):
-    # check that all anti-quarks are followed by a quark
+    # Check that all anti-quarks are followed by a quark in the
+    # process 'perm'. It returns '-1' if this is not the case, or the
+    # position of a quark (the first it encounters) in the process if
+    # valid (if no quark is present, return '0').
     n = len(perm)
     for i in range(n):
         if perm[i] in antiquarks :  # If the current element is anti-quark
@@ -59,11 +65,15 @@ def valid_perm(perm):
     return 0
 
 def shift_order(shift,order):
+    # cyclicly permute the order by an amount 'shift'
     order_shifted=order[shift:]+order[:shift]
     return order_shifted
 
     
-def convert_to_pdg(perm):
+def convert_to_string(perm):
+    # convert the list of particles to their PDG codes; cross the two
+    # incoming particles to the initial state; and convert it to a
+    # single string.
     return " ".join([str(pdgs[antipart[perm[0]]]),str(pdgs[antipart[perm[1]]])]+[str(pdgs[i]) for i in perm[2:]])
 
 
@@ -83,14 +93,12 @@ color_singlets=[]
 #color_singlets=['a']
 #color_singlets=['a','a']
 
-
 # all-gluon process
-#base_procs=[[]]
-base_procs=[]
-## one-quark-line process
-#if nfinal+2 >= len(color_singlets)+2 : 
-#    for q in flavour_scheme:
-#        base_procs.append([q,q+'bar'])
+base_procs=[[]]
+# one-quark-line process
+if nfinal+2 >= len(color_singlets)+2 : 
+    for q in flavour_scheme:
+        base_procs.append([q,q+'bar'])
 # two-quark-line process
 if nfinal+2 >= len(color_singlets)+4 : 
     # different-flavour
@@ -100,12 +108,15 @@ if nfinal+2 >= len(color_singlets)+4 :
     # same-flavour (put after different flavour)
     for q in flavour_scheme:
         base_procs.append([q,q,q+'bar',q+'bar'])
-
-# add the gluons
+# add the gluons such that each proc has all the coloured particles
 for proc in base_procs:
     while len(proc) < nfinal+2 -len(color_singlets):
         proc.append('g')
 
+
+# Define the 'unique processes'. These will be used by
+# matrix_integrate to determine which flavour configurations yield
+# unique matrix elements.
 unique_procs=copy.deepcopy(base_procs)
 # add the 2qq_df processes with the two incoming particles interchanged
 i=0
@@ -117,14 +128,13 @@ while i < len(unique_procs):
         unique_procs.insert(i+1,swapped_proc)
         i+=1
     i+=1
-        
     
 # add the colour singlets
 for proc in unique_procs:
     for s in color_singlets:
         proc.append(s)
 
-        
+# all_procs contains *all* the flavour configurations.
 all_procs=[]
 for proc in base_procs:
     all_procs+=create_all_procs_from_base_procs(proc)
@@ -139,41 +149,52 @@ for i,proc in enumerate(all_procs):
     iden_fac[i]=i_fac
 
     
-    
+# Define the nfinal+1 relevant phase-space orderings.    
 order=[1]+[i for i in range(3,nfinal+3)]
 phase_space_order=[]
 for i in range(1,nfinal+2):
     phase_space_order.append(order[:i]+[2]+order[i:])
 
 
+
+# this is the main loop that creates all the relevant colour orderings
+# and distributes them among the phase-space orderings.
 towrite=[[] for _ in phase_space_order]
-    
 for pso,psorder in enumerate(phase_space_order):
     # The phase-space order fixes where particles 1 and 2 go in the
-    # order. For each process, take all possible permutations of the
-    # other particles (i.e., all the final state ones), and
-    #
-    # 1. Check that it is a unique configurations
-    #
-    # 2. Check that it is compatible with the phase-space-order (i.e.,
-    # if there's a quark line, the gluons are between the quark and
-    # anti-quark (up to cyclic permutations) etc.
+    # colour order. For each process, take all possible permutations
+    # of the other particles (i.e., all the final state ones), and
+    # 1. Check that it is a unique configuration; 2. Check that it is
+    # compatible with a possible colour ordering (i.e., if there's a
+    # quark line, the gluons are between the quark and anti-quark (up
+    # to cyclic permutations) etc. This gives a list of all the
+    # relevant colour orderings for each of the processes.
     for i,proc in enumerate(all_procs):
+        # permute all the final state particles:
         unique_permutations=generate_unique_final_state_permutations(proc)
         for perm in unique_permutations:
+            # re-order the process 'perm' following the phase-space ordering
             perm_ordered=order_permutation_with_psorder(psorder,perm)
+            # check that the re-ordered process results in a valid
+            # colour ordering and by how much it should be cyclicly
+            # permuted to bring it to canonical order
             shift=valid_perm(perm_ordered)
             if shift != -1:
+                # valid_perm is true: add it to the list of processes
+                # to write
                 order_shifted=shift_order(shift,psorder)
-                towrite[pso].append(convert_to_pdg(perm)+"   "+" ".join([str(i) for i in order_shifted])+"   "+str(iden_fac[i]))
-#                towrite.append([perm,order_shifted,proc])
+                towrite[pso].append(convert_to_string(perm)+"   "+" ".join([str(i) for i in order_shifted])+"   "+str(iden_fac[i]))
                 
 
                 
 
 
 
-
+# Write all the information to the file. Start with the 'unique
+# processes'. These will be used to determine which flavour
+# configurations give identical matrix elements. After that, simply
+# dump all processes and colour orderings relevant for each of the
+# flavour configurations (together with their symmetry factors).
 with open('processes.txt','w') as f:
     f.write(str(nfinal+2)+' '+str(len(unique_procs))+'\n')
     for proc in unique_procs:
@@ -190,12 +211,3 @@ with open('processes.txt','w') as f:
         f.write('\n')
         f.write('\n')
         f.write('\n')
-
-
-    
-#    valid_perms=generate_permutations(proc)
-#    for pso,psorder in enumerate(phase_space_order):
-#        for valid_perm in valid_perms:
-#            if valid_perm[0]==proc[0] and valid_perm[pso+1]==proc[1]:
-#                to_write[pso].append([psorder,valid_perm,proc])
-#print(to_write[0])
