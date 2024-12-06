@@ -421,7 +421,7 @@ contains
     end subroutine simple_consistency_checks
 
     subroutine define_canonical_color_order()
-      ! canonical order: (q,glu,glu,glu,singlet,singlet,qbar,q,qbar)
+      ! canonical order: (q,glu,glu,glu,qbar,q,singlet,singlet,qbar)
       use math_functions
       implicit none
       integer :: i,nq,naq,nglu,nsing,iq,iaq,iglu,ising
@@ -460,19 +460,19 @@ contains
                if (iq.eq.1) then
                   order(1,iproc)=i
                else
-                  order(n-1,iproc)=i
+                  order(n-1-nsing,iproc)=i
                endif
             elseif (is_antiquark_from_order(i,iproc)) then
                iaq=iaq+1
                if (iaq.eq.1) then
                   order(n,iproc)=i
                else
-                  order(n-2,iproc)=i
+                  order(n-2-nsing,iproc)=i
                endif
             elseif (is_singlet(this%processes(i,iproc))) then
                ising=ising+1
                if(nq.ne.0) then
-                  order(1+nglu+ising,iproc)=i
+                  order(n-ising,iproc)=i
                else
                   order(nglu+ising,iproc)=i
                endif
@@ -697,27 +697,27 @@ contains
       enddo
       if (chan.eq.1) then
             ! change the 2nd quark and an anti-quark in the process
-            part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+1,part_out1(connection(1,2)))
-            part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+1,part_out1(connection(2,2)))
+            part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+2,part_out1(connection(1,2)))
+            part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+2,part_out1(connection(2,2)))
             ! change the 1st quark and an anti-quark in the process
-            part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+1,part_out1(connection(1,1)))
-            part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+1,part_out1(connection(2,1)))
+            part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+2,part_out1(connection(1,1)))
+            part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+2,part_out1(connection(2,1)))
 
       elseif(chan.eq.2) then
          if (abs(part_out1(connection(1,1))).lt.4) then
             ! change the mixed quark and an anti-quark in the process; leave the
             ! first (anti-)quark unchanged.
-               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+1,part_out1(connection(1,2)))
-               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+1,part_out1(connection(2,1)))
-               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+1,part_out1(connection(1,1)))
-               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+1,part_out1(connection(2,2)))
+               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+2,part_out1(connection(1,2)))
+               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+2,part_out1(connection(2,1)))
+               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+2,part_out1(connection(1,1)))
+               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+2,part_out1(connection(2,2)))
          else
             ! change the mixed quark and an anti-quark in the process; leave the
             ! second (anti-)quark unchanged.
-               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+1,part_out1(connection(1,1)))
-               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+1,part_out1(connection(2,2)))
-               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+1,part_out1(connection(1,2)))
-               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+1,part_out1(connection(2,1)))
+               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+2,part_out1(connection(1,1)))
+               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+2,part_out1(connection(2,2)))
+               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+2,part_out1(connection(1,2)))
+               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+2,part_out1(connection(2,1)))
          endif
       endif
     end subroutine define_symm_2qq
@@ -977,7 +977,7 @@ contains
                do while (j.lt.isize)
                   if (is_singlet(et(j+1))) then
                      j=j+1
-                  elseif (.not.(is_quark(j+1))) then
+                  elseif (.not.(is_quark(et(j+1)))) then
                      return
                   else
                      exit
@@ -2200,7 +2200,7 @@ contains
     if (this%n_qqbar(iproc).eq.0 .or. this%n_qqbar(iproc).eq.1) then
        n_unique_rows=1 ! all rows are similar
     elseif (this%n_qqbar(iproc).eq.2) then
-       n_unique_rows=(n-4)+1 ! number of gluon separations among the two quark lines
+       n_unique_rows=(nOrd-4)+1 ! number of gluon separations among the two quark lines
        n_unique_rows=n_unique_rows*2 ! two ways of combining quarks with anti-quarks
     else
        write (*,*) 'Inconsistent number of quark pairs',this%n_qqbar(iproc)
@@ -2209,7 +2209,7 @@ contains
     if (use_cm_dict) then
        call create_perm_dict()
        allocate(col_vals(1:3,max_keys,n_unique_rows))
-       allocate(unique_rows(1:n,n_unique_rows))
+       allocate(unique_rows(1:nOrd,n_unique_rows))
     endif
 
 ! first check the unique rows in the colour matrix to determine how many
@@ -2346,7 +2346,7 @@ contains
       do irow=1,this%nColOrd
          call determine_gi_ui(this%perm(1,ioff+irow),gi,ui)
          if (ui.eq.1 .and. gi.eq.iunique-1) return
-         if (ui.eq.2 .and. gi.eq.iunique-1-((n-4)+1)) return
+         if (ui.eq.2 .and. gi.eq.iunique-1-((nOrd-4)+1)) return
       enddo
     end subroutine get_unique_row
 
@@ -2390,7 +2390,7 @@ contains
      integer :: i,j,key,iunique
      real(kind=8),dimension(1:3),intent(out) :: col_fac
      if (this%n_qqbar(iproc).eq.2) then
-        iunique=(gi+1)+(ui-1)*((n-4)+1)
+        iunique=(gi+1)+(ui-1)*((nOrd-4)+1)
      else
         iunique=1
      endif

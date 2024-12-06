@@ -53,16 +53,30 @@ def valid_perm(perm):
     # process 'perm'. It returns '-1' if this is not the case, or the
     # position of a quark (the first it encounters) in the process if
     # valid (if no quark is present, return '0').
+    ishift=0
     n = len(perm)
     for i in range(n):
-        if perm[i] in antiquarks :  # If the current element is anti-quark
-            next_index = (i + 1) % n  # Cyclic next element
+        if perm[i] in quarks:
+            ishift=i
+            break
+
+    found_singlet=False
+    for i in range(n):
+        ii=(i+ishift) % n
+        if perm[ii] in antiquarks :  # If the current element is anti-quark
+            next_index = (ii + 1) % n  # Cyclic next element
             if (perm[next_index] not in quarks ):  # next element must be quark
                 return -1
-    for i in range(n):
-        if perm[i] in quarks:
-            return i
-    return 0
+        if perm[ii] in color_singlets:
+            # next element should be another colour singlet or an
+            # anti-quark. And it should come between the *final*
+            # quark-antiquark pair
+            found_singlet=True
+            next_index = (ii + 1) % n  # Cyclic next element
+            if (perm[next_index] not in antiquarks ):  # next element must be an anti-quark
+                return -1
+        if perm[ii] in quarks and found_singlet:  return -1
+    return ishift
 
 def shift_order(shift,order):
     # cyclicly permute the order by an amount 'shift'
@@ -89,12 +103,13 @@ antipart={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tb
 all_part=['g','d','u','s','c','b','t','dbar','ubar','sbar','cbar','bbar','tbar','a']
 
 # color-singlets
-color_singlets=[]
-#color_singlets=['a']
+#color_singlets=[]
+color_singlets=['a']
 #color_singlets=['a','a']
 
 # all-gluon process
-base_procs=[[]]
+#base_procs=[[]]
+base_procs=[]
 # one-quark-line process
 if nfinal+2 >= len(color_singlets)+2 : 
     for q in flavour_scheme:
@@ -113,6 +128,11 @@ for proc in base_procs:
     while len(proc) < nfinal+2 -len(color_singlets):
         proc.append('g')
 
+# add the colour singlets
+for proc in base_procs:
+    for s in color_singlets:
+        proc.append(s)
+
 
 # Define the 'unique processes'. These will be used by
 # matrix_integrate to determine which flavour configurations yield
@@ -129,11 +149,6 @@ while i < len(unique_procs):
         i+=1
     i+=1
     
-# add the colour singlets
-for proc in unique_procs:
-    for s in color_singlets:
-        proc.append(s)
-
 # all_procs contains *all* the flavour configurations.
 all_procs=[]
 for proc in base_procs:
