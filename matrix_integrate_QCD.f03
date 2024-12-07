@@ -67,18 +67,9 @@ program matrix_integrate_QCD
 !!$     ncalls0=640000
 !!$  endif
 
-
   itmax=16         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
-
-  if (integration_step.eq.0) then
-     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
-     write_amps_to_file=.true.
-  else
-     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
-     read_amps_from_file=.true.
-  endif
 
   ! setting energy
   sqrts=14000.d0
@@ -105,6 +96,15 @@ program matrix_integrate_QCD
 
   call get_run_arguments()
 
+  if (integration_step.eq.0) then
+     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     write_amps_to_file=.true.
+  else
+     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
+     read_amps_from_file=.true.
+  endif
+
+  
   ! Not so relevant mint-module parameters: only used in special cases.
   call set_mint_module_special_parameters()
   nchans=ngroups ! overwrite the number of mint-channels to the number of
