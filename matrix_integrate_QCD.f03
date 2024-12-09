@@ -62,12 +62,12 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-100000
+     ncalls0=-10000
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
 
-  itmax=16         ! Number of iterations. (If ncalls0 < 0, the
+  itmax=10         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
@@ -1464,7 +1464,7 @@ contains
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
     integer(kind=8),intent(out) :: sym_fac
-    integer :: ngl=0,ngl_tot=0
+    integer :: ngl=0,ngl_tot=0,n_sing=0
     integer,dimension(6) :: nq,naq
     integer :: i,j
     integer(kind=8) :: tot_ord
@@ -1570,6 +1570,7 @@ contains
        ! quarks, (n-4)! orderings for the gluons, n-3 ways for an order to
        ! distribute the gluons among the two quark lines
        tot_ord=2*factorial8(ngl_tot)*(ngl_tot+1)
+       n_sing=next-4-ngl_tot
 
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
@@ -1607,6 +1608,7 @@ contains
                 endif
              enddo
           endif
+
           ! 2. invert order of two initial states
           do i_ini=1,2
              io(1:next,2)=io(1:next,1)
@@ -1625,7 +1627,7 @@ contains
                 io(1:next,3)=io(1:next,2)
                 if (i_inv.eq.2) then
                    ! invert order
-                   do i=2,next-1
+                   do i=2,next-n_sing-1
                       if ((io(i,2).gt.2 .and. part(io(i,2)).le.-1 .and. part(io(i,2)).ge.-6) .or. &
                            (io(i,2).le.2 .and. part(io(i,2)).ge. 1 .and. part(io(i,2)).le. 6) ) then
                          if ( ((io(1   ,2).le.2 .and. io(i  ,2).gt.2) .or. (io(1   ,2).gt.2 .and. io(i  ,2).le.2)) .or. &
@@ -1634,7 +1636,7 @@ contains
                             cycle do_i_inv
                          endif
                          io(2:i-1,3)=io(i-1:2:-1,2)
-                         io(i+2:next-1,3)=io(next-1:i+2:-1,2)
+                         io(i+2:next-n_sing-1,3)=io(next-n_sing-1:i+2:-1,2)
                          exit
                       endif
                    enddo
@@ -1676,7 +1678,6 @@ contains
                       endif
                    enddo
                    io(1:next,5)=io(1:next,4)
-                   
                    do ip=1,factorial(k)
                       if (ip.eq.1) then
                          do i=1,k
