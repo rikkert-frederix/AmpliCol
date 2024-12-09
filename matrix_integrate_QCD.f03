@@ -62,12 +62,12 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-10000
+     ncalls0=-100000
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
 
-  itmax=10         ! Number of iterations. (If ncalls0 < 0, the
+  itmax=16         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
