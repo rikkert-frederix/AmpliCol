@@ -264,42 +264,11 @@ contains
         enddo
      enddo
      call setup_spin(pgl_unique)
+     call setup_color_order(pgl_unique)
 
      do iproc=1,pgl_unique%nproc
-        nqq=0
-        do i=1,next
-           if (abs(pgl_unique%processes(i,iproc)).le.6) then
-              nqq=nqq+1
-           endif
-        enddo
-        nqq=nqq
-        do i=1,next
-           if (nqq.eq.0) then
-              pgl_unique%orders(i,iproc)=i
-           elseif (nqq.eq.2) then
-              if (i.eq.1) then
-                 pgl_unique%orders(i,iproc)=1
-              elseif (i.lt.next) then
-                 pgl_unique%orders(i,iproc)=i+1
-              elseif(i.eq.next) then
-                 pgl_unique%orders(i,iproc)=2
-              endif
-           elseif (nqq.eq.4) then
-              if (i.eq.1) then
-                 pgl_unique%orders(i,iproc)=1
-              elseif (i.eq.2) then
-                 pgl_unique%orders(i,iproc)=4
-              elseif (i.eq.3) then
-                 pgl_unique%orders(i,iproc)=2
-              elseif (i.le.next-1) then
-                 pgl_unique%orders(i,iproc)=i+1
-              elseif(i.eq.next) then
-                 pgl_unique%orders(i,iproc)=3
-              endif
-           endif
-           if (i.le.2) then
+        do i=1,2
               pgl_unique%processes(i,iproc)=phys_model%get_antipart(pgl_unique%processes(i,iproc))
-           endif
         enddo
      enddo
 
@@ -339,7 +308,7 @@ contains
      call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
 
      do iproc=1,pgl_unique%nproc
-        write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:next,iproc)
+        write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:next,iproc),':',pgl_unique%orders(1:next,iproc)
      enddo
 
      deallocate(pgl_unique%spin)
@@ -951,11 +920,11 @@ contains
 
   subroutine add_to_process_list(process,order,factor)
     implicit none
-    integer,dimension(next) :: process,order,process_mapped,process_unique,invertmap
+    integer,dimension(next) :: process,order,process_mapped,process_unique,mapping
     integer :: factor
     real(kind=8) :: multi_factor
-    call map_to_canonical_form(process,process_mapped,invertmap)
-    call get_unique_process(process,process_mapped,process_unique,multi_factor,invertmap)
+    call map_to_canonical_form(process,process_mapped,mapping)
+    call get_unique_process(process,process_mapped,process_unique,multi_factor,mapping)
     multi_factor=multi_factor*factor
     call add_to_unique_process_list(process,process_unique,order,multi_factor)
   end subroutine add_to_process_list
@@ -986,9 +955,9 @@ contains
   end subroutine add_to_unique_process_list
 
   
-  subroutine get_unique_process(process,process_mapped,process_unique,multi_factor,invertmap)
+  subroutine get_unique_process(process,process_mapped,process_unique,multi_factor,mapping)
     implicit none
-    integer,dimension(next) :: process,process_mapped,process_unique,invertmap
+    integer,dimension(next) :: process,process_mapped,process_unique,mapping
     integer :: iproc,map_from,map_to,i,j
     real(kind=8) :: multi_factor
     do iproc=1,pgl_unique%nproc
@@ -1003,164 +972,75 @@ contains
     multi_factor=unique_map_value(iproc)
     if (unique_map(iproc).gt.0) then
        do i=1,next
-          if ((i.le.2 .and. invertmap(i).gt.2) .or. (i.gt.2 .and. invertmap(i).le.2)) then
-             process_unique(i)=phys_model%get_antipart(pgl_unique%processes(invertmap(i),unique_map(iproc)))
+          if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
+             process_unique(mapping(i))=phys_model%get_antipart(pgl_unique%processes(i,unique_map(iproc)))
           else
-             process_unique(i)=pgl_unique%processes(invertmap(i),unique_map(iproc))
+             process_unique(mapping(i))=pgl_unique%processes(i,unique_map(iproc))
           endif
        enddo
     else
        do i=1,next
-          if ((i.le.2 .and. invertmap(i).gt.2) .or. (i.gt.2 .and. invertmap(i).le.2)) then
-             process_unique(i)=phys_model%get_antipart(pgl_unique%processes(invertmap(i),iproc))
+          if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
+             process_unique(mapping(i))=phys_model%get_antipart(pgl_unique%processes(i,iproc))
           else
-             process_unique(i)=pgl_unique%processes(invertmap(i),iproc)
+             process_unique(mapping(i))=pgl_unique%processes(i,iproc)
           endif
        enddo
     endif
   end subroutine get_unique_process
 
-  subroutine map_to_canonical_form(process,part,invertmap)
-    ! first quarks, then anti-quarks, then gluons, and finally singlets
-    implicit none
-    integer,dimension(next) :: process,part,invertmap
-    logical :: sf
-    integer :: iflav,i,nqq,iflip,tmp
-    ! count the quarks, anti-quarks and gluons. And check if there is more
-    ! than one quark line if they are of the same flavour or not.
-    sf=.true.
-    iflav=0
-    nqq=0
-    do i=1,next
-       if (is_quark(process(i)) .or. is_antiquark(process(i))) then
-          nqq=nqq+1
-          if (iflav.eq.0) iflav=abs(process(i))
-          if (abs(process(i)).ne.iflav) then
-             sf=.false.
-             iflav=min(abs(process(i)),iflav)
-          endif
-       endif
-       invertmap(i)=i
-    enddo
-    nqq=nqq/2
-    if (nqq.lt.2) sf=.false.
-    part(1:next)=process(1:next)
-    if (nqq.eq.0) then
-       continue ! nothing to do
-    elseif (nqq.eq.1) then
-       do i=1,next
-          if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
-             ! found the quark
-             if (i.ne.1) then
-                call flip_one(part,i,1,invertmap,.true.) ! move quark to position 1
-             endif
-          endif
-       enddo
-       do i=1,next
-          if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
-             ! found the anti-quark
-             if (i.ne.2) then
-                call flip_one(part,i,2,invertmap,.true.) ! move anti-quark to position 2
-             endif
-          endif
-       enddo
-    elseif (nqq.eq.2) then
-       if (sf) then
-          iflip=1
-          do i=1,next
-             if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
-                ! found quark
-                if (i.ne.iflip) then
-                   call flip_one(part,i,iflip,invertmap,.true.)
-                endif
-                iflip=iflip+1
-             endif
-          enddo
-          iflip=3
-          do i=1,next
-             if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
-                ! found anti-quark
-                if (i.ne.iflip) then
-                   call flip_one(part,i,iflip,invertmap,.true.)
-                endif
-                iflip=iflip+1
-             endif
-          enddo
-       else
-          iflip=1
-          do i=1,next
-             if ((i.le.2 .and. is_antiquark(part(i))) .or. (i.gt.2 .and. is_quark(part(i)))) then
-                ! found quark
-                if (i.ne.iflip) then
-                   call flip_one(part,i,iflip,invertmap,.true.)
-                endif
-                iflip=iflip+1
-             endif
-          enddo
-          do i=1,next
-             if ((i.le.2 .and. is_quark(part(i))) .or. (i.gt.2 .and. is_antiquark(part(i)))) then
-                ! found anti-quark
-                if (abs(part(i)).eq.abs(part(1))) then
-                   if (i.ne.3) then
-                      call flip_one(part,i,3,invertmap,.true.)
-                   endif
-                else
-                   if (i.ne.4) then
-                      call flip_one(part,i,4,invertmap,.true.)
-                   endif
-                endif
-             endif
-          enddo
-          ! flip if pdg's are not ordered
-          if (abs(part(1)).gt.abs(part(2))) then
-             call flip_one(part,1,2,invertmap,.false.)
-             call flip_one(part,3,4,invertmap,.false.)
-          endif
-       endif
-    endif
-    iflip=next
-    do i=next,1,-1
-       if (is_singlet(part(i))) then
-          ! found a color singlet, move to the end
-          if (i.ne.iflip) then
-             call flip_one(part,i,iflip,invertmap,.true.)
-          endif
-          iflip=iflip-1
-       endif
-    enddo
-  end subroutine map_to_canonical_form
 
-  subroutine flip_one(part,i,j,invertmap,to_invert)
+  subroutine sort_with_mapping(n,array,mapping)
+    !
+    ! EXAMPLE:
+    !
+    ! input:
+    ! n=5
+    ! array=[4, 1, 8, 2, 3]
+    !
+    ! output:
+    ! array=[1, 2, 3, 4, 8]
+    ! mapping=[2, 4, 5, 1, 3]
+    !
     implicit none
-    integer :: i,j,icross,itmp,k,l
-    integer,dimension(next) :: part,invertmap
-    real(kind=8) :: dtmp
-    logical :: to_invert
-    if ((i.le.2 .and. j.gt.2) .or. (i.gt.2 .and. j.le.2)) then
-       icross=-1
-    else
-       icross=1
-    endif
-    ! PDG code:
-    itmp=part(i)
-    if (icross .eq. -1) then
-       part(i)=phys_model%get_antipart(part(j))
-       part(j)=phys_model%get_antipart(itmp)
-    else
-       part(i)=part(j)
-       part(j)=itmp
-    endif
-    if (to_invert) then
-       do k=1,next
-          if (invertmap(k).eq.i) exit
+    integer,intent(in) :: n
+    integer,dimension(n),intent(inout) :: array
+    integer,dimension(n),intent(out) :: mapping
+    integer :: i, j, temp
+    ! Initialize mapping
+    mapping = [(i,i=1,n)]
+    ! Sort the array and mapping using a simple bubble sort
+    do i=1,n-1
+       do j=1,n-i
+          if (array(j) .gt. array(j+1)) then
+             ! Swap array elements
+             temp = array(j)
+             array(j) = array(j+1)
+             array(j+1) = temp
+             ! Swap mapping
+             temp = mapping(j)
+             mapping(j) = mapping(j+1)
+             mapping(j+1) = temp
+          endif
        enddo
-       do l=1,next
-          if (invertmap(l).eq.j) exit
-       enddo
-       invertmap(l)=i
-       invertmap(k)=j
-    endif
-  end subroutine flip_one
+    enddo
+  end subroutine sort_with_mapping
+
+  
+  subroutine map_to_canonical_form(process,part,mapping)
+    ! cross the two initial state particle PDGs, order according to
+    ! the PDG value, (and reflip the two initial states again)
+    implicit none
+    integer,dimension(next) :: process,part,mapping
+    part(1:next)=process(1:next)
+    ! cross the initial state
+    part(1)=phys_model%get_antipart(part(1))
+    part(2)=phys_model%get_antipart(part(2))
+    call sort_with_mapping(next,part,mapping)
+    ! cross the initial state
+    part(1)=phys_model%get_antipart(part(1))
+    part(2)=phys_model%get_antipart(part(2))
+  end subroutine map_to_canonical_form
   
   
   subroutine setup_spin(pgl)
@@ -1190,6 +1070,74 @@ contains
        enddo
     enddo
   end subroutine setup_spin
+
+  subroutine setup_color_order(pgl_unique)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl_unique
+    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig
+    do iproc=1,pgl_unique%nproc
+       nq=0
+       ng=0
+       nsing=0
+       do i=1,next
+          if (is_quark(abs(pgl_unique%processes(i,iproc)))) then
+             nq=nq+1
+          elseif(is_gluon(pgl_unique%processes(i,iproc))) then
+             ng=ng+1
+          elseif(is_singlet(pgl_unique%processes(i,iproc))) then
+             nsing=nsing+1
+          else
+             write (*,*) 'unknown particle type:',pgl_unique%processes(i,iproc)
+             stop 1
+          endif
+       enddo
+       if (nq.eq.0 .and. nsing.ne.0) then
+          write (*,*) 'when there are colour singlets, there should be quarks'
+          stop 1
+       elseif (nq.eq.0) then
+          do i=1,next
+             pgl_unique%orders(i,iproc)=i
+          enddo
+       elseif (nq.eq.2) then
+          ig=2
+          is=ng+2
+          do i=1,next
+             if (is_quark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(1,iproc)=i
+             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(next,iproc)=i
+             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(ig,iproc)=i
+                ig=ig+1
+             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(is,iproc)=i
+                is=is+1
+             endif
+          enddo
+       elseif (nq.eq.4) then
+          iq=1
+          iaq=2
+          ig=4
+          is=ng+4
+          do i=1,next
+             if (is_quark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(iq,iproc)=i
+                iq=iq+2
+             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(iaq,iproc)=i
+                iaq=next
+             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(ig,iproc)=i
+                ig=ig+1
+             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(is,iproc)=i
+                is=is+1
+             endif
+          enddo
+       endif
+    enddo
+  end subroutine setup_color_order
+
   
   subroutine create_run_tag()
     implicit none

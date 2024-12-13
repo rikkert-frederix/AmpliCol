@@ -92,7 +92,7 @@ def convert_to_string(perm):
 
 
 
-nfinal=4
+nfinal=3
 quarks=['d','u','s','c','b','t']
 antiquarks=['dbar','ubar','sbar','cbar','bbar','tbar']
 flavour_scheme=['d','u','s','c','b'] # all the massless quarks
@@ -108,7 +108,7 @@ color_singlets=['a']
 #color_singlets=['a','a']
 
 # all-gluon process
-#base_procs=[[]]
+base_procs=[[]]
 base_procs=[]
 # one-quark-line process
 if nfinal+2 >= len(color_singlets)+2 : 
@@ -138,13 +138,16 @@ for proc in base_procs:
 # matrix_integrate to determine which flavour configurations yield
 # unique matrix elements.
 unique_procs=copy.deepcopy(base_procs)
-# add the 2qq_df processes with the two incoming particles interchanged
+# sort according to the PDF codes:
+for i in range(len(unique_procs)):
+    unique_procs[i]=sorted(unique_procs[i],key=lambda x: int(pdgs[x]))
+# add the 2qq_df processes with the two incoming particles interchanged:
 i=0
 while i < len(unique_procs):
     proc = unique_procs[i]
-    if proc[0] in quarks and proc[1] in quarks and proc[0] != proc[1]:
+    if proc[2] in quarks and proc[3] in quarks and proc[2] != proc[3]:
         swapped_proc=proc[:]
-        swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
+        swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
         unique_procs.insert(i+1,swapped_proc)
         i+=1
     i+=1
