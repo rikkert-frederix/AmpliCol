@@ -109,7 +109,7 @@ color_singlets=['a']
 
 # all-gluon process
 base_procs=[[]]
-base_procs=[]
+#base_procs=[]
 # one-quark-line process
 if nfinal+2 >= len(color_singlets)+2 : 
     for q in flavour_scheme:

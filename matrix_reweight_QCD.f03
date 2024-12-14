@@ -74,11 +74,11 @@ program matrix_reweight
      call cpu_time(tBefore)
      
      call amps(iproc)%evaluate(next,p,hel)
-     ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
+     ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
