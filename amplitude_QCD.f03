@@ -1770,12 +1770,7 @@ contains
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
-!!$             if (this%current_list(ic)%order(1).le.2) then
-!!$                ifinal=-1
-!!$             else
-                ifinal=1
-!!$             endif
-
+             ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
                 ih_in=max(0,hel(this%current_list(ic)%order(1)))
              else

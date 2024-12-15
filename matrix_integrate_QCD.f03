@@ -289,17 +289,17 @@ contains
         if (pgl_unique%phase_space%jac.lt.0d0) cycle
         ievent=ievent+1
         call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel)
-        iproc=1
+        iproc=0
         amp2(ievent,:)=0d0
         if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
            do ih=1,pgl_unique%amps%n_amps
+              do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
               amp2(ievent,iproc)=amp2(ievent,iproc)+pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
-              if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
            enddo
         else
            do ih=1,pgl_unique%amps%n_amps
+              do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
               amp2(ievent,iproc)=amp2(ievent,iproc)+dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
-              if (pgl_unique%amps%iproc_start(iproc+1).eq.ih+1) iproc=iproc+1
            enddo
         endif
      enddo
@@ -330,6 +330,7 @@ contains
      unique_map=-1d0
      do i=1,pgl%nproc
         do j=1,i-1
+           if (all(amp2(1:nevent,j).eq.0d0)) cycle
            ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
            ave=sum(ratio(1:nevent))/nevent
            if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
@@ -411,24 +412,21 @@ contains
     t_amp=t_amp+tAfter-tBefore
 
     call cpu_time(tBefore)
-    iproc=1
+    iproc=0
+    pgl(ichan)%amp2(:)=0d0
     if (use_real_gluons .and. all(pgl(ichan)%amps%n_qqbar(1:pgl(ichan)%amps%nprocs).eq.0)) then
        do ih=1,pgl(ichan)%amps%n_amps
+          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps%amps_r(ih)*pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps%amps_r(ih)*&
-               pgl(ichan)%hel_fac(ih)
-          if (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih+1) then
-             pgl(ichan)%amp2(iproc)=sum(pgl(ichan)%amp2_hel(pgl(ichan)%amps%iproc_start(iproc):ih))
-             iproc=iproc+1
-          endif
+                  pgl(ichan)%hel_fac(ih)
+          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     else
        do ih=1,pgl(ichan)%amps%n_amps
+          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
-          if (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih+1) then
-             pgl(ichan)%amp2(iproc)=sum(pgl(ichan)%amp2_hel(pgl(ichan)%amps%iproc_start(iproc):ih))
-             iproc=iproc+1
-          endif
+          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
     
@@ -1092,8 +1090,19 @@ contains
           endif
        enddo
        if (nq.eq.0 .and. nsing.ne.0) then
-          write (*,*) 'when there are colour singlets, there should be quarks'
-          stop 1
+          ig=nsing+1
+          is=1
+          do i=1,next
+             if (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%orders(is,iproc)=i
+                is=is+1
+             else
+                pgl_unique%orders(ig,iproc)=i
+                ig=ig+1
+             endif
+          enddo
+!!$          write (*,*) 'when there are colour singlets, there should be quarks'
+!!$          stop 1
        elseif (nq.eq.0) then
           do i=1,next
              pgl_unique%orders(i,iproc)=i
