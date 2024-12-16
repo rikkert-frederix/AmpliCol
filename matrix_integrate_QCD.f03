@@ -214,6 +214,7 @@ program matrix_integrate_QCD
      call gen(integrand,0,-1) ! initialise counters
      filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
      open(unit=11,file=filename,status='unknown')
+     if (COMMAND_ARGUMENT_COUNT().le.10) call write_unique_in_file()
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
         call unwgt_process      ! pick a random process
@@ -237,6 +238,16 @@ program matrix_integrate_QCD
   write(*,*) 'Fraction passing:',float(pgl(1:ngroups)%passed)/float(pgl(1:ngroups)%all_evt)
  
 contains
+  subroutine write_unique_in_file()
+    implicit none
+    integer :: iproc
+    write(11,*) next,pgl_unique%nproc
+    do iproc=1,pgl_unique%nproc
+       write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:next,iproc)
+    enddo
+    deallocate(pgl_unique)
+  end subroutine write_unique_in_file
+  
   subroutine check_unique_processes()
     implicit none
     integer :: i,iproc,ievent,ih,nqq
@@ -810,7 +821,7 @@ contains
           read(10,*)
           read(10,*)
        enddo
-       deallocate(pgl_unique)
+       if (integration_step.le.1) deallocate(pgl_unique)
 999    continue
        close(10)
     elseif (argc.le.10) then

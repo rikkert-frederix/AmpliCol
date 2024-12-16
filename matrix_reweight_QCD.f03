@@ -27,12 +27,13 @@ program matrix_reweight
   type(amplitude_QCD),dimension(max_proc) :: amps
   type(physics_model) :: phys_model
   integer,parameter :: string_len=150
-  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff
-  integer,dimension(:),allocatable :: hel
-  integer,dimension(:,:),allocatable :: spin,o,part,processes
-  real(kind=8) :: amp2,amp_col
+  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff,unique_nproc
+  integer,dimension(:),allocatable :: hel,unique_map
+  integer,dimension(:,:),allocatable :: spin,o,part,processes,unique_processes
+  real(kind=8) :: amp2,amp_col,process_map_value
   real(kind=8),dimension(3) :: matrix2
   real(kind=8),dimension(:,:),allocatable :: p
+  real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
   character(len=string_len) :: tag,tag_read,add_arg=''
@@ -43,15 +44,9 @@ program matrix_reweight
   
   call phys_model%init_part(173d0,1.491500d0)
 
-  ! read one event to determine 'next' and allocate the required arrays.
-  call read_event(11,done)
-  rewind(11)
   nprocs=0
-  processes(1:next,1)=part(1:next,1)
   call setup_spin()
-
   col_acc=20
-
 
   do
      call read_event(11,done)
@@ -110,7 +105,9 @@ program matrix_reweight
               matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
            enddo
         endif
-        
+        ! The following line can be removed since 'process_map_value'
+        ! will drop out when taking the ratio w.r.t. LC.
+!        matrix2(iacc)=matrix2(iacc)*process_map_value
         call cpu_time(tAfter)
         if (iacc.eq.1) t_mat_LC=t_mat_LC+tAfter-tBefore
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
@@ -150,6 +147,8 @@ contains
        call get_command_argument(1,argv)
        read(argv,'(a)') filename
        open(unit=11,file=filename,status='old')
+       call read_unique_in_file()
+       call allocate_process_info()
        open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
     elseif (argc.le.8) then
        write(*,*) 'Inconsistent arguments:'
@@ -167,9 +166,8 @@ contains
                 write (*,*) 'Need at least 4 particles (2->2 scattering)',next
                 stop 1
              endif
-             allocate(part(1:next,1))
-             allocate(processes(1:next,max_proc))
-             allocate(o(1:next,1))
+             unique_nproc=0
+             call allocate_process_info()
           endif
           do k=0,next-1
              if (i.eq.2+k) then
@@ -195,6 +193,34 @@ contains
     
   end subroutine get_run_arguments
 
+  subroutine allocate_process_info()
+    use rw_events
+    implicit none
+    if (.not. allocated(hel)) then
+       allocate(momenta(0:3,1:next))
+       allocate(helicity(1:next))
+       allocate(col_order(1:next))
+       allocate(iPDG(1:next))
+       if (.not.allocated(o)) allocate(o(next,1))
+       if (.not.allocated(part)) allocate(part(next,1))
+       if (.not.allocated(processes)) allocate(processes(next,max_proc))
+       allocate(hel(next))
+       allocate(p(0:3,next))
+    endif
+  end subroutine allocate_process_info
+  
+  subroutine read_unique_in_file()
+    implicit none
+    integer :: iproc
+    read(11,*) next,unique_nproc
+    allocate(unique_map(unique_nproc))
+    allocate(unique_map_value(unique_nproc))
+    allocate(unique_processes(next,unique_nproc))
+    do iproc=1,unique_nproc
+       read(11,*) unique_map(iproc),unique_map_value(iproc),unique_processes(1:next,iproc)
+    enddo
+  end subroutine read_unique_in_file
+  
   subroutine setup_spin()
     implicit none
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
@@ -264,17 +290,6 @@ contains
     done=.false.
     read (iunit,*,err=99,end=99) dummy
     read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
-    if (.not. allocated(hel)) then
-       allocate(momenta(0:3,1:next))
-       allocate(helicity(1:next))
-       allocate(col_order(1:next))
-       allocate(iPDG(1:next))
-       if (.not.allocated(o)) allocate(o(next,1))
-       if (.not.allocated(part)) allocate(part(next,1))
-       if (.not.allocated(processes)) allocate(processes(next,max_proc))
-       allocate(hel(next))
-       allocate(p(0:3,next))
-    endif
     read (iunit,*,err=99,end=99) helicity(1:next)
     read (iunit,*,err=99,end=99) col_order(1:next)
     do i=1,next
@@ -331,7 +346,7 @@ contains
     implicit none
     integer,dimension(next) :: mapping
     real(kind=8),dimension(0:3,next) :: p_cross
-    integer :: i
+    integer :: i,iproc
     part(1:next,1)=iPDG(1:next)
     if (.not.use_only_canonical_form) then
        ! do no use the mapping to canonical form, but reweight the
@@ -362,6 +377,22 @@ contains
           hel(i)=helicity(mapping(i))
           o(i,1)=col_order(mapping(i)) ! this is not correct, but isn't used
        enddo
+       ! Convert to 'unique flavour configuration' (if available)
+       if (unique_nproc.eq.0) return
+       do iproc=1,unique_nproc
+          if (all(part(1:next,1).eq.unique_processes(1:next,iproc))) then
+             process_map_value=unique_map_value(iproc)
+             if (unique_map(iproc).gt.0) then
+                part(1:next,1)=unique_processes(1:next,unique_map(iproc))
+             endif
+             exit
+          endif
+       enddo
+       if (iproc.eq.unique_nproc+1) then
+          write (*,*) 'Process not found among unique processes'
+          write (*,*) part(1:next,1)
+          stop 1
+       endif
     endif
   end subroutine map_to_canonical_form
 
