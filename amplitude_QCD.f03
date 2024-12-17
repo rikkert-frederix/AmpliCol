@@ -39,7 +39,7 @@ module amplitude_QCD_mod
      procedure,private :: filter_dead_trees
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm,read_file)
     use math_functions
     use particles
     implicit none
@@ -54,6 +54,7 @@ contains
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc,jproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
+    logical :: read_file
 
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -543,11 +544,27 @@ contains
             order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
          endif
       else
-         this%nprocs=n_processes
-         allocate(this%processes(n,this%nprocs))
-         this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
-         allocate(order(1:n,this%nprocs))
-         order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
+         idum=number_of_quark_lines(part(1,1),sf)
+         if (sf .and. .not.read_file) then
+            ! add the two different-flavour processes that make up the same-flavour process
+            call define_symm_2qq(part(1,1),part_sf(1,1),1)
+            call define_symm_2qq(part(1,1),part_sf(1,2),2)
+            this%nprocs=3
+            allocate(this%processes(n,this%nprocs))
+            this%processes(1:n,1)=part_sf(1:n,1)
+            this%processes(1:n,2)=part_sf(1:n,2)
+            this%processes(1:n,3)=part(1:n,1)
+            allocate(order(1:n,this%nprocs))
+            order(1:n,1)=o(1:n,1)
+            order(1:n,2)=o(1:n,1)
+            order(1:n,3)=o(1:n,1)
+         else
+            this%nprocs=n_processes
+            allocate(this%processes(n,this%nprocs))
+            this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
+            allocate(order(1:n,this%nprocs))
+            order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
+         endif
       endif
       
       allocate(this%n_sing(1:this%nprocs))

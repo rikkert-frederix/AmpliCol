@@ -23,6 +23,7 @@ program matrix_integrate_QCD
   integer :: iproc_picked,iproc_iden_picked
   integer :: ngroups,igroup,integration_step
   logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
+  logical :: read_proc_from_file
   integer :: nproc_unique
   integer,dimension(:,:),allocatable :: unique_procs
   integer :: nprocs
@@ -177,7 +178,8 @@ program matrix_integrate_QCD
      if (read_amps_from_file) then
         call pgl(igroup)%amps%read_init_amps_from_file(next,32)
      else
-        call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%orders,phys_model)
+        call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
+                pgl(igroup)%spin,pgl(igroup)%orders,phys_model,read_proc_from_file)
      endif
      if (write_amps_to_file) then
         call pgl(igroup)%amps%write_init_amps_to_file(next,32)
@@ -287,7 +289,8 @@ contains
           s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf, &
           pgl_unique%iden_processes)
 
-     call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,pgl_unique%spin,pgl_unique%orders,phys_model)
+     call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
+             pgl_unique%spin,pgl_unique%orders,phys_model,read_proc_from_file)
      
      allocate(amp2(nevent,pgl_unique%nproc))
 
@@ -319,7 +322,8 @@ contains
      call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
 
      do iproc=1,pgl_unique%nproc
-        write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:next,iproc),':',pgl_unique%orders(1:next,iproc)
+        write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:next,iproc),&
+                ':',pgl_unique%orders(1:next,iproc)
      enddo
 
      deallocate(pgl_unique%spin)
@@ -759,6 +763,7 @@ contains
           if (i.eq.1) read(argv,'(a)') filename
           if (i.eq.2) read(argv,*) PS_choice
           if (i.eq.3) read(argv,*) integration_step
+          read_proc_from_file=.true.
        enddo
        open(unit=10,file=filename,status='old')
        read (10,*) next,nproc_unique
@@ -833,6 +838,7 @@ contains
        ngroups=1
        allocate(pgl(ngroups))
        do i = 1, argc
+          read_proc_from_file=.false.
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) PS_choice
           if (i.eq.2) read(argv,*) integration_step
