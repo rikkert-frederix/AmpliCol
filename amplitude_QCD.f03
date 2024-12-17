@@ -674,6 +674,8 @@ contains
             enddo
             if (any(this%same_flavour_proc_map(iproc,1:2).eq.0)) then
                write (*,*) 'Same flavour process not found',iproc
+               write (*,*) part_sf(1:n,1)
+               write (*,*) part_sf(1:n,2)
                stop 1
             endif
          endif
@@ -685,7 +687,7 @@ contains
       integer :: chan
       integer,dimension(n) :: part_in,part_out1
       integer,dimension(n,2) :: part_out
-      integer :: i,iq,ia,ifirst,i_same,n_sing
+      integer :: i,iq,ia,ifirst,i_same,n_sing,add_or_subtract
       integer,dimension(2,2) :: connection
       n_sing=0
       do i=1,n
@@ -696,6 +698,16 @@ contains
       else
          i_same=2
       endif
+      do i=1,n
+         if (is_quark(part_in(i)).or.is_antiquark(part_in(i))) then
+            if (abs(part_in(i)).gt.2) then
+               add_or_subtract=-1
+            else
+               add_or_subtract=1
+            endif
+            exit
+         endif
+      enddo
       part_out1=part_in
       part_out(1:n,1)=part_in
       part_out(1:n,2)=part_in
@@ -722,28 +734,28 @@ contains
          endif
       enddo
       if (chan.eq.1) then
-            ! change the 2nd quark and an anti-quark in the process
-            part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+i_same,part_out1(connection(1,2)))
-            part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+i_same,part_out1(connection(2,2)))
-            ! change the 1st quark and an anti-quark in the process
-            part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+i_same,part_out1(connection(1,1)))
-            part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+i_same,part_out1(connection(2,1)))
+         ! change the 2nd quark and an anti-quark in the process
+         part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+add_or_subtract*i_same,part_out1(connection(1,2)))
+         part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+add_or_subtract*i_same,part_out1(connection(2,2)))
+         ! change the 1st quark and an anti-quark in the process
+         part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+add_or_subtract*i_same,part_out1(connection(1,1)))
+         part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+add_or_subtract*i_same,part_out1(connection(2,1)))
 
       elseif(chan.eq.2) then
          if (abs(part_out1(connection(1,1))).lt.4) then
             ! change the mixed quark and an anti-quark in the process; leave the
             ! first (anti-)quark unchanged.
-               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+i_same,part_out1(connection(1,2)))
-               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+i_same,part_out1(connection(2,1)))
-               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+i_same,part_out1(connection(1,1)))
-               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+i_same,part_out1(connection(2,2)))
+               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+add_or_subtract*i_same,part_out1(connection(1,2)))
+               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+add_or_subtract*i_same,part_out1(connection(2,1)))
+               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+add_or_subtract*i_same,part_out1(connection(1,1)))
+               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+add_or_subtract*i_same,part_out1(connection(2,2)))
          else
             ! change the mixed quark and an anti-quark in the process; leave the
             ! second (anti-)quark unchanged.
-               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+i_same,part_out1(connection(1,1)))
-               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+i_same,part_out1(connection(2,2)))
-               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+i_same,part_out1(connection(1,2)))
-               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+i_same,part_out1(connection(2,1)))
+               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+add_or_subtract*i_same,part_out1(connection(1,1)))
+               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+add_or_subtract*i_same,part_out1(connection(2,2)))
+               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+add_or_subtract*i_same,part_out1(connection(1,2)))
+               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+add_or_subtract*i_same,part_out1(connection(2,1)))
          endif
       endif
     end subroutine define_symm_2qq
