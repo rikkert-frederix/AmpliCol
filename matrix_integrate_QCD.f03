@@ -161,7 +161,6 @@ program matrix_integrate_QCD
      deallocate(mass)
      deallocate(width)
 
-
      allocate(pgl(igroup)%iden(pgl(igroup)%nproc))
      pgl(igroup)%iden(1:pgl(igroup)%nproc)=1
      call set_final_state_identical_particle_factor(pgl(igroup)) ! updates 'iden()'
@@ -181,17 +180,25 @@ program matrix_integrate_QCD
         call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
                 pgl(igroup)%spin,pgl(igroup)%orders,phys_model,read_proc_from_file)
      endif
+
+     !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
+     
      if (write_amps_to_file) then
         call pgl(igroup)%amps%write_init_amps_to_file(next,32)
      endif
-     
+
      call cpu_time(tAfter)
      t_amp_init=t_amp_init+tAfter-tBefore
 
      ! Total number of amplitudes is stored in 'nhel'
      pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
 
-     allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
+     !if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
+     !        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
+     !else
+             allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
+     !endif
+
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
   
      allocate(pgl(igroup)%amp2(pgl(igroup)%nproc))
@@ -302,7 +309,7 @@ contains
         call pgl_unique%phase_space%generate_momenta(x)
         if (pgl_unique%phase_space%jac.lt.0d0) cycle
         ievent=ievent+1
-        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel)
+        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file)
         iproc=0
         amp2(ievent,:)=0d0
         if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
@@ -421,7 +428,7 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel)
+    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
 
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -439,12 +446,13 @@ contains
     else
        do ih=1,pgl(ichan)%amps%n_amps
           do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+          !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3) .and. iproc.lt.3) cycle 
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
-    
+
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
        if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
@@ -576,14 +584,14 @@ contains
           endif
        enddo
     enddo
-    
+
     if (pgl%passed.lt.nevent_hel_filter) return
 
     ih2=0
     do ih1=1,pgl%nhel
        if (pgl%include_hel(ih1).gt.0) ih2=ih2+1
     enddo
-    
+
     call pgl%amps%filter_helicity(next,pgl%nhel,pgl%include_hel) ! this updates 'nhel' and 'include_hel'
     deallocate(pgl%hel_fac)
     allocate(pgl%hel_fac(pgl%nhel))
@@ -749,6 +757,7 @@ contains
     integer(kind=8) iseed
     integer,dimension(:),allocatable :: process,order
     integer :: factor,nproc_in_group
+    logical :: same_flavour
     common /to_seed/iseed
     iseed=0
     ! integration steps:
@@ -898,12 +907,27 @@ contains
              endif
           enddo
        endif
+
+
+       do i=2,next-1
+          if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
+              (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+             if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
+                same_flavour=.true.
+             else
+                same_flavour=.false.
+             endif
+             exit
+          endif
+       enddo
+
        if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
           write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
           stop
        endif
        call compute_multichannel_symmetry_factor(sym_fac)
        pgl(1)%nproc=1
+       !if (same_flavour) pgl(1)%nproc=3
        allocate(pgl(1)%processes(1:next,pgl(1)%nproc))
        pgl(1)%processes(1:next,1)=part(1:next)
        allocate(pgl(1)%orders(1:next,pgl(1)%nproc))
@@ -1283,8 +1307,11 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,ifac,iproc
     real(kind=8) :: fac
-    integer :: it
-    do iproc=1,pgl%nproc
+    integer :: it,lim
+
+    lim=pgl%nproc
+    !if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
+    do iproc=1,lim
        fac=0d0
        do i=1,next
           if (pgl%processes(i,iproc).eq.21) then

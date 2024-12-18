@@ -745,17 +745,25 @@ contains
          if (abs(part_out1(connection(1,1))).lt.4) then
             ! change the mixed quark and an anti-quark in the process; leave the
             ! first (anti-)quark unchanged.
-               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+add_or_subtract*i_same,part_out1(connection(1,2)))
-               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+add_or_subtract*i_same,part_out1(connection(2,1)))
-               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+add_or_subtract*i_same,part_out1(connection(1,1)))
-               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+add_or_subtract*i_same,part_out1(connection(2,2)))
+               part_out(connection(1,2),1)=sign(mod(abs(part_out1(connection(1,2))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(1,2)))
+               part_out(connection(2,1),1)=sign(mod(abs(part_out1(connection(2,1))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(2,1)))
+               part_out(connection(1,1),2)=sign(mod(abs(part_out1(connection(1,1))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(1,1)))
+               part_out(connection(2,2),2)=sign(mod(abs(part_out1(connection(2,2))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(2,2)))
          else
             ! change the mixed quark and an anti-quark in the process; leave the
             ! second (anti-)quark unchanged.
-               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+add_or_subtract*i_same,part_out1(connection(1,1)))
-               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+add_or_subtract*i_same,part_out1(connection(2,2)))
-               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+add_or_subtract*i_same,part_out1(connection(1,2)))
-               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+add_or_subtract*i_same,part_out1(connection(2,1)))
+               part_out(connection(1,1),1)=sign(mod(abs(part_out1(connection(1,1))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(1,1)))
+               part_out(connection(2,2),1)=sign(mod(abs(part_out1(connection(2,2))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(2,2)))
+               part_out(connection(1,2),2)=sign(mod(abs(part_out1(connection(1,2))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(1,2)))
+               part_out(connection(2,1),2)=sign(mod(abs(part_out1(connection(2,1))),4)+&
+                       add_or_subtract*i_same,part_out1(connection(2,1)))
          endif
       endif
     end subroutine define_symm_2qq
@@ -1758,7 +1766,7 @@ contains
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel)
+  subroutine evaluate(this,n,p,hel,read_file)
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
@@ -1766,6 +1774,7 @@ contains
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ip,ifinal
+    logical :: read_file 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -2073,7 +2082,30 @@ contains
                                      this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             enddo
          else
-            do iproc=1,this%nprocs
+            if (.not.read_file) then
+               do iproc=1,this%nprocs
+               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                  if (.not.this%same_flav(iproc)) then
+                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+                  else
+                     ! same-flavour amps are build from two different-flavour amps
+                     if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
+                                        this%amps(this%same_flavour_sum(iamp,2))/3d0
+                     elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
+                     elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+                     else
+                        write (*,*) 'At least one should contribute'
+                        stop 1
+                     endif
+                  endif
+               enddo
+               enddo
+            else   
+             do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
                      this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
@@ -2094,7 +2126,10 @@ contains
                   endif
                enddo
             enddo
+            endif
          endif
+
+
       elseif(this%imode.eq.2) then
          if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
             do iamp=1,this%n_amps
