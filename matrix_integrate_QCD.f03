@@ -119,6 +119,7 @@ program matrix_integrate_QCD
   endif
   
   do igroup=1,ngroups
+     if (pgl(igroup)%nproc.eq.0) cycle
      ! allocate the amplitudes and the phase-space for each of the integration channels
      if (PS_choice.eq.1) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
@@ -379,13 +380,13 @@ contains
     real(kind=8) :: vol,cuts_wgt
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
-    real(kind=8) :: Q
     if (.not.allocated(val)) then
        allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
        allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
     endif
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
+    if (pgl(ichan)%nproc.eq.0) return
     if (ifirst.eq.2) then
        ! use previously computed integrand
        f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
@@ -430,7 +431,6 @@ contains
     call cpu_time(tBefore)
 
     call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
-
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
@@ -459,7 +459,7 @@ contains
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
-
+    
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
        if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
@@ -470,8 +470,15 @@ contains
        endif
     endif
 
-    weight=vol*pgl(ichan)%phase_space%jac*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))*conv
+    ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
+    weight=vol*pgl(ichan)%phase_space%jac*conv
 
+    ! multiply by the strong coupling
+    if (pgl(ichan)%amps%n_sing(1).lt.next-2) then
+       weight=weight*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))
+    endif
+    
+    ! multiply by the EW coupling
     if (pgl(ichan)%amps%n_sing(1).ge.1) then
        weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
     endif
@@ -1393,8 +1400,7 @@ contains
   subroutine include_PDF_and_identical_procs(val,val_abs,pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    real(kind=8),intent(inout),dimension(*) :: val
-    real(kind=8),intent(inout),dimension(*) :: val_abs
+    real(kind=8),intent(inout),dimension(*) :: val,val_abs
     integer :: iproc,ip
     real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
