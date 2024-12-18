@@ -73,7 +73,7 @@ def valid_perm(perm):
             # quark-antiquark pair
             found_singlet=True
             next_index = (ii + 1) % n  # Cyclic next element
-            if (perm[next_index] not in antiquarks ):  # next element must be an anti-quark
+            if (perm[next_index] not in antiquarks and perm[next_index] not in color_singlets):  # next element must be an anti-quark or another colour singlet
                 return -1
         if perm[ii] in quarks and found_singlet:  return -1
     return ishift
@@ -92,7 +92,7 @@ def convert_to_string(perm):
 
 
 
-nfinal=3
+nfinal=4
 quarks=['d','u','s','c','b','t']
 antiquarks=['dbar','ubar','sbar','cbar','bbar','tbar']
 flavour_scheme=['d','u','s','c','b'] # all the massless quarks
@@ -101,11 +101,12 @@ proton=['g','d','u','s','c','b','dbar','ubar','sbar','cbar','bbar'] # all parton
 pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','dbar':'-1','ubar':'-2','sbar':'-3','cbar':'-4','bbar':'-5','tbar':'-6','a':'22'}
 antipart={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tbar','dbar':'d','ubar':'u','sbar':'s','cbar':'c','bbar':'b','tbar':'t','a':'a'}
 all_part=['g','d','u','s','c','b','t','dbar','ubar','sbar','cbar','bbar','tbar','a']
+all_coloured=quarks+antiquarks+['g']
 
 # color-singlets
 #color_singlets=[]
-color_singlets=['a']
-#color_singlets=['a','a']
+#color_singlets=['a']
+color_singlets=['a','a']
 
 # all-gluon process
 base_procs=[[]]
@@ -162,7 +163,7 @@ for proc in base_procs:
 iden_fac={}
 for i,proc in enumerate(all_procs):
     i_fac=1
-    for p in all_part:
+    for p in all_coloured:
         i_fac*=max(1,math.factorial(proc[2:].count(p)))
     iden_fac[i]=i_fac
 
