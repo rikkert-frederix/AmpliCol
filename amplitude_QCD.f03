@@ -830,6 +830,7 @@ contains
       if (.not.valid_current_combination())  then
          return
       endif
+      
       if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -1190,7 +1191,7 @@ contains
                ns1=ns1+1
             elseif (mv12.eq.2) then
                ord(ipos)=ord2(ns2)
-               singlet_mv(singlet_mv(0))=n1+ns2+1 - (singlet_mv(0)-1)
+               singlet_mv(singlet_mv(0))=n1+ns2 - (singlet_mv(0)-1)
                ns2=ns2+1
             endif
          enddo
