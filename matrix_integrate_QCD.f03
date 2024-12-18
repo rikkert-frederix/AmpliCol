@@ -193,15 +193,16 @@ program matrix_integrate_QCD
      ! Total number of amplitudes is stored in 'nhel'
      pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
 
-     !if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
-     !        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
-     !else
+     if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
+             allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
+     else
              allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
-     !endif
+     endif
 
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
-  
+
      allocate(pgl(igroup)%amp2(pgl(igroup)%nproc))
+
      ! number of helicities to sum over
      allocate(pgl(igroup)%amp2_hel(1:pgl(igroup)%nhel))
      allocate(pgl(igroup)%hel(1:next))
@@ -446,9 +447,15 @@ contains
     else
        do ih=1,pgl(ichan)%amps%n_amps
           do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-          !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3) .and. iproc.lt.3) cycle 
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
+          if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
+                  .not. pgl(ichan)%amps%same_flav(iproc)) then
+               cycle
+          elseif (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
+                  pgl(ichan)%amps%same_flav(iproc)) then 
+               iproc=1
+          endif
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
@@ -462,7 +469,7 @@ contains
           pgl(ichan)%amp2(1:pgl(ichan)%nproc)=0d0
        endif
     endif
-    
+
     weight=vol*pgl(ichan)%phase_space%jac*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))*conv
 
     if (pgl(ichan)%amps%n_sing(1).ge.1) then
@@ -480,6 +487,7 @@ contains
     f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
     f1(2)=sum(val(1:pgl(ichan)%nproc))
     f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
+
     integrand=f1(1)
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
@@ -767,12 +775,12 @@ contains
     ! integration_step=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
     if (argc.eq.3) then
+       read_proc_from_file=.true.
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,'(a)') filename
           if (i.eq.2) read(argv,*) PS_choice
           if (i.eq.3) read(argv,*) integration_step
-          read_proc_from_file=.true.
        enddo
        open(unit=10,file=filename,status='old')
        read (10,*) next,nproc_unique
@@ -845,9 +853,9 @@ contains
        stop 2
     else
        ngroups=1
+       read_proc_from_file=.false.
        allocate(pgl(ngroups))
        do i = 1, argc
-          read_proc_from_file=.false.
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) PS_choice
           if (i.eq.2) read(argv,*) integration_step
@@ -927,7 +935,6 @@ contains
        endif
        call compute_multichannel_symmetry_factor(sym_fac)
        pgl(1)%nproc=1
-       !if (same_flavour) pgl(1)%nproc=3
        allocate(pgl(1)%processes(1:next,pgl(1)%nproc))
        pgl(1)%processes(1:next,1)=part(1:next)
        allocate(pgl(1)%orders(1:next,pgl(1)%nproc))
@@ -1310,7 +1317,7 @@ contains
     integer :: it,lim
 
     lim=pgl%nproc
-    !if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
+    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
     do iproc=1,lim
        fac=0d0
        do i=1,next
