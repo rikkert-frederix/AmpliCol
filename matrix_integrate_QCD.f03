@@ -661,6 +661,7 @@ contains
     write (iunit,*) '<event>'
     write (iunit,*) next,wgt!,pgl(ichan)%amp2(iproc_picked)*weight,pgl(ichan)%amp2(iproc_picked),weight
     write (iunit,'(100i3)') pgl(ichan)%amps%spins(1:next,hel_picked(1),hel_picked(2))
+    if (.not.read_proc_from_file) iproc_picked=1
     write (iunit,'(100i3)') pgl(ichan)%orders(1:next,iproc_picked)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
     ! compensate for reducing the number of integration channels assuming
@@ -738,6 +739,15 @@ contains
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
+
+    if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3) then
+            do iproc=1,pgl(ichan)%amps%nprocs
+               if (pgl(ichan)%amps%same_flav(iproc)) then
+                       iproc_picked=iproc
+                       exit
+                endif
+            enddo
+    endif
     random=ran2()*pgl(ichan)%amp2(iproc_picked)
     i=pgl(ichan)%amps%iproc_start(iproc_picked)
     do

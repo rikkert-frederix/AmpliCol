@@ -26,6 +26,7 @@ program matrix_reweight
   integer,parameter :: max_proc=1280
   type(amplitude_QCD),dimension(max_proc) :: amps
   type(physics_model) :: phys_model
+  logical :: read_proc_from_file
   integer,parameter :: string_len=150
   integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff,unique_nproc
   integer,dimension(:),allocatable :: hel,unique_map
@@ -58,8 +59,7 @@ program matrix_reweight
         call cpu_time(tBefore)
         nprocs=nprocs+1
         processes(1:next,iproc)=part(1:next,1)
-        write (*,*) 'init amps for',part(1:next,1)
-        call amps(iproc)%init(2,next,1,part,spin,o,phys_model)
+        call amps(iproc)%init(2,next,1,part,spin,o,phys_model,read_proc_from_file)
         call amps(iproc)%init_col(next,col_acc)
         call cpu_time(tAfter)
         t_amp_init=t_amp_init+tAfter-tBefore
@@ -68,7 +68,7 @@ program matrix_reweight
 
      call cpu_time(tBefore)
      
-     call amps(iproc)%evaluate(next,p,hel)
+     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -158,6 +158,7 @@ contains
        write(*,*) 'event_file_name_to_reweight'
        stop 1
     else
+       read_proc_from_file=.false.
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) then
