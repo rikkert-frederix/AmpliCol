@@ -6,6 +6,7 @@ module phase_space_haag_mod
    contains
      procedure :: init => haag_init
      procedure :: generate_momenta => haag_generate_momenta
+     procedure :: compute_x_from_momenta => haag_compute_x_from_momenta
   end type phase_space_haag
   private
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -21,6 +22,13 @@ module phase_space_haag_mod
   real(kind=8),parameter :: vtiny=1d-12
 
 contains
+  subroutine haag_compute_x_from_momenta(this,p)
+    implicit none
+    class(phase_space_haag),intent(inout) :: this
+    real(kind=8),dimension(0:3,this%next),intent(in) :: p
+    write (*,*) 'Cannot invert phase-space for haag parametrisation'
+    stop 1
+  end subroutine haag_compute_x_from_momenta
 
   subroutine haag_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,part)
     implicit none

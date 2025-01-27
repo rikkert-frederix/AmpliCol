@@ -6,6 +6,7 @@ module phase_space_gen23_mod
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
+     procedure :: compute_x_from_momenta => gen23_compute_x_from_momenta
   end type phase_space_gen23
   private
   logical :: includePDF
@@ -18,6 +19,7 @@ module phase_space_gen23_mod
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
+  logical,parameter :: use_t_channel_at_start=.true.
 
 contains
   subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,part)
@@ -280,7 +282,6 @@ contains
       implicit none
       integer(kind=4) :: i,j,inext,im1
       integer(kind=4),dimension(3) :: set
-      logical,parameter :: use_t_channel_at_start=.true.
 
       ! incoming momenta
       this%pp(0,ibset(0,0))=this%sqrtshat/2d0
@@ -321,7 +322,7 @@ contains
          !   write(*,*) j,this%pp(0:3,2**(j-1))
          !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
          !enddo
-      endif    
+      endif
       enddo
 
       ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
@@ -593,11 +594,11 @@ contains
       real(kind=8),external :: ran2
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
-         call shatminmax(i,ir,shatmin,shatmax)
+         call shatminmax(this,i,ir,shatmin,shatmax)
          call generate_mass(i,shatmin,shatmax)
       endif
       if (popcnt(ir).gt.1) then
-         call shatminmax(ir,i,shatmin,shatmax)
+         call shatminmax(this,ir,i,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
       if (this%jac.le.0d0) return
@@ -777,14 +778,14 @@ contains
       ic=i ; irc=ir; ibc=ib; im1c=im1
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
-         call shatminmax(i,ir,shatmin,shatmax)
+         call shatminmax(this,i,ir,shatmin,shatmax)
          call generate_mass(i,shatmin,shatmax)
       endif
       if (debug) then
          write (*,*) '23- i    ',i,this%invm(i),shatmin,shatmax
       endif
       if (popcnt(ir).gt.1) then
-         call shatminmax(ir,i,shatmin,shatmax)
+         call shatminmax(this,ir,i,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
       if (this%jac.le.0d0) return
@@ -1194,25 +1195,6 @@ contains
       endif
       xjac=abs(1d0/(2d0*Eref*(p(3)+vtiny)))
     end subroutine fill_momentum_ptinvmphi
-    subroutine boostz(p,yb,pb)
-      ! boost in the z-direction with rapidity yb
-      implicit none
-      real(kind=8),dimension(0:3) :: p,pb
-      real(kind=8) :: yb
-      pb(0)=p(0)*cosh(yb)-p(3)*sinh(yb)
-      pb(1:2)=p(1:2)
-      pb(3)=p(3)*cosh(yb)-p(0)*sinh(yb)
-    end subroutine boostz
-
-    subroutine rotz(p,phi,prot)
-      implicit none
-      real(kind=8),dimension(0:3) :: p,prot
-      real(kind=8) :: phi
-      prot(0)=p(0)
-      prot(1)=p(1)*cos(phi)-p(2)*sin(phi)
-      prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
-      prot(3)=p(3)
-    end subroutine rotz
 
     subroutine roty(p,phi,prot)
       implicit none
@@ -1232,7 +1214,7 @@ contains
       real(kind=8),dimension(0:3) :: piir,pib
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
-         call shatminmax(i,ir,shatmin,shatmax)
+         call shatminmax(this,i,ir,shatmin,shatmax)
          if (popcnt(i+ir).eq.this%next-2) then
             ! The energy of i will be
             ! Ei=(this%sqrtshat+(this%invm(i)-this%invm(ir))/this%sqrtshat)/2d0. This gives a
@@ -1242,9 +1224,12 @@ contains
             shatmax=min(shatmax,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
          endif
          call generate_mass(i,shatmin,shatmax)
+         if (debug) then
+            write (*,*) 't - i    ',i,this%invm(i),shatmin,shatmax
+         endif
       endif
       if (popcnt(ir).gt.1) then
-         call shatminmax(ir,i,shatmin,shatmax)
+         call shatminmax(this,ir,i,shatmin,shatmax)
          if (popcnt(i+ir).eq.this%next-2) then
             ! The energy of ir will be
             ! Eir=(this%sqrtshat+(this%invm(ir)-this%invm(i))/this%sqrtshat)/2d0. This gives a
@@ -1253,12 +1238,11 @@ contains
             shatmax=min(shatmax,this%invm(i)+this%sqrtshat*(this%sqrtshat-2d0*max(sqrt(this%invm(i)),this%ETmin(i))))
          endif
          call generate_mass(ir,shatmin,shatmax)
+         if (debug) then
+            write (*,*) 't - ir   ',ir,this%invm(ir),shatmin,shatmax
+         endif
       endif
       if (this%jac.le.0d0) return
-      if (debug) then
-         write (*,*) 't - i    ',i,this%invm(i),this%invm_min(i),this%invm_max(i)
-         write (*,*) 't - ir   ',ir,this%invm(ir)
-      endif
 
       call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1307,6 +1291,9 @@ contains
       ix=ix+1
 
       call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
+      if (debug) then
+         write (*,*) 't - phi  ',i,phi,0d0,2d0*pi
+      endif
       call gentcms(this%pp(0,ib+ir+i),this%pp(0,ib),this%invm(ib+ir),phi,sqrt(this%invm(i)) &
            &,sqrt(this%invm(ir)),this%pp(0,i),this%pp(0,ib+ir))
       this%pp(0:3,ir)=this%pp(0:3,ib+ir+i)+this%pp(0:3,ib)-this%pp(0:3,i)
@@ -1600,11 +1587,11 @@ contains
       real(kind=8),dimension(0:3) :: p_i,p_ir
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
-         call shatminmax(i,ir,shatmin,shatmax)
+         call shatminmax(this,i,ir,shatmin,shatmax)
          call generate_mass(i,shatmin,shatmax)
       endif
       if (popcnt(ir).gt.1) then
-         call shatminmax(ir,i,shatmin,shatmax)
+         call shatminmax(this,ir,i,shatmin,shatmax)
          call generate_mass(ir,shatmin,shatmax)
       endif
       if (this%jac.le.0d0) return
@@ -1645,23 +1632,6 @@ contains
     end subroutine generate_mass
 
 
-    subroutine shatminmax(j1,j2,shatmin,shatmax)
-      ! Determines minimum and maximum allowed s-channel invariant
-      ! masses based on previously generated masses and the masses of
-      ! the final-state particles.
-      implicit none
-      integer(kind=4),intent(in) :: j1,j2
-      real(kind=8),intent(out) :: shatmin,shatmax
-      integer(kind=4) :: j
-      shatmin=0d0
-      do j=0,this%next-1
-         if (btest(j1,j)) then
-            shatmin=shatmin+sqrt(this%invm(ibset(0,j)))
-         endif
-      enddo
-      shatmin=shatmin**2
-      shatmax=(sqrt(this%invm(j1+j2))-sqrt(max(this%invm(j2),this%invm_min(j2))))**2
-    end subroutine shatminmax
 
 
 
@@ -1672,42 +1642,6 @@ contains
 
 
 
-
-    real(kind=8) function lambda(s,xa2,xb2)
-      ! The usual two dimensional phase-space volume factor. See, e.g.,
-      ! Eq.(A2) of E.~Byckling and K.~Kajantie, ``Reductions of the
-      ! phase-space integral in terms of simpler processes,'' Phys. Rev. 187
-      ! (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
-      implicit none
-      real(kind=8) :: xa2,xb2,S
-      lambda=s**2-2d0*(xa2+xb2)*s+(xa2-xb2)**2
-    end function lambda
-
-    subroutine boostm(p,q,m,pboost)
-      ! This subroutine performs the Lorentz boost of a four-momentum.  The
-      ! momentum p is assumed to be given in the rest frame of q.  pboost is
-      ! the momentum p boosted to the frame in which q is given.  q must be a
-      ! timelike momentum.
-      ! input:
-      !       real    p(0:3)         : four-momentum p in the q rest  frame
-      !       real    q(0:3)         : four-momentum q in the boosted frame
-      !       real    m              : mass of q (for numerical stability)
-      ! output:
-      !       real    pboost(0:3)    : four-momentum p in the boosted frame
-      implicit none
-      real(kind=8) ,dimension(0:3) :: p,q,pboost
-      real(kind=8) :: pq,qq,m,lf
-      real(kind=8),parameter :: rZero=0d0
-      qq = q(1)**2+q(2)**2+q(3)**2
-      if ( qq.ne.rZero ) then
-         pq = p(1)*q(1)+p(2)*q(2)+p(3)*q(3)
-         lf = ((q(0)-m)*pq/qq+p(0))/m
-         pboost(0) = (p(0)*q(0)+pq)/m
-         pboost(1:3) =  p(1:3)+q(1:3)*lf
-      else
-         pboost(0:3) = p(0:3)
-      endif
-    end subroutine boostm
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
       ! This subroutine sets up two four-momenta in the two particle rest
@@ -1806,7 +1740,6 @@ contains
       p1(1) = pt*cos(phi)
       p1(2) = pt*sin(phi)
       call rotxxx(p1,pa_cms,p1_rot)       !Rotate p1 to the pa_cms frame
-!!$    p1_rot=p1
       call boostm(p1_rot,ptot,esum,p1)    !boost back to lab frame
       pr(0:3)=pa(0:3)-p1(0:3)         !Return remainder of momentum
     end subroutine gentcms
@@ -1907,73 +1840,6 @@ contains
     !c
     !cccccccccccccccccccccccccccccccccccccccccccccccccccc
 
-    subroutine rotxxx(p,q,prot)
-      ! This subroutine performs the spacial rotation of a four-momentum.
-      ! the momentum p is assumed to be given in the frame where the spacial
-      ! component of q points the positive z-axis.  prot is the momentum p
-      ! rotated to the frame where q is given.
-      ! input:
-      !       real    p(0:3)         : four-momentum p in q(1)=q(2)=0 frame
-      !!       real    q(0:3)         : four-momentum q in the rotated frame
-      ! output:
-      !       real    prot(0:3)      : four-momentum p in the rotated frame
-      implicit none
-      real(kind=8),dimension(0:3) :: p,q
-      real(kind=8),dimension(0:3) :: prot
-      real(kind=8) :: qt2,qt,psgn,qq
-      real(kind=8),parameter :: rZero=0d0,rOne=1d0
-      prot(0) = p(0)
-      qt2 = q(1)**2 + q(2)**2
-      if ( qt2.eq.rZero ) then
-         if ( q(3).eq.rZero ) then
-            prot(1:3) = p(1:3)
-         else
-            psgn = sign(rOne,q(3))
-            prot(1:3) = p(1:3)*psgn
-         endif
-      else
-         qq = sqrt(qt2+q(3)**2)
-         qt = sqrt(qt2)
-         prot(1) = q(1)*q(3)/qq/qt*p(1) -q(2)/qt*p(2) +q(1)/qq*p(3)
-         prot(2) = q(2)*q(3)/qq/qt*p(1) +q(1)/qt*p(2) +q(2)/qq*p(3)
-         prot(3) =          -qt/qq*p(1)               +q(3)/qq*p(3)
-      endif
-    end subroutine rotxxx
-
-
-    subroutine rotxxx_inv(p,q,prot)
-      ! Same as rotxxx, but inverse. That is, first doing
-      ! rotxxx(p,q,prot) and then rotxxx_inv(prot,q,p) should give you
-      ! back the original p.
-      implicit none
-      real(kind=8),dimension(0:3),intent(in) :: p,q
-      real(kind=8),dimension(0:3),intent(out) :: prot
-      real(kind=8) :: qt2,qt,psgn,qq
-      prot(0) = p(0)
-      qt2 = q(1)**2 + q(2)**2
-      if ( qt2.eq.0d0 ) then
-         if ( q(3).eq.0d0 ) then
-            prot(1:3)=p(1:3)
-         else
-            psgn = sign(1d0,q(3))
-            prot(1:3)=p(1:3)*psgn
-         endif
-      else
-         qq = sqrt(qt2+q(3)**2)
-         qt = sqrt(qt2)
-         prot(1) = q(1)*q(3)/qq/qt*p(1) +q(2)*q(3)/qq/qt*p(2) -  qt/qq*p(3)
-         prot(2) =        -q(2)/qt*p(1) +        q(1)/qt*p(2)
-         prot(3) =   qt*q(1)/qq/qt*p(1) +        q(2)/qq*p(2) +q(3)/qq*p(3)
-      endif
-    end subroutine rotxxx_inv
-
-    real(kind=8) function dot(p1,p2)
-      ! Inner product between two 4-vectors
-      implicit none
-      real(kind=8),intent(in),dimension(0:3) :: p1,p2
-      dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
-    end function dot
-
     subroutine random_to_var(x,power_in,var_min,var_max,var,jac)
       ! Given a random number x, it generates var in the range var_min
       ! <= var <= var_max according to var^(power)
@@ -2047,126 +1913,800 @@ contains
       endif
     end function getphifroms
 
-    real(kind=8) function computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
-      ! Computes the determinant of V (with m_a=0) based on eq.(11) of
-      ! E.~Byckling and K.~Kajantie, ``Reductions of the phase-space
-      ! integral in terms of simpler processes,'' Phys. Rev. 187 (1969),
-      ! 2008-2016, doi:10.1103/PhysRev.187.2008
-      use LUPdecomposition
-      real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
-      real(kind=8) :: deter
-      integer(kind=4),parameter :: n=3
-      real(kind=8),dimension(n,n) :: a
-      integer(kind=4),dimension(0:n) :: p
-      real(kind=8),parameter :: tol=1d-10
-      logical :: success
-      a(1:3,1)=(/2d0*shat_i             , shat_i-t_i    , shat_i+shat_im1-m_i_2/)
-      a(1:3,2)=(/shat_i-t_i             , 0d0           , shat_im1-t_im1       /)
-      a(1:3,3)=(/shat_ip1+shat_i-m_ip1_2, shat_ip1-t_ip1, 0d0                  /)
-      call LUPdecompose(a,n,tol,p,success)
-      if (success) then
-         call LUPdeterminant(a,p,n,deter)
-         computeV=-deter/8d0
-      else
-         computeV=-99d99
+
+
+
+
+  end subroutine gen23_generate_momenta
+
+  subroutine gen23_compute_x_from_momenta(this,p)
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    real(kind=8),dimension(0:3,this%next),intent(in) :: p
+    real(kind=8) :: ycm
+    integer :: ix
+    this%jac=1d0
+    ix=0
+    ! Fill the full momentum array, including all possible
+    ! intermediate states:
+    call fill_momentum_array
+    ! get the two random number corresponding to the initial state
+    if (includePDF) call compute_x_initial_state
+    ! The final-state momenta configuration gives all the other random numbers
+    call compute_x_final_state
+  contains
+    subroutine compute_x_initial_state
+      implicit none
+      real(kind=8) :: tau
+      call compute_x_from_tau(tau)
+      call compute_x_from_y(tau)
+    end subroutine compute_x_initial_state
+    subroutine compute_x_from_tau(tau)
+      implicit none
+      real(kind=8),intent(out) :: tau
+      real(kind=8) :: smin,smax,shat
+      smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
+      smax=this%sqrts**2
+      shat=dot(this%pp(0:3,3),this%pp(0:3,3))
+      this%sqrtshat=sqrt(shat)
+      ix=ix+1
+      call var_to_random(shat,ip_shat,smin,smax,this%x(ix),this%jac)
+      tau=shat/smax
+      this%jac=this%jac/smax
+    end subroutine compute_x_from_tau
+    subroutine compute_x_from_y(tau)
+      implicit none
+      real(kind=8),intent(in) :: tau
+      real(kind=8) ::  ymin,ymax
+      ymin= log(tau)/2d0
+      ymax=-log(tau)/2d0
+      ix=ix+1
+      call var_to_random(ycm,0d0,ymin,ymax,this%x(ix),this%jac)
+    end subroutine compute_x_from_y
+    subroutine compute_x_final_state
+      implicit none
+      integer(kind=4) :: i,j,inext,im1
+      integer(kind=4),dimension(2) :: set
+      ! invariant mass of all final state particles combined
+      this%invm(ibset(0,0)+ibset(0,1))=this%sqrtshat**2
+      this%invm(maskr(this%next)-ibset(0,0)-ibset(0,1))=this%sqrtshat**2
+      set(1)=this%sets(0,1)
+      set(2)=this%sets(0,2)
+      ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
+      if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
+         if (debug) write (*,*) 'two sets with at least two ',&
+              & 'particles',popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
+         if (use_t_channel_at_start) then
+            call gent_one_step_inverse(set(2),set(1),1)
+         else
+            call gens_one_step_inverse(set(2),set(1))
+         endif
+         this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
+      elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
+         if (debug) write (*,*) 'special double t-channel (1)'&
+              &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
+         call double_t_inverse(set(1),set(2),1,2)
+         this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
+      elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
+         if (debug) write (*,*) 'special double t-channel (2)'&
+              &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
+         call double_t_inverse(set(2),set(1),1,2)
+         this%invm(set(1)+1)=dot(this%pp(0:3,set(1)+1),this%pp(0:3,set(1)+1))
+      elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
+         if (debug) write (*,*) '2->2 scattering with one particle in each set'&
+              &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
+         call gent_one_step_inverse(set(2),set(1),1)
+         this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
       endif
-    end function computeV
 
-    real(kind=8) function G(x,y,z,u,v,w)
-      ! The G-function, eq.(A5) of E.~Byckling and K.~Kajantie,
-      ! ``Reductions of the phase-space integral in terms of simpler
-      ! processes,'' Phys. Rev. 187 (1969), 2008-2016,
-      ! doi:10.1103/PhysRev.187.2008
-      implicit none
-      real(kind=8),intent(in) :: x,y,z,u,v,w
-      G=x**2*y+x*y**2+z**2*u+z*u**2+v**2*w+v*w**2&
-           & +x*z*w+x*u*v+y*z*v+y*u*w &
-           & -x*y*(z+u+v+w)-z*u*(x+y+v+w)-v*w*(x+y+z+u)
-    end function G
+      do i=1,2
+         if (popcnt(set(i)).le.1) cycle ! at least 2 particles in a set
+         inext=ibset(0,this%sets(1,i)-1)
+         set(i)=set(i)-inext
+         if (popcnt(set(i)).ge.2) then
+            ! at least 3 particles in a set
+            if (debug) write (*,*) 'At least 3 particles in a set',&
+                 & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
+            call gent_one_step_inverse(set(i),inext,i)
+            this%invm((3-i)+set(i)+inext)=dot(this%pp(0:3,(3-i)+set(i)+inext),this%pp(0:3,(3-i)+set(i)+inext))
+            this%invm((3-i)+set(i))=dot(this%pp(0:3,(3-i)+set(i)),this%pp(0:3,(3-i)+set(i)))
+            do j=2,popcnt(set(i))-1
+               ! loop over the remaining particles in the set
+               inext=ibset(0,this%sets(j,i)-1)
+               im1=ibset(0,this%sets(j-1,i)-1)
+               set(i)=set(i)-inext
+               if (this%t_channel) then
+                  call gent_one_step_inverse(inext,set(i),3-i)
+               else
+                  call gen23_one_step_inverse(inext,set(i),3-i,im1)
+               endif
+            enddo
+            inext=ibset(0,this%sets(j,i)-1)
+            im1=ibset(0,this%sets(j-1,i)-1)
+            set(i)=set(i)-inext
+            if (this%t_channel) then
+               call gent_one_step_inverse(inext,set(i),3-i)
+            else
+               call gen23_one_step_inverse(inext,set(i),3-i,im1)
+            endif
+         elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).ne.0) then
+            ! Exactly 2 particles in a set (and the other set contains at least one)
+            if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
+                 & 'the other set contains at least one)', &
+                 & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
+            im1=3-i
+            this%invm(set(i)+inext+im1)=dot(this%pp(0:3,set(i)+inext+im1),this%pp(0:3,set(i)+inext+im1))
+            this%invm(set(i)+inext+i+im1)=dot(this%pp(0:3,set(i)+inext+im1+i),this%pp(0:3,set(i)+inext+im1+i))
+            if (this%t_channel) then
+               call gent_one_step_inverse(set(i),inext,i)
+            else
+               call gen23_one_step_inverse(set(i),inext,i,im1)
+            endif
+         elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).eq.0) then
+            ! Exactly 2 particles in a set (and the other set contains none)
+            if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
+                 & 'the other set contains none)', &
+                 & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
+            call gent_one_step_inverse(set(i),inext,i)
+         else
+            write (*,*) 'Inconsistent sets'
+            write (*,*) i,':',this%sets(:,i)
+            write (*,*) 3-i,':',this%sets(:,3-i)
+            stop 
+         endif
+      enddo
 
-    subroutine sminmax(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2&
-         &,m_ip1_2,smin,smax,V,sqrtGG)
-      ! Determines the integration limits for s_i, as determined by
-      ! setting cos(phi) to +/- 1 in eq.(11) of E.~Byckling and
-      ! K.~Kajantie, ``Reductions of the phase-space integral in terms
-      ! of simpler processes,'' Phys. Rev. 187 (1969), 2008-2016,
-      ! doi:10.1103/PhysRev.187.2008.
+      ! Add factors of 2*pi
+      this%jac=this%jac/((2d0*pi)**(3*(this%next-2)-4))
+      ! Add flux factor
+      this%jac=this%jac/(2d0*this%sqrtshat**2)
+      
+    end subroutine compute_x_final_state
+    subroutine gent_one_step_inverse(i,ir,ib)
       implicit none
-      real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
-      real(kind=8),intent(out) :: smin,smax,V,sqrtGG
-      real(kind=8) :: GG,s1,s2
-      V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
-      GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
-           & *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
-      if (GG.le.0d0 .or. V.eq.-99d99) then
+      integer(kind=4),intent(in) :: i,ir,ib
+      real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini,esum
+      real(kind=8),dimension(0:3) :: piir,pib,p_boost,pi_rot,pa_cms
+      if (popcnt(i).gt.1) then
+         if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+         call shatminmax(this,i,ir,shatmin,shatmax)
+         if (popcnt(i+ir).eq.this%next-2) then
+            shatmin=max(shatmin,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*this%ETmin(i)-this%sqrtshat))
+            Eimax=this%sqrtshat-this%ETmin(ir) ! maximum energy for i
+            shatmax=min(shatmax,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
+         endif
+         call generate_mass_inverse(i,shatmin,shatmax)
+      endif
+      if (popcnt(ir).gt.1) then
+         call shatminmax(this,ir,i,shatmin,shatmax)
+         if (popcnt(i+ir).eq.this%next-2) then
+            shatmin=max(shatmin,this%invm(i)+this%sqrtshat*(2d0*this%ETmin(ir)-this%sqrtshat))
+            shatmax=min(shatmax,this%invm(i)+this%sqrtshat*(this%sqrtshat-2d0*max(sqrt(this%invm(i)),this%ETmin(i))))
+         endif
+         call generate_mass_inverse(ir,shatmin,shatmax)
+      endif
+      call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
+      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
+      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      ! Make sure that the t-range is compatible with the pT cut. Since t is an
+      ! invariant we can compute it in any frame. Let's use the frame in which
+      ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
+      ! ETmin() is boost invariant in the z-direction)
+      y=log((this%pp(0,i+ir)+this%pp(3,i+ir))/(this%pp(0,i+ir)-this%pp(3,i+ir)))/2d0
+      call boostz(this%pp(0,i+ir),y,piir)
+      call boostz(this%pp(0,ib),y,pib)
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-this%invm(i) .and. popcnt(i).eq.1 ) then
+         etminir=max(this%ETmin(ir),sqrt(this%invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-this%invm(i)))**2) )
+      else
+         etminir=max(this%ETmin(ir),sqrt(this%invm(ir)))
+      endif
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-this%invm(ir) .and. popcnt(ir).eq.1 ) then
+         etmini=max(this%ETmin(i),sqrt(this%invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-this%invm(ir)))**2) )
+      else
+         etmini=max(this%ETmin(i),sqrt(this%invm(i)))
+      endif
+      base=piir(0)**2-ETmini**2+ETminir**2
+      ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
+      ! following is more stable:
+      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
+           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
+      if (root.lt.0d0) then
+          write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
+         stop 1
+      endif
+      tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
+      tmax=min(tmax,this%invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
+      this%invm(ir+ib)=dot(this%pp(0:3,ir+ib),this%pp(0:3,ir+ib))
+      if (tmin.ge.tmax) then
+         write (*,*) 'tmin.ge.tmax in gent_one_step_inverse',tmin,tmax,this%invm(ir+ib)
+         stop 1
+      endif
+      ix=ix+1
+      call var_to_random(this%invm(ir+ib),ip,tmin,tmax,this%x(ix),this%jac)
+      ! inverse of boosts and rotation from gentcms()
+      esum=sqrt(this%invm(i+ir))
+      p_boost(0)=this%pp(0,i+ir)
+      p_boost(1:3)=-this%pp(1:3,i+ir)
+      call boostm(this%pp(0:3,i),p_boost,esum,pib)
+      call boostm(this%pp(0:3,ib+ir+i),p_boost,esum,pa_cms)
+      call rotxxx_inv(pib,pa_cms,pi_rot)
+      phi=atan(pi_rot(2)/pi_rot(1))
+      if(pi_rot(1).lt.0d0) phi=phi+pi
+      if(phi.lt.0d0) phi=phi+2d0*pi
+      ix=ix+1
+      call var_to_random(phi,0d0,0d0,2d0*pi,this%x(ix),this%jac)
+      this%jac = this%jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,this%invm(ir+i+ib))))
+    end subroutine gent_one_step_inverse
+    subroutine gens_one_step_inverse(i,ir)
+      implicit none
+      integer(kind=4),intent(in) :: i,ir
+      real(kind=8) :: esum,costh,phi,shatmin,shatmax
+      real(kind=8),dimension(0:3) :: p_i,p_boost
+      if (popcnt(i).gt.1) then
+         if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+         call shatminmax(this,i,ir,shatmin,shatmax)
+         call generate_mass_inverse(i,shatmin,shatmax)
+      endif
+      if (popcnt(ir).gt.1) then
+         call shatminmax(this,ir,i,shatmin,shatmax)
+         call generate_mass_inverse(ir,shatmin,shatmax)
+      endif
+      ! boost p(i) and p(ir) to the p(i+ir) rest frame
+      esum=sqrt(this%invm(i+ir))
+      p_boost(0)=-this%pp(0,i+ir)
+      p_boost(1:3)=-this%pp(1:3,i+ir)
+      call boostm(this%pp(0:3,i),p_boost,esum,p_i)
+      ! compute the angles from the momenta and use that to get the random numbers
+      costh=p_i(3)/sqrt(p_i(1)**2+p_i(2)**2+p_i(3)**2)
+      ix=ix+1
+      call var_to_random(costh,0d0,-1d0,1d0,this%x(ix),this%jac)
+      phi=atan(p_i(2)/p_i(1))
+      if(p_i(1).lt.0d0) phi=phi+pi
+      if(phi.lt.0d0) phi=phi+2d0*pi
+      ix=ix+1
+      call var_to_random(phi,0d0,0d0,2d0*pi,this%x(ix),this%jac)
+      ! update the Jacobian
+      this%jac=this%jac*sqrt(lambda(this%invm(i+ir),this%invm(i),this%invm(ir)))/(8d0*this%invm(i+ir))
+      ! compute some t-channel invariants just to make sure they are filled. 
+      this%invm(i+1)=dot(this%pp(0:3,i+1),this%pp(0:3,i+1))
+      this%invm(i+2)=dot(this%pp(0:3,i+2),this%pp(0:3,i+2))
+      this%invm(ir+1)=dot(this%pp(0:3,ir+1),this%pp(0:3,ir+1))
+      this%invm(ir+2)=dot(this%pp(0:3,ir+2),this%pp(0:3,ir+2))
+    end subroutine gens_one_step_inverse
+    subroutine double_t_inverse(i,ir,ia,ib)
+      implicit none
+      integer(kind=4),intent(in) :: i,ir,ia,ib
+      real(kind=8) :: tmin,tmax,phi,yr,Eimax,pzmax
+      if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
+         write (*,*) 'Subroutine only for i is a single particle '&
+              //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
+         stop 1
+      endif
+      yr=sqrt(lambda(this%invm(ia+ib),this%invm(i),this%invm_min(ir)))
+      tmin=(-this%invm(ia+ib)+this%invm(i)+this%invm_min(ir)-yr)/2d0
+      tmax=(-this%invm(ia+ib)+this%invm(i)+this%invm_min(ir)+yr)/2d0
+      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
+      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      pzmax=sqrt(lambda(this%sqrtshat**2,this%ETmin(i)**2,this%ETmin(ir)**2))/(2d0*this%sqrtshat)
+      Eimax=this%sqrtshat-sqrt(this%ETmin(ir)**2+pzmax**2)
+      tmin=max(tmin,this%invm(i)-this%sqrtshat*(Eimax+pzmax))
+      tmax=min(tmax,this%invm(i)-this%sqrtshat*(Eimax-pzmax))
+      if (tmin.ge.tmax) then
+         write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
+         stop 1
+      endif
+      this%invm(i+ia)=dot(this%pp(0:3,i+ia),this%pp(0:3,i+ia))
+      ix=ix+1
+      call var_to_random(this%invm(i+ia),ip,tmin,tmax,this%x(ix),this%jac)
+      tmin=-this%invm(ia+ib)-this%invm(i+ia)+this%invm(i)+this%invm_min(ir)
+      tmax=this%invm(i)*(this%invm(i)-this%invm(ia+ib)-this%invm(i+ia))/(this%invm(i)-this%invm(i+ia))
+      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
+      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
+      ! being larger than ETmin(i) and ETmin(ir), respectively:
+      tmin=max(tmin,this%invm(i)-this%sqrtshat**2*(1-this%ETmin(ir)**2/(this%sqrtshat**2+this%invm(i+ia)-this%invm(i))))
+      tmax=min(tmax,this%invm(i)-this%sqrtshat**2*(this%ETmin(i)**2/(this%invm(i)-this%invm(i+ia))))
+      if (tmin.ge.tmax) then
+         write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
+         stop 1
+      endif
+      this%invm(i+ib)=dot(this%pp(0:3,i+ib),this%pp(0:3,i+ib))
+      ix=ix+1
+      call var_to_random(this%invm(i+ib),ip,tmin,tmax,this%x(ix),this%jac)
+      phi=atan(this%pp(2,i)/this%pp(1,i))
+      if(this%pp(1,i).lt.0d0) phi=phi+pi
+      if(phi.lt.0d0) phi=phi+2d0*pi
+      ix=ix+1
+      call var_to_random(phi,0d0,0d0,2d0*pi,this%x(ix),this%jac)
+      this%invm(ir)=dot(this%pp(0,ir),this%pp(0,ir))
+      if (this%invm(ir).le.0d0) then
+         write (*,*) "ERROR in double_t: invariant mass of system", &
+              & " must be larger than zero",ir,this%invm(ir),i
+         write (*,*) this%invm(ir),this%invm(ia+ib)+this%invm(i+ia)+this%invm(i+ib)-this%invm(i)&
+              &,this%invm(ia+ib),this%invm(i +ia),this%invm(i+ib),this%invm(i)
+         stop
+      endif
+      this%jac = this%jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,0d0)))
+    end subroutine double_t_inverse
+    subroutine gen23_one_step_inverse(i,ir,ib,im1)
+      implicit none
+      integer(kind=4),intent(in) :: im1,i,ir,ib
+      real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
+           etminir,etmini
+      real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      if (popcnt(i).gt.1) then
+         if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
+         call shatminmax(this,i,ir,shatmin,shatmax)
+         call generate_mass_inverse(i,shatmin,shatmax)
+      endif
+      if (popcnt(ir).gt.1) then
+         call shatminmax(this,ir,i,shatmin,shatmax)
+         call generate_mass_inverse(ir,shatmin,shatmax)
+      endif
+      call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
+      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
+      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      this%pp(0:3,i+ir)=this%pp(0:3,i+ir+ib)+this%pp(0:3,ib)
+      y=log((this%pp(0,i+ir)+this%pp(3,i+ir))/(this%pp(0,i+ir)-this%pp(3,i+ir)))/2d0
+      call boostz(this%pp(0,i+ir),y,piir)
+      call boostz(this%pp(0,ib),y,pib)
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-this%invm(i) .and. popcnt(i).eq.1 ) then
+         etminir=max(this%ETmin(ir),sqrt(this%invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-this%invm(i)))**2) )
+      else
+         etminir=max(this%ETmin(ir),sqrt(this%invm(ir)))
+      endif
+      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-this%invm(ir) .and. popcnt(ir).eq.1 ) then
+         etmini=max(this%ETmin(i),sqrt(this%invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-this%invm(ir)))**2) )
+      else
+         etmini=max(this%ETmin(i),sqrt(this%invm(i)))
+      endif
+      base=piir(0)**2-ETmini**2+ETminir**2
+      ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
+      ! following is more stable:
+      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
+           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
+      if (root.lt.0d0) then
+         write (*,*) 'root.lt.0d0 in gen23_one_step_inverse',root
+         stop 1
+      endif
+      tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
+      tmax=min(tmax,this%invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
+      if (tmin.ge.tmax) then
+         if (debug) write (*,*) 'tmin.ge.tmax in gen23_one_step_inverse',tmin,tmax
+         stop 1
+      endif
+      this%invm(ir+ib)=dot(this%pp(0:3,ir+ib),this%pp(0:3,ir+ib))
+      ix=ix+1
+      call var_to_random(this%invm(ir+ib),ip,tmin,tmax,this%x(ix),this%jac)
+      call sminmax(this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1),this%invm(ir+i+ib)&
+           &,this%invm(ir+ib),this%invm(ir+ib+i+im1),this%invm(i),this%invm(im1),smin,smax,V,sqrtGG)
+      if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
+      if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
+      if (im1.gt.2) then
+         ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
+         y=log((this%pp(0,im1)+this%pp(3,im1))/(this%pp(0,im1)-this%pp(3,im1)))/2d0
+         call boostz(this%pp(0,i+ir),y,piirr)
+         call boostz(this%pp(0,im1),y,pim1r)
+         call boostz(this%pp(0,ib),y,pib)
+         phi_rot=atan(this%pp(2,im1)/this%pp(1,im1))
+         if(this%pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+         call rotz(piirr,-phi_rot,piir)
+         call rotz(pim1r,-phi_rot,pim1)
+         ! Eir > Etmin(ir) + constraint coming from t
+         etminir=max(pib(0)*this%ETmin(ir)**2/(this%invm(ir)-this%invm(ir+ib))+(this%invm(ir)-this%invm(ir+ib))/(4d0*pib(0)),&
+              this%ETmin(ir))
+         smax=min(smax,&
+              this%invm(i)+this%invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-this%invm(i))*pim1(1))
+         if(this%invm(i).eq.0d0) then
+            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut)))
+         endif
+      endif
+      if (smin.ge.smax) then
+         write (*,*) 'smin.ge.smax in gen23_one_stop_inverse',smin,smax
+         stop 1
+      endif
+      this%invm(i+im1)=dot(this%pp(0:3,i+im1),this%pp(0:3,i+im1))
+      ix=ix+1
+      call var_to_random(this%invm(i+im1),ip,smin,smax,this%x(ix),this%jac)
+!!$      ! Generate the momenta from the integration variables. Since there is an
+!!$      ! ambiguity in phi, get both of them and pick the one that passes the cuts
+!!$      ! (if it's only one). If both pass, simply pick one of the two at random
+!!$      ! with a flat prior.
+!!$      phi1=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
+!!$           &,this%invm(ir+i+ib),V,sqrtGG,1d0)
+!!$      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi1 &
+!!$           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi1,ppibir1)
+!!$      pr1(0:3)=this%pp(0:3,ir+i)-pi1(0:3)
+!!$      phi2=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
+!!$           &,this%invm(ir+i+ib),V,sqrtGG,0d0)
+!!$      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi2 &
+!!$           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi2,ppibir2)
+!!$      pr2(0:3)=this%pp(0:3,ir+i)-pi2(0:3)
+!!$      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
+!!$           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
+!!$         if(ran2().gt.0.5d0) then
+!!$            this%pp(0:3,i)=pi1(0:3)
+!!$            this%pp(0:3,ir)=pr1(0:3)
+!!$            this%pp(0:3,ib+ir)=ppibir1(0:3)
+!!$         else
+!!$            this%pp(0:3,i)=pi2(0:3)
+!!$            this%pp(0:3,ir)=pr2(0:3)
+!!$            this%pp(0:3,ib+ir)=ppibir2(0:3)
+!!$         endif
+!!$      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2) then
+!!$         this%pp(0:3,i)=pi1(0:3)
+!!$         this%pp(0:3,ir)=pr1(0:3)
+!!$         this%pp(0:3,ib+ir)=ppibir1(0:3)
+!!$         this%jac=this%jac/2d0
+!!$      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
+!!$         this%pp(0:3,i)=pi2(0:3)
+!!$         this%pp(0:3,ir)=pr2(0:3)
+!!$         this%pp(0:3,ib+ir)=ppibir2(0:3)
+!!$         this%jac=this%jac/2d0
+!!$      else
+!!$         this%jac=-19d0
+!!$         if (debug) then
+!!$            write (*,*) 'piir',this%pp(0:3,i+ir)
+!!$            write (*,*) 'pim1',this%pp(0:3,im1)
+!!$            write (*,*) '1:',phi1,(phi1+phi2)/(2d0*pi)
+!!$            write (*,*) 'i',i,this%ETmin(i),':',pi1(0:3)
+!!$            write (*,*) 'ir',ir,this%ETmin(ir),':',pr1(0:3)
+!!$            write (*,*) '2:',phi2
+!!$            write (*,*) 'i',i,this%ETmin(i),':',pi2(0:3)
+!!$            write (*,*) 'ir',ir,this%ETmin(ir),':',pr2(0:3)
+!!$            write (*,*) ''
+!!$         endif
+!!$         return
+!!$      endif
+!!$
+      ! Compute the This%Jacobian
+      gram4=gram_determinant4(this%invm(ir+i+im1),this%invm(ir+ib),this%invm(ir+i+ib)&
+           &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
+           &,this%invm(im1))
+      if (gram4.ge.0d0) then 
+         write (*,*) 'error, gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
+         this%jac=-5d0
+         return
+      endif
+      this%jac=this%jac/(8d0*sqrt(-gram4))
+    end subroutine gen23_one_step_inverse
+    subroutine fill_momentum_array
+      implicit none
+      integer :: i,j
+      real(kind=8),dimension(0:3) :: pp
+      ycm=log((p(0,1)+p(0,2)+p(3,1)+p(3,2))/(p(0,1)+p(0,2)-p(3,1)-p(3,2)))/2d0
+      do i=1,maskr(this%next)
+         pp(0:3)=0d0
+         do j=0,this%next-1
+            if (btest(i,j)) then
+               if (j.le.1 .and. popcnt(i).ne.1) then
+                  pp(0:3)=pp(0:3)-p(0:3,j+1)
+               else
+                  pp(0:3)=pp(0:3)+p(0:3,j+1)
+               endif
+            endif
+         enddo
+         call boostz(pp(0:3),ycm,this%pp(0:3,i))
+      enddo
+    end subroutine fill_momentum_array
+    subroutine var_to_random(variable,power_in,var_min,var_max,x,jac)
+      ! Given a random variable var between varmin and varmax, compute
+      ! the corresponding value of x between 0 and 1.
+      implicit none
+      real(kind=8),intent(in) :: variable,power_in,var_min,var_max
+      real(kind=8),intent(out) :: x
+      real(kind=8),intent(inout) :: jac
+      integer(kind=4) :: ip
+      real(kind=8) :: varmin,varmax,power,var
+      if (variable.lt.var_min .or. variable.gt.var_max) then
+         write (*,*) 'variable not between varmin and varmax',var_min,variable,var_max
+         stop 1
+      endif
+      if (var_min.lt.0d0 .and. var_max.le.0d0) then
+         power=power_in
+         varmin=-var_max
+         varmax=-var_min
+         var=-variable
+      elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
+         write (*,*) 'ERROR: in var_to_random one of the two limits '/&
+              &/'is negative',var_min,var_max,power_in,jac,x
+         write (*,*) 'using flat transformation'
+         power=0d0
+         varmin=var_min
+         varmax=var_max
+         var=variable
+      else
+         power=power_in
+         varmin=var_min
+         varmax=var_max
+         var=variable
+      endif
+      ip=nint(power)
+      if (dble(ip).eq.power) then
+         ! integer
+         if (ip.eq.-1) then
+            x=log(varmin/var)/log(varmin/varmax)
+            jac=jac*var*log(varmax/varmin)
+         elseif (ip.eq.-2) then
+            x=varmax/var * ((var-varmin)/(varmax-varmin))
+            jac=jac*var**2*(varmax-varmin)/(varmax*varmin)
+         elseif (ip.eq.0) then
+            x=(var-varmin)/(varmax-varmin)
+            jac=jac*(varmax-varmin)
+         else
+            x=(var**(1+ip)-varmin**(1+ip))/(varmax**(1+ip)-varmin**(1+ip))
+            jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
+                 (varmin**(1+ip)*(1d0-x)+varmax**(1+ip)*x)**(-power/(1d0+power))/ &
+                 (1d0+power)
+         endif
+      else
+         x=(var**(1d0+power)-varmin**(1d0+power))/(varmax**(1d0+power)-varmin**(1d0+power))
+         jac=jac*(varmax**(1d0+power)-varmin**(1d0+power))* &
+              (varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(-power/(1d0+power))/&
+              (1d0+power)
+      endif
+    end subroutine var_to_random
+    subroutine generate_mass_inverse(i,shatmin,shatmax)
+      implicit none
+      integer :: i
+      real(kind=8) :: shatmin,shatmax
+      if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
+      if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
+      this%invm(i)=dot(this%pp(0:3,i),this%pp(0:3,i))
+      ix=ix+1
+      call var_to_random(this%invm(i),-0.5d0,shatmin,shatmax,this%x(ix),this%jac)
+    end subroutine generate_mass_inverse
+    
+  end subroutine gen23_compute_x_from_momenta
+  real(kind=8) function dot(p1,p2)
+    ! Inner product between two 4-vectors
+    implicit none
+    real(kind=8),intent(in),dimension(0:3) :: p1,p2
+    dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
+  end function dot
+  subroutine shatminmax(this,j1,j2,shatmin,shatmax)
+    ! Determines minimum and maximum allowed s-channel invariant
+    ! masses based on previously generated masses and the masses of
+    ! the final-state particles.
+    implicit none
+    class(phase_space_gen23),intent(in) :: this
+    integer(kind=4),intent(in) :: j1,j2
+    real(kind=8),intent(out) :: shatmin,shatmax
+    integer(kind=4) :: j
+    shatmin=0d0
+    do j=0,this%next-1
+       if (btest(j1,j)) then
+          shatmin=shatmin+sqrt(this%invm(ibset(0,j)))
+       endif
+    enddo
+    shatmin=shatmin**2
+    shatmax=(sqrt(this%invm(j1+j2))-sqrt(max(this%invm(j2),this%invm_min(j2))))**2
+  end subroutine shatminmax
+  real(kind=8) function lambda(s,xa2,xb2)
+    ! The usual two dimensional phase-space volume factor. See, e.g.,
+    ! Eq.(A2) of E.~Byckling and K.~Kajantie, ``Reductions of the
+    ! phase-space integral in terms of simpler processes,'' Phys. Rev. 187
+    ! (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
+    implicit none
+    real(kind=8) :: xa2,xb2,S
+    lambda=s**2-2d0*(xa2+xb2)*s+(xa2-xb2)**2
+  end function lambda
+
+  subroutine boostm(p,q,m,pboost)
+    ! This subroutine performs the Lorentz boost of a four-momentum.  The
+    ! momentum p is assumed to be given in the rest frame of q.  pboost is
+    ! the momentum p boosted to the frame in which q is given.  q must be a
+    ! timelike momentum.
+    ! input:
+    !       real    p(0:3)         : four-momentum p in the q rest  frame
+    !       real    q(0:3)         : four-momentum q in the boosted frame
+    !       real    m              : mass of q (for numerical stability)
+    ! output:
+    !       real    pboost(0:3)    : four-momentum p in the boosted frame
+    implicit none
+    real(kind=8) ,dimension(0:3) :: p,q,pboost
+    real(kind=8) :: pq,qq,m,lf
+    real(kind=8),parameter :: rZero=0d0
+    qq = q(1)**2+q(2)**2+q(3)**2
+    if ( qq.ne.rZero ) then
+       pq = p(1)*q(1)+p(2)*q(2)+p(3)*q(3)
+       lf = ((q(0)-m)*pq/qq+p(0))/m
+       pboost(0) = (p(0)*q(0)+pq)/m
+       pboost(1:3) =  p(1:3)+q(1:3)*lf
+    else
+       pboost(0:3) = p(0:3)
+    endif
+  end subroutine boostm
+  subroutine boostz(p,yb,pb)
+    ! boost in the z-direction with rapidity yb
+    implicit none
+    real(kind=8),dimension(0:3) :: p,pb
+    real(kind=8) :: yb
+    pb(0)=p(0)*cosh(yb)-p(3)*sinh(yb)
+    pb(1:2)=p(1:2)
+    pb(3)=p(3)*cosh(yb)-p(0)*sinh(yb)
+  end subroutine boostz
+  real(kind=8) function gram_determinant4(shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1&
+       &,shat_im1,m_i_2,m_ip1_2)
+    ! Computes the 4x4 Gram determinant (with m_a=0) as in eq.(B6), of
+    ! E.~Byckling and K.~Kajantie, ``Reductions of the phase-space
+    ! integral in terms of simpler processes,'' Phys. Rev. 187 (1969),
+    ! 2008-2016, doi:10.1103/PhysRev.187.2008.
+    use LUPdecomposition
+    implicit none
+    real(kind=8) :: shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1,shat_im1,m_i_2,m_ip1_2
+    integer(kind=4),parameter :: n=4
+    real(kind=8),dimension(n,n) :: a
+    integer(kind=4),dimension(0:n) :: p
+    real(kind=8),parameter :: tol=1d-8
+    real(kind=8) :: deter
+    logical :: success
+    a(1:4,1)=(/ 0d0           , t_im1-shat_im1 , t_i-shat_i       , t_ip1-shat_ip1    /)
+    a(1:4,2)=(/ t_im1-shat_im1, 2d0*t_im1      , t_i+t_im1-m_i_2  , t_im1+t_ip1-s_i   /)
+    a(1:4,3)=(/ t_i-shat_i    , t_i+t_im1-m_i_2, 2d0*t_i          , t_i+t_ip1-m_ip1_2 /)
+    a(1:4,4)=(/ t_ip1-shat_ip1, t_im1+t_ip1-s_i, t_i+t_ip1-m_ip1_2, 2d0*t_ip1         /)
+    call LUPdecompose(a,n,tol,p,success)
+    if (success) then
+       call LUPdeterminant(a,p,n,deter)
+       gram_determinant4=deter/16d0
+    else
+       gram_determinant4=1d0
+    endif
+  end function gram_determinant4
+  subroutine tminmax(X,Z,U,V,W,tmin,tmax)
+    ! Determines the integration limits for t_i, as determined by
+    ! setting cos(theta) to +/- 1 in eq.(10) of E.~Byckling and
+    ! K.~Kajantie, ``Reductions of the phase-space integral in terms
+    ! of simpler processes,'' Phys. Rev. 187 (1969), 2008-2016,
+    ! doi:10.1103/PhysRev.187.2008.
+    ! x = shat_i
+    ! z = t_i
+    ! u = shat_{i-1}
+    ! v = m_i^2
+    ! w = m_a^2
+    implicit none
+    real(kind=8),intent(in) :: x,z,u,v,w 
+    real(kind=8),intent(out):: tmin,tmax
+    real(kind=8) ::  t1,t2,yr
+    yr = lambda(x,u,v)*lambda(x,w,z)
+    if (yr.le.0d0) then
+       write (*,*) 'No allowed range for t: tmin=tmax',yr
+!!$       stop 1
+       yr=0d0
+    endif
+    yr=sqrt(yr)
+    t1 = u+w - ((x+u-v)*(x+w-z) - yr)/(2d0*x)
+    t2 = u+w - ((x+u-v)*(x+w-z) + yr)/(2d0*x)
+    tmin = min(t1,t2)
+    tmax = max(t1,t2)
+  end subroutine tminmax
+  real(kind=8) function computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
+    ! Computes the determinant of V (with m_a=0) based on eq.(11) of
+    ! E.~Byckling and K.~Kajantie, ``Reductions of the phase-space
+    ! integral in terms of simpler processes,'' Phys. Rev. 187 (1969),
+    ! 2008-2016, doi:10.1103/PhysRev.187.2008
+    use LUPdecomposition
+    real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
+    real(kind=8) :: deter
+    integer(kind=4),parameter :: n=3
+    real(kind=8),dimension(n,n) :: a
+    integer(kind=4),dimension(0:n) :: p
+    real(kind=8),parameter :: tol=1d-10
+    logical :: success
+    a(1:3,1)=(/2d0*shat_i             , shat_i-t_i    , shat_i+shat_im1-m_i_2/)
+    a(1:3,2)=(/shat_i-t_i             , 0d0           , shat_im1-t_im1       /)
+    a(1:3,3)=(/shat_ip1+shat_i-m_ip1_2, shat_ip1-t_ip1, 0d0                  /)
+    call LUPdecompose(a,n,tol,p,success)
+    if (success) then
+       call LUPdeterminant(a,p,n,deter)
+       computeV=-deter/8d0
+    else
+       computeV=-99d99
+    endif
+  end function computeV
+  real(kind=8) function G(x,y,z,u,v,w)
+    ! The G-function, eq.(A5) of E.~Byckling and K.~Kajantie,
+    ! ``Reductions of the phase-space integral in terms of simpler
+    ! processes,'' Phys. Rev. 187 (1969), 2008-2016,
+    ! doi:10.1103/PhysRev.187.2008
+    implicit none
+    real(kind=8),intent(in) :: x,y,z,u,v,w
+    G=x**2*y+x*y**2+z**2*u+z*u**2+v**2*w+v*w**2&
+         & +x*z*w+x*u*v+y*z*v+y*u*w &
+         & -x*y*(z+u+v+w)-z*u*(x+y+v+w)-v*w*(x+y+z+u)
+  end function G
+  subroutine sminmax(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2&
+       &,m_ip1_2,smin,smax,V,sqrtGG)
+    ! Determines the integration limits for s_i, as determined by
+    ! setting cos(phi) to +/- 1 in eq.(11) of E.~Byckling and
+    ! K.~Kajantie, ``Reductions of the phase-space integral in terms
+    ! of simpler processes,'' Phys. Rev. 187 (1969), 2008-2016,
+    ! doi:10.1103/PhysRev.187.2008.
+    implicit none
+    real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
+    real(kind=8),intent(out) :: smin,smax,V,sqrtGG
+    real(kind=8) :: GG,s1,s2
+    V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
+    GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
+         & *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
+    if (GG.le.0d0 .or. V.eq.-99d99) then
 !!$       write (*,*) 'No allowed range for s: smin=smax',GG,V
 !!$       stop 1
-         GG=0d0
-         V=0d0
-      endif
-      sqrtGG=sqrt(GG)
-      s1=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V + sqrtGG)
-      s2=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V - sqrtGG)
-      smin=min(s1,s2)
-      smax=max(s1,s2)
-    end subroutine sminmax
-
-
-
-    subroutine tminmax(X,Z,U,V,W,tmin,tmax)
-      ! Determines the integration limits for t_i, as determined by
-      ! setting cos(theta) to +/- 1 in eq.(10) of E.~Byckling and
-      ! K.~Kajantie, ``Reductions of the phase-space integral in terms
-      ! of simpler processes,'' Phys. Rev. 187 (1969), 2008-2016,
-      ! doi:10.1103/PhysRev.187.2008.
-      ! x = shat_i
-      ! z = t_i
-      ! u = shat_{i-1}
-      ! v = m_i^2
-      ! w = m_a^2
+       GG=0d0
+       V=0d0
+    endif
+    sqrtGG=sqrt(GG)
+    s1=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V + sqrtGG)
+    s2=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V - sqrtGG)
+    smin=min(s1,s2)
+    smax=max(s1,s2)
+  end subroutine sminmax
+    subroutine rotxxx(p,q,prot)
+      ! This subroutine performs the spacial rotation of a four-momentum.
+      ! the momentum p is assumed to be given in the frame where the spacial
+      ! component of q points the positive z-axis.  prot is the momentum p
+      ! rotated to the frame where q is given.
+      ! input:
+      !       real    p(0:3)         : four-momentum p in q(1)=q(2)=0 frame
+      !!       real    q(0:3)         : four-momentum q in the rotated frame
+      ! output:
+      !       real    prot(0:3)      : four-momentum p in the rotated frame
       implicit none
-      real(kind=8),intent(in) :: x,z,u,v,w 
-      real(kind=8),intent(out):: tmin,tmax
-      real(kind=8) ::  t1,t2,yr
-      yr = lambda(x,u,v)*lambda(x,w,z)
-      if (yr.le.0d0) then
-         write (*,*) 'No allowed range for t: tmin=tmax',yr
-!!$       stop 1
-         yr=0d0
-      endif
-      yr=sqrt(yr)
-      t1 = u+w - ((x+u-v)*(x+w-z) - yr)/(2d0*x)
-      t2 = u+w - ((x+u-v)*(x+w-z) + yr)/(2d0*x)
-      tmin = min(t1,t2)
-      tmax = max(t1,t2)
-    end subroutine tminmax
-
-    real(kind=8) function gram_determinant4(shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1&
-         &,shat_im1,m_i_2,m_ip1_2)
-      ! Computes the 4x4 Gram determinant (with m_a=0) as in eq.(B6), of
-      ! E.~Byckling and K.~Kajantie, ``Reductions of the phase-space
-      ! integral in terms of simpler processes,'' Phys. Rev. 187 (1969),
-      ! 2008-2016, doi:10.1103/PhysRev.187.2008.
-      use LUPdecomposition
-      implicit none
-      real(kind=8) :: shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1,shat_im1,m_i_2,m_ip1_2
-      integer(kind=4),parameter :: n=4
-      real(kind=8),dimension(n,n) :: a
-      integer(kind=4),dimension(0:n) :: p
-      real(kind=8),parameter :: tol=1d-8
-      real(kind=8) :: deter
-      logical :: success
-      a(1:4,1)=(/ 0d0           , t_im1-shat_im1 , t_i-shat_i       , t_ip1-shat_ip1    /)
-      a(1:4,2)=(/ t_im1-shat_im1, 2d0*t_im1      , t_i+t_im1-m_i_2  , t_im1+t_ip1-s_i   /)
-      a(1:4,3)=(/ t_i-shat_i    , t_i+t_im1-m_i_2, 2d0*t_i          , t_i+t_ip1-m_ip1_2 /)
-      a(1:4,4)=(/ t_ip1-shat_ip1, t_im1+t_ip1-s_i, t_i+t_ip1-m_ip1_2, 2d0*t_ip1         /)
-      call LUPdecompose(a,n,tol,p,success)
-      if (success) then
-         call LUPdeterminant(a,p,n,deter)
-         gram_determinant4=deter/16d0
+      real(kind=8),dimension(0:3) :: p,q
+      real(kind=8),dimension(0:3) :: prot
+      real(kind=8) :: qt2,qt,psgn,qq
+      real(kind=8),parameter :: rZero=0d0,rOne=1d0
+      prot(0) = p(0)
+      qt2 = q(1)**2 + q(2)**2
+      if ( qt2.eq.rZero ) then
+         if ( q(3).eq.rZero ) then
+            prot(1:3) = p(1:3)
+         else
+            psgn = sign(rOne,q(3))
+            prot(1:3) = p(1:3)*psgn
+         endif
       else
-         gram_determinant4=1d0
+         qq = sqrt(qt2+q(3)**2)
+         qt = sqrt(qt2)
+         prot(1) = q(1)*q(3)/qq/qt*p(1) -q(2)/qt*p(2) +q(1)/qq*p(3)
+         prot(2) = q(2)*q(3)/qq/qt*p(1) +q(1)/qt*p(2) +q(2)/qq*p(3)
+         prot(3) =          -qt/qq*p(1)               +q(3)/qq*p(3)
       endif
-    end function gram_determinant4
-  end subroutine gen23_generate_momenta
+    end subroutine rotxxx
+    subroutine rotxxx_inv(p,q,prot)
+      ! Same as rotxxx, but inverse. That is, first doing
+      ! rotxxx(p,q,prot) and then rotxxx_inv(prot,q,p) should give you
+      ! back the original p.
+      implicit none
+      real(kind=8),dimension(0:3),intent(in) :: p,q
+      real(kind=8),dimension(0:3),intent(out) :: prot
+      real(kind=8) :: qt2,qt,psgn,qq
+      prot(0) = p(0)
+      qt2 = q(1)**2 + q(2)**2
+      if ( qt2.lt.vtiny ) then
+         if ( q(3).eq.0d0 ) then
+            prot(1:3)=p(1:3)
+         else
+            psgn = sign(1d0,q(3))
+            prot(1:3)=p(1:3)*psgn
+         endif
+      else
+         qq = sqrt(qt2+q(3)**2)
+         qt = sqrt(qt2)
+         prot(1) = q(1)*q(3)/qq/qt*p(1) +q(2)*q(3)/qq/qt*p(2) -  qt/qq*p(3)
+         prot(2) =        -q(2)/qt*p(1) +        q(1)/qt*p(2)
+         prot(3) =   qt*q(1)/qq/qt*p(1) +        q(2)/qq*p(2) +q(3)/qq*p(3)
+      endif
+    end subroutine rotxxx_inv
+    subroutine rotz(p,phi,prot)
+      implicit none
+      real(kind=8),dimension(0:3) :: p,prot
+      real(kind=8) :: phi
+      prot(0)=p(0)
+      prot(1)=p(1)*cos(phi)-p(2)*sin(phi)
+      prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
+      prot(3)=p(3)
+    end subroutine rotz
+
+
 end module phase_space_gen23_mod
