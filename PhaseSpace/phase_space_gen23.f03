@@ -1745,88 +1745,6 @@ contains
     end subroutine gentcms
 
 
-    subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr)
-      ! Generates 4 momentum for particle p1, and remainder pr given the
-      ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
-      ! particles with momenta pa, pb and outgoing particles with mass
-      ! m1,m2; t=(pb-p1)^2=(pa-pr)^2. Assumes that pa is a massless
-      ! momentum; phi is the azimuthal angle between pr and pc in the pa+pb
-      ! rest frame, with pa aligned with the positive z-axis.
-      implicit none
-      real(kind=8),intent(in) :: t,phi,m1,m2
-      real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
-      real(kind=8),intent(out),dimension(0:3) :: p1,pr
-      real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,phi_off
-      real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
-      real(kind=8),parameter :: tiny=1d-8
-      ptot(0:3)=pa(0:3)+pb(0:3)
-      ptotm(0)=ptot(0)
-      ptotm(1:3)=-ptot(1:3)
-      ! determine magnitude of Pii in cms frame (from dhelas routine mom2cx)
-      ESUM2 = dot(ptot,ptot)
-      if (esum2 .le. 0d0) then
-         this%jac=-9d0
-         write (*,*) "error :: must be time-like momentum in gentcms2",esum2
-         return
-         stop 1
-      endif
-      esum=sqrt(esum2)
-      MD2=(M2-M1)*(M1+M2)
-      ED=MD2/ESUM
-      IF (M1*M2.EQ.0.d0) THEN
-         PP2=0.25d0*(ESUM-ABS(ED))**2
-      ELSE
-         PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
-         if(pp2.lt.0d0) then
-            write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
-                 &/'3-momentum smaller than 0',pp2
-            stop 1
-         endif
-      ENDIF
-      call boostm(pa,ptotm,esum,pa_cms)
-      E_acms = pa_cms(0)
-      p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
-
-      ! determine the offset in phi; the frame in which phi is defined
-      ! is in the ptot rest-frame, with pa_cms aligned with the z-axis,
-      ! and pc having zero phi angle.
-      call boostm(pc,ptotm,esum,pc_cms)
-      call rotxxx_inv(pc_cms,pa_cms,pc_rot)
-      if (pc_rot(1).ne.0d0) then
-         phi_off=atan(pc_rot(2)/pc_rot(1))
-      else
-         phi_off=0d0
-      endif
-      if (pc_rot(1).lt.0d0) then
-         phi_off=phi_off+pi
-      endif
-
-      ! define Pii in the frame where pa_cms is aligned with the positive z axis
-      Pii(0) = MAX((ESUM+ED)*0.5d0,0.d0)
-      if (esum+ed.le.0d0) then
-         write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
-         this%jac=-10d0
-         return
-         stop 1
-      endif
-      Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
-      pt2=pp2-Pii(3)**2
-      if (pt2/esum2.lt.-tiny) then
-         write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
-         this%jac=-11d0
-         return
-         stop 1
-      elseif (pt2.lt.0d0) then
-         pt2=0d0
-      endif
-      pt = sqrt(pt2)
-      Pii(1) = pt*cos(phi+phi_off)
-      Pii(2) = pt*sin(phi+phi_off)
-      call rotxxx(Pii,pa_cms,Pii_rot)       !Rotate Pii to the pa_cms frame
-      call boostm(Pii_rot,ptot,esum,Pii)    !boost back to lab fram
-      p1(0:3)=ptot(0:3)-pii(0:3)
-      pr(0:3)=pb(0:3)-p1(0:3)         !Return remainder of momentum
-    end subroutine gentcms2
 
 
 
@@ -1894,24 +1812,6 @@ contains
       endif
     end subroutine random_to_var
 
-    real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran)
-      ! Given s_i (invariant mass of p_i and p_i+1, it transforms it
-      ! into phi_i. Note that there are two possibilities for phi: need
-      ! to pick one at random.
-      ! Based on eq.(11) of E.~Byckling and K.~Kajantie, ``Reductions of
-      ! the phase-space integral in terms of simpler processes,''
-      ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
-      implicit none
-      real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
-      real(kind=8) :: cosphi,x
-      cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
-      x=ran
-      if (x.gt.0.5d0) then
-         getphifroms=acos(cosphi)
-      else
-         getphifroms=-acos(cosphi)+2d0*pi
-      endif
-    end function getphifroms
 
 
 
@@ -2308,57 +2208,28 @@ contains
       this%invm(i+im1)=dot(this%pp(0:3,i+im1),this%pp(0:3,i+im1))
       ix=ix+1
       call var_to_random(this%invm(i+im1),ip,smin,smax,this%x(ix),this%jac)
-!!$      ! Generate the momenta from the integration variables. Since there is an
-!!$      ! ambiguity in phi, get both of them and pick the one that passes the cuts
-!!$      ! (if it's only one). If both pass, simply pick one of the two at random
-!!$      ! with a flat prior.
-!!$      phi1=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
-!!$           &,this%invm(ir+i+ib),V,sqrtGG,1d0)
-!!$      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi1 &
-!!$           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi1,ppibir1)
-!!$      pr1(0:3)=this%pp(0:3,ir+i)-pi1(0:3)
-!!$      phi2=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
-!!$           &,this%invm(ir+i+ib),V,sqrtGG,0d0)
-!!$      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi2 &
-!!$           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi2,ppibir2)
-!!$      pr2(0:3)=this%pp(0:3,ir+i)-pi2(0:3)
-!!$      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
-!!$           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
-!!$         if(ran2().gt.0.5d0) then
-!!$            this%pp(0:3,i)=pi1(0:3)
-!!$            this%pp(0:3,ir)=pr1(0:3)
-!!$            this%pp(0:3,ib+ir)=ppibir1(0:3)
-!!$         else
-!!$            this%pp(0:3,i)=pi2(0:3)
-!!$            this%pp(0:3,ir)=pr2(0:3)
-!!$            this%pp(0:3,ib+ir)=ppibir2(0:3)
-!!$         endif
-!!$      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2) then
-!!$         this%pp(0:3,i)=pi1(0:3)
-!!$         this%pp(0:3,ir)=pr1(0:3)
-!!$         this%pp(0:3,ib+ir)=ppibir1(0:3)
-!!$         this%jac=this%jac/2d0
-!!$      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
-!!$         this%pp(0:3,i)=pi2(0:3)
-!!$         this%pp(0:3,ir)=pr2(0:3)
-!!$         this%pp(0:3,ib+ir)=ppibir2(0:3)
-!!$         this%jac=this%jac/2d0
-!!$      else
-!!$         this%jac=-19d0
-!!$         if (debug) then
-!!$            write (*,*) 'piir',this%pp(0:3,i+ir)
-!!$            write (*,*) 'pim1',this%pp(0:3,im1)
-!!$            write (*,*) '1:',phi1,(phi1+phi2)/(2d0*pi)
-!!$            write (*,*) 'i',i,this%ETmin(i),':',pi1(0:3)
-!!$            write (*,*) 'ir',ir,this%ETmin(ir),':',pr1(0:3)
-!!$            write (*,*) '2:',phi2
-!!$            write (*,*) 'i',i,this%ETmin(i),':',pi2(0:3)
-!!$            write (*,*) 'ir',ir,this%ETmin(ir),':',pr2(0:3)
-!!$            write (*,*) ''
-!!$         endif
-!!$         return
-!!$      endif
-!!$
+      ! Generate the momenta from the integration variables. Since there is an
+      ! ambiguity in phi, get both of them and pick the one that passes the cuts
+      ! (if it's only one). If both pass, simply pick one of the two at random
+      ! with a flat prior.
+      phi1=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
+           &,this%invm(ir+i+ib),V,sqrtGG,1d0)
+      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi1 &
+           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi1,ppibir1)
+      pr1(0:3)=this%pp(0:3,ir+i)-pi1(0:3)
+      phi2=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
+           &,this%invm(ir+i+ib),V,sqrtGG,0d0)
+      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi2 &
+           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi2,ppibir2)
+      pr2(0:3)=this%pp(0:3,ir+i)-pi2(0:3)
+      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
+           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
+         continue
+      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2) then
+         this%jac=this%jac/2d0
+      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
+         this%jac=this%jac/2d0
+      endif
       ! Compute the This%Jacobian
       gram4=gram_determinant4(this%invm(ir+i+im1),this%invm(ir+ib),this%invm(ir+i+ib)&
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
@@ -2707,6 +2578,100 @@ contains
       prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
       prot(3)=p(3)
     end subroutine rotz
+    subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr)
+      ! Generates 4 momentum for particle p1, and remainder pr given the
+      ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
+      ! particles with momenta pa, pb and outgoing particles with mass
+      ! m1,m2; t=(pb-p1)^2=(pa-pr)^2. Assumes that pa is a massless
+      ! momentum; phi is the azimuthal angle between pr and pc in the pa+pb
+      ! rest frame, with pa aligned with the positive z-axis.
+      implicit none
+      real(kind=8),intent(in) :: t,phi,m1,m2
+      real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
+      real(kind=8),intent(out),dimension(0:3) :: p1,pr
+      real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,phi_off
+      real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
+      real(kind=8),parameter :: tiny=1d-8
+      ptot(0:3)=pa(0:3)+pb(0:3)
+      ptotm(0)=ptot(0)
+      ptotm(1:3)=-ptot(1:3)
+      ! determine magnitude of Pii in cms frame (from dhelas routine mom2cx)
+      ESUM2 = dot(ptot,ptot)
+      if (esum2 .le. 0d0) then
+         write (*,*) "error :: must be time-like momentum in gentcms2",esum2
+         stop 1
+      endif
+      esum=sqrt(esum2)
+      MD2=(M2-M1)*(M1+M2)
+      ED=MD2/ESUM
+      IF (M1*M2.EQ.0.d0) THEN
+         PP2=0.25d0*(ESUM-ABS(ED))**2
+      ELSE
+         PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
+         if(pp2.lt.0d0) then
+            write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
+                 &/'3-momentum smaller than 0',pp2
+            stop 1
+         endif
+      ENDIF
+      call boostm(pa,ptotm,esum,pa_cms)
+      E_acms = pa_cms(0)
+      p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
+
+      ! determine the offset in phi; the frame in which phi is defined
+      ! is in the ptot rest-frame, with pa_cms aligned with the z-axis,
+      ! and pc having zero phi angle.
+      call boostm(pc,ptotm,esum,pc_cms)
+      call rotxxx_inv(pc_cms,pa_cms,pc_rot)
+      if (pc_rot(1).ne.0d0) then
+         phi_off=atan(pc_rot(2)/pc_rot(1))
+      else
+         phi_off=0d0
+      endif
+      if (pc_rot(1).lt.0d0) then
+         phi_off=phi_off+pi
+      endif
+
+      ! define Pii in the frame where pa_cms is aligned with the positive z axis
+      Pii(0) = MAX((ESUM+ED)*0.5d0,0.d0)
+      if (esum+ed.le.0d0) then
+         write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
+         stop 1
+      endif
+      Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
+      pt2=pp2-Pii(3)**2
+      if (pt2/esum2.lt.-tiny) then
+         write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
+         stop 1
+      elseif (pt2.lt.0d0) then
+         pt2=0d0
+      endif
+      pt = sqrt(pt2)
+      Pii(1) = pt*cos(phi+phi_off)
+      Pii(2) = pt*sin(phi+phi_off)
+      call rotxxx(Pii,pa_cms,Pii_rot)       !Rotate Pii to the pa_cms frame
+      call boostm(Pii_rot,ptot,esum,Pii)    !boost back to lab fram
+      p1(0:3)=ptot(0:3)-pii(0:3)
+      pr(0:3)=pb(0:3)-p1(0:3)         !Return remainder of momentum
+    end subroutine gentcms2
+    real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran)
+      ! Given s_i (invariant mass of p_i and p_i+1, it transforms it
+      ! into phi_i. Note that there are two possibilities for phi: need
+      ! to pick one at random.
+      ! Based on eq.(11) of E.~Byckling and K.~Kajantie, ``Reductions of
+      ! the phase-space integral in terms of simpler processes,''
+      ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
+      implicit none
+      real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
+      real(kind=8) :: cosphi,x
+      cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
+      x=ran
+      if (x.gt.0.5d0) then
+         getphifroms=acos(cosphi)
+      else
+         getphifroms=-acos(cosphi)+2d0*pi
+      endif
+    end function getphifroms
 
 
 end module phase_space_gen23_mod
