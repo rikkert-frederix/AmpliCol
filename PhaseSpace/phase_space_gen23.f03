@@ -282,7 +282,6 @@ contains
       implicit none
       integer(kind=4) :: i,j,inext,im1
       integer(kind=4),dimension(3) :: set
-
       ! incoming momenta
       this%pp(0,ibset(0,0))=this%sqrtshat/2d0
       this%pp(0,ibset(0,1))=this%sqrtshat/2d0
@@ -296,35 +295,32 @@ contains
       ! invariant mass of all final state particles combined
       this%invm(ibset(0,0)+ibset(0,1))=this%sqrtshat**2
       this%invm(maskr(this%next)-ibset(0,0)-ibset(0,1))=this%sqrtshat**2
-
       set(1)=this%sets(0,1)
       set(2)=this%sets(0,2)
       set(3)=this%sets(0,3)
-
       do i=1,popcnt(set(3))
          inext=ibset(0,this%sets(i,3)-1)
          set(3)=set(3)-inext
-      if (popcnt(set(1)+set(2)+set(3)).eq.1) then
-         call gent_one_step(inext,set(1)+set(2)+set(3),1)
-         if (this%jac.le.0d0) return
-         this%pp(0:3,set(1)+set(2)+set(3)+2)=this%pp(0:3,1)-this%pp(0:3,inext)
-         this%invm(set(1)+set(2)+set(3)+2)=dot(this%pp(0:3,set(1)+set(2)+set(3)+2),this%pp(0:3,set(1)+set(2)+set(3)+2))
-         !do j=1,this%next
-         !   write(*,*) j,this%pp(0:3,2**(j-1))
-         !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
-         !enddo
-      else
-         call double_t(inext,set(1)+set(2)+set(3),1,2)
-         if (this%jac.le.0d0) return
-         this%pp(0:3,set(1)+set(2)+set(3)+1)=this%pp(0:3,2)-this%pp(0:3,inext)
-         this%invm(set(1)+set(2)+set(3)+1)=dot(this%pp(0:3,set(1)+set(2)+set(3)+1),this%pp(0:3,set(1)+set(2)+set(3)+1))
-         !do j=1,this%next
-         !   write(*,*) j,this%pp(0:3,2**(j-1))
-         !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
-         !enddo
-      endif
+         if (popcnt(set(1)+set(2)+set(3)).eq.1) then
+            call gent_one_step(inext,set(1)+set(2)+set(3),1)
+            if (this%jac.le.0d0) return
+            this%pp(0:3,set(1)+set(2)+set(3)+2)=this%pp(0:3,1)-this%pp(0:3,inext)
+            this%invm(set(1)+set(2)+set(3)+2)=dot(this%pp(0:3,set(1)+set(2)+set(3)+2),this%pp(0:3,set(1)+set(2)+set(3)+2))
+            !do j=1,this%next
+            !   write(*,*) j,this%pp(0:3,2**(j-1))
+            !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
+            !enddo
+         else
+            call double_t(inext,set(1)+set(2)+set(3),1,2)
+            if (this%jac.le.0d0) return
+            this%pp(0:3,set(1)+set(2)+set(3)+1)=this%pp(0:3,2)-this%pp(0:3,inext)
+            this%invm(set(1)+set(2)+set(3)+1)=dot(this%pp(0:3,set(1)+set(2)+set(3)+1),this%pp(0:3,set(1)+set(2)+set(3)+1))
+            !do j=1,this%next
+            !   write(*,*) j,this%pp(0:3,2**(j-1))
+            !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
+            !enddo
+         endif
       enddo
-
       ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
       if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'two sets with at least two ',&
@@ -354,13 +350,11 @@ contains
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) '2->2 scattering with one particle in each set'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
-!!$       call gens_one_step(set(2),set(1))
          call gent_one_step(set(2),set(1),1)
          if (this%jac.le.0d0) return
          this%pp(0:3,set(2)+2)=this%pp(0:3,1)-this%pp(0:3,set(1))
          this%invm(set(2)+2)=dot(this%pp(0:3,set(2)+2),this%pp(0:3,set(2)+2))
       endif
-
       do i=1,2
          if (popcnt(set(i)).le.1) cycle ! at least 2 particles in a set
          inext=ibset(0,this%sets(1,i)-1)
@@ -383,10 +377,7 @@ contains
                if (this%t_channel) then
                   call gent_one_step(inext,set(i),3-i)
                else
-!!$                call gen23_one_step_v2(inext,set(i),3-i,im1)
                   call gen23_one_step(inext,set(i),3-i,im1)
-!!$                call genpt_one_step(inext,set(i),3-i,im1)
-!!$                call gent_one_step_v2(inext,set(i),3-i,im1)
                endif
                if (this%jac.le.0d0) return
             enddo
@@ -396,21 +387,9 @@ contains
             if (this%t_channel) then
                call gent_one_step(inext,set(i),3-i)
             else
-!!$             call gen23_one_step_v2(inext,set(i),3-i,im1)
                call gen23_one_step(inext,set(i),3-i,im1)
-!!$             call genpt_one_step(inext,set(i),3-i,im1)
             endif
             if (this%jac.le.0d0) return
-!!$          inext=ibset(0,this%sets(j+1,i)-1)
-!!$          im1=ibset(0,this%sets(j,i)-1)
-!!$          set(i)=set(i)-inext
-!!$          if (this%t_channel) then
-!!$             call gent_one_step(inext,set(i),3-i)
-!!$          else
-!!$!!$             call gen23_one_step_v2(inext,set(i),3-i,im1)
-!!$             call gen23_one_step(inext,set(i),3-i,im1)
-!!$          endif
-!!$          if (this%jac.le.0d0) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).ne.0) then
             ! Exactly 2 particles in a set (and the other set contains at least one)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
@@ -443,14 +422,11 @@ contains
          ! We need to get the momentum of the final particle of the set.
          this%pp(0:3,set(i))=this%pp(0:3,set(i)+inext+(3-i))+this%pp(0:3,(3-i))-this%pp(0:3,inext)
       enddo
-
       if (debug) call test_momenta
-
       ! Add factors of 2*pi
       this%jac=this%jac/((2d0*pi)**(3*(this%next-2)-4))
       ! Add flux factor
       this%jac=this%jac/(2d0*this%sqrtshat**2)
-
     end subroutine generate_momenta
 
     subroutine test_momenta
@@ -504,15 +480,12 @@ contains
       tmax=(-this%invm(ia+ib)+this%invm(i)+this%invm_min(ir)+yr)/2d0
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
-
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
       pzmax=sqrt(lambda(this%sqrtshat**2,this%ETmin(i)**2,this%ETmin(ir)**2))/(2d0*this%sqrtshat)
       Eimax=this%sqrtshat-sqrt(this%ETmin(ir)**2+pzmax**2)
-
       tmin=max(tmin,this%invm(i)-this%sqrtshat*(Eimax+pzmax))
       tmax=min(tmax,this%invm(i)-this%sqrtshat*(Eimax-pzmax))
-
       if (tmin.ge.tmax) then
          this%jac=-1d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
@@ -520,21 +493,17 @@ contains
       endif
       ix=ix+1
       call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ia),this%jac)
-
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,this%invm(i+ia),tmin,tmax
       endif
-
       tmin=-this%invm(ia+ib)-this%invm(i+ia)+this%invm(i)+this%invm_min(ir)
       tmax=this%invm(i)*(this%invm(i)-this%invm(ia+ib)-this%invm(i+ia))/(this%invm(i)-this%invm(i+ia))
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
-
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
       tmin=max(tmin,this%invm(i)-this%sqrtshat**2*(1-this%ETmin(ir)**2/(this%sqrtshat**2+this%invm(i+ia)-this%invm(i))))
       tmax=min(tmax,this%invm(i)-this%sqrtshat**2*(this%ETmin(i)**2/(this%invm(i)-this%invm(i+ia))))
-
       if (tmin.ge.tmax) then
          this%jac=-2d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
@@ -542,7 +511,6 @@ contains
       endif
       ix=ix+1
       call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(i+ib),this%jac)
-
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,this%invm(i+ib),tmin,tmax
       endif
@@ -569,7 +537,6 @@ contains
       this%pp(0,ir)=this%sqrtshat-this%pp(0,i)
       this%pp(1:3,ir)=-this%pp(1:3,i)
       this%invm(ir)=dot(this%pp(0,ir),this%pp(0,ir))
-
       if (this%invm(ir).le.0d0) then
          write (*,*) "ERROR in double_t: invariant mass of system", &
               & " must be larger than zero",ir,this%invm(ir),i
@@ -606,7 +573,6 @@ contains
          write (*,*) '23- i    ',i,this%invm(i)
          write (*,*) '23- ir   ',ir,this%invm(ir)
       endif
-
       call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
@@ -650,12 +616,10 @@ contains
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
-
       call sminmax(this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1),this%invm(ir+i+ib)&
            &,this%invm(ir+ib),this%invm(ir+ib+i+im1),this%invm(i),this%invm(im1),smin,smax,V,sqrtGG)
       if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
       if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
-
       if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
          y=log((this%pp(0,im1)+this%pp(3,im1))/(this%pp(0,im1)-this%pp(3,im1)))/2d0
@@ -677,7 +641,6 @@ contains
          endif
 
       endif
-
       if (smin.ge.smax) then
          this%jac=-4d0
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
@@ -685,11 +648,9 @@ contains
       endif
       ix=ix+1
       call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),this%jac)
-
       if (debug) then
          write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
       endif
-
       ! Generate the momenta from the integration variables. Since there is an
       ! ambiguity in phi, get both of them and pick the one that passes the cuts
       ! (if it's only one). If both pass, simply pick one of the two at random
@@ -740,7 +701,6 @@ contains
          endif
          return
       endif
-
       ! Compute the This%Jacobian
       gram4=gram_determinant4(this%invm(ir+i+im1),this%invm(ir+ib),this%invm(ir+i+ib)&
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
@@ -755,456 +715,7 @@ contains
 
 
 
-    subroutine gen23_one_step_v2(i,ir,ib,im1)
-      ! Generates one step using the 2->3 setup, using the invariants
-      ! shat(i), s(i) and t(i) as defined in E.~Byckling and K.~Kajantie,
-      ! ``Reductions of the phase-space integral in terms of simpler
-      ! processes,'' Phys. Rev. 187 (1969), 2008-2016,
-      ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
-      implicit none
-      integer(kind=4),intent(in) :: im1,i,ir,ib
-      real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
-           etminir,etmini
-      real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
-      real(kind=8),external :: ran2
-      integer :: ic,irc,ibc,im1c
-      common /current_step/ ic,irc,ibc,im1c
 
-      integer,parameter :: n_try=1000
-      integer :: nb,icode
-      real(kind=8),parameter :: xacc=1d-8
-      real(kind=8),dimension(n_try) :: xbb1,xbb2
-
-      ic=i ; irc=ir; ibc=ib; im1c=im1
-      if (popcnt(i).gt.1) then
-         if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
-         call shatminmax(this,i,ir,shatmin,shatmax)
-         call generate_mass(i,shatmin,shatmax)
-      endif
-      if (debug) then
-         write (*,*) '23- i    ',i,this%invm(i),shatmin,shatmax
-      endif
-      if (popcnt(ir).gt.1) then
-         call shatminmax(this,ir,i,shatmin,shatmax)
-         call generate_mass(ir,shatmin,shatmax)
-      endif
-      if (this%jac.le.0d0) return
-      if (debug) then
-         write (*,*) '23- ir   ',ir,this%invm(ir),shatmin,shatmax,sqrt(this%invm(ir))
-      endif
-
-      call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
-      ! Make sure that the t-range is compatible with the pT cut. Since t is an
-      ! invariant we can compute it in any frame. Let's use the frame in which
-      ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
-      ! ETmin() is boost invariant in the z-direction)
-      this%pp(0:3,i+ir)=this%pp(0:3,i+ir+ib)+this%pp(0:3,ib)
-      y=log((this%pp(0,i+ir)+this%pp(3,i+ir))/(this%pp(0,i+ir)-this%pp(3,i+ir)))/2d0
-      call boostz(this%pp(0,i+ir),y,piir)
-      call boostz(this%pp(0,ib),y,pib)
-
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-this%invm(i) .and. popcnt(i).eq.1 ) then
-         etminir=max(this%ETmin(ir),sqrt(this%invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-this%invm(i)))**2) )
-      else
-         etminir=max(this%ETmin(ir),sqrt(this%invm(ir)))
-      endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-this%invm(ir) .and. popcnt(ir).eq.1 ) then
-         etmini=max(this%ETmin(i),sqrt(this%invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-this%invm(ir)))**2) )
-      else
-         etmini=max(this%ETmin(i),sqrt(this%invm(i)))
-      endif
-      base=piir(0)**2-ETmini**2+ETminir**2
-      ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
-      ! following is more stable:
-      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
-           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
-      if (root.lt.0d0) then
-         this%jac=-33d0
-         if (debug) write (*,*) 'root.lt.0d0',root
-         return
-      endif
-      tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
-      tmax=min(tmax,this%invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
-      if (tmin.ge.tmax) then
-         this%jac=-3d0
-         if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
-         return
-      endif
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),this%jac)
-      if (debug) then
-         write (*,*) '23- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
-      endif
-
-      call sminmax(this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1),this%invm(ir+i+ib)&
-           &,this%invm(ir+ib),this%invm(ir+ib+i+im1),this%invm(i),this%invm(im1),smin,smax,V,sqrtGG)
-      if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
-      if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
-
-      ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
-      y=log((this%pp(0,im1)+this%pp(3,im1))/(this%pp(0,im1)-this%pp(3,im1)))/2d0
-      call boostz(this%pp(0,i+ir),y,piirr)
-      call boostz(this%pp(0,im1),y,pim1r)
-      call boostz(this%pp(0,ib),y,pib)
-      phi_rot=atan(this%pp(2,im1)/this%pp(1,im1))
-      if(this%pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
-      call rotz(piirr,-phi_rot,piir)
-      call rotz(pim1r,-phi_rot,pim1)
-      ! Eir > Etmin(ir) + constraint coming from t
-      etminir=max(pib(0)*this%ETmin(ir)**2/(this%invm(ir)-this%invm(ir+ib))+(this%invm(ir)-this%invm(ir+ib))/(4d0*pib(0)),&
-           this%ETmin(ir))
-      smax=min(smax,&
-           this%invm(i)+this%invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-this%invm(i))*pim1(1))
-
-      if(this%invm(i).eq.0d0) then
-         smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut)))
-      endif
-
-      if (smin.ge.smax) then
-         this%jac=-4d0
-         if (debug) write (*,*) 'smin.ge.smax',smin,smax
-         return
-      endif
-
-      smin=smin*1.00000001d0
-      smax=smax*0.99999999d0
-
-      nb=n_try
-      call zbrak(smin_constraint,smin,smax,n_try,xbb1,xbb2,nb)
-
-      if (nb.ge.1) then
-         if (smin_constraint(smin).lt.0d0) then
-            root=rtbis(smin_constraint,xbb1(1),xbb2(1),xacc,icode)
-            if (icode.ge.0) smin=max(smin,root)
-         endif
-         if (smin_constraint(smax).lt.0d0) then
-            root=rtbis(smin_constraint,xbb1(nb),xbb2(nb),xacc,icode)
-            if (icode.ge.0) smax=min(smax,root)
-         endif
-      endif
-
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),this%jac)
-
-      if (debug) then
-         write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
-      endif
-
-      ! Generate the momenta from the integration variables. Since there is an
-      ! ambiguity in phi, get both of them and pick the one that passes the cuts
-      ! (if it's only one). If both pass, simply pick one of the two at random
-      ! with a flat prior.
-      phi1=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
-           &,this%invm(ir+i+ib),V,sqrtGG,1d0)
-      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi1 &
-           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi1,ppibir1)
-      pr1(0:3)=this%pp(0:3,ir+i)-pi1(0:3)
-      phi2=getphifroms(this%invm(i+im1),this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
-           &,this%invm(ir+i+ib),V,sqrtGG,0d0)
-      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi2 &
-           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi2,ppibir2)
-      pr2(0:3)=this%pp(0:3,ir+i)-pi2(0:3)
-      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
-           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
-         if(ran2().gt.0.5d0) then
-            this%pp(0:3,i)=pi1(0:3)
-            this%pp(0:3,ir)=pr1(0:3)
-            this%pp(0:3,ib+ir)=ppibir1(0:3)
-         else
-            this%pp(0:3,i)=pi2(0:3)
-            this%pp(0:3,ir)=pr2(0:3)
-            this%pp(0:3,ib+ir)=ppibir2(0:3)
-         endif
-      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2) then
-         this%pp(0:3,i)=pi1(0:3)
-         this%pp(0:3,ir)=pr1(0:3)
-         this%pp(0:3,ib+ir)=ppibir1(0:3)
-         this%jac=this%jac/2d0
-      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
-         this%pp(0:3,i)=pi2(0:3)
-         this%pp(0:3,ir)=pr2(0:3)
-         this%pp(0:3,ib+ir)=ppibir2(0:3)
-         this%jac=this%jac/2d0
-      else
-         this%jac=-19d0
-         if (debug) then
-            write (*,*) 'nb',nb
-            write (*,*) 'piir',this%pp(0:3,i+ir)
-            write (*,*) 'pim1',this%pp(0:3,im1)
-            write (*,*) '1:',phi1,(phi1+phi2)/(2d0*pi)
-            write (*,*) 'i',i,this%ETmin(i),':',pi1(0:3)
-            write (*,*) 'ir',ir,this%ETmin(ir),':',pr1(0:3)
-            write (*,*) '2:',phi2
-            write (*,*) 'i',i,this%ETmin(i),':',pi2(0:3)
-            write (*,*) 'ir',ir,this%ETmin(ir),':',pr2(0:3)
-            write (*,*) ''
-         endif
-         return
-      endif
-
-      ! Compute the This%Jacobian
-      gram4=gram_determinant4(this%invm(ir+i+im1),this%invm(ir+ib),this%invm(ir+i+ib)&
-           &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
-           &,this%invm(im1))
-      if (gram4.ge.0d0) then 
-         write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
-         this%jac=-5d0
-         return
-      endif
-      this%jac=this%jac/(8d0*sqrt(-gram4))
-
-
-
-    end subroutine gen23_one_step_v2
-
-
-    real(kind=8) function smin_constraint(siim1)
-      implicit none
-      real(kind=8),intent(in) :: siim1
-      real(kind=8) :: smin,smax,V,sqrtGG,phi1,phi2
-      real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2
-      integer :: i,ir,ib,im1
-      common /current_step/ i,ir,ib,im1
-
-      call sminmax(this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1),this%invm(ir+i+ib)&
-           &,this%invm(ir+ib),this%invm(ir+ib+i+im1),this%invm(i),this%invm(im1),smin,smax,V,sqrtGG)
-      ! Generate the momenta from the integration variables. Since there is an
-      ! ambiguity in phi, get both of them and pick the one that passes the cuts
-      ! (if it's only one). If both pass, simply pick one of the two at random
-      ! with a flat prior.
-      phi1=getphifroms(siim1,this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
-           &,this%invm(ir+i+ib),V,sqrtGG,1d0)
-      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi1 &
-           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi1,ppibir1)
-      pr1(0:3)=this%pp(0:3,ir+i)-pi1(0:3)
-      phi2=getphifroms(siim1,this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1)&
-           &,this%invm(ir+i+ib),V,sqrtGG,0d0)
-      call gentcms2(this%pp(0,ib),this%pp(0,ib+ir+i),this%pp(0,ib+ir+i+im1),this%invm(ir+ib),phi2 &
-           &,sqrt(this%invm(i)),sqrt(this%invm(ir)),pi2,ppibir2)
-      pr2(0:3)=this%pp(0:3,ir+i)-pi2(0:3)
-      smin_constraint= &
-           max(min(pi1(0)**2-pi1(3)**2-this%ETmin(i)**2,pr1(0)**2-pr1(3)**2-this%ETmin(ir)**2), &
-           min(pi2(0)**2-pi2(3)**2-this%ETmin(i)**2,pr2(0)**2-pr2(3)**2-this%ETmin(ir)**2))
-    end function smin_constraint
-
-
-    subroutine genpt_one_step(i,ir,ib,im1)
-      ! This subroutines assumes that all particles in 'ir' are massless. 
-      implicit none
-      integer(kind=4),intent(in) :: i,ir,ib,im1
-      real(kind=8) :: pt2min,pt2max,phimin,phimax,y,shatmin,shatmax,pt2,phi,phi_rot,&
-           xjac,cosphi,pt,root,denom,base,pre,ptiir
-      real(kind=8),dimension(0:3) :: pim1,piir,pip,pim,prp,prm,pipr
-      real(kind=8),external :: ran2
-      logical :: use_plus
-      if (this%invm(i).ne.0d0) then
-         write (*,*) 'genpt_one_step only for massless particles',i,this%invm(i)
-         stop 1
-      endif
-      ! get the energy in the frame where p(:,i+ir) has p_z=0.
-      y=log((this%pp(0,i+ir)+this%pp(3,i+ir))/(this%pp(0,i+ir)-this%pp(3,i+ir)))/2d0
-      call boostz(this%pp(0,i+ir),y,piir)
-      call boostz(this%pp(0,im1),y,pim1)
-      ptiir=sqrt(piir(1)**2+piir(2)**2)
-      ! generate pT^2
-      pt2min=this%ETmin(i)**2-this%invm(i)
-      pt2max=min((piir(0)-this%ETmin(ir))**2-this%invm(i),0.25d0*(piir(0)+ptiir)**2)
-      if (pt2min.gt.pt2max) then
-         if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
-         this%jac=-14d0
-         return
-      endif
-
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,this%jac)
-      pt=sqrt(pt2)
-
-      if (debug) then
-         write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
-      endif
-
-      ! generate phi
-      phimax=(piir(1)**2+piir(2)**2+pT2-(piir(0)-sqrt(pT2+this%invm(i)))**2) &
-           /(2d0*ptiir*pT)
-      if (phimax.gt.1d0) then
-         write (*,*) 'ERROR,phimax',phimax,sqrt(piir(1)**2+piir(2)**2),pT,piir(0)
-         stop 1
-      elseif (phimax.gt.-1d0) then
-         phimax=acos(phimax)
-      else
-         phimax=pi
-      endif
-      phimin=0d0
-
-      ix=ix+1
-      call random_to_var(this%x(ix),0d0,phimin,phimax,phi,this%jac)
-      if (ran2().lt.0.5d0) phi=-phi
-      this%jac=this%jac*2d0
-
-      if (debug) then
-         write (*,*) 'phi - i  ',i,phi,phimin,phimax
-      endif
-
-      ! phi is the angle between pT(i+ir) and pT(i), but it needs to be the
-      ! angle between pT(im1) and pT(i). Hence, compensate:
-      cosphi=(piir(1)*pim1(1)+piir(2)*pim1(2))/&
-           (ptiir*sqrt(pim1(1)**2+pim1(2)**2))
-      if (cosphi.gt.1d0 .and. cosphi.lt.1d0+tiny) cosphi=1d0
-      if (cosphi.lt.-1d0 .and. cosphi.gt.-1d0-tiny) cosphi=-1d0
-      phi_rot=acos(cosphi)
-      if(piir(1)*pim1(2).lt.piir(2)*pim1(1)) phi_rot=-phi_rot
-      phi=phi-phi_rot
-      if (phi.lt.-pi) phi=phi+2d0*pi
-      if (phi.gt.+pi) phi=phi-2d0*pi
-
-      ! boost to the frame where p(:,im1) has p_z=0.
-      y=log((this%pp(0,im1)+this%pp(3,im1))/(this%pp(0,im1)-this%pp(3,im1)))/2d0
-      call boostz(this%pp(0,im1),y,pim1)
-      call boostz(this%pp(0,i+ir),y,piir)
-
-      shatmin=2d0*pt*(pim1(0)-sqrt(pim1(1)**2+pim1(2)**2)*cos(max(this%drcut,abs(phi))))
-
-      pre=pim1(0)*piir(0)-2d0*cos(phi)*pim1(0)*pt
-      base=-pim1(0)*piir(0)*(this%ETmin(ir)-pt)*(this%ETmin(ir)+pt)
-      root=abs(pim1(0)*piir(3))*sqrt((piir(0)**2-(this%ETmin(ir)-pt)**2-piir(3)**2)*&
-           (piir(0)**2-(this%ETmin(ir)+pt)**2-piir(3)**2))
-      denom=(piir(0)-piir(3))*(piir(0)+piir(3))
-
-      if ( pt.gt.piir(0)-abs(piir(3)) .or. &
-           ( pt.lt.piir(0)-abs(piir(3)) .and. &
-           this%ETmin(ir)**2.gt.(piir(0)-pt)**2-piir(3)**2 ) ) then
-         shatmin=max(shatmin,pre+(base-root)/denom)
-      elseif (pt2.gt.denom) then
-         write (*,*) 'pT2 too large',pt2,piir(0)**2-piir(3)**2
-         stop 1
-      elseif (this%ETmin(ir).gt.sqrt(piir(0)**2-piir(3)**2)-pt) then
-         write (*,*) 'Not enough energy',this%ETmin(ir),sqrt(piir(0)**2-piir(3)**2)-pt
-         stop 1
-      endif
-
-      shatmax=pre+(base+root)/denom
-
-      if (shatmin.gt.shatmax) then
-         if (debug) write (*,*) shatmin,shatmax,2d0*pt*pim1(0)*(1d0-cos(this%drcut))
-         this%jac=-13d0
-         return
-      endif
-
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(i+im1),this%jac)
-
-      if (debug) then
-         write (*,*) 'shat - i+im1',i+im1,this%invm(i+im1),shatmin,shatmax
-      endif
-
-      ! fill momentum, assuming that previous particle is along the x-axis.
-      call fill_momentum_ptinvmphi(pt,this%invm(i+im1),phi,pim1(0),pipr(0),xjac)
-      if (xjac.lt.0d0) then
-         this%jac=xjac
-         return
-      endif
-      this%jac=this%jac*xjac
-
-      ! rotate about the z-axis
-      phi_rot=atan(this%pp(2,im1)/this%pp(1,im1))
-      if(this%pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
-      call rotz(pipr,phi_rot,pip)
-
-      ! check both +pz and -pz
-      pim(0:2)=pip(0:2)
-      pim(3)=-pip(3)
-      prp(0:3)=piir(0:3)-pip(0:3)
-      prm(0:3)=piir(0:3)-pim(0:3)
-      if ( prp(0)**2-prp(3)**2 .ge. this%ETmin(ir)**2 .and. &
-           prp(0)**2-prp(3)**2 .ge. this%ETmin(ir)**2 .and. &
-           dot(prp(0:3),prp(0:3)) .ge. 0d0 .and. &
-           dot(prm(0:3),prm(0:3)) .ge. 0d0 &
-           ) then
-         if (ran2().gt.0.5d0) then
-            use_plus=.true.
-         else
-            use_plus=.false.
-         endif
-         this%jac=this%jac*2d0
-      elseif ( prp(0)**2-prp(3)**2 .ge. this%ETmin(ir)**2 .and. &
-           dot(prp(0:3),prp(0:3)) .ge. 0d0 &
-           ) then
-         use_plus=.true.
-      elseif ( prm(0)**2-prm(3)**2 .ge. this%ETmin(ir)**2 .and. &
-           dot(prm(0:3),prm(0:3)) .ge. 0d0 &
-           ) then
-         use_plus=.false.
-      else
-         ! The constraints shatmin/shatmax are such that
-         ! E(ir)>ETmin(ir). However, sometimes, the invariant mass of ir
-         ! is smaller than zero for both configurations (i.e., for both
-         ! +pz and -pz). This boundary has not been implemented
-         ! consistently. In that case we simply return.
-         this%jac=-21d0
-         return
-      endif
-
-      ! boost along the z-axis
-      if (use_plus) then
-         call boostz(pip,-y,this%pp(0,i))
-      else
-         call boostz(pim,-y,this%pp(0,i))
-      endif
-
-      this%pp(0:3,ir)=this%pp(0:3,ir+i)-this%pp(0:3,i)
-      this%jac=this%jac/dble(4)
-      this%invm(ir)=dot(this%pp(0:3,ir),this%pp(0:3,ir))
-      if (debug) then
-         write (*,*) 'pp(ir+i+im1)',this%pp(0:3,ir+i+im1),this%invm(ir+i+im1)
-         write (*,*) 'pp(im1 )    ',this%pp(0:3,im1),this%invm(im1),im1
-         write (*,*) 'pp(ir+i)    ',this%pp(0:3,ir+i),this%invm(ir+i),ir+i
-         write (*,*) 'pp(i)       ',this%pp(0:3,i),this%invm(i),i
-         write (*,*) 'pp(ir)      ',this%pp(0:3,ir),this%invm(ir),ir
-         write (*,*) ''
-      endif
-      if (this%invm(ir).lt.0d0) then
-         this%jac=-12d0
-         return
-      endif
-      ! fill t-channel stuff to be safe.
-      this%pp(0:3,i+ib)=this%pp(0:3,i)-this%pp(0:3,ib)
-      this%pp(0:3,ir+ib)=this%pp(0:3,ir)-this%pp(0:3,ib)
-      this%invm(i+ib)=dot(this%pp(0:3,i+ib),this%pp(0:3,i+ib))
-      this%invm(ir+ib)=dot(this%pp(0:3,ir+ib),this%pp(0:3,ir+ib))
-    end subroutine genpt_one_step
-    subroutine fill_momentum_ptinvmphi(pt,invm,phi,Eref,p,xjac)
-      implicit none
-      real(kind=8) :: invm,phi,xjac,pt,Eref
-      real(kind=8),dimension(0:3) :: p
-      real(kind=8),external :: ran2
-      p(1)=pt*cos(phi)
-      p(2)=pt*sin(phi)
-      p(0)=invm/(2d0*Eref)+p(1)
-      ! There are two values of the pz that correspond to a single
-      ! invm. Take one of the two at random.
-      p(3)=p(0)**2-pt**2
-      if (p(3).lt.0d0 .and. p(3).ge.-tiny) then
-         p(3)=0d0
-      elseif(p(3).lt.-tiny) then
-         xjac=-20d0
-         return
-      else
-         p(3)=sqrt(p(3))
-      endif
-      xjac=abs(1d0/(2d0*Eref*(p(3)+vtiny)))
-    end subroutine fill_momentum_ptinvmphi
-
-    subroutine roty(p,phi,prot)
-      implicit none
-      real(kind=8),dimension(0:3) :: p,prot
-      real(kind=8) :: phi
-      prot(0)=p(0)
-      prot(1)=p(1)*cos(phi)-p(3)*sin(phi)
-      prot(2)=p(2)
-      prot(3)=p(1)*sin(phi)+p(3)*cos(phi)
-    end subroutine roty
 
     subroutine gent_one_step(i,ir,ib)
       ! One step in the usual MadGraph t-channel phase-space generation.
@@ -1243,7 +754,6 @@ contains
          endif
       endif
       if (this%jac.le.0d0) return
-
       call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
@@ -1284,12 +794,10 @@ contains
       endif
       ix=ix+1
       call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ir+ib),this%jac)
-
       if (debug) then
          write (*,*) 't- ir+ib',ir+ib,this%invm(ir+ib),tmin,tmax
       endif
       ix=ix+1
-
       call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
       if (debug) then
          write (*,*) 't - phi  ',i,phi,0d0,2d0*pi
@@ -1299,286 +807,6 @@ contains
       this%pp(0:3,ir)=this%pp(0:3,ib+ir+i)+this%pp(0:3,ib)-this%pp(0:3,i)
       this%jac = this%jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,this%invm(ir+i+ib))))
     end subroutine gent_one_step
-
-    subroutine gent_one_step_v2(i,ir,ib,im1)
-      implicit none
-      integer(kind=4),intent(in) :: i,ir,ib,im1
-      real(kind=8) :: pt2,y,phi_rot,pt2min,pt2max,tmin,tmax,smin,smax,&
-           ea,mi,tr,siim1,mim1,eim1,pxim1,base,root,yb
-      real(kind=8),dimension(0:3) :: piirr,pim1r,pib,piir,pim1,pii,pir
-      real(kind=8),external :: ran2
-
-      ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
-      y=log((this%pp(0,im1)+this%pp(3,im1))/(this%pp(0,im1)-this%pp(3,im1)))/2d0
-      call boostz(this%pp(0,i+ir),y,piirr)
-      call boostz(this%pp(0,im1),y,pim1r)
-      call boostz(this%pp(0,ib),y,pib)
-      phi_rot=atan(this%pp(2,im1)/this%pp(1,im1))
-      if (this%pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
-      call rotz(piirr,-phi_rot,piir)
-      call rotz(pim1r,-phi_rot,pim1)
-
-      ! generate pT^2
-      pt2min=this%ETmin(i)**2-this%invm(i)
-      pt2max=min((piir(0)-this%ETmin(ir))**2-this%invm(i),&
-           0.25d0*(piir(0)+sqrt(piir(1)**2+piir(2)**2))**2)
-      if (pt2min.gt.pt2max) then
-         if (debug) write (*,*) 'pt2min,pt2max',pt2min,pt2max
-         this%jac=-14d0
-         return
-      endif
-
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,pt2min,pt2max,pt2,this%jac)
-
-      if (debug) then
-         write (*,*) 'pt2 - i  ',i,pt2,pt2min,pt2max
-      endif
-
-      Ea=pib(0)
-      mi=sqrt(this%invm(i))
-      tr=this%invm(ib+i)
-      mim1=sqrt(this%invm(im1))
-      eim1=pim1(0)
-      pxim1=pim1(1)
-
-      ! Make sure that the t-range is compatible with the pT cut. Since t is an
-      ! invariant we can compute it in any frame. Let's use the frame in which
-      ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
-      ! ETmin() is boost invariant in the z-direction)
-      this%pp(0:3,i+ir)=this%pp(0:3,i+ir+ib)+this%pp(0:3,ib)
-      yb=log((this%pp(0,i+ir)+this%pp(3,i+ir))/(this%pp(0,i+ir)-this%pp(3,i+ir)))/2d0
-      call boostz(this%pp(0,i+ir),yb,piir)
-      call boostz(this%pp(0,ib),yb,pib)
-      base=piir(0)**2+pt2-this%ETmin(ir)**2+this%invm(i)*(1d0-piir(0)/pib(0))
-      ! Note, root=lambda(piir(0)**2,pt2+this%invm(i),this%ETmin(ir)**2), but the
-      ! following is more stable:
-      root=(piir(0)-sqrt(pt2+this%invm(i))-this%ETmin(ir))*(piir(0)+sqrt(pt2+this%invm(i))-this%ETmin(ir))*&
-           (piir(0)-sqrt(pt2+this%invm(i))+this%ETmin(ir))*(piir(0)+sqrt(pt2+this%invm(i))+this%ETmin(ir))
-      if (root.lt.0d0) then
-         this%jac=-33d0
-         if (debug) write (*,*) 'root.lt.0d0',root
-         return
-      endif
-      tmin=this%invm(i)-pib(0)/piir(0)*(base+sqrt(root))
-      tmax=this%invm(i)-pib(0)/piir(0)*(base-sqrt(root))
-      if (tmin.ge.tmax) then
-         this%jac=-3d0
-         if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
-         return
-      endif
-
-
-      ! generate t
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,tmin,tmax,this%invm(ib+i),this%jac)
-
-      if (debug) then
-         write (*,*) 'pt2 - ib+i',ib+i,this%invm(ib+i),tmin,tmax
-      endif
-
-
-      pii(0)=(Ea*(mi**2 + pt2))/(mi**2 - tr) + (mi**2 - tr)/(4.*Ea)
-      pii(3)=(Ea*(mi**2 + pt2))/(mi**2 - tr) + (-mi**2 + tr)/(4.*Ea)
-
-
-
-      smin=this%invm_min(i+im1)
-      if(this%invm(i).eq.0d0) then
-         smin=max(smin,2d0*sqrt(pt2)*(pim1(0)-pim1(1)*cos(this%drcut)))
-      endif
-      smin=max(smin,2*pii(0)*eim1+mi**2+mim1**2-2d0*sqrt(pt2)*pxim1)
-      smax=2*pii(0)*eim1+mi**2+mim1**2+2d0*sqrt(pt2)*pxim1
-
-      if (smin.ge.smax) then
-         this%jac=-4d0
-         if (debug) write (*,*) 'smin.ge.smax',smin,smax
-         return
-      endif
-      ix=ix+1
-      call random_to_var(this%x(ix),ip,smin,smax,this%invm(i+im1),this%jac)
-
-      if (debug) then
-         write (*,*) '23- i+im1',i+im1,this%invm(i+im1),smin,smax
-      endif
-
-
-      siim1=this%invm(i+im1)
-
-      pii(1)=(2*(mi**2 + mim1**2 - siim1) + &
-           (4*Ea*eim1*(mi**2 + pt2))/(mi**2 - tr) + (eim1*(mi**2 - tr))/Ea)/(4.*pxim1)
-
-      if (pii(1)**2.gt.pt2) then
-         this%jac=-101d0
-         return
-      endif
-
-      pii(2)=sqrt(pt2-pii(1)**2)
-      if (ran2().gt.0.5d0) pii(2)=-pii(2)
-      this%jac=this%jac*2d0
-
-
-
-
-      call rotz(pii,phi_rot,pir)
-      call boostz(pir,-y,this%pp(0,i))
-
-      this%pp(0:3,ir)=this%pp(0:3,i+ir)-this%pp(0:3,i)
-      this%invm(ir)=dot(this%pp(0:3,ir),this%pp(0:3,ir))
-      this%pp(0:3,ir+ib)=this%pp(0:3,ir)-this%pp(0:3,ib)
-      this%invm(ir+ib)=dot(this%pp(0:3,ir+ib),this%pp(0:3,ir+ib))
-
-      this%jac=this%jac*(1d0/abs(8*Ea*pxim1*pii(2)*(-1d0 + pii(3)/pii(0))))*2d0/pii(0)
-      this%jac=this%jac/4d0
-
-      if (this%invm(ir).lt.0d0 .or. this%pp(0,ir).lt.this%ETmin(ir)) then
-         this%jac=-102d0
-         return
-      endif
-
-    end subroutine gent_one_step_v2
-
-    double precision function rtbis(func,x1,x2,xacc,icode)
-      implicit none
-      integer,parameter :: jmax=1000
-      real*8,intent(in) :: x1,x2,xacc
-      integer,intent(out) :: icode
-      real*8,external :: func
-      ! Using bisection, find the root of a function func known to lie
-      ! between x1 and x2. The root, returned as rtbis, will be refined
-      ! until its accuracy is |func(rtbis)|<xacc.
-      integer :: j
-      real*8 :: dx,f,fmid,xmid
-      fmid=func(x2)
-      f=func(x1)
-      icode=0
-      if(f*fmid.ge.0.) then
-!!$       write (*,*) "root must be bracketed in rtbis",x1,x2,f,fmid
-         icode=-1
-!!$       stop 1
-      endif
-      if(f.lt.0.)then ! Orient the search so that f>0 lies at x+dx.
-         rtbis=x1
-         dx=x2-x1
-      else
-         rtbis=x2
-         dx=x1-x2
-      endif
-      do j=1,jmax ! Bisection loop.
-         dx=dx*.5
-         xmid=rtbis+dx
-         fmid=func(xmid)
-         if(fmid.le.0.) rtbis=xmid
-         if(abs(dx).lt.xacc .or. fmid.eq.0.) then
-            return
-         endif
-      enddo
-      write (*,*)  "WARNING: too many bisections in rtbis"
-    end function rtbis
-
-
-    subroutine zbrak(fx,x1,x2,n,xb1,xb2,nb)
-      ! Given a function fx defined on the interval from x1-x2 subdivide the
-      ! interval into n equally spaced segments, and search for zero crossings of
-      ! the function. nb is input as the maximum number of roots sought, and is
-      ! reset to the number of bracketing pairs xb1(1:nb), xb2(1:nb) that are found.
-      implicit none
-      integer n,nb
-      real(kind=8) :: x1,x2,xb1(nb),xb2(nb)
-      real(kind=8),external :: fx
-      integer :: i,nbb
-      real(kind=8) dx,fc,fp,x
-      nbb=0
-      x=x1
-      dx=(x2-x1)/n
-      fp=fx(x)
-      ! Determine the spacing appropriate to the mesh. Loop over all intervals
-      ! If a sign change occurs then record values for the bounds.
-      do i=1,n
-         x=x+dx
-         fc=fx(x)
-         if(fc*fp.le.0d0) then
-            nbb=nbb+1
-            xb1(nbb)=x-dx
-            xb2(nbb)=x
-            if(nbb.eq.nb) exit
-         endif
-         fp=fc
-      enddo
-      nb=nbb
-    end subroutine zbrak
-
-
-    subroutine gentcms_v2(pa,pb,t,phi,m1,m2,p1,pr)
-      ! Generates 4 momentum for particle p1, and remainder pr=pa-p1=p2-pb given the
-      ! values t, and phi in the process pa+pb -> p1+p2.  Assuming incoming
-      ! particles with momenta pa, pb and outgoing particles with mass m1,m2;
-      ! t=(pb-p2)^2 ; phi is the azimuthal angle between p1 and pa in the
-      ! pa+pb rest frame, with pa aligned with the positive z-axis.
-      implicit none
-      real(kind=8),intent(in) :: t,phi,m1,m2
-      real(kind=8),intent(in),dimension(0:3) :: pa,pb
-      real(kind=8),intent(out),dimension(0:3) :: p1,pr
-      real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,ma2,pt,pt2
-      real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,p1_rot
-      real(kind=8),parameter :: tiny=1d-8
-      ptot(0:3)=pa(0:3)+pb(0:3)
-      ptotm(0)=ptot(0)
-      ptotm(1:3)=-ptot(1:3)
-      ma2=dot(pa,pa)
-      ! determine magnitude of p1 in cms frame (from dhelas routine mom2cx)
-      ESUM2 = dot(ptot,ptot)
-      if (esum2 .le. 0d0) then
-         write (*,*) "error :: must be time-like momentum in gentcms",esum2
-         stop 1
-      endif
-      esum=sqrt(esum2)
-      MD2=(M1-M2)*(M1+M2)
-      ED=MD2/ESUM
-      IF (M1*M2.EQ.0.d0) THEN
-         PP2=0.25d0*(ESUM-ABS(ED))**2
-      ELSE
-         PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
-         if(pp2.lt.0d0) then
-            write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
-                 &/'3-momentum smaller than 0',pp2
-            stop 1
-         endif
-      ENDIF
-
-      call boostm(pa,ptotm,esum,pa_cms)
-      E_acms = pa_cms(0)
-      p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
-
-      ! define p1 in the frame where pa_cms is aligned with the positive z axis.
-      p1(0) = MAX((ESUM+ED)*0.5d0,0.d0)
-      if (esum+ed.le.0d0) then
-         write (*,*) 'Error #14 in genps_fks.f: negative energy',esum,ed
-         this%jac=-8d0
-         return
-         write (*,*) pa(0:3)
-         write (*,*) pb(0:3)
-         write (*,*) m1,m2,t,phi
-         write (*,*) pa_cms(0:3)
-         stop 1
-      endif
-      p1(3) = -(m1**2+ma2-t-2d0*p1(0)*E_acms)/(2d0*p_acms)
-      pt2=pp2-p1(3)**2
-      if (pt2/esum2.lt.-tiny) then
-         write (*,*) 'Error #13 in genps_fks.f: relative pt^2 smaller than 0',pt2,esum2
-         stop 1
-      elseif (pt2.lt.0d0) then
-         pt2=0d0
-      endif
-      pt = sqrt(pt2)
-      p1(1) = pt*cos(phi)
-      p1(2) = pt*sin(phi)
-      call rotxxx(p1,pa_cms,p1_rot)       !Rotate p1 to the pa_cms frame
-      call boostm(p1_rot,ptot,esum,p1)    !boost back to lab frame
-      pr(0:3)=pa(0:3)-p1(0:3)         !Return remainder of momentum
-    end subroutine gentcms_v2
-
-
 
     subroutine gens_one_step(i,ir)
       implicit none
@@ -1627,21 +855,8 @@ contains
          return
       endif
       ix=ix+1
-!!$          call random_to_var(this%x(ix),ip,shatmin,shatmax,this%invm(j1),this%jac)
       call random_to_var(this%x(ix),-0.5d0,shatmin,shatmax,this%invm(i),this%jac)
     end subroutine generate_mass
-
-
-
-
-
-
-
-
-
-
-
-
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
       ! This subroutine sets up two four-momenta in the two particle rest
@@ -1711,11 +926,9 @@ contains
             stop 1
          endif
       ENDIF
-
       call boostm(pa,ptotm,esum,pa_cms)
       E_acms = pa_cms(0)
       p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
-
       ! define p1 in the frame where pa_cms is aligned with the positive z axis.
       p1(0) = MAX((ESUM+ED)*0.5d0,0.d0)
       if (esum+ed.le.0d0) then
@@ -1743,20 +956,6 @@ contains
       call boostm(p1_rot,ptot,esum,p1)    !boost back to lab frame
       pr(0:3)=pa(0:3)-p1(0:3)         !Return remainder of momentum
     end subroutine gentcms
-
-
-
-
-
-
-
-
-    !ccccccccccccccccccccccccccccccccccccccccccccccccccccc
-    !c
-    !c
-    !c Functions not to be touched (basic functions)
-    !c
-    !cccccccccccccccccccccccccccccccccccccccccccccccccccc
 
     subroutine random_to_var(x,power_in,var_min,var_max,var,jac)
       ! Given a random number x, it generates var in the range var_min
@@ -1811,12 +1010,6 @@ contains
          var=-var
       endif
     end subroutine random_to_var
-
-
-
-
-
-
   end subroutine gen23_generate_momenta
 
   subroutine gen23_compute_x_from_momenta(this,p)
