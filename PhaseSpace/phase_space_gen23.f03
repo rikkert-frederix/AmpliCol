@@ -12,7 +12,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false.,eff_photon_int=.false.
+  logical,parameter :: verbose=.true.,eff_photon_int=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
@@ -54,7 +54,7 @@ contains
     logical,intent(in) :: t_chan
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
-    integer(kind=4) :: i,j,ns
+    integer(kind=4) :: i,j,ns,nns
     real(kind=8) :: ptcut
     this%sqrtshat=sqrts
     this%sqrts=sqrts
@@ -112,6 +112,7 @@ contains
     enddo
 
     ns=0
+    nns=1
     this%sets=0
     ! move all singlets to the end of the order
     if (eff_photon_int) then
@@ -121,12 +122,17 @@ contains
            this%order(i).gt.2) then
             ord_temp(this%next-ns)=this%order(i)
             ns=ns+1
+       else
+            ord_temp(nns)=this%order(i)
+            nns=nns+1
        endif
     enddo
-    this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
-    do j=this%next-ns+1,this%next
-        this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
-    enddo
+
+
+    !this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
+    !do j=this%next-ns+1,this%next
+    !    this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
+    !enddo
     j=1
     do i=1,this%next
        if (part(this%order(i)).eq.21.or.abs(part(this%order(i))).le.6.) then
@@ -137,6 +143,8 @@ contains
     this%order=ord_temp
     endif
 
+   
+    ns=0 ! needed for the new ordering of the phase-space order 
     i=0
     do i=2,this%next-ns
        if (this%order(i).eq.2) then
