@@ -12,7 +12,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.true.,eff_photon_int=.true.
+  logical,parameter :: verbose=.true.,eff_photon_int=.false.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
@@ -100,17 +100,8 @@ contains
        ptcut=0d0
     endif
     call setup_PS_cuts(s_cut)
-    ! Bring the colour order to a canonical order (first in the list
-    ! should be particle 1, i.e., the first incoming particle).
-    do i=1,this%next
-       if (o(i).eq.1) then
-          do j=0,this%next-1
-             this%order(j+1)=o(1+mod(i+j-1,this%next))
-          enddo
-          exit
-       endif
-    enddo
 
+    this%order=o
     ns=0
     nns=1
     this%sets=0
@@ -128,7 +119,6 @@ contains
        endif
     enddo
 
-
     !this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
     !do j=this%next-ns+1,this%next
     !    this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
@@ -140,10 +130,21 @@ contains
             j=j+1
        endif
     enddo
-    this%order=ord_temp
+    else
+      ord_temp=o
     endif
 
-   
+    ! Bring the colour order to a canonical order (first in the list
+    ! should be particle 1, i.e., the first incoming particle).
+    do i=1,this%next
+       if (ord_temp(i).eq.1) then
+          do j=0,this%next-1
+             this%order(j+1)=ord_temp(1+mod(i+j-1,this%next))
+          enddo
+          exit
+       endif
+    enddo
+
     ns=0 ! needed for the new ordering of the phase-space order 
     i=0
     do i=2,this%next-ns
