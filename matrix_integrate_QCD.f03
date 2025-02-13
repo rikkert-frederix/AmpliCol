@@ -93,7 +93,7 @@ program matrix_integrate_QCD
 
   if (include_pdf) call PDF_initialise
 
-  call phys_model%init_part(173d0,1.491500d0)
+  call phys_model%init_part(173d0,1.491500d0,zmass,zwidth)
 
   call get_run_arguments()
 
@@ -1119,6 +1119,10 @@ contains
        if (pgl%spin(0,i).eq.2) then
           pgl%spin(1,i)=-1
           pgl%spin(2,i)=1
+       elseif (pgl%spin(0,i).eq.3) then
+          pgl%spin(1,i)=-1
+          pgl%spin(2,i)=1
+          pgl%spin(3,i)=0
        else
           write (*,*) 'spin state not known',i,pgl%processes(i,1),pgl%spin(0,i)
           stop 1

@@ -19,7 +19,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
-     real(kind=8) :: coupl
+     real(kind=8),dimension(2) :: coupl
   end type interaction
   type amplitude_QCD
      integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
@@ -826,11 +826,11 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      real(kind=8) :: coupl
+      real(kind=8),dimension(2) :: coupl
       if (.not.valid_current_combination())  then
          return
       endif
-      
+
       if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -865,35 +865,68 @@ contains
       elseif (is_singlet(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a photon-quark to quark vertex
          if (mod(current_list_local(ic2)%type,2).eq.0) then
-            coupl=2d0/3d0
+            coupl=(/2d0/3d0,0d0/)
          else
-            coupl=-1d0/3d0
+            coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(10,current_list_local(ic2)%type,coupl)
       elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
          ! add a quark-photon to quark vertex
          if (mod(current_list_local(ic1)%type,2).eq.0) then
-            coupl=2d0/3d0
+            coupl=(/2d0/3d0,0d0/)
          else
-            coupl=-1d0/3d0
+            coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(12,current_list_local(ic1)%type,coupl)
       elseif (is_singlet(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a photon-antiquark to quark vertex
          if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
-            coupl=2d0/3d0
+            coupl=(/2d0/3d0,0d0/)
          else
-            coupl=-1d0/3d0
+            coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(11,current_list_local(ic2)%type,coupl)
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
          ! add a antiquark-photon to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=2d0/3d0
+            coupl=(/2d0/3d0,0d0/)
          else
-            coupl=-1d0/3d0
+            coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(13,current_list_local(ic1)%type,coupl)
+
+      elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
+         ! add a z-quark to quark vertex
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=(/2d0/3d0,1d0/2d0/)
+         else
+            coupl=(/-1d0/3d0,-1d0/2d0/)
+         endif
+         call add_vertex(16,current_list_local(ic2)%type,coupl)
+      elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add a quark-z to quark vertex
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=(/2d0/3d0,1d0/2d0/)
+         else
+            coupl=(/-1d0/3d0,-1d0/2d0/)
+         endif
+         call add_vertex(17,current_list_local(ic1)%type)
+      elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
+         ! add a z-antiquark to quark vertex
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=(/2d0/3d0,1d0/2d0/)
+         else
+            coupl=(/-1d0/3d0,-1d0/2d0/)
+         endif
+         call add_vertex(18,current_list_local(ic2)%type)
+      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add a antiquark-z to quark vertex
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=(/2d0/3d0,1d0/2d0/)
+         else
+            coupl=(/-1d0/3d0,-1d0/2d0/)
+         endif
+         call add_vertex(19,current_list_local(ic1)%type)
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1044,7 +1077,7 @@ contains
     subroutine add_vertex(itype,ctype,coupl)
       implicit none
       integer :: itype,ctype,ic
-      real(kind=8),optional :: coupl
+      real(kind=8),dimension(2),optional :: coupl
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -1058,7 +1091,7 @@ contains
       if (present(coupl)) then
          interaction_list_local(this%n_vert)%coupl=coupl
       else
-         interaction_list_local(this%n_vert)%coupl=1d0
+         interaction_list_local(this%n_vert)%coupl=(/1d0,1d0/)
       endif
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype)
@@ -1846,6 +1879,14 @@ contains
                    call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
+             elseif (this%current_list(ic)%type.eq.23) then
+                if (use_real_gluons) then
+                   call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_r(1:4))
+                else
+                   call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4))
+                endif
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
@@ -2015,6 +2056,27 @@ contains
 
           elseif(this%interaction_list(iv)%type.eq.15) then
              call AquarkQuarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.16) then
+             call GluonQuarktoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.17) then
+             call GluonAquarktoAquark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.18) then
+             call QuarkGluontoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.19) then
+             call AquarkGluontoAquark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)

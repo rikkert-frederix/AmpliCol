@@ -11,14 +11,15 @@ module particles
      procedure,public :: init_part,get_mass,get_width,get_spin,get_antipart
   end type physics_model
 contains
-  subroutine init_part(this,tmass,twidth)
+  subroutine init_part(this,tmass,twidth,zmass,zwidth)
     implicit none
     class(physics_model) :: this
     integer :: i
     real(kind=8) :: tmass,twidth
+    real(kind=8) :: zmass,zwidth
+
     this%npart=9 ! gluon, 6 quarks, tensor, and the photon
     allocate(this%particle_list(this%npart))
-
     ! 5 massless quarks
     do i=1,5
        this%particle_list(i)%type=i
@@ -55,6 +56,13 @@ contains
     this%particle_list(9)%width=0d0
     this%particle_list(9)%spin=2 ! two spin states
     this%particle_list(9)%anti_type=22
+
+    ! z-boson
+    this%particle_list(9)%type=23
+    this%particle_list(9)%mass=zmass
+    this%particle_list(9)%width=zwidth
+    this%particle_list(9)%spin=3 ! two spin states
+    this%particle_list(9)%anti_type=23
     
   end subroutine init_part
   integer function get_antipart(this,ipdg)
@@ -152,10 +160,19 @@ contains
   logical function is_singlet(i)
     implicit none
     integer :: i
-    if (abs(i).ge.22) then
+    if (abs(i).eq.22) then
        is_singlet=.true.
     else
        is_singlet=.false.
     endif
   end function is_singlet
+  logical function is_singlet_z(i)
+    implicit none
+    integer :: i
+    if (abs(i).ge.23) then
+       is_singlet_z=.true.
+    else
+       is_singlet_z=.false.
+    endif
+  end function is_singlet_z
 end module particles
