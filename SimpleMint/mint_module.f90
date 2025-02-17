@@ -131,7 +131,7 @@ module mint_module
   common /c_fnlo_nlops/fixed_order,nlo_ps
 
 ! functions and subroutines:
-  public :: mint,gen,read_grids_from_file
+  public :: mint,gen,read_grids_from_file,mint_get_jacobian_from_x
   private :: initialise_mint,setup_basic_mint &
        &,update_accumulated_results,prepare_next_iteration &
        &,check_desired_accuracy,update_integration_grids &
@@ -820,7 +820,45 @@ contains
     endif
     if (fixed_points_pass_cuts) ntotcalls(1:nintegrals)=ntotcalls(1:nintegrals)+1
   end subroutine compute_integrand
-  
+
+  subroutine mint_get_jacobian_from_x(ich,xi,voli)
+    ! returns the MINT Jacobian 'voli' for generating the random
+    ! numbers 'xi' in channel 'ich'. This does NOT include the
+    ! jacobian related to the importance sampling over the channels
+    ! ('vol_chan' from the 'get_channel()' subroutine), nor the
+    ! 'wgt_mult' due to splitting of the integration over separate
+    ! jobs.
+    implicit none
+    integer,intent(in) :: ich
+    double precision,intent(out) :: voli
+    double precision, dimension(ndim),intent(in) :: xi
+    integer, dimension(ndim) :: icl
+    call get_cells_from_x(ich,xi,icl,voli)
+  end subroutine mint_get_jacobian_from_x
+
+  subroutine get_cells_from_x(ich,x,icl,vol)
+    implicit none
+    integer,intent(in) :: ich
+    integer :: kdim
+    double precision,intent(out) :: vol
+    double precision :: dx
+    double precision, dimension(ndim),intent(in) :: x
+    integer, dimension(ndim),intent(out) :: icl
+    if (any(ifold(1:ndim).ne.1)) then
+       write (*,*) 'ERROR #32: only implemented without folding'
+       stop 1
+    endif
+    vol=1d0
+    do kdim=1,ndim
+       icl(kdim)=1
+       do while (xgrid(icl(kdim),kdim,ich).lt.x(kdim))
+          icl(kdim)=icl(kdim)+1
+       enddo
+       dx=xgrid(icl(kdim),kdim,ich)-xgrid(icl(kdim)-1,kdim,ich)
+       vol=vol*dx*nint_used
+    enddo
+  end subroutine get_cells_from_x
+
   subroutine get_random_x(x,vol,kfold)
     implicit none
     integer :: kdim,k_ord_virt,nintcurr
