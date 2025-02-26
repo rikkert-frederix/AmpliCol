@@ -528,6 +528,8 @@ contains
 !!$         frac  = 0.8d0
 !!$         steep = 0.1d0
 !!$       endif
+
+       if (dot(p(0,i),p(0,i)).gt.0d0) cycle
          
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then

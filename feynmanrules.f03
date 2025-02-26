@@ -789,17 +789,19 @@ contains
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
 
+    ! L
     TMP5=prefact*coupl(1)
     wfq_temp(1)=0d0
     wfq_temp(2)=0d0
-    wfq_temp(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
-    wfq_temp(4)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
+    wfq_temp(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2)) 
+    wfq_temp(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1)) 
 
+    ! R
     TMP5=prefact*coupl(2)
-    wfq(1)=TMP5*(TMP2*wfq2(3)-TMP4*wfq2(4)) !sr1 ! minus sign!
-    wfq(2)=TMP5*(TMP1*wfq2(4)-TMP3*wfq2(3)) !sr2
-    wfq(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
-    wfq(4)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
+    wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4)) 
+    wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3)) 
+    wfq(3)=0d0
+    wfq(4)=0d0
 
     wfq(1)=wfq(1)+wfq_temp(1)
     wfq(2)=wfq(2)+wfq_temp(2)
