@@ -576,7 +576,8 @@ contains
          this%same_flavour_proc_map(iproc,1:2)=0
          this%n_sing(iproc)=0
          do i=1,n
-            if (is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
+            if (is_singlet(this%processes(i,iproc)).or.&
+                    is_singlet_z(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
          enddo
          if (iproc.gt.1) then
             if (this%n_qqbar(iproc-1).gt.this%n_qqbar(iproc)) then
@@ -910,7 +911,7 @@ contains
          else
             coupl=(/-1d0/3d0,-1d0/2d0/)
          endif
-         call add_vertex(17,current_list_local(ic1)%type)
+         call add_vertex(17,current_list_local(ic1)%type,coupl)
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a z-antiquark to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
@@ -918,7 +919,7 @@ contains
          else
             coupl=(/-1d0/3d0,-1d0/2d0/)
          endif
-         call add_vertex(18,current_list_local(ic2)%type)
+         call add_vertex(18,current_list_local(ic2)%type,coupl)
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a antiquark-z to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
@@ -926,7 +927,7 @@ contains
          else
             coupl=(/-1d0/3d0,-1d0/2d0/)
          endif
-         call add_vertex(19,current_list_local(ic1)%type)
+         call add_vertex(19,current_list_local(ic1)%type,coupl)
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1880,13 +1881,8 @@ contains
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
              elseif (this%current_list(ic)%type.eq.23) then
-                if (use_real_gluons) then
-                   call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_r(1:4))
-                else
-                   call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4))
-                endif
+                   call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1

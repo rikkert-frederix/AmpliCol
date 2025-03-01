@@ -1,4 +1,5 @@
 module FeynmanRules
+        real(kind=8),parameter :: sw = 0.34416217507
 contains
   subroutine ext_gluon_real(p,ihel,ifinal,wf)
     implicit none
@@ -83,6 +84,68 @@ contains
   
   end subroutine ext_gluon_cmplx
 
+  subroutine ext_gluon_mass(p,nhel,nsv,wf,vmass)
+      implicit none
+      double complex wf(4)
+      double precision p(0:3),vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
+      integer nhel,nsv,nsvahl
+
+      double precision rZero, rHalf, rOne, rTwo
+      parameter( rZero = 0.0d0, rHalf = 0.5d0 )
+      parameter( rOne = 1.0d0, rTwo = 2.0d0 )
+
+      sqh = dsqrt(rHalf)
+      hel = dble(nhel)
+      nsvahl = nsv*dabs(hel)
+      pt2 = p(1)**2+p(2)**2
+      pp = min(p(0),dsqrt(pt2+p(3)**2))
+      pt = min(pp,dsqrt(pt2))
+
+      if ( vmass.ne.rZero ) then
+
+         hel0 = rOne-dabs(hel)
+
+         if ( pp.eq.rZero ) then
+
+            wf(1) = dcmplx( rZero )
+            wf(2) = dcmplx(-hel*sqh )
+            wf(3) = dcmplx( rZero , nsvahl*sqh )
+            wf(4) = dcmplx( hel0 )
+
+         else
+
+            emp = p(0)/(vmass*pp)
+            wf(1) = dcmplx( hel0*pp/vmass )
+            wf(4) = dcmplx( hel0*p(3)*emp+hel*pt/pp*sqh )
+            if ( pt.ne.rZero ) then
+               pzpt = p(3)/(pp*pt)*sqh*hel
+               wf(2) = dcmplx( hel0*p(1)*emp-p(1)*pzpt , -nsvahl*p(2)/pt*sqh       )
+               wf(3) = dcmplx( hel0*p(2)*emp-p(2)*pzpt ,  nsvahl*p(1)/pt*sqh       )
+            else
+               wf(2) = dcmplx( -hel*sqh )
+               wf(3) = dcmplx( rZero , nsvahl*sign(sqh,p(3)) )
+            endif
+
+         endif
+
+      else
+         pp = p(0)
+         pt = sqrt(p(1)**2+p(2)**2)
+         wf(1) = dcmplx( rZero )
+         wf(4) = dcmplx( hel*pt/pp*sqh )
+         if ( pt.ne.rZero ) then
+            pzpt = p(3)/(pp*pt)*sqh*hel
+            wf(2) = dcmplx( -p(1)*pzpt , -nsv*p(2)/pt*sqh )
+            wf(3) = dcmplx( -p(2)*pzpt ,  nsv*p(1)/pt*sqh )
+         else
+            wf(2) = dcmplx( -hel*sqh )
+            wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
+         endif
+
+      endif
+
+
+  end subroutine ext_gluon_mass
 
 
   subroutine ext_quark(p,ihel,ifinal,wf,fmass)
@@ -790,16 +853,16 @@ contains
     TMP4=wfg1(2)-cImag*wfg1(3)
 
     ! L
-    TMP5=prefact*coupl(1)
+    TMP5=prefact*(coupl(2)-sw**2*coupl(1))/sw/dsqrt(1d0-sw**2)
     wfq_temp(1)=0d0
     wfq_temp(2)=0d0
-    wfq_temp(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2)) 
-    wfq_temp(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1)) 
+    wfq_temp(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2)) 
+    wfq_temp(4)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1)) 
 
     ! R
-    TMP5=prefact*coupl(2)
-    wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4)) 
-    wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3)) 
+    TMP5=prefact*(-sw*coupl(1)/(dsqrt(1d0-sw**2)))
+    wfq(1)=TMP5*(TMP2*wfq2(3)-TMP4*wfq2(4)) 
+    wfq(2)=TMP5*(TMP1*wfq2(4)-TMP3*wfq2(3)) 
     wfq(3)=0d0
     wfq(4)=0d0
 
