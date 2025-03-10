@@ -44,7 +44,8 @@ contains
        write (*,*) p
        stop 1
     elseif (p(0).gt.0d0) then
-       hel = dble(2*ihel-1)
+       !hel=dble(2*ihel-1)
+       hel=ihel
        pp = p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
@@ -59,7 +60,8 @@ contains
        endif
     else
 !!$       hel = -dble(2*ihel-1)
-       hel = dble(2*ihel-1)
+       !hel = dble(2*ihel-1)
+       hel=ihel
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
@@ -169,7 +171,8 @@ contains
 
     if (p(0).gt.0d0) then
        ! outgoing final state momenta
-       nhel = 2*ihel-1
+       !nhel=2*ihel-1
+       nhel=ihel
        if (abs(fmass).lt.lim) then
          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
             sqp0p3 = 0d0
@@ -222,7 +225,8 @@ contains
 
     else
        ! "outgoing" initial state momenta
-       nhel = (2*ihel-1)
+       !nhel=(2*ihel-1)
+       nhel=ihel
        if (abs(fmass).lt.lim) then
          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
             sqp0p3 = 0d0
@@ -297,7 +301,8 @@ contains
 
     if(p(0).gt.0d0) then
 ! outgoing final state momenta
-       nhel = (2*ihel-1)
+       !nhel=(2*ihel-1)
+       nhel=ihel
        if (abs(fmass).lt.lim) then
          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
             sqp0p3 = 0d0
@@ -351,7 +356,8 @@ contains
 
     else
 ! "outgoing" initial state momenta
-       nhel = 2*ihel-1
+       !nhel=2*ihel-1
+       nhel=ihel
        if (abs(fmass).lt.lim) then
          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
             sqp0p3 = 0d0
@@ -852,15 +858,15 @@ contains
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
 
-    ! L
-    TMP5=prefact*(coupl(2)-sw**2*coupl(1))/sw/dsqrt(1d0-sw**2)
+    ! R
+    TMP5=prefact**((0d0-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
     wfq_temp(1)=0d0
     wfq_temp(2)=0d0
     wfq_temp(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2)) 
     wfq_temp(4)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1)) 
 
-    ! R
-    TMP5=prefact*(-sw*coupl(1)/(dsqrt(1d0-sw**2)))
+    ! L
+    TMP5=prefact*((coupl(2)-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
     wfq(1)=TMP5*(TMP2*wfq2(3)-TMP4*wfq2(4)) 
     wfq(2)=TMP5*(TMP1*wfq2(4)-TMP3*wfq2(3)) 
     wfq(3)=0d0

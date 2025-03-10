@@ -61,7 +61,7 @@ contains
     this%particle_list(9)%type=23
     this%particle_list(9)%mass=zmass
     this%particle_list(9)%width=zwidth
-    this%particle_list(9)%spin=3 ! two spin states
+    this%particle_list(9)%spin=3 ! three spin states
     this%particle_list(9)%anti_type=23
     
   end subroutine init_part

@@ -1854,9 +1854,12 @@ contains
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
              ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
-                ih_in=max(0,hel(this%current_list(ic)%order(1)))
+                !ih_in=max(0,hel(this%current_list(ic)%order(1)))
+                ih_in=hel(this%current_list(ic)%order(1))
              else
-                ih_in=max(0,this%current_list(ic)%spin(1))
+               
+               !ih_in=max(0,this%current_list(ic)%spin(1))
+               ih_in=this%current_list(ic)%spin(1)
              endif
              if (this%current_list(ic)%type.eq.21) then
                 if (use_real_gluons) then
@@ -2096,6 +2099,7 @@ contains
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
+
           elseif (this%current_list(ic)%type.eq.-21) then
              ! the non-propagating tensor current
              call combine_interactions(6)
