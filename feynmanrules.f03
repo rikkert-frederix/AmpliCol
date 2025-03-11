@@ -1,5 +1,5 @@
 module FeynmanRules
-        real(kind=8),parameter :: sw = 0.34416217507
+        real(kind=8),parameter :: sw = 0.47143025548407230 
 contains
   subroutine ext_gluon_real(p,ihel,ifinal,wf)
     implicit none
