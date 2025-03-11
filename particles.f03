@@ -160,12 +160,21 @@ contains
   logical function is_singlet(i)
     implicit none
     integer :: i
-    if (abs(i).eq.22) then
+    if (abs(i).ge.22) then
        is_singlet=.true.
     else
        is_singlet=.false.
     endif
   end function is_singlet
+  logical function is_singlet_a(i)
+    implicit none
+    integer :: i
+    if (abs(i).eq.22) then
+       is_singlet_a=.true.
+    else
+       is_singlet_a=.false.
+    endif
+  end function is_singlet_a
   logical function is_singlet_z(i)
     implicit none
     integer :: i

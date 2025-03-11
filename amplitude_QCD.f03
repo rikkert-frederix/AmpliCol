@@ -863,7 +863,7 @@ contains
            (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
          ! add a antiquark-quark to gluon vertex
          call add_vertex(9,21)
-      elseif (is_singlet(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
+      elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a photon-quark to quark vertex
          if (mod(current_list_local(ic2)%type,2).eq.0) then
             coupl=(/2d0/3d0,0d0/)
@@ -871,7 +871,7 @@ contains
             coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(10,current_list_local(ic2)%type,coupl)
-      elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
+      elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a quark-photon to quark vertex
          if (mod(current_list_local(ic1)%type,2).eq.0) then
             coupl=(/2d0/3d0,0d0/)
@@ -879,7 +879,7 @@ contains
             coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(12,current_list_local(ic1)%type,coupl)
-      elseif (is_singlet(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
+      elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a photon-antiquark to quark vertex
          if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
             coupl=(/2d0/3d0,0d0/)
@@ -887,7 +887,7 @@ contains
             coupl=(/-1d0/3d0,0d0/)
          endif
          call add_vertex(11,current_list_local(ic2)%type,coupl)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
+      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a antiquark-photon to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
             coupl=(/2d0/3d0,0d0/)
@@ -1854,13 +1854,11 @@ contains
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
              ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
-                !ih_in=max(0,hel(this%current_list(ic)%order(1)))
                 ih_in=hel(this%current_list(ic)%order(1))
              else
-               
-               !ih_in=max(0,this%current_list(ic)%spin(1))
                ih_in=this%current_list(ic)%spin(1)
              endif
+
              if (this%current_list(ic)%type.eq.21) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
@@ -2065,12 +2063,12 @@ contains
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.17) then
-             call GluonAquarktoAquark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call QuarkGluontoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.18) then
-             call QuarkGluontoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call GluonAquarktoAquark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)

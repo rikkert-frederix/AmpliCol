@@ -851,15 +851,13 @@ contains
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
 
-    !! only this one for single Z
-
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
 
     ! R
-    TMP5=prefact**((0d0-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
+    TMP5=prefact*((0d0-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
     wfq_temp(1)=0d0
     wfq_temp(2)=0d0
     wfq_temp(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2)) 
@@ -880,20 +878,34 @@ contains
 
   subroutine QuarkGluontoQuark_z(wfq1,wfg2,wfq,coupl) ! NEEDS TO BE CHANGED!
     implicit none
-    complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
+    complex(kind=8),dimension(4) :: wfq1,wfg2,wfq,wfq_temp
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
-    
+   
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
     TMP4=wfg2(2)-cImag*wfg2(3)
-    TMP5=prefact
+
+    ! R
+    TMP5=prefact*((0d0-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
+    wfq_temp(1)=0d0
+    wfq_temp(2)=0d0
+    wfq_temp(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
+    wfq_temp(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
+
+    ! L
+    TMP5=prefact*((coupl(2)-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
     wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4))
     wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3))
-    wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
-    wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
+    wfq(3)=0d0
+    wfq(4)=0d0
+
+    wfq(1)=wfq(1)+wfq_temp(1)
+    wfq(2)=wfq(2)+wfq_temp(2)
+    wfq(3)=wfq(3)+wfq_temp(3)
+    wfq(4)=wfq(4)+wfq_temp(4)
   end subroutine QuarkGluontoQuark_z
 
   subroutine AquarkGluontoAquark_z(wfq1,wfg2,wfq,coupl) ! NEEDS TO BE CHANGED!

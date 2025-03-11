@@ -43,7 +43,7 @@ program matrix_reweight
 
   call cpu_time(tTot_B)
   
-  call phys_model%init_part(173d0,1.491500d0)
+  call phys_model%init_part(173d0,1.491500d0,91.18800d0,2.0d0)
 
   nprocs=0
   call setup_spin()
