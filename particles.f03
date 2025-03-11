@@ -18,7 +18,7 @@ contains
     real(kind=8) :: tmass,twidth
     real(kind=8) :: zmass,zwidth
 
-    this%npart=9 ! gluon, 6 quarks, tensor, and the photon
+    this%npart=10 ! gluon, 6 quarks, tensor, and the photon
     allocate(this%particle_list(this%npart))
     ! 5 massless quarks
     do i=1,5
@@ -58,11 +58,11 @@ contains
     this%particle_list(9)%anti_type=22
 
     ! z-boson
-    this%particle_list(9)%type=23
-    this%particle_list(9)%mass=zmass
-    this%particle_list(9)%width=zwidth
-    this%particle_list(9)%spin=3 ! three spin states
-    this%particle_list(9)%anti_type=23
+    this%particle_list(10)%type=23
+    this%particle_list(10)%mass=zmass
+    this%particle_list(10)%width=zwidth
+    this%particle_list(10)%spin=3 ! three spin states
+    this%particle_list(10)%anti_type=23
     
   end subroutine init_part
   integer function get_antipart(this,ipdg)
@@ -91,7 +91,7 @@ contains
           return
        endif
     enddo
-    write (*,*) 'Particle not in model (mass)',ipdg
+    write (*,*) 'dParticle not in model (mass)',ipdg
     stop 1
   end function get_mass
   real(kind=8) function get_width(this,ipdg)
