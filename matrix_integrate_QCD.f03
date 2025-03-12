@@ -431,11 +431,11 @@ contains
     call cpu_time(tBefore)
 
     !!!! for z
-    pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-    pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-    pgl(ichan)%phase_space%p(:,3)=(/0.4482517E+03,  0.1656372E+03,  0.3711039E+03, -0.1891448E+03/)
-    pgl(ichan)%phase_space%p(:,4)=(/0.3558679E+03, -0.1791708E+02, -0.3398741E+03,  0.1039546E+03/)
-    pgl(ichan)%phase_space%p(:,5)=(/0.1958804E+03, -0.1477201E+03, -0.3122987E+02,  0.8519020E+02/)
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.4482517E+03,  0.1656372E+03,  0.3711039E+03, -0.1891448E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3558679E+03, -0.1791708E+02, -0.3398741E+03,  0.1039546E+03/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.1958804E+03, -0.1477201E+03, -0.3122987E+02,  0.8519020E+02/)
 
     !!!! for a
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
@@ -474,9 +474,6 @@ contains
        enddo
     endif
 
-    write(*,*) (next-2-pgl(ichan)%amps%n_sing(1))
-    write(*,*) pgl(ichan)%amps%n_sing(1)
-    write(*,*) dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
     write(*,*) pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
                *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
