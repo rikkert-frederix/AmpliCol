@@ -430,6 +430,20 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
+    !!!! for z
+    pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    pgl(ichan)%phase_space%p(:,3)=(/0.4482517E+03,  0.1656372E+03,  0.3711039E+03, -0.1891448E+03/)
+    pgl(ichan)%phase_space%p(:,4)=(/0.3558679E+03, -0.1791708E+02, -0.3398741E+03,  0.1039546E+03/)
+    pgl(ichan)%phase_space%p(:,5)=(/0.1958804E+03, -0.1477201E+03, -0.3122987E+02,  0.8519020E+02/)
+
+    !!!! for a
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.4585788E+03,  0.1694532E+03,  0.3796537E+03, -0.1935025E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3640666E+03, -0.1832987E+02, -0.3477043E+03,  0.1063496E+03/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.1773546E+03, -0.1511234E+03, -0.3194936E+02,  0.8715287E+02/)
+
     call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -459,7 +473,13 @@ contains
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
-    
+
+    write(*,*) (next-2-pgl(ichan)%amps%n_sing(1))
+    write(*,*) pgl(ichan)%amps%n_sing(1)
+    write(*,*) dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+    write(*,*) pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
+               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
        if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
@@ -521,15 +541,10 @@ contains
     endif
 
     do i=3,n
-!!$       if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
-         frac  = 0.9d0
-         steep = 0.1d0
-!!$       elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-!!$         frac  = 0.8d0
-!!$         steep = 0.1d0
-!!$       endif
+       frac  = 0.9d0
+       steep = 0.1d0
 
-       if (dot(p(0,i),p(0,i)).gt.0d0) cycle
+       if (dot(p(0,i),p(0,i)).gt.10d0) cycle
          
        if (pt_min.gt.0d0) then
           if (pt(p(0,i)).lt.frac*pt_min) then
@@ -539,11 +554,7 @@ contains
           if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
              y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
              if (integration_step.le.0) then
-               !if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
-                  pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
-               !elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-               !   pass_cuts=pass_cuts*((steep)*y/((steep+1d0-y)**2)) ! 1/x2 damping function
-               !endif
+               pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
              else
                pass_cuts=-1d0
              endif
@@ -560,6 +571,7 @@ contains
        if (drjj_min.gt.0d0) then
           if (i.ne.n) then
              do j=i+1,n
+                if (dot(p(0,j),p(0,j)).gt.10d0) cycle
                 if (DeltaR(p(0,i),p(0,j)).lt.drjj_min) then
                    pass_cuts=-1d0
                    return
