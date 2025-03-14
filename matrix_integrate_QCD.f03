@@ -93,7 +93,7 @@ program matrix_integrate_QCD
 
   if (include_pdf) call PDF_initialise
 
-  call phys_model%init_part(173d0,1.491500d0,zmass,zwidth)
+  call phys_model%init_part(173d0,1.491500d0,zmass,zwidth,wmass,wwidth)
 
   call get_run_arguments()
 
@@ -474,8 +474,8 @@ contains
        enddo
     endif
 
-    write(*,*) pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
-               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+   ! write(*,*) pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
+   !            *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))

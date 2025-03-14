@@ -101,7 +101,7 @@ contains
    
     this%n_cur=0
     this%n_vert=0
-    
+   
     do isize=1,n-1
        this%n_cur_start(isize)=this%n_cur+1
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
@@ -135,6 +135,7 @@ contains
        this%n_cur_end(isize)=this%n_cur
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
+
 
     call simple_consistency_checks()
 
@@ -828,6 +829,7 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       real(kind=8),dimension(2) :: coupl
+      integer :: cc_out
       if (.not.valid_current_combination())  then
          return
       endif
@@ -915,19 +917,70 @@ contains
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a z-antiquark to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/2d0/3d0,1d0/2d0/)
+            coupl=(/-2d0/3d0,1d0/2d0/)
          else
-            coupl=(/-1d0/3d0,-1d0/2d0/)
+            coupl=(/1d0/3d0,-1d0/2d0/)
          endif
          call add_vertex(18,current_list_local(ic2)%type,coupl)
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a antiquark-z to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/2d0/3d0,1d0/2d0/)
+            coupl=(/-2d0/3d0,1d0/2d0/)
          else
-            coupl=(/-1d0/3d0,-1d0/2d0/)
+            coupl=(/1d0/3d0,-1d0/2d0/)
          endif
          call add_vertex(19,current_list_local(ic1)%type,coupl)
+
+
+
+
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
+         ! add a w-quark to quark vertex
+         if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
+            coupl=(/2d0/3d0,1d0/2d0/)
+            cc_out=current_list_local(ic2)%type-1
+         else
+            coupl=(/-1d0/3d0,-1d0/2d0/)
+            cc_out=current_list_local(ic2)%type+1
+         endif
+         if (abs(coupl(1)+sign(1,current_list_local(ic1)%type)) .gt. 1) return
+         call add_vertex(20,cc_out,coupl)
+
+      elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add a quark-w to quark vertex
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=(/2d0/3d0,1d0/2d0/)
+            cc_out=current_list_local(ic1)%type-1
+         else
+            coupl=(/-1d0/3d0,-1d0/2d0/)
+            cc_out=current_list_local(ic1)%type+1
+         endif
+         if (abs(coupl(1)+sign(1,current_list_local(ic2)%type)) .gt. 1) return
+         call add_vertex(21,cc_out,coupl)
+
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
+         ! add a w-antiquark to quark vertex
+         if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
+            coupl=(/-2d0/3d0,1d0/2d0/)
+            cc_out=current_list_local(ic2)%type+1
+         else
+            coupl=(/1d0/3d0,-1d0/2d0/)
+            cc_out=current_list_local(ic2)%type-1
+         endif
+         if (abs(coupl(1)+sign(1,current_list_local(ic1)%type)) .gt. 1) return
+         call add_vertex(22,cc_out,coupl)
+
+      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add a antiquark-w to quark vertex
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=(/-2d0/3d0,1d0/2d0/)
+            cc_out=current_list_local(ic1)%type+1
+         else
+            coupl=(/1d0/3d0,-1d0/2d0/)
+            cc_out=current_list_local(ic1)%type-1
+         endif
+         if (abs(coupl(1)+sign(1,current_list_local(ic2)%type)) .gt. 1) return
+         call add_vertex(23,cc_out,coupl)
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1079,12 +1132,19 @@ contains
       implicit none
       integer :: itype,ctype,ic
       real(kind=8),dimension(2),optional :: coupl
+      
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
-            if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
+            if (ctype.eq.anti_current(current_list_local(ic)%type)) then
+                    exit
+            endif
          enddo
-         if (ic.eq.this%n_cur_end(n)+1) return ! dead tree. Filter already here
+          
+         if ((ic.eq.this%n_cur_end(n)+1) .and. (itype .lt.20)) then 
+         return ! dead tree. Filter already here
+         endif
       endif
+
       this%n_vert=this%n_vert+1
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%currents(1)=ic1
@@ -1884,6 +1944,9 @@ contains
              elseif (this%current_list(ic)%type.eq.23) then
                    call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+             elseif (abs(this%current_list(ic)%type).eq.24) then
+                   call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
@@ -2077,6 +2140,28 @@ contains
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.20) then
+             call GluonQuarktoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.21) then
+             call QuarkGluontoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.22) then
+             call GluonAquarktoAquark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.23) then
+             call AquarkGluontoAquark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -2235,6 +2320,7 @@ contains
             enddo
          endif
       endif
+
     end subroutine compute_amps_from_currents
 
     subroutine combine_interactions(dim)

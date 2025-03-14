@@ -2,9 +2,9 @@ module common
   use amplitude_QCD_mod
   implicit none
   ! coupling constants
-  real(kind=8),parameter :: alphaS=0.118d0,alphaEW=0.00754677114d0
+  real(kind=8),parameter :: alphaS=0.119d0,alphaEW=0.00754677114d0
   real(kind=8),parameter :: zmass=9.118800e+01, wmass=8.038700e+01
-  real(kind=8),parameter :: zwidth=2.4414039999999999 ,wwidth=2.0e+00
+  real(kind=8),parameter :: zwidth=2.4414039999999999 ,wwidth=2.4414039999999999
 
   ! timing
   real(kind=4) :: tBefore,tAfter,tTot_A,tTot_B

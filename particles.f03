@@ -11,14 +11,15 @@ module particles
      procedure,public :: init_part,get_mass,get_width,get_spin,get_antipart
   end type physics_model
 contains
-  subroutine init_part(this,tmass,twidth,zmass,zwidth)
+  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth)
     implicit none
     class(physics_model) :: this
     integer :: i
     real(kind=8) :: tmass,twidth
     real(kind=8) :: zmass,zwidth
+    real(kind=8) :: wmass,wwidth
 
-    this%npart=10 ! gluon, 6 quarks, tensor, and the photon
+    this%npart=12 ! gluon, 6 quarks, tensor, photon, z-boson, w-boson
     allocate(this%particle_list(this%npart))
     ! 5 massless quarks
     do i=1,5
@@ -63,6 +64,19 @@ contains
     this%particle_list(10)%width=zwidth
     this%particle_list(10)%spin=3 ! three spin states
     this%particle_list(10)%anti_type=23
+
+    ! w-boson
+    this%particle_list(11)%type=24
+    this%particle_list(11)%mass=wmass
+    this%particle_list(11)%width=wwidth
+    this%particle_list(11)%spin=3 ! three spin states
+    this%particle_list(11)%anti_type=-24
+
+    this%particle_list(12)%type=-24
+    this%particle_list(12)%mass=wmass
+    this%particle_list(12)%width=wwidth
+    this%particle_list(12)%spin=3 ! three spin states
+    this%particle_list(12)%anti_type=24
     
   end subroutine init_part
   integer function get_antipart(this,ipdg)
@@ -91,7 +105,7 @@ contains
           return
        endif
     enddo
-    write (*,*) 'dParticle not in model (mass)',ipdg
+    write (*,*) 'Particle not in model (mass)',ipdg
     stop 1
   end function get_mass
   real(kind=8) function get_width(this,ipdg)
@@ -178,10 +192,19 @@ contains
   logical function is_singlet_z(i)
     implicit none
     integer :: i
-    if (abs(i).ge.23) then
+    if (abs(i).eq.23) then
        is_singlet_z=.true.
     else
        is_singlet_z=.false.
     endif
   end function is_singlet_z
+  logical function is_singlet_w(i)
+    implicit none
+    integer :: i
+    if (abs(i).eq.24) then
+       is_singlet_w=.true.
+    else
+       is_singlet_w=.false.
+    endif
+  end function is_singlet_w
 end module particles
