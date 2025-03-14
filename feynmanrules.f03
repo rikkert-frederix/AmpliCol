@@ -938,7 +938,7 @@ contains
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
     ! L    
-    TMP5=prefact*(-1d0/sw)
+    TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
     wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4))
     wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3))
     wfq(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2))
@@ -956,7 +956,7 @@ contains
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
     ! L
-    TMP5=prefact*(-1d0/sw)
+    TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
     wfq(1)=TMP5*(TMP2*wfq2(3)-TMP4*wfq2(4))
     wfq(2)=TMP5*(TMP1*wfq2(4)-TMP3*wfq2(3))
     wfq(3)=0d0
@@ -974,7 +974,7 @@ contains
     TMP3=wfg2(2)+cImag*wfg2(3)
     TMP4=wfg2(2)-cImag*wfg2(3)
     ! L
-    TMP5=prefact*(-1d0/sw)
+    TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
     wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4))
     wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3))
     wfq(3)=0d0
@@ -991,7 +991,7 @@ contains
     TMP3=wfg2(2)+cImag*wfg2(3)
     TMP4=wfg2(2)-cImag*wfg2(3)
     ! L
-    TMP5=prefact*(-1d0/sw)
+    TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
     wfq(1)=TMP5*(TMP2*wfq1(3)-TMP4*wfq1(4))
     wfq(2)=TMP5*(TMP1*wfq1(4)-TMP3*wfq1(3))
     wfq(3)=0d0

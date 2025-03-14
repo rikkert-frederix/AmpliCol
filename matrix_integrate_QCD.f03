@@ -444,6 +444,12 @@ contains
     !pgl(ichan)%phase_space%p(:,4)=(/0.3640666E+03, -0.1832987E+02, -0.3477043E+03,  0.1063496E+03/)
     !pgl(ichan)%phase_space%p(:,5)=(/0.1773546E+03, -0.1511234E+03, -0.3194936E+02,  0.8715287E+02/)
 
+    !!! for w 
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.4967664E+03,  0.1102069E+03,  0.4419540E+03, -0.1982624E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.5032336E+03, -0.1102069E+03, -0.4419540E+03,  0.1982624E+03/)
+
     call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -474,8 +480,8 @@ contains
        enddo
     endif
 
-   ! write(*,*) pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
-   !            *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+    !write(*,*) pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
+    !           *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
@@ -1367,7 +1373,7 @@ contains
        endif
        if (abs(pgl%processes(pgl%orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%orders(next,iproc),iproc)) &
             .and. .not.pgl%amps%same_flav(iproc)) then
-          ifac=ifac-2
+          if (.not.(any(pgl%processes.eq.24).or.any(pgl%processes.eq.-24)) ) ifac=ifac-2
        endif
        pgl%col_fac(iproc)=3**ifac
     enddo
