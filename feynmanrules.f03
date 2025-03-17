@@ -1,5 +1,5 @@
 module FeynmanRules
-        real(kind=8),parameter :: sw = 0.47143025548407230 
+    real(kind=8),parameter :: sw = 0.47143025548407230d0 
 contains
   subroutine ext_gluon_real(p,ihel,ifinal,wf)
     implicit none
@@ -531,6 +531,30 @@ contains
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
   end subroutine GluonTensortoGluon_Real
+  subroutine ThreeGluon_aww(wf1,pwf1,wf2,pwf2,wf)
+    ! Colour-ordered three-gluon interaction
+    implicit none
+    complex(kind=8),dimension(4) :: wf1,wf2,wf
+    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3
+    TMP1 = 100d0*(wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
+    TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
+    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
+  end subroutine ThreeGluon_aww
+  subroutine ThreeGluon_zww(wf1,pwf1,wf2,pwf2,wf)
+    ! Colour-ordered three-gluon interaction
+    implicit none
+    complex(kind=8),dimension(4) :: wf1,wf2,wf
+    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3
+    TMP1 = 100d0*(wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
+    TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
+    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
+  end subroutine ThreeGluon_zww
 
 
 

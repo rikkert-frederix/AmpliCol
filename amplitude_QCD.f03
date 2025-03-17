@@ -981,6 +981,13 @@ contains
          endif
          if (abs(coupl(1)+sign(1,current_list_local(ic2)%type)) .gt. 1) return
          call add_vertex(23,cc_out,coupl)
+
+       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add a w-w to a vertex
+         if (abs(sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type)) .gt. 0) return
+         call add_vertex(24,21)
+         ! add a w-w to z vertex
+         call add_vertex(25,23)
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1649,7 +1656,7 @@ contains
       implicit none
       type(current),intent(in) :: curr
       integer,intent(in) :: len
-      if (any(curr%ext_type(1:len).lt.22)) then
+      if (any(abs(curr%ext_type(1:len)).lt.22)) then
          all_singlet_current=.false.
       else
          all_singlet_current=.true.
@@ -2161,6 +2168,18 @@ contains
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.24) then
+             call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4))
+          elseif(this%interaction_list(iv)%type.eq.25) then
+             call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4))
 
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
@@ -2176,6 +2195,20 @@ contains
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
+          elseif (this%current_list(ic)%type.eq.22) then
+             call combine_interactions(4)
+             ! a photon current
+             if (isize.ne.n-1)  then
+                call include_gluon_propagator()
+             endif
+          elseif (abs(this%current_list(ic)%type).ge.23) then
+             call combine_interactions(4)
+             ! a massive vector boson current
+             if (isize.ne.n-1)  then
+                call include_gluon_propagator()
+             endif
+             
+
           elseif ((this%current_list(ic)%type.ge.1.and.this%current_list(ic)%type.le.6)) then
              ! a quark current
              call combine_interactions(4)
