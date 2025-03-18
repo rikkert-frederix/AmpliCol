@@ -531,29 +531,54 @@ contains
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
   end subroutine GluonTensortoGluon_Real
-  subroutine ThreeGluon_aww(wf1,pwf1,wf2,pwf2,wf)
+  subroutine ThreeGluon_aww(wf1,pwf1,wf2,pwf2,wf,wm)
     ! Colour-ordered three-gluon interaction
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf
     real(kind=8),dimension(0:3) :: pwf1,pwf2
     complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3
-    TMP1 = 100d0*(wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5,TMP6,TMP7
+    real(kind=8) :: wm, M2
+    TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
-    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
+
+    TMP4 = pwf1(0)**3-pwf1(1)**3-pwf1(2)**3-pwf1(3)**3
+    TMP5 = pwf2(0)**3-pwf2(1)**3-pwf2(2)**3-pwf2(3)**3
+    TMP6 = (wf1(1)*pwf1(0)-wf1(2)*pwf1(1)-wf1(3)*pwf1(2)-wf1(4)*pwf1(3))
+    TMP6 = (wf2(1)*pwf2(0)-wf2(2)*pwf2(1)-wf2(3)*pwf2(2)-wf2(4)*pwf2(3))
+
+    M2 = 0d0
+    if (wm.ne.0d0) M2=1d0/wm**2
+    TMP7 = TMP1*(-TMP4+TMP5) + TMP5*TMP3 - TMP6*TMP2
+    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
+                      -M2*TMP7)
   end subroutine ThreeGluon_aww
-  subroutine ThreeGluon_zww(wf1,pwf1,wf2,pwf2,wf)
+  subroutine ThreeGluon_zww(wf1,pwf1,wf2,pwf2,wf,wm)
     ! Colour-ordered three-gluon interaction
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf
     real(kind=8),dimension(0:3) :: pwf1,pwf2
     complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3
-    TMP1 = 100d0*(wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5,TMP6,TMP7
+    real(kind=8) :: wm, M2
+
+    TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
-    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))
+
+    TMP4 = pwf1(0)**2-pwf1(1)**2-pwf1(2)**2-pwf1(3)**2
+    TMP5 = pwf2(0)**2-pwf2(1)**2-pwf2(2)**2-pwf2(3)**2
+    TMP6 = (wf1(1)*pwf1(0)-wf1(2)*pwf1(1)-wf1(3)*pwf1(2)-wf1(4)*pwf1(3))
+    TMP6 = (wf2(1)*pwf2(0)-wf2(2)*pwf2(1)-wf2(3)*pwf2(2)-wf2(4)*pwf2(3))
+
+    TMP7 = TMP1*(-TMP4+TMP5) + TMP5*TMP3 - TMP6*TMP2
+
+    M2 = 0d0
+    if (wm.ne.0d0) M2=1d0/wm**2
+    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
+                       (TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
+                      -M2*TMP7)
   end subroutine ThreeGluon_zww
 
 
@@ -850,17 +875,17 @@ contains
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
     ! R
-    TMP5=prefact*coupl(1)
+    TMP5=prefact*((0d0-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
     wfq_temp(1)=0d0
     wfq_temp(2)=0d0
     wfq_temp(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2)) 
     wfq_temp(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1)) 
     ! L
-    TMP5=prefact*coupl(2)
+    TMP5=prefact*((coupl(2)-sw**2*coupl(1))/(sw*dsqrt(1d0-sw**2)))
     wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4)) 
     wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3)) 
-    wfq(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2)) 
-    wfq(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1)) 
+    wfq(3)=0d0
+    wfq(4)=0d0
     wfq(1)=wfq(1)+wfq_temp(1)
     wfq(2)=wfq(2)+wfq_temp(2)
     wfq(3)=wfq(3)+wfq_temp(3)
@@ -963,8 +988,8 @@ contains
     TMP4=wfg1(2)-cImag*wfg1(3)
     ! L    
     TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
-    wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4))
-    wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3))
+    wfq(1)=0d0
+    wfq(2)=0d0
     wfq(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2))
     wfq(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1))
   end subroutine GluonQuarktoQuark_w
@@ -981,10 +1006,10 @@ contains
     TMP4=wfg1(2)-cImag*wfg1(3)
     ! L
     TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
-    wfq(1)=TMP5*(TMP2*wfq2(3)-TMP4*wfq2(4))
-    wfq(2)=TMP5*(TMP1*wfq2(4)-TMP3*wfq2(3))
-    wfq(3)=0d0
-    wfq(4)=0d0
+    wfq(1)=0d0
+    wfq(2)=0d0
+    wfq(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2))
+    wfq(4)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1))
   end subroutine GluonAquarktoAquark_w
 
   subroutine QuarkGluontoQuark_w(wfq1,wfg2,wfq,coupl)
@@ -999,11 +1024,12 @@ contains
     TMP4=wfg2(2)-cImag*wfg2(3)
     ! L
     TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
-    wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4))
-    wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3))
-    wfq(3)=0d0
-    wfq(4)=0d0
+    wfq(1)=0d0
+    wfq(2)=0d0
+    wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
+    wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
   end subroutine QuarkGluontoQuark_w
+
   subroutine AquarkGluontoAquark_w(wfq1,wfg2,wfq,coupl) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
@@ -1016,10 +1042,10 @@ contains
     TMP4=wfg2(2)-cImag*wfg2(3)
     ! L
     TMP5=prefact*(-1d0/sw)*(1d0/dsqrt(2d0))
-    wfq(1)=TMP5*(TMP2*wfq1(3)-TMP4*wfq1(4))
-    wfq(2)=TMP5*(TMP1*wfq1(4)-TMP3*wfq1(3))
-    wfq(3)=0d0
-    wfq(4)=0d0
+    wfq(1)=0d0
+    wfq(2)=0d0
+    wfq(3)=TMP5*(TMP1*wfq1(1)+TMP4*wfq1(2))
+    wfq(4)=TMP5*(TMP2*wfq1(2)+TMP3*wfq1(1))
   end subroutine AquarkGluontoAquark_w
 
 
@@ -1043,6 +1069,17 @@ contains
     propagator=1d0/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     wfg(1:4)=wfg(1:4)*propagator
   end subroutine GluonPropagator_Real
+
+  subroutine GluonPropagator_mass(wfg,p,vm,vw)
+    implicit none
+    complex(kind=8),dimension(1:4),intent(inout) :: wfg
+    real(kind=8),dimension(0:3),intent(in) :: p
+    complex(kind=8) :: propagator
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    real(kind=8) :: vm,vw
+    propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-vm**2+cImag*vm*vw)
+    wfg(1:4)=wfg(1:4)*propagator
+  end subroutine GluonPropagator_mass
 
   subroutine QuarkPropagator(wfq,p,fm,fw)
     implicit none

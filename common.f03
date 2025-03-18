@@ -3,8 +3,8 @@ module common
   implicit none
   ! coupling constants
   real(kind=8),parameter :: alphaS=0.118d0,alphaEW=0.00754677114d0
-  real(kind=8),parameter :: zmass=9.118800e+01, wmass=80.419002445756163
-  real(kind=8),parameter :: zwidth=2.4414039999999999 ,wwidth=2.4414039999999999
+  real(kind=8),parameter :: zmass=91.18800d0, wmass=80.4190024d0
+  real(kind=8),parameter :: zwidth=2.4414039999d0 ,wwidth=2.04760000000d0
 
   ! timing
   real(kind=4) :: tBefore,tAfter,tTot_A,tTot_B

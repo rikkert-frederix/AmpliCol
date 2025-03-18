@@ -20,6 +20,7 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8),dimension(2) :: coupl
+     real(kind=8) :: mass,width
   end type interaction
   type amplitude_QCD
      integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
@@ -982,12 +983,13 @@ contains
          if (abs(coupl(1)+sign(1,current_list_local(ic2)%type)) .gt. 1) return
          call add_vertex(23,cc_out,coupl)
 
-       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a w-w to a vertex
+         coupl=(/0d0,0d0/)
          if (abs(sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type)) .gt. 0) return
-         call add_vertex(24,21)
+         call add_vertex(24,22,coupl,pm%get_mass(22))
          ! add a w-w to z vertex
-         call add_vertex(25,23)
+         call add_vertex(25,23,coupl,pm%get_mass(23))
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1135,10 +1137,11 @@ contains
       valid_current_combination=.true.
     end function valid_current_combination
     
-    subroutine add_vertex(itype,ctype,coupl)
+    subroutine add_vertex(itype,ctype,coupl,mass)
       implicit none
       integer :: itype,ctype,ic
       real(kind=8),dimension(2),optional :: coupl
+      real(kind=8),optional :: mass
       
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
@@ -1160,6 +1163,11 @@ contains
          interaction_list_local(this%n_vert)%coupl=coupl
       else
          interaction_list_local(this%n_vert)%coupl=(/1d0,1d0/)
+      endif
+      if (present(mass)) then
+         interaction_list_local(this%n_vert)%mass=mass
+      else
+         interaction_list_local(this%n_vert)%mass=0d0
       endif
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype)
@@ -1937,9 +1945,12 @@ contains
              elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
                 call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                write(*,*) 'external quark',ic
              elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+               write(*,*) 'external antiquark',ic
+             stop 6
              elseif (this%current_list(ic)%type.eq.22) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
@@ -2154,6 +2165,8 @@ contains
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.21) then
+             write(*,*) 'combining',this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4)
+             !write(*,*) 'and',this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4)
              call QuarkGluontoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
@@ -2173,13 +2186,13 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4))
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
           elseif(this%interaction_list(iv)%type.eq.25) then
              call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4))
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
 
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
@@ -2187,6 +2200,7 @@ contains
           endif
        enddo
 
+       write(*,*) '****************************'
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
           if (this%current_list(ic)%type.eq.21) then
@@ -2208,13 +2222,13 @@ contains
                 call include_gluon_propagator()
              endif
              
-
           elseif ((this%current_list(ic)%type.ge.1.and.this%current_list(ic)%type.le.6)) then
              ! a quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
+             
 
           elseif (this%current_list(ic)%type.eq.-21) then
              ! the non-propagating tensor current
@@ -2332,6 +2346,7 @@ contains
                                           this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                   else
                      if (.not.this%same_flav(iproc)) then
+                        write(*,*) 'IAMP',iamp
                         this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
                                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
@@ -2386,6 +2401,11 @@ contains
     end subroutine combine_interactions
     subroutine include_gluon_propagator()
       implicit none
+      if (this%current_list(ic)%mass .gt. 0d0) then
+              call GluonPropagator_mass(this%current_list(ic)%val_c, &
+              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+              this%current_list(ic)%mass,this%current_list(ic)%width)
+      else
       if (use_real_gluons) then
          call GluonPropagator_real(this%current_list(ic)%val_r, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
@@ -2393,7 +2413,10 @@ contains
          call GluonPropagator(this%current_list(ic)%val_c, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
       endif
+      endif
     end subroutine include_gluon_propagator
+
+
 
     subroutine include_quark_propagator()
       implicit none
@@ -2401,6 +2424,8 @@ contains
            this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), & 
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
+      write(*,*) 'isize',isize
+      write(*,*) this%current_list(ic)%val_c
     end subroutine include_quark_propagator
 
     subroutine include_aquark_propagator()
