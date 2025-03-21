@@ -154,6 +154,7 @@ contains
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
 
     call deallocate_unneeded()
+    !stop 22
   contains
 
     subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
@@ -219,6 +220,7 @@ contains
       this%n_amps=0
       do iproc=1,this%nprocs
          this%iproc_start(iproc)=this%n_amps+1
+
          if (this%same_flav(iproc)) cycle
          do icur=this%n_cur_start(n-1),this%n_cur_end(n-1)
             do jcur=this%n_cur_start(n),this%n_cur_end(n)
@@ -846,6 +848,7 @@ contains
       elseif (is_gluon(current_list_local(ic1)%type) .and. is_tensor(current_list_local(ic2)%type)) then
          ! add a gluon-tensor to gluon vertex
          call add_vertex(3,21)
+
       elseif (is_gluon(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a gluon-quark to quark vertex
          call add_vertex(4,current_list_local(ic2)%type)
@@ -1470,6 +1473,7 @@ contains
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
+
       elseif (this%imode.eq.2) then
          if (is_gluon(new_current%type)) then
             ! gluon current
@@ -1945,12 +1949,9 @@ contains
              elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
                 call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-                write(*,*) 'external quark',ic
              elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-               write(*,*) 'external antiquark',ic
-             stop 6
              elseif (this%current_list(ic)%type.eq.22) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
@@ -1965,6 +1966,9 @@ contains
              elseif (abs(this%current_list(ic)%type).eq.24) then
                    call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                   !write(*,*) 'type',this%current_list(ic)%type
+                   !write(*,*) this%current_list(ic)%val_c(1:4)
+                   !write(*,*) 'ih: ',ih_in
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
@@ -1984,6 +1988,7 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_r(1:4))
              else
+                     !write(*,*) 'call 1'
                 call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
@@ -1997,6 +2002,7 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                      this%interaction_list(iv)%val_r(1:6))
              else
+                     !write(*,*) 'call 2'
                 call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:6))
@@ -2008,6 +2014,7 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                      this%interaction_list(iv)%val_r(1:4))
              else
+                     !write(*,*) 'call 3'
                 call TensorGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:4))
@@ -2019,6 +2026,7 @@ contains
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:6),&
                                              this%interaction_list(iv)%val_r(1:4))
              else
+                     !write(*,*) 'call 4'
                 call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                                         this%interaction_list(iv)%val_c(1:4))
@@ -2030,6 +2038,7 @@ contains
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                             this%interaction_list(iv)%val_c(1:4))
              else
+                     !write(*,*) 'call 5'
                 call GluonQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                        this%interaction_list(iv)%val_c(1:4))
@@ -2041,6 +2050,7 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                               this%interaction_list(iv)%val_c(1:4))
              else
+                     !write(*,*) 'call 6'
                 call GluonAquarktoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                          this%interaction_list(iv)%val_c(1:4))
@@ -2051,6 +2061,7 @@ contains
                                             this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                                             this%interaction_list(iv)%val_c(1:4))
              else
+                     !write(*,*) 'call 7'
                 call QuarkGluontoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                        this%interaction_list(iv)%val_c(1:4))
@@ -2061,17 +2072,20 @@ contains
                                               this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                                               this%interaction_list(iv)%val_c(1:4))
              else
+                     !write(*,*) 'call 8'
                 call AquarkGluontoAquark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                          this%interaction_list(iv)%val_c(1:4))
              endif
                  
           elseif(this%interaction_list(iv)%type.eq.8) then
+                  !write(*,*) 'call 9'
              call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                      this%interaction_list(iv)%val_c(1:4))
 
           elseif(this%interaction_list(iv)%type.eq.9) then
+                  !write(*,*) 'call 10'
              call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                      this%interaction_list(iv)%val_c(1:4))
@@ -2083,6 +2097,7 @@ contains
                                                   this%interaction_list(iv)%val_c(1:4),&
                                                   this%interaction_list(iv)%coupl)
              else
+                     !write(*,*) 'call 11'
                 call GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                              this%interaction_list(iv)%val_c(1:4),&
@@ -2096,6 +2111,7 @@ contains
                                                     this%interaction_list(iv)%val_c(1:4),&
                                                     this%interaction_list(iv)%coupl)
              else
+                     !write(*,*) 'call 12'
                 call GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                                this%interaction_list(iv)%val_c(1:4),&
@@ -2108,6 +2124,7 @@ contains
                                                   this%interaction_list(iv)%val_c(1:4),&
                                                   this%interaction_list(iv)%coupl)
              else
+                     !write(*,*) 'call 13'
                 call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                              this%interaction_list(iv)%val_c(1:4),&
@@ -2120,6 +2137,7 @@ contains
                                                     this%interaction_list(iv)%val_c(1:4),&
                                                     this%interaction_list(iv)%coupl)
              else
+                     !write(*,*) 'call 14'
                 call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                                this%interaction_list(iv)%val_c(1:4),&
@@ -2127,82 +2145,104 @@ contains
              endif
                  
           elseif(this%interaction_list(iv)%type.eq.14) then
+                  !write(*,*) 'call 15'
              call QuarkAquarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.eq.15) then
+                  !write(*,*) 'call 16'
              call AquarkQuarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.eq.16) then
+                  !write(*,*) 'call 17'
              call GluonQuarktoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.17) then
+                  !write(*,*) 'call 18'
              call QuarkGluontoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.18) then
+                  !write(*,*) 'call 19'
              call GluonAquarktoAquark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.19) then
+                  !write(*,*) 'call 20'
              call AquarkGluontoAquark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.eq.20) then
+                  !write(*,*) 'call 21'
              call GluonQuarktoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.21) then
-             write(*,*) 'combining',this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4)
+                  !write(*,*) 'call 22'
+             !write(*,*) 'combining',this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4)
              !write(*,*) 'and',this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4)
              call QuarkGluontoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.22) then
+                  !write(*,*) 'call 23'
              call GluonAquarktoAquark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.23) then
+                  !write(*,*) 'call 24'
              call AquarkGluontoAquark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.24) then
+                  !write(*,*) 'call 25'
              call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+             !call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+             !        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+             !        this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.25) then
+                  !write(*,*) 'call 26'
              call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
-
+             !call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+             !        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+             !        this%interaction_list(iv)%val_c(1:4))
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
           endif
        enddo
 
-       write(*,*) '****************************'
        ! compute the currents by combining the interactions
+       !write(*,*) '*************************isize',isize
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          !write(*,*) 'ic in loop',ic
           if (this%current_list(ic)%type.eq.21) then
              call combine_interactions(4)
              ! a gluon current
@@ -2279,8 +2319,10 @@ contains
                do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
+                          !write(*,*) 'iamp',iamp
                      this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
                                          this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+                          !write(*,*) this%amps(iamp)*(2d0*4d0*3.14159265d0*0.00754677114d0)**2
                   else
                      ! same-flavour amps are build from two different-flavour amps
                      if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
@@ -2424,8 +2466,6 @@ contains
            this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), & 
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
-      write(*,*) 'isize',isize
-      write(*,*) this%current_list(ic)%val_c
     end subroutine include_quark_propagator
 
     subroutine include_aquark_propagator()
@@ -3067,7 +3107,6 @@ contains
     this%spins(1:n,1:maxval(include_hel),1:nspin)=tmp_spin(1:n,1:maxval(include_hel),1:nspin)
 
     call this%filter_dead_trees(n,include_current)
-    
     nhel=this%n_amps
     write (*,*) 'Total number of currents and vertices after filtering helicities',this%n_cur,this%n_vert,this%n_amps
     deallocate(this%include_amp)
