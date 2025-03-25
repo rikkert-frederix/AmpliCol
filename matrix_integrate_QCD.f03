@@ -430,12 +430,6 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    !!! d d~ > g z
-    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-    !pgl(ichan)%phase_space%p(:,3)=(/0.4958424E+03,  0.1100019E+03,  0.4411319E+03, -0.1978936E+03/)
-    !pgl(ichan)%phase_space%p(:,4)=(/0.5041576E+03, -0.1100019E+03, -0.4411319E+03,  0.1978936E+03/)
-
     !!!! d d~ > g g z
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
     !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
@@ -463,6 +457,7 @@ contains
     !pgl(ichan)%phase_space%p(:,4)=(/0.3597595E+03, -0.1752151E+02, -0.3323703E+03,  0.1016595E+03/)
     !pgl(ichan)%phase_space%p(:,5)=(/0.1925012E+03, -0.1444587E+03, -0.3054037E+02,  0.8330936E+02/)
 
+    !!! d d~ > g z    
     !!! d d~ > a z
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
     !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
@@ -470,6 +465,7 @@ contains
     !pgl(ichan)%phase_space%p(:,4)=(/0.5041576E+03, -0.1100019E+03, -0.4411319E+03,  0.1978936E+03/)
 
     !!! u d~ > g w+
+    !!! u d~ > a w+
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)   
     !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
     !pgl(ichan)%phase_space%p(:,3)=(/0.4967664E+03,  0.1102069E+03,  0.4419540E+03, -0.1982624E+03/)
@@ -499,16 +495,31 @@ contains
     !pgl(ichan)%phase_space%p(:,6)=(/0.4307611E+03,  0.2318313E+03,  0.3595630E+03, -0.5023788E+02/)
 
     !! d d~ > w+ w-
-    pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-    pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-    pgl(ichan)%phase_space%p(:,3)=(/0.5000000E+03,  0.1094801E+03,  0.4390395E+03, -0.1969549E+03/)
-    pgl(ichan)%phase_space%p(:,4)=(/0.5000000E+03, -0.1094801E+03, -0.4390395E+03,  0.1969549E+03/)
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.5000000E+03,  0.1094801E+03,  0.4390395E+03, -0.1969549E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.5000000E+03, -0.1094801E+03, -0.4390395E+03,  0.1969549E+03/)
 
     !! u d~ > z w+
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
     !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
     !pgl(ichan)%phase_space%p(:,3)=(/0.5009240E+03,  0.1092724E+03,  0.4382065E+03, -0.1965813E+03/)
     !pgl(ichan)%phase_space%p(:,4)=(/0.4990760E+03, -0.1092724E+03, -0.4382065E+03,  0.1965813E+03/)
+
+    !! u d~ > z z w+
+    pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    pgl(ichan)%phase_space%p(:,3)=(/0.4500094E+03,  0.1628369E+03,  0.3648301E+03, -0.1859472E+03/)
+    pgl(ichan)%phase_space%p(:,4)=(/0.3615403E+03, -0.1761418E+02, -0.3341282E+03,  0.1021972E+03/)
+    pgl(ichan)%phase_space%p(:,5)=(/0.1884503E+03, -0.1452227E+03, -0.3070190E+02,  0.8374998E+02/)
+
+    !! d d~ > a w+ w-
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.4462762E+03,  0.1649072E+03,  0.3694684E+03, -0.1883112E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3633117E+03, -0.1783812E+02, -0.3383762E+03,  0.1034965E+03/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.1904122E+03, -0.1470691E+03, -0.3109223E+02,  0.8481475E+02/)
+
 
     call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
     call cpu_time(tAfter)
@@ -524,6 +535,7 @@ contains
                   pgl(ichan)%hel_fac(ih)
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
+
     else
        do ih=1,pgl(ichan)%amps%n_amps
           do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
@@ -542,13 +554,6 @@ contains
 
     !write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
     !           *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-
-     !write(*,*) (4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1)) 
-     !write(*,*) ' '
-     !do ih=1,pgl(ichan)%amps%n_amps
-     ! write(*,*) pgl(ichan)%amp2_hel(ih)*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)&
-     !         *(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))
-     !enddo
 
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))

@@ -869,6 +869,7 @@ contains
            (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
          ! add a antiquark-quark to gluon vertex
          call add_vertex(9,21)
+
       elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a photon-quark to quark vertex
          if (mod(current_list_local(ic2)%type,2).eq.0) then
@@ -888,17 +889,17 @@ contains
       elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a photon-antiquark to quark vertex
          if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
-            coupl=(/2d0/3d0,0d0/)
+            coupl=(/-2d0/3d0,0d0/)
          else
-            coupl=(/-1d0/3d0,0d0/)
+            coupl=(/1d0/3d0,0d0/)
          endif
          call add_vertex(11,current_list_local(ic2)%type,coupl)
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a antiquark-photon to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/2d0/3d0,0d0/)
+            coupl=(/-2d0/3d0,0d0/)
          else
-            coupl=(/-1d0/3d0,0d0/)
+            coupl=(/1d0/3d0,0d0/)
          endif
          call add_vertex(13,current_list_local(ic1)%type,coupl)
 
@@ -921,17 +922,17 @@ contains
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a z-antiquark to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/-2d0/3d0,1d0/2d0/)
+            coupl=(/-2d0/3d0,-1d0/2d0/)
          else
-            coupl=(/1d0/3d0,-1d0/2d0/)
+            coupl=(/1d0/3d0,1d0/2d0/)
          endif
          call add_vertex(18,current_list_local(ic2)%type,coupl)
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a antiquark-z to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/-2d0/3d0,1d0/2d0/)
+            coupl=(/-2d0/3d0,-1d0/2d0/)
          else
-            coupl=(/1d0/3d0,-1d0/2d0/)
+            coupl=(/1d0/3d0,1d0/2d0/)
          endif
          call add_vertex(19,current_list_local(ic1)%type,coupl)
 
@@ -941,11 +942,11 @@ contains
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a w-quark to quark vertex
          if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
-            coupl=(/2d0/3d0,1d0/2d0/)
             cc_out=current_list_local(ic2)%type-1
+            coupl=(/2d0/3d0,1d0/2d0/) ! to check charge conservation
          else
-            coupl=(/-1d0/3d0,-1d0/2d0/)
             cc_out=current_list_local(ic2)%type+1
+            coupl=(/-1d0/3d0,-1d0/2d0/) ! to check charge conservation
          endif
          if (abs(coupl(1)+sign(1,current_list_local(ic1)%type)) .gt. 1) return
          call add_vertex(20,cc_out,coupl)
@@ -953,46 +954,60 @@ contains
       elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a quark-w to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/2d0/3d0,1d0/2d0/)
             cc_out=current_list_local(ic1)%type-1
+            coupl=(/2d0/3d0,1d0/2d0/) ! to check charge conservation
          else
-            coupl=(/-1d0/3d0,-1d0/2d0/)
             cc_out=current_list_local(ic1)%type+1
+            coupl=(/-1d0/3d0,-1d0/2d0/) ! to check charge conservation
          endif
          if (abs(coupl(1)+sign(1,current_list_local(ic2)%type)) .gt. 1) return
-         call add_vertex(21,cc_out,coupl)
+         call add_vertex(21,cc_out)
 
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a w-antiquark to quark vertex
          if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
-            coupl=(/-2d0/3d0,1d0/2d0/)
             cc_out=current_list_local(ic2)%type+1
+            coupl=(/-2d0/3d0,1d0/2d0/) ! to check charge conservation
          else
-            coupl=(/1d0/3d0,-1d0/2d0/)
             cc_out=current_list_local(ic2)%type-1
+            coupl=(/1d0/3d0,1d0/2d0/) ! to check charge conservation
          endif
          if (abs(coupl(1)+sign(1,current_list_local(ic1)%type)) .gt. 1) return
-         call add_vertex(22,cc_out,coupl)
+         call add_vertex(22,cc_out)
 
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a antiquark-w to quark vertex
          if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=(/-2d0/3d0,1d0/2d0/)
             cc_out=current_list_local(ic1)%type+1
+            coupl=(/-2d0/3d0,-1d0/2d0/) ! to check charge conservation
          else
-            coupl=(/1d0/3d0,-1d0/2d0/)
             cc_out=current_list_local(ic1)%type-1
+            coupl=(/1d0/3d0,1d0/2d0/) ! to check charge conservation
          endif
          if (abs(coupl(1)+sign(1,current_list_local(ic2)%type)) .gt. 1) return
-         call add_vertex(23,cc_out,coupl)
+         call add_vertex(23,cc_out)
 
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a w-w to a vertex
-         coupl=(/0d0,0d0/)
+         coupl=(/0d0,0d0/) ! dummy, so that it read sin the mass as last argument below
          if (abs(sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type)) .gt. 0) return
          call add_vertex(24,22,coupl,pm%get_mass(22))
          ! add a w-w to z vertex
          call add_vertex(25,23,coupl,pm%get_mass(23))
+
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add a z-w to a vertex
+         call add_vertex(26,current_list_local(ic1)%type)
+      elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add a w-z to a vertex
+         call add_vertex(26,current_list_local(ic2)%type)
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
+         ! add a a-w to a vertex
+         call add_vertex(27,current_list_local(ic1)%type)
+      elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add a w-a to a vertex
+         call add_vertex(28,current_list_local(ic2)%type)
+
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1145,7 +1160,7 @@ contains
       integer :: itype,ctype,ic
       real(kind=8),dimension(2),optional :: coupl
       real(kind=8),optional :: mass
-      
+     
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) then
@@ -1153,7 +1168,7 @@ contains
             endif
          enddo
           
-         if ((ic.eq.this%n_cur_end(n)+1) .and. (itype .lt.20)) then 
+         if ((ic.eq.this%n_cur_end(n)+1)) then 
          return ! dead tree. Filter already here
          endif
       endif
@@ -1250,6 +1265,7 @@ contains
 
       ! The order of the coloured particles can be concatinated:
       ord(1:nc1+nc2)=[ord1(1:nc1),ord2(1:nc2)]
+
       ! Setup the singlet_mv and put the colour singlets in the right order in
       ! the combined ord():
       if (nc1.eq.n1) then
@@ -2187,28 +2203,24 @@ contains
                   !write(*,*) 'call 21'
              call GluonQuarktoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                           this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.21) then
                   !write(*,*) 'call 22'
              !write(*,*) 'combining',this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4)
              !write(*,*) 'and',this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4)
              call QuarkGluontoQuark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                           this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.22) then
                   !write(*,*) 'call 23'
              call GluonAquarktoAquark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                           this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.23) then
                   !write(*,*) 'call 24'
              call AquarkGluontoAquark_w(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                           this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.24) then
                   !write(*,*) 'call 25'
              call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2216,11 +2228,6 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
-             !call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
-             !        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-             !        this%interaction_list(iv)%val_c(1:4))
           elseif(this%interaction_list(iv)%type.eq.25) then
                   !write(*,*) 'call 26'
              call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2228,11 +2235,30 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
-             !call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
-             !        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-             !        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-             !        this%interaction_list(iv)%val_c(1:4))
+          elseif(this%interaction_list(iv)%type.eq.26) then
+             call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+          elseif(this%interaction_list(iv)%type.eq.27) then
+             call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+          elseif(this%interaction_list(iv)%type.eq.28) then
+             call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+          elseif(this%interaction_list(iv)%type.eq.29) then
+             call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -2319,10 +2345,8 @@ contains
                do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
-                          !write(*,*) 'iamp',iamp
                      this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
                                          this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                          !write(*,*) this%amps(iamp)*(2d0*4d0*3.14159265d0*0.00754677114d0)**2
                   else
                      ! same-flavour amps are build from two different-flavour amps
                      if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
