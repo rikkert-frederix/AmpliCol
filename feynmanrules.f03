@@ -584,6 +584,54 @@ contains
                       -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
   end subroutine ThreeGluon_zww
 
+  subroutine TensorGluontoGluon_wwww(wfT1,wfg2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(6) :: wfT1
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(1d0/sw**2)
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+  end subroutine TensorGluontoGluon_wwww
+  subroutine TensorGluontoGluon_wwzz(wfT1,wfg2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(6) :: wfT1
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(-(1d0-sw**2)/sw**2)
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+  end subroutine TensorGluontoGluon_wwzz
+  subroutine TensorGluontoGluon_wwaz(wfT1,wfg2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(6) :: wfT1
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(dsqrt(1d0-sw**2)/sw)
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+  end subroutine TensorGluontoGluon_wwaz
+  subroutine TensorGluontoGluon_wwaa(wfT1,wfg2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(6) :: wfT1
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(-1d0)
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
+  end subroutine TensorGluontoGluon_wwaa
 
 
 
