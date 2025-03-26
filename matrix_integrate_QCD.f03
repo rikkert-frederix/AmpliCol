@@ -552,8 +552,8 @@ contains
        enddo
     endif
 
-    !write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
-    !           *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+    write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
+               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))

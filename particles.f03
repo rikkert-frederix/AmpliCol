@@ -241,6 +241,24 @@ contains
        is_tensor=.false.
     endif
   end function is_tensor
+  logical function is_tensor_v(i)
+    implicit none
+    integer :: i
+    if (is_tensor_t1(i).or.&
+        is_tensor_t2(i).or.&
+        is_tensor_t3(i).or.&
+        is_tensor_t4(i).or.&
+        is_tensor_t5(i).or.&
+        is_tensor_t6(i).or.&
+        is_tensor_t7(i).or.&
+        is_tensor_t8(i).or.&
+        is_tensor_t9(i).or.&
+        is_tensor_t10(i)) then
+       is_tensor_v=.true.
+    else
+       is_tensor_v=.false.
+    endif
+  end function is_tensor_v
   logical function is_tensor_t1(i)
     implicit none
     integer :: i
