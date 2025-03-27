@@ -1008,7 +1008,7 @@ contains
          call add_vertex(102,-102)
 
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
-         ! add a z-w to w vertex
+         ! add a w-z to w vertex
          call add_vertex(26,current_list_local(ic1)%type)
 
          ! add a w+z to T3 vertex
@@ -1018,9 +1018,10 @@ contains
 
 
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
-         ! add a w-z to a vertex
+         ! add a z-w to w vertex
          call add_vertex(27,current_list_local(ic2)%type)
 
+         !stop 3
          ! add a w+z to T3 vertex
          if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(103,-103)
          ! add a w-z to T5 vertex
@@ -1058,6 +1059,7 @@ contains
 
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a z-z to T8 vertex
+         !stop 2
          call add_vertex(108,-108)
          
       
@@ -1102,12 +1104,14 @@ contains
          endif
       elseif (is_tensor_t3(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a (T3 z to w) vertex
+         !stop 33
          call add_vertex(37,24)
       elseif (is_tensor_t6(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a (T6 z to w) vertex
          call add_vertex(38,-24)
       elseif (is_tensor_t8(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a (T8 w to w) vertex
+         !stop 1
          call add_vertex(39,current_list_local(ic2)%type)
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_tensor_t2(current_list_local(ic2)%type)) then
          ! add a (z T2 to z) vertex
@@ -1125,7 +1129,7 @@ contains
          call add_vertex(43,-24)
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t8(current_list_local(ic2)%type)) then
          ! add a (w T8 to w) vertex
-         stop 13
+         !stop 13
          call add_vertex(44,current_list_local(ic1)%type)
 
 
@@ -1729,8 +1733,8 @@ contains
             allocate(current_list_local(this%n_cur)%vertices(2*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(2*(isize-1)))
          else
-            allocate(current_list_local(this%n_cur)%vertices(3*(isize-1)))
-            allocate(current_list_local(this%n_cur)%vertex_sign(3*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
@@ -2511,6 +2515,7 @@ contains
              call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:6))
+             !write(*,*) this%interaction_list(iv)%val_c(1:6)
 
           ! WWWW
           elseif(this%interaction_list(iv)%type.ge.30 .and. this%interaction_list(iv)%type.le.32) then
@@ -2529,12 +2534,14 @@ contains
              call TensorGluontoGluon_wwzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:4))
+             !write(*,*) this%interaction_list(iv)%val_c(1:4)
              !stop 21
           elseif(this%interaction_list(iv)%type.ge.41 .and. this%interaction_list(iv)%type.le.45) then
              call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                      this%interaction_list(iv)%val_c(1:4))
              ! maybe add with the couplings
+             !write(*,*) this%interaction_list(iv)%val_c(1:4)
              !write(*,*) this%interaction_list(iv)%type
              !stop 12
 
@@ -2570,6 +2577,7 @@ contains
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          !write(*,*) this%current_list(ic)%type
           if (this%current_list(ic)%type.eq.21) then
              call combine_interactions(4)
              ! a gluon current
@@ -2582,7 +2590,7 @@ contains
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-          elseif (abs(this%current_list(ic)%type).ge.23) then
+          elseif (abs(this%current_list(ic)%type).ge.23.and.abs(this%current_list(ic)%type).le.24) then
              call combine_interactions(4)
              ! a massive vector boson current
              if (isize.ne.n-1)  then
