@@ -93,7 +93,7 @@ program matrix_integrate_QCD
 
   if (include_pdf) call PDF_initialise
 
-  call phys_model%init_part(173d0,1.491500d0,zmass,zwidth,wmass,wwidth)
+  call phys_model%init_part(173d0,1.491500d0,zmass,zwidth,wmass,wwidth, hmass, hwidth)
 
   call get_run_arguments()
 
@@ -182,7 +182,7 @@ program matrix_integrate_QCD
                 pgl(igroup)%spin,pgl(igroup)%orders,phys_model,read_proc_from_file)
      endif
 
-     !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
+     if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
      
      if (write_amps_to_file) then
         call pgl(igroup)%amps%write_init_amps_to_file(next,32)
@@ -541,6 +541,48 @@ contains
     !pgl(ichan)%phase_space%p(:,4)=(/0.3633117E+03, -0.1783812E+02, -0.3383762E+03,  0.1034965E+03/)
     !pgl(ichan)%phase_space%p(:,5)=(/0.1904122E+03, -0.1470691E+03, -0.3109223E+02,  0.8481475E+02/)
 
+    !! d d~ > h t t~
+    !  g g  > h t t~
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.4126805E+03,  0.1453293E+03,  0.3256050E+03, -0.1659549E+03 /)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3569607E+03, -0.1572037E+02, -0.2982040E+03,  0.9120934E+02/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.2303588E+03, -0.1296090E+03, -0.2740095E+02,  0.7474551E+02/)
+
+    !! d d~ > h z
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.5036549E+03,  0.1082392E+03,  0.4340630E+03, -0.1947224E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.4963451E+03, -0.1082392E+03, -0.4340630E+03,  0.1947224E+03/)
+
+    !! u d~ > h w+
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.5045789E+03,  0.1084508E+03,  0.4349116E+03, -0.1951031E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.4954211E+03, -0.1084508E+03, -0.4349116E+03,  0.1951031E+03/)
+
+    !! u d~ > w+ h h
+    pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    pgl(ichan)%phase_space%p(:,3)=(/0.4330924E+03,  0.1572524E+03,  0.3523182E+03, -0.1795701E+03/)
+    pgl(ichan)%phase_space%p(:,4)=(/0.3602359E+03, -0.1701010E+02, -0.3226692E+03,  0.9869231E+02/)
+    pgl(ichan)%phase_space%p(:,5)=(/0.2066717E+03, -0.1402423E+03, -0.2964897E+02,  0.8087776E+02/)
+
+    !  g g  > h h t t~
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5960000E+03,  0.0000000E+00,  0.0000000E+00,  0.5960000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5960000E+03,  0.0000000E+00,  0.0000000E+00, -0.5960000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.1527567E+03, -0.2191427E+02,  0.3974226E+02, -0.7516599E+02/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3487323E+03, -0.1029736E+03, -0.2993869E+03,  0.7584967E+02/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.2296781E+03, -0.1049878E+03, -0.9688543E+02,  0.4913043E+02/)
+    !pgl(ichan)%phase_space%p(:,6)=(/0.4608329E+03,  0.2298757E+03,  0.3565300E+03, -0.4981411E+02/)
+
+    !  g g  > z h t t~
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.1236761E+03, -0.2085233E+02,  0.3781642E+02, -0.7152357E+02/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3340524E+03, -0.9798368E+02, -0.2848791E+03,  0.7217411E+02/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.2249304E+03, -0.9990028E+02, -0.9219052E+02,  0.4674965E+02/)
+    !pgl(ichan)%phase_space%p(:,6)=(/0.4417172E+03,  0.2187363E+03,  0.3392532E+03, -0.4740019E+02/)
 
     call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
     call cpu_time(tAfter)
@@ -1234,6 +1276,8 @@ contains
           pgl%spin(1,i)=-1
           pgl%spin(2,i)=1
           pgl%spin(3,i)=0
+       elseif (pgl%spin(0,i).eq.1) then
+          pgl%spin(1,i)=0
        else
           write (*,*) 'spin state not known',i,pgl%processes(i,1),pgl%spin(0,i)
           stop 1

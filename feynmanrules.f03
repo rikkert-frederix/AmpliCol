@@ -411,7 +411,16 @@ contains
     endif
   end subroutine ext_antiquark
 
+  subroutine ext_scalar(p,ifinal,wf)
+    implicit none
+    integer :: ifinal
+    real(kind=8), dimension(0:3) :: p
+    complex(kind=8), dimension(1) :: wf
+    real(kind=8),parameter :: rOne=1d0
 
+    wf(1)=(rOne,0d0)
+
+  end subroutine
 
 
 
@@ -632,6 +641,92 @@ contains
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
   end subroutine TensorGluontoGluon_wwaa
+
+
+  subroutine QuarkScalartoQuark(wfq1,wfs2,wfq,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq
+    complex(kind=8),dimension(1) :: wfs2
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    wfq(1:4)=-prefact*coupl(1)/(2d0*sw)*wfs2(1)*wfq1(1:4)
+  end subroutine QuarkScalartoQuark
+
+  subroutine ScalarQuarktoQuark(wfs1,wfq2,wfq,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq2,wfq
+    complex(kind=8),dimension(1) :: wfs1
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    wfq(1:4)=prefact*coupl(1)/(2d0*sw)*wfs1(1)*wfq2(1:4)
+  end subroutine ScalarQuarktoQuark
+
+  subroutine GluonScalartoGluon_hzz(wfg1,pwf1,wfs2,pwf2,wfg,coupl,vm)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(1) :: wfs2
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pw
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: TMP,vm,M2
+    if (vm.ne.0d0) M2=1d0/vm**2
+    pw(0:3)=pwf1(0:3)+pwf2(0:3)
+    TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
+    wfg(1:4)=prefact*coupl(1)/((1d0-sw**2)*sw)*wfs2(1)*(-wfg1(1:4)+TMP*M2*pw(0:3))
+  end subroutine GluonScalartoGluon_hzz
+
+  subroutine ScalarGluontoGluon_hzz(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(1) :: wfs1
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pw
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: TMP,vm,M2
+    if (vm.ne.0d0) M2=1d0/vm**2
+    pw(0:3)=pwf1(0:3)+pwf2(0:3)
+    TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
+    wfg(1:4)= prefact*coupl(1)/((1d0-sw**2)*sw)*wfs1(1)*(-wfg2(1:4)+TMP*M2*pw(0:3))
+  end subroutine ScalarGluontoGluon_hzz
+ 
+  subroutine GluonScalartoGluon_hww(wfg1,pwf1,wfs2,pwf2,wfg,coupl,vm)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(1) :: wfs2
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pw
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: TMP,vm,M2
+    if (vm.ne.0d0) M2=1d0/vm**2
+    pw(0:3)=pwf1(0:3)+pwf2(0:3)
+    !stop 7
+    TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
+    wfg(1:4)=prefact*coupl(1)/sw*wfs2(1)*(-wfg1(1:4)+TMP*M2*pw(0:3))
+  end subroutine GluonScalartoGluon_hww
+
+  subroutine ScalarGluontoGluon_hww(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(1) :: wfs1
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pw
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: TMP,vm,M2
+    if (vm.ne.0d0) M2=1d0/vm**2
+    pw(0:3)=pwf1(0:3)+pwf2(0:3)
+    !stop 8
+    TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
+    wfg(1:4)=prefact*coupl(1)/sw*wfs1(1)*(-wfg2(1:4)+TMP*M2*pw(0:3))
+  end subroutine ScalarGluontoGluon_hww
+
+  subroutine ScalarScalartoScalar(wfs1,wfs2,wfs,coupl,sm)
+    implicit none
+    complex(kind=8),dimension(1) :: wfs1,wfs2,wfs
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: sm
+    wfs(1)=-prefact*(3d0/2d0)/sw/coupl(1)*sm**2*wfs1(1)*wfs2(1)
+  end subroutine ScalarScalartoScalar
 
 
 
@@ -1160,4 +1255,17 @@ contains
     wfq(3)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3))*prefact
     wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine AquarkPropagator
+
+  subroutine ScalarPropagator(wfs,p,sm,sw)
+    implicit none
+    complex(kind=8),dimension(1),intent(inout) :: wfs
+    real(kind=8),dimension(0:3),intent(in) :: p
+    complex(kind=8) :: propagator
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    real(kind=8) :: sm,sw
+    propagator=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-sm**2+cImag*sm*sw)
+    wfs(1)=wfs(1)*propagator
+  end subroutine ScalarPropagator
+
 end module FeynmanRules
+

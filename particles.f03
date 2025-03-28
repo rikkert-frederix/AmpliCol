@@ -11,15 +11,16 @@ module particles
      procedure,public :: init_part,get_mass,get_width,get_spin,get_antipart
   end type physics_model
 contains
-  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth)
+  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
     class(physics_model) :: this
     integer :: i
     real(kind=8) :: tmass,twidth
     real(kind=8) :: zmass,zwidth
     real(kind=8) :: wmass,wwidth
+    real(kind=8) :: hmass,hwidth
 
-    this%npart=22 ! gluon, 6 quarks, tensor, photon, z-boson, w-boson + 5 tensors for EW bosons
+    this%npart=23 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 10 tensors for EW bosons
     allocate(this%particle_list(this%npart))
     ! 5 massless quarks
     do i=1,5
@@ -147,6 +148,13 @@ contains
     this%particle_list(22)%width=0d0
     this%particle_list(22)%spin=-1
     this%particle_list(22)%anti_type=-110
+
+    ! higgs
+    this%particle_list(23)%type=25
+    this%particle_list(23)%mass=hmass
+    this%particle_list(23)%width=hwidth
+    this%particle_list(23)%spin=1
+    this%particle_list(23)%anti_type=25
     
   end subroutine init_part
   integer function get_antipart(this,ipdg)
@@ -241,6 +249,15 @@ contains
        is_tensor=.false.
     endif
   end function is_tensor
+  logical function is_scalar(i)
+    implicit none
+    integer :: i
+    if (i.eq.25) then
+       is_scalar=.true.
+    else
+       is_scalar=.false.
+    endif
+  end function is_scalar
   logical function is_tensor_v(i)
     implicit none
     integer :: i
@@ -352,7 +369,7 @@ contains
   logical function is_singlet(i)
     implicit none
     integer :: i
-    if (abs(i).ge.22) then
+    if (abs(i).ge.22.and.abs(i).le.25) then
        is_singlet=.true.
     else
        is_singlet=.false.

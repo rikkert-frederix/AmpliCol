@@ -1254,6 +1254,51 @@ contains
          ! add a (w T10 to w) vertex
          call add_vertex(76,current_list_local(ic1)%type)
 
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
+         ! add a higgs-quark vertex
+         coupl=(/pm%get_mass(current_list_local(ic1)%type)/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic2)%type) .gt. 0d0) then
+           call add_vertex(77,current_list_local(ic2)%type,coupl)
+         endif
+      elseif (is_quark(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add a quark-higgs vertex
+         coupl=(/pm%get_mass(current_list_local(ic1)%type)/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic1)%type) .gt. 0d0) then
+           call add_vertex(78,current_list_local(ic1)%type,coupl)
+         endif
+
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add a higgs-z vertex
+         coupl=(/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic2)%type) .gt. 0d0) then
+           call add_vertex(79,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
+         endif
+      elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add a z-higgs vertex
+         coupl=(/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic1)%type) .gt. 0d0) then
+           call add_vertex(80,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
+         endif
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add a higgs-w vertex
+         coupl=(/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic2)%type) .gt. 0d0) then
+           call add_vertex(81,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
+         endif
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add a w-higgs vertex
+         coupl=(/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic1)%type) .gt. 0d0) then
+           call add_vertex(82,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
+         endif
+
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add a higgs-higgs vertex
+         coupl=(/80.4190024d0,0d0/)
+         if (pm%get_mass(current_list_local(ic1)%type) .gt. 0d0) then
+            call add_vertex(83,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
+         endif
+
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -1283,6 +1328,7 @@ contains
       implicit none
       integer :: i,j,nc1,nc2
       logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,not_valid
+      logical :: all_singlet_middle
       integer,dimension(isize) :: ip,et
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
@@ -1305,11 +1351,20 @@ contains
       ! Check for colour singlets:
       colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
+      all_singlet_middle=.false.
+      if (current_list_local(ic1)%order(n1)+1 .ne. current_list_local(ic2)%order(1)) then
+      if (all(part(current_list_local(ic1)%order(n1)+1:current_list_local(ic2)%order(n2)-1,1).ge.22)&
+         .and. all(part(current_list_local(ic1)%order(n1)+1:current_list_local(ic2)%order(n2)-1,1).le.25)) then
+         all_singlet_middle=.true.
+      endif
+      endif
       ! If the first current is a singlet and the second is not, it is not a valid order
       if (colour_singlet1 .and. (.not.colour_singlet2)) return
       ! If both currents are colour singlets, only consider one of the two. 
       if (colour_singlet1 .and. colour_singlet2) then
-         if (maxval(current_list_local(ic1)%order(1:n1)).ge.maxval(current_list_local(ic2)%order(1:n2))) then
+         if (maxval(current_list_local(ic1)%order(1:n1)).ge.maxval(current_list_local(ic2)%order(1:n2)).or.&
+             minval(current_list_local(ic1)%order(1:n1)).ge.minval(current_list_local(ic2)%order(1:n2)).or.&
+             all_singlet_middle) then
             return
          else
             valid_current_combination=.true.
@@ -2167,6 +2222,8 @@ contains
              allocate(this%current_list(ic)%val_c(1:6))
           elseif (this%current_list(ic)%type.eq.21 .and. use_real_gluons) then
              allocate(this%current_list(ic)%val_r(1:4))
+          elseif (this%current_list(ic)%type.eq.25) then
+             allocate(this%current_list(ic)%val_c(1))
           else
              allocate(this%current_list(ic)%val_c(1:4))
           endif
@@ -2184,6 +2241,8 @@ contains
                    this%interaction_list(iv)%type.eq.2 .or. &
                    this%interaction_list(iv)%type.eq.3) .and. use_real_gluons  ) then
              allocate(this%interaction_list(iv)%val_r(1:4))
+          elseif (this%interaction_list(iv)%type.eq.83) then
+                  allocate(this%interaction_list(iv)%val_c(1))
           else
              allocate(this%interaction_list(iv)%val_c(1:4))
           endif
@@ -2236,6 +2295,9 @@ contains
              elseif (abs(this%current_list(ic)%type).eq.24) then
                    call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+             elseif (this%current_list(ic)%type.eq.25) then
+                   call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ifinal,this%current_list(ic)%val_c(1))
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
@@ -2563,13 +2625,60 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:4))
              !stop 23
-          elseif(this%interaction_list(iv)%type.ge.73 .and. this%interaction_list(iv)%type.le.77) then
+          elseif(this%interaction_list(iv)%type.ge.73 .and. this%interaction_list(iv)%type.le.76) then
              call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                      this%interaction_list(iv)%val_c(1:4))
               !stop 7
 
-          else
+          ! higgs-quark coupling
+          elseif(this%interaction_list(iv)%type.eq.77) then
+             call ScalarQuarktoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.eq.78) then
+             call QuarkScalartoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+
+          ! higgs-z coupling
+          elseif(this%interaction_list(iv)%type.eq.79) then
+             call ScalarGluontoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+          elseif(this%interaction_list(iv)%type.eq.80) then
+             call GluonScalartoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+           ! higgs-w 
+          elseif(this%interaction_list(iv)%type.eq.81) then
+             call ScalarGluontoGluon_hww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+          elseif(this%interaction_list(iv)%type.eq.82) then
+             call GluonScalartoGluon_hww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+
+           ! higgs-higgs
+           elseif(this%interaction_list(iv)%type.eq.83) then
+             call ScalarScalartoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+         else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
           endif
@@ -2615,6 +2724,12 @@ contains
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_aquark_propagator()
+             endif
+          elseif (this%current_list(ic)%type.eq.25) then
+             ! a scalar current
+             call combine_interactions(1)
+             if (isize.ne.n-1)  then
+                call include_scalar_propagator()
              endif
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
@@ -2809,6 +2924,14 @@ contains
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_aquark_propagator
+
+    subroutine include_scalar_propagator()
+      implicit none
+      call ScalarPropagator(this%current_list(ic)%val_c, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
+    end subroutine include_scalar_propagator
   end subroutine evaluate
 
   subroutine init_col(this,n,col_acc)
