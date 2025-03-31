@@ -11,6 +11,7 @@ module common
   ! technical
   logical,parameter :: smooth_cuts=.false.
   logical,parameter :: include_pdf=.true.
+  logical,parameter :: use_colour_singlet_multichannel=.true.
   
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   real(kind=8),parameter :: pT_min     = 30d0

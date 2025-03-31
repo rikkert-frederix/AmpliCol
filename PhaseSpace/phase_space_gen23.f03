@@ -12,7 +12,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.true.,eff_photon_int=.false.
+  logical,parameter :: verbose=.true.,eff_photon_int=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
@@ -105,33 +105,33 @@ contains
     ns=0
     nns=1
     this%sets=0
-    ! move all singlets to the end of the order
     if (eff_photon_int) then
-    ord_temp=this%order
-    do i=1,this%next
-       if (part(this%order(i)).ne.21.and.abs(part(this%order(i))).gt.6.and.&
-           this%order(i).gt.2) then
-            ord_temp(this%next-ns)=this%order(i)
-            ns=ns+1
-       else
-            ord_temp(nns)=this%order(i)
-            nns=nns+1
-       endif
-    enddo
+       ! move all singlets to the end of the order
+       ord_temp=this%order
+       do i=1,this%next
+          if (part(this%order(i)).ne.21.and.abs(part(this%order(i))).gt.6.and.&
+               this%order(i).gt.2) then
+             ord_temp(this%next-ns)=this%order(i)
+             ns=ns+1
+          else
+             ord_temp(nns)=this%order(i)
+             nns=nns+1
+          endif
+       enddo
 
-    !this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
-    !do j=this%next-ns+1,this%next
-    !    this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
-    !enddo
-    j=1
-    do i=1,this%next
-       if (part(this%order(i)).eq.21.or.abs(part(this%order(i))).le.6.) then
-            ord_temp(j)=this%order(i)
-            j=j+1
-       endif
-    enddo
+       !this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
+       !do j=this%next-ns+1,this%next
+       !    this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
+       !enddo
+       j=1
+       do i=1,this%next
+          if (part(this%order(i)).eq.21.or.abs(part(this%order(i))).le.6.) then
+             ord_temp(j)=this%order(i)
+             j=j+1
+          endif
+       enddo
     else
-      ord_temp=o
+       ord_temp=o
     endif
 
     ! Bring the colour order to a canonical order (first in the list
@@ -1437,7 +1437,7 @@ contains
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
-         write (*,*) 'error, gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
+         write (*,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
          this%jac=-5d0
          return
       endif
@@ -1471,9 +1471,14 @@ contains
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: ip
       real(kind=8) :: varmin,varmax,power,var
-      if (variable.lt.var_min .or. variable.gt.var_max) then
-         write (*,*) 'variable not between varmin and varmax',var_min,variable,var_max
-         stop 1
+      if (variable.lt.var_min) then
+         write (*,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+         jac=-1d0
+         return
+      elseif (variable.gt.var_max) then
+         write (*,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+         jac=-1d0
+         return
       endif
       if (var_min.lt.0d0 .and. var_max.le.0d0) then
          power=power_in
@@ -1664,7 +1669,7 @@ contains
     integer(kind=4),parameter :: n=3
     real(kind=8),dimension(n,n) :: a
     integer(kind=4),dimension(0:n) :: p
-    real(kind=8),parameter :: tol=1d-10
+    real(kind=8),parameter :: tol=1d-8
     logical :: success
     a(1:3,1)=(/2d0*shat_i             , shat_i-t_i    , shat_i+shat_im1-m_i_2/)
     a(1:3,2)=(/shat_i-t_i             , 0d0           , shat_im1-t_im1       /)
