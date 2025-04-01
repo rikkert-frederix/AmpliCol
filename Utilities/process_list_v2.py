@@ -5,48 +5,75 @@ import copy
 import re
 import argparse
 from collections import Counter
+import multiprocessing
+
+# Global sets (make then 'frozenset' so that they are immutable):
+quarks=frozenset({'d','u','s','c','b','t'})
+antiquarks=frozenset({'dbar','ubar','sbar','cbar','bbar','tbar'})
+singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
+gluons=frozenset({'g'})
+flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+#flavour_scheme=frozenset({'d'}) # all the massless quarks
+all_coloured=quarks | antiquarks | gluons
+massless_QCD=flavour_scheme | frozenset([q+'bar' for q in flavour_scheme]) | gluons
+proton=massless_QCD
+jet=massless_QCD
+
+
+def process_proc(proc):
+    """Function to process each 'proc' in parallel"""
+    phase_space_orders_local = {}  # Local dictionary to avoid race conditions
+
+    all_possible_color_ord = list(itertools.permutations(range(len(proc))))
+    valid_color_ord = [perm for perm in all_possible_color_ord if ValidColorOrd(proc, perm)]
+    unique_color_ord = [perm for perm in valid_color_ord if UniqueColorOrd(proc, perm)]
+
+    for perm in unique_color_ord:
+        ordered_proc, ordered_perm = OrderProcPerm(proc, perm)
+        zero = ordered_perm.index(0)
+        perm_mapped = tuple(ordered_perm[zero:] + ordered_perm[:zero])
+
+        if perm_mapped in phase_space_orders_local:
+            phase_space_orders_local[perm_mapped].append((ordered_proc, ordered_perm))
+        else:
+            phase_space_orders_local[perm_mapped] = [(ordered_proc, ordered_perm)]
+
+    return phase_space_orders_local
+
 
 def ValidColorOrd(proc,perm):
     # Check if 'perm' is a valid color order for the process 'proc'
-    found=[False,False,False,False] # quarks, antiquarks,singlets,gluons
-    for i in range(len(perm)):
-        if proc[perm[i]] in quarks:
-            if found[0] or found[3]:
-                validColorOrd=False
-                return
-            if found[1] and perm[i] < perm[0]: # for 2-quark line process, the removes one of the two orders
-                validColorOrd=False
-                return
-            found[0]=True
-            found[1]=False
-            found[2]=False
-            found[3]=False
-        if proc[perm[i]] in antiquarks:
-            if found[1] or found[2] or not(found[0]) :
-                validColorOrd=False
-                return
-            found[0]=False
-            found[1]=True
-            found[2]=False
-            found[3]=False
-        if proc[perm[i]] in singlets:
-            if found[3] or found[0] or not(found[1]):
-                validColorOrd=False
-                return
-            found[2]=True
-        if proc[perm[i]] in gluons:
-            if found[1] or found[2]:
-                validColorOrd=False
-                return
-            if i == 0 and perm[i] != 0: # for all-gluon procs, this removes cyclic permutations
-                validColorOrd=False
-                return
-            found[3]=True
+    found_quark = found_antiquark = found_singlet = found_gluon = False
+    for idx in perm:
+        particle = proc[idx]
+        if particle in quarks:
+            if found_quark or found_gluon:
+                return False
+            if found_antiquark and idx < perm[0]:  # Two-quark line process, reject one ordering
+                return False
+            found_quark = True
+            found_antiquark = found_singlet = found_gluon = False
+        elif particle in antiquarks:
+            if found_antiquark or found_singlet or not found_quark:
+                return False
+            found_antiquark = True
+            found_quark = found_singlet = found_gluon = False
+        elif particle in gluons:
+            if found_antiquark or found_singlet:
+                return False
+            found_gluon = True
+        else:  # Assuming the rest are singlets
+            if found_quark or found_gluon or not found_antiquark :
+                return False
+            found_singlet = True
+    if found_gluon: # Only for all-gluon process found_gluon is True here. Use it to remove cyclic permutations
+        if perm[0] != 0 :
+            return False
     return True
 
 def UniqueColorOrd(proc,perm):
     # Check if 'perm' is a color order in canonical order for the process 'proc'.
-
+    #
     # Start at the first incoming particle. From there, the indentical
     # final state particles should each come in *increasing* order.
     zero=perm.index(0)
@@ -83,14 +110,6 @@ def OrderProcPerm(proc,perm):
         proc_ordered[perm_ordered[i]]=proc[perm[i]]
 
     return tuple(proc_ordered),perm_ordered
-
-def AddProcPermToPhaseSpaceOrder(proc,perm,phase_space_orders):
-    zero=perm.index(0)
-    perm_mapped=tuple(perm[zero:]+perm[:zero])
-    if perm_mapped in phase_space_orders:
-        phase_space_orders[perm_mapped].append((proc,perm))
-    else:
-        phase_space_orders[perm_mapped]=[(proc,perm)]
 
 
 def ParseCollision(input_string):
@@ -136,7 +155,7 @@ def GenerateAllUniqueProcs(process):
                     procs_new=[sorted(proc+[p])]
                 else:
                     procs_new.append(sorted(proc+[p]))
-        procs=copy.deepcopy(procs_new)
+        procs=procs_new.copy()
     for part in process['rest']:
         for proc in procs:
             proc.append(part)
@@ -158,52 +177,33 @@ def GenerateAllProcs(unique_procs):
                 procs.add(tuple(pair2+remaining))
     return procs
 
+if __name__ == "__main__":    
     
-
-quarks=['d','u','s','c','b','t']
-antiquarks=['dbar','ubar','sbar','cbar','bbar','tbar']
-#flavour_scheme=['d','u','s','c','b'] # all the massless quarks
-flavour_scheme=['d'] # all the massless quarks
-singlets=['a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h']
-gluons=['g']
-all_coloured=quarks+antiquarks+gluons
-massless_QCD=flavour_scheme+[q+'bar' for q in flavour_scheme]+gluons
-proton=massless_QCD
-jet=massless_QCD
-
-if jet != proton:
-    raise ValueError("definition of 'jet' and 'proton' should be the same")
-
-parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
-parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
-args=parser.parse_args()
-                            
-process=ParseCollision(args.process_string)
-
-all_unique_procs=GenerateAllUniqueProcs(process)
-all_procs=GenerateAllProcs(all_unique_procs)
-
-#print(len(all_unique_procs),all_unique_procs)
-#print(len(all_procs),all_procs)
-
-phase_space_orders={}
-
-for proc in all_procs:
-    all_possible_color_ord=list(itertools.permutations([i for i in range(len(proc))]))
-    valid_color_ord=[]
-    for perm in all_possible_color_ord:
-        if ValidColorOrd(proc,perm):
-            valid_color_ord.append(perm)
-    unique_color_ord=[]
-    for perm in valid_color_ord:
-        if UniqueColorOrd(proc,perm):
-            unique_color_ord.append(perm)
-    for perm in unique_color_ord:
-        ordered_proc,ordered_perm=OrderProcPerm(proc,perm)
-        AddProcPermToPhaseSpaceOrder(ordered_proc,ordered_perm,phase_space_orders)
+    if jet != proton:
+        raise ValueError("definition of 'jet' and 'proton' should be the same")
+    
+    parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
+    parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
+    args=parser.parse_args()
+    process=ParseCollision(args.process_string)
+    
+    all_unique_procs=GenerateAllUniqueProcs(process)
+    all_procs=GenerateAllProcs(all_unique_procs)
+    
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.map(process_proc, all_procs)  # Parallelize across procs
+    
+    # Merge all local dictionaries into one global dictionary
+    phase_space_orders = {}
+    for result in results:
+        for key, value in result.items():
+            if key in phase_space_orders:
+                phase_space_orders[key].extend(value)
+            else:
+                phase_space_orders[key] = value
+    
+    print(len(phase_space_orders.keys()))
+    for key in phase_space_orders.keys():
+        print(key,':',len(phase_space_orders[key]))
+        #    print(key,':',phase_space_orders[key])
         
-print(len(phase_space_orders.keys()))
-for key in phase_space_orders.keys():
-    print(key,':',len(phase_space_orders[key]))
-#    print(key,':',phase_space_orders[key])
-    
