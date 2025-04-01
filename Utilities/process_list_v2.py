@@ -6,21 +6,26 @@ import re
 import argparse
 from collections import Counter
 import multiprocessing
+import math
 
 # Global sets (make then 'frozenset' so that they are immutable):
 quarks=frozenset({'d','u','s','c','b','t'})
 antiquarks=frozenset({'dbar','ubar','sbar','cbar','bbar','tbar'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
-flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
-#flavour_scheme=frozenset({'d'}) # all the massless quarks
+#flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+flavour_scheme=frozenset({'d','u'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
 massless_QCD=flavour_scheme | frozenset([q+'bar' for q in flavour_scheme]) | gluons
 proton=massless_QCD
 jet=massless_QCD
+if jet != proton:
+    raise ValueError("definition of 'jet' and 'proton' should be the same")
+pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','dbar':'-1','ubar':'-2','sbar':'-3','cbar':'-4','bbar':'-5','tbar':'-6','a':'22','z':'23','w+':'24','w-':'-24','e+':'-11','e-':'11','mu+':'-13','mu-':'13','ta+':'-15','ta-':'15','ve':'12','ve~':'-12','vm':'14','vm~':'-14','vt':'16','vt~':'-16','h':'25'}
+anti_particle={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tbar','dbar':'d','ubar':'u','sbar':'s','cbar':'c','bbar':'b','tbar':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
 
 
-def process_proc(proc):
+def ProcessProcess(proc):
     """Function to process each 'proc' in parallel"""
     phase_space_orders_local = {}  # Local dictionary to avoid race conditions
 
@@ -34,9 +39,9 @@ def process_proc(proc):
         perm_mapped = tuple(ordered_perm[zero:] + ordered_perm[:zero])
 
         if perm_mapped in phase_space_orders_local:
-            phase_space_orders_local[perm_mapped].append((ordered_proc, ordered_perm))
+            phase_space_orders_local[perm_mapped].append((ordered_proc, ordered_perm, []))
         else:
-            phase_space_orders_local[perm_mapped] = [(ordered_proc, ordered_perm)]
+            phase_space_orders_local[perm_mapped] = [(ordered_proc, ordered_perm, [])]
 
     return phase_space_orders_local
 
@@ -131,13 +136,13 @@ def count_matching_elements(main_list,check_list):
 def ValidProc(proc):
     nq=count_matching_elements(proc,quarks)
     naq=count_matching_elements(proc,antiquarks)
-    if nq > 2 : return False
-    if naq > 2 : return False
-    if nq != naq : return False
-    # check flavour changing currents:
+    if nq > 2 : return False    # at most two quarks
+    if naq > 2 : return False   # at most two anti-quarks
+    if nq != naq : return False # same number of quarks and anti-quarks
+    # remove flavour changing currents:
     for q in quarks:
         if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'bar']) : return False
-    # need at least one quark line if there are colour singlets
+    # need at least one quark line if there are colour singlets:
     if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
     return True
 
@@ -177,23 +182,7 @@ def GenerateAllProcs(unique_procs):
                 procs.add(tuple(pair2+remaining))
     return procs
 
-if __name__ == "__main__":    
-    
-    if jet != proton:
-        raise ValueError("definition of 'jet' and 'proton' should be the same")
-    
-    parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
-    parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
-    args=parser.parse_args()
-    process=ParseCollision(args.process_string)
-    
-    all_unique_procs=GenerateAllUniqueProcs(process)
-    all_procs=GenerateAllProcs(all_unique_procs)
-    
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        results = pool.map(process_proc, all_procs)  # Parallelize across procs
-    
-    # Merge all local dictionaries into one global dictionary
+def CombineResults(results):
     phase_space_orders = {}
     for result in results:
         for key, value in result.items():
@@ -201,9 +190,89 @@ if __name__ == "__main__":
                 phase_space_orders[key].extend(value)
             else:
                 phase_space_orders[key] = value
+    return phase_space_orders
+                
+def ParseArgument():
+    parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
+    parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
+    args=parser.parse_args()
+    return ParseCollision(args.process_string)
+
+def IdenticalParticleSymmetryFactor(proc):
+    i_fac=1
+    for p in all_coloured:
+        i_fac*=max(1,math.factorial(proc[2:].count(p)))
+    return i_fac
+
+
+def MultiChannelPartners(proc,perm,k,l):
+    all_possible_perms={perm}
+    colour_singlets_in_proc=[perm.index(i) for i,p in enumerate(proc) if p in singlets]
+    anti_quarks_in_proc=tuple([perm.index(i) for i,p in enumerate(proc) if p in antiquarks])
+    if colour_singlets_in_proc:
+        all_singlet_orders=tuple(itertools.permutations(colour_singlets_in_proc))
+    else:
+        all_singlet_orders=()
+    if len(anti_quarks_in_proc) == 1:
+        for s in all_singlet_orders:
+            order=[]
+            for i in range(len(perm)):
+                if i == anti_quarks_in_proc[0]:
+                    order.extend([perm[p] for p in list(anti_quarks_in_proc+s)])
+                elif i not in colour_singlets_in_proc:
+                    order.append(perm[i])
+            all_possible_perms.add(tuple(order))
+    elif len(anti_quarks_in_proc) == 2:
+        for j in range(len(all_singlet_orders)+1):
+            for s in all_singlet_orders:
+                order=[]
+                for i in range(len(perm)):
+                    if i == anti_quarks_in_proc[0]:
+                        order.extend([perm[p] for p in list((anti_quarks_in_proc[0],)+s[:j])])
+                    elif i == anti_quarks_in_proc[1]:
+                        order.extend([perm[p] for p in list((anti_quarks_in_proc[1],)+s[j:])])
+                    elif i not in colour_singlets_in_proc:
+                        order.append(perm[i])
+                all_possible_perms.add(tuple(order))
+    mt=[]
+    for o in all_possible_perms:
+        found=False
+        for i,key in enumerate(all_keys_sorted):
+            for (process,order,multichannel) in phase_space_orders[key]:
+                if process == proc and order==o:
+                    if found:
+                        print('FOUND DOUBLE')
+                    else:
+                        Found=True
+                        mt.append(i)
+#                        print('found',process,proc,order,o,i)
+        if not Found:
+            print('NOT FOUND')
+    phase_space_orders[k][l]=(proc,perm,tuple(sorted(mt)))
+#    print(proc,':',all_singlet_orders,':',anti_quarks_in_proc,':',all_possible_perms)
+
+def DetermineMultiChannelPartnersAndSymmetryFactor():
+    for j,key in enumerate(all_keys_sorted):
+        for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
+            MultiChannelPartners(process,order,key,i)
+    for key in all_keys_sorted:
+        for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
+            phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process))
+
+
+if __name__ == "__main__":    
+    process=ParseArgument()
+    all_unique_procs=GenerateAllUniqueProcs(process)
+    all_procs=GenerateAllProcs(all_unique_procs)
     
-    print(len(phase_space_orders.keys()))
-    for key in phase_space_orders.keys():
-        print(key,':',len(phase_space_orders[key]))
-        #    print(key,':',phase_space_orders[key])
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
+    phase_space_orders=CombineResults(results)
+    all_keys_sorted=sorted(phase_space_orders.keys())
+
+    DetermineMultiChannelPartnersAndSymmetryFactor()
+
+    for key in all_keys_sorted:
+#        print(key,':',len(phase_space_orders[key]))
+        print(key,':',phase_space_orders[key])
         
