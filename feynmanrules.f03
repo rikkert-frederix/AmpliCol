@@ -673,7 +673,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
-    wfg(1:4)=prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs2(1)*(-wfg1(1:4)+TMP*M2*pw(0:3))
+    wfg(1:4)=prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs2(1)*(wfg1(1:4))-TMP*M2*pw(0:3)
   end subroutine GluonScalartoGluon_hzz
 
   subroutine ScalarGluontoGluon_hzz(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
@@ -688,7 +688,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
-    wfg(1:4)= prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs1(1)*(-wfg2(1:4)+TMP*M2*pw(0:3))
+    wfg(1:4)= prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs1(1)*(wfg2(1:4)-TMP*M2*pw(0:3))
   end subroutine ScalarGluontoGluon_hzz
 
   subroutine GluonGluontoScalar_hzz(wfg1,wfg2,wfs,coupl)
@@ -714,7 +714,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
-    wfg(1:4)=prefact*coupl(1)/sw*wfs2(1)*(-wfg1(1:4)+TMP*M2*pw(0:3))
+    wfg(1:4)=prefact*coupl(1)/sw*wfs2(1)*(wfg1(1:4)-TMP*M2*pw(0:3))
   end subroutine GluonScalartoGluon_hww
 
   subroutine ScalarGluontoGluon_hww(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
@@ -729,7 +729,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
-    wfg(1:4)=prefact*coupl(1)/sw*wfs1(1)*(-wfg2(1:4)+TMP*M2*pw(0:3))
+    wfg(1:4)=prefact*coupl(1)/sw*wfs1(1)*(wfg2(1:4)-TMP*M2*pw(0:3))
   end subroutine ScalarGluontoGluon_hww
 
   subroutine GluonGluontoScalar_hww(wfg1,wfg2,wfs,coupl)
