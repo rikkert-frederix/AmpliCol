@@ -993,10 +993,10 @@ contains
 
          ! add a w+w+ to T1 vertex
          if (sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type) .gt. 0) then
-            call add_vertex(101,-101)
+            call add_vertex(201,-101)
          ! add a w-w- to T5 vertex
          elseif (sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type) .lt. 0) then
-            call add_vertex(105,-105)
+            call add_vertex(205,-105)
          endif
 
          if (abs(sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type)) .gt. 0) return
@@ -1005,7 +1005,7 @@ contains
          call add_vertex(25,23,coupl,pm%get_mass(23))
 
          ! add a w+w- to T2 vertex
-         call add_vertex(102,-102)
+         call add_vertex(202,-102)
 
          coupl=(/80.419002445756163d0,0d0/)
          ! add w-w to higgs vertex
@@ -1016,9 +1016,9 @@ contains
          call add_vertex(26,current_list_local(ic1)%type)
 
          ! add a w+z to T3 vertex
-         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(103,-103)
+         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(203,-103)
          ! add a w-z to T5 vertex
-         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(105,-105)
+         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(205,-105)
 
 
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
@@ -1027,44 +1027,44 @@ contains
 
          !stop 3
          ! add a w+z to T3 vertex
-         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(103,-103)
+         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(203,-103)
          ! add a w-z to T5 vertex
-         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(105,-105)
+         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(205,-105)
 
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a a-w to a vertex
          call add_vertex(28,current_list_local(ic1)%type)
 
          ! add a w+a to T4 vertex
-         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(104,-104)
+         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(204,-104)
          ! add a w-a to T7 vertex
-         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(107,-107)
+         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(207,-107)
 
       elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a w-a to a vertex
          call add_vertex(29,current_list_local(ic2)%type)
 
          ! add a w+a to T4 vertex
-         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(104,-104)
+         if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(204,-104)
          ! add a w-a to T7 vertex
-         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(107,-107)
+         if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(207,-107)
 
       ! remaining boson-boson to tensor vertices
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a z-a to T9 vertex
-         call add_vertex(109,-109)
+         call add_vertex(209,-109)
       elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a z-a to T9 vertex
-         call add_vertex(109,-109)
+         call add_vertex(209,-109)
 
       elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a a-a to T10 vertex
-         call add_vertex(110,-110)
+         call add_vertex(210,-110)
 
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a z-z to T8 vertex
          !stop 2
-         call add_vertex(108,-108)
+         call add_vertex(208,-108)
 
          coupl=(/80.419002445756163d0,0d0/)
          ! add z-z to higgs vertex
@@ -1281,24 +1281,41 @@ contains
          if (pm%get_mass(current_list_local(ic2)%type) .gt. 0d0) then
            call add_vertex(79,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
          endif
+
+         ! add a z-higgs tensor 
+         call add_vertex(211,-111)
+
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
          ! add a z-higgs vertex
          coupl=(/pm%get_mass(current_list_local(ic1)%type),0d0/)
          if (pm%get_mass(current_list_local(ic1)%type) .gt. 0d0) then
            call add_vertex(80,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
          endif
+
+         ! add a higgs-h tensor
+         call add_vertex(211,-111)
+
       elseif (is_scalar(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a higgs-w vertex
          coupl=(/80.419002445756163d0,0d0/)
          if (pm%get_mass(current_list_local(ic2)%type) .gt. 0d0) then
            call add_vertex(81,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
          endif
+
+         ! add a higgs-w tensor
+         if (sign(1,current_list_local(ic2)%type).gt.0d0) call add_vertex(213,-113)
+         if (sign(1,current_list_local(ic2)%type).lt.0d0) call add_vertex(214,-114)
+
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
          ! add a w-higgs vertex
          coupl=(/80.419002445756163d0,0d0/)
          if (pm%get_mass(current_list_local(ic1)%type) .gt. 0d0) then
            call add_vertex(82,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
          endif
+
+         ! add a w-higgs tensor
+         if (sign(1,current_list_local(ic2)%type).gt.0d0) call add_vertex(213,-113)
+         if (sign(1,current_list_local(ic2)%type).lt.0d0) call add_vertex(214,-114)
 
       elseif (is_scalar(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
          ! add a higgs-higgs vertex
@@ -1307,6 +1324,67 @@ contains
             call add_vertex(83,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
          endif
 
+         ! add a z-higgs to T12
+         call add_vertex(212,-112)
+
+      ! hHZZ decomposition
+      elseif (is_tensor_t8(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add T8-higgs vertex
+         call add_vertex(86,current_list_local(ic2)%type)
+       elseif (is_tensor_t11(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add T11-higgs to z vertex
+         call add_vertex(87,23)
+      elseif (is_tensor_t11(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add T11-z to higgs vertex
+         call add_vertex(88,25)
+      elseif (is_tensor_t11(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add T12-z to z vertex
+         call add_vertex(89,23)
+
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t8(current_list_local(ic2)%type)) then
+         ! add higgs-T8 vertex
+         call add_vertex(90,current_list_local(ic2)%type)
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t11(current_list_local(ic2)%type)) then
+         ! add higgs-T11  to z vertex
+         call add_vertex(91,23)
+      elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_tensor_t11(current_list_local(ic2)%type)) then
+         ! add z-T11 to higgs vertex
+         call add_vertex(92,25)
+      elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_tensor_t11(current_list_local(ic2)%type)) then
+         ! add z-T12 to z vertex
+         call add_vertex(93,23)
+
+      elseif (is_tensor_t2(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add T2-h to h vertex
+         call add_vertex(94,25)
+      elseif (is_tensor_t13(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add T13-h to w+ vertex
+         call add_vertex(95,24)
+      elseif (is_tensor_t13(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add T13-w+ to h vertex
+         if (sign(1,current_list_local(ic2)%type).gt.0d0) call add_vertex(96,25)
+      elseif (is_tensor_t14(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add T14-h to w- vertex
+         call add_vertex(97,-24)
+      elseif (is_tensor_t14(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add T14-w- to h vertex
+         if (sign(1,current_list_local(ic2)%type).lt.0d0) call add_vertex(98,25)
+
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t2(current_list_local(ic2)%type)) then
+         ! add h-T2 to h vertex
+         call add_vertex(99,25)
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t13(current_list_local(ic2)%type)) then
+         ! add h-T13 to w+ vertex
+         call add_vertex(100,24)
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t13(current_list_local(ic2)%type)) then
+         ! add w+-T13 to h vertex
+         if (sign(1,current_list_local(ic1)%type).gt.0d0) call add_vertex(101,25)
+      elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t14(current_list_local(ic2)%type)) then
+         ! add h-T14 to w- vertex
+         call add_vertex(102,-24)
+      elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t13(current_list_local(ic2)%type)) then
+         ! add w--T14 to h vertex
+         if (sign(1,current_list_local(ic1)%type).lt.0d0) call add_vertex(103,25)
 
 
       endif
@@ -2610,7 +2688,7 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
 
-          elseif(this%interaction_list(iv)%type.ge.101 .and. this%interaction_list(iv)%type.le.110) then
+          elseif(this%interaction_list(iv)%type.ge.201 .and. this%interaction_list(iv)%type.le.214) then
              call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:6))
@@ -2731,6 +2809,28 @@ contains
              call GluonGluontoScalar_hww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1),this%interaction_list(iv)%coupl)
+
+
+
+           ! HHZZ
+           elseif(this%interaction_list(iv)%type.ge.86 .and. this%interaction_list(iv)%type.le.89) then
+             call TensorGluontoGluon_hhzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%interaction_list(iv)%val_c(1:4))
+           elseif(this%interaction_list(iv)%type.ge.90 .and. this%interaction_list(iv)%type.le.93) then
+             call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
+                     this%interaction_list(iv)%val_c(1:4))
+
+           ! HHWW
+           elseif(this%interaction_list(iv)%type.ge.94 .and. this%interaction_list(iv)%type.le.98) then
+             call TensorGluontoGluon_hhww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%interaction_list(iv)%val_c(1:4))
+           elseif(this%interaction_list(iv)%type.ge.99 .and. this%interaction_list(iv)%type.le.103) then
+             call GluonTensortoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
+                     this%interaction_list(iv)%val_c(1:4))
          else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -2768,7 +2868,7 @@ contains
           elseif (this%current_list(ic)%type.eq.-21) then
              ! the non-propagating tensor current
              call combine_interactions(6)
-          elseif (this%current_list(ic)%type.ge.-110 .and.this%current_list(ic)%type.le.-101) then
+          elseif (this%current_list(ic)%type.ge.-114 .and.this%current_list(ic)%type.le.-101) then
              ! the non-propagating (massive vector boson) tensor current
              call combine_interactions(6)
           elseif ((this%current_list(ic)%type.le.-1.and.this%current_list(ic)%type.ge.-6)) then
