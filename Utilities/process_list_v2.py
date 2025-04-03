@@ -13,8 +13,8 @@ quarks=frozenset({'d','u','s','c','b','t'})
 antiquarks=frozenset({'dbar','ubar','sbar','cbar','bbar','tbar'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
-#flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
-flavour_scheme=frozenset({'d','u'}) # all the massless quarks
+flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+#flavour_scheme=frozenset({'d','u'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
 massless_QCD=flavour_scheme | frozenset([q+'bar' for q in flavour_scheme]) | gluons
 proton=massless_QCD
@@ -23,6 +23,8 @@ if jet != proton:
     raise ValueError("definition of 'jet' and 'proton' should be the same")
 pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','dbar':'-1','ubar':'-2','sbar':'-3','cbar':'-4','bbar':'-5','tbar':'-6','a':'22','z':'23','w+':'24','w-':'-24','e+':'-11','e-':'11','mu+':'-13','mu-':'13','ta+':'-15','ta-':'15','ve':'12','ve~':'-12','vm':'14','vm~':'-14','vt':'16','vt~':'-16','h':'25'}
 anti_particle={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tbar','dbar':'d','ubar':'u','sbar':'s','cbar':'c','bbar':'b','tbar':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
+sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'dbar':7,'ubar':8,'sbar':9,'cbar':10,'bbar':11,'tbar':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
+
 
 
 def ProcessProcess(proc):
@@ -259,7 +261,44 @@ def DetermineMultiChannelPartnersAndSymmetryFactor():
         for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
             phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process))
 
+def ConvertProcToString(proc):
+    process,order,multi_channel,iden=proc
+    crossed=[pdgs[p] if i>1 else pdgs[anti_particle[p]] for i,p in enumerate(process)]
+    line=' '.join(crossed)
+    line=line+'   '+' '.join([str(o+1) for o in order])
+    line=line+'   '+str(len(multi_channel))
+    line=line+'   '+' '.join([str(m+1) for m in multi_channel])
+    line=line+'   '+str(iden)
+    return line
 
+def sort_by_pdg_codes(proc):
+    process=proc[0]
+    nq=count_matching_elements(process,quarks)
+    if nq == 2:
+        quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
+        same_flavour=quarks_in_proc[0]==quarks_in_proc[1]
+    else:
+        same_flavour=False
+    val=0
+    val+=nq*2
+    if same_flavour : val=val+1
+    return (val,[sort_particles[p] for p in process]) # first sort by 'val', then by (modified) PDG codes.
+
+def WriteIntoList():
+    towrite=[]
+    towrite.append(str(len(all_keys_sorted)))
+    towrite.append('')
+    for i,key in enumerate(all_keys_sorted):
+        towrite.append(str(i+1)+'   '+str(len(phase_space_orders[key]))+'   '+' '.join([str(k+1) for k in key]))
+        process_list=sorted(phase_space_orders[key],key=sort_by_pdg_codes)
+        for proc in process_list:
+            process_line=ConvertProcToString(proc)
+            towrite.append(process_line)
+        towrite.append('')
+        towrite.append('')
+        towrite.append('')
+    return towrite
+    
 if __name__ == "__main__":    
     process=ParseArgument()
     all_unique_procs=GenerateAllUniqueProcs(process)
@@ -269,10 +308,8 @@ if __name__ == "__main__":
         results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
     phase_space_orders=CombineResults(results)
     all_keys_sorted=sorted(phase_space_orders.keys())
-
     DetermineMultiChannelPartnersAndSymmetryFactor()
+    towrite=WriteIntoList()
 
-    for key in all_keys_sorted:
-#        print(key,':',len(phase_space_orders[key]))
-        print(key,':',phase_space_orders[key])
-        
+    with open('processes_v2.txt','w') as f:
+        f.write('\n'.join(towrite))
