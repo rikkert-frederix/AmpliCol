@@ -110,13 +110,21 @@ def OrderProcPerm(proc,perm):
     sorted_elements=sorted(elements_to_order)
     for i, val in zip(indices,sorted_elements):
         perm_mapped[i]=val
-    perm_ordered=tuple(perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero])
+    perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero]
     
     proc_ordered=[None]*len(proc)
     for i in range(len(perm_ordered)):
         proc_ordered[perm_ordered[i]]=proc[perm[i]]
-
-    return tuple(proc_ordered),perm_ordered
+        
+    # if there are two quark lines there are two options for the order. Pick the right one
+    if count_matching_elements(proc,quarks) == 2:
+        for q in quarks:
+            qi=[(i+1,j) for i,j in enumerate(perm_ordered[1:]) if proc_ordered[j] == q]
+            if qi:
+                break
+        if qi[0][1] < perm_ordered[0]:
+            perm_ordered=perm_ordered[qi[0][0]:]+perm_ordered[:qi[0][0]]
+    return tuple(proc_ordered),tuple(perm_ordered)
 
 
 def ParseCollision(input_string):
@@ -245,10 +253,10 @@ def MultiChannelPartners(proc,perm,k,l):
                     if found:
                         print('FOUND DOUBLE')
                     else:
-                        Found=True
+                        found=True
                         mt.append(i)
 #                        print('found',process,proc,order,o,i)
-        if not Found:
+        if not found:
             print('NOT FOUND')
     phase_space_orders[k][l]=(proc,perm,tuple(sorted(mt)))
 #    print(proc,':',all_singlet_orders,':',anti_quarks_in_proc,':',all_possible_perms)
@@ -264,15 +272,14 @@ def DetermineMultiChannelPartnersAndSymmetryFactor():
 def ConvertProcToString(proc):
     process,order,multi_channel,iden=proc
     crossed=[pdgs[p] if i>1 else pdgs[anti_particle[p]] for i,p in enumerate(process)]
-    line=' '.join(crossed)
-    line=line+'   '+' '.join([str(o+1) for o in order])
-    line=line+'   '+str(len(multi_channel))
+    line=str(len(multi_channel))
     line=line+'   '+' '.join([str(m+1) for m in multi_channel])
+    line=line+'   '+' '.join(crossed)
+    line=line+'   '+' '.join([str(o+1) for o in order])
     line=line+'   '+str(iden)
     return line
 
-def sort_by_pdg_codes(proc):
-    process=proc[0]
+def sort_by_pdg_codes(process):
     nq=count_matching_elements(process,quarks)
     if nq == 2:
         quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
@@ -284,13 +291,17 @@ def sort_by_pdg_codes(proc):
     if same_flavour : val=val+1
     return (val,[sort_particles[p] for p in process]) # first sort by 'val', then by (modified) PDG codes.
 
-def WriteIntoList():
+def sort_by_pdg_codes2(proc):
+    process=proc[0]
+    return sort_by_pdg_codes(process)
+
+def WriteAllProcsIntoList():
     towrite=[]
     towrite.append(str(len(all_keys_sorted)))
     towrite.append('')
     for i,key in enumerate(all_keys_sorted):
-        towrite.append(str(i+1)+'   '+str(len(phase_space_orders[key]))+'   '+' '.join([str(k+1) for k in key]))
-        process_list=sorted(phase_space_orders[key],key=sort_by_pdg_codes)
+        towrite.append(str(i+1)+'   '+str(len(phase_space_orders[key]))+'   '+str(max(len(proc[2]) for proc in phase_space_orders[key]))+'   '+' '.join([str(k+1) for k in key]))
+        process_list=sorted(phase_space_orders[key],key=sort_by_pdg_codes2)
         for proc in process_list:
             process_line=ConvertProcToString(proc)
             towrite.append(process_line)
@@ -298,6 +309,30 @@ def WriteIntoList():
         towrite.append('')
         towrite.append('')
     return towrite
+
+def Add2qq_dfProcesses(sorted_procs):
+    # add the 2qq_df processes with the two incoming particles interchanged:
+    i=0
+    while i < len(sorted_procs):
+        proc = sorted_procs[i]
+        if proc[2] in quarks and proc[3] in quarks and proc[2] != proc[3]:
+            swapped_proc=proc[:]
+            swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
+            sorted_procs.insert(i+1,swapped_proc)
+            i+=1
+        i+=1
+    return sorted_procs
+
+def WriteUniqueProcsIntoList(procs):
+    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
+    sorted_procs=Add2qq_dfProcesses(sorted_procs)
+    line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
+    for proc in sorted_procs:
+        line.append(' '.join(pdgs[p] for p in proc))
+    line.append('')
+    line.append('')
+    line.append('')
+    return line
     
 if __name__ == "__main__":    
     process=ParseArgument()
@@ -308,8 +343,11 @@ if __name__ == "__main__":
         results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
     phase_space_orders=CombineResults(results)
     all_keys_sorted=sorted(phase_space_orders.keys())
-    DetermineMultiChannelPartnersAndSymmetryFactor()
-    towrite=WriteIntoList()
-
+    DetermineMultiChannelPartnersAndSymmetryFactor() # updates the phase_space_orders dictionary
+    towriteunique=WriteUniqueProcsIntoList(all_unique_procs)
+    towriteallprocs=WriteAllProcsIntoList() # puts the phase_space_orders dictionary in a writable list
+    
     with open('processes_v2.txt','w') as f:
-        f.write('\n'.join(towrite))
+        f.write('\n'.join(towriteunique))
+        f.write('\n'.join(towriteallprocs))
+        f.write('\n')

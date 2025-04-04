@@ -227,8 +227,10 @@ contains
                   cycle
                elseif (popcnt(proc).ne.1) then
                   write (*,*) 'A given amplitude should only contribute to one process'
-                  write (*,*) proc,icur,jcur,current_list_local(icur)%iproc,current_list_local(jcur)%iproc
-                  write (*,*) current_list_local(icur)%ext_type(1:n-1),current_list_local(jcur)%ext_type(1)
+                  write (*,*) proc,icur,jcur
+                  write (*,'(a,i40,B64)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
+                  write (*,'(a,i40,B64)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
+                  write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
                   stop 1
                elseif (.not. btest(proc,iproc-1)) then
                   ! one process, but it is not equal to process 'iproc'
@@ -2107,7 +2109,7 @@ contains
                enddo
             else   
              do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
                      this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
                                          this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
