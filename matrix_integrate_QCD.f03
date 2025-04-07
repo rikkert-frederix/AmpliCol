@@ -380,8 +380,9 @@ contains
     real(kind=8), dimension(ndim) :: x
     real(kind=8), dimension(nintegrals) :: f1
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
+    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc,i
-    real(kind=8) :: vol,cuts_wgt,colour_singlet_multichannel_weight
+    real(kind=8) :: vol,cuts_wgt
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
 
@@ -481,7 +482,7 @@ contains
     endif
 
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
-    weight=vol*pgl(ichan)%phase_space%jac*conv*colour_singlet_multichannel_weight
+    weight=vol*pgl(ichan)%phase_space%jac*conv
 
     ! multiply by the strong coupling
     if (pgl(ichan)%amps%n_sing(1).lt.next-2) then
@@ -494,6 +495,7 @@ contains
     endif
 
     val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+    val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
     
     ! Apply the weight from the cuts
     if (smooth_cuts) val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*cuts_wgt
@@ -595,33 +597,39 @@ contains
     real(kind=8),dimension(0:3,next),intent(in) :: p
     real(kind=8),dimension(ndim),intent(in) :: x
     real(kind=8),intent(in) :: jac
-    real(kind=8),intent(out) :: weight
-    integer :: i
+    real(kind=8),dimension(nproc),intent(out) :: weight
+    integer :: i,iproc
     real(kind=8) :: vol_ichan,vol
-    if (all(ichan.ne.chans(:,1))) then
-       write (*,*) 'Current channel not among the multi-channel channels',ichan
-       write (*,*) chans
-       stop 1
-    endif
-    if (chans(0,1).eq.1) then
-       weight=1d0
+    if (.not. use_colour_singlet_multichannel) then
+       weight(1:nproc)=1d0/dble(chans(0,1:nproc))
        return
     endif
-    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
-    weight=1d0
-    do i=1,chans(0,1)
-       if (chans(i,1).eq.ichan) cycle
-       call pgl(chans(i,1))%phase_space%compute_x_from_momenta(p)
-       if (pgl(chans(i,1))%phase_space%jac.lt.0d0) then
-          ! The x's could not be correctly computed from the momenta
-          write (*,*) 'WARNING: multi-channel weight set to 1'
-          weight=1d0
-          return
+    do iproc=1,nproc
+       if (all(ichan.ne.chans(1:chans(0,iproc),iproc))) then
+          write (*,*) 'Current channel not among the multi-channel channels',ichan,iproc
+          write (*,*) chans(:,iproc)
+          stop 1
        endif
-       call mint_get_jacobian_from_x(chans(i,1),pgl(chans(i,1))%phase_space%x,vol)
-       weight=weight+jac/pgl(chans(i,1))%phase_space%jac * vol_ichan/vol
+       if (chans(0,iproc).eq.1) then
+          weight(iproc)=1d0
+          cycle
+       endif
+       call mint_get_jacobian_from_x(ichan,x,vol_ichan)
+       weight(iproc)=1d0
+       do i=1,chans(0,iproc)
+          if (chans(i,iproc).eq.ichan) cycle
+          call pgl(chans(i,iproc))%phase_space%compute_x_from_momenta(p)
+          if (pgl(chans(i,iproc))%phase_space%jac.lt.0d0) then
+             ! The x's could not be correctly computed from the momenta
+             write (*,*) 'WARNING: multi-channel weight set to 1'
+             weight(iproc)=1d0
+             return
+          endif
+          call mint_get_jacobian_from_x(chans(i,iproc),pgl(chans(i,iproc))%phase_space%x,vol)
+          weight(iproc)=weight(iproc)+jac/pgl(chans(i,iproc))%phase_space%jac * vol_ichan/vol
+       enddo
+       weight(iproc)=1d0/weight(iproc)
     enddo
-    weight=1d0/weight
   end subroutine compute_multichannel_weight
 
   subroutine setup_helicity_filter(pgl)
