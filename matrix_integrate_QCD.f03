@@ -182,7 +182,7 @@ program matrix_integrate_QCD
                 pgl(igroup)%spin,pgl(igroup)%orders,phys_model,read_proc_from_file)
      endif
 
-     if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
+     !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
      
      if (write_amps_to_file) then
         call pgl(igroup)%amps%write_init_amps_to_file(next,32)
@@ -194,11 +194,11 @@ program matrix_integrate_QCD
      ! Total number of amplitudes is stored in 'nhel'
      pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
 
-     if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
-             allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
-     else
+     !if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
+     !        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
+     !else
              allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
-     endif
+     !endif
 
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
 
@@ -528,11 +528,11 @@ contains
     !pgl(ichan)%phase_space%p(:,5)=(/0.1925012E+03, -0.1444587E+03, -0.3054037E+02,  0.8330936E+02/)
 
     !! u d~ > w+ w- w+
-    !pgl(ichan)%phase_space%p(:,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
-    !pgl(ichan)%phase_space%p(:,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
-    !pgl(ichan)%phase_space%p(:,3)=(/450.1093d0,  163.6474d0,  366.6460d0, -186.8727d0/)
-    !pgl(ichan)%phase_space%p(:,4)=(/360.6728d0, -17.70185d0, -335.7913d0,  102.7059d0/)
-    !pgl(ichan)%phase_space%p(:,5)=(/189.2179d0, -145.9456d0, -308.5472d0,  84.16685d0/)
+    pgl(ichan)%phase_space%p(:,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
+    pgl(ichan)%phase_space%p(:,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
+    pgl(ichan)%phase_space%p(:,3)=(/450.1093d0,  163.6474d0,  366.6460d0, -186.8727d0/)
+    pgl(ichan)%phase_space%p(:,4)=(/360.6728d0, -17.70185d0, -335.7913d0,  102.7059d0/)
+    pgl(ichan)%phase_space%p(:,5)=(/189.2179d0, -145.9456d0, -30.85472d0,  84.16685d0/)
 
     !! d d~ > a w+ w-
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
@@ -550,12 +550,12 @@ contains
     !pgl(ichan)%phase_space%p(:,5)=(/0.2303588E+03, -0.1296090E+03, -0.2740095E+02,  0.7474551E+02/)
 
     !! d d~ > h z
-    pgl(ichan)%phase_space%p(:,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
-    pgl(ichan)%phase_space%p(:,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
-    pgl(ichan)%phase_space%p(:,3)=(/503.65487432799989d0,  108.23919433690230d0,  &
-                                    434.06298730574690d0, -194.72244938594719d0/)
-    pgl(ichan)%phase_space%p(:,4)=(/496.34512567200011d0, -108.23919433690232d0, &
-                                    -434.06298730574696d0,  194.72244938594713d0/)
+    !pgl(ichan)%phase_space%p(:,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
+    !pgl(ichan)%phase_space%p(:,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
+    !pgl(ichan)%phase_space%p(:,3)=(/503.65487432799989d0,  108.23919433690230d0,  &
+    !                                434.06298730574690d0, -194.72244938594719d0/)
+    !pgl(ichan)%phase_space%p(:,4)=(/496.34512567200011d0, -108.23919433690232d0, &
+    !                                -434.06298730574696d0,  194.72244938594713d0/)
 
     !! u d~ > h w+
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
@@ -564,11 +564,11 @@ contains
     !pgl(ichan)%phase_space%p(:,4)=(/0.4954211E+03, -0.1084508E+03, -0.4349116E+03,  0.1951031E+03/)
 
     !! u d~ > w+ h h
-    pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
-    pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-    pgl(ichan)%phase_space%p(:,3)=(/0.4330924E+03,  0.1572524E+03,  0.3523182E+03, -0.1795701E+03/)
-    pgl(ichan)%phase_space%p(:,4)=(/0.3602359E+03, -0.1701010E+02, -0.3226692E+03,  0.9869231E+02/)
-    pgl(ichan)%phase_space%p(:,5)=(/0.2066717E+03, -0.1402423E+03, -0.2964897E+02,  0.8087776E+02/)
+    !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.4330924E+03,  0.1572524E+03,  0.3523182E+03, -0.1795701E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.3602359E+03, -0.1701010E+02, -0.3226692E+03,  0.9869231E+02/)
+    !pgl(ichan)%phase_space%p(:,5)=(/0.2066717E+03, -0.1402423E+03, -0.2964897E+02,  0.8087776E+02/)
 
     !! d d~ > z h h
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
@@ -642,8 +642,8 @@ contains
        enddo
     endif
 
-    write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
-               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+    !write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
+    !           *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
@@ -1520,7 +1520,7 @@ contains
     integer :: it,lim
 
     lim=pgl%nproc
-    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
+    !if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
     do iproc=1,lim
        fac=0d0
        do i=1,next

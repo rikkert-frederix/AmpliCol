@@ -20,7 +20,7 @@ contains
     real(kind=8) :: wmass,wwidth
     real(kind=8) :: hmass,hwidth
 
-    this%npart=27 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 10 tensors for EW bosons
+    this%npart=26 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 13 tensors for EW bosons
     allocate(this%particle_list(this%npart))
     ! 5 massless quarks
     do i=1,5
@@ -156,34 +156,29 @@ contains
     this%particle_list(23)%spin=1
     this%particle_list(23)%anti_type=25
 
-    ! zH tensor T11
+    
+    
+    ! HH tensor T11
     this%particle_list(24)%type=-111
     this%particle_list(24)%mass=0d0
     this%particle_list(24)%width=0d0
     this%particle_list(24)%spin=-1
     this%particle_list(24)%anti_type=-111
 
-    ! HH tensor T12
+    ! zZ scalar tensor T12
     this%particle_list(25)%type=-112
     this%particle_list(25)%mass=0d0
     this%particle_list(25)%width=0d0
     this%particle_list(25)%spin=-1
     this%particle_list(25)%anti_type=-112
 
-    ! w+H tensor T13
+    ! WW scalar tensor T13
     this%particle_list(26)%type=-113
     this%particle_list(26)%mass=0d0
     this%particle_list(26)%width=0d0
     this%particle_list(26)%spin=-1
     this%particle_list(26)%anti_type=-113
 
-    ! w-H tensor T14
-    this%particle_list(27)%type=-114
-    this%particle_list(27)%mass=0d0
-    this%particle_list(27)%width=0d0
-    this%particle_list(27)%spin=-1
-    this%particle_list(27)%anti_type=-114
-    
   end subroutine init_part
   integer function get_antipart(this,ipdg)
     implicit none
@@ -301,8 +296,7 @@ contains
         is_tensor_t10(i).or.&
         is_tensor_t11(i).or.&
         is_tensor_t12(i).or.&
-        is_tensor_t13(i).or.&
-        is_tensor_t14(i)) then
+        is_tensor_t13(i)) then
        is_tensor_v=.true.
     else
        is_tensor_v=.false.
@@ -425,15 +419,6 @@ contains
        is_tensor_t13=.false.
     endif
   end function is_tensor_t13
-  logical function is_tensor_t14(i)
-    implicit none
-    integer :: i
-    if (i.eq.-114) then
-       is_tensor_t14=.true.
-    else
-       is_tensor_t14=.false.
-    endif
-  end function is_tensor_t14
   logical function is_singlet(i)
     implicit none
     integer :: i

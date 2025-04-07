@@ -552,17 +552,17 @@ contains
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
 
-    TMP4 = pwf1(0)**3-pwf1(1)**3-pwf1(2)**3-pwf1(3)**3
-    TMP5 = pwf2(0)**3-pwf2(1)**3-pwf2(2)**3-pwf2(3)**3
+    TMP4 = pwf1(0)**2-pwf1(1)**2-pwf1(2)**2-pwf1(3)**2
+    TMP5 = pwf2(0)**2-pwf2(1)**2-pwf2(2)**2-pwf2(3)**2
     TMP6 = (wf1(1)*pwf1(0)-wf1(2)*pwf1(1)-wf1(3)*pwf1(2)-wf1(4)*pwf1(3))
     TMP7 = (wf2(1)*pwf2(0)-wf2(2)*pwf2(1)-wf2(3)*pwf2(2)-wf2(4)*pwf2(3))
 
     M2 = 0d0
     if (wm.ne.0d0) M2=1d0/wm**2
     TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
-    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4)&
-                      -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
+    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))!&
+    !                   +TMP6*wf2(1:4)-TMP7*wf1(1:4)&
+    !                  -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
   end subroutine ThreeGluon_aww
 
   subroutine ThreeGluon_zww(wf1,pwf1,wf2,pwf2,wf,wm)
@@ -588,9 +588,9 @@ contains
     M2 = 0d0
     if (wm.ne.0d0) M2=1d0/wm**2
     wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
-                       (TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4)&
-                      -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
+                       (TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4)))!&
+    !                   +TMP6*wf2(1:4)-TMP7*wf1(1:4)&
+    !                  -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
   end subroutine ThreeGluon_zww
 
   subroutine TensorGluontoGluon_wwww(wfT1,wfg2,wfg)
@@ -605,6 +605,19 @@ contains
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
   end subroutine TensorGluontoGluon_wwww
+  subroutine GluonTensortoGluon_wwww(wfg1,wfT2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(6) :: wfT2
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(1d0/sw**2)
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+  end subroutine GluonTensortoGluon_wwww
+
   subroutine TensorGluontoGluon_wwzz(wfT1,wfg2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
@@ -617,6 +630,19 @@ contains
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
   end subroutine TensorGluontoGluon_wwzz
+  subroutine GluonTensortoGluon_wwzz(wfg1,wfT2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(6) :: wfT2
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(-(1d0-sw**2)/sw**2)
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+  end subroutine GluonTensortoGluon_wwzz
+
   subroutine TensorGluontoGluon_wwaz(wfT1,wfg2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
@@ -629,6 +655,19 @@ contains
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
   end subroutine TensorGluontoGluon_wwaz
+  subroutine GluonTensortoGluon_wwaz(wfg1,wfT2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(6) :: wfT2
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(dsqrt(1d0-sw**2)/sw)
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+  end subroutine GluonTensortoGluon_wwaz
+
   subroutine TensorGluontoGluon_wwaa(wfT1,wfg2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
@@ -641,6 +680,19 @@ contains
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
   end subroutine TensorGluontoGluon_wwaa
+  subroutine GluonTensortoGluon_wwaa(wfg1,wfT2,wfg)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(6) :: wfT2
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    complex(kind=8) :: TMP1
+    TMP1= prefact*(-1d0)
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
+  end subroutine GluonTensortoGluon_wwaa
+
   subroutine TensorGluontoGluon_hhww(wfT1,wfg2,wfg)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
@@ -696,7 +748,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
-    wfg(1:4)=prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs2(1)*(wfg1(1:4))-TMP*M2*pw(0:3)
+    wfg(1:4)=prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs2(1)*(wfg1(1:4))!-TMP*M2*pw(0:3)
   end subroutine GluonScalartoGluon_hzz
 
   subroutine ScalarGluontoGluon_hzz(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
@@ -711,7 +763,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
-    wfg(1:4)= prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs1(1)*(wfg2(1:4)-TMP*M2*pw(0:3))
+    wfg(1:4)= prefact*coupl(1)/(sw*dsqrt(1d0-sw**2))*wfs1(1)*(wfg2(1:4))!-TMP*M2*pw(0:3))
   end subroutine ScalarGluontoGluon_hzz
 
   subroutine GluonGluontoScalar_hzz(wfg1,wfg2,wfs,coupl)
@@ -737,7 +789,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
-    wfg(1:4)=prefact*coupl(1)/sw*wfs2(1)*(wfg1(1:4)-TMP*M2*pw(0:3))
+    wfg(1:4)=prefact*coupl(1)/sw*wfs2(1)*(wfg1(1:4))!-TMP*M2*pw(0:3))
   end subroutine GluonScalartoGluon_hww
 
   subroutine ScalarGluontoGluon_hww(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
@@ -752,7 +804,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pw(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
-    wfg(1:4)=prefact*coupl(1)/sw*wfs1(1)*(wfg2(1:4)-TMP*M2*pw(0:3))
+    wfg(1:4)=prefact*coupl(1)/sw*wfs1(1)*(wfg2(1:4))!-TMP*M2*pw(0:3))
   end subroutine ScalarGluontoGluon_hww
 
   subroutine GluonGluontoScalar_hww(wfg1,wfg2,wfs,coupl)
@@ -774,7 +826,6 @@ contains
     real(kind=8) :: sm
     wfs(1)=-prefact*(3d0/2d0)/sw*(sm**2/coupl(1))*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar
-
 
 
 
