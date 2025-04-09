@@ -741,7 +741,12 @@ contains
             ! constraint on the allowed value of this%invm(i), since Ei>ETmin(i)
             shatmin=max(shatmin,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*this%ETmin(i)-this%sqrtshat))
             Eimax=this%sqrtshat-this%ETmin(ir) ! maximum energy for i
-            shatmax=min(shatmax,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
+            if (popcnt(ir).eq.1) then
+               shatmax=min(shatmax,this%invm(ir)+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
+            else
+               shatmax=min(shatmax,Eimax**2)
+            endif
+!!$            shatmax=min(shatmax,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
          endif
          call generate_mass(i,shatmin,shatmax)
          if (debug) then
@@ -1027,6 +1032,7 @@ contains
     real(kind=8),dimension(0:3,this%next),intent(in) :: p
     real(kind=8) :: ycm
     integer :: ix
+    if (debug) write (*,*) 'computing x from momenta'
     this%jac=1d0
     ix=0
     ! Fill the full momentum array, including all possible
@@ -1175,8 +1181,13 @@ contains
          if (popcnt(i+ir).eq.this%next-2) then
             shatmin=max(shatmin,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*this%ETmin(i)-this%sqrtshat))
             Eimax=this%sqrtshat-this%ETmin(ir) ! maximum energy for i
-            shatmax=min(shatmax,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
+            if (popcnt(ir).eq.1) then
+               shatmax=min(shatmax,this%invm(ir)+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
+            else
+               shatmax=min(shatmax,Eimax**2)
+            endif
          endif
+         if (debug) write (*,*) 'generate_mass_inverse gent 1',i,ir
          call generate_mass_inverse(i,shatmin,shatmax)
       endif
       if (popcnt(ir).gt.1) then
@@ -1185,6 +1196,7 @@ contains
             shatmin=max(shatmin,this%invm(i)+this%sqrtshat*(2d0*this%ETmin(ir)-this%sqrtshat))
             shatmax=min(shatmax,this%invm(i)+this%sqrtshat*(this%sqrtshat-2d0*max(sqrt(this%invm(i)),this%ETmin(i))))
          endif
+         if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
       endif
       call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
@@ -1223,6 +1235,9 @@ contains
          write (*,*) 'tmin.ge.tmax in gent_one_step_inverse',tmin,tmax,this%invm(ir+ib)
          stop 1
       endif
+      if (debug) then
+         write (*,*) 'ti - ir+ib',ir+ib,tmin,tmax,this%invm(ir+ib)
+      endif
       ix=ix+1
       call var_to_random(this%invm(ir+ib),ip,tmin,tmax,this%x(ix),this%jac)
       ! inverse of boosts and rotation from gentcms()
@@ -1235,6 +1250,9 @@ contains
       phi=atan(pi_rot(2)/pi_rot(1))
       if(pi_rot(1).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
+      if (debug) then
+         write (*,*) 'ti - phi',0d0,2d0*pi,phi
+      endif
       ix=ix+1
       call var_to_random(phi,0d0,0d0,2d0*pi,this%x(ix),this%jac)
       this%jac = this%jac/(4d0*sqrt(lambda(this%invm(ir+i),0d0,this%invm(ir+i+ib))))
@@ -1247,10 +1265,12 @@ contains
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax)
+         if (debug) write (*,*) 'generate_mass_inverse gens 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax)
+         if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
@@ -1260,11 +1280,17 @@ contains
       call boostm(this%pp(0:3,i),p_boost,esum,p_i)
       ! compute the angles from the momenta and use that to get the random numbers
       costh=p_i(3)/sqrt(p_i(1)**2+p_i(2)**2+p_i(3)**2)
+      if (debug) then
+         write (*,*) 'si - i',i,-1d0,1d0,costh
+      endif
       ix=ix+1
       call var_to_random(costh,0d0,-1d0,1d0,this%x(ix),this%jac)
       phi=atan(p_i(2)/p_i(1))
       if(p_i(1).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
+      if (debug) then
+         write (*,*) 'si - phi i',i,0d0,2d0*pi,phi
+      endif
       ix=ix+1
       call var_to_random(phi,0d0,0d0,2d0*pi,this%x(ix),this%jac)
       ! update the Jacobian
@@ -1298,6 +1324,9 @@ contains
          stop 1
       endif
       this%invm(i+ia)=dot(this%pp(0:3,i+ia),this%pp(0:3,i+ia))
+      if (debug) then
+         write (*,*) 'dti- i+ia',i+ia,tmin,tmax,this%invm(i+ia)
+      endif
       ix=ix+1
       call var_to_random(this%invm(i+ia),ip,tmin,tmax,this%x(ix),this%jac)
       tmin=-this%invm(ia+ib)-this%invm(i+ia)+this%invm(i)+this%invm_min(ir)
@@ -1313,11 +1342,17 @@ contains
          stop 1
       endif
       this%invm(i+ib)=dot(this%pp(0:3,i+ib),this%pp(0:3,i+ib))
+      if (debug) then
+         write (*,*) 'dti- i+ib',i+ib,tmin,tmax,this%invm(i+ib)
+      endif
       ix=ix+1
       call var_to_random(this%invm(i+ib),ip,tmin,tmax,this%x(ix),this%jac)
       phi=atan(this%pp(2,i)/this%pp(1,i))
       if(this%pp(1,i).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
+      if (debug) then
+         write (*,*) 'dti- phi',i,0d0,2d0*pi,phi
+      endif
       ix=ix+1
       call var_to_random(phi,0d0,0d0,2d0*pi,this%x(ix),this%jac)
       this%invm(ir)=dot(this%pp(0,ir),this%pp(0,ir))
@@ -1339,10 +1374,12 @@ contains
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) this%invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax)
+         if (debug) write (*,*) 'generate_mass_inverse gen23 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax)
+         if (debug) write (*,*) 'generate_mass_inverse gen23 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
       endif
       call tminmax(this%invm(ir+i),this%invm(ir+i+ib),this%invm(ir),this%invm(i),0d0,tmin,tmax)
@@ -1378,6 +1415,9 @@ contains
          stop 1
       endif
       this%invm(ir+ib)=dot(this%pp(0:3,ir+ib),this%pp(0:3,ir+ib))
+      if (debug) then
+         write (*,*) '23i- ir+ib',ir+ib,tmin,tmax,this%invm(ir+ib)
+      endif
       ix=ix+1
       call var_to_random(this%invm(ir+ib),ip,tmin,tmax,this%x(ix),this%jac)
       call sminmax(this%invm(ir+i),this%invm(ir),this%invm(ir+i+im1),this%invm(ir+i+ib)&
@@ -1408,6 +1448,9 @@ contains
          stop 1
       endif
       this%invm(i+im1)=dot(this%pp(0:3,i+im1),this%pp(0:3,i+im1))
+      if (debug) then
+         write (*,*) '23i- i+im1',i+im1,smin,smax,this%invm(i+im1)
+      endif
       ix=ix+1
       call var_to_random(this%invm(i+im1),ip,smin,smax,this%x(ix),this%jac)
       ! Generate the momenta from the integration variables. Since there is an
@@ -1531,6 +1574,9 @@ contains
       if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
       if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
       this%invm(i)=dot(this%pp(0:3,i),this%pp(0:3,i))
+      if (debug) then
+         write (*,*) 'mi- i',i,shatmin,shatmax,this%invm(i)
+      endif
       ix=ix+1
       call var_to_random(this%invm(i),-0.5d0,shatmin,shatmax,this%x(ix),this%jac)
     end subroutine generate_mass_inverse
