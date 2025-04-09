@@ -35,9 +35,9 @@ program matrix_integrate_QCD
   type phase_space_order_group
      type(amplitude_QCD) :: amps
      class(phase_space_type),allocatable :: phase_space
-     integer,dimension(:,:),allocatable :: multi_factor,processes,color_orders,multi_chans
-     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
-     integer :: nproc,max_chans
+     integer,dimension(:,:),allocatable :: multi_factor,processes,color_orders,multi_chans,multichans_all_chans_proc
+     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,multichans_allchans,multichans_multifactor
+     integer :: nproc,max_chans,multichans_nchan,multichans_nchans_proc
      real(kind=8),dimension(:,:),allocatable :: val_procs
      integer,dimension(:,:,:),allocatable :: iden_processes
      integer(kind=4),dimension(:,:),allocatable :: spin
@@ -194,11 +194,11 @@ program matrix_integrate_QCD
      ! Total number of amplitudes is stored in 'nhel'
      pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
 
-     if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
-        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
-     else
+!     if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
+!        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
+!     else
         allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
-     endif
+!     endif
 
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
 
@@ -460,13 +460,13 @@ contains
           do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
-          if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
-                  .not. pgl(ichan)%amps%same_flav(iproc)) then
-               cycle
-          elseif (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
-                  pgl(ichan)%amps%same_flav(iproc)) then 
-               iproc=1
-          endif
+!          if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
+!                  .not. pgl(ichan)%amps%same_flav(iproc)) then
+!               cycle
+!          elseif (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
+!                  pgl(ichan)%amps%same_flav(iproc)) then 
+!               iproc=1
+!          endif
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
@@ -597,39 +597,72 @@ contains
     real(kind=8),dimension(0:3,next),intent(in) :: p
     real(kind=8),dimension(ndim),intent(in) :: x
     real(kind=8),intent(in) :: jac
+    real(kind=8),dimension(pgl(ichan)%multichans_nchan) :: factors
+    real(kind=8),dimension(pgl(ichan)%multichans_nchans_proc) :: weight_factors
     real(kind=8),dimension(nproc),intent(out) :: weight
-    integer :: i,iproc
+    integer :: i,j,iproc,ii
     real(kind=8) :: vol_ichan,vol
     if (.not. use_colour_singlet_multichannel) then
        weight(1:nproc)=1d0/dble(chans(0,1:nproc))
        return
     endif
-    do iproc=1,nproc
-       if (all(ichan.ne.chans(1:chans(0,iproc),iproc))) then
-          write (*,*) 'Current channel not among the multi-channel channels',ichan,iproc
-          write (*,*) chans(:,iproc)
-          stop 1
-       endif
-       if (chans(0,iproc).eq.1) then
-          weight(iproc)=1d0
+    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
+    do j=1,pgl(ichan)%multichans_nchan
+       i=pgl(ichan)%multichans_allchans(j)
+       if (i.eq.ichan) then
+          ii=j
           cycle
        endif
-       call mint_get_jacobian_from_x(ichan,x,vol_ichan)
-       weight(iproc)=1d0
-       do i=1,chans(0,iproc)
-          if (chans(i,iproc).eq.ichan) cycle
-          call pgl(chans(i,iproc))%phase_space%compute_x_from_momenta(p)
-          if (pgl(chans(i,iproc))%phase_space%jac.lt.0d0) then
-             ! The x's could not be correctly computed from the momenta
-             write (*,*) 'WARNING: multi-channel weight set to 1'
-             weight(iproc)=1d0
-             return
-          endif
-          call mint_get_jacobian_from_x(chans(i,iproc),pgl(chans(i,iproc))%phase_space%x,vol)
-          weight(iproc)=weight(iproc)+jac/pgl(chans(i,iproc))%phase_space%jac * vol_ichan/vol
-       enddo
-       weight(iproc)=1d0/weight(iproc)
+       call pgl(i)%phase_space%compute_x_from_momenta(p)
+       if (pgl(i)%phase_space%jac.lt.0d0) then
+          ! The x's could not be correctly computed from the momenta
+          write (*,*) 'WARNING: multi-channel weight not included'
+          weight(1:nproc)=1d0/dble(chans(0,1:nproc))
+          return
+       endif
+       call mint_get_jacobian_from_x(i,pgl(i)%phase_space%x,vol)
+       factors(j)=pgl(i)%phase_space%jac*vol
     enddo
+    do i=1,pgl(ichan)%multichans_nchans_proc
+       weight_factors(i)=1d0
+       do j=1,pgl(ichan)%multichans_all_chans_proc(0,i)
+          if (pgl(ichan)%multichans_all_chans_proc(j,i).eq.ii) cycle
+          weight_factors(i)=weight_factors(i)+jac*vol_ichan/factors(pgl(ichan)%multichans_all_chans_proc(j,i))
+       enddo
+    enddo
+    weight(1:nproc)=1d0/weight_factors(pgl(ichan)%multichans_multifactor(1:nproc))
+    
+    
+!!$    if (.not. use_colour_singlet_multichannel) then
+!!$       weight(1:nproc)=1d0/dble(chans(0,1:nproc))
+!!$       return
+!!$    endif
+!!$    do iproc=1,nproc
+!!$       if (all(ichan.ne.chans(1:chans(0,iproc),iproc))) then
+!!$          write (*,*) 'Current channel not among the multi-channel channels',ichan,iproc
+!!$          write (*,*) chans(:,iproc)
+!!$          stop 1
+!!$       endif
+!!$       if (chans(0,iproc).eq.1) then
+!!$          weight(iproc)=1d0
+!!$          cycle
+!!$       endif
+!!$       call mint_get_jacobian_from_x(ichan,x,vol_ichan)
+!!$       weight(iproc)=1d0
+!!$       do i=1,chans(0,iproc)
+!!$          if (chans(i,iproc).eq.ichan) cycle
+!!$          call pgl(chans(i,iproc))%phase_space%compute_x_from_momenta(p)
+!!$          if (pgl(chans(i,iproc))%phase_space%jac.lt.0d0) then
+!!$             ! The x's could not be correctly computed from the momenta
+!!$             write (*,*) 'WARNING: multi-channel weight set to 1'
+!!$             weight(iproc)=1d0
+!!$             return
+!!$          endif
+!!$          call mint_get_jacobian_from_x(chans(i,iproc),pgl(chans(i,iproc))%phase_space%x,vol)
+!!$          weight(iproc)=weight(iproc)+jac/pgl(chans(i,iproc))%phase_space%jac * vol_ichan/vol
+!!$       enddo
+!!$       weight(iproc)=1d0/weight(iproc)
+!!$    enddo
   end subroutine compute_multichannel_weight
 
   subroutine setup_helicity_filter(pgl)
@@ -1061,6 +1094,12 @@ contains
           pgl(i)%iden_processes(1:next,1,1)=pgl(i)%processes(1:next,1)
        enddo
     endif
+
+    do i=1,ngroups
+       call setup_optimised_multichannel_weight_computation(pgl(i))
+    enddo
+    
+    
     ! basic checks:
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
@@ -1078,6 +1117,60 @@ contains
     endif
   end subroutine get_run_arguments
 
+  subroutine setup_optimised_multichannel_weight_computation(pgl)
+    implicit none
+    type(phase_space_order_group) :: pgl
+    integer,dimension(pgl%nproc*pgl%max_chans) :: all_chans
+    integer,dimension(pgl%nproc*ngroups) :: all_chans_inv
+    integer,dimension(0:pgl%max_chans,pgl%nproc) :: all_chans_proc
+    integer,dimension(pgl%nproc) :: multifactor
+    integer :: iproc,ichan,nchans,nchans_proc
+    logical :: found
+    nchans=0
+    nchans_proc=0
+    do iproc=1,pgl%nproc
+       do ichan=1,pgl%multi_chans(0,iproc)
+          if (all(all_chans(1:nchans).ne.pgl%multi_chans(ichan,iproc))) then
+             nchans=nchans+1
+             all_chans(nchans)=pgl%multi_chans(ichan,iproc)
+             all_chans_inv(pgl%multi_chans(ichan,iproc))=nchans
+          endif
+       enddo
+    enddo
+    do iproc=1,pgl%nproc
+       found=.false.
+       do i=1,nchans_proc
+          if (all_chans_proc(0,i).ne.pgl%multi_chans(0,iproc))cycle
+          if (all(all_chans_inv(all_chans_proc(1:pgl%multi_chans(0,iproc),i)).eq. &
+               pgl%multi_chans(1:pgl%multi_chans(0,iproc),iproc))) then
+             multifactor(iproc)=i
+             found=.true.
+             exit
+          endif
+       enddo
+       if (.not.found) then
+          nchans_proc=nchans_proc+1
+          all_chans_proc(0,nchans_proc)= &
+               pgl%multi_chans(0,iproc)
+          all_chans_proc(1:pgl%multi_chans(0,iproc),nchans_proc)= &
+               all_chans_inv(pgl%multi_chans(1:pgl%multi_chans(0,iproc),iproc))
+          multifactor(iproc)=nchans_proc
+       endif
+    enddo
+
+    pgl%multichans_nchan=nchans
+    pgl%multichans_nchans_proc=nchans_proc
+    allocate(pgl%multichans_allchans(nchans))
+    pgl%multichans_allchans=all_chans(1:nchans)
+    allocate(pgl%multichans_all_chans_proc(0:pgl%max_chans,nchans_proc))
+    pgl%multichans_all_chans_proc(0:pgl%max_chans,1:nchans_proc)=all_chans_proc(0:pgl%max_chans,1:nchans_proc)
+    allocate(pgl%multichans_multifactor(pgl%nproc))
+    pgl%multichans_multifactor(1:pgl%nproc)=multifactor(1:pgl%nproc)
+
+  end subroutine setup_optimised_multichannel_weight_computation
+    
+
+  
   subroutine determine_multi_channel_size(part,n_ps)
     implicit none
     integer,dimension(1:next),intent(in) :: part
@@ -1175,7 +1268,7 @@ contains
        if(is_singlet(ipart)) then
           if (i.gt.aq) then
              order(aq:i)=[order(i),order(aq)]
-             aq=aq-1
+             aq=aq+1
              i=i+1
           else
              order(i:aq)=[order(i+1:aq),order(i)]
@@ -1544,7 +1637,7 @@ contains
     integer :: it,lim
 
     lim=pgl%nproc
-    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
+!    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
     do iproc=1,lim
        fac=0d0
        do i=1,next
