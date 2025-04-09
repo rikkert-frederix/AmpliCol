@@ -476,6 +476,7 @@ contains
 !!$    do i=1,4
 !!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
 !!$    enddo
+    !stop 30
   end subroutine TwoGluontoTensor
   subroutine TwoGluontoTensor_real(wfg1,wfg2,wfT)
     ! This vertex includes the all factors such that the tensor "propagator"
@@ -560,9 +561,8 @@ contains
     M2 = 0d0
     if (wm.ne.0d0) M2=1d0/wm**2
     TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
-    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))!&
-    !                  -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
+    wf(1:4) = prefact*(-TMP1*(pwf2(0:3)-pwf1(0:3))-2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
+                       -TMP6*wf2(1:4)+TMP7*wf1(1:4))
     !stop 22
   end subroutine ThreeGluon_aww
 
@@ -589,9 +589,8 @@ contains
     M2 = 0d0
     if (wm.ne.0d0) M2=1d0/wm**2
     wf(1:4) = prefact*(dsqrt(1d0-sw**2)/sw)*&
-                       (TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))!&
-    !                  -(pwf1(0:3)+pwf2(0:3))*M2*TMP8)
+                       (TMP1*(pwf2(0:3)-pwf1(0:3))-2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
+                       -TMP6*wf2(1:4)+TMP7*wf1(1:4))
     !stop 21
   end subroutine ThreeGluon_zww
 
@@ -601,7 +600,7 @@ contains
     complex(kind=8),dimension(6) :: wfT1
     complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     complex(kind=8) :: TMP1
-    TMP1= prefact*(-1d0/sw**2)
+    TMP1= prefact*(1d0/(sw**2))
     wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*TMP1
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*TMP1
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*TMP1
@@ -614,7 +613,7 @@ contains
     complex(kind=8),dimension(6) :: wfT2
     complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     complex(kind=8) :: TMP1
-    TMP1= prefact*(-1d0/sw**2)
+    TMP1= prefact*(1d0/(sw**2))
     wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*TMP1
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*TMP1
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*TMP1
@@ -791,34 +790,24 @@ contains
     stop 8
   end subroutine GluonGluontoScalar_hzz
  
-  subroutine GluonScalartoGluon_hww(wfg1,pwf1,wfs2,pwf2,wfg,coupl,vm)
+  subroutine GluonScalartoGluon_hww(wfg1,pwf1,wfs2,pwf2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(1) :: wfs2
     real(kind=8),dimension(0:3) :: pwf1,pwf2,pw
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: vm,M2
-    complex(kind=8) :: TMP
-    if (vm.ne.0d0) M2=1d0/vm**2
-    pw(0:3)=pwf1(0:3)+pwf2(0:3)
-    TMP = wfg1(1)*pw(0)-wfg1(2)*pw(1)-wfg1(3)*pw(2)-wfg1(4)*pw(3)
-    wfg(1:4)= prefact*coupl(1)/sw*wfs2(1)*(wfg1(1:4))!-TMP*M2*pw(0:3))
+    wfg(1:4)= prefact*coupl(1)/sw*wfs2(1)*(wfg1(1:4))
     !stop 7
   end subroutine GluonScalartoGluon_hww
-  subroutine ScalarGluontoGluon_hww(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
+  subroutine ScalarGluontoGluon_hww(wfs1,pwf1,wfg2,pwf2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(1) :: wfs1
     real(kind=8),dimension(0:3) :: pwf1,pwf2,pw
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: vm,M2
-    complex(kind=8) :: TMP
-    if (vm.ne.0d0) M2=1d0/vm**2
-    pw(0:3)=pwf1(0:3)+pwf2(0:3)
-    TMP = wfg2(1)*pw(0)-wfg2(2)*pw(1)-wfg2(3)*pw(2)-wfg2(4)*pw(3)
-    wfg(1:4)= prefact*coupl(1)/sw*wfs1(1)*(wfg2(1:4))!-TMP*M2*pw(0:3))
+    wfg(1:4)= prefact*coupl(1)/sw*wfs1(1)*(wfg2(1:4))
     !stop 6
   end subroutine ScalarGluontoGluon_hww
   subroutine GluonGluontoScalar_hww(wfg1,wfg2,wfs,coupl)
@@ -857,7 +846,7 @@ contains
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
     real(kind=8) :: sm
-    wfs(1)=-prefact*(3d0/2d0)/sw*(sm**2/coupl(1))*wfs1(1)*wfs2(1)
+    wfs(1)= prefact*(-3d0/2d0)/sw*(sm**2/coupl(1))*wfs1(1)*wfs2(1)
     stop 2
   end subroutine ScalarScalartoScalar_hhh
 
@@ -1319,6 +1308,7 @@ contains
     wfq(2)=0d0
     wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
     wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
+    !stop 31
   end subroutine QuarkGluontoQuark_w
   subroutine AquarkGluontoAquark_w(wfq1,wfg2,wfq) 
     implicit none
