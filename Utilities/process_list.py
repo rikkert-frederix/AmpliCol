@@ -1,232 +1,353 @@
 #!/usr/bin/env python
 
-
 import itertools
-import math
 import copy
+import re
+import argparse
+from collections import Counter
+import multiprocessing
+import math
+
+# Global sets (make then 'frozenset' so that they are immutable):
+quarks=frozenset({'d','u','s','c','b','t'})
+antiquarks=frozenset({'dbar','ubar','sbar','cbar','bbar','tbar'})
+singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
+gluons=frozenset({'g'})
+flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+#flavour_scheme=frozenset({'d','u'}) # all the massless quarks
+all_coloured=quarks | antiquarks | gluons
+massless_QCD=flavour_scheme | frozenset([q+'bar' for q in flavour_scheme]) | gluons
+proton=massless_QCD
+jet=massless_QCD
+if jet != proton:
+    raise ValueError("definition of 'jet' and 'proton' should be the same")
+pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','dbar':'-1','ubar':'-2','sbar':'-3','cbar':'-4','bbar':'-5','tbar':'-6','a':'22','z':'23','w+':'24','w-':'-24','e+':'-11','e-':'11','mu+':'-13','mu-':'13','ta+':'-15','ta-':'15','ve':'12','ve~':'-12','vm':'14','vm~':'-14','vt':'16','vt~':'-16','h':'25'}
+anti_particle={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tbar','dbar':'d','ubar':'u','sbar':'s','cbar':'c','bbar':'b','tbar':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
+sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'dbar':7,'ubar':8,'sbar':9,'cbar':10,'bbar':11,'tbar':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
 
 
 
-def create_all_procs_from_base_procs(proc):
-    # given a flavour configuration, list all subprocesses that can be
-    # obtained from that flavour configuration. Effectively, this
-    # means looping over all possible pairs of initial state
-    # particles.
-    all_procs = []
-    # Iterate over all permutations of the first two elements
-    for perm in itertools.permutations(proc, 2):
-        if perm[0] not in proton or perm[1] not in proton : continue
-        # Find the remaining elements
-        remaining = list(proc)
-        remaining.remove(perm[0])
-        remaining.remove(perm[1])
+def ProcessProcess(proc):
+    """Function to process each 'proc' in parallel"""
+    phase_space_orders_local = {}  # Local dictionary to avoid race conditions
+
+    all_possible_color_ord = list(itertools.permutations(range(len(proc))))
+    valid_color_ord = [perm for perm in all_possible_color_ord if ValidColorOrd(proc, perm)]
+    unique_color_ord = [perm for perm in valid_color_ord if UniqueColorOrd(proc, perm)]
+
+    for perm in unique_color_ord:
+        ordered_proc, ordered_perm = OrderProcPerm(proc, perm)
+        zero = ordered_perm.index(0)
+        perm_mapped = tuple(ordered_perm[zero:] + ordered_perm[:zero])
+
+        if perm_mapped in phase_space_orders_local:
+            phase_space_orders_local[perm_mapped].append((ordered_proc, ordered_perm, []))
+        else:
+            phase_space_orders_local[perm_mapped] = [(ordered_proc, ordered_perm, [])]
+
+    return phase_space_orders_local
+
+
+def ValidColorOrd(proc,perm):
+    # Check if 'perm' is a valid color order for the process 'proc'
+    found_quark = found_antiquark = found_singlet = found_gluon = False
+    for idx in perm:
+        particle = proc[idx]
+        if particle in quarks:
+            if found_quark or found_gluon:
+                return False
+            if found_antiquark and idx < perm[0]:  # Two-quark line process, reject one ordering
+                return False
+            found_quark = True
+            found_antiquark = found_singlet = found_gluon = False
+        elif particle in antiquarks:
+            if found_antiquark or found_singlet or not found_quark:
+                return False
+            found_antiquark = True
+            found_quark = found_singlet = found_gluon = False
+        elif particle in gluons:
+            if found_antiquark or found_singlet:
+                return False
+            found_gluon = True
+        else:  # Assuming the rest are singlets
+            if found_quark or found_gluon or not found_antiquark :
+                return False
+            found_singlet = True
+    if found_gluon: # Only for all-gluon process found_gluon is True here. Use it to remove cyclic permutations
+        if perm[0] != 0 :
+            return False
+    return True
+
+def UniqueColorOrd(proc,perm):
+    # Check if 'perm' is a color order in canonical order for the process 'proc'.
+    #
+    # Start at the first incoming particle. From there, the indentical
+    # final state particles should each come in *increasing* order.
+    zero=perm.index(0)
+    perm_mapped=perm[zero:]+perm[:zero]
+    for particle in all_coloured:
+        particle_positions=[]
+        for i,part in enumerate(proc[2:]):
+            if part==particle:
+                particle_positions.append(i+2)
+        previous_position=0        
+        for i in particle_positions:
+            if perm_mapped.index(i) < previous_position:
+                return False
+            else:
+                previous_position=perm_mapped.index(i)
+    return True
+
+def OrderProcPerm(proc,perm):
+    zero=perm.index(0)
+    perm_mapped=list(perm[zero:]+perm[:zero])
+    proc_mapped=proc[zero:]+proc[:zero]
+    elements_to_order=[]
+    for i in perm_mapped:
+        if proc[i] in massless_QCD and i > 1:
+            elements_to_order.append(i)
+    indices=[perm_mapped.index(x) for x in elements_to_order]
+    sorted_elements=sorted(elements_to_order)
+    for i, val in zip(indices,sorted_elements):
+        perm_mapped[i]=val
+    perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero]
+    
+    proc_ordered=[None]*len(proc)
+    for i in range(len(perm_ordered)):
+        proc_ordered[perm_ordered[i]]=proc[perm[i]]
         
-        # Sort remaining elements since final state is unordered
-        remaining_sorted = sorted(remaining)
-        
-        # Combine the permuted first two elements with the sorted remaining
-        combined = list(perm)+remaining_sorted
-
-        if combined not in all_procs :
-            all_procs.append(combined)
-    return all_procs
-
-def generate_unique_final_state_permutations(proc):
-    # take all the permutations of the final state particles in
-    # 'proc', and add it to the 'all_procs' list if it wasn't there
-    # already.
-    all_procs=[]
-    for perm in itertools.permutations(proc[2:]):
-        combined=[proc[0]]+[proc[1]]+list(perm)
-        if combined not in all_procs :
-            all_procs.append(combined)
-    return all_procs
+    # if there are two quark lines there are two options for the order. Pick the right one
+    if count_matching_elements(proc,quarks) == 2:
+        for q in quarks:
+            qi=[(i+1,j) for i,j in enumerate(perm_ordered[1:]) if proc_ordered[j] == q]
+            if qi:
+                break
+        if qi[0][1] < perm_ordered[0]:
+            perm_ordered=perm_ordered[qi[0][0]:]+perm_ordered[:qi[0][0]]
+    return tuple(proc_ordered),tuple(perm_ordered)
 
 
-def order_permutation_with_psorder(order,perm):
-    # Take a process 'perm' and order it according to the phase-space
-    # ordering 'order'
-    return [perm[i-1] for i in order]
+def ParseCollision(input_string):
+    parts=input_string.split(">")
+    if len(parts) != 2:
+        raise ValueError("Invalid collision format. Expected 'p p > ...'.")
+    initial_state=parts[0].strip().split()
+    final_state=parts[1].strip().split()
+    jet_match=re.match(r"(\d+)j",final_state[-1]) if final_state else None
+    jet_count=int(jet_match.group(1)) if jet_match else 0
+    rest=final_state[:-1] if jet_match else final_state
+    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest}
 
-def valid_perm(perm):
-    # Check that all anti-quarks are followed by a quark in the
-    # process 'perm'. It returns '-1' if this is not the case, or the
-    # position of a quark (the first it encounters) in the process if
-    # valid (if no quark is present, return '0').
-    ishift=0
-    n = len(perm)
-    for i in range(n):
-        if perm[i] in quarks:
-            ishift=i
-            break
+def count_matching_elements(main_list,check_list):
+    main_counts=Counter(main_list)
+    count=sum(main_counts[item] for item in check_list if item in main_counts)
+    return count
 
-    found_singlet=False
-    for i in range(n):
-        ii=(i+ishift) % n
-        if perm[ii] in antiquarks :  # If the current element is anti-quark
-            next_index = (ii + 1) % n  # Cyclic next element
-            if (perm[next_index] not in quarks ):  # next element must be quark
-                return -1
-        if perm[ii] in color_singlets:
-            # next element should be another colour singlet or an
-            # anti-quark. And it should come between the *final*
-            # quark-antiquark pair
-            found_singlet=True
-            next_index = (ii + 1) % n  # Cyclic next element
-            if (perm[next_index] not in antiquarks and perm[next_index] not in color_singlets):  # next element must be an anti-quark or another colour singlet
-                return -1
-        if perm[ii] in quarks and found_singlet:  return -1
-    return ishift
+def ValidProc(proc):
+    nq=count_matching_elements(proc,quarks)
+    naq=count_matching_elements(proc,antiquarks)
+    if nq > 2 : return False    # at most two quarks
+    if naq > 2 : return False   # at most two anti-quarks
+    if nq != naq : return False # same number of quarks and anti-quarks
+    # remove flavour changing currents:
+    for q in quarks:
+        if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'bar']) : return False
+    # need at least one quark line if there are colour singlets:
+    if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
+    return True
 
-def shift_order(shift,order):
-    # cyclicly permute the order by an amount 'shift'
-    order_shifted=order[shift:]+order[:shift]
-    return order_shifted
+def GenerateAllUniqueProcs(process):
+    procs=[[]]
+    for part in process['initial_state']:
+        if part != 'p':
+            raise ValueError("Initial state should be a proton ('p').")
+    for part in range(process['jet_count']+2):
+        procs_new=[]
+        for proc in procs:
+            for p in jet:
+                if part > 3 and p not in gluons: continue
+                if not procs_new:
+                    procs_new=[sorted(proc+[p])]
+                else:
+                    procs_new.append(sorted(proc+[p]))
+        procs=procs_new.copy()
+    for part in process['rest']:
+        for proc in procs:
+            proc.append(part)
+    unique_procs=[]
+    for proc in procs:
+        if (ValidProc(proc)):
+            unique_procs.append(tuple(proc))
+    return set(unique_procs)
 
-    
-def convert_to_string(perm):
-    # convert the list of particles to their PDG codes; cross the two
-    # incoming particles to the initial state; and convert it to a
-    # single string.
-    return " ".join([str(pdgs[antipart[perm[0]]]),str(pdgs[antipart[perm[1]]])]+[str(pdgs[i]) for i in perm[2:]])
+def GenerateAllProcs(unique_procs):
+    procs=set()
+    for proc in unique_procs:
+        for i,j in itertools.combinations(range(len(proc)),2):
+            if proc[i] in proton and proc[j] in proton:
+                pair1=[proc[i],proc[j]]
+                pair2=[proc[j],proc[i]]
+                remaining=[e for k,e in enumerate(proc) if k not in (i,j)]
+                procs.add(tuple(pair1+remaining))
+                procs.add(tuple(pair2+remaining))
+    return procs
 
+def CombineResults(results):
+    phase_space_orders = {}
+    for result in results:
+        for key, value in result.items():
+            if key in phase_space_orders:
+                phase_space_orders[key].extend(value)
+            else:
+                phase_space_orders[key] = value
+    return phase_space_orders
+                
+def ParseArgument():
+    parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
+    parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
+    args=parser.parse_args()
+    return ParseCollision(args.process_string)
 
-
-nfinal=4
-quarks=['d','u','s','c','b','t']
-antiquarks=['dbar','ubar','sbar','cbar','bbar','tbar']
-flavour_scheme=['d','u','s','c','b'] # all the massless quarks
-#flavour_scheme=['d','u'] # all the massless quarks
-proton=['g','d','u','s','c','b','dbar','ubar','sbar','cbar','bbar'] # all partons that can be element of proton
-pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','dbar':'-1','ubar':'-2','sbar':'-3','cbar':'-4','bbar':'-5','tbar':'-6','a':'22'}
-antipart={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tbar','dbar':'d','ubar':'u','sbar':'s','cbar':'c','bbar':'b','tbar':'t','a':'a'}
-all_part=['g','d','u','s','c','b','t','dbar','ubar','sbar','cbar','bbar','tbar','a']
-all_coloured=quarks+antiquarks+['g']
-
-# color-singlets
-#color_singlets=[]
-#color_singlets=['a']
-color_singlets=['a','a']
-
-# all-gluon process
-base_procs=[[]]
-#base_procs=[]
-# one-quark-line process
-if nfinal+2 >= len(color_singlets)+2 : 
-    for q in flavour_scheme:
-        base_procs.append([q,q+'bar'])
-# two-quark-line process
-if nfinal+2 >= len(color_singlets)+4 : 
-    # different-flavour
-    for i,q in enumerate(flavour_scheme[:-1]):
-        for qp in flavour_scheme[i+1:]:
-            base_procs.append([q,qp,q+'bar',qp+'bar'])
-    # same-flavour (put after different flavour)
-    for q in flavour_scheme:
-        base_procs.append([q,q,q+'bar',q+'bar'])
-# add the gluons such that each proc has all the coloured particles
-for proc in base_procs:
-    while len(proc) < nfinal+2 -len(color_singlets):
-        proc.append('g')
-
-# add the colour singlets
-for proc in base_procs:
-    for s in color_singlets:
-        proc.append(s)
-
-
-# Define the 'unique processes'. These will be used by
-# matrix_integrate to determine which flavour configurations yield
-# unique matrix elements.
-unique_procs=copy.deepcopy(base_procs)
-# sort according to the PDF codes:
-for i in range(len(unique_procs)):
-    unique_procs[i]=sorted(unique_procs[i],key=lambda x: int(pdgs[x]))
-# add the 2qq_df processes with the two incoming particles interchanged:
-i=0
-while i < len(unique_procs):
-    proc = unique_procs[i]
-    if proc[2] in quarks and proc[3] in quarks and proc[2] != proc[3]:
-        swapped_proc=proc[:]
-        swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
-        unique_procs.insert(i+1,swapped_proc)
-        i+=1
-    i+=1
-    
-# all_procs contains *all* the flavour configurations.
-all_procs=[]
-for proc in base_procs:
-    all_procs+=create_all_procs_from_base_procs(proc)
-
-    
-# Get symmetry factor
-iden_fac={}
-for i,proc in enumerate(all_procs):
+def IdenticalParticleSymmetryFactor(proc):
     i_fac=1
     for p in all_coloured:
         i_fac*=max(1,math.factorial(proc[2:].count(p)))
-    iden_fac[i]=i_fac
+    return i_fac
 
+
+def MultiChannelPartners(proc,perm,k,l):
+    all_possible_perms={perm}
+    colour_singlets_in_proc=[perm.index(i) for i,p in enumerate(proc) if p in singlets]
+    anti_quarks_in_proc=tuple([perm.index(i) for i,p in enumerate(proc) if p in antiquarks])
+    if colour_singlets_in_proc:
+        all_singlet_orders=tuple(itertools.permutations(colour_singlets_in_proc))
+    else:
+        all_singlet_orders=()
+    if len(anti_quarks_in_proc) == 1:
+        for s in all_singlet_orders:
+            order=[]
+            for i in range(len(perm)):
+                if i == anti_quarks_in_proc[0]:
+                    order.extend([perm[p] for p in list(anti_quarks_in_proc+s)])
+                elif i not in colour_singlets_in_proc:
+                    order.append(perm[i])
+            all_possible_perms.add(tuple(order))
+    elif len(anti_quarks_in_proc) == 2:
+        for j in range(len(all_singlet_orders)+1):
+            for s in all_singlet_orders:
+                order=[]
+                for i in range(len(perm)):
+                    if i == anti_quarks_in_proc[0]:
+                        order.extend([perm[p] for p in list((anti_quarks_in_proc[0],)+s[:j])])
+                    elif i == anti_quarks_in_proc[1]:
+                        order.extend([perm[p] for p in list((anti_quarks_in_proc[1],)+s[j:])])
+                    elif i not in colour_singlets_in_proc:
+                        order.append(perm[i])
+                all_possible_perms.add(tuple(order))
+    mt=[]
+    for o in all_possible_perms:
+        found=False
+        for i,key in enumerate(all_keys_sorted):
+            for (process,order,multichannel) in phase_space_orders[key]:
+                if process == proc and order==o:
+                    if found:
+                        print('FOUND DOUBLE')
+                    else:
+                        found=True
+                        mt.append(i)
+#                        print('found',process,proc,order,o,i)
+        if not found:
+            print('NOT FOUND')
+    phase_space_orders[k][l]=(proc,perm,tuple(sorted(mt)))
+#    print(proc,':',all_singlet_orders,':',anti_quarks_in_proc,':',all_possible_perms)
+
+def DetermineMultiChannelPartnersAndSymmetryFactor():
+    for j,key in enumerate(all_keys_sorted):
+        for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
+            MultiChannelPartners(process,order,key,i)
+    for key in all_keys_sorted:
+        for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
+            phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process))
+
+def ConvertProcToString(proc):
+    process,order,multi_channel,iden=proc
+    crossed=[pdgs[p] if i>1 else pdgs[anti_particle[p]] for i,p in enumerate(process)]
+    line=str(len(multi_channel))
+    line=line+'   '+' '.join([str(m+1) for m in multi_channel])
+    line=line+'   '+' '.join(crossed)
+    line=line+'   '+' '.join([str(o+1) for o in order])
+    line=line+'   '+str(iden)
+    return line
+
+def sort_by_pdg_codes(process):
+    nq=count_matching_elements(process,quarks)
+    if nq == 2:
+        quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
+        same_flavour=quarks_in_proc[0]==quarks_in_proc[1]
+    else:
+        same_flavour=False
+    val=0
+    val+=nq*2
+    if same_flavour : val=val+1
+    return (val,[sort_particles[p] for p in process]) # first sort by 'val', then by (modified) PDG codes.
+
+def sort_by_pdg_codes2(proc):
+    process=proc[0]
+    return sort_by_pdg_codes(process)
+
+def WriteAllProcsIntoList():
+    towrite=[]
+    towrite.append(str(len(all_keys_sorted)))
+    towrite.append('')
+    for i,key in enumerate(all_keys_sorted):
+        towrite.append(str(i+1)+'   '+str(len(phase_space_orders[key]))+'   '+str(max(len(proc[2]) for proc in phase_space_orders[key]))+'   '+' '.join([str(k+1) for k in key]))
+        process_list=sorted(phase_space_orders[key],key=sort_by_pdg_codes2)
+        for proc in process_list:
+            process_line=ConvertProcToString(proc)
+            towrite.append(process_line)
+        towrite.append('')
+        towrite.append('')
+        towrite.append('')
+    return towrite
+
+def Add2qq_dfProcesses(sorted_procs):
+    # add the 2qq_df processes with the two incoming particles interchanged:
+    i=0
+    while i < len(sorted_procs):
+        proc = sorted_procs[i]
+        if proc[2] in quarks and proc[3] in quarks and proc[2] != proc[3]:
+            swapped_proc=proc[:]
+            swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
+            sorted_procs.insert(i+1,swapped_proc)
+            i+=1
+        i+=1
+    return sorted_procs
+
+def WriteUniqueProcsIntoList(procs):
+    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
+    sorted_procs=Add2qq_dfProcesses(sorted_procs)
+    line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
+    for proc in sorted_procs:
+        line.append(' '.join(pdgs[p] for p in proc))
+    line.append('')
+    line.append('')
+    line.append('')
+    return line
     
-# Define the nfinal+1 relevant phase-space orderings.    
-order=[1]+[i for i in range(3,nfinal+3)]
-phase_space_order=[]
-for i in range(1,nfinal+2):
-    phase_space_order.append(order[:i]+[2]+order[i:])
-
-
-
-# this is the main loop that creates all the relevant colour orderings
-# and distributes them among the phase-space orderings.
-towrite=[[] for _ in phase_space_order]
-for pso,psorder in enumerate(phase_space_order):
-    # The phase-space order fixes where particles 1 and 2 go in the
-    # colour order. For each process, take all possible permutations
-    # of the other particles (i.e., all the final state ones), and
-    # 1. Check that it is a unique configuration; 2. Check that it is
-    # compatible with a possible colour ordering (i.e., if there's a
-    # quark line, the gluons are between the quark and anti-quark (up
-    # to cyclic permutations) etc. This gives a list of all the
-    # relevant colour orderings for each of the processes.
-    for i,proc in enumerate(all_procs):
-        # permute all the final state particles:
-        unique_permutations=generate_unique_final_state_permutations(proc)
-        for perm in unique_permutations:
-            # re-order the process 'perm' following the phase-space ordering
-            perm_ordered=order_permutation_with_psorder(psorder,perm)
-            # check that the re-ordered process results in a valid
-            # colour ordering and by how much it should be cyclicly
-            # permuted to bring it to canonical order
-            shift=valid_perm(perm_ordered)
-            if shift != -1:
-                # valid_perm is true: add it to the list of processes
-                # to write
-                order_shifted=shift_order(shift,psorder)
-                towrite[pso].append(convert_to_string(perm)+"   "+" ".join([str(i) for i in order_shifted])+"   "+str(iden_fac[i]))
-                
-
-                
-
-
-
-# Write all the information to the file. Start with the 'unique
-# processes'. These will be used to determine which flavour
-# configurations give identical matrix elements. After that, simply
-# dump all processes and colour orderings relevant for each of the
-# flavour configurations (together with their symmetry factors).
-with open('processes.txt','w') as f:
-    f.write(str(nfinal+2)+' '+str(len(unique_procs))+'\n')
-    for proc in unique_procs:
-        f.write(' '.join([pdgs[ele] for ele in proc])+'\n')
-    f.write('\n')
-    f.write('\n')
-    f.write(str(len(towrite))+'\n')
-    f.write('\n')
-    for pso in towrite:
-        f.write(str(len(pso))+'\n')
-        for ele in pso:
-            f.write(ele+'\n')
-        f.write('\n')
-        f.write('\n')
-        f.write('\n')
+if __name__ == "__main__":    
+    process=ParseArgument()
+    all_unique_procs=GenerateAllUniqueProcs(process)
+    all_procs=GenerateAllProcs(all_unique_procs)
+    
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
+    phase_space_orders=CombineResults(results)
+    all_keys_sorted=sorted(phase_space_orders.keys())
+    DetermineMultiChannelPartnersAndSymmetryFactor() # updates the phase_space_orders dictionary
+    towriteunique=WriteUniqueProcsIntoList(all_unique_procs)
+    towriteallprocs=WriteAllProcsIntoList() # puts the phase_space_orders dictionary in a writable list
+    
+    with open('processes.txt','w') as f:
+        f.write('\n'.join(towriteunique))
+        f.write('\n'.join(towriteallprocs))
         f.write('\n')
