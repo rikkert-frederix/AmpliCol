@@ -23,7 +23,7 @@ contains
     write (*,*) 'Cannot invert phase-space for pT-based parametrisation'
     stop 1
   end subroutine genpt_compute_x_from_momenta
-  subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf,part)
+  subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
     ! INPUT
@@ -36,7 +36,7 @@ contains
     ! masses of all the particles. The two incoming particles must be
     ! massless.
     real(kind=8),dimension(n),intent(in) :: m
-    integer,dimension(n),intent(in) :: o,part
+    integer,dimension(n),intent(in) :: o
     real(kind=8),dimension(2),intent(in) :: s_cut
     logical,intent(in) :: include_pdf,t_chan
     this%ptcut=pt_cut

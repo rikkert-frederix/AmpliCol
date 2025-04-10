@@ -12,7 +12,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.true.,eff_photon_int=.false.
+  logical,parameter :: verbose=.false.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
@@ -22,7 +22,7 @@ module phase_space_gen23_mod
   logical,parameter :: use_t_channel_at_start=.true.
 
 contains
-  subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,part)
+  subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -32,8 +32,7 @@ contains
     ! number of particles (initial state + final state)
     integer(kind=4),intent(in) :: n
     ! the colour order:
-    integer(kind=4),dimension(n),intent(in) :: o,part
-    integer(kind=4),dimension(n) :: ord_temp
+    integer(kind=4),dimension(n),intent(in) :: o
     ! cut on the minimum invariant mass of all pairs of particles,
     ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
     ! an initial and a final state particle; s_cut(2) is between two final
@@ -79,7 +78,7 @@ contains
     this%pp(0:3,0:maskr(this%next))=0d0
     allocate(this%p(0:3,this%next))
     allocate(this%x(this%ndim))
-    allocate(this%sets(0:this%next-2,3))
+    allocate(this%sets(0:this%next-2,2))
     ! masses of external particles
     do i=1,n
        if ((i.eq.1 .or. i.eq.2) .and. m(i).ne.0d0) then
@@ -101,59 +100,29 @@ contains
     endif
     call setup_PS_cuts(s_cut)
 
-    this%order=o
-    ns=0
-    nns=1
-    this%sets=0
-    if (eff_photon_int) then
-       ! move all singlets to the end of the order
-       ord_temp=this%order
-       do i=1,this%next
-          if (part(this%order(i)).ne.21.and.abs(part(this%order(i))).gt.6.and.&
-               this%order(i).gt.2) then
-             ord_temp(this%next-ns)=this%order(i)
-             ns=ns+1
-          else
-             ord_temp(nns)=this%order(i)
-             nns=nns+1
-          endif
-       enddo
-
-       !this%sets(1:ns,3)=ord_temp(this%next-ns+1:this%next)
-       !do j=this%next-ns+1,this%next
-       !    this%sets(0,3)=ibset(this%sets(0,3),ord_temp(j)-1)
-       !enddo
-       j=1
-       do i=1,this%next
-          if (part(this%order(i)).eq.21.or.abs(part(this%order(i))).le.6.) then
-             ord_temp(j)=this%order(i)
-             j=j+1
-          endif
-       enddo
-    else
-       ord_temp=o
-    endif
-
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
     do i=1,this%next
-       if (ord_temp(i).eq.1) then
+       if (o(i).eq.1) then
           do j=0,this%next-1
-             this%order(j+1)=ord_temp(1+mod(i+j-1,this%next))
+             this%order(j+1)=o(1+mod(i+j-1,this%next))
           enddo
           exit
        endif
     enddo
 
-    ns=0 ! needed for the new ordering of the phase-space order 
-    i=0
-    do i=2,this%next-ns
+    ! Put in the two sets the particles that are between the two
+    ! initial state ones, assuming cyclic permutation freedom
+    ! (set(:,1) contains the ones between 1 and 2; set(:,2) contains
+    ! the ones between 2 and 1)
+    this%sets=0
+    do i=2,this%next
        if (this%order(i).eq.2) then
-          do j=i+1,this%next-ns
+          do j=i+1,this%next
              this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
           enddo
           this%sets(1:i-2,1)=this%order(2:i-1)
-          this%sets(1:this%next-ns-i,2)=this%order(i+1:this%next-ns)
+          this%sets(1:this%next-i,2)=this%order(i+1:this%next)
           exit
        endif
        this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
@@ -161,7 +130,6 @@ contains
     if (verbose) then
        write (*,*) "set 1:",this%sets(:,1)
        write (*,*) "set 2:",this%sets(:,2)
-       write (*,*) "set 3:",this%sets(:,3)
     endif
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
@@ -290,7 +258,7 @@ contains
     subroutine generate_momenta
       implicit none
       integer(kind=4) :: i,j,inext,im1
-      integer(kind=4),dimension(3) :: set
+      integer(kind=4),dimension(2) :: set
       ! incoming momenta
       this%pp(0,ibset(0,0))=this%sqrtshat/2d0
       this%pp(0,ibset(0,1))=this%sqrtshat/2d0
@@ -306,30 +274,6 @@ contains
       this%invm(maskr(this%next)-ibset(0,0)-ibset(0,1))=this%sqrtshat**2
       set(1)=this%sets(0,1)
       set(2)=this%sets(0,2)
-      set(3)=this%sets(0,3)
-      do i=1,popcnt(set(3))
-         inext=ibset(0,this%sets(i,3)-1)
-         set(3)=set(3)-inext
-         if (popcnt(set(1)+set(2)+set(3)).eq.1) then
-            call gent_one_step(inext,set(1)+set(2)+set(3),1)
-            if (this%jac.le.0d0) return
-            this%pp(0:3,set(1)+set(2)+set(3)+2)=this%pp(0:3,1)-this%pp(0:3,inext)
-            this%invm(set(1)+set(2)+set(3)+2)=dot(this%pp(0:3,set(1)+set(2)+set(3)+2),this%pp(0:3,set(1)+set(2)+set(3)+2))
-            !do j=1,this%next
-            !   write(*,*) j,this%pp(0:3,2**(j-1))
-            !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
-            !enddo
-         else
-            call double_t(inext,set(1)+set(2)+set(3),1,2)
-            if (this%jac.le.0d0) return
-            this%pp(0:3,set(1)+set(2)+set(3)+1)=this%pp(0:3,2)-this%pp(0:3,inext)
-            this%invm(set(1)+set(2)+set(3)+1)=dot(this%pp(0:3,set(1)+set(2)+set(3)+1),this%pp(0:3,set(1)+set(2)+set(3)+1))
-            !do j=1,this%next
-            !   write(*,*) j,this%pp(0:3,2**(j-1))
-            !   write(*,*) dot(this%pp(0:3,2**(j-1)),this%pp(0:3,2**(j-1)))
-            !enddo
-         endif
-      enddo
       ! Generate the central 2->2 process in case both set(1) and set(2) are not empty
       if (popcnt(set(1)).gt.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'two sets with at least two ',&
@@ -746,7 +690,6 @@ contains
             else
                shatmax=min(shatmax,Eimax**2)
             endif
-!!$            shatmax=min(shatmax,max(this%invm(ir),this%invm_min(ir))+this%sqrtshat*(2d0*Eimax-this%sqrtshat))
          endif
          call generate_mass(i,shatmin,shatmax)
          if (debug) then

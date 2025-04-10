@@ -150,12 +150,10 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf,&
-             pgl(igroup)%iden_processes)
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
      elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf,&
-             pgl(igroup)%iden_processes)
+             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
      endif
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
@@ -299,8 +297,7 @@ contains
      pgl_unique%phase_space_orders(1:next)=pgl_unique%color_orders(1:next,1)
 
      call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
-          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf, &
-          pgl_unique%iden_processes)
+          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
 
      call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
              pgl_unique%spin,pgl_unique%color_orders,phys_model,read_proc_from_file)
@@ -631,38 +628,6 @@ contains
        enddo
     enddo
     weight(1:nproc)=1d0/weight_factors(pgl(ichan)%multichans_multifactor(1:nproc))
-    
-    
-!!$    if (.not. use_colour_singlet_multichannel) then
-!!$       weight(1:nproc)=1d0/dble(chans(0,1:nproc))
-!!$       return
-!!$    endif
-!!$    do iproc=1,nproc
-!!$       if (all(ichan.ne.chans(1:chans(0,iproc),iproc))) then
-!!$          write (*,*) 'Current channel not among the multi-channel channels',ichan,iproc
-!!$          write (*,*) chans(:,iproc)
-!!$          stop 1
-!!$       endif
-!!$       if (chans(0,iproc).eq.1) then
-!!$          weight(iproc)=1d0
-!!$          cycle
-!!$       endif
-!!$       call mint_get_jacobian_from_x(ichan,x,vol_ichan)
-!!$       weight(iproc)=1d0
-!!$       do i=1,chans(0,iproc)
-!!$          if (chans(i,iproc).eq.ichan) cycle
-!!$          call pgl(chans(i,iproc))%phase_space%compute_x_from_momenta(p)
-!!$          if (pgl(chans(i,iproc))%phase_space%jac.lt.0d0) then
-!!$             ! The x's could not be correctly computed from the momenta
-!!$             write (*,*) 'WARNING: multi-channel weight set to 1'
-!!$             weight(iproc)=1d0
-!!$             return
-!!$          endif
-!!$          call mint_get_jacobian_from_x(chans(i,iproc),pgl(chans(i,iproc))%phase_space%x,vol)
-!!$          weight(iproc)=weight(iproc)+jac/pgl(chans(i,iproc))%phase_space%jac * vol_ichan/vol
-!!$       enddo
-!!$       weight(iproc)=1d0/weight(iproc)
-!!$    enddo
   end subroutine compute_multichannel_weight
 
   subroutine setup_helicity_filter(pgl)
