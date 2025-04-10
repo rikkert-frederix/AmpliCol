@@ -10,20 +10,20 @@ import math
 
 # Global sets (make then 'frozenset' so that they are immutable):
 quarks=frozenset({'d','u','s','c','b','t'})
-antiquarks=frozenset({'dbar','ubar','sbar','cbar','bbar','tbar'})
+antiquarks=frozenset({'d~','u~','s~','c~','b~','t~'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
 flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
 #flavour_scheme=frozenset({'d','u'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
-massless_QCD=flavour_scheme | frozenset([q+'bar' for q in flavour_scheme]) | gluons
+massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
 proton=massless_QCD
 jet=massless_QCD
 if jet != proton:
     raise ValueError("definition of 'jet' and 'proton' should be the same")
-pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','dbar':'-1','ubar':'-2','sbar':'-3','cbar':'-4','bbar':'-5','tbar':'-6','a':'22','z':'23','w+':'24','w-':'-24','e+':'-11','e-':'11','mu+':'-13','mu-':'13','ta+':'-15','ta-':'15','ve':'12','ve~':'-12','vm':'14','vm~':'-14','vt':'16','vt~':'-16','h':'25'}
-anti_particle={'g':'g','d':'dbar','u':'ubar','s':'sbar','c':'cbar','b':'bbar','t':'tbar','dbar':'d','ubar':'u','sbar':'s','cbar':'c','bbar':'b','tbar':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
-sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'dbar':7,'ubar':8,'sbar':9,'cbar':10,'bbar':11,'tbar':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
+pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','d~':'-1','u~':'-2','s~':'-3','c~':'-4','b~':'-5','t~':'-6','a':'22','z':'23','w+':'24','w-':'-24','e+':'-11','e-':'11','mu+':'-13','mu-':'13','ta+':'-15','ta-':'15','ve':'12','ve~':'-12','vm':'14','vm~':'-14','vt':'16','vt~':'-16','h':'25'}
+anti_particle={'g':'g','d':'d~','u':'u~','s':'s~','c':'c~','b':'b~','t':'t~','d~':'d','u~':'u','s~':'s','c~':'c','b~':'b','t~':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
+sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
 
 
 
@@ -128,10 +128,14 @@ def OrderProcPerm(proc,perm):
 
 
 def ParseCollision(input_string):
+    input_string=input_string.replace('bar','~')
     parts=input_string.split(">")
     if len(parts) != 2:
         raise ValueError("Invalid collision format. Expected 'p p > ...'.")
     initial_state=parts[0].strip().split()
+    for i,p in enumerate(initial_state):
+        if p != 'p': 
+            initial_state[i]=anti_particle[p]
     final_state=parts[1].strip().split()
     jet_match=re.match(r"(\d+)j",final_state[-1]) if final_state else None
     jet_count=int(jet_match.group(1)) if jet_match else 0
@@ -151,17 +155,48 @@ def ValidProc(proc):
     if nq != naq : return False # same number of quarks and anti-quarks
     # remove flavour changing currents:
     for q in quarks:
-        if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'bar']) : return False
+        if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
     # need at least one quark line if there are colour singlets:
     if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
     return True
 
+def CompatibleUniqueProc(process,proc):
+    mandatory=[]
+    proc_local=proc.copy()
+    for part in process['initial_state']:
+        if part != 'p':
+            mandatory.append(part)
+    mandatory.extend(process['rest'])
+    try:
+        for p in mandatory:
+            proc_local.remove(p)
+        return True
+    except:
+        return False
+    
+def CompatibleProc(process,proc):
+    proc_local=list(proc[2:])
+    for i in [0,1]:
+        if process['initial_state'][i] != 'p':
+            if proc[i] != process['initial_state'][i]:
+                return False
+    try:
+        for p in process['rest']:
+            proc_local.remove(p)
+    except:
+        return False
+    return True
+    
 def GenerateAllUniqueProcs(process):
     procs=[[]]
     for part in process['initial_state']:
-        if part != 'p':
+        if part != 'p' and part not in jet:
             raise ValueError("Initial state should be a proton ('p').")
-    for part in range(process['jet_count']+2):
+    jp=0
+    for part in process['rest']:
+        if part not in jet : continue
+        jp=jp+1
+    for part in range(process['jet_count']+2+jp):
         procs_new=[]
         for proc in procs:
             for p in jet:
@@ -172,24 +207,29 @@ def GenerateAllUniqueProcs(process):
                     procs_new.append(sorted(proc+[p]))
         procs=procs_new.copy()
     for part in process['rest']:
+        if part in jet : continue
         for proc in procs:
             proc.append(part)
     unique_procs=[]
     for proc in procs:
-        if (ValidProc(proc)):
+        if ValidProc(proc) and CompatibleUniqueProc(process,proc):
             unique_procs.append(tuple(proc))
     return set(unique_procs)
 
-def GenerateAllProcs(unique_procs):
+def GenerateAllProcs(unique_procs,process):
     procs=set()
     for proc in unique_procs:
         for i,j in itertools.combinations(range(len(proc)),2):
-            if proc[i] in proton and proc[j] in proton:
+            if proc[i] in jet and proc[j] in jet:
                 pair1=[proc[i],proc[j]]
                 pair2=[proc[j],proc[i]]
                 remaining=[e for k,e in enumerate(proc) if k not in (i,j)]
-                procs.add(tuple(pair1+remaining))
-                procs.add(tuple(pair2+remaining))
+                proc1=tuple(pair1+remaining)
+                if CompatibleProc(process,proc1):
+                    procs.add(proc1)
+                proc2=tuple(pair2+remaining)
+                if CompatibleProc(process,proc2):
+                    procs.add(proc2)
     return procs
 
 def CombineResults(results):
@@ -337,7 +377,7 @@ def WriteUniqueProcsIntoList(procs):
 if __name__ == "__main__":    
     process=ParseArgument()
     all_unique_procs=GenerateAllUniqueProcs(process)
-    all_procs=GenerateAllProcs(all_unique_procs)
+    all_procs=GenerateAllProcs(all_unique_procs,process)
     
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
