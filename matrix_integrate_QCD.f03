@@ -30,15 +30,22 @@ program matrix_integrate_QCD
   integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
   integer,dimension(:,:),allocatable :: processes,color_orders,multi_chans
   integer,dimension(:,:,:),allocatable :: iden_processes
-  real(kind=8),dimension(:,:),allocatable :: factors
-  
+  real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
+
+  type multichan_info
+     integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
+     integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
+     integer :: max_channels,n_unique_channels,n_unique_channelgroups
+  end type multichan_info
+
   type phase_space_order_group
      type(amplitude_QCD) :: amps
      class(phase_space_type),allocatable :: phase_space
-     integer,dimension(:,:),allocatable :: multi_factor,processes,color_orders,multi_chans,multichans_all_chans_proc
-     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,multichans_allchans,multichans_multifactor
-     integer :: nproc,max_chans,multichans_nchan,multichans_nchans_proc
-     real(kind=8),dimension(:,:),allocatable :: val_procs
+     type(multichan_info) :: multichan
+     integer,dimension(:,:),allocatable :: processes,color_orders
+     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
+     integer :: nproc
+     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes
      integer(kind=4),dimension(:,:),allocatable :: spin
      integer(kind=8),dimension(:),allocatable :: iden
@@ -438,9 +445,8 @@ contains
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     
-    call compute_multichannel_weight(ichan,pgl(ichan)%nproc,pgl(ichan)%max_chans,pgl(ichan)%multi_chans, &
-                                     pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p,pgl(ichan)%phase_space%jac, &
-                                     colour_singlet_multichannel_weight)
+    call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
+                                     pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
     
     call cpu_time(tBefore)
     iproc=0
@@ -577,7 +583,7 @@ contains
     enddo
   end function pass_cuts
 
-  subroutine compute_multichannel_weight(ichan,nproc,max_chans,chans,x,p,jac,weight)
+  subroutine compute_multichannel_weight(ichan,x,p,jac,weight)
     ! Computes the multichannel weight 'weight' when there are
     ! 'chans(0)' channels (that are listed in the array 'chans(1:)') and
     ! the current channel is 'ichan'. The momenta 'p' have been
@@ -589,23 +595,22 @@ contains
     ! with J_i the combined Jacobian coming from MINT and the
     ! phase-space.
     implicit none
-    integer,intent(in) :: ichan,nproc,max_chans
-    integer,dimension(0:max_chans,nproc),intent(in) :: chans
+    integer,intent(in) :: ichan
     real(kind=8),dimension(0:3,next),intent(in) :: p
     real(kind=8),dimension(ndim),intent(in) :: x
     real(kind=8),intent(in) :: jac
-    real(kind=8),dimension(pgl(ichan)%multichans_nchan) :: factors
-    real(kind=8),dimension(pgl(ichan)%multichans_nchans_proc) :: weight_factors
-    real(kind=8),dimension(nproc),intent(out) :: weight
+    real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
+    real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
+    real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
     integer :: i,j,iproc,ii
     real(kind=8) :: vol_ichan,vol
     if (.not. use_colour_singlet_multichannel) then
-       weight(1:nproc)=1d0/dble(chans(0,1:nproc))
+       weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
        return
     endif
     call mint_get_jacobian_from_x(ichan,x,vol_ichan)
-    do j=1,pgl(ichan)%multichans_nchan
-       i=pgl(ichan)%multichans_allchans(j)
+    do j=1,pgl(ichan)%multichan%n_unique_channels
+       i=pgl(ichan)%multichan%unique_channel_list(j)
        if (i.eq.ichan) then
           ii=j
           cycle
@@ -614,20 +619,20 @@ contains
        if (pgl(i)%phase_space%jac.lt.0d0) then
           ! The x's could not be correctly computed from the momenta
           write (*,*) 'WARNING: multi-channel weight not included'
-          weight(1:nproc)=1d0/dble(chans(0,1:nproc))
+          weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
           return
        endif
        call mint_get_jacobian_from_x(i,pgl(i)%phase_space%x,vol)
        factors(j)=pgl(i)%phase_space%jac*vol
     enddo
-    do i=1,pgl(ichan)%multichans_nchans_proc
+    do i=1,pgl(ichan)%multichan%n_unique_channelgroups
        weight_factors(i)=1d0
-       do j=1,pgl(ichan)%multichans_all_chans_proc(0,i)
-          if (pgl(ichan)%multichans_all_chans_proc(j,i).eq.ii) cycle
-          weight_factors(i)=weight_factors(i)+jac*vol_ichan/factors(pgl(ichan)%multichans_all_chans_proc(j,i))
+       do j=1,pgl(ichan)%multichan%unique_channelgroup_list(0,i)
+          if (pgl(ichan)%multichan%unique_channelgroup_list(j,i).eq.ii) cycle
+          weight_factors(i)=weight_factors(i)+jac*vol_ichan/factors(pgl(ichan)%multichan%unique_channelgroup_list(j,i))
        enddo
     enddo
-    weight(1:nproc)=1d0/weight_factors(pgl(ichan)%multichans_multifactor(1:nproc))
+    weight(1:pgl(ichan)%nproc)=1d0/weight_factors(pgl(ichan)%multichan%map_proc_to_channelgroup(1:pgl(ichan)%nproc))
   end subroutine compute_multichannel_weight
 
   subroutine setup_helicity_filter(pgl)
@@ -844,7 +849,7 @@ contains
     integer(kind=8) iseed
     integer,dimension(:),allocatable :: process,order,ichans
     integer,dimension(:,:),allocatable :: ps_o
-    integer :: factor,nproc_in_group,icheck,max_chans
+    integer :: idenCOfactor,nproc_in_group,icheck,max_channels
     logical :: same_flavour
     character(len=1024) :: buff
     common /to_seed/iseed
@@ -885,7 +890,7 @@ contains
        do igroup=1,ngroups
           nprocs=0
           allocate(phase_space_orders(1:next))
-          read(10,*) icheck,nproc_in_group,max_chans,phase_space_orders(1:next)
+          read(10,*) icheck,nproc_in_group,max_channels,phase_space_orders(1:next)
           if (icheck.ne.igroup) then
              write (*,*) 'ERROR in processes file',icheck,igroup
              stop 1
@@ -894,47 +899,49 @@ contains
           allocate(processes(1:next,nproc_in_group))
           allocate(color_orders(1:next,nproc_in_group))
           allocate(iden_processes(1:next,nproc_in_group,nproc_in_group))
-          allocate(factors(nproc_in_group,nproc_in_group))
-          allocate(multi_chans(0:max_chans,nproc_in_group))
-          allocate(ichans(0:max_chans))
+          allocate(idenCOandMAPfactor(nproc_in_group,nproc_in_group))
+          allocate(multi_chans(0:max_channels,nproc_in_group))
+          allocate(ichans(0:max_channels))
           do iproc=1,nproc_in_group
              read(10,'(a)') buff
              read(buff,*) ichans(0)
-             read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),factor
-             call add_to_process_list(process,order,factor,max_chans,ichans)
+             read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
+             call add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
           enddo
           pgl(igroup)%nproc=nprocs
-          pgl(igroup)%max_chans=max_chans
+          pgl(igroup)%multichan%max_channels=max_channels
           allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
           allocate(pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc))
           allocate(pgl(igroup)%phase_space_orders(1:next))
-          allocate(pgl(igroup)%multi_factor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
           allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
           allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
           allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
-          allocate(pgl(igroup)%multi_chans(0:max_chans,1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
           pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
           pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
           pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
-          pgl(igroup)%multi_factor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
-               factors(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
+          pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
+               idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
           pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc)=iden_iproc(1:pgl(igroup)%nproc)
           pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
                iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
-          pgl(igroup)%multi_chans(0:max_chans,1:pgl(igroup)%nproc)=multi_chans(0:max_chans,1:pgl(igroup)%nproc)
+          pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
+          pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
           deallocate(iden_iproc)
           deallocate(processes)
           deallocate(color_orders)
           deallocate(phase_space_orders)
           deallocate(iden_processes)
-          deallocate(factors)
+          deallocate(idenCOandMAPfactor)
           deallocate(multi_chans)
           deallocate(ichans)
           write (*,*) '****************************************************'
           do iproc=1,pgl(igroup)%nproc
              write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
                   pgl(igroup)%color_orders(1:next,iproc),' ; ',pgl(igroup)%iden_iproc(iproc),' ; ',&
-                  pgl(igroup)%multi_chans(1:pgl(igroup)%multi_chans(0,iproc),iproc)
+                  pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
           enddo
           write (*,*) '****************************************************'
           read(10,*)
@@ -1039,10 +1046,11 @@ contains
        allocate(pgl(ngroups))
        do i=1,ngroups
           pgl(i)%nproc=1
-          allocate(pgl(i)%multi_chans(0:n_ps,1))
-          pgl(i)%multi_chans(0,1)=n_ps
+          allocate(pgl(i)%multichan%channels(1:n_ps,1))
+          allocate(pgl(i)%multichan%number_of_channels(1))
+          pgl(i)%multichan%number_of_channels(1)=n_ps
           do k=1,n_ps
-             pgl(i)%multi_chans(k,1)=k
+             pgl(i)%multichan%channels(k,1)=k
           enddo
           allocate(pgl(i)%processes(1:next,pgl(i)%nproc))
           pgl(i)%processes(1:next,1)=part(1:next)
@@ -1050,8 +1058,8 @@ contains
           pgl(i)%color_orders(1:next,1)=o(1:next)
           allocate(pgl(i)%phase_space_orders(1:next))
           pgl(i)%phase_space_orders(1:next)=ps_o(1:next,i)
-          allocate(pgl(i)%multi_factor(1,1))
-          pgl(i)%multi_factor(1,1)=sym_fac
+          allocate(pgl(i)%idenCOandMAPfactor(1,1))
+          pgl(i)%idenCOandMAPfactor(1,1)=sym_fac
           allocate(pgl(i)%iden_iproc(1))
           pgl(i)%iden_iproc(1)=1
           allocate(pgl(i)%val_procs(1,1))
@@ -1085,53 +1093,54 @@ contains
   subroutine setup_optimised_multichannel_weight_computation(pgl)
     implicit none
     type(phase_space_order_group) :: pgl
-    integer,dimension(pgl%nproc*pgl%max_chans) :: all_chans
-    integer,dimension(pgl%nproc*ngroups) :: all_chans_inv
-    integer,dimension(0:pgl%max_chans,pgl%nproc) :: all_chans_proc
-    integer,dimension(pgl%nproc) :: multifactor
-    integer :: iproc,ichan,nchans,nchans_proc
+    integer,dimension(pgl%nproc*pgl%multichan%max_channels) :: all_unique_chans
+    integer,dimension(pgl%nproc*ngroups) :: all_unique_chans_inv
+    integer,dimension(0:pgl%multichan%max_channels,pgl%nproc) :: all_unique_channelgroups
+    integer,dimension(pgl%nproc) :: map_proc_to_group
+    integer :: iproc,ichan,nchans,nchans_group
     logical :: found
     nchans=0
-    nchans_proc=0
+    nchans_group=0
     do iproc=1,pgl%nproc
-       do ichan=1,pgl%multi_chans(0,iproc)
-          if (all(all_chans(1:nchans).ne.pgl%multi_chans(ichan,iproc))) then
+       do ichan=1,pgl%multichan%number_of_channels(iproc)
+          if (all(all_unique_chans(1:nchans).ne.pgl%multichan%channels(ichan,iproc))) then
              nchans=nchans+1
-             all_chans(nchans)=pgl%multi_chans(ichan,iproc)
-             all_chans_inv(pgl%multi_chans(ichan,iproc))=nchans
+             all_unique_chans(nchans)=pgl%multichan%channels(ichan,iproc)
+             all_unique_chans_inv(pgl%multichan%channels(ichan,iproc))=nchans
           endif
        enddo
     enddo
     do iproc=1,pgl%nproc
        found=.false.
-       do i=1,nchans_proc
-          if (all_chans_proc(0,i).ne.pgl%multi_chans(0,iproc))cycle
-          if (all(all_chans_inv(all_chans_proc(1:pgl%multi_chans(0,iproc),i)).eq. &
-               pgl%multi_chans(1:pgl%multi_chans(0,iproc),iproc))) then
-             multifactor(iproc)=i
+       do i=1,nchans_group
+          if (all_unique_channelgroups(0,i).ne.pgl%multichan%number_of_channels(iproc))cycle
+          if (all(all_unique_chans_inv(all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),i)).eq. &
+               pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc))) then
+             map_proc_to_group(iproc)=i
              found=.true.
              exit
           endif
        enddo
        if (.not.found) then
-          nchans_proc=nchans_proc+1
-          all_chans_proc(0,nchans_proc)= &
-               pgl%multi_chans(0,iproc)
-          all_chans_proc(1:pgl%multi_chans(0,iproc),nchans_proc)= &
-               all_chans_inv(pgl%multi_chans(1:pgl%multi_chans(0,iproc),iproc))
-          multifactor(iproc)=nchans_proc
+          nchans_group=nchans_group+1
+          all_unique_channelgroups(0,nchans_group)= &
+               pgl%multichan%number_of_channels(iproc)
+          all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),nchans_group)= &
+               all_unique_chans_inv(pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc))
+          map_proc_to_group(iproc)=nchans_group
        endif
     enddo
 
-    pgl%multichans_nchan=nchans
-    pgl%multichans_nchans_proc=nchans_proc
-    allocate(pgl%multichans_allchans(nchans))
-    pgl%multichans_allchans=all_chans(1:nchans)
-    allocate(pgl%multichans_all_chans_proc(0:pgl%max_chans,nchans_proc))
-    pgl%multichans_all_chans_proc(0:pgl%max_chans,1:nchans_proc)=all_chans_proc(0:pgl%max_chans,1:nchans_proc)
-    allocate(pgl%multichans_multifactor(pgl%nproc))
-    pgl%multichans_multifactor(1:pgl%nproc)=multifactor(1:pgl%nproc)
-
+    pgl%multichan%n_unique_channels=nchans
+    pgl%multichan%n_unique_channelgroups=nchans_group
+    allocate(pgl%multichan%unique_channel_list(nchans))
+    pgl%multichan%unique_channel_list=all_unique_chans(1:nchans)
+    allocate(pgl%multichan%unique_channelgroup_list(0:pgl%multichan%max_channels,nchans_group))
+    pgl%multichan%unique_channelgroup_list(0:pgl%multichan%max_channels,1:nchans_group)= &
+         all_unique_channelgroups(0:pgl%multichan%max_channels,1:nchans_group)
+    allocate(pgl%multichan%map_proc_to_channelgroup(pgl%nproc))
+    pgl%multichan%map_proc_to_channelgroup(1:pgl%nproc)=map_proc_to_group(1:pgl%nproc)
+    deallocate(pgl%multichan%channels)
   end subroutine setup_optimised_multichannel_weight_computation
     
 
@@ -1196,17 +1205,17 @@ contains
     enddo
   end subroutine determine_phase_space_orders
 
-  subroutine add_to_process_list(process,order,factor,max_chans,ichans)
+  subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
     implicit none
-    integer :: max_chans
-    integer,dimension(0:max_chans) :: ichans
+    integer :: max_channels
+    integer,dimension(0:max_channels) :: ichans
     integer,dimension(next) :: process,order,process_mapped,process_unique,mapping
-    integer :: factor
-    real(kind=8) :: multi_factor
+    integer :: idenCOfactor
+    real(kind=8) :: idenMAPfactor,idenCOMAPfactor
     call map_to_canonical_form(process,process_mapped,mapping)
-    call get_unique_process(process,process_mapped,process_unique,multi_factor,mapping)
-    multi_factor=multi_factor*factor
-    call add_to_unique_process_list(process,process_unique,order,multi_factor,max_chans,ichans)
+    call get_unique_process(process,process_mapped,process_unique,idenMAPfactor,mapping)
+    idenCOMAPfactor=idenMAPfactor*idenCOfactor
+    call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
   end subroutine add_to_process_list
 
   subroutine move_colour_singlet_in_order(process,order)
@@ -1245,12 +1254,12 @@ contains
     enddo
   end subroutine move_colour_singlet_in_order
           
-  subroutine add_to_unique_process_list(process,process_unique,order,multi_factor,max_chans,ichans)
+  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
     implicit none
-    integer,intent(in) :: max_chans
-    integer,dimension(0:max_chans),intent(in) :: ichans
+    integer,intent(in) :: max_channels
+    integer,dimension(0:max_channels),intent(in) :: ichans
     integer,dimension(next) :: process,process_unique,order
-    real(kind=8) :: multi_factor
+    real(kind=8) :: idenCOMAPfactor
     integer :: iproc
     call move_colour_singlet_in_order(process,order)
     do iproc=1,nprocs
@@ -1264,13 +1273,13 @@ contains
        color_orders(1:next,iproc)=order(1:next)
        iden_iproc(iproc)=1
        iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
-       factors(iden_iproc(iproc),iproc)=multi_factor
+       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
        multi_chans(0:ichans(0),iproc)=ichans(0:ichans(0))
     else
        ! identical to another matrix element
        iden_iproc(iproc)=iden_iproc(iproc)+1
        iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
-       factors(iden_iproc(iproc),iproc)=multi_factor
+       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
        if (ichans(0).ne.multi_chans(0,iproc)) then
           write (*,*) 'Number of multi-channels not the same among identical processes',&
                ichans(0),multi_chans(0,iproc)
@@ -1286,11 +1295,11 @@ contains
   end subroutine add_to_unique_process_list
 
   
-  subroutine get_unique_process(process,process_mapped,process_unique,multi_factor,mapping)
+  subroutine get_unique_process(process,process_mapped,process_unique,idenMAPfactor,mapping)
     implicit none
     integer,dimension(next) :: process,process_mapped,process_unique,mapping
     integer :: iproc,map_from,map_to,i,j
-    real(kind=8) :: multi_factor
+    real(kind=8) :: idenMAPfactor
     do iproc=1,pgl_unique%nproc
        if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
     enddo
@@ -1300,7 +1309,7 @@ contains
        write (*,*) process_mapped(1:next)
        stop 1
     endif
-    multi_factor=unique_map_value(iproc)
+    idenMAPfactor=unique_map_value(iproc)
     if (unique_map(iproc).gt.0) then
        do i=1,next
           if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
@@ -1689,7 +1698,7 @@ contains
        call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
     do iproc=1,pgl%nproc
-       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)*pgl%multi_factor(1:pgl%iden_iproc(iproc),iproc)
+       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)*pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
        if (include_pdf) then
           do ip=1,pgl%iden_iproc(iproc)
              ! first incoming particle
