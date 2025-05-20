@@ -163,6 +163,7 @@ contains
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
 
     call deallocate_unneeded()
+
   contains
 
     subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
@@ -832,7 +833,7 @@ contains
       if (.not.valid_current_combination())  then
          return
       endif
-      
+
       if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -943,7 +944,6 @@ contains
       endif
       ! check that both currents can contribute to the same process
       if (iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc).eq.0) return
-
       ! Check for colour singlets:
       colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
@@ -1836,7 +1836,7 @@ contains
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
-          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
              ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
                 ih_in=max(0,hel(this%current_list(ic)%order(1)))
@@ -3061,6 +3061,7 @@ contains
     integer :: val_size
     lhs%type=rhs%type
     lhs%currents(1:2)=rhs%currents(1:2)
+    lhs%coupl=rhs%coupl
     if (allocated(lhs%singlet_mv)) deallocate(lhs%singlet_mv)
     if (allocated(rhs%singlet_mv)) then
        if (rhs%singlet_mv(0).gt.0) then

@@ -298,7 +298,7 @@ contains
 
      do iproc=1,pgl_unique%nproc
         do i=1,2
-              pgl_unique%processes(i,iproc)=phys_model%get_antipart(pgl_unique%processes(i,iproc))
+           pgl_unique%processes(i,iproc)=phys_model%get_antipart(pgl_unique%processes(i,iproc))
         enddo
      enddo
 
@@ -429,6 +429,7 @@ contains
     endif
 
     cuts_wgt=pass_cuts(next,pgl(ichan)%phase_space%p)
+    
     if ((pgl(ichan)%phase_space%jac.lt.0d0) .or. &
          (smooth_cuts .and. cuts_wgt.lt.0d0) .or. &
          (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
@@ -448,7 +449,6 @@ contains
     
     call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
                                      pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
-    
     call cpu_time(tBefore)
     iproc=0
     pgl(ichan)%amp2(:)=0d0
