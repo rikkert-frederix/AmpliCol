@@ -7,6 +7,7 @@ module phase_space_genpt_mod
      procedure :: init => genpt_init
      procedure :: generate_momenta => genpt_generate_momenta
      procedure :: compute_x_from_momenta => genpt_compute_x_from_momenta
+     procedure :: cleanup => genpt_cleanup
   end type phase_space_genpt
   private
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -23,6 +24,20 @@ contains
     write (*,*) 'Cannot invert phase-space for pT-based parametrisation'
     stop 1
   end subroutine genpt_compute_x_from_momenta
+  subroutine genpt_cleanup(this)
+    implicit none
+    class(phase_space_genpt),intent(inout) :: this
+    if (allocated(this%order)) deallocate(this%order)
+    if (allocated(this%masses)) deallocate(this%masses)
+    if (allocated(this%invm)) deallocate(this%invm)
+    if (allocated(this%invm_min)) deallocate(this%invm_min)
+    if (allocated(this%invm_max)) deallocate(this%invm_max)
+    if (allocated(this%ETmin)) deallocate(this%ETmin)
+    if (allocated(this%pp)) deallocate(this%pp)
+    if (allocated(this%p)) deallocate(this%p)
+    if (allocated(this%x)) deallocate(this%x)
+    if (allocated(this%sets)) deallocate(this%sets)
+  end subroutine genpt_cleanup
   subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
     implicit none
     class(phase_space_genpt),intent(inout) :: this

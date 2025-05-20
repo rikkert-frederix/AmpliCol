@@ -799,14 +799,14 @@ contains
     ! contribution to integral
     ifirst=0
     if(imode.eq.0) then
-       dummy=fun(x,vol,ifirst,f1)
+       dummy=fun(x(1:ndim),vol,ifirst,f1)
        f(1:nintegrals)=f1(1:nintegrals)
     else
        f(1:nintegrals)=0d0
        kfold(1:ndim)=1
 1      continue
        ! this accumulated value will not be used
-       dummy=fun(x,vol,ifirst,f1)
+       dummy=fun(x(1:ndim),vol,ifirst,f1)
        ifirst=1
        call nextlexi(ifold,kfold,iret)
        if(iret.eq.0) then
@@ -815,7 +815,7 @@ contains
        endif
        !closing call: accumulated value with correct sign
        ifirst=2
-       dummy=fun(x,vol,ifirst,f1)
+       dummy=fun(x(1:ndim),vol,ifirst,f1)
        f(1:nintegrals)=f1(1:nintegrals)
     endif
     if (fixed_points_pass_cuts) ntotcalls(1:nintegrals)=ntotcalls(1:nintegrals)+1

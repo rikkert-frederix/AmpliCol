@@ -4,7 +4,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
-  type current
+  type :: current
      integer :: type,bin,n_vert
      integer(kind=16) :: iproc
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
@@ -12,16 +12,26 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8) :: mass,width
+   contains
+     final :: finalize_current ! custom deallocation of current
   end type current
-  type interaction
+  type :: interaction
      integer :: type
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8) :: coupl
+   contains
+     final :: finalize_interaction ! custom deallocation of interaction
   end type interaction
-  type amplitude_QCD
+  ! setting one current (or interaction) equal to another using equal
+  ! sign, requires a special operation:
+  interface assignment(=)
+     module procedure assign_current
+     module procedure assign_interaction
+  end interface assignment(=)
+  type :: amplitude_QCD
      integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
@@ -37,6 +47,7 @@ module amplitude_QCD_mod
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file
      procedure,private :: filter_dead_trees
+     final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
   subroutine init(this,imode,n,n_processes,part,spin,o,pm,read_file)
@@ -74,7 +85,7 @@ contains
     endif
     this%imode=imode
 
-    call check_input_consistency()
+    call check_input_consistency(part)
 
     if (this%imode.eq.2) then
        call define_canonical_color_order()
@@ -188,7 +199,6 @@ contains
       allocate(current_list_local(this%n_cur)%spin(isize))
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
-      current_list_local(this%n_cur)%iproc=0
       current_list_local(this%n_cur)%iproc=ibset(int(0,kind=16),iproc-1)
     end subroutine create_external_current
     
@@ -513,9 +523,10 @@ contains
       if (number_of_quark_lines.lt.2) is_same_flavour_process=.false.
     end function number_of_quark_lines
     
-    subroutine check_input_consistency()
+    subroutine check_input_consistency(part)
       implicit none
       integer :: i,j,k,iflav,iproc,jproc,idum,ichan
+      integer,dimension(n,n_processes),intent(in) :: part
       integer,dimension(n,2) :: part_sf
       integer,dimension(n) :: jord
       logical :: sf
@@ -527,12 +538,12 @@ contains
          idum=number_of_quark_lines(part(1,1),sf)
          if (sf) then
             ! add the two different-flavour processes that make up the same-flavour process
-            call define_symm_2qq(part(1,1),part_sf(1,1),1)
-            call define_symm_2qq(part(1,1),part_sf(1,2),2)
             this%nprocs=3
             allocate(this%processes(n,this%nprocs))
+            call define_symm_2qq(part(1,1),part_sf,1)
             this%processes(1:n,1)=part_sf(1:n,1)
-            this%processes(1:n,2)=part_sf(1:n,2)
+            call define_symm_2qq(part(1,1),part_sf,2)
+            this%processes(1:n,2)=part_sf(1:n,1)
             this%processes(1:n,3)=part(1:n,1)
             allocate(order(1:n,this%nprocs))
             order(1:n,1)=o(1:n,1)
@@ -549,12 +560,12 @@ contains
          idum=number_of_quark_lines(part(1,1),sf)
          if (sf .and. .not.read_file) then
             ! add the two different-flavour processes that make up the same-flavour process
-            call define_symm_2qq(part(1,1),part_sf(1,1),1)
-            call define_symm_2qq(part(1,1),part_sf(1,2),2)
             this%nprocs=3
             allocate(this%processes(n,this%nprocs))
+            call define_symm_2qq(part(1,1),part_sf,1)
             this%processes(1:n,1)=part_sf(1:n,1)
-            this%processes(1:n,2)=part_sf(1:n,2)
+            call define_symm_2qq(part(1,1),part_sf,2)
+            this%processes(1:n,2)=part_sf(1:n,1)
             this%processes(1:n,3)=part(1:n,1)
             allocate(order(1:n,this%nprocs))
             order(1:n,1)=o(1:n,1)
@@ -653,7 +664,7 @@ contains
                stop 1
             endif
             do ichan=1,2
-               call define_symm_2qq(this%processes(1,iproc),part_sf(1,1),ichan)
+               call define_symm_2qq(this%processes(1,iproc),part_sf,ichan)
                do jproc=1,iproc-1
                   if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
                   jord(1:n)=order(1:n,jproc)
@@ -687,8 +698,8 @@ contains
     subroutine define_symm_2qq(part_in,part_out,chan)
       implicit none
       integer :: chan
-      integer,dimension(n) :: part_in
-      integer,dimension(n,2) :: part_out
+      integer,dimension(n),intent(in) :: part_in
+      integer,dimension(n,2),intent(out) :: part_out
       integer :: i,iq,ia,i_same,n_sing,add_or_subtract
       integer,dimension(2,2) :: connection
       n_sing=0
@@ -710,8 +721,8 @@ contains
             exit
          endif
       enddo
-      part_out(1:n,1)=part_in
-      part_out(1:n,2)=part_in
+      part_out(1:n,1)=part_in(1:n)
+      part_out(1:n,2)=part_in(1:n)
       iq=0
       ia=0
       do i=1,n
@@ -785,6 +796,7 @@ contains
       endif
     end subroutine set_max_vert
 
+      
     subroutine allocate_current_list_and_interaction_list()
       ! allocate the minimum memory needed for the current_list and
       ! interaction_list to be able to perform the evaluate() procedure.
@@ -793,27 +805,21 @@ contains
       allocate(this%current_list(1:this%n_cur))
       do isize=1,n-1
          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-            this%current_list(ic)=current_list_local(ic)
-            if(this%current_list(ic)%n_vert.gt.0) then
-               deallocate(this%current_list(ic)%vertices)
-               allocate(this%current_list(ic)%vertices(this%current_list(ic)%n_vert))
-               this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)=&
-                    current_list_local(ic)%vertices(1:current_list_local(ic)%n_vert)
-               deallocate(this%current_list(ic)%vertex_sign)
-               allocate(this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert))
-               this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)=&
-                    current_list_local(ic)%vertex_sign(1:current_list_local(ic)%n_vert)
-            endif
+            this%current_list(ic)=current_list_local(ic) ! use non-custom 'assignment'
          enddo
+      enddo
+      ! make sure to deallocate currents consistently
+      do ic=1,size(current_list_local)
+         call finalize_current(current_list_local(ic))
       enddo
       deallocate(current_list_local)
       allocate(this%interaction_list(1:this%n_vert))
       do iv=1,this%n_vert
-         this%interaction_list(iv)=interaction_list_local(iv)
-         deallocate(this%interaction_list(iv)%singlet_mv)
-         allocate(this%interaction_list(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0)))
-         this%interaction_list(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0))=&
-              interaction_list_local(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0))
+         this%interaction_list(iv)=interaction_list_local(iv) ! use non-custom 'assignment'
+      enddo
+      ! make sure to deallocate interactions consistently
+      do iv=1,size(interaction_list_local)
+         call finalize_interaction(interaction_list_local(iv))
       enddo
       deallocate(interaction_list_local)
     end subroutine allocate_current_list_and_interaction_list
@@ -1638,8 +1644,12 @@ contains
     ! interaction_list
     do iv=1,this%n_vert
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),&
-            this%interaction_list(iv)%singlet_mv(0),this%interaction_list(iv)%coupl
-       write (iunit) this%interaction_list(iv)%singlet_mv(1:this%interaction_list(iv)%singlet_mv(0))
+            this%interaction_list(iv)%coupl
+       if (allocated(this%interaction_list(iv)%singlet_mv)) then
+          write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
+       else
+          write (iunit) 0
+       endif
     enddo
     ! momenta array
     write (iunit) this%pp_bin_to_i(1:maskr(n))
@@ -1696,10 +1706,12 @@ contains
     ! interaction_list
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
-       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),itmp,this%interaction_list(iv)%coupl
-       allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
-       this%interaction_list(iv)%singlet_mv(0)=itmp
-       read (iunit) this%interaction_list(iv)%singlet_mv(1:itmp)
+       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl,itmp
+       if (itmp.gt.0) then
+          allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
+          this%interaction_list(iv)%singlet_mv(0)=itmp
+          read (iunit) this%interaction_list(iv)%singlet_mv(1:itmp)
+       endif
     enddo
     ! momenta array
     allocate(this%pp_bin_to_i(1:maskr(n)))
@@ -1740,12 +1752,23 @@ contains
   contains
     subroutine deallocate_all()
       implicit none
+      integer :: i
       if (allocated(this%n_cur_start)) deallocate(this%n_cur_start)
       if (allocated(this%n_cur_end)) deallocate(this%n_cur_end)
       if (allocated(this%n_vert_start)) deallocate(this%n_vert_start)
       if (allocated(this%n_vert_end)) deallocate(this%n_vert_end)
-      if (allocated(this%current_list)) deallocate(this%current_list)
-      if (allocated(this%interaction_list)) deallocate(this%interaction_list)
+      if (allocated(this%current_list)) then
+         do i=1,size(this%current_list)
+            call finalize_current(this%current_list(i))
+         enddo
+         deallocate(this%current_list)
+      endif
+      if (allocated(this%interaction_list)) then
+         do i=1,size(this%interaction_list)
+            call finalize_interaction(this%interaction_list(i))
+         enddo
+         deallocate(this%interaction_list)
+      endif
       if (allocated(this%pp)) deallocate(this%pp)
       if (allocated(this%pp_bin_to_i)) deallocate(this%pp_bin_to_i)
       if (allocated(this%pp_i_to_bin)) deallocate(this%pp_i_to_bin)
@@ -2943,7 +2966,7 @@ contains
     ! do the actual shifting of the currents in the list
     do nc=1,this%n_cur
        if (.not.is_needed_cur(nc)) cycle
-       this%current_list(where_to_cur(nc))=this%current_list(nc)
+       if (where_to_cur(nc).ne.nc) this%current_list(where_to_cur(nc))=this%current_list(nc)
        do iv=1,this%current_list(where_to_cur(nc))%n_vert
           this%current_list(where_to_cur(nc))%vertices(iv)= &
                where_to_ver(this%current_list(where_to_cur(nc))%vertices(iv))
@@ -2952,7 +2975,7 @@ contains
     ! do the actual shifting of the interactions in the list
     do iv=1,this%n_vert
        if (.not.is_needed_ver(iv)) cycle
-       this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+       if (where_to_ver(iv).ne.iv) this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
        this%interaction_list(where_to_ver(iv))%currents(1:2)= &
             where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
     enddo
@@ -3030,4 +3053,157 @@ contains
     deallocate(where_to_cur)
   end subroutine filter_dead_trees
 
+  subroutine assign_interaction(lhs,rhs)
+    ! sets non-custom 'lhs' = 'rhs' for interactions
+    implicit none
+    type(interaction),intent(inout) :: lhs
+    type(interaction),intent(in) :: rhs
+    integer :: val_size
+    lhs%type=rhs%type
+    lhs%currents(1:2)=rhs%currents(1:2)
+    if (allocated(lhs%singlet_mv)) deallocate(lhs%singlet_mv)
+    if (allocated(rhs%singlet_mv)) then
+       if (rhs%singlet_mv(0).gt.0) then
+          allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
+          lhs%singlet_mv(0:rhs%singlet_mv(0))=rhs%singlet_mv(0:rhs%singlet_mv(0))
+       endif
+    endif
+    if (allocated(lhs%val_c)) deallocate(lhs%val_c)
+    if (allocated(rhs%val_c)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_c(1:val_size))
+       lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
+    endif
+    if (allocated(lhs%val_r)) deallocate(lhs%val_r)
+    if (allocated(rhs%val_r)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_r(1:val_size))
+       lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
+    endif
+  end subroutine assign_interaction
+  
+  subroutine assign_current(lhs,rhs)
+    ! sets non-custom 'lhs' = 'rhs' for currents
+    implicit none
+    type(current),intent(inout) :: lhs
+    type(current),intent(in) :: rhs
+    integer :: isize,val_size
+    lhs%type=rhs%type
+    lhs%bin=rhs%bin
+    isize=popcnt(lhs%bin)
+    lhs%n_vert=rhs%n_vert
+    lhs%iproc=rhs%iproc
+    lhs%mass=rhs%mass
+    lhs%width=rhs%width
+    if (allocated(lhs%vertices)) deallocate(lhs%vertices)
+    if (allocated(rhs%vertices) .and. rhs%n_vert.gt.0) then
+       allocate(lhs%vertices(1:lhs%n_vert))
+       lhs%vertices(1:lhs%n_vert)=rhs%vertices(1:lhs%n_vert)
+    endif
+    if (allocated(lhs%order)) deallocate(lhs%order)
+    if (allocated(rhs%order) .and. isize.gt.0) then
+       allocate(lhs%order(1:isize))
+       lhs%order(1:isize)=rhs%order(1:isize)
+    endif
+    if (allocated(lhs%spin)) deallocate(lhs%spin)
+    if (allocated(rhs%spin) .and. isize.gt.0) then
+       allocate(lhs%spin(1:isize))
+       lhs%spin(1:isize)=rhs%spin(1:isize)
+    endif
+    if (allocated(lhs%ext_type)) deallocate(lhs%ext_type)
+    if (allocated(rhs%ext_type) .and. isize.gt.0) then
+       allocate(lhs%ext_type(1:isize))
+       lhs%ext_type(1:isize)=rhs%ext_type(1:isize)
+    endif
+    if (allocated(lhs%vertex_sign)) deallocate(lhs%vertex_sign)
+    if (allocated(rhs%vertex_sign) .and. rhs%n_vert.gt.0) then
+       allocate(lhs%vertex_sign(1:lhs%n_vert))
+       lhs%vertex_sign(1:lhs%n_vert)=rhs%vertex_sign(1:lhs%n_vert)
+    endif
+    if (allocated(lhs%val_c)) deallocate(lhs%val_c)
+    if (allocated(rhs%val_c)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_c(1:val_size))
+       lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
+    endif
+    if (allocated(lhs%val_r)) deallocate(lhs%val_r)
+    if (allocated(rhs%val_r)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_r(1:val_size))
+       lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
+    endif
+  end subroutine assign_current
+  subroutine finalize_amplitude_QCD(amp)
+    type(amplitude_QCD),intent(inout) :: amp
+    integer :: i
+    if (allocated(amp%current_list)) then
+       do i=1,size(amp%current_list)
+          call finalize_current(amp%current_list(i))
+       enddo
+       deallocate(amp%current_list)
+    endif
+    if (allocated(amp%interaction_list)) then
+       do i=1,size(amp%interaction_list)
+          call finalize_interaction(amp%interaction_list(i))
+       enddo
+       deallocate(amp%interaction_list)
+    endif
+    if (allocated(amp%amps)) deallocate(amp%amps)
+    if (allocated(amp%amps_r)) deallocate(amp%amps_r)
+    if (allocated(amp%pp)) deallocate(amp%pp)
+    if (allocated(amp%diff_col_vals)) deallocate(amp%diff_col_vals)
+    if (allocated(amp%n_cur_start)) deallocate(amp%n_cur_start)
+    if (allocated(amp%n_cur_end)) deallocate(amp%n_cur_end)
+    if (allocated(amp%n_vert_start)) deallocate(amp%n_vert_start)
+    if (allocated(amp%n_vert_end)) deallocate(amp%n_vert_end)
+    if (allocated(amp%pp_bin_to_i)) deallocate(amp%pp_bin_to_i)
+    if (allocated(amp%pp_i_to_bin)) deallocate(amp%pp_i_to_bin)
+    if (allocated(amp%col_index)) deallocate(amp%col_index)
+    if (allocated(amp%n_col_vals)) deallocate(amp%n_col_vals)
+    if (allocated(amp%iproc_start)) deallocate(amp%iproc_start)
+    if (allocated(amp%n_sing)) deallocate(amp%n_sing)
+    if (allocated(amp%n_qqbar)) deallocate(amp%n_qqbar)
+    if (allocated(amp%perm)) deallocate(amp%perm)
+    if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
+    if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
+    if (allocated(amp%processes)) deallocate(amp%processes)
+    if (allocated(amp%same_flavour_proc_map)) deallocate(amp%same_flavour_proc_map)
+    if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)
+    if (allocated(amp%spins)) deallocate(amp%spins)
+    if (allocated(amp%row_index)) deallocate(amp%row_index)
+    if (allocated(amp%include_amp)) deallocate(amp%include_amp)
+    if (allocated(amp%same_flav)) deallocate(amp%same_flav)
+  end subroutine finalize_amplitude_QCD
+  subroutine finalize_interaction(vert)
+    type(interaction),intent(inout) :: vert
+    if (allocated(vert%singlet_mv)) deallocate(vert%singlet_mv)
+    if (allocated(vert%val_c)) deallocate(vert%val_c)
+    if (allocated(vert%val_r)) deallocate(vert%val_r)
+  end subroutine finalize_interaction
+  subroutine finalize_current(cur)
+    type(current),intent(inout) :: cur
+    if (allocated(cur%vertices)) deallocate(cur%vertices)
+    if (allocated(cur%order)) deallocate(cur%order)
+    if (allocated(cur%spin)) deallocate(cur%spin)
+    if (allocated(cur%ext_type)) deallocate(cur%ext_type)
+    if (allocated(cur%vertex_sign)) deallocate(cur%vertex_sign)
+    if (allocated(cur%val_c)) deallocate(cur%val_c)
+    if (allocated(cur%val_r)) deallocate(cur%val_r)
+  end subroutine finalize_current
 end module amplitude_QCD_mod

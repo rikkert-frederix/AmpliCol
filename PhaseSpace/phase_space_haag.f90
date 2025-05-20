@@ -7,6 +7,7 @@ module phase_space_haag_mod
      procedure :: init => haag_init
      procedure :: generate_momenta => haag_generate_momenta
      procedure :: compute_x_from_momenta => haag_compute_x_from_momenta
+     procedure :: cleanup => haag_cleanup
   end type phase_space_haag
   private
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -29,7 +30,20 @@ contains
     write (*,*) 'Cannot invert phase-space for haag parametrisation'
     stop 1
   end subroutine haag_compute_x_from_momenta
-
+  subroutine haag_cleanup(this)
+    implicit none
+    class(phase_space_haag),intent(inout) :: this
+    if (allocated(this%order)) deallocate(this%order)
+    if (allocated(this%masses)) deallocate(this%masses)
+    if (allocated(this%invm)) deallocate(this%invm)
+    if (allocated(this%invm_min)) deallocate(this%invm_min)
+    if (allocated(this%invm_max)) deallocate(this%invm_max)
+    if (allocated(this%ETmin)) deallocate(this%ETmin)
+    if (allocated(this%pp)) deallocate(this%pp)
+    if (allocated(this%p)) deallocate(this%p)
+    if (allocated(this%x)) deallocate(this%x)
+    if (allocated(this%sets)) deallocate(this%sets)
+  end subroutine haag_cleanup
   subroutine haag_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
     implicit none
     class(phase_space_haag),intent(inout) :: this

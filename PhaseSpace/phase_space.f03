@@ -16,6 +16,7 @@ module phase_space_base
      procedure(phase_space_interface_init),deferred :: init
      procedure(phase_space_interface_generate_momenta),deferred :: generate_momenta
      procedure(phase_space_interface_compute_x_from_momenta),deferred :: compute_x_from_momenta
+     procedure(phase_space_interface_cleanup),deferred :: cleanup
   end type phase_space_type
   
   ! Declare the abstract interface for the procedures
@@ -41,5 +42,9 @@ module phase_space_base
        class(phase_space_type),intent(inout) :: this
        real(kind=8),dimension(0:3,this%next),intent(in) :: p
      end subroutine phase_space_interface_compute_x_from_momenta
+     subroutine phase_space_interface_cleanup(this)
+       import :: phase_space_type
+       class(phase_space_type),intent(inout) :: this
+     end subroutine phase_space_interface_cleanup
   end interface
 end module phase_space_base

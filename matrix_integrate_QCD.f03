@@ -32,7 +32,7 @@ program matrix_integrate_QCD
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 
-  type multichan_info
+  type :: multichan_info
      integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
      integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
      integer :: max_channels,n_unique_channels,n_unique_channelgroups
@@ -261,6 +261,8 @@ contains
     do iproc=1,pgl_unique%nproc
        write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:next,iproc)
     enddo
+    ! make sure pgl_unique is deallocated consistently:
+    call finalize_phase_space_order_group(pgl_unique)
     deallocate(pgl_unique)
   end subroutine write_unique_in_file
   
@@ -350,7 +352,7 @@ contains
 
    subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
      implicit none
-     type(phase_space_order_group) :: pgl
+     type(phase_space_order_group),intent(in) :: pgl
      integer :: nevent
      real(kind=8),dimension(nevent,pgl%nproc) :: amp2
      real(kind=8),dimension(pgl%nproc) :: unique_map_value
@@ -389,7 +391,6 @@ contains
     real(kind=8) :: vol,cuts_wgt
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
-
     if (.not.allocated(val)) then
        allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
        allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
@@ -948,7 +949,11 @@ contains
           read(10,*)
           read(10,*)
        enddo
-       if (integration_step.le.1) deallocate(pgl_unique)
+       if (integration_step.le.1) then
+          ! make sure pgl_unique is deallocated consistently:
+          call finalize_phase_space_order_group(pgl_unique)
+          deallocate(pgl_unique)
+       endif
 999    continue
        close(10)
     elseif (argc.le.10) then
@@ -1092,7 +1097,7 @@ contains
 
   subroutine setup_optimised_multichannel_weight_computation(pgl)
     implicit none
-    type(phase_space_order_group) :: pgl
+    type(phase_space_order_group),intent(inout) :: pgl
     integer,dimension(pgl%nproc*pgl%multichan%max_channels) :: all_unique_chans
     integer,dimension(pgl%nproc*ngroups) :: all_unique_chans_inv
     integer,dimension(0:pgl%multichan%max_channels,pgl%nproc) :: all_unique_channelgroups
@@ -2040,4 +2045,37 @@ contains
     enddo
   end function ifindloc
 
+  subroutine finalize_multichan_info(mi)
+    type(multichan_info),intent(inout) :: mi
+    if (allocated(mi%channels)) deallocate(mi%channels)
+    if (allocated(mi%unique_channelgroup_list)) deallocate(mi%unique_channelgroup_list)
+    if (allocated(mi%unique_channel_list)) deallocate(mi%unique_channel_list)
+    if (allocated(mi%map_proc_to_channelgroup)) deallocate(mi%map_proc_to_channelgroup)
+    if (allocated(mi%number_of_channels)) deallocate(mi%number_of_channels)
+  end subroutine finalize_multichan_info
+
+  subroutine finalize_phase_space_order_group(pgl)
+    type(phase_space_order_group),intent(inout) :: pgl
+    call finalize_amplitude_QCD(pgl%amps)
+    if(allocated(pgl%phase_space)) then
+       call pgl%phase_space%cleanup()
+       deallocate(pgl%phase_space)
+    endif
+    call finalize_multichan_info(pgl%multichan)
+    if (allocated(pgl%processes)) deallocate(pgl%processes)
+    if (allocated(pgl%color_orders)) deallocate(pgl%color_orders)
+    if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
+    if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
+    if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
+    if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
+    if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
+    if (allocated(pgl%spin)) deallocate(pgl%spin)
+    if (allocated(pgl%iden)) deallocate(pgl%iden)
+    if (allocated(pgl%col_fac)) deallocate(pgl%col_fac)
+    if (allocated(pgl%amp2)) deallocate(pgl%amp2)
+    if (allocated(pgl%amp2_hel)) deallocate(pgl%amp2_hel)
+    if (allocated(pgl%hel)) deallocate(pgl%hel)
+    if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
+    if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)
+  end subroutine finalize_phase_space_order_group
 end program matrix_integrate_QCD

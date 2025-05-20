@@ -7,6 +7,7 @@ module phase_space_gen23_mod
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
      procedure :: compute_x_from_momenta => gen23_compute_x_from_momenta
+     procedure :: cleanup => gen23_cleanup
   end type phase_space_gen23
   private
   logical :: includePDF
@@ -65,7 +66,7 @@ contains
        write (*,*) 'Use the simple t-channel?',this%t_channel
     endif
     includePDF=include_pdf
-    call gen23_deallocate
+    call gen23_cleanup(this)
     this%next=n
     this%ndim=3*(this%next-2)-4
     if (includePDF) this%ndim=this%ndim+2 ! the two Bjorken x's
@@ -186,19 +187,22 @@ contains
       enddo
     end subroutine setup_ETmin
 
-    subroutine gen23_deallocate
-      implicit none
-      if (allocated(this%order)) deallocate(this%order)
-      if (allocated(this%invm)) deallocate(this%invm)
-      if (allocated(this%invm_min)) deallocate(this%invm_min)
-      if (allocated(this%invm_max)) deallocate(this%invm_max)
-      if (allocated(this%ETmin)) deallocate(this%ETmin)
-      if (allocated(this%pp)) deallocate(this%pp)
-      if (allocated(this%p)) deallocate(this%p)
-      if (allocated(this%x)) deallocate(this%x)
-      if (allocated(this%sets)) deallocate(this%sets)
-    end subroutine gen23_deallocate
   end subroutine gen23_init
+  
+  subroutine gen23_cleanup(this)
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    if (allocated(this%order)) deallocate(this%order)
+    if (allocated(this%masses)) deallocate(this%masses)
+    if (allocated(this%invm)) deallocate(this%invm)
+    if (allocated(this%invm_min)) deallocate(this%invm_min)
+    if (allocated(this%invm_max)) deallocate(this%invm_max)
+    if (allocated(this%ETmin)) deallocate(this%ETmin)
+    if (allocated(this%pp)) deallocate(this%pp)
+    if (allocated(this%p)) deallocate(this%p)
+    if (allocated(this%x)) deallocate(this%x)
+    if (allocated(this%sets)) deallocate(this%sets)
+  end subroutine gen23_cleanup
 
   subroutine gen23_generate_momenta(this,xx)
     ! Wrapper for the routine that generates the momenta.
