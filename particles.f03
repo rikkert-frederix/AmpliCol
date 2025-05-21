@@ -20,7 +20,7 @@ contains
     real(kind=8) :: wmass,wwidth
     real(kind=8) :: hmass,hwidth
 
-    this%npart=26 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 13 tensors for EW bosons
+    this%npart=17 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 4 tensors for EW bosons
     allocate(this%particle_list(this%npart))
     ! 5 massless quarks
     do i=1,5
@@ -79,105 +79,40 @@ contains
     this%particle_list(12)%spin=3 ! three spin states
     this%particle_list(12)%anti_type=24
 
-    ! w+w+ tensor T1
-    this%particle_list(13)%type=-101
-    this%particle_list(13)%mass=0d0
-    this%particle_list(13)%width=0d0
-    this%particle_list(13)%spin=-1 
-    this%particle_list(13)%anti_type=-101
+    ! higgs boson
+    this%particle_list(13)%type=25
+    this%particle_list(13)%mass=wmass
+    this%particle_list(13)%width=wwidth
+    this%particle_list(13)%spin=3 ! three spin states
+    this%particle_list(13)%anti_type=25
 
-    ! w+w- tensor T2
-    this%particle_list(14)%type=-102
+    ! w-w tensor T1
+    this%particle_list(14)%type=-101
     this%particle_list(14)%mass=0d0
     this%particle_list(14)%width=0d0
-    this%particle_list(14)%spin=-1
-    this%particle_list(14)%anti_type=-102
+    this%particle_list(14)%spin=-1 
+    this%particle_list(14)%anti_type=-101
 
-    ! w+z tensor T3
-    this%particle_list(15)%type=-103
+    ! w-z/a tensor T2 (plus)
+    this%particle_list(15)%type=-102
     this%particle_list(15)%mass=0d0
     this%particle_list(15)%width=0d0
     this%particle_list(15)%spin=-1
-    this%particle_list(15)%anti_type=-103
+    this%particle_list(15)%anti_type=-102
 
-    ! w+a tensor T4
-    this%particle_list(16)%type=-104
+    ! w-z/a tensor T3 (minus)
+    this%particle_list(16)%type=-103
     this%particle_list(16)%mass=0d0
     this%particle_list(16)%width=0d0
     this%particle_list(16)%spin=-1
-    this%particle_list(16)%anti_type=-104
+    this%particle_list(16)%anti_type=-103
 
-    ! w-w- tensor T5
-    this%particle_list(17)%type=-105
+    ! HH tensor T4
+    this%particle_list(17)%type=-104
     this%particle_list(17)%mass=0d0
     this%particle_list(17)%width=0d0
     this%particle_list(17)%spin=-1
-    this%particle_list(17)%anti_type=-105
-
-    ! w-z tensor T6
-    this%particle_list(18)%type=-106
-    this%particle_list(18)%mass=0d0
-    this%particle_list(18)%width=0d0
-    this%particle_list(18)%spin=-1
-    this%particle_list(18)%anti_type=-106
-
-    ! w-a tensor T7
-    this%particle_list(19)%type=-107
-    this%particle_list(19)%mass=0d0
-    this%particle_list(19)%width=0d0
-    this%particle_list(19)%spin=-1
-    this%particle_list(19)%anti_type=-107
-
-    ! zz tensor T8
-    this%particle_list(20)%type=-108
-    this%particle_list(20)%mass=0d0
-    this%particle_list(20)%width=0d0
-    this%particle_list(20)%spin=-1
-    this%particle_list(20)%anti_type=-108
-
-    ! za tensor T9
-    this%particle_list(21)%type=-109
-    this%particle_list(21)%mass=0d0
-    this%particle_list(21)%width=0d0
-    this%particle_list(21)%spin=-1
-    this%particle_list(21)%anti_type=-109
-
-    ! aa tensor T10
-    this%particle_list(22)%type=-110
-    this%particle_list(22)%mass=0d0
-    this%particle_list(22)%width=0d0
-    this%particle_list(22)%spin=-1
-    this%particle_list(22)%anti_type=-110
-
-    ! higgs
-    this%particle_list(23)%type=25
-    this%particle_list(23)%mass=hmass
-    this%particle_list(23)%width=hwidth
-    this%particle_list(23)%spin=1
-    this%particle_list(23)%anti_type=25
-
-    
-    
-    ! HH tensor T11
-    this%particle_list(24)%type=-111
-    this%particle_list(24)%mass=0d0
-    this%particle_list(24)%width=0d0
-    this%particle_list(24)%spin=-1
-    this%particle_list(24)%anti_type=-111
-
-    ! zZ scalar tensor T12
-    this%particle_list(25)%type=-112
-    this%particle_list(25)%mass=0d0
-    this%particle_list(25)%width=0d0
-    this%particle_list(25)%spin=-1
-    this%particle_list(25)%anti_type=-112
-
-    ! WW scalar tensor T13
-    this%particle_list(26)%type=-113
-    this%particle_list(26)%mass=0d0
-    this%particle_list(26)%width=0d0
-    this%particle_list(26)%spin=-1
-    this%particle_list(26)%anti_type=-113
+    this%particle_list(17)%anti_type=-104
 
   end subroutine init_part
   integer function get_antipart(this,ipdg)
@@ -287,16 +222,7 @@ contains
     if (is_tensor_t1(i).or.&
         is_tensor_t2(i).or.&
         is_tensor_t3(i).or.&
-        is_tensor_t4(i).or.&
-        is_tensor_t5(i).or.&
-        is_tensor_t6(i).or.&
-        is_tensor_t7(i).or.&
-        is_tensor_t8(i).or.&
-        is_tensor_t9(i).or.&
-        is_tensor_t10(i).or.&
-        is_tensor_t11(i).or.&
-        is_tensor_t12(i).or.&
-        is_tensor_t13(i)) then
+        is_tensor_t4(i))then
        is_tensor_v=.true.
     else
        is_tensor_v=.false.
@@ -338,87 +264,6 @@ contains
        is_tensor_t4=.false.
     endif
   end function is_tensor_t4
-  logical function is_tensor_t5(i)
-    implicit none
-    integer :: i
-    if (i.eq.-105) then
-       is_tensor_t5=.true.
-    else
-       is_tensor_t5=.false.
-    endif
-  end function is_tensor_t5
-  logical function is_tensor_t6(i)
-    implicit none
-    integer :: i
-    if (i.eq.-106) then
-       is_tensor_t6=.true.
-    else
-       is_tensor_t6=.false.
-    endif
-  end function is_tensor_t6
-  logical function is_tensor_t7(i)
-    implicit none
-    integer :: i
-    if (i.eq.-107) then
-       is_tensor_t7=.true.
-    else
-       is_tensor_t7=.false.
-    endif
-  end function is_tensor_t7
-  logical function is_tensor_t8(i)
-    implicit none
-    integer :: i
-    if (i.eq.-108) then
-       is_tensor_t8=.true.
-    else
-       is_tensor_t8=.false.
-    endif
-  end function is_tensor_t8
-  logical function is_tensor_t9(i)
-    implicit none
-    integer :: i
-    if (i.eq.-109) then
-       is_tensor_t9=.true.
-    else
-       is_tensor_t9=.false.
-    endif
-  end function is_tensor_t9
-  logical function is_tensor_t10(i)
-    implicit none
-    integer :: i
-    if (i.eq.-110) then
-       is_tensor_t10=.true.
-    else
-       is_tensor_t10=.false.
-    endif
-  end function is_tensor_t10
-  logical function is_tensor_t11(i)
-    implicit none
-    integer :: i
-    if (i.eq.-111) then
-       is_tensor_t11=.true.
-    else
-       is_tensor_t11=.false.
-    endif
-  end function is_tensor_t11
-  logical function is_tensor_t12(i)
-    implicit none
-    integer :: i
-    if (i.eq.-112) then
-       is_tensor_t12=.true.
-    else
-       is_tensor_t12=.false.
-    endif
-  end function is_tensor_t12
-  logical function is_tensor_t13(i)
-    implicit none
-    integer :: i
-    if (i.eq.-113) then
-       is_tensor_t13=.true.
-    else
-       is_tensor_t13=.false.
-    endif
-  end function is_tensor_t13
   logical function is_singlet(i)
     implicit none
     integer :: i
