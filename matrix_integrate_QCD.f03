@@ -33,12 +33,14 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 
   type :: multichan_info
+     ! if adding variables here, also update the finalize_multichan_info subroutine
      integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
      integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
      integer :: max_channels,n_unique_channels,n_unique_channelgroups
   end type multichan_info
 
   type phase_space_order_group
+     ! if adding variables here, also update the finalize_phase_space_order_group subroutine
      type(amplitude_QCD) :: amps
      class(phase_space_type),allocatable :: phase_space
      type(multichan_info) :: multichan

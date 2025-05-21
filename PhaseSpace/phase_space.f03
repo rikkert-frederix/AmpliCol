@@ -1,7 +1,9 @@
 module phase_space_base
   implicit none
-  ! define an abstract base for the phase_space types
   type,abstract :: phase_space_type
+     ! If adding variables here, make sure to also update the
+     ! 'cleanup' subroutines for all phase-space parametrisation
+     ! module.
      real(kind=8),dimension(:,:),allocatable,public :: p
      real(kind=8),public :: jac,xbjrk(2)
      real(kind=8) :: s0,tot_mass,sqrtshat,sqrts,drcut,ptcut,ycut

@@ -5,6 +5,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
   type :: current
+     ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert
      integer(kind=16) :: iproc
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
@@ -16,6 +17,7 @@ module amplitude_QCD_mod
      final :: finalize_current ! custom deallocation of current
   end type current
   type :: interaction
+     ! if adding variables here, also update the finalize_interaction and assign_interaction subroutines
      integer :: type
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
@@ -32,6 +34,7 @@ module amplitude_QCD_mod
      module procedure assign_interaction
   end interface assignment(=)
   type :: amplitude_QCD
+     ! if adding variables here, also update the finalize_amplitude_QCD subroutine
      integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
