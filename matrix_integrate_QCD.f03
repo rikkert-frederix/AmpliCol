@@ -86,28 +86,6 @@ program matrix_integrate_QCD
   ! setting energy
   sqrts=14000.d0
 
-
-    ! cut on the minimum invariant mass of all pairs of particles,
-    ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
-    ! an initial and a final state particle; s_cut(2) is between two final
-    ! state particles.
-  
-!!$  ! cuts on invariants (Note: these assume massless particles!)
-!!$  s_cut(1)=0d0 ! cut on invariant between initial and final state particle
-!!$  s_cut(2)=0d0 ! cut on invariant of two final state particles.
-!!$  if (sqrt_s_min.gt.0d0) then
-!!$     s_cut(1)=max(s_cut(1),sqrt_s_min**2)
-!!$     s_cut(2)=max(s_cut(2),sqrt_s_min**2)
-!!$  endif
-!!$  if (pt_min.gt.0d0) then
-!!$     s_cut(1)=max(s_cut(1),pt_min**2)
-!!$     s_cut(2)=max(s_cut(2),2d0*pt_min**2*(1d0-cos(DRjj_min)))
-!!$  endif
-!!$
-!!$  if (sqrt_s_min.gt.0d0) then
-!!$     s_cut(1:2)=sqrt_s_min**2
-!!$  endif
-
   if (include_pdf) call PDF_initialise
 
   call phys_model%init_part(173d0,1.491500d0)
@@ -318,7 +296,7 @@ contains
 
      call setup_cuts_for_each_particle(pgl_unique)
      call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
-          pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
+          pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf)
 
      call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
              pgl_unique%spin,pgl_unique%color_orders,phys_model,read_proc_from_file)
@@ -400,7 +378,7 @@ contains
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc,i
-    real(kind=8) :: vol,cuts_wgt
+    real(kind=8) :: vol
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
     if (.not.allocated(val)) then
@@ -436,15 +414,13 @@ contains
     pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
 
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
+       pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
 
-    cuts_wgt=pass_cuts(next,pgl(ichan)%phase_space%p)
-    
-    if ((pgl(ichan)%phase_space%jac.lt.0d0) .or. &
-         (smooth_cuts .and. cuts_wgt.lt.0d0) .or. &
-         (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
+
+    if (.not.pass_cuts(pgl(ichan))) then
        pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
@@ -512,9 +488,6 @@ contains
 
     val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
     val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-    
-    ! Apply the weight from the cuts
-    if (smooth_cuts) val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*cuts_wgt
 
     call include_PDF_and_identical_procs(val,val_abs,pgl(ichan))
 
@@ -528,71 +501,44 @@ contains
     t_mat=t_mat+tAfter-tBefore
   end function integrand
 
-  double precision function pass_cuts(n,p)
+  logical function pass_cuts(pgl)
     ! Cuts on the phase-space point. Note that these cuts need to be symmetric
     ! under pz -> -pz.
     implicit none
-    integer :: i,j,n
-    real(kind=8),dimension(0:3,n) :: p
-    double precision :: frac,y,steep
-
-    pass_cuts=1d0
-    if (sqrt_s_min.gt.0d0) then
-       do i=1,n-1
-          do j=i+1,n
-             if (abs(2d0*dot(p(0,i),p(0,j))).lt.sqrt_s_min**2) then
-                pass_cuts=-1d0
+    type(phase_space_order_group),intent(in) :: pgl
+    integer :: i,j
+    ! cuts on single particles
+    pass_cuts=.true.
+    do i=1,next
+       if (pgl%pT_min(i).gt.0d0) then
+          if (pt(pgl%phase_space%p(0,i)).lt.pgl%pT_min(i)) then
+             pass_cuts=.false.
+             return
+          endif
+       endif
+       if (pgl%eta_max(i).gt.0d0) then
+          if (abs(eta(pgl%phase_space%p(0,i))).gt.pgl%eta_max(i)) then
+             pass_cuts=.false.
+             return
+          endif
+       endif
+    enddo
+    ! cuts on pairs of particles
+    do i=1,next-1
+       do j=i+1,next
+          if (pgl%sqrt_s_min(i,j).gt.0d0) then
+             if (abs(sumdot(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%sqrt_s_min(i,j)**2) then
+                pass_cuts=.false.
                 return
              endif
-          enddo
-       enddo
-    endif
-
-    do i=3,n
-!!$       if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
-         frac  = 0.9d0
-         steep = 0.1d0
-!!$       elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-!!$         frac  = 0.8d0
-!!$         steep = 0.1d0
-!!$       endif
-         
-       if (pt_min.gt.0d0) then
-          if (pt(p(0,i)).lt.frac*pt_min) then
-             pass_cuts=-1d0
-             return
           endif
-          if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
-             y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
-             if (integration_step.le.0) then
-               !if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
-                  pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
-               !elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-               !   pass_cuts=pass_cuts*((steep)*y/((steep+1d0-y)**2)) ! 1/x2 damping function
-               !endif
-             else
-               pass_cuts=-1d0
+          if (pgl%DR_min(i,j).gt.0d0) then
+             if (abs(deltaR(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%DR_min(i,j)**2) then
+                pass_cuts=.false.
+                return
              endif
-             return
           endif
-       endif
-
-       if (eta_max.gt.0d0) then
-          if (abs(eta(p(0,i))).gt.eta_max) then
-             pass_cuts=-1d0
-             return
-          endif
-       endif
-       if (drjj_min.gt.0d0) then
-          if (i.ne.n) then
-             do j=i+1,n
-                if (DeltaR(p(0,i),p(0,j)).lt.drjj_min) then
-                   pass_cuts=-1d0
-                   return
-                endif
-             enddo
-          endif
-       endif
+       enddo
     enddo
   end function pass_cuts
 
@@ -708,6 +654,15 @@ contains
     dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
   end function dot
 
+  real(kind=8) function sumdot(p1,p2)
+    ! Inner product between two 4-vectors
+    implicit none
+    real(kind=8),intent(in),dimension(0:3) :: p1,p2
+    real(kind=8),dimension(0:3) :: p
+    p=p1+p2
+    sumdot=dot(p,p)
+  end function sumdot
+
   real(kind=8) function eta(p)
     ! pseudo-rapidity of 'p'
     implicit none
@@ -721,9 +676,22 @@ contains
     ! azimuthal difference of 'p1' and 'p2'
     implicit none
     real(kind=8), dimension(0:3) :: p1,p2
-    real(kind=8) :: denom
+    real(kind=8) :: denom,arg
+    real(kind=8),parameter :: tiny=1d-8
     denom=pt(p1)*pt(p2)
-    delta_phi=acos((p1(1)*p2(1)+p1(2)*p2(2))/denom)
+    arg=(p1(1)*p2(1)+p1(2)*p2(2))/denom
+    if (arg.lt.-1d0-tiny) then
+       write (*,*) 'cosine is complex'
+       stop 1
+    elseif (arg.lt.-1d0) then
+       arg=-1d0
+    elseif(arg.gt.1d0+tiny) then
+       write (*,*) 'cosine is complex'
+       stop 1
+    elseif(arg.gt.1d0) then
+       arg=1d0
+    endif
+    delta_phi=acos(arg)
   end function delta_phi
 
   real(kind=8) function deltaR(p1,p2)
@@ -2107,24 +2075,24 @@ contains
     endif
     ! check consistency among processes
     do i=1,next
-       if (is_jet(pgl%processes(1,i))) then
+       if (is_jet(pgl%processes(i,1))) then
           do j=2,pgl%nproc
-             if (.not.is_jet(pgl%processes(j,i))) then
-                write (*,*) 'inconsistent processes and cuts'
+             if (.not.is_jet(pgl%processes(i,j))) then
+                write (*,*) 'inconsistent processes and cuts #1'
                 stop 1
              endif
           enddo
-       elseif(is_photon(pgl%processes(1,i))) then
+       elseif(is_photon(pgl%processes(i,1))) then
           do j=2,pgl%nproc
-             if (.not.is_photon(pgl%processes(j,i))) then
-                write (*,*) 'inconsistent processes and cuts'
+             if (.not.is_photon(pgl%processes(i,j))) then
+                write (*,*) 'inconsistent processes and cuts #2'
                 stop 1
              endif
           enddo
        else
           do j=2,pgl%nproc
-             if (is_jet(pgl%processes(j,i)) .or. is_photon(pgl%processes(j,i))) then
-                write (*,*) 'inconsistent processes and cuts'
+             if (is_jet(pgl%processes(i,j)) .or. is_photon(pgl%processes(i,j))) then
+                write (*,*) 'inconsistent processes and cuts #3'
                 stop 1
              endif
           enddo
@@ -2141,22 +2109,22 @@ contains
     pgl%sqrt_s_min(1:next,1:next)=-1d0
     ! cuts on single jets
     do i=3,next
-       if (.not. is_jet(pgl%processes(1,i))) cycle
+       if (.not. is_jet(pgl%processes(i,1))) cycle
        pgl%pT_min(i)=ptj_min
        pgl%eta_max(i)=etaj_max
     enddo
     ! cuts on single photons
     do i=3,next
-       if (.not. is_photon(pgl%processes(1,i))) cycle
+       if (.not. is_photon(pgl%processes(i,1))) cycle
        pgl%pT_min(i)=pta_min
        pgl%eta_max(i)=etaa_max
     enddo
     ! cuts on pair of jets
     do i=1,next
-       if (.not. is_jet(pgl%processes(1,i))) cycle
+       if (.not. is_jet(pgl%processes(i,1))) cycle
           do j=1,next
           if (i.eq.j) cycle
-          if (.not. is_jet(pgl%processes(1,j))) cycle
+          if (.not. is_jet(pgl%processes(j,1))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sjj_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRjj_min
@@ -2165,10 +2133,10 @@ contains
     enddo
     ! cuts on pair of photons
     do i=1,next
-       if (.not. is_photon(pgl%processes(1,i))) cycle
+       if (.not. is_photon(pgl%processes(i,1))) cycle
           do j=1,next
           if (i.eq.j) cycle
-          if (.not. is_photon(pgl%processes(1,j))) cycle
+          if (.not. is_photon(pgl%processes(j,1))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_saa_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRaa_min
@@ -2179,8 +2147,8 @@ contains
     do i=1,next
           do j=1,next
           if (i.eq.j) cycle
-          if (.not.((is_jet(pgl%processes(1,i)) .and. is_photon(pgl%processes(1,j))) .or. &
-                    (is_photon(pgl%processes(1,i)) .and. is_jet(pgl%processes(1,j))))) cycle
+          if (.not.((is_jet(pgl%processes(i,1)) .and. is_photon(pgl%processes(j,1))) .or. &
+                    (is_photon(pgl%processes(i,1)) .and. is_jet(pgl%processes(j,1))))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sja_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRja_min

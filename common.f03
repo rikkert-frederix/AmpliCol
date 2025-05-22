@@ -9,7 +9,6 @@ module common
   real(kind=4) :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
 
   ! technical
-  logical,parameter :: smooth_cuts=.false.
   logical,parameter :: include_pdf=.true.
   logical,parameter :: use_colour_singlet_multichannel=.true.
   
