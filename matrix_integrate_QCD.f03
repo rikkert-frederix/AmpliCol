@@ -58,12 +58,14 @@ program matrix_integrate_QCD
      integer(kind=4),dimension(:),allocatable :: hel,hel_fac
      integer(kind=4) :: passed=0,all_evt=0
      integer,dimension(:),allocatable :: include_hel
+     ! cuts
+     double precision,dimension(:),allocatable :: pT_min,eta_max
+     double precision,dimension(:,:),allocatable :: DR_min,sqrt_s_min
   end type phase_space_order_group
   type(phase_space_order_group),dimension(:),allocatable :: pgl
   type(phase_space_order_group),allocatable :: pgl_unique
   real(kind=8),dimension(:),allocatable :: unique_map_value
   integer,dimension(:),allocatable :: unique_map
-
   call cpu_time(tTot_B)
 
   ! relevant input parameters for integration
@@ -84,21 +86,27 @@ program matrix_integrate_QCD
   ! setting energy
   sqrts=14000.d0
 
-  ! cuts on invariants (Note: these assume massless particles!)
-  s_cut(1)=0d0 ! cut on invariant between initial and final state particle
-  s_cut(2)=0d0 ! cut on invariant of two final state particles.
-  if (sqrt_s_min.gt.0d0) then
-     s_cut(1)=max(s_cut(1),sqrt_s_min**2)
-     s_cut(2)=max(s_cut(2),sqrt_s_min**2)
-  endif
-  if (pt_min.gt.0d0) then
-     s_cut(1)=max(s_cut(1),pt_min**2)
-     s_cut(2)=max(s_cut(2),2d0*pt_min**2*(1d0-cos(DRjj_min)))
-  endif
 
-  if (sqrt_s_min.gt.0d0) then
-     s_cut(1:2)=sqrt_s_min**2
-  endif
+    ! cut on the minimum invariant mass of all pairs of particles,
+    ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
+    ! an initial and a final state particle; s_cut(2) is between two final
+    ! state particles.
+  
+!!$  ! cuts on invariants (Note: these assume massless particles!)
+!!$  s_cut(1)=0d0 ! cut on invariant between initial and final state particle
+!!$  s_cut(2)=0d0 ! cut on invariant of two final state particles.
+!!$  if (sqrt_s_min.gt.0d0) then
+!!$     s_cut(1)=max(s_cut(1),sqrt_s_min**2)
+!!$     s_cut(2)=max(s_cut(2),sqrt_s_min**2)
+!!$  endif
+!!$  if (pt_min.gt.0d0) then
+!!$     s_cut(1)=max(s_cut(1),pt_min**2)
+!!$     s_cut(2)=max(s_cut(2),2d0*pt_min**2*(1d0-cos(DRjj_min)))
+!!$  endif
+!!$
+!!$  if (sqrt_s_min.gt.0d0) then
+!!$     s_cut(1:2)=sqrt_s_min**2
+!!$  endif
 
   if (include_pdf) call PDF_initialise
 
@@ -157,12 +165,13 @@ program matrix_integrate_QCD
 
      ! Initialise the phase-space parametrisation
      call cpu_time(tBefore)
+     call setup_cuts_for_each_particle(pgl(igroup))
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
+             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      endif
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
@@ -307,8 +316,9 @@ contains
      ! No multi-channel needed to check: simply use the color_orders for the phase-space order
      pgl_unique%phase_space_orders(1:next)=pgl_unique%color_orders(1:next,1)
 
+     call setup_cuts_for_each_particle(pgl_unique)
      call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
-          s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+          pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
 
      call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
              pgl_unique%spin,pgl_unique%color_orders,phys_model,read_proc_from_file)
@@ -2079,5 +2089,103 @@ contains
     if (allocated(pgl%hel)) deallocate(pgl%hel)
     if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
     if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)
+    if (allocated(pgl%pT_min)) deallocate(pgl%pT_min)
+    if (allocated(pgl%eta_max)) deallocate(pgl%eta_max)
+    if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
+    if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
   end subroutine finalize_phase_space_order_group
+
+
+  subroutine setup_cuts_for_each_particle(pgl)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer :: i,j
+    if (allocated(pgl%pT_min)) then
+       write (*,*) 'ERROR: setting-up phase space cuts already'//&
+            ' done for this phase-space group'
+       stop 1
+    endif
+    ! check consistency among processes
+    do i=1,next
+       if (is_jet(pgl%processes(1,i))) then
+          do j=2,pgl%nproc
+             if (.not.is_jet(pgl%processes(j,i))) then
+                write (*,*) 'inconsistent processes and cuts'
+                stop 1
+             endif
+          enddo
+       elseif(is_photon(pgl%processes(1,i))) then
+          do j=2,pgl%nproc
+             if (.not.is_photon(pgl%processes(j,i))) then
+                write (*,*) 'inconsistent processes and cuts'
+                stop 1
+             endif
+          enddo
+       else
+          do j=2,pgl%nproc
+             if (is_jet(pgl%processes(j,i)) .or. is_photon(pgl%processes(j,i))) then
+                write (*,*) 'inconsistent processes and cuts'
+                stop 1
+             endif
+          enddo
+       endif
+    enddo
+    ! initialize all:
+    allocate(pgl%pT_min(1:next))
+    allocate(pgl%eta_max(1:next))
+    allocate(pgl%DR_min(1:next,1:next))
+    allocate(pgl%sqrt_s_min(1:next,1:next))
+    pgl%pT_min(1:next)=-1d0
+    pgl%eta_max(1:next)=-1d0
+    pgl%DR_min(1:next,1:next)=-1d0
+    pgl%sqrt_s_min(1:next,1:next)=-1d0
+    ! cuts on single jets
+    do i=3,next
+       if (.not. is_jet(pgl%processes(1,i))) cycle
+       pgl%pT_min(i)=ptj_min
+       pgl%eta_max(i)=etaj_max
+    enddo
+    ! cuts on single photons
+    do i=3,next
+       if (.not. is_photon(pgl%processes(1,i))) cycle
+       pgl%pT_min(i)=pta_min
+       pgl%eta_max(i)=etaa_max
+    enddo
+    ! cuts on pair of jets
+    do i=1,next
+       if (.not. is_jet(pgl%processes(1,i))) cycle
+          do j=1,next
+          if (i.eq.j) cycle
+          if (.not. is_jet(pgl%processes(1,j))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sjj_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRjj_min
+          endif
+       enddo
+    enddo
+    ! cuts on pair of photons
+    do i=1,next
+       if (.not. is_photon(pgl%processes(1,i))) cycle
+          do j=1,next
+          if (i.eq.j) cycle
+          if (.not. is_photon(pgl%processes(1,j))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_saa_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRaa_min
+          endif
+       enddo
+    enddo
+    ! cuts on jet-photon pair
+    do i=1,next
+          do j=1,next
+          if (i.eq.j) cycle
+          if (.not.((is_jet(pgl%processes(1,i)) .and. is_photon(pgl%processes(1,j))) .or. &
+                    (is_photon(pgl%processes(1,i)) .and. is_jet(pgl%processes(1,j))))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sja_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRja_min
+          endif
+       enddo
+    enddo
+  end subroutine setup_cuts_for_each_particle
 end program matrix_integrate_QCD

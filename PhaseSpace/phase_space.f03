@@ -6,11 +6,11 @@ module phase_space_base
      ! module.
      real(kind=8),dimension(:,:),allocatable,public :: p
      real(kind=8),public :: jac,xbjrk(2)
-     real(kind=8) :: s0,tot_mass,sqrtshat,sqrts,drcut,ptcut,ycut
-     real(kind=8),dimension(:),allocatable :: masses
+     real(kind=8) :: s0,tot_mass,sqrtshat,sqrts
+     real(kind=8),dimension(:),allocatable :: masses,ptcut,ycut
      integer(kind=4) :: ndim,next
      integer(kind=4),dimension(:,:),allocatable :: sets
-     real(kind=8),dimension(:,:),allocatable :: pp
+     real(kind=8),dimension(:,:),allocatable :: pp,drcut,sqrt_s_min
      real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
      logical :: t_channel
@@ -23,14 +23,14 @@ module phase_space_base
   
   ! Declare the abstract interface for the procedures
   abstract interface
-     subroutine phase_space_interface_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+     subroutine phase_space_interface_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
        import :: phase_space_type
        class(phase_space_type),intent(inout) :: this
        real(kind=8),intent(in) :: sqrts
        integer(kind=4),intent(in) :: n
        integer(kind=4),dimension(n),intent(in) :: o
-       real(kind=8),intent(in) :: s_cut(2),pt_cut,dr_cut,rap_cut,sqrt_s_min
-       real(kind=8),dimension(n),intent(in) :: m
+       real(kind=8),dimension(n,n),intent(in) :: dr_cut,sqrt_s_min
+       real(kind=8),dimension(n),intent(in) :: m,pt_cut,rap_cut
        logical,intent(in) :: t_chan
        logical,intent(in) :: include_pdf
      end subroutine phase_space_interface_init

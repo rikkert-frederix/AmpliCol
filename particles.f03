@@ -140,22 +140,40 @@ contains
        is_gluon=.false.
     endif
   end function is_gluon
-  logical function is_tensor(i)
+  logical function is_tensor(iPDG)
     implicit none
-    integer :: i
-    if (i.eq.-21) then
+    integer :: iPDG
+    if (iPDG.eq.-21) then
        is_tensor=.true.
     else
        is_tensor=.false.
     endif
   end function is_tensor
-  logical function is_singlet(i)
+  logical function is_singlet(iPDG)
     implicit none
-    integer :: i
-    if (abs(i).ge.22) then
+    integer :: iPDG
+    if (abs(iPDG).ge.22) then
        is_singlet=.true.
     else
        is_singlet=.false.
     endif
   end function is_singlet
+  logical function is_photon(iPDG)
+    implicit none
+    integer :: iPDG
+    if (abs(iPDG).ge.22) then
+       is_photon=.true.
+    else
+       is_photon=.false.
+    endif
+  end function is_photon
+  logical function is_jet(iPDG)
+    implicit none
+    integer :: iPDG
+    if (is_quark(iPDG).or.is_antiquark(iPDG).or.is_gluon(iPDG)) then
+       is_jet=.true.
+    else
+       is_jet=.false.
+    endif
+  end function is_jet
 end module particles

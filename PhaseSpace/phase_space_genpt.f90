@@ -37,8 +37,12 @@ contains
     if (allocated(this%p)) deallocate(this%p)
     if (allocated(this%x)) deallocate(this%x)
     if (allocated(this%sets)) deallocate(this%sets)
+    if (allocated(this%ptcut)) deallocate(this%ptcut)
+    if (allocated(this%ycut)) deallocate(this%ycut)
+    if (allocated(this%drcut)) deallocate(this%drcut)
+    if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
   end subroutine genpt_cleanup
-  subroutine genpt_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine genpt_init(this,sqrts,n,m,o,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
     ! INPUT
@@ -46,16 +50,20 @@ contains
     real(kind=8),intent(in) :: sqrts
     ! number of particles (initial state + final state)
     integer(kind=4),intent(in) :: n
-    ! rapidity and pT cut on all final state particles
-    real(kind=8),intent(in) :: rap_cut,pt_cut,DR_cut,sqrt_s_min
+    ! rapidity and pT cut (and DR and sqrt_s_min) on all the particles
+    real(kind=8),dimension(n),intent(in) :: rap_cut,pt_cut
+    real(kind=8),dimension(n,n),intent(in) :: DR_cut,sqrt_s_min
     ! masses of all the particles. The two incoming particles must be
     ! massless.
     real(kind=8),dimension(n),intent(in) :: m
     integer,dimension(n),intent(in) :: o
-    real(kind=8),dimension(2),intent(in) :: s_cut
     logical,intent(in) :: include_pdf,t_chan
+    integer :: i,j
+    allocate(this%ptcut(1:n))
     this%ptcut=pt_cut
+    allocate(this%ycut(1:n))
     this%ycut=rap_cut
+    allocate(this%DRcut(1:n,1:n))
     this%DRcut=DR_cut
     this%sqrts=sqrts
     this%next=n
@@ -67,15 +75,20 @@ contains
        write (*,*) 'genpt phase-space only for all massless particles'
        stop 1
     endif
-    if (use_mode.eq.1 .and. rap_cut.le.0d0) then
+    if (use_mode.eq.1 .and. any(rap_cut(3:n).le.0d0)) then
        write (*,*) 'genpt phase-space must have rapidity cut'
        stop 1
     endif
-    if (use_mode.ne.1 .and. this%DRcut.le.0d0) then
-       write (*,*) 'genpt phase-space must have DeltaR cut'
-       stop 1
-    endif
-    if (this%ptcut.le.0d0) then
+    do i=3,n
+       do j=3,n
+          if (i.eq.j) cycle
+          if (use_mode.ne.1 .and. this%DRcut(i,j).le.0d0) then
+             write (*,*) 'genpt phase-space must have DeltaR cut'
+             stop 1
+          endif
+       enddo
+    enddo
+    if (any(this%ptcut(3:n).le.0d0)) then
        write (*,*) 'genpt phase-space must have pT cut'
        stop 1
     endif
@@ -96,7 +109,7 @@ contains
     this%jac=1d0
     do i=3,this%next-1
        ! generate pT^2
-       pt2min=this%ptcut**2
+       pt2min=this%ptcut(i)**2
        pt2max=this%sqrts**2/4d0
        ix=ix+1
        call random_to_var(xx(ix),-1.5d0,pt2min,pt2max,pt2,this%jac)
@@ -107,8 +120,8 @@ contains
        call random_to_var(xx(ix),0d0,phimin,phimax,phi,this%jac)
        if (use_mode.eq.1 .or.i.eq.3) then
           ! generate rapidity
-          ymin=-this%ycut
-          ymax=+this%ycut
+          ymin=-this%ycut(i)
+          ymax=+this%ycut(i)
           ix=ix+1
           call random_to_var(xx(ix),0d0,ymin,ymax,y,this%jac)
           ! fill momentum
@@ -117,8 +130,8 @@ contains
        elseif (use_mode.eq.2) then
           ! generate deltaR w.r.t. previously generated particle
           y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
-          drmin=max(this%DRcut,abs(phi))
-          drmax=sqrt((this%ycut+abs(y))**2+phi**2)
+          drmin=max(this%DRcut(i,i-1),abs(phi))
+          drmax=sqrt((this%ycut(i)+abs(y))**2+phi**2)
           ix=ix+1
           call random_to_var(xx(ix),0d0,drmin,drmax,dr,this%jac)
           ! fill momentum, assuming that previous particle is along the x-axis.
@@ -134,7 +147,7 @@ contains
           ! get the energy in the frame where p(:,i-1) has p_z=0.
           y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
           call boostz(this%p(0,i-1),y,pb)
-          invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut,abs(phi))))
+          invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(i,i-1),abs(phi))))
           invmmax=this%sqrts**2
           ix=ix+1
           call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,this%jac)
@@ -151,7 +164,7 @@ contains
        elseif (use_mode.eq.4) then
           y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
           costhetamin=-1d0 
-          costhetamax=cos(this%DRcut)
+          costhetamax=cos(this%DRcut(i,i-1))
           ix=ix+1
           call random_to_var(xx(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
           call fill_momentum_pt2cosphi(pt2,costheta,phi,this%p(0,i),this%jac)
@@ -169,8 +182,8 @@ contains
 !!$    if (.true.) then
     if (use_mode.eq.1.or.use_mode.eq.4) then
        ! final particle: generate rapidity
-       ymin=-this%ycut
-       ymax=+this%ycut
+       ymin=-this%ycut(this%next)
+       ymax=+this%ycut(this%next)
        ix=ix+1
        call random_to_var(xx(ix),0d0,ymin,ymax,y,this%jac)
        ! final particle: fill momentum
@@ -193,8 +206,8 @@ contains
        phi=phi2-phi ! aximuthal separation particle 'next' and 'next-1'
        ! generate deltaR w.r.t. previously generated particle
        y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
-       drmin=max(this%DRcut,abs(phi))
-       drmax=sqrt((this%ycut+abs(y))**2+phi**2)
+       drmin=max(this%DRcut(this%next,this%next-1),abs(phi))
+       drmax=sqrt((this%ycut(this%next)+abs(y))**2+phi**2)
        ix=ix+1
        call random_to_var(xx(ix),0d0,drmin,drmax,dr,this%jac)
        y=sqrt(dr**2-phi**2)
@@ -215,7 +228,7 @@ contains
        y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
        call boostz(this%p(0,this%next-1),y,pb)
        phi=delta_phi(this%p(0,this%next),this%p(0,this%next-1))
-       invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut,phi)))
+       invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next,this%next-1),phi)))
        invmmax=this%sqrts**2
        if(invmmin.ge.invmmax) then
           this%jac=-1d0
@@ -259,14 +272,14 @@ contains
 
        pt2=this%p(1,this%next)**2+this%p(2,this%next)**2
        y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
-       ymax=this%ycut+abs(y)
+       ymax=this%ycut(this%next)+abs(y)
        pzmax = sqrt(pt2)/tan(2d0*atan(exp(-ymax)))
 
        costhetamin= abs(this%p(1,this%next))/(dsqrt(pt2+pzmax**2))
-       costhetamax= cos(max(abs(phi2),this%DRcut))
+       costhetamax= cos(max(abs(phi2),this%DRcut(this%next,this%next-1)))
 
        if (abs(phi2).ge.pi/2d0) then
-          costhetamin= cos(max(abs(phi2),this%DRcut))
+          costhetamin= cos(max(abs(phi2),this%DRcut(this%next,this%next-1)))
           costhetamax = cos(pi-acos(abs(this%p(1,this%next))/(dsqrt(pt2+pzmax**2))))
        endif
        if (costhetamin.gt.costhetamax) return

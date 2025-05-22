@@ -14,10 +14,21 @@ module common
   logical,parameter :: use_colour_singlet_multichannel=.true.
   
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
-  real(kind=8),parameter :: pT_min     = 30d0
-  real(kind=8),parameter :: DRjj_min   = 0.4d0  ! max allowed value: Drjj_min=1d0
-  real(kind=8),parameter :: eta_max    = 6d0
-  real(kind=8),parameter :: sqrt_s_min = -1d0
+  ! jets:
+  real(kind=8),parameter :: pTj_min      = 30d0
+  real(kind=8),parameter :: DRjj_min     = 0.4d0  ! max allowed value: Drjj_min=1d0
+  real(kind=8),parameter :: etaj_max     = 6d0
+  real(kind=8),parameter :: sqrt_sjj_min = -1d0
+
+  ! photons:
+  real(kind=8),parameter :: pTa_min      = 30d0
+  real(kind=8),parameter :: DRaa_min     = 0.4d0  ! max allowed value: Draa_min=1d0
+  real(kind=8),parameter :: etaa_max     = 6d0
+  real(kind=8),parameter :: sqrt_saa_min = -1d0
+
+  ! jets+photons:
+  real(kind=8),parameter :: DRja_min     = 0.4d0  ! max allowed value: Drja_min=1d0
+  real(kind=8),parameter :: sqrt_sja_min = -1d0
   
 end module common
 

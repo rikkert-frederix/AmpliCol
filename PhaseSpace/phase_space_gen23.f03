@@ -23,7 +23,7 @@ module phase_space_gen23_mod
   logical,parameter :: use_t_channel_at_start=.true.
 
 contains
-  subroutine gen23_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -34,11 +34,9 @@ contains
     integer(kind=4),intent(in) :: n
     ! the colour order:
     integer(kind=4),dimension(n),intent(in) :: o
-    ! cut on the minimum invariant mass of all pairs of particles,
-    ! abs((p_i+p_j)^2)>s_cut, (initial and final state). s_cut(1) is between
-    ! an initial and a final state particle; s_cut(2) is between two final
-    ! state particles.
-    real(kind=8),intent(in) :: s_cut(2),pt_cut,dr_cut,rap_cut,sqrt_s_min
+    ! rapidity (not used) and pT cut (and DR and sqrt_s_min) on all the particles
+    real(kind=8),dimension(n),intent(in) :: rap_cut,pt_cut
+    real(kind=8),dimension(n,n),intent(in) :: DR_cut,sqrt_s_min
     ! masses of all the particles. The two incoming particles must be
     ! massless.
     real(kind=8),dimension(n),intent(in) :: m
@@ -62,7 +60,6 @@ contains
     if (verbose) then
        write (*,*) 'Setting up',n,'particle phase-space'
        write (*,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
-       write (*,*) 'Cut on invariants used in the phase-space generation: abs((p_i+p_j)^2) >=',s_cut
        write (*,*) 'Use the simple t-channel?',this%t_channel
     endif
     includePDF=include_pdf
@@ -80,6 +77,9 @@ contains
     allocate(this%p(0:3,this%next))
     allocate(this%x(this%ndim))
     allocate(this%sets(0:this%next-2,2))
+    allocate(this%ptcut(1:this%next))
+    allocate(this%drcut(1:this%next,1:this%next))
+    allocate(this%sqrt_s_min(1:this%next,1:this%next))
     ! masses of external particles
     do i=1,n
        if ((i.eq.1 .or. i.eq.2) .and. m(i).ne.0d0) then
@@ -92,14 +92,26 @@ contains
        this%invm(ibclr(maskr(this%next),i-1))=m(i)**2
     enddo
     if (verbose) write (*,*) 'masses:',m(1:n)
-    if (pt_cut.gt.0d0) then
-       this%drcut=dr_cut
-       ptcut=pt_cut
-    else
-       this%drcut=0d0
-       ptcut=0d0
-    endif
-    call setup_PS_cuts(s_cut)
+    do i=1,this%next
+       if (pt_cut(i).gt.0d0) then
+          this%ptcut(i)=pt_cut(i)
+       else
+          this%ptcut(i)=0d0
+       endif
+       do j=1,this%next
+          if (dr_cut(i,j).gt.0d0) then
+             this%drcut(i,j)=dr_cut(i,j)
+          else
+             this%drcut(i,j)=0d0
+          endif
+          if (sqrt_s_min(i,j).gt.0d0) then
+             this%sqrt_s_min(i,j)=sqrt_s_min(i,j)
+          else
+             this%sqrt_s_min(i,j)=0d0
+          endif
+       enddo
+    enddo
+    call setup_PS_cuts()
 
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
@@ -136,36 +148,52 @@ contains
        write (*,*) "Power in importance sampling:",ip
     endif
   contains
-    subroutine setup_PS_cuts(s_cut)
-      ! Given s_cut = abs((p_i+p_j)^2), fills the minimum (s-channel)
-      ! and/or maximum (t-channel) values the invariants can be in the
-      ! phase-space generation. Does not apply these cuts on invariants
-      ! not used in the phase-space generation.
+    subroutine setup_PS_cuts()
+      ! Given the input cuts, fills the minimum (s-channel) and/or
+      ! maximum (t-channel) values the invariants can be in the
+      ! phase-space generation. Does not apply these cuts on
+      ! invariants not used in the phase-space generation.
       implicit none
-      real(kind=8),intent(in) :: s_cut(2)
-      real(kind=8) :: mass
-      integer(kind=4) :: i,j,npart
+      real(kind=8) :: s_cut(2)
+      real(kind=8) :: mass,cut
+      integer(kind=4) :: i,j,k,npart
       this%invm_min=0d0
       this%invm_max=0d0
-      do i=1,maskr(this%next)
-         npart=popcnt(i)
-         if (btest(i,0).and.btest(i,1)) then
-            this%invm_min(i)=0d0
-         elseif (btest(i,0).or.btest(i,1)) then
-            if (npart.eq.2 .or. npart.eq.this%next-2) then
-               this%invm_max(i)=-s_cut(1)
+      do k=1,maskr(this%next)
+         npart=popcnt(k)
+         if (btest(k,0).and.btest(k,1)) then ! both initial state particles are part of 'k'
+            this%invm_min(k)=0d0 ! no cuts
+         elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
+            if (npart.eq.2) then ! exaclty two particles in 'k'
+               do i=1,this%next
+                  if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
+                  do j=1,this%next
+                     if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
+                     this%invm_max(k)=-max(this%sqrt_s_min(i,j)**2,this%ptcut(i)**2,this%ptcut(j)**2)
+                     this%invm_max(maskr(this%next)-k)=this%invm_max(k) ! all but the two particles
+                  enddo
+               enddo
             endif
-         else
+         else ! only final state particles in the combined particle 'k'
+            ! total mass of external particles in 'k'
             mass=0d0
-            do j=0,this%next-1
-               if (btest(i,j)) then
-                  mass=mass+sqrt(this%invm(ibset(0,j)))
-               endif
+            do i=0,this%next-1
+               if (.not.btest(k,i)) cycle ! particle 'i' is not in combined particle 'k'
+               mass=mass+sqrt(this%invm(ibset(0,i)))
             enddo
-            if (npart.eq.this%next-2) then
-               this%invm_min(i)=max(s_cut(2)*npart**2,mass**2)
+            ! total from the cuts
+            cut=0d0
+            do i=1,this%next-1
+               if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
+               do j=i+1,this%next
+                  if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
+                  cut=cut+max(this%sqrt_s_min(i,j)**2,2d0*this%ptcut(i)*this%ptcut(j)*(1d0-cos(this%drcut(i,j))))
+               enddo
+            enddo
+            if (npart.eq.this%next-2) then ! all final state particles are in 'k'
+               this%invm_min(k)=max(cut*dble(npart)/dble(npart-1),mass**2)
             else
-               this%invm_min(i)=max(s_cut(2)*(npart)*(npart-1)/2d0,mass**2)
+               this%invm_min(k)=max(cut/2d0,mass**2)
             endif
          endif
       enddo
@@ -181,7 +209,7 @@ contains
       do i=1,maskr(this%next)
          if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
          do j=0,this%next-1
-            if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+ptcut**2)
+            if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+this%ptcut(j+1)**2)
          enddo
          this%ETmin(i)=max(this%ETmin(i),sqrt(this%invm_min(i)))
       enddo
@@ -202,6 +230,10 @@ contains
     if (allocated(this%p)) deallocate(this%p)
     if (allocated(this%x)) deallocate(this%x)
     if (allocated(this%sets)) deallocate(this%sets)
+    if (allocated(this%ptcut)) deallocate(this%ptcut)
+    if (allocated(this%ycut)) deallocate(this%ycut)
+    if (allocated(this%drcut)) deallocate(this%drcut)
+    if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
   end subroutine gen23_cleanup
 
   subroutine gen23_generate_momenta(this,xx)
@@ -594,7 +626,7 @@ contains
               this%invm(i)+this%invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-this%invm(i))*pim1(1))
 
          if(this%invm(i).eq.0d0) then
-            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut)))
+            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i,im1))))
          endif
 
       endif
@@ -1387,7 +1419,7 @@ contains
          smax=min(smax,&
               this%invm(i)+this%invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-this%invm(i))*pim1(1))
          if(this%invm(i).eq.0d0) then
-            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut)))
+            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i,im1))))
          endif
       endif
       if (smin.ge.smax) then
