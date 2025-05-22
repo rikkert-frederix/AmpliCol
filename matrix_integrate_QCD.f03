@@ -528,11 +528,11 @@ contains
     !pgl(ichan)%phase_space%p(:,5)=(/0.1925012E+03, -0.1444587E+03, -0.3054037E+02,  0.8330936E+02/)
 
     !! u d~ > w+ w- w+
-    pgl(ichan)%phase_space%p(:,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
-    pgl(ichan)%phase_space%p(:,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
-    pgl(ichan)%phase_space%p(:,3)=(/450.1093d0,  163.6474d0,  366.6460d0, -186.8727d0/)
-    pgl(ichan)%phase_space%p(:,4)=(/360.6728d0, -17.70185d0, -335.7913d0,  102.7059d0/)
-    pgl(ichan)%phase_space%p(:,5)=(/189.2179d0, -145.9456d0, -30.85472d0,  84.16685d0/)
+    !pgl(ichan)%phase_space%p(:,1)=(/500.0000d0,  0.0000000d0,  0.0000000d0,  500.0000d0/)
+    !pgl(ichan)%phase_space%p(:,2)=(/500.0000d0,  0.0000000d0,  0.0000000d0, -500.0000d0/)
+    !pgl(ichan)%phase_space%p(:,3)=(/450.1093d0,  163.6474d0,  366.6460d0, -186.8727d0/)
+    !pgl(ichan)%phase_space%p(:,4)=(/360.6728d0, -17.70185d0, -335.7913d0,  102.7059d0/)
+    !pgl(ichan)%phase_space%p(:,5)=(/189.2179d0, -145.9456d0, -30.85472d0,  84.16685d0/)
 
     !! d d~ > a w+ w-
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
@@ -560,8 +560,8 @@ contains
     !! u d~ > h w+
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
     !pgl(ichan)%phase_space%p(:,2)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00, -0.5000000E+03/)
-    !pgl(ichan)%phase_space%p(:,3)=(/0.4954211E+03, -0.1084508E+03, -0.4349116E+03,  0.1951031E+03/)
-    !pgl(ichan)%phase_space%p(:,4)=(/0.5045789E+03,  0.1084508E+03,  0.4349116E+03, -0.1951031E+03/)
+    !pgl(ichan)%phase_space%p(:,3)=(/0.5045789E+03,  0.1084508E+03,  0.4349116E+03, -0.1951031E+03/)
+    !pgl(ichan)%phase_space%p(:,4)=(/0.4954211E+03, -0.1084508E+03, -0.4349116E+03,  0.1951031E+03/)
 
     !! u d~ > w+ h
     !pgl(ichan)%phase_space%p(:,1)=(/0.5000000E+03,  0.0000000E+00,  0.0000000E+00,  0.5000000E+03/)
@@ -617,6 +617,20 @@ contains
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
 
+
+    iproc=0
+    pgl(ichan)%amp2(:)=0d0
+    do ih=1,pgl(ichan)%amps%n_amps
+          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+          pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))
+          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+    enddo
+
+    write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
+               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+
+
+
     call cpu_time(tBefore)
     iproc=0
     pgl(ichan)%amp2(:)=0d0
@@ -630,6 +644,7 @@ contains
 
     else
        do ih=1,pgl(ichan)%amps%n_amps
+          
           do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
@@ -648,8 +663,6 @@ contains
        enddo
     endif
 
-    write(*,*) 'tot',pgl(ichan)%amp2(iproc)*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))&
-               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
 
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))

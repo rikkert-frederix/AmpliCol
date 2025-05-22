@@ -137,7 +137,6 @@ contains
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
 
-
     call simple_consistency_checks()
 
     call allocate_and_fill_currents_to_amps_map()
@@ -154,6 +153,7 @@ contains
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
 
     call deallocate_unneeded()
+
     !stop 22
   contains
 
@@ -885,6 +885,7 @@ contains
          else
             coupl=(/-1d0/3d0,0d0/)
          endif
+         write(*,*) coupl
          call add_vertex(12,current_list_local(ic1)%type,coupl)
       elseif (is_singlet_a(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a photon-antiquark to quark vertex
@@ -1057,7 +1058,7 @@ contains
          if (sign(1,current_list_local(ic1)%type) .lt. 0) call add_vertex(209,-103)
 
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
-         coupl=(/80.419002445756163d0,0d0/)
+         coupl=(/91.18800d0,0d0/)
          ! add z-z to higgs vertex
          call add_vertex(92,25,coupl)
 
@@ -1168,12 +1169,12 @@ contains
          ! add h-w vertex
          call add_vertex(94,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
-         coupl=(/80.419002445756163d0,0d0/)
+         coupl=(/91.18800d0,0d0/)
          ! add z-h vertex
          call add_vertex(95,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
       elseif (is_scalar(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
-         coupl=(/80.419002445756163d0,0d0/)
-         ! add h-w vertex
+         coupl=(/91.18800d0,0d0/)
+         ! add h-z vertex
          call add_vertex(96,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
 
       endif
@@ -2132,6 +2133,7 @@ contains
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ip,ifinal
     logical :: read_file 
+
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -2141,7 +2143,7 @@ contains
                 allocate(this%current_list(ic)%val_c(1:6))
              endif
 
-          elseif (this%current_list(ic)%type.le.-101 .and. this%current_list(ic)%type.ge.-110) then
+          elseif (this%current_list(ic)%type.le.-101 .and. this%current_list(ic)%type.ge.-104) then
              allocate(this%current_list(ic)%val_c(1:6))
 
           elseif (this%current_list(ic)%type.eq.21 .and. use_real_gluons) then
@@ -2150,8 +2152,6 @@ contains
           elseif (this%current_list(ic)%type.eq.25) then
              allocate(this%current_list(ic)%val_c(1))
 
-          elseif (this%current_list(ic)%type.le.-111 .and. this%current_list(ic)%type.ge.-113) then
-             allocate(this%current_list(ic)%val_c(1))
           else
              allocate(this%current_list(ic)%val_c(1:4))
           endif
@@ -2164,7 +2164,7 @@ contains
                 allocate(this%interaction_list(iv)%val_c(1:6))
              endif
 
-          elseif (this%interaction_list(iv)%type.ge.201.and.this%interaction_list(iv)%type.le.210) then
+          elseif (this%interaction_list(iv)%type.ge.201.and.this%interaction_list(iv)%type.le.209) then
                   allocate(this%interaction_list(iv)%val_c(1:6))
 
           elseif ((this%interaction_list(iv)%type.eq.0 .or. &
@@ -2183,7 +2183,7 @@ contains
                   this%interaction_list(iv)%type.eq.92) then
                   allocate(this%interaction_list(iv)%val_c(1))
 
-          elseif (this%interaction_list(iv)%type.ge.211.and.this%interaction_list(iv)%type.le.213) then
+          elseif (this%interaction_list(iv)%type.ge.210.and.this%interaction_list(iv)%type.le.213) then
                   allocate(this%interaction_list(iv)%val_c(1))
           else
              allocate(this%interaction_list(iv)%val_c(1:4))
@@ -2231,10 +2231,7 @@ contains
                    call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
-             elseif (this%current_list(ic)%type.eq.23) then
-                   call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (abs(this%current_list(ic)%type).eq.24) then
+             elseif (abs(this%current_list(ic)%type).ge.23 .and. abs(this%current_list(ic)%type).le.24) then
                    call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              elseif (this%current_list(ic)%type.eq.25) then
@@ -2251,6 +2248,7 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+         !write(*,*) this%interaction_list(iv)%type
           if (this%interaction_list(iv)%type.eq.0) then
              if (use_real_gluons) then
                 call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
@@ -2259,7 +2257,6 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_r(1:4))
              else
-                     !write(*,*) 'call 1'
                 call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
@@ -2786,7 +2783,6 @@ contains
          call GluonPropagator_mass(this%current_list(ic)%val_c, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
                this%current_list(ic)%mass,this%current_list(ic)%width)
-       !write(*,*) 'now it is',this%current_list(ic)%val_c*dsqrt(2d0*4d0*3.14159265358979323846d0*0.00754677114d0)**2
       else
       if (use_real_gluons) then
          call GluonPropagator_real(this%current_list(ic)%val_r, &

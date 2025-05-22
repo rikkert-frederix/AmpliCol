@@ -231,7 +231,7 @@ contains
          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
             sqp0p3 = 0d0
          else
-            sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
+            sqp0p3 = dsqrt(max(((-p(0))+(-p(3))),rZero))
          end if
          chi(1) = dcmplx( sqp0p3 )
          if ( sqp0p3.eq.rZero ) then
@@ -239,7 +239,7 @@ contains
          else
             chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
          endif
-         if ( -nhel.eq.1 ) then
+         if ( nhel.eq.1 ) then
             ! oxxx, nsf=-1, nhel=+1
             wf(1) = cZero
             wf(2) = cZero
@@ -300,6 +300,7 @@ contains
     lim=tiny
 
     if(p(0).gt.0d0) then
+            stop 3
 ! outgoing final state momenta
        !nhel=(2*ihel-1)
        nhel=ihel
@@ -362,7 +363,7 @@ contains
          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
             sqp0p3 = 0d0
          else
-            sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
+            sqp0p3 = dsqrt(max(((-p(0))+(-p(3))),rZero))
          end if
          chi(1) = dcmplx( sqp0p3 )
          if ( sqp0p3.eq.rZero ) then
@@ -588,7 +589,7 @@ contains
 
     M2 = 0d0
     if (wm.ne.0d0) M2=1d0/wm**2
-    wf(1:4) = prefact*(dsqrt(1d0-sw**2)/sw)*&
+    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
                        (TMP1*(pwf2(0:3)-pwf1(0:3))-2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
                        -TMP6*wf2(1:4)+TMP7*wf1(1:4))
     !stop 21
@@ -732,6 +733,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     wfg(1:4)= prefact*coupl(1)/sw*wfs1(1)*(wfg2(1:4))
   end subroutine ScalarGluontoGluon_hww
+
   subroutine GluonGluontoScalar_hww(wfg1,wfg2,wfs,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg2
