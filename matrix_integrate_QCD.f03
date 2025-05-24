@@ -533,7 +533,7 @@ contains
              endif
           endif
           if (pgl%DR_min(i,j).gt.0d0) then
-             if (abs(deltaR(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%DR_min(i,j)**2) then
+             if (abs(deltaR(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%DR_min(i,j)) then
                 pass_cuts=.false.
                 return
              endif

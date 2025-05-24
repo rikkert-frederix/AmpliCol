@@ -78,7 +78,7 @@ contains
     allocate(this%x(this%ndim))
     allocate(this%sets(0:this%next-2,2))
     allocate(this%ptcut(1:this%next))
-    allocate(this%drcut(1:this%next,1:this%next))
+    allocate(this%drcut(maskr(this%next)))
     allocate(this%sqrt_s_min(1:this%next,1:this%next))
     ! masses of external particles
     do i=1,n
@@ -92,22 +92,19 @@ contains
        this%invm(ibclr(maskr(this%next),i-1))=m(i)**2
     enddo
     if (verbose) write (*,*) 'masses:',m(1:n)
+    this%drcut=0d0
+    this%ptcut=0d0
+    this%sqrt_s_min=0d0
     do i=1,this%next
        if (pt_cut(i).gt.0d0) then
           this%ptcut(i)=pt_cut(i)
-       else
-          this%ptcut(i)=0d0
        endif
        do j=1,this%next
           if (dr_cut(i,j).gt.0d0) then
-             this%drcut(i,j)=dr_cut(i,j)
-          else
-             this%drcut(i,j)=0d0
+             this%drcut(ibset(ibset(0,i-1),j-1))=dr_cut(i,j)
           endif
           if (sqrt_s_min(i,j).gt.0d0) then
              this%sqrt_s_min(i,j)=sqrt_s_min(i,j)
-          else
-             this%sqrt_s_min(i,j)=0d0
           endif
        enddo
     enddo
@@ -187,7 +184,8 @@ contains
                if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
                do j=i+1,this%next
                   if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
-                  cut=cut+max(this%sqrt_s_min(i,j)**2,2d0*this%ptcut(i)*this%ptcut(j)*(1d0-cos(this%drcut(i,j))))
+                  cut=cut+max(this%sqrt_s_min(i,j)**2,2d0*this%ptcut(i)*this%ptcut(j)* &
+                       (1d0-cos(this%drcut(ibset(ibset(0,i-1),j-1)))))
                enddo
             enddo
             if (npart.eq.this%next-2) then ! all final state particles are in 'k'
@@ -626,7 +624,7 @@ contains
               this%invm(i)+this%invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-this%invm(i))*pim1(1))
 
          if(this%invm(i).eq.0d0) then
-            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i,im1))))
+            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
 
       endif
@@ -1419,7 +1417,7 @@ contains
          smax=min(smax,&
               this%invm(i)+this%invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-this%invm(i))*pim1(1))
          if(this%invm(i).eq.0d0) then
-            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i,im1))))
+            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
       endif
       if (smin.ge.smax) then

@@ -63,8 +63,12 @@ contains
     this%ptcut=pt_cut
     allocate(this%ycut(1:n))
     this%ycut=rap_cut
-    allocate(this%DRcut(1:n,1:n))
-    this%DRcut=DR_cut
+    allocate(this%DRcut(n**2))
+    do i=1,n
+       do j=1,n
+          this%DRcut(n*(i-1)+j)=DR_cut(i,j)
+       enddo
+    enddo
     this%sqrts=sqrts
     this%next=n
     if (.not.include_pdf) then
@@ -82,7 +86,7 @@ contains
     do i=3,n
        do j=3,n
           if (i.eq.j) cycle
-          if (use_mode.ne.1 .and. this%DRcut(i,j).le.0d0) then
+          if (use_mode.ne.1 .and. this%DRcut(n*(i-1)+j).le.0d0) then
              write (*,*) 'genpt phase-space must have DeltaR cut'
              stop 1
           endif
@@ -130,7 +134,7 @@ contains
        elseif (use_mode.eq.2) then
           ! generate deltaR w.r.t. previously generated particle
           y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
-          drmin=max(this%DRcut(i,i-1),abs(phi))
+          drmin=max(this%DRcut(this%next*(i-1)+i-1),abs(phi))
           drmax=sqrt((this%ycut(i)+abs(y))**2+phi**2)
           ix=ix+1
           call random_to_var(xx(ix),0d0,drmin,drmax,dr,this%jac)
@@ -147,7 +151,7 @@ contains
           ! get the energy in the frame where p(:,i-1) has p_z=0.
           y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
           call boostz(this%p(0,i-1),y,pb)
-          invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(i,i-1),abs(phi))))
+          invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next*(i-1)+i-1),abs(phi))))
           invmmax=this%sqrts**2
           ix=ix+1
           call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,this%jac)
@@ -164,7 +168,7 @@ contains
        elseif (use_mode.eq.4) then
           y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
           costhetamin=-1d0 
-          costhetamax=cos(this%DRcut(i,i-1))
+          costhetamax=cos(this%DRcut(this%next*(i-1)+i-1))
           ix=ix+1
           call random_to_var(xx(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
           call fill_momentum_pt2cosphi(pt2,costheta,phi,this%p(0,i),this%jac)
@@ -206,7 +210,7 @@ contains
        phi=phi2-phi ! aximuthal separation particle 'next' and 'next-1'
        ! generate deltaR w.r.t. previously generated particle
        y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
-       drmin=max(this%DRcut(this%next,this%next-1),abs(phi))
+       drmin=max(this%DRcut(this%next*(this%next-1)+this%next-1),abs(phi))
        drmax=sqrt((this%ycut(this%next)+abs(y))**2+phi**2)
        ix=ix+1
        call random_to_var(xx(ix),0d0,drmin,drmax,dr,this%jac)
@@ -228,7 +232,7 @@ contains
        y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
        call boostz(this%p(0,this%next-1),y,pb)
        phi=delta_phi(this%p(0,this%next),this%p(0,this%next-1))
-       invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next,this%next-1),phi)))
+       invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next*(this%next-1)+this%next-1),phi)))
        invmmax=this%sqrts**2
        if(invmmin.ge.invmmax) then
           this%jac=-1d0
@@ -276,10 +280,10 @@ contains
        pzmax = sqrt(pt2)/tan(2d0*atan(exp(-ymax)))
 
        costhetamin= abs(this%p(1,this%next))/(dsqrt(pt2+pzmax**2))
-       costhetamax= cos(max(abs(phi2),this%DRcut(this%next,this%next-1)))
+       costhetamax= cos(max(abs(phi2),this%DRcut(this%next*(this%next-1)+this%next-1)))
 
        if (abs(phi2).ge.pi/2d0) then
-          costhetamin= cos(max(abs(phi2),this%DRcut(this%next,this%next-1)))
+          costhetamin= cos(max(abs(phi2),this%DRcut(this%next*(this%next-1)+this%next-1)))
           costhetamax = cos(pi-acos(abs(this%p(1,this%next))/(dsqrt(pt2+pzmax**2))))
        endif
        if (costhetamin.gt.costhetamax) return

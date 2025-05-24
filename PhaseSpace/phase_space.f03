@@ -7,10 +7,10 @@ module phase_space_base
      real(kind=8),dimension(:,:),allocatable,public :: p
      real(kind=8),public :: jac,xbjrk(2)
      real(kind=8) :: s0,tot_mass,sqrtshat,sqrts
-     real(kind=8),dimension(:),allocatable :: masses,ptcut,ycut
+     real(kind=8),dimension(:),allocatable :: masses,ptcut,ycut,drcut
      integer(kind=4) :: ndim,next
      integer(kind=4),dimension(:,:),allocatable :: sets
-     real(kind=8),dimension(:,:),allocatable :: pp,drcut,sqrt_s_min
+     real(kind=8),dimension(:,:),allocatable :: pp,sqrt_s_min
      real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
      logical :: t_channel
