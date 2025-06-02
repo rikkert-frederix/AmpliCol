@@ -770,14 +770,12 @@ contains
     real(kind=8),dimension(2) :: coupl
     real(kind=8) :: sm
     real(kind=8) :: TMP1
-
     if (coupl(1) .gt. 1d0) then
         TMP1 = (-3d0/2d0)/sw*(sm**2/coupl(1))
     elseif ( coupl(1) .lt. 1d0) then
         TMP1 = 1d0
     endif
-    wfs(1)= TMP1*prefact*(-3d0/2d0)/sw*(sm**2/coupl(1))*wfs1(1)*wfs2(1)
-    stop 2
+    wfs(1)= TMP1*prefact*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar_hhh
 
   subroutine ScalarScalartoScalar_hzz(wfs1,wfs2,wfs,coupl)

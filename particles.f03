@@ -81,9 +81,9 @@ contains
 
     ! higgs boson
     this%particle_list(13)%type=25
-    this%particle_list(13)%mass=wmass
-    this%particle_list(13)%width=wwidth
-    this%particle_list(13)%spin=3 ! three spin states
+    this%particle_list(13)%mass=hmass
+    this%particle_list(13)%width=hwidth
+    this%particle_list(13)%spin=1 ! one spin states
     this%particle_list(13)%anti_type=25
 
     ! w-w tensor T1

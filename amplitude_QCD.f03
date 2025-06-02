@@ -105,6 +105,7 @@ contains
    
     do isize=1,n-1
        this%n_cur_start(isize)=this%n_cur+1
+       write(*,*) 'n cur start for isize',isize,this%n_cur_start(isize)
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
        if (isize.eq.1) then
           ! external currents
@@ -123,6 +124,7 @@ contains
              if (nc.eq.n) this%n_cur_end(n)=this%n_cur
           enddo
        else
+          write(*,*) 'doing isize',isize
           do isplit=1,isize-1
              n1=isplit
              n2=isize-isplit
@@ -134,6 +136,7 @@ contains
           enddo
        endif
        this%n_cur_end(isize)=this%n_cur
+       write(*,*) ' n cur end',this%n_cur_end(isize)
        if (isize.ge.2) this%n_vert_end(isize)=this%n_vert
     enddo
 
@@ -147,6 +150,8 @@ contains
     call allocate_and_fill_colour_permutations()
     call allocate_and_fill_momentum_array()
 
+    write(*,*) this%n_cur_start(n  ),this%n_cur_end(n  )
+    write(*,*) this%n_cur_start(n-1),this%n_cur_end(n-1)
     ! All done. But there could be currents that are not needed. Filter them out
     write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
     call this%filter_dead_trees(n)
@@ -833,6 +838,7 @@ contains
       implicit none
       real(kind=8),dimension(2) :: coupl
       integer :: cc_out
+
       if (.not.valid_current_combination())  then
          return
       endif
@@ -1050,11 +1056,11 @@ contains
          ! add a w-a to a vertex
          call add_vertex(29,current_list_local(ic2)%type)
 
-         ! add a zw to T2 vertex
+         ! add a aw to T2 vertex
          coupl=(/3d0,0d0/)
          if (sign(1,current_list_local(ic1)%type) .gt. 0)  call add_vertex(208,-102)
          coupl=(/3d0,0d0/)
-         ! add a zw to T3 vertex
+         ! add a aw to T3 vertex
          if (sign(1,current_list_local(ic1)%type) .lt. 0) call add_vertex(209,-103)
 
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
@@ -1120,6 +1126,34 @@ contains
          ! add a (z T3 to w) vertex
          coupl=(/2d0,0d0/)
          call add_vertex(113,-24,coupl)
+
+     elseif (is_tensor_t4(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
+         ! add T4-higgs to higgs vertex
+         coupl=(/0d0,0d0/)
+         call add_vertex(114,current_list_local(ic2)%type,coupl)
+     elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t4(current_list_local(ic2)%type)) then
+         ! add higgs T4 to higgs vertex
+         coupl=(/0d0,0d0/)
+         call add_vertex(115,current_list_local(ic1)%type,coupl)
+
+     elseif (is_tensor_t4(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
+         ! add T4-z to z vertex
+         coupl=(/0d0,0d0/)
+         call add_vertex(116,current_list_local(ic2)%type,coupl)
+     elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_tensor_t4(current_list_local(ic2)%type)) then
+         ! add z T4 to z vertex
+         coupl=(/0d0,0d0/)
+         call add_vertex(117,current_list_local(ic1)%type,coupl)
+
+     elseif (is_tensor_t4(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add T4-w to w vertex
+         coupl=(/0d0,0d0/)
+         call add_vertex(118,current_list_local(ic2)%type,coupl)
+     elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t4(current_list_local(ic2)%type)) then
+         ! add w T4 to w vertex
+         coupl=(/0d0,0d0/)
+         call add_vertex(119,current_list_local(ic1)%type,coupl)
+
          
 !-----------------------------------------------------------------
 
@@ -1146,17 +1180,7 @@ contains
          endif
          ! add a higgs-higgs to T4
          coupl=(/80.419002445756163d0,0d0/)
-         call add_vertex(210,-104,coupl)
-
-      elseif (is_tensor_t4(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
-         ! add T4-higgs to higgs vertex
-         coupl=(/0d0,0d0/)
-         call add_vertex(212,current_list_local(ic2)%type,coupl)
-
-      elseif (is_scalar(current_list_local(ic1)%type) .and. is_tensor_t4(current_list_local(ic2)%type)) then
-         ! add higgs T4 to higgs vertex
-         coupl=(/0d0,0d0/)
-         call add_vertex(213,current_list_local(ic2)%type,coupl)
+         call add_vertex(212,-104,coupl,pm%get_mass(current_list_local(ic1)%type))
 
 ! -----------------------------------------------------------
 
@@ -1199,7 +1223,7 @@ contains
       !      must be included
       ! 5. If it is not a gluon current, and if the first particle (of the
       !    colour order) is in the current, this must come in the first
-      !    place. Note that this is consistent with the 'it' parameter in
+      !    place. Noee that this is consistent with the 'it' parameter in
       !    define_canonical_order() for the two-quark-line case.
       ! 6. In general, the current must be of the format "q g..g qbar q g..g
       !    qbar" or any subset thereof.
@@ -1211,7 +1235,9 @@ contains
       valid_current_combination=.false.
 
       ! check that all particles are different in the two currents:
-      if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) return
+      if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) then
+              return
+             endif
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
@@ -1279,13 +1305,15 @@ contains
          if (maxval(current_list_local(ic1)%order(1:n1)).ge.maxval(current_list_local(ic2)%order(1:n2))) then !.or.&
             ! minval(current_list_local(ic1)%order(1:n1)).ge.minval(current_list_local(ic2)%order(1:n2))) then !.or.&
             !all_singlet_middle) then
+            !write(*,*) 'returning',current_list_local(ic1)%order(1:n1),current_list_local(ic2)%order(1:n2)
             return
          else
             valid_current_combination=.true.
+            !write(*,*) 'accept current',current_list_local(ic1)%order(1:n1),current_list_local(ic2)%order(1:n2)
             return ! no need to check further: below are only checks about the colours
          endif
       endif
-      
+
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order. First, find where the singlets are, since they do not matter
@@ -1376,7 +1404,7 @@ contains
       real(kind=8),dimension(2),optional :: coupl
       real(kind=8),optional :: mass
      
-      !write(*,*) 'adding vertex',itype
+      write(*,*) 'adding vertex',itype
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) then
@@ -1404,6 +1432,7 @@ contains
          interaction_list_local(this%n_vert)%mass=0d0
       endif
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
+      write(*,*) 'add all currents',ctype
       call add_all_currents(ctype)
     end subroutine add_vertex
 
@@ -1692,11 +1721,12 @@ contains
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+            write(*,*) 'checking add',new_current%type
             return
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
-         !write(*,*) 'new curr number',this%n_cur
+         write(*,*) 'new curr number',new_current%type
          current_list_local(this%n_cur)=new_current
          !write(*,*) 'new spin',current_list_local(this%n_cur)%spin
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
@@ -2143,13 +2173,16 @@ contains
                 allocate(this%current_list(ic)%val_c(1:6))
              endif
 
-          elseif (this%current_list(ic)%type.le.-101 .and. this%current_list(ic)%type.ge.-104) then
+          elseif (this%current_list(ic)%type.le.-101 .and. this%current_list(ic)%type.ge.-103) then
              allocate(this%current_list(ic)%val_c(1:6))
 
           elseif (this%current_list(ic)%type.eq.21 .and. use_real_gluons) then
              allocate(this%current_list(ic)%val_r(1:4))
 
           elseif (this%current_list(ic)%type.eq.25) then
+             allocate(this%current_list(ic)%val_c(1))
+
+          elseif (this%current_list(ic)%type.eq.-104) then
              allocate(this%current_list(ic)%val_c(1))
 
           else
@@ -2183,7 +2216,7 @@ contains
                   this%interaction_list(iv)%type.eq.92) then
                   allocate(this%interaction_list(iv)%val_c(1))
 
-          elseif (this%interaction_list(iv)%type.ge.210.and.this%interaction_list(iv)%type.le.213) then
+          elseif (this%interaction_list(iv)%type.ge.210.and.this%interaction_list(iv)%type.le.212) then
                   allocate(this%interaction_list(iv)%val_c(1))
           else
              allocate(this%interaction_list(iv)%val_c(1:4))
@@ -2248,7 +2281,7 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
-         !write(*,*) this%interaction_list(iv)%type
+          write(*,*) this%interaction_list(iv)%type
           if (this%interaction_list(iv)%type.eq.0) then
              if (use_real_gluons) then
                 call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
@@ -2498,11 +2531,13 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1),this%interaction_list(iv)%coupl)
 
-          elseif(this%interaction_list(iv)%type.ge.212 .and. this%interaction_list(iv)%type.le.213) then
+          elseif(this%interaction_list(iv)%type.eq.212) then
+
              call ScalarScalartoScalar_hhh(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                      this%interaction_list(iv)%val_c(1),this%interaction_list(iv)%coupl,&
                      this%interaction_list(iv)%mass)
+
 
           elseif(this%interaction_list(iv)%type.ge.100 .and. this%interaction_list(iv)%type.le.106) then
              call TensorGluontoGluon_4v(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
@@ -2511,6 +2546,39 @@ contains
           elseif(this%interaction_list(iv)%type.ge.107 .and. this%interaction_list(iv)%type.le.113) then
              call GluonTensortoGluon_4v(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+          elseif(this%interaction_list(iv)%type.ge.114 .and. this%interaction_list(iv)%type.le.115) then
+             call ScalarScalartoScalar_hhh(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%interaction_list(iv)%val_c(1),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+
+           elseif(this%interaction_list(iv)%type.eq.116) then
+             call ScalarGluontoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+           elseif(this%interaction_list(iv)%type.eq.117) then
+             call GluonScalartoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
+
+           elseif(this%interaction_list(iv)%type.eq.118) then
+             call ScalarGluontoGluon_hww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+           elseif(this%interaction_list(iv)%type.eq.119) then
+             call GluonScalartoGluon_hww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
 
           ! higgs-quark coupling
@@ -2603,9 +2671,13 @@ contains
           elseif (this%current_list(ic)%type.eq.-21) then
              ! the non-propagating tensor current
              call combine_interactions(6)
-          elseif (this%current_list(ic)%type.ge.-113 .and.this%current_list(ic)%type.le.-101) then
+          elseif (this%current_list(ic)%type.ge.-103 .and.this%current_list(ic)%type.le.-101) then
              ! the non-propagating (massive vector boson) tensor current
              call combine_interactions(6)
+          elseif (this%current_list(ic)%type.eq.-104) then
+             ! the non-propagating (scalar) tensor current
+             call combine_interactions(1)
+
           elseif ((this%current_list(ic)%type.le.-1.and.this%current_list(ic)%type.ge.-6)) then
              ! an anti-quark current
              call combine_interactions(4)
@@ -3484,6 +3556,8 @@ contains
     where_to_cur=0
     where_to_ver=0
     where_to_amp=0
+    write(*,*) this%n_cur_start(n  ),this%n_cur_end(n  )
+    write(*,*) this%n_cur_start(n-1),this%n_cur_end(n-1)
     if (.not.present(include_current)) then
        is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=.true.
        is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=.true.
