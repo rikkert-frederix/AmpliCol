@@ -825,19 +825,26 @@ contains
       type(interaction),dimension(:),allocatable :: tmp
       new_max_vert=2*max_vert
       allocate(tmp(new_max_vert))
+      ! copy old list into tmp
       do iv=1,max_vert
-         allocate(tmp(iv)%singlet_mv(0:size(interaction_list_local(iv)%singlet_mv)-1))
+         if (allocated(interaction_list_local(iv)%singlet_mv)) &
+              allocate(tmp(iv)%singlet_mv(0:size(interaction_list_local(iv)%singlet_mv)-1))
          tmp(iv)=interaction_list_local(iv)
       enddo
+      ! empty old list
       do iv=1,max_vert
          call finalize_interaction(interaction_list_local(iv))
       enddo
       deallocate(interaction_list_local)
+      ! allocate new list
       allocate(interaction_list_local(new_max_vert))
+      ! copy tmp into new list
       do iv=1,max_vert
-         allocate(interaction_list_local(iv)%singlet_mv(0:size(tmp(iv)%singlet_mv)-1))
+         if (allocated(tmp(iv)%singlet_mv)) &
+              allocate(interaction_list_local(iv)%singlet_mv(0:size(tmp(iv)%singlet_mv)-1))
          interaction_list_local(iv)=tmp(iv)
       enddo
+      ! empty tmp
       do iv=1,max_vert
          call finalize_interaction(tmp(iv))
       enddo
@@ -3135,6 +3142,8 @@ contains
        if (rhs%singlet_mv(0).gt.0) then
           if (.not.allocated(lhs%singlet_mv)) allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
           lhs%singlet_mv(0:rhs%singlet_mv(0))=rhs%singlet_mv(0:rhs%singlet_mv(0))
+       elseif (allocated(lhs%singlet_mv)) then
+          lhs%singlet_mv(0)=0
        endif
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
