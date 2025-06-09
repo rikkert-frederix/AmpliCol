@@ -20,7 +20,7 @@ contains
     real(kind=8) :: wmass,wwidth
     real(kind=8) :: hmass,hwidth
 
-    this%npart=17 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 4 tensors for EW bosons
+    this%npart=18 ! gluon, 6 quarks, tensor, photon, higgs, z-boson, w-boson + 4 tensors for EW bosons
     allocate(this%particle_list(this%npart))
     ! 5 massless quarks
     do i=1,5
@@ -107,12 +107,19 @@ contains
     this%particle_list(16)%spin=-1
     this%particle_list(16)%anti_type=-103
 
-    ! HH tensor T4
+    ! HH tensor T4a (from ZZ)
     this%particle_list(17)%type=-104
     this%particle_list(17)%mass=0d0
     this%particle_list(17)%width=0d0
     this%particle_list(17)%spin=-1
     this%particle_list(17)%anti_type=-104
+
+    ! HH tensor T4b (from HH)
+    this%particle_list(18)%type=-105
+    this%particle_list(18)%mass=0d0
+    this%particle_list(18)%width=0d0
+    this%particle_list(18)%spin=-1
+    this%particle_list(18)%anti_type=-105
 
   end subroutine init_part
   integer function get_antipart(this,ipdg)
@@ -222,7 +229,8 @@ contains
     if (is_tensor_t1(i).or.&
         is_tensor_t2(i).or.&
         is_tensor_t3(i).or.&
-        is_tensor_t4(i))then
+        is_tensor_t4a(i).or.&
+        is_tensor_t4b(i))then
        is_tensor_v=.true.
     else
        is_tensor_v=.false.
@@ -255,15 +263,24 @@ contains
        is_tensor_t3=.false.
     endif
   end function is_tensor_t3
-  logical function is_tensor_t4(i)
+  logical function is_tensor_t4a(i)
     implicit none
     integer :: i
     if (i.eq.-104) then
-       is_tensor_t4=.true.
+       is_tensor_t4a=.true.
     else
-       is_tensor_t4=.false.
+       is_tensor_t4a=.false.
     endif
-  end function is_tensor_t4
+  end function is_tensor_t4a
+  logical function is_tensor_t4b(i)
+    implicit none
+    integer :: i
+    if (i.eq.-105) then
+       is_tensor_t4b=.true.
+    else
+       is_tensor_t4b=.false.
+    endif
+  end function is_tensor_t4b
   logical function is_singlet(i)
     implicit none
     integer :: i
