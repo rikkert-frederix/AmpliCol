@@ -100,7 +100,6 @@ contains
     call set_max_vert()
     
     if (this%imode.eq.2) then
-       allocate(current_dict(max_cur)) 
        call create_current_dict()
        allocate(key_to_current(max_key,maskr(this%nprocs)))
        key_to_current(1:max_key,1:maskr(this%nprocs))=0
@@ -1474,6 +1473,15 @@ contains
       integer :: size,i,j,key
       integer(kind=8) :: val,previous_val
       integer,dimension(:),allocatable :: ips_in,ips
+      size=n
+      max_key=n
+      do isize=2,n-1
+         size=size*(n-isize+1)
+         do i=1,size
+            max_key=max_key+14
+         enddo
+      enddo
+      allocate(current_dict(max_key)) 
       key=n  ! skip the external currents.
       size=n
       previous_val=0
