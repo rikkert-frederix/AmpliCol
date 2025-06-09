@@ -783,23 +783,68 @@ contains
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
       implicit none
-      if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_cur=2*n*(n-1)*2**n*10
-      else
-         max_cur=factorial(n+1)*14
-      endif
+      max_cur=1024
     end subroutine set_max_cur
 
     subroutine set_max_vert()
       ! rough upper bound on the maximum number of interactions
       implicit none
-      if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_vert=n**3*factorial(this%n_sing(1))*2**(n-2)*10
-      elseif(this%imode.eq.2) then
-         max_vert=factorial(n+1)*14
-      endif
+      max_vert=1024
     end subroutine set_max_vert
 
+    subroutine increase_max_cur()
+      implicit none
+      integer :: new_max_cur,ic
+      type(current),dimension(:),allocatable :: tmp
+      new_max_cur=2*max_cur
+      allocate(tmp(new_max_cur))
+      do ic=1,max_cur
+         allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
+         allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
+         tmp(ic)=current_list_local(ic)
+      enddo
+      do ic=1,max_cur
+         call finalize_current(current_list_local(ic))
+      enddo
+      deallocate(current_list_local)
+      allocate(current_list_local(new_max_cur))
+      do ic=1,max_cur
+         allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
+         allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
+         current_list_local(ic)=tmp(ic)
+      enddo
+      do ic=1,max_cur
+         call finalize_current(tmp(ic))
+      enddo
+      deallocate(tmp)
+      max_cur=new_max_cur
+    end subroutine increase_max_cur
+    
+    subroutine increase_max_vert()
+      implicit none
+      integer :: new_max_vert,iv
+      type(interaction),dimension(:),allocatable :: tmp
+      new_max_vert=2*max_vert
+      allocate(tmp(new_max_vert))
+      do iv=1,max_vert
+         allocate(tmp(iv)%singlet_mv(0:size(interaction_list_local(iv)%singlet_mv)-1))
+         tmp(iv)=interaction_list_local(iv)
+      enddo
+      do iv=1,max_vert
+         call finalize_interaction(interaction_list_local(iv))
+      enddo
+      deallocate(interaction_list_local)
+      allocate(interaction_list_local(new_max_vert))
+      do iv=1,max_vert
+         allocate(interaction_list_local(iv)%singlet_mv(0:size(tmp(iv)%singlet_mv)-1))
+         interaction_list_local(iv)=tmp(iv)
+      enddo
+      do iv=1,max_vert
+         call finalize_interaction(tmp(iv))
+      enddo
+      deallocate(tmp)
+      max_vert=new_max_vert
+    end subroutine increase_max_vert
       
     subroutine allocate_current_list_and_interaction_list()
       ! allocate the minimum memory needed for the current_list and
@@ -1057,6 +1102,7 @@ contains
          if (ic.eq.this%n_cur_end(n)+1) return ! dead tree. Filter already here
       endif
       this%n_vert=this%n_vert+1
+      if (this%n_vert.gt.max_vert) call increase_max_vert()
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
@@ -1350,6 +1396,7 @@ contains
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
+         if (this%n_cur.gt.max_cur) call increase_max_cur()
          current_list_local(this%n_cur)=new_current
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
@@ -1385,6 +1432,7 @@ contains
          if (ic.eq.0) then
             ! initialise new current
             this%n_cur=this%n_cur+1
+            if (this%n_cur.gt.max_cur) call increase_max_cur()
             key_to_current(key,new_current%iproc)=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
@@ -2969,7 +3017,13 @@ contains
     ! do the actual shifting of the currents in the list
     do nc=1,this%n_cur
        if (.not.is_needed_cur(nc)) cycle
-       if (where_to_cur(nc).ne.nc) this%current_list(where_to_cur(nc))=this%current_list(nc)
+       if (where_to_cur(nc).ne.nc) then
+          if (allocated(this%current_list(where_to_cur(nc))%vertices)) &
+               deallocate(this%current_list(where_to_cur(nc))%vertices)
+          if (allocated(this%current_list(where_to_cur(nc))%vertex_sign)) &
+               deallocate(this%current_list(where_to_cur(nc))%vertex_sign)
+          this%current_list(where_to_cur(nc))=this%current_list(nc)
+       endif
        do iv=1,this%current_list(where_to_cur(nc))%n_vert
           this%current_list(where_to_cur(nc))%vertices(iv)= &
                where_to_ver(this%current_list(where_to_cur(nc))%vertices(iv))
@@ -2978,7 +3032,11 @@ contains
     ! do the actual shifting of the interactions in the list
     do iv=1,this%n_vert
        if (.not.is_needed_ver(iv)) cycle
-       if (where_to_ver(iv).ne.iv) this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+       if (where_to_ver(iv).ne.iv) then
+          if (allocated(this%interaction_list(where_to_ver(iv))%singlet_mv)) &
+               deallocate(this%interaction_list(where_to_ver(iv))%singlet_mv)
+          this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+       endif
        this%interaction_list(where_to_ver(iv))%currents(1:2)= &
             where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
     enddo
@@ -3065,10 +3123,9 @@ contains
     lhs%type=rhs%type
     lhs%currents(1:2)=rhs%currents(1:2)
     lhs%coupl=rhs%coupl
-    if (allocated(lhs%singlet_mv)) deallocate(lhs%singlet_mv)
     if (allocated(rhs%singlet_mv)) then
        if (rhs%singlet_mv(0).gt.0) then
-          allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
+          if (.not.allocated(lhs%singlet_mv)) allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
           lhs%singlet_mv(0:rhs%singlet_mv(0))=rhs%singlet_mv(0:rhs%singlet_mv(0))
        endif
     endif
@@ -3107,9 +3164,8 @@ contains
     lhs%iproc=rhs%iproc
     lhs%mass=rhs%mass
     lhs%width=rhs%width
-    if (allocated(lhs%vertices)) deallocate(lhs%vertices)
     if (allocated(rhs%vertices) .and. rhs%n_vert.gt.0) then
-       allocate(lhs%vertices(1:lhs%n_vert))
+       if (.not.allocated(lhs%vertices)) allocate(lhs%vertices(1:lhs%n_vert))
        lhs%vertices(1:lhs%n_vert)=rhs%vertices(1:lhs%n_vert)
     endif
     if (allocated(lhs%order)) deallocate(lhs%order)
@@ -3127,9 +3183,8 @@ contains
        allocate(lhs%ext_type(1:isize))
        lhs%ext_type(1:isize)=rhs%ext_type(1:isize)
     endif
-    if (allocated(lhs%vertex_sign)) deallocate(lhs%vertex_sign)
     if (allocated(rhs%vertex_sign) .and. rhs%n_vert.gt.0) then
-       allocate(lhs%vertex_sign(1:lhs%n_vert))
+       if (.not.allocated(lhs%vertex_sign)) allocate(lhs%vertex_sign(1:lhs%n_vert))
        lhs%vertex_sign(1:lhs%n_vert)=rhs%vertex_sign(1:lhs%n_vert)
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
