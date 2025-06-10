@@ -6,6 +6,8 @@ module phase_space_haag_mod
    contains
      procedure :: init => haag_init
      procedure :: generate_momenta => haag_generate_momenta
+     procedure :: compute_x_from_momenta => haag_compute_x_from_momenta
+     procedure :: cleanup => haag_cleanup
   end type phase_space_haag
   private
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -21,15 +23,43 @@ module phase_space_haag_mod
   real(kind=8),parameter :: vtiny=1d-12
 
 contains
-
-  subroutine haag_init(this,sqrts,n,m,o,s_cut,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine haag_compute_x_from_momenta(this,p)
+    implicit none
+    class(phase_space_haag),intent(inout) :: this
+    real(kind=8),dimension(0:3,this%next),intent(in) :: p
+    write (*,*) 'Cannot invert phase-space for haag parametrisation'
+    stop 1
+  end subroutine haag_compute_x_from_momenta
+  subroutine haag_cleanup(this)
+    implicit none
+    class(phase_space_haag),intent(inout) :: this
+    if (allocated(this%order)) deallocate(this%order)
+    if (allocated(this%masses)) deallocate(this%masses)
+    if (allocated(this%invm)) deallocate(this%invm)
+    if (allocated(this%invm_min)) deallocate(this%invm_min)
+    if (allocated(this%invm_max)) deallocate(this%invm_max)
+    if (allocated(this%ETmin)) deallocate(this%ETmin)
+    if (allocated(this%pp)) deallocate(this%pp)
+    if (allocated(this%p)) deallocate(this%p)
+    if (allocated(this%x)) deallocate(this%x)
+    if (allocated(this%sets)) deallocate(this%sets)
+    if (allocated(this%ptcut)) deallocate(this%ptcut)
+    if (allocated(this%ycut)) deallocate(this%ycut)
+    if (allocated(this%drcut)) deallocate(this%drcut)
+    if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
+  end subroutine haag_cleanup
+  subroutine haag_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
     implicit none
     class(phase_space_haag),intent(inout) :: this
     real(kind=8),intent(in) :: sqrts
     integer(kind=4),intent(in) :: n
     integer(kind=4),dimension(n),intent(in) :: o
-    real(kind=8),intent(in) :: s_cut(2),pt_cut,rap_cut,dr_cut,sqrt_s_min
+    ! rapidity and pT cut (and DR and sqrt_s_min) on all the particles
+    real(kind=8),dimension(n),intent(in) :: rap_cut,pt_cut
+    real(kind=8),dimension(n,n),intent(in) :: DR_cut,sqrt_s_min
+    ! masses
     real(kind=8),dimension(n),intent(in) :: m
+    real(kind=8),dimension(2) :: s_cut
     logical,intent(in) :: t_chan
     logical,intent(in) :: include_pdf
     integer(kind=4) :: i,j
@@ -38,13 +68,18 @@ contains
     real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,sigma_ij
     this%sqrtshat=sqrts
     this%sqrts=sqrts
-    drjj_min=dr_cut
-    pt_min=pt_cut
-    sqrt_smin=sqrt_s_min
+    drjj_min=99d99
+    do i=3,n-1
+       drjj_min=min(drjj_min,minval(dr_cut(i,i+1:n)))
+    enddo
+    pt_min=minval(pt_cut(3:n))
+    sqrt_smin=99d99
+    do i=3,n-1
+       sqrt_smin=min(sqrt_smin,minval(sqrt_s_min(i,i+1:n)))
+    enddo
     if (verbose) then
        write (*,*) 'Setting up',n,'particle phase-space'
        write (*,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
-       write (*,*) 'Cut on invariants used in the phase-space generation: abs((p_i+p_j)^2) >=',s_cut
     endif
     includePDF=include_pdf
     call haag_deallocate
@@ -72,6 +107,16 @@ contains
        invm(ibset(0,i-1))=m(i)**2
     enddo
 
+    s_cut(1)=0d0 ! cut on invariant between initial and final state particle
+    s_cut(2)=0d0 ! cut on invariant of two final state particles.
+    if (sqrt_smin.gt.0d0) then
+       s_cut(1)=max(s_cut(1),sqrt_smin**2)
+       s_cut(2)=max(s_cut(2),sqrt_smin**2)
+    endif
+    if (pt_min.gt.0d0) then
+       s_cut(1)=max(s_cut(1),pt_min**2)
+       s_cut(2)=max(s_cut(2),2d0*pt_min**2*(1d0-cos(DRjj_min)))
+    endif
     call setup_PS_cuts(s_cut)
     this%masses=m
     this%tot_mass=sum(this%masses)

@@ -75,7 +75,7 @@ module mint_module
   integer, parameter, private :: min_it0=4        ! minimal number of iterations in the mint step 0 phase
   integer, parameter, private :: min_it1=5        ! minimal number of iterations in the mint step 1 phase
   integer, parameter, private :: max_points=1000000! maximum number of points to trow per iteration if not enough non-zero points can be found.
-  integer, parameter, public  :: maxchannels=20 ! set as least as large as in amcatnlo_run_interface
+  integer, parameter, public  :: maxchannels=128 ! set as least as large as in amcatnlo_run_interface
   double precision, parameter, public :: min_virt_fraction=1d0
   ! Note that the number of intervals in the integration grids, 'nintervals', cannot be arbitrarily large.
   ! It should be equal to
@@ -131,7 +131,7 @@ module mint_module
   common /c_fnlo_nlops/fixed_order,nlo_ps
 
 ! functions and subroutines:
-  public :: mint,gen,read_grids_from_file
+  public :: mint,gen,read_grids_from_file,mint_get_jacobian_from_x
   private :: initialise_mint,setup_basic_mint &
        &,update_accumulated_results,prepare_next_iteration &
        &,check_desired_accuracy,update_integration_grids &
@@ -180,8 +180,9 @@ contains
           call accumulate_the_point(x)
           if (fixed_points_pass_cuts) then
              if (non_zero_point(1).ge.ncalls .or. &
-                  ((nit.le.3 .and. ntotcalls(1).gt.1000000 .and. double_events) &
-                                                  .and.non_zero_point(1).ge.3)) exit
+!!$                  ((nit.le.3 .and. ntotcalls(1).gt.100000 .and. double_events) &
+!!$                                                  .and.non_zero_point(1).ge.3)) exit
+                  ((nit.le.3 .and. ntotcalls(1).gt.100000 .and. double_events))) exit
           else
              kpoint=kpoint+1
              if (kpoint.ge.ncalls) exit
@@ -798,14 +799,14 @@ contains
     ! contribution to integral
     ifirst=0
     if(imode.eq.0) then
-       dummy=fun(x,vol,ifirst,f1)
+       dummy=fun(x(1:ndim),vol,ifirst,f1)
        f(1:nintegrals)=f1(1:nintegrals)
     else
        f(1:nintegrals)=0d0
        kfold(1:ndim)=1
 1      continue
        ! this accumulated value will not be used
-       dummy=fun(x,vol,ifirst,f1)
+       dummy=fun(x(1:ndim),vol,ifirst,f1)
        ifirst=1
        call nextlexi(ifold,kfold,iret)
        if(iret.eq.0) then
@@ -814,12 +815,50 @@ contains
        endif
        !closing call: accumulated value with correct sign
        ifirst=2
-       dummy=fun(x,vol,ifirst,f1)
+       dummy=fun(x(1:ndim),vol,ifirst,f1)
        f(1:nintegrals)=f1(1:nintegrals)
     endif
     if (fixed_points_pass_cuts) ntotcalls(1:nintegrals)=ntotcalls(1:nintegrals)+1
   end subroutine compute_integrand
-  
+
+  subroutine mint_get_jacobian_from_x(ich,xi,voli)
+    ! returns the MINT Jacobian 'voli' for generating the random
+    ! numbers 'xi' in channel 'ich'. This does NOT include the
+    ! jacobian related to the importance sampling over the channels
+    ! ('vol_chan' from the 'get_channel()' subroutine), nor the
+    ! 'wgt_mult' due to splitting of the integration over separate
+    ! jobs.
+    implicit none
+    integer,intent(in) :: ich
+    double precision,intent(out) :: voli
+    double precision, dimension(ndim),intent(in) :: xi
+    integer, dimension(ndim) :: icl
+    call get_cells_from_x(ich,xi,icl,voli)
+  end subroutine mint_get_jacobian_from_x
+
+  subroutine get_cells_from_x(ich,x,icl,vol)
+    implicit none
+    integer,intent(in) :: ich
+    integer :: kdim
+    double precision,intent(out) :: vol
+    double precision :: dx
+    double precision, dimension(ndim),intent(in) :: x
+    integer, dimension(ndim),intent(out) :: icl
+    if (any(ifold(1:ndim).ne.1)) then
+       write (*,*) 'ERROR #32: only implemented without folding'
+       stop 1
+    endif
+    vol=1d0
+    do kdim=1,ndim
+       icl(kdim)=1
+       do while (xgrid(icl(kdim),kdim,ich).lt.x(kdim))
+          icl(kdim)=icl(kdim)+1
+       enddo
+       dx=xgrid(icl(kdim),kdim,ich)-xgrid(icl(kdim)-1,kdim,ich)
+       vol=vol*dx*nint_used
+    enddo
+  end subroutine get_cells_from_x
+
   subroutine get_random_x(x,vol,kfold)
     implicit none
     integer :: kdim,k_ord_virt,nintcurr

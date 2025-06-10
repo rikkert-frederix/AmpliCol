@@ -22,16 +22,19 @@ program matrix_reweight
   use timings
   use particles
   implicit none
+  logical,parameter :: use_only_canonical_form=.true.
   integer,parameter :: max_proc=1280
   type(amplitude_QCD),dimension(max_proc) :: amps
   type(physics_model) :: phys_model
+  logical :: read_proc_from_file
   integer,parameter :: string_len=150
-  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff
-  integer,dimension(:),allocatable :: hel
-  integer,dimension(:,:),allocatable :: spin,o,part,processes
-  real(kind=8) :: amp2,amp_col
+  integer :: i,j,col_acc,icol,irow,ic,iacc,nColOrd,next,nprocs,iproc,ioff,unique_nproc
+  integer,dimension(:),allocatable :: hel,unique_map
+  integer,dimension(:,:),allocatable :: spin,o,part,processes,unique_processes
+  real(kind=8) :: amp2,amp_col,process_map_value
   real(kind=8),dimension(3) :: matrix2
   real(kind=8),dimension(:,:),allocatable :: p
+  real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
   character(len=string_len) :: tag,tag_read,add_arg=''
@@ -42,21 +45,9 @@ program matrix_reweight
   
   call phys_model%init_part(173d0,1.491500d0)
 
-  ! read one event to determine 'next' and allocate the required arrays.
-  call read_event(11,done)
-  rewind(11)
-  nprocs=1
-  processes(1:next,1)=part(1:next,1)
+  nprocs=0
   call setup_spin()
-  call cpu_time(tBefore)
-
-  write (*,*) 'init amps for',part(1:next,1)
-  call amps(1)%init(2,next,1,part,spin,o,phys_model)
   col_acc=20
-  call amps(1)%init_col(next,col_acc)
-
-  call cpu_time(tAfter)
-  t_amp_init=t_amp_init+tAfter-tBefore
 
   do
      call read_event(11,done)
@@ -65,22 +56,24 @@ program matrix_reweight
         if (all(part(1:next,1).eq.processes(1:next,iproc)))exit
      enddo
      if (iproc.eq.nprocs+1) then
+        call cpu_time(tBefore)
         nprocs=nprocs+1
         processes(1:next,iproc)=part(1:next,1)
-        write (*,*) 'init amps for',part(1:next,1)
-        call amps(iproc)%init(2,next,1,part,spin,o,phys_model)
+        call amps(iproc)%init(2,next,1,part,spin,o,phys_model,read_proc_from_file)
         call amps(iproc)%init_col(next,col_acc)
+        call cpu_time(tAfter)
+        t_amp_init=t_amp_init+tAfter-tBefore
      endif
      matrix2(1:3)=0d0
 
      call cpu_time(tBefore)
      
-     call amps(iproc)%evaluate(next,p,hel)
-     ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
+     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
 
+     ioff=amps(iproc)%iproc_start(amps(iproc)%nprocs)-1
      do iacc=1,3 ! LC, NLC and full colour
         call cpu_time(tBefore)
         if (iacc.eq.3 .and. col_acc.lt.2) cycle
@@ -112,7 +105,9 @@ program matrix_reweight
               matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
            enddo
         endif
-        
+        ! The following line can be removed since 'process_map_value'
+        ! will drop out when taking the ratio w.r.t. LC.
+!        matrix2(iacc)=matrix2(iacc)*process_map_value
         call cpu_time(tAfter)
         if (iacc.eq.1) t_mat_LC=t_mat_LC+tAfter-tBefore
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
@@ -152,6 +147,8 @@ contains
        call get_command_argument(1,argv)
        read(argv,'(a)') filename
        open(unit=11,file=filename,status='old')
+       call read_unique_in_file()
+       call allocate_process_info()
        open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
     elseif (argc.le.8) then
        write(*,*) 'Inconsistent arguments:'
@@ -161,6 +158,7 @@ contains
        write(*,*) 'event_file_name_to_reweight'
        stop 1
     else
+       read_proc_from_file=.false.
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) then
@@ -169,9 +167,8 @@ contains
                 write (*,*) 'Need at least 4 particles (2->2 scattering)',next
                 stop 1
              endif
-             allocate(part(1:next,1))
-             allocate(processes(1:next,max_proc))
-             allocate(o(1:next,1))
+             unique_nproc=0
+             call allocate_process_info()
           endif
           do k=0,next-1
              if (i.eq.2+k) then
@@ -197,6 +194,34 @@ contains
     
   end subroutine get_run_arguments
 
+  subroutine allocate_process_info()
+    use rw_events
+    implicit none
+    if (.not. allocated(hel)) then
+       allocate(momenta(0:3,1:next))
+       allocate(helicity(1:next))
+       allocate(col_order(1:next))
+       allocate(iPDG(1:next))
+       if (.not.allocated(o)) allocate(o(next,1))
+       if (.not.allocated(part)) allocate(part(next,1))
+       if (.not.allocated(processes)) allocate(processes(next,max_proc))
+       allocate(hel(next))
+       allocate(p(0:3,next))
+    endif
+  end subroutine allocate_process_info
+  
+  subroutine read_unique_in_file()
+    implicit none
+    integer :: iproc
+    read(11,*) next,unique_nproc
+    allocate(unique_map(unique_nproc))
+    allocate(unique_map_value(unique_nproc))
+    allocate(unique_processes(next,unique_nproc))
+    do iproc=1,unique_nproc
+       read(11,*) unique_map(iproc),unique_map_value(iproc),unique_processes(1:next,iproc)
+    enddo
+  end subroutine read_unique_in_file
+  
   subroutine setup_spin()
     implicit none
     if (.not. allocated(spin)) allocate(spin(0:3,1:next))
@@ -266,17 +291,6 @@ contains
     done=.false.
     read (iunit,*,err=99,end=99) dummy
     read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
-    if (.not. allocated(hel)) then
-       allocate(momenta(0:3,1:next))
-       allocate(helicity(1:next))
-       allocate(col_order(1:next))
-       allocate(iPDG(1:next))
-       allocate(o(next,1))
-       allocate(part(next,1))
-       allocate(processes(next,max_proc))
-       allocate(hel(next))
-       allocate(p(0:3,next))
-    endif
     read (iunit,*,err=99,end=99) helicity(1:next)
     read (iunit,*,err=99,end=99) col_order(1:next)
     do i=1,next
@@ -288,151 +302,100 @@ contains
 99  done=.true.
   end subroutine read_event
 
+
+  subroutine sort_with_mapping(n,array,mapping)
+    !
+    ! EXAMPLE:
+    !
+    ! input:
+    ! n=5
+    ! array=[4, 1, 8, 2, 3]
+    !
+    ! output:
+    ! array=[1, 2, 3, 4, 8]
+    ! mapping=[2, 4, 5, 1, 3]
+    !
+    implicit none
+    integer,intent(in) :: n
+    integer,dimension(n),intent(inout) :: array
+    integer,dimension(n),intent(out) :: mapping
+    integer :: i, j, temp
+    ! Initialize mapping
+    mapping = [(i,i=1,n)]
+    ! Sort the array and mapping using a simple bubble sort
+    do i=1,n-1
+       do j=1,n-i
+          if (array(j) .gt. array(j+1)) then
+             ! Swap array elements
+             temp = array(j)
+             array(j) = array(j+1)
+             array(j+1) = temp
+             ! Swap mapping
+             temp = mapping(j)
+             mapping(j) = mapping(j+1)
+             mapping(j+1) = temp
+          endif
+       enddo
+    enddo
+  end subroutine sort_with_mapping
+
+  
   subroutine map_to_canonical_form()
-    ! first quarks, then anti-quarks, then gluons
+    ! cross the two initial state particle PDGs, order according to
+    ! the PDG value, (and reflip the two initial states again)
     use rw_events
     implicit none
-    logical :: sf
-    integer :: iflav,i,nqq,iflip
-    ! count the quarks, anti-quarks and gluons. And check if there is more
-    ! than one quark line if they are of the same flavour or not.
-    sf=.true.
-    iflav=0
-    nqq=0
-    do i=1,next
-       if (is_quark(iPDG(i)) .or. is_antiquark(iPDG(i))) then
-          nqq=nqq+1
-          if (iflav.eq.0) iflav=abs(iPDG(i))
-          if (abs(iPDG(i)).ne.iflav) then
-             sf=.false.
-             iflav=min(abs(iPDG(i)),iflav)
-          endif
-       endif
-    enddo
-    nqq=nqq/2
-    if (nqq.lt.2) sf=.false.
+    integer,dimension(next) :: mapping
+    real(kind=8),dimension(0:3,next) :: p_cross
+    integer :: i,iproc
     part(1:next,1)=iPDG(1:next)
-    hel(1:next)=helicity(1:next)
-    o(1:next,1)=col_order(1:next)
-    p(0:3,1:next)=momenta(0:3,1:next)
-    if (nqq.eq.0) then
-       continue ! nothing to do
-    elseif (nqq.eq.1) then
+    if (.not.use_only_canonical_form) then
+       ! do no use the mapping to canonical form, but reweight the
+       ! events as they are.
+       hel(1:next)=helicity(1:next)
+       o(1:next,1)=col_order(1:next)
+       p(0:3,1:next)=momenta(0:3,1:next)
+    else
+       ! Map to canonical from to reduce the number of matrix elements
+       ! to initialise.
+       ! cross the initial state
+       part(1,1)=phys_model%get_antipart(part(1,1))
+       part(2,1)=phys_model%get_antipart(part(2,1))
+       p_cross(0:3,1:2)=-momenta(0:3,1:2)
+       p_cross(0:3,3:next)=momenta(0:3,3:next)
+       ! determing the mapping
+       call sort_with_mapping(next,part(1,1),mapping)
+       ! cross the initial state
+       part(1,1)=phys_model%get_antipart(part(1,1))
+       part(2,1)=phys_model%get_antipart(part(2,1))
+       ! apply the mapping to the momenta and helicity.
        do i=1,next
-          if ((i.le.2 .and. is_antiquark(part(i,1))) .or. (i.gt.2 .and. is_quark(part(i,1)))) then
-             ! found the quark
-             if (i.ne.1) call flip_one(i,1) ! move quark to position 1
+          if (i.le.2) then
+             p(0:3,i)=-p_cross(0:3,mapping(i))
+          else
+             p(0:3,i)=p_cross(0:3,mapping(i))
+          endif
+          hel(i)=helicity(mapping(i))
+          o(i,1)=col_order(mapping(i)) ! this is not correct, but isn't used
+       enddo
+       ! Convert to 'unique flavour configuration' (if available)
+       if (unique_nproc.eq.0) return
+       do iproc=1,unique_nproc
+          if (all(part(1:next,1).eq.unique_processes(1:next,iproc))) then
+             process_map_value=unique_map_value(iproc)
+             if (unique_map(iproc).gt.0) then
+                part(1:next,1)=unique_processes(1:next,unique_map(iproc))
+             endif
+             exit
           endif
        enddo
-       do i=1,next
-          if ((i.le.2 .and. is_quark(part(i,1))) .or. (i.gt.2 .and. is_antiquark(part(i,1)))) then
-             ! found the anti-quark
-             if (i.ne.2) call flip_one(i,2) ! move anti-quark to position 2
-          endif
-       enddo
-       ! overwrite the PDGs of the quark and anti-quark
-       part(1,1)=-1
-       part(2,1)=1
-    elseif (nqq.eq.2) then
-       if (sf) then
-          iflip=1
-          do i=1,next
-             if ((i.le.2 .and. is_antiquark(part(i,1))) .or. (i.gt.2 .and. is_quark(part(i,1)))) then
-                ! found quark
-                if (i.ne.iflip) then
-                   call flip_one(i,iflip)
-                endif
-                iflip=iflip+1
-             endif
-          enddo
-          iflip=3
-          do i=1,next
-             if ((i.le.2 .and. is_quark(part(i,1))) .or. (i.gt.2 .and. is_antiquark(part(i,1)))) then
-                ! found anti-quark
-                if (i.ne.iflip) then
-                   call flip_one(i,iflip)
-                endif
-                iflip=iflip+1
-             endif
-          enddo
-          ! overwrite the PDGs of the quark and anti-quark
-          part(1:4,1)=-1
-       else
-          iflip=1
-          do i=1,next
-             if ((i.le.2 .and. is_antiquark(part(i,1))) .or. (i.gt.2 .and. is_quark(part(i,1)))) then
-                ! found quark
-                if (i.ne.iflip) then
-                   call flip_one(i,iflip)
-                endif
-                iflip=iflip+1
-             endif
-          enddo
-          do i=1,next
-             if ((i.le.2 .and. is_quark(part(i,1))) .or. (i.gt.2 .and. is_antiquark(part(i,1)))) then
-                ! found anti-quark
-                if (abs(part(i,1)).eq.abs(part(1,1))) then
-                   if (i.ne.3) then
-                      call flip_one(i,3)
-                   endif
-                else
-                   if (i.ne.4) then
-                      call flip_one(i,4)
-                   endif
-                endif
-             endif
-          enddo
-          ! overwrite the PDGs of the quark and anti-quark
-          part(1,1)=-1
-          part(2,1)=-2
-          part(3,1)=-1
-          part(4,1)=-2
+       if (iproc.eq.unique_nproc+1) then
+          write (*,*) 'Process not found among unique processes'
+          write (*,*) part(1:next,1)
+          stop 1
        endif
     endif
   end subroutine map_to_canonical_form
-
-  subroutine flip_one(i,j)
-    use rw_events
-    implicit none
-    integer :: i,j,icross,itmp
-    real(kind=8) :: dtmp
-    if ((i.le.2 .and. j.gt.2) .or. (i.gt.2 .and. j.le.2)) then
-       icross=-1
-    else
-       icross=1
-    endif
-    ! PDG code:
-    itmp=part(i,1)
-    if (icross .eq. -1) then
-       part(i,1)=phys_model%get_antipart(part(j,1))
-       part(j,1)=phys_model%get_antipart(itmp)
-    else
-       part(i,1)=part(j,1)
-       part(j,1)=itmp
-    endif
-    ! helicity:
-    itmp=hel(i)
-       hel(i)=hel(j)
-       hel(j)=itmp
-    ! colour order (should not be used):
-    !!!THIS IS WRONG!!!!
-    itmp=o(i,1)
-    o(i,1)=o(j,1)
-    o(j,1)=itmp
-    ! 4-momentum:
-    dtmp=p(0,i)
-    p(0,i)=icross*p(0,j)
-    p(0,j)=icross*dtmp
-    dtmp=p(1,i)
-    p(1,i)=icross*p(1,j)
-    p(1,j)=icross*dtmp
-    dtmp=p(2,i)
-    p(2,i)=icross*p(2,j)
-    p(2,j)=icross*dtmp
-    dtmp=p(3,i)
-    p(3,i)=icross*p(3,j)
-    p(3,j)=icross*dtmp
-  end subroutine flip_one
 
   subroutine write_event(iunit)
     use rw_events

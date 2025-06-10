@@ -2483,14 +2483,14 @@ set key invert
             # return [template_no_stat%rep_dic]+\
             #               ([template%rep_dic] if show_mc_uncertainties else [])
             
-            # The use of sqrt(-1) is just a trick to prevent the line to display
+            # The use of 1/0 is just a trick to prevent the line to display
             res = []
-            rep_dic['data'] = '($3 < 0 ? sqrt(-1) : $3)'
+            rep_dic['data'] = '($3 < 0 ? 1/0 : $3)'
             res.append(template_no_stat%rep_dic)
             rep_dic['title'] = " title ''"
             if show_mc_uncertainties:
                 res.append(template%rep_dic)                
-            rep_dic['data'] = '($3 >= 0 ? sqrt(-1) : abs($3))'
+            rep_dic['data'] = '($3 >= 0 ? 1/0 : abs($3))'
             rep_dic['ls']  = ' ls %d'%(100+color_index)            
             res.append(template_no_stat%rep_dic)
             if show_mc_uncertainties:
@@ -2881,7 +2881,7 @@ plot \\"""
                 
                 # We decide to show uncertainties in the main plot only if they
                 # are part of a monocolor band. Otherwise, they will only be 
-                # shown in the first subplot. Notice that plotting 'sqrt(-1)' 
+                # shown in the first subplot. Notice that plotting '1/0' 
                 # is just a trick so as to have only the key printed with no
                 # line
                 
@@ -2893,7 +2893,7 @@ plot \\"""
                         '%s, scale variation'%title, band='scale' in use_band)
                     else:
                       uncertainty_plot_lines[-1]['scale'] = \
-      ["sqrt(-1) ls %d title '%s'"%(color_index+10,'%s, scale variation'%title)]
+      ["1/0 ls %d title '%s'"%(color_index+10,'%s, scale variation'%title)]
                 # And now PDF_variation if available
                 if not PDF_var_pos is None and len(PDF_var_pos)>0:
                     if 'pdf' in use_band:
@@ -2902,7 +2902,7 @@ plot \\"""
                              '%s, PDF variation'%title, band='pdf' in use_band)
                     else:
                         uncertainty_plot_lines[-1]['pdf'] = \
-        ["sqrt(-1) ls %d title '%s'"%(color_index+20,'%s, PDF variation'%title)]
+        ["1/0 ls %d title '%s'"%(color_index+20,'%s, PDF variation'%title)]
                 # And now merging variation if available
                 if not merging_var_pos is None and len(merging_var_pos)>0:
                     if 'merging_scale' in use_band:
@@ -2911,7 +2911,7 @@ plot \\"""
                 '%s, merging scale variation'%title, band='merging_scale' in use_band)
                     else:
                         uncertainty_plot_lines[-1]['merging_scale'] = \
-        ["sqrt(-1) ls %d title '%s'"%(color_index+30,'%s, merging scale variation'%title)]                        
+        ["1/0 ls %d title '%s'"%(color_index+30,'%s, merging scale variation'%title)]                        
                 # And now alpsfact variation if available
                 if not alpsfact_var_pos is None and len(alpsfact_var_pos)>0:
                     if 'alpsfact' in use_band:
@@ -2920,7 +2920,7 @@ plot \\"""
                     '%s, alpsfact variation'%title, band='alpsfact' in use_band)
                     else:
                         uncertainty_plot_lines[-1]['alpsfact'] = \
-        ["sqrt(-1) ls %d title '%s'"%(color_index+40,'%s, alpsfact variation'%title)]
+        ["1/0 ls %d title '%s'"%(color_index+40,'%s, alpsfact variation'%title)]
 
 #            plot_lines.append(
 # "'%s' index %d using (($1+$2)/2):3 ls %d title '%s'"\

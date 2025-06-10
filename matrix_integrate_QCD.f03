@@ -23,14 +23,31 @@ program matrix_integrate_QCD
   integer :: iproc_picked,iproc_iden_picked
   integer :: ngroups,igroup,integration_step
   logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
-  
+  logical :: read_proc_from_file
+  integer :: nproc_unique
+  integer,dimension(:,:),allocatable :: unique_procs
+  integer :: nprocs
+  integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
+  integer,dimension(:,:),allocatable :: processes,color_orders,multi_chans
+  integer,dimension(:,:,:),allocatable :: iden_processes
+  real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
+
+  type :: multichan_info
+     ! if adding variables here, also update the finalize_multichan_info subroutine
+     integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
+     integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
+     integer :: max_channels,n_unique_channels,n_unique_channelgroups
+  end type multichan_info
+
   type phase_space_order_group
+     ! if adding variables here, also update the finalize_phase_space_order_group subroutine
      type(amplitude_QCD) :: amps
      class(phase_space_type),allocatable :: phase_space
-     integer,dimension(:,:),allocatable :: processes,orders
-     integer,dimension(:),allocatable :: multi_factor,iden_iproc
+     type(multichan_info) :: multichan
+     integer,dimension(:,:),allocatable :: processes,color_orders
+     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
      integer :: nproc
-     real(kind=8),dimension(:,:),allocatable :: val_procs
+     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes
      integer(kind=4),dimension(:,:),allocatable :: spin
      integer(kind=8),dimension(:),allocatable :: iden
@@ -41,20 +58,15 @@ program matrix_integrate_QCD
      integer(kind=4),dimension(:),allocatable :: hel,hel_fac
      integer(kind=4) :: passed=0,all_evt=0
      integer,dimension(:),allocatable :: include_hel
+     ! cuts
+     double precision,dimension(:),allocatable :: pT_min,eta_max
+     double precision,dimension(:,:),allocatable :: DR_min,sqrt_s_min
   end type phase_space_order_group
   type(phase_space_order_group),dimension(:),allocatable :: pgl
-
+  type(phase_space_order_group),allocatable :: pgl_unique
+  real(kind=8),dimension(:),allocatable :: unique_map_value
+  integer,dimension(:),allocatable :: unique_map
   call cpu_time(tTot_B)
-  call get_run_arguments()
-
-  ! Not so relevant mint-module parameters: only used in special cases.
-  call set_mint_module_special_parameters()
-  nchans=ngroups ! overwrite the number of mint-channels to the number of
-                 ! needed integration channels.
-
-  call phys_model%init_part(173d0,1.491500d0)
-
-  call create_run_tag()
 
   ! relevant input parameters for integration
   ! Number of events to generate. (If negative, start
@@ -67,50 +79,42 @@ program matrix_integrate_QCD
 !!$     ncalls0=640000
 !!$  endif
 
-  ndim=3*(next-2)-4   ! Number of dimensions of the integration.
-
   itmax=16         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
+  ! setting energy
+  sqrts=14000.d0
+
+  if (include_pdf) call PDF_initialise
+
+  call phys_model%init_part(173d0,1.491500d0)
+
+  call get_run_arguments()
+
   if (integration_step.eq.0) then
-     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     accuracy=0.001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
      accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
      read_amps_from_file=.true.
   endif
 
-  ! setting energy
-  sqrts=14000.d0
+  
+  ! Not so relevant mint-module parameters: only used in special cases.
+  call set_mint_module_special_parameters()
+  nchans=ngroups ! overwrite the number of mint-channels to the number of
+                 ! needed integration channels.
 
-  ! cuts on invariants (Note: these assume massless particles!)
-  s_cut(1)=0d0 ! cut on invariant between initial and final state particle
-  s_cut(2)=0d0 ! cut on invariant of two final state particles.
-  if (sqrt_s_min.gt.0d0) then
-     s_cut(1)=max(s_cut(1),sqrt_s_min**2)
-     s_cut(2)=max(s_cut(2),sqrt_s_min**2)
-  endif
-  if (pt_min.gt.0d0) then
-     s_cut(1)=max(s_cut(1),pt_min**2)
-     s_cut(2)=max(s_cut(2),2d0*pt_min**2*(1d0-cos(DRjj_min)))
-  endif
-
-  if (sqrt_s_min.gt.0d0) then
-     s_cut(1:2)=sqrt_s_min**2
-  endif
-
-  if (include_pdf) then
-     ndim=ndim+2
-     call PDF_initialise
-  endif
+  call create_run_tag()
   
   if (read_amps_from_file .or. write_amps_to_file) then
        open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
             unit=32,access='stream',form='unformatted',status='UNKNOWN')
   endif
-  
+
   do igroup=1,ngroups
+     if (pgl(igroup)%nproc.eq.0) cycle
      ! allocate the amplitudes and the phase-space for each of the integration channels
      if (PS_choice.eq.1) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
@@ -139,18 +143,18 @@ program matrix_integrate_QCD
 
      ! Initialise the phase-space parametrisation
      call cpu_time(tBefore)
+     call setup_cuts_for_each_particle(pgl(igroup))
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
-        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.false.,include_pdf)
+        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
+             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      elseif (PS_choice.eq.4) then
-        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%orders(1,1),&
-             s_cut,pt_min,eta_max,DRjj_min,sqrt_s_min,.true.,include_pdf)
+        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
+             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      endif
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
      deallocate(mass)
      deallocate(width)
-
 
      allocate(pgl(igroup)%iden(pgl(igroup)%nproc))
      pgl(igroup)%iden(1:pgl(igroup)%nproc)=1
@@ -168,22 +172,32 @@ program matrix_integrate_QCD
      if (read_amps_from_file) then
         call pgl(igroup)%amps%read_init_amps_from_file(next,32)
      else
-        call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,pgl(igroup)%spin,pgl(igroup)%orders,phys_model)
+        call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
+                pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model,read_proc_from_file)
      endif
+
+     !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
+     
      if (write_amps_to_file) then
         call pgl(igroup)%amps%write_init_amps_to_file(next,32)
      endif
-     
+
      call cpu_time(tAfter)
      t_amp_init=t_amp_init+tAfter-tBefore
 
      ! Total number of amplitudes is stored in 'nhel'
      pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
 
-     allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
+!     if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
+!        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
+!     else
+        allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
+!     endif
+
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
-  
+
      allocate(pgl(igroup)%amp2(pgl(igroup)%nproc))
+
      ! number of helicities to sum over
      allocate(pgl(igroup)%amp2_hel(1:pgl(igroup)%nhel))
      allocate(pgl(igroup)%hel(1:next))
@@ -205,6 +219,7 @@ program matrix_integrate_QCD
      call gen(integrand,0,-1) ! initialise counters
      filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
      open(unit=11,file=filename,status='unknown')
+     if (COMMAND_ARGUMENT_COUNT().le.10) call write_unique_in_file()
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
         call unwgt_process      ! pick a random process
@@ -228,23 +243,152 @@ program matrix_integrate_QCD
   write(*,*) 'Fraction passing:',float(pgl(1:ngroups)%passed)/float(pgl(1:ngroups)%all_evt)
  
 contains
+  subroutine write_unique_in_file()
+    implicit none
+    integer :: iproc
+    write(11,*) next,pgl_unique%nproc
+    do iproc=1,pgl_unique%nproc
+       write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:next,iproc)
+    enddo
+    ! make sure pgl_unique is deallocated consistently:
+    call finalize_phase_space_order_group(pgl_unique)
+    deallocate(pgl_unique)
+  end subroutine write_unique_in_file
+  
+  subroutine check_unique_processes()
+    implicit none
+    integer :: i,iproc,ievent,ih,nqq
+    integer,parameter :: nevent=10
+    real(kind=8),dimension(:,:),allocatable :: amp2
+    real(kind=8),dimension(:),allocatable :: mass,width
+    real(kind=8),dimension(ndim) :: x
+    real(kind=8),external :: ran2
+    allocate(phase_space_genpt :: pgl_unique%phase_space)
+    allocate(pgl_unique%processes(next,nproc_unique))
+    allocate(pgl_unique%color_orders(next,nproc_unique))
+    allocate(pgl_unique%phase_space_orders(next))
+    allocate(mass(next))
+    allocate(width(next))
+    pgl_unique%nproc=nproc_unique
+    pgl_unique%processes=unique_procs
+    do i=1,next
+        mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
+        width(i)=phys_model%get_width(pgl_unique%processes(i,1))
+        do iproc=2,pgl_unique%nproc
+           if ( mass(i).ne.phys_model%get_mass(pgl_unique%processes(i,iproc)) .or. &
+                width(i).ne.phys_model%get_width(pgl_unique%processes(i,iproc))) then
+              write (*,*) 'masses and widths not compatible among processes'
+              stop 1
+           endif
+        enddo
+     enddo
+     call setup_spin(pgl_unique)
+     call setup_color_order(pgl_unique)
+
+     do iproc=1,pgl_unique%nproc
+        do i=1,2
+           pgl_unique%processes(i,iproc)=phys_model%get_antipart(pgl_unique%processes(i,iproc))
+        enddo
+     enddo
+
+     ! No multi-channel needed to check: simply use the color_orders for the phase-space order
+     pgl_unique%phase_space_orders(1:next)=pgl_unique%color_orders(1:next,1)
+
+     call setup_cuts_for_each_particle(pgl_unique)
+     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
+          pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf)
+
+     call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
+             pgl_unique%spin,pgl_unique%color_orders,phys_model,read_proc_from_file)
+     
+     allocate(amp2(nevent,pgl_unique%nproc))
+
+     ievent=0
+     do while (ievent.lt.nevent)
+        do i=1,ndim
+           x(i)=ran2()
+        enddo
+        call pgl_unique%phase_space%generate_momenta(x)
+        if (pgl_unique%phase_space%jac.lt.0d0) cycle
+        ievent=ievent+1
+        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file)
+        iproc=0
+        amp2(ievent,:)=0d0
+        if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
+           do ih=1,pgl_unique%amps%n_amps
+              do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+              amp2(ievent,iproc)=amp2(ievent,iproc)+pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
+           enddo
+        else
+           do ih=1,pgl_unique%amps%n_amps
+              do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+              amp2(ievent,iproc)=amp2(ievent,iproc)+dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
+           enddo
+        endif
+     enddo
+     allocate(unique_map(1:pgl_unique%nproc))
+     allocate(unique_map_value(1:pgl_unique%nproc))
+     call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
+
+     do iproc=1,pgl_unique%nproc
+        write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:next,iproc),&
+                ':',pgl_unique%color_orders(1:next,iproc)
+     enddo
+
+     deallocate(pgl_unique%spin)
+     deallocate(pgl_unique%phase_space)
+     deallocate(amp2)
+   end subroutine check_unique_processes
+
+   subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
+     implicit none
+     type(phase_space_order_group),intent(in) :: pgl
+     integer :: nevent
+     real(kind=8),dimension(nevent,pgl%nproc) :: amp2
+     real(kind=8),dimension(pgl%nproc) :: unique_map_value
+     integer,dimension(pgl%nproc) :: unique_map
+     integer :: i,j,n
+     real(kind=8),dimension(nevent) :: ratio
+     real(kind=8) :: ave
+     real(kind=8),parameter :: tiny=1d-6
+     unique_map=-1d0
+     do i=1,pgl%nproc
+        do j=1,i-1
+           if (all(amp2(1:nevent,j).eq.0d0)) cycle
+           ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
+           ave=sum(ratio(1:nevent))/nevent
+           if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
+              unique_map_value(i)=ave
+              unique_map(i)=j
+              exit
+           endif
+        enddo
+        if (j.eq.i) then
+           unique_map(i)=-1
+           unique_map_value(i)=1d0
+        endif
+     enddo
+   end subroutine find_unique
+  
   real(kind=8) function integrand(x,vol,ifirst,f1)
     implicit none
     integer :: ifirst
     real(kind=8), dimension(ndim) :: x
     real(kind=8), dimension(nintegrals) :: f1
-    real(kind=8), dimension(:),allocatable,save :: val,val_abs
+    real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
+    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc,i
-    real(kind=8) :: vol,cuts_wgt
+    real(kind=8) :: vol
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
-    real(kind=8) :: Q
     if (.not.allocated(val)) then
        allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
        allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
+       allocate(vol_ichan(1:ngroups))
     endif
     ! some point-by-point initialisation
     f1(1:nintegrals)=0d0
+    if (pgl(ichan)%nproc.eq.0) return
     if (ifirst.eq.2) then
        ! use previously computed integrand
        f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
@@ -261,7 +405,7 @@ contains
     call pgl(ichan)%phase_space%generate_momenta(x)
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
-
+    
     if (debug ) then
        write (*,*) pgl(ichan)%phase_space%jac
        stop 1
@@ -270,14 +414,13 @@ contains
     pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
 
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
+       pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
-    
-    cuts_wgt=pass_cuts(next,pgl(ichan)%phase_space%p)
-    if ((pgl(ichan)%phase_space%jac.lt.0d0) .or. &
-         (smooth_cuts .and. cuts_wgt.lt.0d0) .or. &
-         (.not.smooth_cuts .and. cuts_wgt.lt.1d0)) then
+
+
+    if (.not.pass_cuts(pgl(ichan))) then
        pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
@@ -288,30 +431,35 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel)
-
+    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
-
+    
+    call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
+                                     pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
     call cpu_time(tBefore)
-    iproc=1
+    iproc=0
+    pgl(ichan)%amp2(:)=0d0
     if (use_real_gluons .and. all(pgl(ichan)%amps%n_qqbar(1:pgl(ichan)%amps%nprocs).eq.0)) then
        do ih=1,pgl(ichan)%amps%n_amps
+          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps%amps_r(ih)*pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps%amps_r(ih)*&
-               pgl(ichan)%hel_fac(ih)
-          if (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih+1) then
-             pgl(ichan)%amp2(iproc)=sum(pgl(ichan)%amp2_hel(pgl(ichan)%amps%iproc_start(iproc):ih))
-             iproc=iproc+1
-          endif
+                  pgl(ichan)%hel_fac(ih)
+          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     else
        do ih=1,pgl(ichan)%amps%n_amps
+          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
-          if (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih+1) then
-             pgl(ichan)%amp2(iproc)=sum(pgl(ichan)%amp2_hel(pgl(ichan)%amps%iproc_start(iproc):ih))
-             iproc=iproc+1
-          endif
+!          if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
+!                  .not. pgl(ichan)%amps%same_flav(iproc)) then
+!               cycle
+!          elseif (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
+!                  pgl(ichan)%amps%same_flav(iproc)) then 
+!               iproc=1
+!          endif
+          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
     
@@ -324,27 +472,22 @@ contains
           pgl(ichan)%amp2(1:pgl(ichan)%nproc)=0d0
        endif
     endif
-    
-    weight=vol*pgl(ichan)%phase_space%jac*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))*conv
 
+    ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
+    weight=vol*pgl(ichan)%phase_space%jac*conv
+
+    ! multiply by the strong coupling
+    if (pgl(ichan)%amps%n_sing(1).lt.next-2) then
+       weight=weight*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))
+    endif
+    
+    ! multiply by the EW coupling
     if (pgl(ichan)%amps%n_sing(1).ge.1) then
-       do i=1,next
-          if (abs(part(i)).le.6) then
-             if (mod(abs(part(i)),2).eq.0) Q=2d0/3d0
-             if (mod(abs(part(i)),2).eq.1) Q=-1d0/3d0
-          endif
-       enddo
-       weight=weight*(Q**2*2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
+       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
     endif
 
     val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-
-    ! Apply the weight from the cuts
-    if (smooth_cuts) val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*cuts_wgt
-
-    ! Since we only need to include a subset of all the colour-orderings, we
-    ! need to compensate with a symmetry factor
-    val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*pgl(ichan)%multi_factor(1:pgl(ichan)%nproc)
+    val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
 
     call include_PDF_and_identical_procs(val,val_abs,pgl(ichan))
 
@@ -352,78 +495,104 @@ contains
     f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
     f1(2)=sum(val(1:pgl(ichan)%nproc))
     f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
+    
     integrand=f1(1)
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end function integrand
 
-  double precision function pass_cuts(n,p)
+  logical function pass_cuts(pgl)
     ! Cuts on the phase-space point. Note that these cuts need to be symmetric
     ! under pz -> -pz.
     implicit none
-    integer :: i,j,n
-    real(kind=8),dimension(0:3,n) :: p
-    double precision :: frac,y,steep
-
-    pass_cuts=1d0
-    if (sqrt_s_min.gt.0d0) then
-       do i=1,n-1
-          do j=i+1,n
-             if (abs(2d0*dot(p(0,i),p(0,j))).lt.sqrt_s_min**2) then
-                pass_cuts=-1d0
-                return
-             endif
-          enddo
-       enddo
-    endif
-
-    do i=3,n
-!!$       if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
-         frac  = 0.9d0
-         steep = 0.1d0
-!!$       elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-!!$         frac  = 0.8d0
-!!$         steep = 0.1d0
-!!$       endif
-         
-       if (pt_min.gt.0d0) then
-          if (pt(p(0,i)).lt.frac*pt_min) then
-             pass_cuts=-1d0
-             return
-          endif
-          if (pt(p(0,i)).gt.frac*pt_min.and.pt(p(0,i)).lt.pt_min) then
-             y=(pt(p(0,i))-frac*pt_min)/(pt_min*(1d0-frac))
-             if (integration_step.le.0) then
-               !if (abs(part(i)).ge.0.and.abs(part(i)).le.6) then ! for quarks
-                  pass_cuts=pass_cuts*((steep)*y/(steep+1d0-y)) ! 1/x damping function
-               !elseif (part(i).eq.21.or.part(i).eq.22) then ! for gluons and photons
-               !   pass_cuts=pass_cuts*((steep)*y/((steep+1d0-y)**2)) ! 1/x2 damping function
-               !endif
-             else
-               pass_cuts=-1d0
-             endif
+    type(phase_space_order_group),intent(in) :: pgl
+    integer :: i,j
+    ! cuts on single particles
+    pass_cuts=.true.
+    do i=1,next
+       if (pgl%pT_min(i).gt.0d0) then
+          if (pt(pgl%phase_space%p(0,i)).lt.pgl%pT_min(i)) then
+             pass_cuts=.false.
              return
           endif
        endif
-
-       if (eta_max.gt.0d0) then
-          if (abs(eta(p(0,i))).gt.eta_max) then
-             pass_cuts=-1d0
+       if (pgl%eta_max(i).gt.0d0) then
+          if (abs(eta(pgl%phase_space%p(0,i))).gt.pgl%eta_max(i)) then
+             pass_cuts=.false.
              return
-          endif
-       endif
-       if (drjj_min.gt.0d0) then
-          if (i.ne.n) then
-             do j=i+1,n
-                if (DeltaR(p(0,i),p(0,j)).lt.drjj_min) then
-                   pass_cuts=-1d0
-                   return
-                endif
-             enddo
           endif
        endif
     enddo
+    ! cuts on pairs of particles
+    do i=1,next-1
+       do j=i+1,next
+          if (pgl%sqrt_s_min(i,j).gt.0d0) then
+             if (abs(sumdot(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%sqrt_s_min(i,j)**2) then
+                pass_cuts=.false.
+                return
+             endif
+          endif
+          if (pgl%DR_min(i,j).gt.0d0) then
+             if (abs(deltaR(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%DR_min(i,j)) then
+                pass_cuts=.false.
+                return
+             endif
+          endif
+       enddo
+    enddo
   end function pass_cuts
+
+  subroutine compute_multichannel_weight(ichan,x,p,jac,weight)
+    ! Computes the multichannel weight 'weight' when there are
+    ! 'chans(0)' channels (that are listed in the array 'chans(1:)') and
+    ! the current channel is 'ichan'. The momenta 'p' have been
+    ! generate with phase-space jacobian 'jac' using the random
+    ! variables 'x' within the channel 'ichan'.
+    !
+    ! weight = 1/( J_{ichan}*[ sum_{i=1}^{chans(0)} 1/J_i ] )
+    !
+    ! with J_i the combined Jacobian coming from MINT and the
+    ! phase-space.
+    implicit none
+    integer,intent(in) :: ichan
+    real(kind=8),dimension(0:3,next),intent(in) :: p
+    real(kind=8),dimension(ndim),intent(in) :: x
+    real(kind=8),intent(in) :: jac
+    real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
+    real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
+    real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
+    integer :: i,j,iproc,ii
+    real(kind=8) :: vol_ichan,vol
+    if (.not. use_colour_singlet_multichannel) then
+       weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
+       return
+    endif
+    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
+    do j=1,pgl(ichan)%multichan%n_unique_channels
+       i=pgl(ichan)%multichan%unique_channel_list(j)
+       if (i.eq.ichan) then
+          ii=j
+          cycle
+       endif
+       call pgl(i)%phase_space%compute_x_from_momenta(p)
+       if (pgl(i)%phase_space%jac.lt.0d0) then
+          ! The x's could not be correctly computed from the momenta
+          write (*,*) 'WARNING: multi-channel weight not included'
+          weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
+          return
+       endif
+       call mint_get_jacobian_from_x(i,pgl(i)%phase_space%x,vol)
+       factors(j)=pgl(i)%phase_space%jac*vol
+    enddo
+    do i=1,pgl(ichan)%multichan%n_unique_channelgroups
+       weight_factors(i)=1d0
+       do j=1,pgl(ichan)%multichan%unique_channelgroup_list(0,i)
+          if (pgl(ichan)%multichan%unique_channelgroup_list(j,i).eq.ii) cycle
+          weight_factors(i)=weight_factors(i)+jac*vol_ichan/factors(pgl(ichan)%multichan%unique_channelgroup_list(j,i))
+       enddo
+    enddo
+    weight(1:pgl(ichan)%nproc)=1d0/weight_factors(pgl(ichan)%multichan%map_proc_to_channelgroup(1:pgl(ichan)%nproc))
+  end subroutine compute_multichannel_weight
 
   subroutine setup_helicity_filter(pgl)
     implicit none
@@ -456,14 +625,14 @@ contains
           endif
        enddo
     enddo
-    
+
     if (pgl%passed.lt.nevent_hel_filter) return
 
     ih2=0
     do ih1=1,pgl%nhel
        if (pgl%include_hel(ih1).gt.0) ih2=ih2+1
     enddo
-    
+
     call pgl%amps%filter_helicity(next,pgl%nhel,pgl%include_hel) ! this updates 'nhel' and 'include_hel'
     deallocate(pgl%hel_fac)
     allocate(pgl%hel_fac(pgl%nhel))
@@ -485,6 +654,15 @@ contains
     dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
   end function dot
 
+  real(kind=8) function sumdot(p1,p2)
+    ! Inner product between two 4-vectors
+    implicit none
+    real(kind=8),intent(in),dimension(0:3) :: p1,p2
+    real(kind=8),dimension(0:3) :: p
+    p=p1+p2
+    sumdot=dot(p,p)
+  end function sumdot
+
   real(kind=8) function eta(p)
     ! pseudo-rapidity of 'p'
     implicit none
@@ -498,9 +676,22 @@ contains
     ! azimuthal difference of 'p1' and 'p2'
     implicit none
     real(kind=8), dimension(0:3) :: p1,p2
-    real(kind=8) :: denom
+    real(kind=8) :: denom,arg
+    real(kind=8),parameter :: tiny=1d-8
     denom=pt(p1)*pt(p2)
-    delta_phi=acos((p1(1)*p2(1)+p1(2)*p2(2))/denom)
+    arg=(p1(1)*p2(1)+p1(2)*p2(2))/denom
+    if (arg.lt.-1d0-tiny) then
+       write (*,*) 'cosine is complex'
+       stop 1
+    elseif (arg.lt.-1d0) then
+       arg=-1d0
+    elseif(arg.gt.1d0+tiny) then
+       write (*,*) 'cosine is complex'
+       stop 1
+    elseif(arg.gt.1d0) then
+       arg=1d0
+    endif
+    delta_phi=acos(arg)
   end function delta_phi
 
   real(kind=8) function deltaR(p1,p2)
@@ -518,7 +709,8 @@ contains
     write (iunit,*) '<event>'
     write (iunit,*) next,wgt!,pgl(ichan)%amp2(iproc_picked)*weight,pgl(ichan)%amp2(iproc_picked),weight
     write (iunit,'(100i3)') pgl(ichan)%amps%spins(1:next,hel_picked(1),hel_picked(2))
-    write (iunit,'(100i3)') pgl(ichan)%orders(1:next,iproc_picked)
+    if (.not.read_proc_from_file) iproc_picked=1
+    write (iunit,'(100i3)') pgl(ichan)%color_orders(1:next,iproc_picked)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
     ! compensate for reducing the number of integration channels assuming
     ! symmetric initial states, we need to randomly flip all z-components in
@@ -595,6 +787,15 @@ contains
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
+
+    if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3) then
+            do iproc=1,pgl(ichan)%amps%nprocs
+               if (pgl(ichan)%amps%same_flav(iproc)) then
+                       iproc_picked=iproc
+                       exit
+                endif
+            enddo
+    endif
     random=ran2()*pgl(ichan)%amp2(iproc_picked)
     i=pgl(ichan)%amps%iproc_start(iproc_picked)
     do
@@ -621,12 +822,17 @@ contains
   
   subroutine get_run_arguments()
     implicit none
-    integer :: argc
+    integer :: argc,n_ps
     integer :: i,k,iproc
     character(len=256) :: argv
     logical :: found_1
     integer(kind=8) :: sym_fac
     integer(kind=8) iseed
+    integer,dimension(:),allocatable :: process,order,ichans
+    integer,dimension(:,:),allocatable :: ps_o
+    integer :: idenCOfactor,nproc_in_group,icheck,max_channels
+    logical :: same_flavour
+    character(len=1024) :: buff
     common /to_seed/iseed
     iseed=0
     ! integration steps:
@@ -636,6 +842,7 @@ contains
     ! integration_step=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
     if (argc.eq.3) then
+       read_proc_from_file=.true.
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,'(a)') filename
@@ -643,28 +850,90 @@ contains
           if (i.eq.3) read(argv,*) integration_step
        enddo
        open(unit=10,file=filename,status='old')
+       read (10,*) next,nproc_unique
+       ndim=3*(next-2)-4
+       if (include_pdf) ndim=ndim+2
+       allocate(unique_procs(1:next,1:nproc_unique))
+       do iproc=1,nproc_unique
+          read(10,*) unique_procs(1:next,iproc)
+       enddo
+       allocate(pgl_unique)
+       call check_unique_processes()
+       read(10,*)
+       read(10,*)
        read (10,*) ngroups
        allocate(pgl(ngroups))
+
+       allocate(process(1:next))
+       allocate(order(1:next))
+       
        read (10,*) 
        do igroup=1,ngroups
-          read(10,*) next,pgl(igroup)%nproc
+          nprocs=0
+          allocate(phase_space_orders(1:next))
+          read(10,*) icheck,nproc_in_group,max_channels,phase_space_orders(1:next)
+          if (icheck.ne.igroup) then
+             write (*,*) 'ERROR in processes file',icheck,igroup
+             stop 1
+          endif
+          allocate(iden_iproc(nproc_in_group))
+          allocate(processes(1:next,nproc_in_group))
+          allocate(color_orders(1:next,nproc_in_group))
+          allocate(iden_processes(1:next,nproc_in_group,nproc_in_group))
+          allocate(idenCOandMAPfactor(nproc_in_group,nproc_in_group))
+          allocate(multi_chans(0:max_channels,nproc_in_group))
+          allocate(ichans(0:max_channels))
+          do iproc=1,nproc_in_group
+             read(10,'(a)') buff
+             read(buff,*) ichans(0)
+             read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
+             call add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
+          enddo
+          pgl(igroup)%nproc=nprocs
+          pgl(igroup)%multichan%max_channels=max_channels
           allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
-          allocate(pgl(igroup)%orders(1:next,1:pgl(igroup)%nproc))
-          allocate(pgl(igroup)%multi_factor(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%phase_space_orders(1:next))
+          allocate(pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
+          pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
+          pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
+          pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
+          pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
+               idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
+          pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc)=iden_iproc(1:pgl(igroup)%nproc)
+          pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
+               iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
+          pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
+          pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
+          deallocate(iden_iproc)
+          deallocate(processes)
+          deallocate(color_orders)
+          deallocate(phase_space_orders)
+          deallocate(iden_processes)
+          deallocate(idenCOandMAPfactor)
+          deallocate(multi_chans)
+          deallocate(ichans)
           write (*,*) '****************************************************'
           do iproc=1,pgl(igroup)%nproc
-             read(10,*) pgl(igroup)%processes(1:next,iproc),&
-                  pgl(igroup)%orders(1:next,iproc),pgl(igroup)%multi_factor(iproc)
-             write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),'   ',&
-                  pgl(igroup)%orders(1:next,iproc),'   ',pgl(igroup)%multi_factor(iproc)
+             write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
+                  pgl(igroup)%color_orders(1:next,iproc),' ; ',pgl(igroup)%iden_iproc(iproc),' ; ',&
+                  pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
           enddo
-          call define_identical_procs(pgl(igroup))
           write (*,*) '****************************************************'
-          read(10,*)
           read(10,*)
           read(10,*)
           read(10,*)
        enddo
+       if (integration_step.le.1) then
+          ! make sure pgl_unique is deallocated consistently:
+          call finalize_phase_space_order_group(pgl_unique)
+          deallocate(pgl_unique)
+       endif
 999    continue
        close(10)
     elseif (argc.le.10) then
@@ -673,8 +942,7 @@ contains
        write(*,*) 'PS_choice, mode, next, *process*, *order*'
        stop 2
     else
-       ngroups=1
-       allocate(pgl(ngroups))
+       read_proc_from_file=.false.
        do i = 1, argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,*) PS_choice
@@ -685,6 +953,8 @@ contains
                 write (*,*) 'Need at least 4 particles (2->2 scattering)',next
                 stop 1
              endif
+             ndim=3*(next-2)-4
+             if (include_pdf) ndim=ndim+2
              allocate(part(1:next))
              allocate(o(1:next))
           endif
@@ -733,24 +1003,61 @@ contains
              endif
           enddo
        endif
+
+       do i=2,next-1
+          if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
+              (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+             if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
+                same_flavour=.true.
+             else
+                same_flavour=.false.
+             endif
+             exit
+          endif
+       enddo
+
        if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
           write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
           stop
        endif
        call compute_multichannel_symmetry_factor(sym_fac)
-       pgl(1)%nproc=1
-       allocate(pgl(1)%processes(1:next,pgl(1)%nproc))
-       pgl(1)%processes(1:next,1)=part(1:next)
-       allocate(pgl(1)%orders(1:next,pgl(1)%nproc))
-       pgl(1)%orders(1:next,1)=o(1:next)
-       allocate(pgl(1)%multi_factor(1))
-       pgl(1)%multi_factor(1)=sym_fac
-       allocate(pgl(1)%iden_iproc(1))
-       pgl(1)%iden_iproc(1)=1
-       allocate(pgl(1)%val_procs(1,1))
-       allocate(pgl(1)%iden_processes(1:next,1,1))
-       pgl(1)%iden_processes(1:next,1,1)=pgl(1)%processes(1:next,1)
+
+       call determine_multi_channel_size(part,n_ps)
+       
+       allocate(ps_o(1:next,1:n_ps))
+       call determine_phase_space_orders(part,o,n_ps,ps_o)
+       
+       ngroups=n_ps
+       allocate(pgl(ngroups))
+       do i=1,ngroups
+          pgl(i)%nproc=1
+          allocate(pgl(i)%multichan%channels(1:n_ps,1))
+          allocate(pgl(i)%multichan%number_of_channels(1))
+          pgl(i)%multichan%number_of_channels(1)=n_ps
+          do k=1,n_ps
+             pgl(i)%multichan%channels(k,1)=k
+          enddo
+          allocate(pgl(i)%processes(1:next,pgl(i)%nproc))
+          pgl(i)%processes(1:next,1)=part(1:next)
+          allocate(pgl(i)%color_orders(1:next,pgl(i)%nproc))
+          pgl(i)%color_orders(1:next,1)=o(1:next)
+          allocate(pgl(i)%phase_space_orders(1:next))
+          pgl(i)%phase_space_orders(1:next)=ps_o(1:next,i)
+          allocate(pgl(i)%idenCOandMAPfactor(1,1))
+          pgl(i)%idenCOandMAPfactor(1,1)=sym_fac
+          allocate(pgl(i)%iden_iproc(1))
+          pgl(i)%iden_iproc(1)=1
+          allocate(pgl(i)%val_procs(1,1))
+          allocate(pgl(i)%iden_processes(1:next,1,1))
+          pgl(i)%iden_processes(1:next,1,1)=pgl(i)%processes(1:next,1)
+       enddo
     endif
+
+    do i=1,ngroups
+       call setup_optimised_multichannel_weight_computation(pgl(i))
+    enddo
+    
+    
     ! basic checks:
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
@@ -768,6 +1075,299 @@ contains
     endif
   end subroutine get_run_arguments
 
+  subroutine setup_optimised_multichannel_weight_computation(pgl)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer,dimension(pgl%nproc*pgl%multichan%max_channels) :: all_unique_chans
+    integer,dimension(pgl%nproc*ngroups) :: all_unique_chans_inv
+    integer,dimension(0:pgl%multichan%max_channels,pgl%nproc) :: all_unique_channelgroups
+    integer,dimension(pgl%nproc) :: map_proc_to_group
+    integer :: iproc,ichan,nchans,nchans_group
+    logical :: found
+    nchans=0
+    nchans_group=0
+    do iproc=1,pgl%nproc
+       do ichan=1,pgl%multichan%number_of_channels(iproc)
+          if (all(all_unique_chans(1:nchans).ne.pgl%multichan%channels(ichan,iproc))) then
+             nchans=nchans+1
+             all_unique_chans(nchans)=pgl%multichan%channels(ichan,iproc)
+             all_unique_chans_inv(pgl%multichan%channels(ichan,iproc))=nchans
+          endif
+       enddo
+    enddo
+    do iproc=1,pgl%nproc
+       found=.false.
+       do i=1,nchans_group
+          if (all_unique_channelgroups(0,i).ne.pgl%multichan%number_of_channels(iproc))cycle
+          if (all(all_unique_chans_inv(all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),i)).eq. &
+               pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc))) then
+             map_proc_to_group(iproc)=i
+             found=.true.
+             exit
+          endif
+       enddo
+       if (.not.found) then
+          nchans_group=nchans_group+1
+          all_unique_channelgroups(0,nchans_group)= &
+               pgl%multichan%number_of_channels(iproc)
+          all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),nchans_group)= &
+               all_unique_chans_inv(pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc))
+          map_proc_to_group(iproc)=nchans_group
+       endif
+    enddo
+
+    pgl%multichan%n_unique_channels=nchans
+    pgl%multichan%n_unique_channelgroups=nchans_group
+    allocate(pgl%multichan%unique_channel_list(nchans))
+    pgl%multichan%unique_channel_list=all_unique_chans(1:nchans)
+    allocate(pgl%multichan%unique_channelgroup_list(0:pgl%multichan%max_channels,nchans_group))
+    pgl%multichan%unique_channelgroup_list(0:pgl%multichan%max_channels,1:nchans_group)= &
+         all_unique_channelgroups(0:pgl%multichan%max_channels,1:nchans_group)
+    allocate(pgl%multichan%map_proc_to_channelgroup(pgl%nproc))
+    pgl%multichan%map_proc_to_channelgroup(1:pgl%nproc)=map_proc_to_group(1:pgl%nproc)
+    deallocate(pgl%multichan%channels)
+  end subroutine setup_optimised_multichannel_weight_computation
+    
+
+  
+  subroutine determine_multi_channel_size(part,n_ps)
+    implicit none
+    integer,dimension(1:next),intent(in) :: part
+    integer,intent(out) :: n_ps
+    integer :: i
+    if (.not. use_colour_singlet_multichannel) then
+       n_ps=1
+       return
+    endif
+    n_ps=0
+    do i=1,next
+       if (is_singlet(part(i))) n_ps=n_ps+1
+    enddo
+    n_ps=factorial(n_ps)
+  end subroutine determine_multi_channel_size
+  
+  subroutine determine_phase_space_orders(part,col_o,n_ps,PS_o)
+    implicit none
+    integer,dimension(1:next),intent(in) :: part,col_o
+    integer,intent(in) :: n_ps
+    integer,dimension(1:next,1:n_ps),intent(inout) :: ps_o
+    integer :: i,n_sing,i_sing
+    integer,dimension(:),allocatable :: jmap,ips,ips_out
+    if (n_ps.eq.1) then
+       PS_o(1:next,1)=col_o(1:next)
+       return
+    endif
+    n_sing=0
+    do i=1,next
+       if (is_singlet(part(i))) n_sing=n_sing+1
+    enddo
+    allocate(jmap(n_sing))
+    j=0
+    do i=1,next
+       if (is_singlet(part(o(i)))) then
+          j=j+1
+          jmap(j)=i
+       endif
+    enddo
+    allocate(ips(n_sing))
+    allocate(ips_out(n_sing))
+    do i=1,n_sing
+       ips(i)=i
+    enddo
+    do j=1,n_ps
+       i_sing=0
+       do i=1,next
+          if (is_singlet(part(o(i)))) then
+             i_sing=i_sing+1
+             ps_o(i,j)=col_o(jmap(ips(i_sing)))
+          else
+             ps_o(i,j)=col_o(i)
+          endif
+       enddo
+       if (j.eq.n_ps) exit
+       call get_next_iperm(n_sing,ips,ips_out,n_sing)
+       ips(1:n_sing)=ips_out(1:n_sing)
+    enddo
+  end subroutine determine_phase_space_orders
+
+  subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
+    implicit none
+    integer :: max_channels
+    integer,dimension(0:max_channels) :: ichans
+    integer,dimension(next) :: process,order,process_mapped,process_unique,mapping
+    integer :: idenCOfactor
+    real(kind=8) :: idenMAPfactor,idenCOMAPfactor
+    call map_to_canonical_form(process,process_mapped,mapping)
+    call get_unique_process(process,process_mapped,process_unique,idenMAPfactor,mapping)
+    idenCOMAPfactor=idenMAPfactor*idenCOfactor
+    call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
+  end subroutine add_to_process_list
+
+  subroutine move_colour_singlet_in_order(process,order)
+    ! Move the colour singlet(s) to go *before* the final anti-quark in the order
+    implicit none
+    integer,dimension(next),intent(in) :: process
+    integer,dimension(next),intent(inout) :: order
+    integer :: i,iord,aq,iaq,itmp,ipart
+    ! find the final anti-quark
+    do i=next,1,-1
+       iord=order(i)
+       ipart=process(iord)
+       if (((iord.le.2 .and. is_quark(ipart)).or.(iord.gt.2 .and. is_antiquark(ipart)))) then
+          aq=i
+          iaq=iord
+          exit
+       endif
+    enddo
+    ! move the colour_singlet to after the anti-quark
+    i=1
+    do while (i.le.next)
+       iord=order(i)
+       ipart=process(iord)
+       if(is_singlet(ipart)) then
+          if (i.gt.aq) then
+             order(aq:i)=[order(i),order(aq)]
+             aq=aq+1
+             i=i+1
+          else
+             order(i:aq)=[order(i+1:aq),order(i)]
+             aq=aq-1
+          endif
+       else
+          i=i+1
+       endif
+    enddo
+  end subroutine move_colour_singlet_in_order
+          
+  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
+    implicit none
+    integer,intent(in) :: max_channels
+    integer,dimension(0:max_channels),intent(in) :: ichans
+    integer,dimension(next) :: process,process_unique,order
+    real(kind=8) :: idenCOMAPfactor
+    integer :: iproc
+    call move_colour_singlet_in_order(process,order)
+    do iproc=1,nprocs
+       if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
+            .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
+    enddo
+    if (iproc.gt.nprocs) then
+       ! new matrix element to generate
+       nprocs=nprocs+1
+       processes(1:next,iproc)=process_unique(1:next)
+       color_orders(1:next,iproc)=order(1:next)
+       iden_iproc(iproc)=1
+       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
+       multi_chans(0:ichans(0),iproc)=ichans(0:ichans(0))
+    else
+       ! identical to another matrix element
+       iden_iproc(iproc)=iden_iproc(iproc)+1
+       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
+       if (ichans(0).ne.multi_chans(0,iproc)) then
+          write (*,*) 'Number of multi-channels not the same among identical processes',&
+               ichans(0),multi_chans(0,iproc)
+          stop 1
+       endif
+       if (any(ichans(1:ichans(0)).ne.multi_chans(1:ichans(0),iproc))) then
+          write (*,*) 'Multi-channels not the same among identical processes'
+          write (*,*) ichans(1:ichans(0))
+          write (*,*) multi_chans(1:ichans(0),iproc)
+          stop 1
+       endif
+    endif
+  end subroutine add_to_unique_process_list
+
+  
+  subroutine get_unique_process(process,process_mapped,process_unique,idenMAPfactor,mapping)
+    implicit none
+    integer,dimension(next) :: process,process_mapped,process_unique,mapping
+    integer :: iproc,map_from,map_to,i,j
+    real(kind=8) :: idenMAPfactor
+    do iproc=1,pgl_unique%nproc
+       if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
+    enddo
+    if (iproc.gt.pgl_unique%nproc) then
+       write (*,*) 'Process not found'
+       write (*,*) process(1:next)
+       write (*,*) process_mapped(1:next)
+       stop 1
+    endif
+    idenMAPfactor=unique_map_value(iproc)
+    if (unique_map(iproc).gt.0) then
+       do i=1,next
+          if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
+             process_unique(mapping(i))=phys_model%get_antipart(pgl_unique%processes(i,unique_map(iproc)))
+          else
+             process_unique(mapping(i))=pgl_unique%processes(i,unique_map(iproc))
+          endif
+       enddo
+    else
+       do i=1,next
+          if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
+             process_unique(mapping(i))=phys_model%get_antipart(pgl_unique%processes(i,iproc))
+          else
+             process_unique(mapping(i))=pgl_unique%processes(i,iproc)
+          endif
+       enddo
+    endif
+  end subroutine get_unique_process
+
+
+  subroutine sort_with_mapping(n,array,mapping)
+    !
+    ! EXAMPLE:
+    !
+    ! input:
+    ! n=5
+    ! array=[4, 1, 8, 2, 3]
+    !
+    ! output:
+    ! array=[1, 2, 3, 4, 8]
+    ! mapping=[2, 4, 5, 1, 3]
+    !
+    implicit none
+    integer,intent(in) :: n
+    integer,dimension(n),intent(inout) :: array
+    integer,dimension(n),intent(out) :: mapping
+    integer :: i, j, temp
+    ! Initialize mapping
+    mapping = [(i,i=1,n)]
+    ! Sort the array and mapping using a simple bubble sort
+    do i=1,n-1
+       do j=1,n-i
+          if (array(j) .gt. array(j+1)) then
+             ! Swap array elements
+             temp = array(j)
+             array(j) = array(j+1)
+             array(j+1) = temp
+             ! Swap mapping
+             temp = mapping(j)
+             mapping(j) = mapping(j+1)
+             mapping(j+1) = temp
+          endif
+       enddo
+    enddo
+  end subroutine sort_with_mapping
+
+  
+  subroutine map_to_canonical_form(process,part,mapping)
+    ! cross the two initial state particle PDGs, order according to
+    ! the PDG value, (and reflip the two initial states again)
+    implicit none
+    integer,dimension(next) :: process,part,mapping
+    part(1:next)=process(1:next)
+    ! cross the initial state
+    part(1)=phys_model%get_antipart(part(1))
+    part(2)=phys_model%get_antipart(part(2))
+    call sort_with_mapping(next,part,mapping)
+    ! cross the initial state
+    part(1)=phys_model%get_antipart(part(1))
+    part(2)=phys_model%get_antipart(part(2))
+  end subroutine map_to_canonical_form
+  
+  
   subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible
     ! spin states. Note that this assumes that all the processes() have the
@@ -795,6 +1395,85 @@ contains
        enddo
     enddo
   end subroutine setup_spin
+
+  subroutine setup_color_order(pgl_unique)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl_unique
+    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig
+    do iproc=1,pgl_unique%nproc
+       nq=0
+       ng=0
+       nsing=0
+       do i=1,next
+          if (is_quark(abs(pgl_unique%processes(i,iproc)))) then
+             nq=nq+1
+          elseif(is_gluon(pgl_unique%processes(i,iproc))) then
+             ng=ng+1
+          elseif(is_singlet(pgl_unique%processes(i,iproc))) then
+             nsing=nsing+1
+          else
+             write (*,*) 'unknown particle type:',pgl_unique%processes(i,iproc)
+             stop 1
+          endif
+       enddo
+       if (nq.eq.0 .and. nsing.ne.0) then
+          ig=nsing+1
+          is=1
+          do i=1,next
+             if (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(is,iproc)=i
+                is=is+1
+             else
+                pgl_unique%color_orders(ig,iproc)=i
+                ig=ig+1
+             endif
+          enddo
+!!$          write (*,*) 'when there are colour singlets, there should be quarks'
+!!$          stop 1
+       elseif (nq.eq.0) then
+          do i=1,next
+             pgl_unique%color_orders(i,iproc)=i
+          enddo
+       elseif (nq.eq.2) then
+          ig=2
+          is=ng+2
+          do i=1,next
+             if (is_quark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(1,iproc)=i
+             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(next,iproc)=i
+             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(ig,iproc)=i
+                ig=ig+1
+             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(is,iproc)=i
+                is=is+1
+             endif
+          enddo
+       elseif (nq.eq.4) then
+          iq=1
+          iaq=2
+          ig=4
+          is=ng+4
+          do i=1,next
+             if (is_quark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(iq,iproc)=i
+                iq=iq+2
+             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(iaq,iproc)=i
+                iaq=next
+             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(ig,iproc)=i
+                ig=ig+1
+             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(is,iproc)=i
+                is=is+1
+             endif
+          enddo
+       endif
+    enddo
+  end subroutine setup_color_order
+
   
   subroutine create_run_tag()
     implicit none
@@ -824,8 +1503,8 @@ contains
        call add_to_string(tag_read,o(next),.false.)
     else
 !!$        ! just to the first process; the should all give the same value for 'i'
-!!$       i1=ifindloc(orders(1:next,1),next,1)
-!!$       i2=ifindloc(orders(1:next,1),next,2)
+!!$       i1=ifindloc(color_orders(1:next,1),next,1)
+!!$       i2=ifindloc(color_orders(1:next,1),next,2)
 !!$       i=i2-i1 -1
 !!$       if (i.lt.0) i=i+next
 !!$       call add_to_string(tag,i,.false.)
@@ -914,8 +1593,11 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,ifac,iproc
     real(kind=8) :: fac
-    integer :: it
-    do iproc=1,pgl%nproc
+    integer :: it,lim
+
+    lim=pgl%nproc
+!    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
+    do iproc=1,lim
        fac=0d0
        do i=1,next
           if (pgl%processes(i,iproc).eq.21) then
@@ -930,7 +1612,7 @@ contains
                'colour factor is not an integer',ifac,fac
           stop 1
        endif
-       if (abs(pgl%processes(pgl%orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%orders(next,iproc),iproc)) &
+       if (abs(pgl%processes(pgl%color_orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%color_orders(next,iproc),iproc)) &
             .and. .not.pgl%amps%same_flav(iproc)) then
           ifac=ifac-2
        endif
@@ -990,8 +1672,7 @@ contains
   subroutine include_PDF_and_identical_procs(val,val_abs,pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    real(kind=8),intent(inout),dimension(*) :: val
-    real(kind=8),intent(inout),dimension(*) :: val_abs
+    real(kind=8),intent(inout),dimension(*) :: val,val_abs
     integer :: iproc,ip
     real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
@@ -1002,7 +1683,7 @@ contains
        call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
     do iproc=1,pgl%nproc
-       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)
+       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)*pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
        if (include_pdf) then
           do ip=1,pgl%iden_iproc(iproc)
              ! first incoming particle
@@ -1069,7 +1750,7 @@ contains
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     implicit none
     integer(kind=8),intent(out) :: sym_fac
-    integer :: ngl=0
+    integer :: ngl=0,ngl_tot=0,n_sing=0
     integer,dimension(6) :: nq,naq
     integer :: i,j
     integer(kind=8) :: tot_ord
@@ -1091,11 +1772,16 @@ contains
          if (part(i).eq.-j) naq(j)=naq(j)+1
        enddo
     enddo
+    do i=1,next
+       if (part(i).eq.21) then
+          ngl_tot=ngl_tot+1
+       endif
+    enddo
 
     ! Since we only need to include a subset of all the colour-orderings, we
     ! need to compensate with a symmetry factor
     if (nquarks.eq.0) then
-       tot_ord=factorial8(next-1)
+       tot_ord=factorial8(ngl_tot-1)
        ! All gluon process. This assumes that the only channels we are
        ! including are strictly different. We distinguish them by considering
        ! how many (final state) gluons are attached to the two colour lines
@@ -1119,7 +1805,7 @@ contains
           sym_fac=2*factorial8(ngl)
        endif
     elseif (nquarks.eq.2) then
-       tot_ord=factorial8(next-2)
+       tot_ord=factorial8(ngl_tot)
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
@@ -1158,6 +1844,9 @@ contains
           ! iii, with symmetry factor (ngluon-2)!*2
           ! Hence
           sym_fac=factorial8(ngl)*2
+          if (ngl.gt.0) then
+               sym_fac=factorial8(ngl)*2
+          endif
           if (ifindloc(o,next,1).ne.next-ifindloc(o,next,2)+1) then
              sym_fac=sym_fac*2
           endif
@@ -1166,7 +1855,8 @@ contains
        ! total number of potentially different orders: two ways of connecting
        ! quarks, (n-4)! orderings for the gluons, n-3 ways for an order to
        ! distribute the gluons among the two quark lines
-       tot_ord=2*factorial8(next-4)*(next-3)
+       tot_ord=2*factorial8(ngl_tot)*(ngl_tot+1)
+       n_sing=next-4-ngl_tot
 
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
@@ -1204,6 +1894,7 @@ contains
                 endif
              enddo
           endif
+
           ! 2. invert order of two initial states
           do i_ini=1,2
              io(1:next,2)=io(1:next,1)
@@ -1222,7 +1913,7 @@ contains
                 io(1:next,3)=io(1:next,2)
                 if (i_inv.eq.2) then
                    ! invert order
-                   do i=2,next-1
+                   do i=2,next-n_sing-1
                       if ((io(i,2).gt.2 .and. part(io(i,2)).le.-1 .and. part(io(i,2)).ge.-6) .or. &
                            (io(i,2).le.2 .and. part(io(i,2)).ge. 1 .and. part(io(i,2)).le. 6) ) then
                          if ( ((io(1   ,2).le.2 .and. io(i  ,2).gt.2) .or. (io(1   ,2).gt.2 .and. io(i  ,2).le.2)) .or. &
@@ -1231,7 +1922,7 @@ contains
                             cycle do_i_inv
                          endif
                          io(2:i-1,3)=io(i-1:2:-1,2)
-                         io(i+2:next-1,3)=io(next-1:i+2:-1,2)
+                         io(i+2:next-n_sing-1,3)=io(next-n_sing-1:i+2:-1,2)
                          exit
                       endif
                    enddo
@@ -1273,7 +1964,6 @@ contains
                       endif
                    enddo
                    io(1:next,5)=io(1:next,4)
-                   
                    do ip=1,factorial(k)
                       if (ip.eq.1) then
                          do i=1,k
@@ -1335,4 +2025,135 @@ contains
     enddo
   end function ifindloc
 
+  subroutine finalize_multichan_info(mi)
+    type(multichan_info),intent(inout) :: mi
+    if (allocated(mi%channels)) deallocate(mi%channels)
+    if (allocated(mi%unique_channelgroup_list)) deallocate(mi%unique_channelgroup_list)
+    if (allocated(mi%unique_channel_list)) deallocate(mi%unique_channel_list)
+    if (allocated(mi%map_proc_to_channelgroup)) deallocate(mi%map_proc_to_channelgroup)
+    if (allocated(mi%number_of_channels)) deallocate(mi%number_of_channels)
+  end subroutine finalize_multichan_info
+
+  subroutine finalize_phase_space_order_group(pgl)
+    type(phase_space_order_group),intent(inout) :: pgl
+    call finalize_amplitude_QCD(pgl%amps)
+    if(allocated(pgl%phase_space)) then
+       call pgl%phase_space%cleanup()
+       deallocate(pgl%phase_space)
+    endif
+    call finalize_multichan_info(pgl%multichan)
+    if (allocated(pgl%processes)) deallocate(pgl%processes)
+    if (allocated(pgl%color_orders)) deallocate(pgl%color_orders)
+    if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
+    if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
+    if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
+    if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
+    if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
+    if (allocated(pgl%spin)) deallocate(pgl%spin)
+    if (allocated(pgl%iden)) deallocate(pgl%iden)
+    if (allocated(pgl%col_fac)) deallocate(pgl%col_fac)
+    if (allocated(pgl%amp2)) deallocate(pgl%amp2)
+    if (allocated(pgl%amp2_hel)) deallocate(pgl%amp2_hel)
+    if (allocated(pgl%hel)) deallocate(pgl%hel)
+    if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
+    if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)
+    if (allocated(pgl%pT_min)) deallocate(pgl%pT_min)
+    if (allocated(pgl%eta_max)) deallocate(pgl%eta_max)
+    if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
+    if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
+  end subroutine finalize_phase_space_order_group
+
+
+  subroutine setup_cuts_for_each_particle(pgl)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer :: i,j
+    if (allocated(pgl%pT_min)) then
+       write (*,*) 'ERROR: setting-up phase space cuts already'//&
+            ' done for this phase-space group'
+       stop 1
+    endif
+    ! check consistency among processes
+    do i=1,next
+       if (is_jet(pgl%processes(i,1))) then
+          do j=2,pgl%nproc
+             if (.not.is_jet(pgl%processes(i,j))) then
+                write (*,*) 'inconsistent processes and cuts #1'
+                stop 1
+             endif
+          enddo
+       elseif(is_photon(pgl%processes(i,1))) then
+          do j=2,pgl%nproc
+             if (.not.is_photon(pgl%processes(i,j))) then
+                write (*,*) 'inconsistent processes and cuts #2'
+                stop 1
+             endif
+          enddo
+       else
+          do j=2,pgl%nproc
+             if (is_jet(pgl%processes(i,j)) .or. is_photon(pgl%processes(i,j))) then
+                write (*,*) 'inconsistent processes and cuts #3'
+                stop 1
+             endif
+          enddo
+       endif
+    enddo
+    ! initialize all:
+    allocate(pgl%pT_min(1:next))
+    allocate(pgl%eta_max(1:next))
+    allocate(pgl%DR_min(1:next,1:next))
+    allocate(pgl%sqrt_s_min(1:next,1:next))
+    pgl%pT_min(1:next)=-1d0
+    pgl%eta_max(1:next)=-1d0
+    pgl%DR_min(1:next,1:next)=-1d0
+    pgl%sqrt_s_min(1:next,1:next)=-1d0
+    ! cuts on single jets
+    do i=3,next
+       if (.not. is_jet(pgl%processes(i,1))) cycle
+       pgl%pT_min(i)=ptj_min
+       pgl%eta_max(i)=etaj_max
+    enddo
+    ! cuts on single photons
+    do i=3,next
+       if (.not. is_photon(pgl%processes(i,1))) cycle
+       pgl%pT_min(i)=pta_min
+       pgl%eta_max(i)=etaa_max
+    enddo
+    ! cuts on pair of jets
+    do i=1,next
+       if (.not. is_jet(pgl%processes(i,1))) cycle
+          do j=1,next
+          if (i.eq.j) cycle
+          if (.not. is_jet(pgl%processes(j,1))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sjj_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRjj_min
+          endif
+       enddo
+    enddo
+    ! cuts on pair of photons
+    do i=1,next
+       if (.not. is_photon(pgl%processes(i,1))) cycle
+          do j=1,next
+          if (i.eq.j) cycle
+          if (.not. is_photon(pgl%processes(j,1))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_saa_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRaa_min
+          endif
+       enddo
+    enddo
+    ! cuts on jet-photon pair
+    do i=1,next
+          do j=1,next
+          if (i.eq.j) cycle
+          if (.not.((is_jet(pgl%processes(i,1)) .and. is_photon(pgl%processes(j,1))) .or. &
+                    (is_photon(pgl%processes(i,1)) .and. is_jet(pgl%processes(j,1))))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sja_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRja_min
+          endif
+       enddo
+    enddo
+  end subroutine setup_cuts_for_each_particle
 end program matrix_integrate_QCD

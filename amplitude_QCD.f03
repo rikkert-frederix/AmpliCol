@@ -4,7 +4,8 @@ module amplitude_QCD_mod
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
-  type current
+  type :: current
+     ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert
      integer(kind=16) :: iproc
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
@@ -12,15 +13,28 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8) :: mass,width
+   contains
+     final :: finalize_current ! custom deallocation of current
   end type current
-  type interaction
+  type :: interaction
+     ! if adding variables here, also update the finalize_interaction and assign_interaction subroutines
      integer :: type
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
+     real(kind=8) :: coupl
+   contains
+     final :: finalize_interaction ! custom deallocation of interaction
   end type interaction
-  type amplitude_QCD
+  ! setting one current (or interaction) equal to another using equal
+  ! sign, requires a special operation:
+  interface assignment(=)
+     module procedure assign_current
+     module procedure assign_interaction
+  end interface assignment(=)
+  type :: amplitude_QCD
+     ! if adding variables here, also update the finalize_amplitude_QCD subroutine
      integer :: n_cur,n_vert,imode,nColOrd,max_pp,n_amps,nprocs
      type(current),dimension(:),allocatable :: current_list
      type(interaction),dimension(:),allocatable :: interaction_list
@@ -36,9 +50,10 @@ module amplitude_QCD_mod
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file
      procedure,private :: filter_dead_trees
+     final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm,read_file)
     use math_functions
     use particles
     implicit none
@@ -53,6 +68,7 @@ contains
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc,jproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
+    logical :: read_file
 
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -72,7 +88,7 @@ contains
     endif
     this%imode=imode
 
-    call check_input_consistency()
+    call check_input_consistency(part)
 
     if (this%imode.eq.2) then
        call define_canonical_color_order()
@@ -84,7 +100,6 @@ contains
     call set_max_vert()
     
     if (this%imode.eq.2) then
-       allocate(current_dict(max_cur)) 
        call create_current_dict()
        allocate(key_to_current(max_key,maskr(this%nprocs)))
        key_to_current(1:max_key,1:maskr(this%nprocs))=0
@@ -187,7 +202,6 @@ contains
       allocate(current_list_local(this%n_cur)%spin(isize))
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
-      current_list_local(this%n_cur)%iproc=0
       current_list_local(this%n_cur)%iproc=ibset(int(0,kind=16),iproc-1)
     end subroutine create_external_current
     
@@ -226,8 +240,10 @@ contains
                   cycle
                elseif (popcnt(proc).ne.1) then
                   write (*,*) 'A given amplitude should only contribute to one process'
-                  write (*,*) proc,icur,jcur,current_list_local(icur)%iproc,current_list_local(jcur)%iproc
-                  write (*,*) current_list_local(icur)%ext_type(1:n-1),current_list_local(jcur)%ext_type(1)
+                  write (*,*) proc,icur,jcur
+                  write (*,'(a,i40,B64)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
+                  write (*,'(a,i40,B64)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
+                  write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
                   stop 1
                elseif (.not. btest(proc,iproc-1)) then
                   ! one process, but it is not equal to process 'iproc'
@@ -246,11 +262,9 @@ contains
          if (.not. this%same_flav(iproc)) cycle
          this%iproc_start(iproc)=this%n_amps+1
          do iamp=this%iproc_start(this%same_flavour_proc_map(iproc,1)),this%iproc_start(this%same_flavour_proc_map(iproc,1)+1)-1
-            if (same_flavour_sum(iamp,1).eq.0) cycle
             iord=[current_list_local(curr2amp(1,iamp))%order(1:n-1),current_list_local(curr2amp(2,iamp))%order(1)]
             ispn=[current_list_local(curr2amp(1,iamp))%spin(1:n-1) ,current_list_local(curr2amp(2,iamp))%spin(1) ]
             do jamp=this%iproc_start(this%same_flavour_proc_map(iproc,2)),this%iproc_start(this%same_flavour_proc_map(iproc,2)+1)-1
-               if (same_flavour_sum(jamp,2).eq.0) cycle
                ! if they have the same colour order and spins, they need to be added together
                jord=[current_list_local(curr2amp(1,jamp))%order(1:n-1),current_list_local(curr2amp(2,jamp))%order(1)]
                jspn=[current_list_local(curr2amp(1,jamp))%spin(1:n-1) ,current_list_local(curr2amp(2,jamp))%spin(1) ]
@@ -268,15 +282,13 @@ contains
                if (any(jord(1:n).ne.iord(1:n)) .or. any(jspn(1:n).ne.ispn(1:n))) cycle
                this%n_amps=this%n_amps+1
                if ( abs(this%processes(iord(1),this%same_flavour_proc_map(iproc,1))).eq. &
-                    abs(this%processes(iord(n-this%n_sing(1)),this%same_flavour_proc_map(iproc,1)))) then
+                    abs(this%processes(iord(n),this%same_flavour_proc_map(iproc,1)))) then
                   same_flavour_sum(this%n_amps,1)=iamp ! in iamp, the different-flavour quarks are connected
                   same_flavour_sum(this%n_amps,2)=jamp ! in jamp, the different-flavour quarks are not connected
                else
                   same_flavour_sum(this%n_amps,1)=jamp ! in jamp, the different-flavour quarks are connected    
                   same_flavour_sum(this%n_amps,2)=iamp ! in iamp, the different-flavour quarks are not connected
                endif
-               same_flavour_sum(iamp,1:2)=0
-               same_flavour_sum(jamp,1:2)=0
                exit
             enddo
             if (jamp.gt.this%n_amps) then
@@ -387,7 +399,7 @@ contains
                   endif
                endif
             else
-               this%perm(1:n,iamp)=this%perm(1:n,this%same_flavour_sum(iamp,1))
+               this%perm(1:n-this%n_sing(1),iamp)=this%perm(1:n-this%n_sing(1),this%same_flavour_sum(iamp,1))
             endif
          enddo
       enddo
@@ -425,7 +437,7 @@ contains
     end subroutine simple_consistency_checks
 
     subroutine define_canonical_color_order()
-      ! canonical order: (q,glu,glu,glu,singlet,singlet,qbar,q,qbar)
+      ! canonical order: (q,glu,glu,glu,qbar,q,singlet,singlet,qbar)
       use math_functions
       implicit none
       integer :: i,nq,naq,nglu,nsing,iq,iaq,iglu,ising
@@ -464,19 +476,19 @@ contains
                if (iq.eq.1) then
                   order(1,iproc)=i
                else
-                  order(n-1,iproc)=i
+                  order(n-1-nsing,iproc)=i
                endif
             elseif (is_antiquark_from_order(i,iproc)) then
                iaq=iaq+1
                if (iaq.eq.1) then
                   order(n,iproc)=i
                else
-                  order(n-2,iproc)=i
+                  order(n-2-nsing,iproc)=i
                endif
             elseif (is_singlet(this%processes(i,iproc))) then
                ising=ising+1
                if(nq.ne.0) then
-                  order(1+nglu+ising,iproc)=i
+                  order(n-ising,iproc)=i
                else
                   order(nglu+ising,iproc)=i
                endif
@@ -514,9 +526,10 @@ contains
       if (number_of_quark_lines.lt.2) is_same_flavour_process=.false.
     end function number_of_quark_lines
     
-    subroutine check_input_consistency()
+    subroutine check_input_consistency(part)
       implicit none
-      integer :: i,j,k,iflav,iproc,jproc,idum
+      integer :: i,j,k,iflav,iproc,jproc,idum,ichan
+      integer,dimension(n,n_processes),intent(in) :: part
       integer,dimension(n,2) :: part_sf
       integer,dimension(n) :: jord
       logical :: sf
@@ -528,12 +541,12 @@ contains
          idum=number_of_quark_lines(part(1,1),sf)
          if (sf) then
             ! add the two different-flavour processes that make up the same-flavour process
-            call define_symm_2qq(part(1,1),part_sf(1,1),1)
-            call define_symm_2qq(part(1,1),part_sf(1,2),2)
             this%nprocs=3
             allocate(this%processes(n,this%nprocs))
+            call define_symm_2qq(part(1,1),part_sf,1)
             this%processes(1:n,1)=part_sf(1:n,1)
-            this%processes(1:n,2)=part_sf(1:n,2)
+            call define_symm_2qq(part(1,1),part_sf,2)
+            this%processes(1:n,2)=part_sf(1:n,1)
             this%processes(1:n,3)=part(1:n,1)
             allocate(order(1:n,this%nprocs))
             order(1:n,1)=o(1:n,1)
@@ -547,11 +560,27 @@ contains
             order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
          endif
       else
-         this%nprocs=n_processes
-         allocate(this%processes(n,this%nprocs))
-         this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
-         allocate(order(1:n,this%nprocs))
-         order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
+         idum=number_of_quark_lines(part(1,1),sf)
+         if (sf .and. .not.read_file) then
+            ! add the two different-flavour processes that make up the same-flavour process
+            this%nprocs=3
+            allocate(this%processes(n,this%nprocs))
+            call define_symm_2qq(part(1,1),part_sf,1)
+            this%processes(1:n,1)=part_sf(1:n,1)
+            call define_symm_2qq(part(1,1),part_sf,2)
+            this%processes(1:n,2)=part_sf(1:n,1)
+            this%processes(1:n,3)=part(1:n,1)
+            allocate(order(1:n,this%nprocs))
+            order(1:n,1)=o(1:n,1)
+            order(1:n,2)=o(1:n,1)
+            order(1:n,3)=o(1:n,1)
+         else
+            this%nprocs=n_processes
+            allocate(this%processes(n,this%nprocs))
+            this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
+            allocate(order(1:n,this%nprocs))
+            order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
+         endif
       endif
       
       allocate(this%n_sing(1:this%nprocs))
@@ -637,44 +666,32 @@ contains
                write (*,*) iproc,':',this%processes(1:n,iproc)
                stop 1
             endif
-            call define_symm_2qq(this%processes(1,iproc),part_sf(1,1),1)
-            call define_symm_2qq(this%processes(1,iproc),part_sf(1,2),2)
-            do jproc=1,iproc-1
-               if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
-               jord(1:n)=order(1:n,jproc)
-               if (jord(1).ne.order(1,iproc)) then
-                  ! different order of the quarks, switch the two colour strings:
-                  do i=1,n
-                     if (jord(i).eq.order(1,iproc)) then
-                        jord(1:n)=[jord(i:n),jord(1:i-1)]
-                        exit
-                     endif
-                  enddo
-               endif
-               if (any(jord(1:n).ne.order(1:n,iproc))) cycle
-               if (all(this%processes(1:n,jproc).eq.part_sf(1:n,1))) then
-                  if (this%same_flavour_proc_map(iproc,1).ne.0) then
-                     write (*,*) 'ERROR: double mapping 1'
-                     write (*,*) iproc,part_sf(1:n,1),order(1:n,iproc)
-                     write (*,*) jproc,this%processes(1:n,jproc),order(1:n,jproc)
-                     stop 1
+            do ichan=1,2
+               call define_symm_2qq(this%processes(1,iproc),part_sf,ichan)
+               do jproc=1,iproc-1
+                  if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
+                  jord(1:n)=order(1:n,jproc)
+                  if (jord(1).ne.order(1,iproc)) then
+                     ! different order of the quarks, switch the two colour strings:
+                     do i=1,n
+                        if (jord(i).eq.order(1,iproc)) then
+                           jord(1:n)=[jord(i:n),jord(1:i-1)]
+                           exit
+                        endif
+                     enddo
                   endif
-                  this%same_flavour_proc_map(iproc,1)=jproc
-               endif
-               if (all(this%processes(1:n,jproc).eq.part_sf(1:n,2))) then
-                  if (this%same_flavour_proc_map(iproc,2).ne.0) then
-                     write (*,*) 'ERROR: double mapping 2'
-                     write (*,*) iproc,part_sf(1:n,2),order(1:n,iproc)
-                     write (*,*) jproc,this%processes(1:n,jproc),order(1:n,jproc)
-                     stop 1
+                  if (any(jord(1:n).ne.order(1:n,iproc))) cycle
+                  if (all(this%processes(1:n,jproc).eq.part_sf(1:n,1))) then
+                     this%same_flavour_proc_map(iproc,ichan)=jproc
+                  elseif (all(this%processes(1:n,jproc).eq.part_sf(1:n,2))) then
+                     this%same_flavour_proc_map(iproc,ichan)=jproc
                   endif
-                  this%same_flavour_proc_map(iproc,2)=jproc
-               endif
+               enddo
             enddo
             if (any(this%same_flavour_proc_map(iproc,1:2).eq.0)) then
                write (*,*) 'Same flavour process not found',iproc
-               write (*,*) part_sf(1:n,1),':',order(1:n,iproc)
-               write (*,*) part_sf(1:n,2),':',order(1:n,iproc)
+               write (*,*) part_sf(1:n,1)
+               write (*,*) part_sf(1:n,2)
                stop 1
             endif
          endif
@@ -684,46 +701,80 @@ contains
     subroutine define_symm_2qq(part_in,part_out,chan)
       implicit none
       integer :: chan
-      integer, dimension(n) :: part_in,part_out
-      integer :: i,iq,ia,ifirst
+      integer,dimension(n),intent(in) :: part_in
+      integer,dimension(n,2),intent(out) :: part_out
+      integer :: i,iq,ia,i_same,n_sing,add_or_subtract
       integer,dimension(2,2) :: connection
-      part_out=part_in
+      n_sing=0
+      do i=1,n
+         if (is_singlet(part_in(i))) n_sing=n_sing+1
+      enddo
+      if (n_sing.eq.0) then
+         i_same=1
+      else
+         i_same=2
+      endif
+      do i=1,n
+         if (is_quark(part_in(i)).or.is_antiquark(part_in(i))) then
+            if (abs(part_in(i)).gt.2) then
+               add_or_subtract=-1
+            else
+               add_or_subtract=1
+            endif
+            exit
+         endif
+      enddo
+      part_out(1:n,1)=part_in(1:n)
+      part_out(1:n,2)=part_in(1:n)
       iq=0
       ia=0
-      ifirst=0
       do i=1,n
-         if (i.le.2 .and. is_quark(part_out(i))) then
+         if (i.le.2 .and. is_quark(part_in(i))) then
             ia=ia+1
             connection(2,ia)=i
-            if (ifirst.eq.0) ifirst=i
-         elseif(i.le.2 .and. is_antiquark(part_out(i))) then
+         elseif(i.le.2 .and. is_antiquark(part_in(i))) then
             iq=iq+1
             connection(1,iq)=i
-            if (ifirst.eq.0) ifirst=i
-         elseif (i.gt.2 .and. is_quark(part_out(i))) then
+         elseif (i.gt.2 .and. is_quark(part_in(i))) then
             iq=iq+1
             connection(1,iq)=i
-            if (ifirst.eq.0) ifirst=i
-         elseif (i.gt.2 .and. is_antiquark(part_out(i))) then
+         elseif (i.gt.2 .and. is_antiquark(part_in(i))) then
             ia=ia+1
             connection(2,ia)=i
-            if (ifirst.eq.0) ifirst=i
          endif
       enddo
       if (chan.eq.1) then
          ! change the 2nd quark and an anti-quark in the process
-         part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),5)+1,part_out(connection(1,2)))
-         part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),5)+1,part_out(connection(2,2)))
+         part_out(connection(1,2),1)=sign(abs(part_in(connection(1,2)))+add_or_subtract*i_same,part_in(connection(1,2)))
+         part_out(connection(2,2),1)=sign(abs(part_in(connection(2,2)))+add_or_subtract*i_same,part_in(connection(2,2)))
+         ! change the 1st quark and an anti-quark in the process
+         part_out(connection(1,1),2)=sign(abs(part_in(connection(1,1)))+add_or_subtract*i_same,part_in(connection(1,1)))
+         part_out(connection(2,1),2)=sign(abs(part_in(connection(2,1)))+add_or_subtract*i_same,part_in(connection(2,1)))
+
       elseif(chan.eq.2) then
-         ! change the mixed quark and an anti-quark in the process; leave the
-         ! first (anti-)quark unchanged.
-         if (connection(1,1).eq.ifirst) then
-            part_out(connection(1,2))=sign(mod(abs(part_out(connection(1,2))),5)+1,part_out(connection(1,2)))
-            part_out(connection(2,1))=sign(mod(abs(part_out(connection(2,1))),5)+1,part_out(connection(2,1)))
-         else
-            part_out(connection(1,1))=sign(mod(abs(part_out(connection(1,1))),5)+1,part_out(connection(1,1)))
-            part_out(connection(2,2))=sign(mod(abs(part_out(connection(2,2))),5)+1,part_out(connection(2,2)))
-         endif
+!!$         if (abs(part_in(connection(1,1))).lt.4) then
+            ! change the mixed quark and an anti-quark in the process; leave the
+            ! first (anti-)quark unchanged.
+               part_out(connection(1,2),1)=sign(abs(part_in(connection(1,2)))+&
+                       add_or_subtract*i_same,part_in(connection(1,2)))
+               part_out(connection(2,1),1)=sign(abs(part_in(connection(2,1)))+&
+                       add_or_subtract*i_same,part_in(connection(2,1)))
+               part_out(connection(1,1),2)=sign(abs(part_in(connection(1,1)))+&
+                       add_or_subtract*i_same,part_in(connection(1,1)))
+               part_out(connection(2,2),2)=sign(abs(part_in(connection(2,2)))+&
+                       add_or_subtract*i_same,part_in(connection(2,2)))
+!!$         else
+!!$            ! change the mixed quark and an anti-quark in the process; leave the
+!!$            ! second (anti-)quark unchanged.
+!!$               part_out(connection(1,1),1)=sign(abs(part_in(connection(1,1)))+&
+!!$                       add_or_subtract*i_same,part_in(connection(1,1)))
+!!$               part_out(connection(2,2),1)=sign(abs(part_in(connection(2,2)))+&
+!!$                       add_or_subtract*i_same,part_in(connection(2,2)))
+!!$               part_out(connection(1,2),2)=sign(abs(part_in(connection(1,2)))+&
+!!$                       add_or_subtract*i_same,part_in(connection(1,2)))
+!!$               part_out(connection(2,1),2)=sign(abs(part_in(connection(2,1)))+&
+!!$                       add_or_subtract*i_same,part_in(connection(2,1)))
+!!$         endif
       endif
     end subroutine define_symm_2qq
 
@@ -731,23 +782,76 @@ contains
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
       implicit none
-      if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_cur=2*n*(n-1)*2**n
-      else
-         max_cur=factorial(n+1)*14
-      endif
+      max_cur=1024
     end subroutine set_max_cur
 
     subroutine set_max_vert()
       ! rough upper bound on the maximum number of interactions
       implicit none
-      if (this%imode.eq.1 .or. this%imode.eq.3) then
-         max_vert=n**3*factorial(this%n_sing(1))*2**(n-2)*10
-      elseif(this%imode.eq.2) then
-         max_vert=factorial(n+1)*14
-      endif
+      max_vert=1024
     end subroutine set_max_vert
 
+    subroutine increase_max_cur()
+      implicit none
+      integer :: new_max_cur,ic
+      type(current),dimension(:),allocatable :: tmp
+      new_max_cur=2*max_cur
+      allocate(tmp(new_max_cur))
+      do ic=1,max_cur
+         allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
+         allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
+         tmp(ic)=current_list_local(ic)
+      enddo
+      do ic=1,max_cur
+         call finalize_current(current_list_local(ic))
+      enddo
+      deallocate(current_list_local)
+      allocate(current_list_local(new_max_cur))
+      do ic=1,max_cur
+         allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
+         allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
+         current_list_local(ic)=tmp(ic)
+      enddo
+      do ic=1,max_cur
+         call finalize_current(tmp(ic))
+      enddo
+      deallocate(tmp)
+      max_cur=new_max_cur
+    end subroutine increase_max_cur
+    
+    subroutine increase_max_vert()
+      implicit none
+      integer :: new_max_vert,iv
+      type(interaction),dimension(:),allocatable :: tmp
+      new_max_vert=2*max_vert
+      allocate(tmp(new_max_vert))
+      ! copy old list into tmp
+      do iv=1,max_vert
+         if (allocated(interaction_list_local(iv)%singlet_mv)) &
+              allocate(tmp(iv)%singlet_mv(0:size(interaction_list_local(iv)%singlet_mv)-1))
+         tmp(iv)=interaction_list_local(iv)
+      enddo
+      ! empty old list
+      do iv=1,max_vert
+         call finalize_interaction(interaction_list_local(iv))
+      enddo
+      deallocate(interaction_list_local)
+      ! allocate new list
+      allocate(interaction_list_local(new_max_vert))
+      ! copy tmp into new list
+      do iv=1,max_vert
+         if (allocated(tmp(iv)%singlet_mv)) &
+              allocate(interaction_list_local(iv)%singlet_mv(0:size(tmp(iv)%singlet_mv)-1))
+         interaction_list_local(iv)=tmp(iv)
+      enddo
+      ! empty tmp
+      do iv=1,max_vert
+         call finalize_interaction(tmp(iv))
+      enddo
+      deallocate(tmp)
+      max_vert=new_max_vert
+    end subroutine increase_max_vert
+      
     subroutine allocate_current_list_and_interaction_list()
       ! allocate the minimum memory needed for the current_list and
       ! interaction_list to be able to perform the evaluate() procedure.
@@ -756,27 +860,21 @@ contains
       allocate(this%current_list(1:this%n_cur))
       do isize=1,n-1
          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-            this%current_list(ic)=current_list_local(ic)
-            if(this%current_list(ic)%n_vert.gt.0) then
-               deallocate(this%current_list(ic)%vertices)
-               allocate(this%current_list(ic)%vertices(this%current_list(ic)%n_vert))
-               this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)=&
-                    current_list_local(ic)%vertices(1:current_list_local(ic)%n_vert)
-               deallocate(this%current_list(ic)%vertex_sign)
-               allocate(this%current_list(ic)%vertex_sign(this%current_list(ic)%n_vert))
-               this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)=&
-                    current_list_local(ic)%vertex_sign(1:current_list_local(ic)%n_vert)
-            endif
+            this%current_list(ic)=current_list_local(ic) ! use non-custom 'assignment'
          enddo
+      enddo
+      ! make sure to deallocate currents consistently
+      do ic=1,size(current_list_local)
+         call finalize_current(current_list_local(ic))
       enddo
       deallocate(current_list_local)
       allocate(this%interaction_list(1:this%n_vert))
       do iv=1,this%n_vert
-         this%interaction_list(iv)=interaction_list_local(iv)
-         deallocate(this%interaction_list(iv)%singlet_mv)
-         allocate(this%interaction_list(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0)))
-         this%interaction_list(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0))=&
-              interaction_list_local(iv)%singlet_mv(0:interaction_list_local(iv)%singlet_mv(0))
+         this%interaction_list(iv)=interaction_list_local(iv) ! use non-custom 'assignment'
+      enddo
+      ! make sure to deallocate interactions consistently
+      do iv=1,size(interaction_list_local)
+         call finalize_interaction(interaction_list_local(iv))
       enddo
       deallocate(interaction_list_local)
     end subroutine allocate_current_list_and_interaction_list
@@ -785,9 +883,11 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
+      real(kind=8) :: coupl
       if (.not.valid_current_combination())  then
          return
       endif
+
       if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
          ! add the gluon-gluon to gluon vertex
          call add_vertex(0,21)
@@ -821,16 +921,36 @@ contains
          call add_vertex(9,21)
       elseif (is_singlet(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
          ! add a photon-quark to quark vertex
-         call add_vertex(4,current_list_local(ic2)%type)
+         if (mod(current_list_local(ic2)%type,2).eq.0) then
+            coupl=2d0/3d0
+         else
+            coupl=-1d0/3d0
+         endif
+         call add_vertex(10,current_list_local(ic2)%type,coupl)
       elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
          ! add a quark-photon to quark vertex
-         call add_vertex(6,current_list_local(ic1)%type)
+         if (mod(current_list_local(ic1)%type,2).eq.0) then
+            coupl=2d0/3d0
+         else
+            coupl=-1d0/3d0
+         endif
+         call add_vertex(12,current_list_local(ic1)%type,coupl)
       elseif (is_singlet(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a photon-antiquark to quark vertex
-         call add_vertex(5,current_list_local(ic2)%type)
+         if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
+            coupl=2d0/3d0
+         else
+            coupl=-1d0/3d0
+         endif
+         call add_vertex(11,current_list_local(ic2)%type,coupl)
       elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
          ! add a antiquark-photon to quark vertex
-         call add_vertex(7,current_list_local(ic1)%type)
+         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
+            coupl=2d0/3d0
+         else
+            coupl=-1d0/3d0
+         endif
+         call add_vertex(13,current_list_local(ic1)%type,coupl)
       endif
     end subroutine add_if_allowed_threevertex
 
@@ -878,7 +998,6 @@ contains
       endif
       ! check that both currents can contribute to the same process
       if (iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc).eq.0) return
-
       ! Check for colour singlets:
       colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
@@ -890,7 +1009,7 @@ contains
             return
          else
             valid_current_combination=.true.
-            return ! no need to check further: below is ony checks about the colours
+            return ! no need to check further: below are only checks about the colours
          endif
       endif
       
@@ -957,11 +1076,16 @@ contains
                   return
                endif
                ! next one must be a quark:
-               if (i.lt.isize) then
-                  if (.not. (is_quark(et(i+1)))) then
+               j=i
+               do while (j.lt.isize)
+                  if (is_singlet(et(j+1))) then
+                     j=j+1
+                  elseif (.not.(is_quark(et(j+1)))) then
                      return
+                  else
+                     exit
                   endif
-               endif
+               enddo
                found_quark=.false.
                found_antiquark=.true.
             endif
@@ -973,9 +1097,10 @@ contains
       valid_current_combination=.true.
     end function valid_current_combination
     
-    subroutine add_vertex(itype,ctype)
+    subroutine add_vertex(itype,ctype,coupl)
       implicit none
       integer :: itype,ctype,ic
+      real(kind=8),optional :: coupl
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -983,9 +1108,15 @@ contains
          if (ic.eq.this%n_cur_end(n)+1) return ! dead tree. Filter already here
       endif
       this%n_vert=this%n_vert+1
+      if (this%n_vert.gt.max_vert) call increase_max_vert()
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
+      if (present(coupl)) then
+         interaction_list_local(this%n_vert)%coupl=coupl
+      else
+         interaction_list_local(this%n_vert)%coupl=1d0
+      endif
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype)
     end subroutine add_vertex
@@ -1001,7 +1132,7 @@ contains
       combine_lists(1:isize)=current(1:isize)
       do imv=1,singlet_mv(0)
          combine_lists(1:isize)=[combine_lists(1:singlet_mv(imv)-1), &
-                                 combine_lists(singlet_mv(imv)+1:isize-1),combine_lists(singlet_mv(imv))]
+                                 combine_lists(singlet_mv(imv)+1:isize),combine_lists(singlet_mv(imv))]
       enddo
     end function combine_lists
 
@@ -1117,7 +1248,7 @@ contains
                ns1=ns1+1
             elseif (mv12.eq.2) then
                ord(ipos)=ord2(ns2)
-               singlet_mv(singlet_mv(0))=n1+ns2+1 - (singlet_mv(0)-1)
+               singlet_mv(singlet_mv(0))=n1+ns2 - (singlet_mv(0)-1)
                ns2=ns2+1
             endif
          enddo
@@ -1271,6 +1402,7 @@ contains
          enddo
          ! Need a new current
          this%n_cur=this%n_cur+1
+         if (this%n_cur.gt.max_cur) call increase_max_cur()
          current_list_local(this%n_cur)=new_current
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
@@ -1306,6 +1438,7 @@ contains
          if (ic.eq.0) then
             ! initialise new current
             this%n_cur=this%n_cur+1
+            if (this%n_cur.gt.max_cur) call increase_max_cur()
             key_to_current(key,new_current%iproc)=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
@@ -1347,6 +1480,15 @@ contains
       integer :: size,i,j,key
       integer(kind=8) :: val,previous_val
       integer,dimension(:),allocatable :: ips_in,ips
+      size=n
+      max_key=n
+      do isize=2,n-1
+         size=size*(n-isize+1)
+         do i=1,size
+            max_key=max_key+14
+         enddo
+      enddo
+      allocate(current_dict(max_key)) 
       key=n  ! skip the external currents.
       size=n
       previous_val=0
@@ -1568,8 +1710,12 @@ contains
     ! interaction_list
     do iv=1,this%n_vert
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),&
-            this%interaction_list(iv)%singlet_mv(0)
-       write (iunit) this%interaction_list(iv)%singlet_mv(1:this%interaction_list(iv)%singlet_mv(0))
+            this%interaction_list(iv)%coupl
+       if (allocated(this%interaction_list(iv)%singlet_mv)) then
+          write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
+       else
+          write (iunit) 0
+       endif
     enddo
     ! momenta array
     write (iunit) this%pp_bin_to_i(1:maskr(n))
@@ -1626,10 +1772,12 @@ contains
     ! interaction_list
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
-       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),itmp
-       allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
-       this%interaction_list(iv)%singlet_mv(0)=itmp
-       read (iunit) this%interaction_list(iv)%singlet_mv(1:itmp)
+       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl,itmp
+       if (itmp.gt.0) then
+          allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
+          this%interaction_list(iv)%singlet_mv(0)=itmp
+          read (iunit) this%interaction_list(iv)%singlet_mv(1:itmp)
+       endif
     enddo
     ! momenta array
     allocate(this%pp_bin_to_i(1:maskr(n)))
@@ -1670,12 +1818,23 @@ contains
   contains
     subroutine deallocate_all()
       implicit none
+      integer :: i
       if (allocated(this%n_cur_start)) deallocate(this%n_cur_start)
       if (allocated(this%n_cur_end)) deallocate(this%n_cur_end)
       if (allocated(this%n_vert_start)) deallocate(this%n_vert_start)
       if (allocated(this%n_vert_end)) deallocate(this%n_vert_end)
-      if (allocated(this%current_list)) deallocate(this%current_list)
-      if (allocated(this%interaction_list)) deallocate(this%interaction_list)
+      if (allocated(this%current_list)) then
+         do i=1,size(this%current_list)
+            call finalize_current(this%current_list(i))
+         enddo
+         deallocate(this%current_list)
+      endif
+      if (allocated(this%interaction_list)) then
+         do i=1,size(this%interaction_list)
+            call finalize_interaction(this%interaction_list(i))
+         enddo
+         deallocate(this%interaction_list)
+      endif
       if (allocated(this%pp)) deallocate(this%pp)
       if (allocated(this%pp_bin_to_i)) deallocate(this%pp_bin_to_i)
       if (allocated(this%pp_i_to_bin)) deallocate(this%pp_i_to_bin)
@@ -1693,7 +1852,7 @@ contains
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel)
+  subroutine evaluate(this,n,p,hel,read_file)
     use FeynmanRules
     implicit none
     class(amplitude_QCD) :: this
@@ -1701,6 +1860,7 @@ contains
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ip,ifinal
+    logical :: read_file 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (this%current_list(ic)%type.eq.-21) then
@@ -1742,13 +1902,8 @@ contains
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
-          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
-!!$             if (this%current_list(ic)%order(1).le.2) then
-!!$                ifinal=-1
-!!$             else
-                ifinal=1
-!!$             endif
-
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+             ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
                 ih_in=max(0,hel(this%current_list(ic)%order(1)))
              else
@@ -1887,6 +2042,67 @@ contains
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                      this%interaction_list(iv)%val_c(1:4))
 
+          elseif(this%interaction_list(iv)%type.eq.10) then
+             if (use_real_gluons) then
+                call GluonQuarktoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                                  this%interaction_list(iv)%val_c(1:4),&
+                                                  this%interaction_list(iv)%coupl)
+             else
+                call GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                             this%interaction_list(iv)%val_c(1:4),&
+                                             this%interaction_list(iv)%coupl)
+             endif
+
+          elseif(this%interaction_list(iv)%type.eq.11) then
+             if (use_real_gluons) then
+                call GluonAquarktoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
+                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                                    this%interaction_list(iv)%val_c(1:4),&
+                                                    this%interaction_list(iv)%coupl)
+             else
+                call GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                               this%interaction_list(iv)%val_c(1:4),&
+                                               this%interaction_list(iv)%coupl)
+             endif
+          elseif(this%interaction_list(iv)%type.eq.12) then
+             if (use_real_gluons) then
+                call QuarkGluontoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
+                                                  this%interaction_list(iv)%val_c(1:4),&
+                                                  this%interaction_list(iv)%coupl)
+             else
+                call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                             this%interaction_list(iv)%val_c(1:4),&
+                                             this%interaction_list(iv)%coupl)
+             endif
+          elseif(this%interaction_list(iv)%type.eq.13) then
+             if (use_real_gluons) then
+                call AquarkGluontoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
+                                                    this%interaction_list(iv)%val_c(1:4),&
+                                                    this%interaction_list(iv)%coupl)
+             else
+                call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                               this%interaction_list(iv)%val_c(1:4),&
+                                               this%interaction_list(iv)%coupl)
+             endif
+                 
+          elseif(this%interaction_list(iv)%type.eq.14) then
+             call QuarkAquarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.15) then
+             call AquarkQuarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                           this%interaction_list(iv)%val_c(1:4),&
+                                           this%interaction_list(iv)%coupl)
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -1952,7 +2168,8 @@ contains
                                      this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             enddo
          else
-            do iproc=1,this%nprocs
+            if (.not.read_file) then
+               do iproc=1,this%nprocs
                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
                   if (.not.this%same_flav(iproc)) then
                      this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
@@ -1972,8 +2189,33 @@ contains
                      endif
                   endif
                enddo
+               enddo
+            else   
+             do iproc=1,this%nprocs
+                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                  if (.not.this%same_flav(iproc)) then
+                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+                  else
+                     ! same-flavour amps are build from two different-flavour amps
+                     if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
+                                        this%amps(this%same_flavour_sum(iamp,2))/3d0
+                     elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
+                     elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+                     else
+                        write (*,*) 'At least one should contribute'
+                        stop 1
+                     endif
+                  endif
+               enddo
             enddo
+            endif
          endif
+
+
       elseif(this%imode.eq.2) then
          if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
             do iamp=1,this%n_amps
@@ -2083,7 +2325,7 @@ contains
     class(amplitude_qcd) :: this
     integer,parameter :: max_vals=10000
     integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,gj,ui,uj,uj_upper,iperm_upper,&
-         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique,iproc,ioff
+         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique,iproc,ioff,nOrd
     integer,dimension(n) :: iper,jper,part
     integer,dimension(:),allocatable :: n_vals
     real(kind=8),dimension(1:3) :: col_fac
@@ -2102,7 +2344,7 @@ contains
     endif
     part(1:n)=this%processes(1:n,1)
     ioff=this%iproc_start(iproc)-1
-    
+    nOrd=n-this%n_sing(iproc)
 
     allocate(n_vals(1:3))
     allocate(diff_vals(max_vals,1:3))
@@ -2112,7 +2354,7 @@ contains
     if (this%n_qqbar(iproc).eq.0 .or. this%n_qqbar(iproc).eq.1) then
        n_unique_rows=1 ! all rows are similar
     elseif (this%n_qqbar(iproc).eq.2) then
-       n_unique_rows=(n-4)+1 ! number of gluon separations among the two quark lines
+       n_unique_rows=(nOrd-4)+1 ! number of gluon separations among the two quark lines
        n_unique_rows=n_unique_rows*2 ! two ways of combining quarks with anti-quarks
     else
        write (*,*) 'Inconsistent number of quark pairs',this%n_qqbar(iproc)
@@ -2121,7 +2363,7 @@ contains
     if (use_cm_dict) then
        call create_perm_dict()
        allocate(col_vals(1:3,max_keys,n_unique_rows))
-       allocate(unique_rows(1:n,n_unique_rows))
+       allocate(unique_rows(1:nOrd,n_unique_rows))
     endif
 
 ! first check the unique rows in the colour matrix to determine how many
@@ -2139,16 +2381,16 @@ contains
           ! already considered
           call get_unique_row(iunique,irow,gi,ui)
        endif
-       iper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+irow)
-       if (use_cm_dict) unique_rows(1:n-this%n_sing(iproc),iunique) = iper(1:n-this%n_sing(iproc))
+       iper(1:nOrd)=this%perm(1:nOrd,ioff+irow)
+       if (use_cm_dict) unique_rows(1:nOrd,iunique) = iper(1:nOrd)
        ! loop over the columns
        do jperm=1,this%nColOrd
-          jper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+jperm)
+          jper(1:nOrd)=this%perm(1:nOrd,ioff+jperm)
           if (this%n_qqbar(iproc).eq.2) then
              ! determine how the quarks are connected
              call determine_gi_ui(jper,gj,uj)
           endif
-          call compute_color_factor(col_acc,n-this%n_sing(iproc),iper,jper,ui,uj,gi,gj,col_fac)
+          call compute_color_factor(col_acc,nOrd,iper,jper,ui,uj,gi,gj,col_fac)
           if (use_symm_cm) then
              ! include a factor 2 for the off-diagonal terms
              if (irow.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0 
@@ -2156,7 +2398,7 @@ contains
           do iacc=1,3
              if (col_fac(iacc).eq.0d0) cycle
              if (use_cm_dict) then
-                key=solve_dict(get_value(jper(1:n)))
+                key=solve_dict(get_value(nOrd,jper(1:nOrd)))
                 col_vals(iacc,key,iunique)=col_fac(iacc)
              endif
              do ival=1,n_vals(iacc)
@@ -2208,7 +2450,7 @@ contains
     ic=0
     ir=0
     do iperm=1,this%nColOrd
-       iper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+iperm)
+       iper(1:nOrd)=this%perm(1:nOrd,ioff+iperm)
        if (this%n_qqbar(iproc).eq.2)  call determine_gi_ui(iper,gi,ui)
        if (use_symm_cm) then
           jperm_lower=iperm
@@ -2216,14 +2458,14 @@ contains
           jperm_lower=1
        endif
        do jperm=jperm_lower,this%nColOrd
-          jper(1:n-this%n_sing(iproc))=this%perm(1:n-this%n_sing(iproc),ioff+jperm)
+          jper(1:nOrd)=this%perm(1:nOrd,ioff+jperm)
           if (this%n_qqbar(iproc).eq.2)  call determine_gi_ui(jper,gj,uj)
           if (use_cm_dict) then
              ! GET color factors from permuting first row
              call get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
           else
              ! COMPUTE color factors again
-             call compute_color_factor(col_acc,n-this%n_sing(iproc),iper,jper,ui,uj,gi,gj,col_fac)
+             call compute_color_factor(col_acc,nOrd,iper,jper,ui,uj,gi,gj,col_fac)
              if (use_symm_cm) then
                 ! include a factor 2 for the off-diagonal terms
                 if (iperm.ne.jperm) col_fac(1:3)=col_fac(1:3)*2d0
@@ -2258,7 +2500,7 @@ contains
       do irow=1,this%nColOrd
          call determine_gi_ui(this%perm(1,ioff+irow),gi,ui)
          if (ui.eq.1 .and. gi.eq.iunique-1) return
-         if (ui.eq.2 .and. gi.eq.iunique-1-((n-4)+1)) return
+         if (ui.eq.2 .and. gi.eq.iunique-1-((nOrd-4)+1)) return
       enddo
     end subroutine get_unique_row
 
@@ -2302,19 +2544,19 @@ contains
      integer :: i,j,key,iunique
      real(kind=8),dimension(1:3),intent(out) :: col_fac
      if (this%n_qqbar(iproc).eq.2) then
-        iunique=(gi+1)+(ui-1)*((n-4)+1)
+        iunique=(gi+1)+(ui-1)*((nOrd-4)+1)
      else
         iunique=1
      endif
      ! First row
-     row_first(1:n-this%n_sing(iproc))=unique_rows(1:n-this%n_sing(iproc),iunique)
+     row_first(1:nOrd)=unique_rows(1:nOrd,iunique)
      ! Row in consideration
-     row_per(1:n-this%n_sing(iproc))=iper(1:n-this%n_sing(iproc))
+     row_per(1:nOrd)=iper(1:nOrd)
      ! Column in consideration
-     col_per(1:n-this%n_sing(iproc))=jper(1:n-this%n_sing(iproc))
+     col_per(1:nOrd)=jper(1:nOrd)
      ! Map one into the other
-     do i=1,n-this%n_sing(iproc)
-        do j=1,n-this%n_sing(iproc)
+     do i=1,nOrd
+        do j=1,nOrd
            if (col_per(i) .eq. row_per(j)) exit
         enddo
         if (.not.(abs(part(col_per(i))).le.6.and.abs(part(col_per(i))).ge.1)) then
@@ -2323,7 +2565,7 @@ contains
           col_new(i) = col_per(i)
         endif
      enddo
-     key=solve_dict(get_value(col_new(1:n)))
+     key=solve_dict(get_value(nOrd,col_new(1:nOrd)))
      col_fac(1:3)=col_vals(1:3,key,iunique)
    end subroutine get_col_fac
 
@@ -2361,43 +2603,40 @@ contains
       integer :: iperm,i
       integer(kind=8) :: val,previous_val
       integer,dimension(:),allocatable :: iper,iper_in
-      if (this%n_sing(iproc).ne.0) then
-         write (*,*) 'fix create_perm_dict when there are color singlets'
-         stop 1
-      endif
-      allocate(iper(1:n))
-      allocate(iper_in(1:n))
-      max_keys=factorial(n)
+      allocate(iper(1:nOrd))
+      allocate(iper_in(1:nOrd))
+      max_keys=factorial(n)/factorial(n-nOrd)
       allocate(perm_dict(1:max_keys))
-      do i=1,n
+      do i=1,nOrd
          iper(i)=i
       enddo
       previous_val=0
       do iperm=1,max_keys
-         val=get_value(iper(1:n))
+         val=get_value(nOrd,iper(1:nOrd))
          if (val.le.previous_val) then
             write (*,*) 'In create_perm_dict need to get values in ascending order',val,previous_val
+            write (*,*) iper(1:nOrd)
             stop 1
          else
             previous_val=val
          endif
          perm_dict(iperm)=val
          iper_in=iper
-         call get_next_iperm(n,iper_in,iper,n)
+         call get_next_iperm(nOrd,iper_in,iper,n)
       enddo
       deallocate(iper)
     end subroutine create_perm_dict
 
-    integer(kind=8) function get_value(iper)
+    integer(kind=8) function get_value(nOrd,iper)
       ! Give a unique identifier based on the colour order. Simply convert the
       ! list to an integer with base equal to the number of elements in the
       ! order.
       implicit none
-      integer :: j
-      integer,dimension(1:n) :: iper
+      integer :: j,nOrd
+      integer,dimension(1:nOrd) :: iper
       get_value=0
-      do j=1,n
-         get_value=get_value+int(iper(n+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
+      do j=1,nOrd
+         get_value=get_value+int(iper(nOrd+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
       enddo
     end function get_value
     
@@ -2406,7 +2645,7 @@ contains
       implicit none
       integer :: i,n,acc,col_acc,k,ui,uj,gi,gj
       real(kind=8),dimension(1:3) :: col_fac
-      integer,dimension(n-this%n_sing(iproc)) :: iper,jper
+      integer,dimension(n) :: iper,jper
       integer,dimension(n-4) :: iper_glu,jper_glu,iper_ord,jper_ord
       real(kind=16) :: col_factor
       col_fac(1:3)=0d0
@@ -2793,7 +3032,13 @@ contains
     ! do the actual shifting of the currents in the list
     do nc=1,this%n_cur
        if (.not.is_needed_cur(nc)) cycle
-       this%current_list(where_to_cur(nc))=this%current_list(nc)
+       if (where_to_cur(nc).ne.nc) then
+          if (allocated(this%current_list(where_to_cur(nc))%vertices)) &
+               deallocate(this%current_list(where_to_cur(nc))%vertices)
+          if (allocated(this%current_list(where_to_cur(nc))%vertex_sign)) &
+               deallocate(this%current_list(where_to_cur(nc))%vertex_sign)
+          this%current_list(where_to_cur(nc))=this%current_list(nc)
+       endif
        do iv=1,this%current_list(where_to_cur(nc))%n_vert
           this%current_list(where_to_cur(nc))%vertices(iv)= &
                where_to_ver(this%current_list(where_to_cur(nc))%vertices(iv))
@@ -2802,7 +3047,11 @@ contains
     ! do the actual shifting of the interactions in the list
     do iv=1,this%n_vert
        if (.not.is_needed_ver(iv)) cycle
-       this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+       if (where_to_ver(iv).ne.iv) then
+          if (allocated(this%interaction_list(where_to_ver(iv))%singlet_mv)) &
+               deallocate(this%interaction_list(where_to_ver(iv))%singlet_mv)
+          this%interaction_list(where_to_ver(iv))=this%interaction_list(iv)
+       endif
        this%interaction_list(where_to_ver(iv))%currents(1:2)= &
             where_to_cur(this%interaction_list(where_to_ver(iv))%currents(1:2))
     enddo
@@ -2880,4 +3129,157 @@ contains
     deallocate(where_to_cur)
   end subroutine filter_dead_trees
 
+  subroutine assign_interaction(lhs,rhs)
+    ! sets non-custom 'lhs' = 'rhs' for interactions
+    implicit none
+    type(interaction),intent(inout) :: lhs
+    type(interaction),intent(in) :: rhs
+    integer :: val_size
+    lhs%type=rhs%type
+    lhs%currents(1:2)=rhs%currents(1:2)
+    lhs%coupl=rhs%coupl
+    if (allocated(rhs%singlet_mv)) then
+       if (rhs%singlet_mv(0).gt.0) then
+          if (.not.allocated(lhs%singlet_mv)) allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
+          lhs%singlet_mv(0:rhs%singlet_mv(0))=rhs%singlet_mv(0:rhs%singlet_mv(0))
+       elseif (allocated(lhs%singlet_mv)) then
+          lhs%singlet_mv(0)=0
+       endif
+    endif
+    if (allocated(lhs%val_c)) deallocate(lhs%val_c)
+    if (allocated(rhs%val_c)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_c(1:val_size))
+       lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
+    endif
+    if (allocated(lhs%val_r)) deallocate(lhs%val_r)
+    if (allocated(rhs%val_r)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_r(1:val_size))
+       lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
+    endif
+  end subroutine assign_interaction
+  
+  subroutine assign_current(lhs,rhs)
+    ! sets non-custom 'lhs' = 'rhs' for currents
+    implicit none
+    type(current),intent(inout) :: lhs
+    type(current),intent(in) :: rhs
+    integer :: isize,val_size
+    lhs%type=rhs%type
+    lhs%bin=rhs%bin
+    isize=popcnt(lhs%bin)
+    lhs%n_vert=rhs%n_vert
+    lhs%iproc=rhs%iproc
+    lhs%mass=rhs%mass
+    lhs%width=rhs%width
+    if (allocated(rhs%vertices) .and. rhs%n_vert.gt.0) then
+       if (.not.allocated(lhs%vertices)) allocate(lhs%vertices(1:lhs%n_vert))
+       lhs%vertices(1:lhs%n_vert)=rhs%vertices(1:lhs%n_vert)
+    endif
+    if (allocated(lhs%order)) deallocate(lhs%order)
+    if (allocated(rhs%order) .and. isize.gt.0) then
+       allocate(lhs%order(1:isize))
+       lhs%order(1:isize)=rhs%order(1:isize)
+    endif
+    if (allocated(lhs%spin)) deallocate(lhs%spin)
+    if (allocated(rhs%spin) .and. isize.gt.0) then
+       allocate(lhs%spin(1:isize))
+       lhs%spin(1:isize)=rhs%spin(1:isize)
+    endif
+    if (allocated(lhs%ext_type)) deallocate(lhs%ext_type)
+    if (allocated(rhs%ext_type) .and. isize.gt.0) then
+       allocate(lhs%ext_type(1:isize))
+       lhs%ext_type(1:isize)=rhs%ext_type(1:isize)
+    endif
+    if (allocated(rhs%vertex_sign) .and. rhs%n_vert.gt.0) then
+       if (.not.allocated(lhs%vertex_sign)) allocate(lhs%vertex_sign(1:lhs%n_vert))
+       lhs%vertex_sign(1:lhs%n_vert)=rhs%vertex_sign(1:lhs%n_vert)
+    endif
+    if (allocated(lhs%val_c)) deallocate(lhs%val_c)
+    if (allocated(rhs%val_c)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_c(1:val_size))
+       lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
+    endif
+    if (allocated(lhs%val_r)) deallocate(lhs%val_r)
+    if (allocated(rhs%val_r)) then
+       if(lhs%type.eq.-21) then
+          val_size=6
+       else
+          val_size=4
+       endif
+       allocate(lhs%val_r(1:val_size))
+       lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
+    endif
+  end subroutine assign_current
+  subroutine finalize_amplitude_QCD(amp)
+    type(amplitude_QCD),intent(inout) :: amp
+    integer :: i
+    if (allocated(amp%current_list)) then
+       do i=1,size(amp%current_list)
+          call finalize_current(amp%current_list(i))
+       enddo
+       deallocate(amp%current_list)
+    endif
+    if (allocated(amp%interaction_list)) then
+       do i=1,size(amp%interaction_list)
+          call finalize_interaction(amp%interaction_list(i))
+       enddo
+       deallocate(amp%interaction_list)
+    endif
+    if (allocated(amp%amps)) deallocate(amp%amps)
+    if (allocated(amp%amps_r)) deallocate(amp%amps_r)
+    if (allocated(amp%pp)) deallocate(amp%pp)
+    if (allocated(amp%diff_col_vals)) deallocate(amp%diff_col_vals)
+    if (allocated(amp%n_cur_start)) deallocate(amp%n_cur_start)
+    if (allocated(amp%n_cur_end)) deallocate(amp%n_cur_end)
+    if (allocated(amp%n_vert_start)) deallocate(amp%n_vert_start)
+    if (allocated(amp%n_vert_end)) deallocate(amp%n_vert_end)
+    if (allocated(amp%pp_bin_to_i)) deallocate(amp%pp_bin_to_i)
+    if (allocated(amp%pp_i_to_bin)) deallocate(amp%pp_i_to_bin)
+    if (allocated(amp%col_index)) deallocate(amp%col_index)
+    if (allocated(amp%n_col_vals)) deallocate(amp%n_col_vals)
+    if (allocated(amp%iproc_start)) deallocate(amp%iproc_start)
+    if (allocated(amp%n_sing)) deallocate(amp%n_sing)
+    if (allocated(amp%n_qqbar)) deallocate(amp%n_qqbar)
+    if (allocated(amp%perm)) deallocate(amp%perm)
+    if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
+    if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
+    if (allocated(amp%processes)) deallocate(amp%processes)
+    if (allocated(amp%same_flavour_proc_map)) deallocate(amp%same_flavour_proc_map)
+    if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)
+    if (allocated(amp%spins)) deallocate(amp%spins)
+    if (allocated(amp%row_index)) deallocate(amp%row_index)
+    if (allocated(amp%include_amp)) deallocate(amp%include_amp)
+    if (allocated(amp%same_flav)) deallocate(amp%same_flav)
+  end subroutine finalize_amplitude_QCD
+  subroutine finalize_interaction(vert)
+    type(interaction),intent(inout) :: vert
+    if (allocated(vert%singlet_mv)) deallocate(vert%singlet_mv)
+    if (allocated(vert%val_c)) deallocate(vert%val_c)
+    if (allocated(vert%val_r)) deallocate(vert%val_r)
+  end subroutine finalize_interaction
+  subroutine finalize_current(cur)
+    type(current),intent(inout) :: cur
+    if (allocated(cur%vertices)) deallocate(cur%vertices)
+    if (allocated(cur%order)) deallocate(cur%order)
+    if (allocated(cur%spin)) deallocate(cur%spin)
+    if (allocated(cur%ext_type)) deallocate(cur%ext_type)
+    if (allocated(cur%vertex_sign)) deallocate(cur%vertex_sign)
+    if (allocated(cur%val_c)) deallocate(cur%val_c)
+    if (allocated(cur%val_r)) deallocate(cur%val_r)
+  end subroutine finalize_current
 end module amplitude_QCD_mod
