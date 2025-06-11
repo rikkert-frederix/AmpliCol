@@ -664,7 +664,8 @@ contains
     real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: vm,M2,TMP
+    real(kind=8) :: vm,M2
+    complex(kind=8) :: TMP
     if (vm.ne.0d0) M2=1d0/vm**2
     pwf(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pwf(0)-wfg1(2)*pwf(1)-wfg1(3)*pwf(2)-wfg1(4)*pwf(3)
@@ -678,7 +679,8 @@ contains
     real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: vm,M2,TMP
+    real(kind=8) :: vm, M2
+    complex(kind=8) :: TMP
     if (vm.ne.0d0) M2=1d0/vm**2
     pwf(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg2(1)*pwf(0)-wfg2(2)*pwf(1)-wfg2(3)*pwf(2)-wfg2(4)*pwf(3)
@@ -691,7 +693,8 @@ contains
     complex(kind=8),dimension(1) :: wfs
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    complex(kind=8) :: TMP,TMP1
+    complex(kind=8) :: TMP
+    real(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2))
     TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
@@ -703,7 +706,8 @@ contains
     complex(kind=8),dimension(1) :: wfs
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    complex(kind=8) :: TMP,TMP1
+    complex(kind=8) :: TMP
+    real(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2)*(1d0-sw**2))
     TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
@@ -716,7 +720,7 @@ contains
     complex(kind=8),dimension(1) :: wfs1
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    complex(kind=8) :: TMP1
+    real(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2))
     TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs1(1)*wfg2(1:4)
@@ -727,7 +731,7 @@ contains
     complex(kind=8),dimension(1) :: wfs1
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    complex(kind=8) :: TMP1
+    real(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2)*(1d0-sw**2))
     TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs1(1)*wfg2(1:4)
@@ -739,7 +743,7 @@ contains
     complex(kind=8),dimension(1) :: wfs2
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    complex(kind=8) :: TMP1
+    real(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2))
     TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs2(1)*wfg1(1:4)
@@ -751,7 +755,7 @@ contains
     complex(kind=8),dimension(1) :: wfs2
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    complex(kind=8) :: TMP1
+    real(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2)*(1d0-sw**2))
     !TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs2(1)*wfg1(1:4)
@@ -1316,7 +1320,7 @@ contains
     complex(kind=8) :: propagator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: vm,vw
-    real(kind=8) :: TMP
+    complex(kind=8) :: TMP
     propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-vm**2+cImag*vm*vw)
     TMP = wfg(1)*p(0)-wfg(2)*p(1)-wfg(3)*p(2)-wfg(4)*p(3)
     wfg(1:4)=propagator*(wfg(1:4))! -(TMP/vm**2)*p(0:3))
