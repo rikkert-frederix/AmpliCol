@@ -1146,7 +1146,7 @@ contains
          ! add z T4b to z vertex
          ! GluonScalartoGluon_vhzz
          coupl=(/pm%get_mass(24),pm%get_mass(25)/)
-         call add_vertex(117,current_list_local(ic1)%type,coupl)
+         call add_vertex(117,current_list_local(ic1)%type,coupl,pm%get_mass(23))
 
      elseif (is_tensor_t4a(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add T4-w to w vertex
@@ -1263,12 +1263,12 @@ contains
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
       all_singlet_middle=.false.
 
-      !if (n1.eq.1.and.n2.eq.1) then
-      !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
-      !        valid_current_combination=.false.
-      !        return
-      !endif
-      !endif
+      if (n1.eq.1.and.n2.eq.1) then
+      if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
+              valid_current_combination=.false.
+              return
+      endif
+      endif
 
       !if (n1.eq.1.and.n2.eq.1) then
       !if (current_list_local(ic1)%order(n1).eq.4.and.current_list_local(ic2)%order(n2).eq.5) then
@@ -1277,12 +1277,12 @@ contains
       !endif
       !endif
 
-      !if (n1.eq.1.and.n2.eq.1) then
-      !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.5) then
-      !        valid_current_combination=.false.
-      !        return
-      !endif
-      !endif
+      if (n1.eq.1.and.n2.eq.1) then
+      if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.5) then
+              valid_current_combination=.false.
+              return
+      endif
+      endif
 
 
 
@@ -2547,8 +2547,11 @@ contains
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
            elseif(this%interaction_list(iv)%type.eq.117) then
              call GluonScalartoGluon_vhzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
 
            elseif(this%interaction_list(iv)%type.eq.118) then
              call ScalarGluontoGluon_vhww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
@@ -2591,13 +2594,15 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
            elseif(this%interaction_list(iv)%type.eq.94) then
              call ScalarGluontoGluon_hww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
            elseif(this%interaction_list(iv)%type.eq.95) then
              call GluonScalartoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
