@@ -657,22 +657,32 @@ contains
     wfq(1:4)=prefact*coupl(1)/(2d0*sw)*wfs1(1)*wfq2(1:4)
   end subroutine ScalarQuarktoQuark
 
-  subroutine GluonScalartoGluon_hzz(wfg1,wfs2,wfg,coupl)
+  subroutine GluonScalartoGluon_hzz(wfg1,pwf1,wfs2,pwf2,wfg,coupl,vm)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(1) :: wfs2
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    wfg(1:4)= prefact*coupl(1)/(sw*(1d0-sw**2))*wfs2(1)*(wfg1(1:4))
+    real(kind=8) :: vm,M2,TMP
+    if (vm.ne.0d0) M2=1d0/vm**2
+    pwf(0:3)=pwf1(0:3)+pwf2(0:3)
+    TMP = wfg1(1)*pwf(0)-wfg1(2)*pwf(1)-wfg1(3)*pwf(2)-wfg1(4)*pwf(3)
+    wfg(1:4)= -prefact*coupl(1)/(sw*(1d0-sw**2))*wfs2(1)*(wfg1(1:4) -M2*TMP*pwf(0:3))
   end subroutine GluonScalartoGluon_hzz
 
-  subroutine ScalarGluontoGluon_hzz(wfs1,wfg2,wfg,coupl)
+  subroutine ScalarGluontoGluon_hzz(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(1) :: wfs1
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    wfg(1:4)= prefact*coupl(1)/(sw*(1d0-sw**2))*wfs1(1)*(wfg2(1:4))
+    real(kind=8) :: vm,M2,TMP
+    if (vm.ne.0d0) M2=1d0/vm**2
+    pwf(0:3)=pwf1(0:3)+pwf2(0:3)
+    TMP = wfg2(1)*pwf(0)-wfg2(2)*pwf(1)-wfg2(3)*pwf(2)-wfg2(4)*pwf(3)
+    wfg(1:4)= -prefact*coupl(1)/(sw*(1d0-sw**2))*wfs1(1)*(wfg2(1:4)-M2*TMP*pwf(0:3))
   end subroutine ScalarGluontoGluon_hzz
 
   subroutine GluonGluontoScalar_vhww(wfg1,wfg2,wfs,coupl)
@@ -683,7 +693,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP,TMP1
     TMP1=1d0/(2d0*(sw**2))
-    TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
     wfs(1)= prefact*TMP1*TMP
   end subroutine GluonGluontoScalar_vhww
@@ -695,7 +705,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP,TMP1
     TMP1=1d0/(2d0*(sw**2)*(1d0-sw**2))
-    TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
     wfs(1)= prefact*TMP1*TMP
   end subroutine GluonGluontoScalar_vhzz
@@ -708,7 +718,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2))
-    TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs1(1)*wfg2(1:4)
   end subroutine ScalarGluontoGluon_vhww
   subroutine ScalarGluontoGluon_vhzz(wfs1,wfg2,wfg,coupl)
@@ -719,7 +729,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2)*(1d0-sw**2))
-    TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs1(1)*wfg2(1:4)
   end subroutine ScalarGluontoGluon_vhzz
 
@@ -731,9 +741,10 @@ contains
     real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2))
-    TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs2(1)*wfg1(1:4)
   end subroutine GluonScalartoGluon_vhww
+
   subroutine GluonScalartoGluon_vhzz(wfg1,wfs2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg
@@ -742,7 +753,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP1
     TMP1=1d0/(2d0*(sw**2)*(1d0-sw**2))
-    TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    !TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     wfg(1:4)= prefact*TMP1*wfs2(1)*wfg1(1:4)
   end subroutine GluonScalartoGluon_vhzz
 
@@ -814,9 +825,9 @@ contains
     real(kind=8) :: sm
     real(kind=8) :: TMP1
     if (coupl(2) .gt. 0d0) then ! for the hhh vertex
-        TMP1 = (3d0/2d0)/sw*(sm**2/coupl(1))
+        TMP1 = (-3d0/2d0)/sw*(sm**2/coupl(1))
     elseif ( coupl(2) .lt. 0d0) then ! for the hhhh vertex decomposition
-        TMP1 = (3d0/4d0)/sw**2*(sm**2/coupl(1)**2)
+        TMP1 = 1d0!(3d0/4d0)/sw**2*(sm**2/coupl(1)**2)
     endif
     wfs(1)= TMP1*prefact*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar_hhh
@@ -1305,8 +1316,10 @@ contains
     complex(kind=8) :: propagator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: vm,vw
+    real(kind=8) :: TMP
     propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-vm**2+cImag*vm*vw)
-    wfg(1:4)=wfg(1:4)*propagator
+    TMP = wfg(1)*p(0)-wfg(2)*p(1)-wfg(3)*p(2)-wfg(4)*p(3)
+    wfg(1:4)=propagator*(wfg(1:4))! -(TMP/vm**2)*p(0:3))
   end subroutine GluonPropagator_mass
 
   subroutine QuarkPropagator(wfq,p,fm,fw)

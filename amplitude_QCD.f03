@@ -1200,11 +1200,11 @@ contains
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
          coupl=(/pm%get_mass(24),0d0/)
          ! add z-h vertex
-         call add_vertex(95,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
+         call add_vertex(95,23,coupl,pm%get_mass(23))
       elseif (is_scalar(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          coupl=(/pm%get_mass(24),0d0/)
          ! add h-z vertex
-         call add_vertex(96,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
+         call add_vertex(96,23,coupl,pm%get_mass(23))
 
       endif
     end subroutine add_if_allowed_threevertex
@@ -1265,7 +1265,6 @@ contains
 
       !if (n1.eq.1.and.n2.eq.1) then
       !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
-      !!!        valid_current_combination=.true.        
       !        valid_current_combination=.false.
       !        return
       !endif
@@ -1273,7 +1272,6 @@ contains
 
       !if (n1.eq.1.and.n2.eq.1) then
       !if (current_list_local(ic1)%order(n1).eq.4.and.current_list_local(ic2)%order(n2).eq.5) then
-      !!        valid_current_combination=.true.
       !        valid_current_combination=.false.
       !        return
       !endif
@@ -1281,19 +1279,14 @@ contains
 
       !if (n1.eq.1.and.n2.eq.1) then
       !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.5) then
-      !!        valid_current_combination=.true.
       !        valid_current_combination=.false.
       !        return
       !endif
       !endif
 
-      !if (n1.eq.1.and.n2.eq.1) then
-      !if (current_list_local(ic1)%order(n1).eq.2.and.current_list_local(ic2)%order(n2).ge.3) then
-      !!        valid_current_combination=.true.
-      !        valid_current_combination=.false.
-      !        return
-      !endif
-      !endif
+
+
+
 
 
       if (current_list_local(ic1)%order(n1)+1 .ne. current_list_local(ic2)%order(1)) then
@@ -2444,6 +2437,7 @@ contains
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.17) then
+
              call QuarkGluontoQuark_z(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
@@ -2606,12 +2600,18 @@ contains
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
            elseif(this%interaction_list(iv)%type.eq.95) then
              call GluonScalartoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
            elseif(this%interaction_list(iv)%type.eq.96) then
              call ScalarGluontoGluon_hzz(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
 
          else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type

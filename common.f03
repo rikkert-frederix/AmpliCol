@@ -2,7 +2,7 @@ module common
   use amplitude_QCD_mod
   implicit none
   ! coupling constants
-  real(kind=8),parameter :: alphaS=0.118d0,alphaEW=0.00754677114d0
+  real(kind=8),parameter :: alphaS=0.118d0,alphaEW=7.5467711139788835E-003
   real(kind=8),parameter :: zmass=91.18800d0, wmass=80.4190024d0, hmass=125d0
   real(kind=8),parameter :: zwidth=2.4414039999d0 ,wwidth=2.04760000000d0, hwidth=6.3823389999999999E-003
 
