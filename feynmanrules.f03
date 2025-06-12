@@ -672,7 +672,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pwf(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pwf(0)-wfg1(2)*pwf(1)-wfg1(3)*pwf(2)-wfg1(4)*pwf(3)
-    wfg(1:4)= -prefact*coupl(1)/(sw*(1d0-sw**2))*wfs2(1)*(-wfg1(1:4) + M2*TMP*pwf(0:3))
+    wfg(1:4)= prefact*coupl(1)/(sw*(1d0-sw**2))*wfs2(1)*(wfg1(1:4) - M2*TMP*pwf(0:3))
   end subroutine GluonScalartoGluon_hzz
 
   subroutine ScalarGluontoGluon_hzz(wfs1,pwf1,wfg2,pwf2,wfg,coupl,vm)
@@ -687,7 +687,7 @@ contains
     if (vm.ne.0d0) M2=1d0/vm**2
     pwf(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg2(1)*pwf(0)-wfg2(2)*pwf(1)-wfg2(3)*pwf(2)-wfg2(4)*pwf(3)
-    wfg(1:4)= -prefact*coupl(1)/(sw*(1d0-sw**2))*wfs1(1)*(-wfg2(1:4) + M2*TMP*pwf(0:3))
+    wfg(1:4)= prefact*coupl(1)/(sw*(1d0-sw**2))*wfs1(1)*(wfg2(1:4) - M2*TMP*pwf(0:3))
   end subroutine ScalarGluontoGluon_hzz
 
   subroutine GluonGluontoScalar_hzz(wfg1,wfg2,wfs,coupl)
@@ -824,8 +824,9 @@ contains
     pwf(0:3)=pwf1(0:3)+pwf2(0:3)
     TMP = wfg1(1)*pwf(0)-wfg1(2)*pwf(1)-wfg1(3)*pwf(2)-wfg1(4)*pwf(3)
     TMP1= 1d0/(2d0*(sw**2)*(1d0-sw**2))
-    !TMP1 = TMP1 /((3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
-    wfg(1:4)= prefact*TMP1*wfs2(1)*(-wfg1(1:4) + M2*TMP*pwf(0:3))
+    !TMP1 = TMP1 /((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
+    wfg(1:4)= -prefact*TMP1*wfs2(1)*(wfg1(1:4)  - M2*TMP*pwf(0:3))
+    wfg(1:4)= wfg(1:4)*(0d0,1d0) ! for the propagator in the scalar tensor
   end subroutine GluonScalartoGluon_vhzz
 
 
@@ -848,7 +849,7 @@ contains
     if (coupl(2) .gt. 0d0) then ! for the hhh vertex
         TMP1 = (-3d0/2d0)/sw*(sm**2/coupl(1))
     elseif ( coupl(2) .lt. 0d0) then ! for the hhhh vertex decomposition
-        TMP1 = -1d0!(3d0/4d0)/sw**2*(sm**2/coupl(1)**2)
+        TMP1 = 1d0 ! ((-3d0/4d0)/sw**2*(coupl(2)**2/coupl(1)**2))
     endif
     wfs(1)= TMP1*prefact*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar_hhh
