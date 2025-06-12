@@ -1148,16 +1148,16 @@ contains
          coupl=(/pm%get_mass(24),pm%get_mass(25)/)
          call add_vertex(117,current_list_local(ic1)%type,coupl,pm%get_mass(23))
 
-     elseif (is_tensor_t4a(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
-         ! add T4-w to w vertex
+     elseif (is_tensor_t4b(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
+         ! add T4b-w to w vertex
          ! ScalarGluontoGluon_vhww
          coupl=(/pm%get_mass(24),pm%get_mass(25)/)
-         call add_vertex(118,current_list_local(ic2)%type,coupl)
-     elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t4a(current_list_local(ic2)%type)) then
-         ! add w T4 to w vertex
+         call add_vertex(118,current_list_local(ic2)%type,coupl,pm%get_mass(24))
+     elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t4b(current_list_local(ic2)%type)) then
+         ! add w-T4b to w vertex
          ! GluonScalartoGluon_vhww
          coupl=(/pm%get_mass(24),pm%get_mass(25)/)
-         call add_vertex(119,current_list_local(ic1)%type,coupl)
+         call add_vertex(119,current_list_local(ic1)%type,coupl,pm%get_mass(24))
 
          
 !-----------------------------------------------------------------
@@ -1192,11 +1192,11 @@ contains
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
          coupl=(/pm%get_mass(24),0d0/)
          ! add w-h vertex
-         call add_vertex(93,current_list_local(ic1)%type,coupl,pm%get_mass(current_list_local(ic1)%type))
+         call add_vertex(93,current_list_local(ic1)%type,coupl,pm%get_mass(24))
       elseif (is_scalar(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          coupl=(/pm%get_mass(24),0d0/)
          ! add h-w vertex
-         call add_vertex(94,current_list_local(ic2)%type,coupl,pm%get_mass(current_list_local(ic2)%type))
+         call add_vertex(94,current_list_local(ic2)%type,coupl,pm%get_mass(24))
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_scalar(current_list_local(ic2)%type)) then
          coupl=(/pm%get_mass(24),0d0/)
          ! add z-h vertex
@@ -1263,12 +1263,19 @@ contains
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
       all_singlet_middle=.false.
 
-      if (n1.eq.1.and.n2.eq.1) then
-      if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
-              valid_current_combination=.false.
-              return
-      endif
-      endif
+      !if (n1.eq.1.and.n2.eq.1) then
+      !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
+      !        valid_current_combination=.false.
+      !        return
+      !endif
+      !endif
+
+      !if (n1.eq.1.and.n2.eq.1) then
+      !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.5) then
+      !        valid_current_combination=.false.
+      !        return
+      !endif
+      !endif
 
       !if (n1.eq.1.and.n2.eq.1) then
       !if (current_list_local(ic1)%order(n1).eq.4.and.current_list_local(ic2)%order(n2).eq.5) then
@@ -1277,12 +1284,6 @@ contains
       !endif
       !endif
 
-      if (n1.eq.1.and.n2.eq.1) then
-      if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.5) then
-              valid_current_combination=.false.
-              return
-      endif
-      endif
 
 
 
@@ -2559,9 +2560,11 @@ contains
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
            elseif(this%interaction_list(iv)%type.eq.119) then
              call GluonScalartoGluon_vhww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl) 
-
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl,&
+                     this%interaction_list(iv)%mass)
 
           ! higgs-quark coupling
           elseif(this%interaction_list(iv)%type.eq.78) then
