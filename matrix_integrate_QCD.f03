@@ -93,7 +93,7 @@ program matrix_integrate_QCD
   call get_run_arguments()
 
   if (integration_step.eq.0) then
-     accuracy=0.001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
      accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
@@ -841,13 +841,18 @@ contains
     ! integration_step=1  (computing bounding envelope)
     ! integration_step=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.eq.3) then
+    if (argc.ge.3 .and. argc .le. 4) then
+            write(*,*) 'it'
        read_proc_from_file=.true.
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,'(a)') filename
           if (i.eq.2) read(argv,*) PS_choice
           if (i.eq.3) read(argv,*) integration_step
+          if (i.eq.4) then
+                  read(argv,*) iseed
+                  write(add_arg(1:),*) iseed
+          endif
        enddo
        open(unit=10,file=filename,status='old')
        read (10,*) next,nproc_unique
