@@ -300,7 +300,6 @@ contains
     lim=tiny
 
     if(p(0).gt.0d0) then
-            stop 3
 ! outgoing final state momenta
        !nhel=(2*ihel-1)
        nhel=ihel
@@ -563,7 +562,8 @@ contains
     if (wm.ne.0d0) M2=1d0/wm**2
     TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
     wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))
+                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))! &
+                       !-M2 * ((-TMP4+TMP5)*TMP1 + TMP6*TMP3 - TMP7 * TMP1 ))
     !stop 22
   end subroutine ThreeGluon_aww
 
@@ -589,11 +589,9 @@ contains
     M2 = 0d0
     if (wm.ne.0d0) M2=1d0/wm**2
     wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
-                       (TMP1*(pwf2(0:3)-pwf1(0:3))-2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       -TMP6*wf2(1:4)+TMP7*wf1(1:4))
-    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
                        (TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))
+                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))!&
+                       !-M2 * (-pwf1(0:3)-pwf2(0:3)) * ((-TMP4+TMP5)*TMP1 + TMP6*TMP3 - TMP7 * TMP1 ))
     !stop 21
   end subroutine ThreeGluon_zww
 

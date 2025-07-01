@@ -1284,6 +1284,14 @@ contains
       !endif
       !endif
 
+      !if (n1.eq.1.and.n2.eq.1) then
+      !if (current_list_local(ic1)%order(n1).eq.2.and.current_list_local(ic2)%order(n2).eq.3) then
+      !        valid_current_combination=.false.
+      !        return
+      !endif
+      !endif
+
+
 
 
 
@@ -2269,7 +2277,7 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
-          !write(*,*) this%interaction_list(iv)%type
+          write(*,*) this%interaction_list(iv)%type
           if (this%interaction_list(iv)%type.eq.0) then
              if (use_real_gluons) then
                 call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
@@ -2842,6 +2850,7 @@ contains
          call GluonPropagator_mass(this%current_list(ic)%val_c, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
                this%current_list(ic)%mass,this%current_list(ic)%width)
+       !write(*,*) this%current_list(ic)%val_c*dsqrt((2d0*4d0*3.14159265d0*7.5467711139788835E-003))
       else
       if (use_real_gluons) then
          call GluonPropagator_real(this%current_list(ic)%val_r, &
@@ -2849,6 +2858,7 @@ contains
       else
          call GluonPropagator(this%current_list(ic)%val_c, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+        !write(*,*) this%current_list(ic)%val_c
       endif
       endif
     end subroutine include_gluon_propagator
