@@ -542,13 +542,16 @@ contains
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
   end subroutine GluonTensortoGluon_Real
 
-  subroutine ThreeGluon_aww(wf1,pwf1,wf2,pwf2,wf,wm)
+  subroutine ThreeGluon_aww(wf1,pwf1,wf2,pwf2,wf,wm,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf
-    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,q
     complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5,TMP6,TMP7,TMP8
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5,TMP6,TMP7,TMP8,TMP9
     real(kind=8) :: wm, M2
+    real(kind=8),dimension(2) :: coupl
+
+    q(0:3) = pwf1(0:3)+pwf2(0:3)
     TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
@@ -558,23 +561,28 @@ contains
     TMP6 = (wf1(1)*pwf1(0)-wf1(2)*pwf1(1)-wf1(3)*pwf1(2)-wf1(4)*pwf1(3))
     TMP7 = (wf2(1)*pwf2(0)-wf2(2)*pwf2(1)-wf2(3)*pwf2(2)-wf2(4)*pwf2(3))
 
-    M2 = 0d0
-    if (wm.ne.0d0) M2=1d0/wm**2
-    TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
-    wf(1:4) = prefact*(TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))! &
-                       !-M2 * ((-TMP4+TMP5)*TMP1 + TMP6*TMP3 - TMP7 * TMP1 ))
+    TMP8 = wf1(1)*q(0)-wf1(2)*q(1)-wf1(3)*q(2)-wf1(4)*q(3)
+    TMP9 = wf2(1)*q(0)-wf2(2)*q(1)-wf2(3)*q(2)-wf2(4)*q(3)
+
+    !M2 = 0d0
+    !if (wm.ne.0d0) M2=1d0/wm**2
+    !TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
+
+    wf(1:4) = prefact*coupl(2)*&
+              (TMP1*(pwf1(0:3)-pwf2(0:3)) - wf1(1:4)*(TMP3 + TMP9) + wf2(1:4)*(TMP2 + TMP8))
     !stop 22
   end subroutine ThreeGluon_aww
 
-  subroutine ThreeGluon_zww(wf1,pwf1,wf2,pwf2,wf,wm)
+  subroutine ThreeGluon_zww(wf1,pwf1,wf2,pwf2,wf,wm,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wf1,wf2,wf
-    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,q
     complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5,TMP6,TMP7,TMP8
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5,TMP6,TMP7,TMP8,TMP9
     real(kind=8) :: wm, M2
+    real(kind=8),dimension(2) :: coupl
 
+    q(0:3) = pwf1(0:3)+pwf2(0:3)
     TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
@@ -584,14 +592,14 @@ contains
     TMP6 = (wf1(1)*pwf1(0)-wf1(2)*pwf1(1)-wf1(3)*pwf1(2)-wf1(4)*pwf1(3))
     TMP7 = (wf2(1)*pwf2(0)-wf2(2)*pwf2(1)-wf2(3)*pwf2(2)-wf2(4)*pwf2(3))
 
-    TMP8 = TMP1*(-TMP4+TMP5) + TMP1*TMP3 - TMP7*TMP2
+    TMP8 = wf1(1)*q(0)-wf1(2)*q(1)-wf1(3)*q(2)-wf1(4)*q(3)
+    TMP9 = wf2(1)*q(0)-wf2(2)*q(1)-wf2(3)*q(2)-wf2(4)*q(3)
 
-    M2 = 0d0
-    if (wm.ne.0d0) M2=1d0/wm**2
-    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
-                       (TMP1*(pwf1(0:3)-pwf2(0:3))+2d0*(TMP2*wf2(1:4)-TMP3*wf1(1:4))&
-                       +TMP6*wf2(1:4)-TMP7*wf1(1:4))!&
-                       !-M2 * (-pwf1(0:3)-pwf2(0:3)) * ((-TMP4+TMP5)*TMP1 + TMP6*TMP3 - TMP7 * TMP1 ))
+    !TMP8 = TMP1*(-TMP4+TMP5) + TMP1*TMP3 - TMP7*TMP2
+    !M2 = 0d0
+    !if (wm.ne.0d0) M2=1d0/wm**2
+    wf(1:4) = prefact*coupl(2)*(-dsqrt(1d0-sw**2)/sw)*&
+              (TMP1*(pwf1(0:3)-pwf2(0:3)) - wf1(1:4)*(TMP3 + TMP9) + wf2(1:4)*(TMP2 + TMP8))
     !stop 21
   end subroutine ThreeGluon_zww
 

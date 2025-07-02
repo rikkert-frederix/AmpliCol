@@ -1000,7 +1000,10 @@ contains
 ! ---------------------------------------------------------------------------
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a w-w to a vertex
-         coupl=(/0d0,0d0/) ! dummy, so that it read sin the mass as last argument below
+         coupl=(/0d0,0d0/) 
+
+         if (sign(1,current_list_local(ic1)%type).gt.0d0) coupl=(/0d0,1d0/)
+         if (sign(1,current_list_local(ic1)%type).lt.0d0) coupl=(/0d0,-1d0/)
 
          if (abs(sign(1,current_list_local(ic1)%type)+sign(1,current_list_local(ic2)%type)) .gt. 0) return
          call add_vertex(24,22,coupl,pm%get_mass(22))
@@ -1270,6 +1273,7 @@ contains
       !endif
       !endif
 
+      
       !if (n1.eq.1.and.n2.eq.1) then
       !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.5) then
       !        valid_current_combination=.false.
@@ -2483,38 +2487,44 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass,&
+                     this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.25) then
              call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass,&
+                     this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.eq.26) then
              call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass,&
+                     this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.27) then
              call threeGluon_zww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass,&
+                     this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.28) then
              call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass,&
+                     this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.eq.29) then
              call threeGluon_aww(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass)
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%mass,&
+                     this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.ge.201 .and. this%interaction_list(iv)%type.le.209) then
              call TwoGluonToTensor(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
