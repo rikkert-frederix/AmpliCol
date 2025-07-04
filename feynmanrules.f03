@@ -567,7 +567,6 @@ contains
     !M2 = 0d0
     !if (wm.ne.0d0) M2=1d0/wm**2
     !TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
-
     wf(1:4) = prefact*coupl(2)*&
               (TMP1*(pwf1(0:3)-pwf2(0:3)) - wf1(1:4)*(TMP3 + TMP9) + wf2(1:4)*(TMP2 + TMP8))
     !stop 22
@@ -603,6 +602,35 @@ contains
     !stop 21
   end subroutine ThreeGluon_zww
 
+
+  subroutine TwoGluontoTensor_4v(wfg1,wfg2,wfT,coupl)
+    ! This vertex includes the all factors such that the tensor "propagator"
+    ! is simply the identity
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg2
+    complex(kind=8),dimension(6) :: wfT
+    complex(kind=8),parameter :: prefact=(0d0,1d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8)  :: TMP1
+
+    if (coupl(1) .eq. 1d0) then ! ww-tensor
+       TMP1= coupl(2)*1d0 
+    elseif (coupl(1) .eq. 2d0) then ! wz-tensor
+       TMP1= coupl(2)*(-(dsqrt(1d0-sw**2)/sw))
+    elseif (coupl(1) .eq. 3d0) then ! wa-tensor
+       TMP1= coupl(2)*1d0
+    endif
+
+    ! Since it is an anti-symmetric 4x4 tensor, take only the upper-right triangle.
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))*TMP1
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))*TMP1
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))*TMP1
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))*TMP1
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))*TMP1
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))*TMP1
+  end subroutine TwoGluontoTensor_4v
+
+
   subroutine TensorGluontoGluon_4v(wfT1,wfg2,wfg,coupl)
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
@@ -612,18 +640,19 @@ contains
     real(kind=8),dimension(2) :: coupl
 
     if (coupl(1) .eq. 1d0) then ! wwww
-       TMP1= prefact*(1d0/sw)
+       TMP1= coupl(2)*prefact*(1d0/sw)**2
     elseif (coupl(1) .eq. 2d0) then ! wwzz
-       TMP1= prefact*(dsqrt(1d0-sw**2)/sw)
-    elseif (coupl(1) .eq. 3d0) then ! wwaa
-       TMP1= prefact*(1d0)
+       TMP1= coupl(2)*prefact*(dsqrt(1d0-sw**2)/sw)
+    elseif (coupl(1) .eq. 3d0) then ! wwaz
+       TMP1= coupl(2)*prefact*(-1d0)
     endif
 
     wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*TMP1
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*TMP1
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*TMP1
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*TMP1
-    !stop 20
+
+   ! stop 20
   end subroutine TensorGluontoGluon_4v
   subroutine GluonTensortoGluon_4v(wfg1,wfT2,wfg,coupl)
     implicit none
@@ -634,17 +663,18 @@ contains
     real(kind=8),dimension(2) :: coupl
 
     if (coupl(1) .eq. 1d0) then ! wwww
-       TMP1= prefact*(1d0/sw)
+       TMP1= coupl(2)*prefact*(1d0/sw)**2
     elseif (coupl(1) .eq. 2d0) then ! wwzz
-       TMP1= prefact*(dsqrt(1d0-sw**2)/sw)
+       TMP1= coupl(2)*prefact*(dsqrt(1d0-sw**2)/sw)
     elseif (coupl(1) .eq. 3d0) then ! wwaz
-       TMP1= prefact*(1d0)
+       TMP1= coupl(2)*prefact*(-1d0)
     endif
 
     wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*TMP1
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*TMP1
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*TMP1
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*TMP1
+
     !stop 19
   end subroutine GluonTensortoGluon_4v
 
