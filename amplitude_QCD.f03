@@ -105,7 +105,6 @@ contains
    
     do isize=1,n-1
        this%n_cur_start(isize)=this%n_cur+1
-       write(*,*) 'n cur start for isize',isize,this%n_cur_start(isize)
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
        if (isize.eq.1) then
           ! external currents
@@ -117,7 +116,6 @@ contains
                 ! corresponding two different-flavour amplitudes
                 if (this%same_flav(iproc)) cycle
                 do ispin=1, spin(0,order(nc,iproc))
-                   write(*,*) 'creating',nc,order(nc,iproc)
                    call create_external_current(nc,iproc,spin(ispin,order(nc,iproc)),&
                         this%processes(order(nc,iproc),iproc),order(nc,iproc))
                 enddo
@@ -163,7 +161,6 @@ contains
       implicit none
       integer,intent(in) :: nc,ispin,ipart,iorder,iproc
       integer :: i,ic
-      write(*,*) 'type',ipart
       do ic=1,this%n_cur
          if (current_list_local(ic)%order(1).ne.iorder) cycle
          if (iorder.le.2 .and. abs(ipart).le.6) then
@@ -179,7 +176,6 @@ contains
       enddo
       ! new external current
       this%n_cur=this%n_cur+1
-      write(*,*) 'nr',this%n_cur
       allocate(current_list_local(this%n_cur)%order(isize))
       current_list_local(this%n_cur)%order(1)=iorder
       if (iorder.le.2 .and. abs(ipart).le.6) then ! initial quark states
@@ -1024,7 +1020,6 @@ contains
          ! add a w-z to w veritex
          !call add_vertex(26,current_list_local(ic1)%type)
          ! add a wz to T2 vertex
-         write(*,*) 'ic1,ic2 wz',ic1,ic2
          coupl=(/2d0,1d0/)
          if (sign(1,current_list_local(ic1)%type) .gt. 0)  call add_vertex(202,-102,coupl)
          coupl=(/2d0,1d0/)
@@ -1038,7 +1033,6 @@ contains
 
          ! add a zw to T2
          coupl=(/2d0,-1d0/)
-         write(*,*) 'ic1,ic2',ic1,ic2
          if (sign(1,current_list_local(ic2)%type) .gt. 0)  call add_vertex(204,-102,coupl)
          coupl=(/2d0,-1d0/)
          ! add a zw to T3 vertex
@@ -1331,13 +1325,9 @@ contains
          if (maxval(current_list_local(ic1)%order(1:n1)).ge.maxval(current_list_local(ic2)%order(1:n2))) then !.or.&
             ! minval(current_list_local(ic1)%order(1:n1)).ge.minval(current_list_local(ic2)%order(1:n2))) then !.or.&
             !all_singlet_middle) then
-            !write(*,*) 'returning',current_list_local(ic1)%order(1:n1),current_list_local(ic2)%order(1:n2)
             return
          else
-            write(*,*) 'yes',current_list_local(ic1)%order(1:n1)
-            write(*,*) 'hip',current_list_local(ic2)%order(1:n2)
             valid_current_combination=.true.
-            !write(*,*) 'accept current',current_list_local(ic1)%order(1:n1),current_list_local(ic2)%order(1:n2)
             return ! no need to check further: below are only checks about the colours
          endif
       endif
@@ -2544,9 +2534,6 @@ contains
                      this%interaction_list(iv)%coupl)
 
           elseif(this%interaction_list(iv)%type.ge.201 .and. this%interaction_list(iv)%type.le.209) then
-             !write(*,*) ' '
-             !write(*,*) this%interaction_list(iv)%currents(1)
-             !write(*,*) this%interaction_list(iv)%currents(2)
              call TwoGluonToTensor_4v(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:6),this%interaction_list(iv)%coupl)
@@ -2572,9 +2559,6 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
           elseif(this%interaction_list(iv)%type.ge.107 .and. this%interaction_list(iv)%type.le.113) then
-             !write(*,*) ' '
-             !write(*,*) this%interaction_list(iv)%currents(1)
-             !write(*,*) this%interaction_list(iv)%currents(2)
              call GluonTensortoGluon_4v(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                      this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl)
@@ -2883,7 +2867,6 @@ contains
          call GluonPropagator_mass(this%current_list(ic)%val_c, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
                this%current_list(ic)%mass,this%current_list(ic)%width)
-       !write(*,*) this%current_list(ic)%val_c*dsqrt((2d0*4d0*3.14159265d0*7.5467711139788835E-003))
       else
       if (use_real_gluons) then
          call GluonPropagator_real(this%current_list(ic)%val_r, &
@@ -2891,7 +2874,6 @@ contains
       else
          call GluonPropagator(this%current_list(ic)%val_c, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
-        !write(*,*) this%current_list(ic)%val_c
       endif
       endif
     end subroutine include_gluon_propagator
@@ -3586,8 +3568,6 @@ contains
     where_to_cur=0
     where_to_ver=0
     where_to_amp=0
-    write(*,*) this%n_cur_start(n  ),this%n_cur_end(n  )
-    write(*,*) this%n_cur_start(n-1),this%n_cur_end(n-1)
     if (.not.present(include_current)) then
        is_needed_cur(this%n_cur_start(n-1):this%n_cur_end(n-1))=.true.
        is_needed_cur(this%n_cur_start(n  ):this%n_cur_end(n  ))=.true.
