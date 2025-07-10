@@ -929,6 +929,7 @@ contains
          else
             coupl=(/-1d0/3d0,-1d0/2d0/)
          endif
+         
          call add_vertex(17,current_list_local(ic1)%type,coupl)
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
          ! add a z-antiquark to quark vertex
@@ -1018,9 +1019,9 @@ contains
          ! comment for 4v
 
          ! add a ww to T1 vertex
-         coupl=(/1d0,1d0/)
+         coupl=(/1d0,1d0/) 
          if (sign(1,current_list_local(ic1)%type) .gt. 0) coupl=(/1d0,1d0/)
-        if (sign(1,current_list_local(ic1)%type) .lt. 0) coupl=(/1d0,-1d0/) 
+         if (sign(1,current_list_local(ic1)%type) .lt. 0) coupl=(/1d0,-1d0/) 
 
          call add_vertex(201,-101, coupl)
          
@@ -1049,6 +1050,7 @@ contains
       elseif (is_singlet_z(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a z-w to w vertex
          coupl=(/1d0,pm%get_mass(24)/)
+
          call add_vertex(27,current_list_local(ic2)%type,coupl,pm%get_mass(24))
          ! comment for 4v
 
@@ -1097,52 +1099,51 @@ contains
       ! vector boson-tensor vertices 
       elseif (is_tensor_t1(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a (T1 w to w) vertex
-         coupl=(/1d0,-1d0/) 
+         coupl=(/1d0,1d0/) 
          call add_vertex(100,current_list_local(ic2)%type,coupl)
 
       elseif (is_tensor_t2(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a (T2 w to a) vertex
-         coupl=(/3d0,-1d0/)
+         coupl=(/3d0,1d0/)
          if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(101,22,coupl)
          ! add a (T2 w to z) vertex
-         coupl=(/2d0,-1d0/)
+         coupl=(/2d0,1d0/)
          if (sign(1,current_list_local(ic2)%type) .lt. 0) call add_vertex(102,23,coupl)
 
       elseif (is_tensor_t3(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a (T3 w to a) vertex
-         coupl=(/3d0,-1d0/)
+         coupl=(/3d0,1d0/)
          if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(103,22,coupl)
          ! add a (T3 w to z) vertex
-         coupl=(/2d0,-1d0/)
+         coupl=(/2d0,1d0/)
          if (sign(1,current_list_local(ic2)%type) .gt. 0) call add_vertex(104,23,coupl)
 
       elseif (is_tensor_t2(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a (T2 a to w) vertex
-         coupl=(/3d0,-1d0/) 
+         coupl=(/3d0,1d0/) 
          call add_vertex(105,24,coupl)
 
       elseif (is_tensor_t2(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a (T2 z to w) vertex
-         coupl=(/2d0,-1d0/) ! 
+         coupl=(/2d0,1d0/) ! 
          call add_vertex(106,24,coupl)
 
       elseif (is_tensor_t3(current_list_local(ic1)%type) .and. is_singlet_a(current_list_local(ic2)%type)) then
          ! add a (T3 a to w) vertex
-         coupl=(/3d0,-1d0/)
+         coupl=(/3d0,1d0/)
          call add_vertex(107,-24,coupl)
 
      elseif (is_tensor_t3(current_list_local(ic1)%type) .and. is_singlet_z(current_list_local(ic2)%type)) then
          ! add a (T3 z to w) vertex
-         coupl=(/2d0,-1d0/)
+         coupl=(/2d0,1d0/)
          call add_vertex(108,-24,coupl)
 
      elseif (is_tensor_t3(current_list_local(ic1)%type) .and. is_singlet_w(current_list_local(ic2)%type)) then
          ! add a (T3 w to z) vertex
-         coupl=(/2d0,-1d0/)
-         stop 6
+         coupl=(/2d0,1d0/)
          call add_vertex(107,23,coupl)
          ! add a (T3 w to a) vertex
-         coupl=(/2d0,-1d0/)
+         coupl=(/2d0,1d0/)
          call add_vertex(108,22,coupl)
 
       elseif (is_singlet_w(current_list_local(ic1)%type) .and. is_tensor_t1(current_list_local(ic2)%type)) then
@@ -1321,12 +1322,12 @@ contains
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
       all_singlet_middle=.false.
 
-      !if (n1.eq.1.and.n2.eq.1) then
-      !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
-      !        valid_current_combination=.false.
-      !        return
-      !endif
-      !endif
+     !if (n1.eq.1.and.n2.eq.1) then
+     !if (current_list_local(ic1)%order(n1).eq.3.and.current_list_local(ic2)%order(n2).eq.4) then
+     !         valid_current_combination=.false.
+     !         return
+     ! endif
+     ! endif
 
       
       !if (n1.eq.1.and.n2.eq.1) then
@@ -1488,7 +1489,6 @@ contains
       real(kind=8),dimension(2),optional :: coupl
       real(kind=8),optional :: mass
      
-      write(*,*) ctype
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) then
