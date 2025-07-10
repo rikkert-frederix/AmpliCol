@@ -567,7 +567,7 @@ contains
     !M2 = 0d0
     !if (wm.ne.0d0) M2=1d0/wm**2
     !TMP8 = TMP1*(-TMP4+TMP5) + TMP6*TMP3 - TMP6*TMP2
-    wf(1:4) = prefact*coupl(2)*&
+    wf(1:4) = prefact*&
               (TMP1*(pwf1(0:3)-pwf2(0:3)) - wf1(1:4)*(TMP3 + TMP9) + wf2(1:4)*(TMP2 + TMP8))
     !stop 22
   end subroutine ThreeGluon_aww
@@ -581,7 +581,7 @@ contains
     real(kind=8) :: wm, M2
     real(kind=8),dimension(2) :: coupl
 
-    q(0:3) = pwf1(0:3)+pwf2(0:3)
+    q(0:3) = -(pwf1(0:3)+pwf2(0:3))
     TMP1 = (wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4))
     TMP2 = (wf1(1)*pwf2(0)-wf1(2)*pwf2(1)-wf1(3)*pwf2(2)-wf1(4)*pwf2(3))
     TMP3 = (wf2(1)*pwf1(0)-wf2(2)*pwf1(1)-wf2(3)*pwf1(2)-wf2(4)*pwf1(3))
@@ -594,11 +594,12 @@ contains
     TMP8 = wf1(1)*q(0)-wf1(2)*q(1)-wf1(3)*q(2)-wf1(4)*q(3)
     TMP9 = wf2(1)*q(0)-wf2(2)*q(1)-wf2(3)*q(2)-wf2(4)*q(3)
 
-    !TMP8 = TMP1*(-TMP4+TMP5) + TMP1*TMP3 - TMP7*TMP2
-    !M2 = 0d0
-    !if (wm.ne.0d0) M2=1d0/wm**2
-    wf(1:4) = prefact*coupl(2)*(-dsqrt(1d0-sw**2)/sw)*&
-              (TMP1*(pwf1(0:3)-pwf2(0:3)) - wf1(1:4)*(TMP3 + TMP9) + wf2(1:4)*(TMP2 + TMP8))
+    M2 = 0d0
+    if (wm.ne.0d0) M2=1d0/wm**2
+    wf(1:4) = prefact*(-dsqrt(1d0-sw**2)/sw)*&
+              ((TMP1*(-pwf1(0:3)+pwf2(0:3)) + wf1(1:4)*(TMP3 - TMP9) + wf2(1:4)*(TMP8 - TMP2))&
+              +q(0:3)*M2*(TMP1 *(-TMP4+TMP5) - TMP6 * TMP3 + TMP7 * TMP2))
+
     !stop 21
   end subroutine ThreeGluon_zww
 
@@ -622,12 +623,12 @@ contains
     endif
 
     ! Since it is an anti-symmetric 4x4 tensor, take only the upper-right triangle.
-    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))*TMP1
-    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))*TMP1
-    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))*TMP1
-    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))*TMP1
-    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))*TMP1
-    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))*TMP1
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))*TMP1!*(0d0,1d0)
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))*TMP1!*(0d0,1d0)
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))*TMP1!*(0d0,1d0)
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))*TMP1!*(0d0,1d0)
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))*TMP1!*(0d0,1d0)
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))*TMP1!*(0d0,1d0)
   end subroutine TwoGluontoTensor_4v
 
 
@@ -639,18 +640,18 @@ contains
     complex(kind=8) :: TMP1
     real(kind=8),dimension(2) :: coupl
 
-    if (coupl(1) .eq. 1d0) then ! wwww
+    if (coupl(1) .eq. 1d0) then 
        TMP1= coupl(2)*prefact*(1d0/sw)**2
-    elseif (coupl(1) .eq. 2d0) then ! wwzz
+    elseif (coupl(1) .eq. 2d0) then 
        TMP1= coupl(2)*prefact*(dsqrt(1d0-sw**2)/sw)
-    elseif (coupl(1) .eq. 3d0) then ! wwaz
+    elseif (coupl(1) .eq. 3d0) then 
        TMP1= coupl(2)*prefact*(-1d0)
     endif
 
-    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*TMP1
-    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*TMP1
-    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*TMP1
-    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*TMP1
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*TMP1!*(0d0,1d0)
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*TMP1!*(0d0,1d0)
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*TMP1!*(0d0,1d0)
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*TMP1!*(0d0,1d0)
 
    ! stop 20
   end subroutine TensorGluontoGluon_4v
@@ -670,10 +671,10 @@ contains
        TMP1= coupl(2)*prefact*(-1d0)
     endif
 
-    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*TMP1
-    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*TMP1
-    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*TMP1
-    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*TMP1
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*TMP1!*(0d0,1d0)
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*TMP1!*(0d0,1d0)
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*TMP1!*(0d0,1d0)
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*TMP1!*(0d0,1d0)
 
     !stop 19
   end subroutine GluonTensortoGluon_4v
