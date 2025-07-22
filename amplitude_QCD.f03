@@ -1623,7 +1623,7 @@ contains
       implicit none
       type(current),intent(in) :: curr
       integer,intent(in) :: len
-      if (any(curr%ext_type(1:len).lt.22)) then
+      if (any(abs(curr%ext_type(1:len)).lt.22)) then
          all_singlet_current=.false.
       else
          all_singlet_current=.true.
