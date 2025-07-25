@@ -1,0 +1,130 @@
+module handling_events
+  use common
+  integer :: iproc_picked,iproc_iden_picked
+  integer,dimension(2) :: hel_picked
+  real(kind=8) :: evt_sign
+contains
+  subroutine write_event(iunit,pgl,wgt)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer :: i,iunit
+    real(kind=8) :: wgt
+    real(kind=8),external :: ran2
+    write (iunit,*) '<event>'
+    write (iunit,*) pgl%next,sign(wgt,evt_sign)
+    write (iunit,'(100i3)') pgl%amps%spins(1:pgl%next,hel_picked(1),hel_picked(2))
+!!$    if (.not.read_proc_from_file) iproc_picked=1
+    write (iunit,'(100i3)') pgl%color_orders(1:pgl%next,iproc_picked)
+    ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
+    ! compensate for reducing the number of integration channels assuming
+    ! symmetric initial states, we need to randomly flip all z-components in
+    ! those cases. Easiest to always do this if the two incoming particles are
+    ! identical.
+    if (pgl%processes(1,iproc_picked).ne.pgl%processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
+       ! do not flip
+       do i=1,pgl%next
+          write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
+               pgl%phase_space%p(1:3,i),pgl%phase_space%p(0,i)
+       enddo
+    else
+       ! do flip
+       do i=1,pgl%next
+          if (i.le.2) then
+             write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
+                  pgl%phase_space%p(1:2,3-i),-pgl%phase_space%p(3,3-i),pgl%phase_space%p(0,3-i)
+          else
+             write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
+                  pgl%phase_space%p(1:2,i),-pgl%phase_space%p(3,i),pgl%phase_space%p(0,i)
+          endif
+       enddo
+    endif
+    write (iunit,*) '</event>'
+  end subroutine write_event
+
+  subroutine unwgt_process(pgl)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer :: i,iproc
+    real(kind=8) :: random,accum,target
+    real(kind=8),external :: ran2
+    target=0d0
+    do iproc=1,pgl%nproc
+       do i=1,pgl%iden_iproc(iproc)
+          target=target+abs(pgl%val_procs(i,iproc))
+       enddo
+    enddo
+    random=ran2()*target
+    iproc=1
+    i=1
+    accum=abs(pgl%val_procs(i,iproc))
+    do
+       if (accum.gt.random) then
+          exit
+       else
+          i=i+1
+          if (i.gt.pgl%iden_iproc(iproc)) then
+             i=1
+             iproc=iproc+1
+          endif
+          accum=accum+abs(pgl%val_procs(i,iproc))
+       endif
+    enddo
+    iproc_picked=iproc
+    iproc_iden_picked=i
+    if (iproc_picked.gt.pgl%amps%nprocs) then
+       write (*,*) "Could not unweight process",iproc_picked,pgl%amps%nprocs
+       stop 1
+    endif
+    if (iproc_iden_picked.gt.pgl%iden_iproc(iproc)) then
+       write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl%iden_iproc(iproc)
+       stop 1
+    endif
+    if (pgl%val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
+       evt_sign=-1d0
+    else
+       evt_sign=+1d0
+    endif
+  end subroutine unwgt_process
+
+  subroutine unwgt_helicity(pgl)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer :: i,iproc
+    real(kind=8) :: random
+    real(kind=8),external :: ran2
+
+!!$    if (.not.read_proc_from_file .and. pgl%amps%nprocs.eq.3) then
+!!$       do iproc=1,pgl%amps%nprocs
+!!$          if (pgl%amps%same_flav(iproc)) then
+!!$             iproc_picked=iproc
+!!$             exit
+!!$          endif
+!!$       enddo
+!!$    endif
+    random=ran2()*pgl%amp2(iproc_picked)
+    i=pgl%amps%iproc_start(iproc_picked)
+    do
+       if (pgl%amp2_hel(i).gt.random) then
+          exit
+       else
+          i=i+1
+          pgl%amp2_hel(i)=pgl%amp2_hel(i)+pgl%amp2_hel(i-1)
+       endif
+    enddo
+    hel_picked(2)=i
+    if ( hel_picked(2).lt.pgl%amps%iproc_start(iproc_picked) .or. &
+         hel_picked(2).ge.pgl%amps%iproc_start(iproc_picked+1)) then
+       write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,pgl%amps%iproc_start(iproc_picked),&
+            pgl%amps%iproc_start(iproc_picked+1)
+       stop 1
+    endif
+    if (pgl%hel_fac(hel_picked(2)).gt.1) then
+       hel_picked(1)=1+int(ran2()*pgl%hel_fac(hel_picked(2)))
+    else
+       hel_picked(1)=1
+    endif
+  end subroutine unwgt_helicity
+  
+
+  
+end module handling_events

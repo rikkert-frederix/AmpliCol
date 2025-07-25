@@ -10,6 +10,8 @@ program matrix_integrate_QCD
   use particles
   use amplitude_QCD_mod
   use cuts
+  use pdf_help
+  use handling_events
   implicit none
   type(physics_model) :: phys_model
   integer :: next,iproc
@@ -17,12 +19,10 @@ program matrix_integrate_QCD
   integer :: j,c_o,i
   integer(kind=4),dimension(:),allocatable :: o,part
   real(kind=8),dimension(:),allocatable :: mass,width
-  real(kind=8) :: s_cut(2),sqrts,evt_sign
+  real(kind=8) :: sqrts
   character(len=80) :: filename
   integer(kind=4) :: PS_choice,nquarks
   integer,parameter :: nevent_hel_filter=10
-  integer,dimension(2) :: hel_picked
-  integer :: iproc_picked,iproc_iden_picked
   integer :: ngroups,igroup,integration_step
   logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
   logical :: read_proc_from_file
@@ -196,9 +196,9 @@ program matrix_integrate_QCD
      if (COMMAND_ARGUMENT_COUNT().le.10) call write_unique_in_file()
      do j=1,abs(ncalls0)
         call gen(integrand,1,2) ! generate an unweighted event
-        call unwgt_process      ! pick a random process
-        call unwgt_helicity     ! pick a random helicity for the process picked
-        call write_event(11,sign(ans(1,0),evt_sign))
+        call unwgt_process(pgl(ichan))      ! pick a random process
+        call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
+        call write_event(11,pgl(ichan),ans(1,0))
      enddo
      close(11)
      call gen(integrand,3,-1) ! print counters
@@ -572,125 +572,6 @@ contains
   end subroutine setup_helicity_filter
 
 
-  subroutine write_event(iunit,wgt)
-    implicit none
-    integer :: i,iunit
-    real(kind=8) :: wgt
-    real(kind=8),external :: ran2
-    write (iunit,*) '<event>'
-    write (iunit,*) next,wgt!,pgl(ichan)%amp2(iproc_picked)*weight,pgl(ichan)%amp2(iproc_picked),weight
-    write (iunit,'(100i3)') pgl(ichan)%amps%spins(1:next,hel_picked(1),hel_picked(2))
-    if (.not.read_proc_from_file) iproc_picked=1
-    write (iunit,'(100i3)') pgl(ichan)%color_orders(1:next,iproc_picked)
-    ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
-    ! compensate for reducing the number of integration channels assuming
-    ! symmetric initial states, we need to randomly flip all z-components in
-    ! those cases. Easiest to always do this if the two incoming particles are
-    ! identical.
-    if (pgl(ichan)%processes(1,iproc_picked).ne.pgl(ichan)%processes(2,iproc_picked) .or. ran2().lt.0.5d0) then
-       ! do not flip
-       do i=1,next
-          write (iunit,*) pgl(ichan)%iden_processes(i,iproc_iden_picked,iproc_picked),&
-               pgl(ichan)%phase_space%p(1:3,i),pgl(ichan)%phase_space%p(0,i)
-       enddo
-    else
-       ! do flip
-       do i=1,next
-          if (i.le.2) then
-             write (iunit,*) pgl(ichan)%iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  pgl(ichan)%phase_space%p(1:2,3-i),-pgl(ichan)%phase_space%p(3,3-i),pgl(ichan)%phase_space%p(0,3-i)
-          else
-             write (iunit,*) pgl(ichan)%iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  pgl(ichan)%phase_space%p(1:2,i),-pgl(ichan)%phase_space%p(3,i),pgl(ichan)%phase_space%p(0,i)
-          endif
-       enddo
-    endif
-    write (iunit,*) '</event>'
-  end subroutine write_event
-
-  subroutine unwgt_process
-    implicit none
-    integer :: i,iproc
-    real(kind=8) :: random,accum,target
-    real(kind=8),external :: ran2
-    target=0d0
-    do iproc=1,pgl(ichan)%nproc
-       do i=1,pgl(ichan)%iden_iproc(iproc)
-          target=target+abs(pgl(ichan)%val_procs(i,iproc))
-       enddo
-    enddo
-    random=ran2()*target
-    iproc=1
-    i=1
-    accum=abs(pgl(ichan)%val_procs(i,iproc))
-    do
-       if (accum.gt.random) then
-          exit
-       else
-          i=i+1
-          if (i.gt.pgl(ichan)%iden_iproc(iproc)) then
-             i=1
-             iproc=iproc+1
-          endif
-          accum=accum+abs(pgl(ichan)%val_procs(i,iproc))
-       endif
-    enddo
-    iproc_picked=iproc
-    iproc_iden_picked=i
-    if (iproc_picked.gt.pgl(ichan)%amps%nprocs) then
-       write (*,*) "Could not unweight process",iproc_picked,pgl(ichan)%amps%nprocs
-       stop 1
-    endif
-    if (iproc_iden_picked.gt.pgl(ichan)%iden_iproc(iproc)) then
-       write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl(ichan)%iden_iproc(iproc)
-       stop 1
-    endif
-    if (pgl(ichan)%val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
-       evt_sign=-1d0
-    else
-       evt_sign=+1d0
-    endif
-  end subroutine unwgt_process
-  
-
-  subroutine unwgt_helicity
-    implicit none
-    integer :: i
-    real(kind=8) :: random
-    real(kind=8),external :: ran2
-
-    if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3) then
-            do iproc=1,pgl(ichan)%amps%nprocs
-               if (pgl(ichan)%amps%same_flav(iproc)) then
-                       iproc_picked=iproc
-                       exit
-                endif
-            enddo
-    endif
-    random=ran2()*pgl(ichan)%amp2(iproc_picked)
-    i=pgl(ichan)%amps%iproc_start(iproc_picked)
-    do
-       if (pgl(ichan)%amp2_hel(i).gt.random) then
-          exit
-       else
-          i=i+1
-          pgl(ichan)%amp2_hel(i)=pgl(ichan)%amp2_hel(i)+pgl(ichan)%amp2_hel(i-1)
-       endif
-    enddo
-    hel_picked(2)=i
-    if ( hel_picked(2).lt.pgl(ichan)%amps%iproc_start(iproc_picked) .or. &
-         hel_picked(2).ge.pgl(ichan)%amps%iproc_start(iproc_picked+1)) then
-       write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,pgl(ichan)%amps%iproc_start(iproc_picked),&
-            pgl(ichan)%amps%iproc_start(iproc_picked+1)
-       stop 1
-    endif
-    if (pgl(ichan)%hel_fac(hel_picked(2)).gt.1) then
-       hel_picked(1)=1+int(ran2()*pgl(ichan)%hel_fac(hel_picked(2)))
-    else
-       hel_picked(1)=1
-    endif
-  end subroutine unwgt_helicity
-  
   subroutine get_run_arguments()
     implicit none
     integer :: argc,n_ps
@@ -1535,68 +1416,6 @@ contains
     only_virt=.false.
   end subroutine set_mint_module_special_parameters
   
-  subroutine set_ipdgs_for_PDF(pgl)
-    ! determines for which flavours the PDFs should be evolved
-    implicit none
-    type(phase_space_order_group),intent(inout) :: pgl
-    integer :: iflav,iproc
-    pgl%ipdgs(-6:7,1:2)=.false.
-    do iflav=-6,7
-       do iproc=1,pgl%nproc
-          if (iflav.eq.0) then    ! gluon
-             if (any(pgl%iden_processes(1,1:pgl%iden_iproc(iproc),iproc).eq.21)) pgl%ipdgs(iflav,1)=.true.
-             if (any(pgl%iden_processes(2,1:pgl%iden_iproc(iproc),iproc).eq.21)) pgl%ipdgs(iflav,2)=.true.
-          elseif(iflav.eq.7) then ! photon
-             if (any(pgl%iden_processes(1,1:pgl%iden_iproc(iproc),iproc).eq.22)) pgl%ipdgs(iflav,1)=.true.
-             if (any(pgl%iden_processes(2,1:pgl%iden_iproc(iproc),iproc).eq.22)) pgl%ipdgs(iflav,2)=.true.
-          else                    ! quarks and anti-quarks
-             if (any(pgl%iden_processes(1,1:pgl%iden_iproc(iproc),iproc).eq.iflav)) pgl%ipdgs(iflav,1)=.true.
-             if (any(pgl%iden_processes(2,1:pgl%iden_iproc(iproc),iproc).eq.iflav)) pgl%ipdgs(iflav,2)=.true.
-          endif
-       enddo
-    enddo
-  end subroutine set_ipdgs_for_PDF
-
-  subroutine include_PDF_and_identical_procs(val,val_abs,pgl)
-    implicit none
-    type(phase_space_order_group),intent(inout) :: pgl
-    real(kind=8),intent(inout),dimension(*) :: val,val_abs
-    integer :: iproc,ip
-    real(kind=8) :: xmu_fac
-    real(kind=8), dimension(-6:7,2) :: PDF
-    if (include_pdf) then
-       ! Include the PDFs
-       xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,pgl%ipdgs(-6,1),pgl%phase_space%xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
-    endif
-    do iproc=1,pgl%nproc
-       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)*pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
-       if (include_pdf) then
-          do ip=1,pgl%iden_iproc(iproc)
-             ! first incoming particle
-             if (pgl%iden_processes(1,ip,iproc).eq.21) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(0,1)
-             elseif(pgl%iden_processes(1,ip,iproc).eq.22) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(7,1)
-             else
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(pgl%iden_processes(1,ip,iproc),1)
-             endif
-             ! second incoming particle
-             if (pgl%iden_processes(2,ip,iproc).eq.21) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(0,2)
-             elseif(pgl%iden_processes(2,ip,iproc).eq.22) then
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(7,2)
-             else
-                pgl%val_procs(ip,iproc)=pgl%val_procs(ip,iproc)*PDF(pgl%iden_processes(2,ip,iproc),2)
-             endif
-          enddo
-       endif
-       val(iproc)=sum(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc))
-       val_abs(iproc)=sum(abs(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)))
-    enddo
-  end subroutine include_PDF_and_identical_procs
-
   subroutine define_identical_procs(pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
