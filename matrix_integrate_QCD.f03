@@ -74,7 +74,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-100000
+     ncalls0=-500000
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
@@ -88,12 +88,14 @@ program matrix_integrate_QCD
 
   if (include_pdf) call PDF_initialise
 
-  call phys_model%init_part(173d0,1.491500d0)
+  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+!!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+  call phys_model%init_vert()
 
   call get_run_arguments()
 
   if (integration_step.eq.0) then
-     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     accuracy=0.001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
      accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
@@ -263,7 +265,7 @@ contains
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(ndim) :: x
     real(kind=8),external :: ran2
-    allocate(phase_space_genpt :: pgl_unique%phase_space)
+    allocate(phase_space_gen23 :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%color_orders(next,nproc_unique))
     allocate(pgl_unique%phase_space_orders(next))
@@ -311,7 +313,7 @@ contains
         call pgl_unique%phase_space%generate_momenta(x)
         if (pgl_unique%phase_space%jac.lt.0d0) cycle
         ievent=ievent+1
-        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file)
+        call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model)
         iproc=0
         amp2(ievent,:)=0d0
         if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
@@ -412,13 +414,12 @@ contains
     endif
     
     pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
-
+    
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
        pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
-
 
     if (.not.pass_cuts(pgl(ichan))) then
        pass_cuts_check=.false.
@@ -431,7 +432,7 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file)
+    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model)
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     
@@ -462,7 +463,6 @@ contains
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
-    
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
        call setup_helicity_filter(pgl(ichan))
        if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
@@ -842,7 +842,6 @@ contains
     ! integration_step=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
     if (argc.ge.3 .and. argc .le. 4) then
-            write(*,*) 'it'
        read_proc_from_file=.true.
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
@@ -1337,12 +1336,17 @@ contains
     integer,dimension(n),intent(inout) :: array
     integer,dimension(n),intent(out) :: mapping
     integer :: i, j, temp
+    ! 'array_map' maps the PDG codes to the 'sort_particle' codes
+    ! (see Utilities/process_list.py)
+    integer,dimension(-24:25),parameter :: array_map=[83,0,0,0,0,0,0&
+         &,0,95,88,93,86,91,84,0,0,0,0,12,11,10,9,8,7,0,1,2,3,4,5,6,0,0&
+         &,0,0,85,90,87,92,89,94,0,0,0,0,13,80,81,82,96]
     ! Initialize mapping
     mapping = [(i,i=1,n)]
     ! Sort the array and mapping using a simple bubble sort
     do i=1,n-1
        do j=1,n-i
-          if (array(j) .gt. array(j+1)) then
+          if (array_map(array(j)) .gt. array_map(array(j+1))) then
              ! Swap array elements
              temp = array(j)
              array(j) = array(j+1)
@@ -1384,8 +1388,14 @@ contains
     do i=1,next
        pgl%spin(0,i)=phys_model%get_spin(pgl%processes(i,1))
        if (pgl%spin(0,i).eq.2) then
+          pgl%spin(1,i)=0
+          pgl%spin(2,i)=1
+       elseif (pgl%spin(0,i).eq.3) then
           pgl%spin(1,i)=-1
           pgl%spin(2,i)=1
+          pgl%spin(3,i)=0
+       elseif (pgl%spin(0,i).eq.1) then
+          pgl%spin(1,i)=0
        else
           write (*,*) 'spin state not known',i,pgl%processes(i,1),pgl%spin(0,i)
           stop 1
@@ -1619,7 +1629,7 @@ contains
        endif
        if (abs(pgl%processes(pgl%color_orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%color_orders(next,iproc),iproc)) &
             .and. .not.pgl%amps%same_flav(iproc)) then
-          ifac=ifac-2
+          if (all(abs(pgl%processes(1:next,iproc)).ne.24)) ifac=ifac-2
        endif
        pgl%col_fac(iproc)=3**ifac
     enddo
@@ -2150,7 +2160,7 @@ contains
     enddo
     ! cuts on jet-photon pair
     do i=1,next
-          do j=1,next
+       do j=1,next
           if (i.eq.j) cycle
           if (.not.((is_jet(pgl%processes(i,1)) .and. is_photon(pgl%processes(j,1))) .or. &
                     (is_photon(pgl%processes(i,1)) .and. is_jet(pgl%processes(j,1))))) cycle

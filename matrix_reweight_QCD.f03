@@ -43,7 +43,9 @@ program matrix_reweight
 
   call cpu_time(tTot_B)
   
-  call phys_model%init_part(173d0,1.491500d0)
+  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+!!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+  call phys_model%init_vert()
 
   nprocs=0
   call setup_spin()
@@ -68,7 +70,7 @@ program matrix_reweight
 
      call cpu_time(tBefore)
      
-     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file)
+     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file,phys_model)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -320,12 +322,17 @@ contains
     integer,dimension(n),intent(inout) :: array
     integer,dimension(n),intent(out) :: mapping
     integer :: i, j, temp
+    ! 'array_map' maps the PDG codes to the 'sort_particle' codes
+    ! (see Utilities/process_list.py)
+    integer,dimension(-24:25),parameter :: array_map=[83,0,0,0,0,0,0&
+         &,0,95,88,93,86,91,84,0,0,0,0,12,11,10,9,8,7,0,1,2,3,4,5,6,0,0&
+         &,0,0,85,90,87,92,89,94,0,0,0,0,13,80,81,82,96]
     ! Initialize mapping
     mapping = [(i,i=1,n)]
     ! Sort the array and mapping using a simple bubble sort
     do i=1,n-1
        do j=1,n-i
-          if (array(j) .gt. array(j+1)) then
+          if (array_map(array(j)) .gt. array_map(array(j+1))) then
              ! Swap array elements
              temp = array(j)
              array(j) = array(j+1)

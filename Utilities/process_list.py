@@ -13,8 +13,9 @@ quarks=frozenset({'d','u','s','c','b','t'})
 antiquarks=frozenset({'d~','u~','s~','c~','b~','t~'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
+#gluons=frozenset({})
 flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
-#flavour_scheme=frozenset({'d','u'}) # all the massless quarks
+#flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
 massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
 proton=massless_QCD
@@ -23,7 +24,8 @@ if jet != proton:
     raise ValueError("definition of 'jet' and 'proton' should be the same")
 pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','d~':'-1','u~':'-2','s~':'-3','c~':'-4','b~':'-5','t~':'-6','a':'22','z':'23','w+':'24','w-':'-24','e+':'-11','e-':'11','mu+':'-13','mu-':'13','ta+':'-15','ta-':'15','ve':'12','ve~':'-12','vm':'14','vm~':'-14','vt':'16','vt~':'-16','h':'25'}
 anti_particle={'g':'g','d':'d~','u':'u~','s':'s~','c':'c~','b':'b~','t':'t~','d~':'d','u~':'u','s~':'s','c~':'c','b~':'b','t~':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
-sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
+#sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
+sort_particles={'g':13,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':80,'z':81,'w+':82,'w-':83,'e+':84,'e-':85,'mu+':86,'mu-':87,'ta+':88,'ta-':89,'ve':90,'ve~':91,'vm':92,'vm~':93,'vt':94,'vt~':95,'h':96}
 
 
 
@@ -154,8 +156,8 @@ def ValidProc(proc):
     if naq > 2 : return False   # at most two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
     # remove flavour changing currents:
-    for q in quarks:
-        if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
+#    for q in quarks:
+#        if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
     # need at least one quark line if there are colour singlets:
     if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
     return True
@@ -355,7 +357,7 @@ def Add2qq_dfProcesses(sorted_procs):
     i=0
     while i < len(sorted_procs):
         proc = sorted_procs[i]
-        if proc[2] in quarks and proc[3] in quarks and proc[2] != proc[3]:
+        if proc[2] in antiquarks and proc[3] in antiquarks and proc[2] != proc[3]:
             swapped_proc=proc[:]
             swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
             sorted_procs.insert(i+1,swapped_proc)
@@ -364,7 +366,8 @@ def Add2qq_dfProcesses(sorted_procs):
     return sorted_procs
 
 def WriteUniqueProcsIntoList(procs):
-    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
+#    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
+    sorted_procs=sorted([sorted(proc,key=lambda x: sort_particles[x]) for proc in procs],key=sort_by_pdg_codes)
     sorted_procs=Add2qq_dfProcesses(sorted_procs)
     line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
     for proc in sorted_procs:

@@ -23,7 +23,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
-     real(kind=8) :: coupl
+     real(kind=8),dimension(2) :: coupl
    contains
      final :: finalize_interaction ! custom deallocation of interaction
   end type interaction
@@ -432,6 +432,10 @@ contains
       endif
       if (this%n_cur.gt.max_cur) then
          write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
+         stop 1
+      endif
+      if (this%n_cur_start(n-1).gt.this%n_cur_end(n-1)) then
+         write (*,*) 'ERROR: no valid matrix elements found: check your process definition'
          stop 1
       endif
     end subroutine simple_consistency_checks
@@ -883,75 +887,18 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      real(kind=8) :: coupl
+      integer :: i
       if (.not.valid_current_combination())  then
          return
       endif
-
-      if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add the gluon-gluon to gluon vertex
-         call add_vertex(0,21)
-         ! add the gluon-gluon to tensor vertex
-         call add_vertex(1,-21)
-      elseif (is_tensor(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add a tensor-gluon to gluon vertex
-         call add_vertex(2,21)
-      elseif (is_gluon(current_list_local(ic1)%type) .and. is_tensor(current_list_local(ic2)%type)) then
-         ! add a gluon-tensor to gluon vertex
-         call add_vertex(3,21)
-      elseif (is_gluon(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
-         ! add a gluon-quark to quark vertex
-         call add_vertex(4,current_list_local(ic2)%type)
-      elseif (is_gluon(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
-         ! add a gluon-antiquark to antiquark vertex
-         call add_vertex(5,current_list_local(ic2)%type)
-      elseif (is_quark(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add a quark-gluon to quark vertex
-         call add_vertex(6,current_list_local(ic1)%type)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add a antiquark-gluon to antiquark vertex
-         call add_vertex(7,current_list_local(ic1)%type)
-      elseif (is_quark(current_list_local(ic1)%type) .and. &
-           (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
-         ! add a quark-antiquark to gluon vertex
-         call add_vertex(8,21)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. &
-           (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
-         ! add a antiquark-quark to gluon vertex
-         call add_vertex(9,21)
-      elseif (is_singlet(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
-         ! add a photon-quark to quark vertex
-         if (mod(current_list_local(ic2)%type,2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
+      do i=1,pm%nint
+         if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
+              current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
+            call add_vertex(pm%vertex_list(i)%type, &
+                            pm%vertex_list(i)%particles(3), &
+                            pm%vertex_list(i)%coupl)
          endif
-         call add_vertex(10,current_list_local(ic2)%type,coupl)
-      elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
-         ! add a quark-photon to quark vertex
-         if (mod(current_list_local(ic1)%type,2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
-         endif
-         call add_vertex(12,current_list_local(ic1)%type,coupl)
-      elseif (is_singlet(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
-         ! add a photon-antiquark to quark vertex
-         if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
-         endif
-         call add_vertex(11,current_list_local(ic2)%type,coupl)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
-         ! add a antiquark-photon to quark vertex
-         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
-         endif
-         call add_vertex(13,current_list_local(ic1)%type,coupl)
-      endif
+      enddo
     end subroutine add_if_allowed_threevertex
 
     
@@ -1100,7 +1047,7 @@ contains
     subroutine add_vertex(itype,ctype,coupl)
       implicit none
       integer :: itype,ctype,ic
-      real(kind=8),optional :: coupl
+      real(kind=8),dimension(2) :: coupl
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -1112,11 +1059,7 @@ contains
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
-      if (present(coupl)) then
-         interaction_list_local(this%n_vert)%coupl=coupl
-      else
-         interaction_list_local(this%n_vert)%coupl=1d0
-      endif
+      interaction_list_local(this%n_vert)%coupl=coupl
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype)
     end subroutine add_vertex
@@ -1412,27 +1355,18 @@ contains
          elseif (is_tensor(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(isize-1))
             allocate(current_list_local(this%n_cur)%vertex_sign(isize-1))
+         elseif (is_massiveboson(new_current%type)) then
+            allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          else
-            allocate(current_list_local(this%n_cur)%vertices(2*(isize-1)))
-            allocate(current_list_local(this%n_cur)%vertex_sign(2*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
       elseif (this%imode.eq.2) then
-         if (is_gluon(new_current%type)) then
-            ! gluon current
-            call get_value(new_current%order,0,val)
-         elseif (is_tensor(new_current%type)) then
-            ! tensor current
-            call get_value(new_current%order,-1,val)
-         elseif (is_quark(new_current%type)) then
-            ! quark current
-            call get_value(new_current%order,2*new_current%type-1,val)
-         elseif (is_antiquark(new_current%type)) then
-            ! anti-quark current
-            call get_value(new_current%order,2*abs(new_current%type),val)
-         endif
+         call get_value(new_current%order,new_current%type,val)
          call solve_dict(val,key)
          ic=key_to_current(key,new_current%iproc)
          if (ic.eq.0) then
@@ -1452,12 +1386,15 @@ contains
             if (is_gluon(new_current%type)) then
                allocate(current_list_local(ic)%vertices(5*(isize-1)))
                allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
-            elseif (is_gluon(new_current%type)) then
+            elseif (is_tensor(new_current%type)) then
                allocate(current_list_local(ic)%vertices(isize-1))
                allocate(current_list_local(ic)%vertex_sign(isize-1))
+            elseif (is_massiveboson(new_current%type)) then
+               allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+               allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
             else
-               allocate(current_list_local(ic)%vertices(2*(isize-1)))
-               allocate(current_list_local(ic)%vertex_sign(2*(isize-1)))
+               allocate(current_list_local(ic)%vertices(5*(isize-1)))
+               allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
             endif
             current_list_local(ic)%n_vert=0
          endif
@@ -1506,35 +1443,11 @@ contains
                call get_next_iperm(isize,ips_in,ips,n)
                ips_in=ips
             endif
-            ! add the gluon:
-            key=key+1
-            call get_value(ips_in,0,val)
-            if (val.le.previous_val) then
-               write (*,*) 'inconsistent current dictionary #1',val,previous_val
-               stop 1
-            endif
-            current_dict(key)=val
-            ! add the tensor
-            key=key+1
-            call get_value(ips_in,-1,val)
-            if (val.le.previous_val) then
-               write (*,*) 'inconsistent current dictionary #2',val,previous_val
-               stop 1
-            endif
-            current_dict(key)=val
-            ! add the quarks and anti-quarks
-            do j=1,6
+            do j=1,pm%npart
                key=key+1
-               call get_value(ips_in,2*j-1,val) ! quarks are the odd ones
+               call get_value(ips_in,pm%particle_list(j)%type,val)
                if (val.le.previous_val) then
-                  write (*,*) 'inconsistent current dictionary #3',val,previous_val
-                  stop 1
-               endif
-               current_dict(key)=val
-               key=key+1
-               call get_value(ips_in,2*j,val)   ! anti-quarks are the even ones
-               if (val.le.previous_val) then
-                  write (*,*) 'inconsistent current dictionary #4',val,previous_val
+                  write (*,*) 'inconsistent current dictionary #1',val,previous_val
                   stop 1
                endif
                current_dict(key)=val
@@ -1552,8 +1465,8 @@ contains
       ! the current type.
       implicit none
       integer,dimension(isize) :: ips
-      integer :: j,itype
-      integer(kind=8) :: val
+      integer :: j,itype,i
+      integer(kind=8) :: val,offset
       if (isize.eq.1) then
          write (*,*) 'current_dict only setup for isize.ge.2',isize
          stop 1
@@ -1565,14 +1478,15 @@ contains
       do j=1,isize
          val=val+int(ips(isize+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
       enddo
-      ! Take the types into account (we have only 14 types (gluon,
-      ! tensor and 6 quarks and 6 anti-quarks):
-      val=val*int(14,kind=8) ! gluon
-      if (itype.eq.-1) then
-         val=val+int(1,kind=8) ! tensor
-      elseif (itype.ge.1) then
-         val=val+int(itype+1,kind=8) ! quark or anti-quark
-      endif
+      ! Take the types into account (don't worry about particle
+      ! vs. anti-particle, since there should be no confusion given
+      ! the (external) particles that are part of the current).
+      do j=1,pm%npart
+         if (itype.eq.pm%particle_list(j)%type .or. itype.eq.pm%particle_list(j)%anti_type) then
+            offset=int(j-1,kind=8)
+         endif
+      enddo
+      val=val*int(pm%npart,kind=8) + offset
     end subroutine get_value
 
     subroutine solve_dict(val,key)
@@ -1601,11 +1515,7 @@ contains
     integer function anti_current(ctype)
       implicit none
       integer :: ctype
-      if (abs(ctype).le.6) then
-         anti_current=-ctype
-      else
-         anti_current=ctype
-      endif
+      anti_current=pm%get_antipart(ctype)
     end function anti_current
     logical function all_gluon_current(curr,len)
       ! returns .true. only if all external particles are gluons
@@ -1623,18 +1533,21 @@ contains
       implicit none
       type(current),intent(in) :: curr
       integer,intent(in) :: len
-      if (any(abs(curr%ext_type(1:len)).lt.22)) then
-         all_singlet_current=.false.
-      else
-         all_singlet_current=.true.
-      endif
+      integer :: i
+      all_singlet_current=.true.
+      do i=1,len
+         if (.not.is_singlet(curr%ext_type(i))) then
+            all_singlet_current=.false.
+            return
+         endif
+      enddo
     end function all_singlet_current
     logical function is_quark_from_order(io,iproc)
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io,iproc
-      if ( (io.le.2  .and. (this%processes(io,iproc).le.-1 .and. this%processes(io,iproc).ge.-6)) .or. &
-           (io.gt.2  .and. (this%processes(io,iproc).ge. 1 .and. this%processes(io,iproc).le. 6))) then
+      if ( (io.le.2  .and. is_antiquark(this%processes(io,iproc))) .or. &
+           (io.gt.2  .and. is_quark(this%processes(io,iproc)))) then
          is_quark_from_order=.true.
       else
          is_quark_from_order=.false.
@@ -1644,8 +1557,8 @@ contains
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io,iproc
-      if ( (io.le.2  .and. (this%processes(io,iproc).ge. 1 .and. this%processes(io,iproc).le. 6)) .or. &
-           (io.gt.2  .and. (this%processes(io,iproc).le.-1 .and. this%processes(io,iproc).ge.-6))) then
+      if ( (io.le.2  .and. is_quark(this%processes(io,iproc))) .or. &
+           (io.gt.2  .and. is_antiquark(this%processes(io,iproc)))) then
          is_antiquark_from_order=.true.
       else
          is_antiquark_from_order=.false.
@@ -1710,7 +1623,7 @@ contains
     ! interaction_list
     do iv=1,this%n_vert
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),&
-            this%interaction_list(iv)%coupl
+            this%interaction_list(iv)%coupl(1:2)
        if (allocated(this%interaction_list(iv)%singlet_mv)) then
           write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
        else
@@ -1772,7 +1685,7 @@ contains
     ! interaction_list
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
-       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl,itmp
+       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl(1:2),itmp
        if (itmp.gt.0) then
           allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
           this%interaction_list(iv)%singlet_mv(0)=itmp
@@ -1852,42 +1765,36 @@ contains
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel,read_file)
+  subroutine evaluate(this,n,p,hel,read_file,pm)
     use FeynmanRules
+    use particles
     implicit none
     class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
     integer :: n
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih_in,ip,ifinal
+    integer :: ic,iv,isize,ih_in,ip,ifinal,dim
     logical :: read_file 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
-          if (this%current_list(ic)%type.eq.-21) then
-             if (use_real_gluons) then
-                allocate(this%current_list(ic)%val_r(1:6))
-             else
-                allocate(this%current_list(ic)%val_c(1:6))
-             endif
-          elseif (this%current_list(ic)%type.eq.21 .and. use_real_gluons) then
-             allocate(this%current_list(ic)%val_r(1:4))
+          if (use_real_gluons .and. &
+               (is_gluon(this%current_list(ic)%type) .or. is_tensor6(this%current_list(ic)%type))) then
+             dim=pm%get_dim(this%current_list(ic)%type)
+             allocate(this%current_list(ic)%val_r(1:dim))
           else
-             allocate(this%current_list(ic)%val_c(1:4))
+             dim=pm%get_dim(this%current_list(ic)%type)
+             allocate(this%current_list(ic)%val_c(1:dim))
           endif
        enddo
        do iv=1,this%n_vert
-          if (this%interaction_list(iv)%type.eq.1) then
-             if (use_real_gluons) then
-                allocate(this%interaction_list(iv)%val_r(1:6))
-             else
-                allocate(this%interaction_list(iv)%val_c(1:6))
-             endif
-          elseif ((this%interaction_list(iv)%type.eq.0 .or. &
-                   this%interaction_list(iv)%type.eq.2 .or. &
-                   this%interaction_list(iv)%type.eq.3) .and. use_real_gluons  ) then
-             allocate(this%interaction_list(iv)%val_r(1:4))
+          if (use_real_gluons .and. &
+               (this%interaction_list(iv)%type.ge.0 .and. this%interaction_list(iv)%type.le.3)) then
+             dim=pm%get_inter_dim(this%interaction_list(iv)%type)
+             allocate(this%interaction_list(iv)%val_r(1:dim))
           else
-             allocate(this%interaction_list(iv)%val_c(1:4))
+             dim=pm%get_inter_dim(this%interaction_list(iv)%type)
+             allocate(this%interaction_list(iv)%val_c(1:dim))
           endif
        enddo
        if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
@@ -1898,18 +1805,18 @@ contains
     endif
     
     call fill_momentum_array()
-   
+
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)
              ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
-                ih_in=max(0,hel(this%current_list(ic)%order(1)))
+                ih_in=0
              else
-                ih_in=max(0,this%current_list(ic)%spin(1))
+                ih_in=this%current_list(ic)%spin(1)
              endif
-             if (this%current_list(ic)%type.eq.21) then
+             if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_r(1:4))
@@ -1917,20 +1824,18 @@ contains
                    call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
-             elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
+             elseif (is_quark(this%current_list(ic)%type)) then
                 call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
+             elseif (is_antiquark(this%current_list(ic)%type)) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (this%current_list(ic)%type.eq.22) then
-                if (use_real_gluons) then
-                   call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_r(1:4))
-                else
-                   call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4))
-                endif
+             elseif (is_massiveboson(this%current_list(ic)%type)) then
+                call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+             elseif (is_higgs(this%current_list(ic)%type)) then
+                call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ifinal,this%current_list(ic)%val_c(1))
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
@@ -1938,7 +1843,6 @@ contains
           enddo
           cycle
        endif
-
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
@@ -2044,65 +1948,54 @@ contains
 
           elseif(this%interaction_list(iv)%type.eq.10) then
              if (use_real_gluons) then
-                call GluonQuarktoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                                  this%interaction_list(iv)%val_c(1:4),&
-                                                  this%interaction_list(iv)%coupl)
-             else
-                call GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                             this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl)
-             endif
-
-          elseif(this%interaction_list(iv)%type.eq.11) then
-             if (use_real_gluons) then
-                call GluonAquarktoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                                    this%interaction_list(iv)%val_c(1:4),&
-                                                    this%interaction_list(iv)%coupl)
-             else
-                call GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                               this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl)
-             endif
-          elseif(this%interaction_list(iv)%type.eq.12) then
-             if (use_real_gluons) then
                 call QuarkGluontoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                                                   this%interaction_list(iv)%val_c(1:4),&
-                                                  this%interaction_list(iv)%coupl)
+                                                  this%interaction_list(iv)%coupl(1:2))
              else
                 call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                              this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                              this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl)
+                                             this%interaction_list(iv)%coupl(1:2))
              endif
-          elseif(this%interaction_list(iv)%type.eq.13) then
+          elseif(this%interaction_list(iv)%type.eq.11) then
              if (use_real_gluons) then
                 call AquarkGluontoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                                     this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                                                     this%interaction_list(iv)%val_c(1:4),&
-                                                    this%interaction_list(iv)%coupl)
+                                                    this%interaction_list(iv)%coupl(1:2))
              else
                 call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                                this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl)
+                                               this%interaction_list(iv)%coupl(1:2))
              endif
-                 
+          elseif (this%interaction_list(iv)%type.eq.12) then
+             call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                       this%interaction_list(iv)%val_c(1:4),&
+                       this%interaction_list(iv)%coupl(1:2))
+
+          elseif(this%interaction_list(iv)%type.eq.13) then
+             call TwoGluonToTensor_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                         this%interaction_list(iv)%val_c(1:6),&
+                                         this%interaction_list(iv)%coupl(1:2))
+
           elseif(this%interaction_list(iv)%type.eq.14) then
-             call QuarkAquarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call TensorGluontoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.15) then
-             call AquarkQuarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+             call GluonTensortoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                                            this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%coupl(1:2))
+
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -2111,26 +2004,38 @@ contains
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (this%current_list(ic)%type.eq.21) then
+          if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-          elseif ((this%current_list(ic)%type.ge.1.and.this%current_list(ic)%type.le.6)) then
+          elseif (is_quark(this%current_list(ic)%type)) then
              ! a quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
-          elseif (this%current_list(ic)%type.eq.-21) then
+          elseif (is_tensor6(this%current_list(ic)%type)) then
              ! the non-propagating tensor current
              call combine_interactions(6)
-          elseif ((this%current_list(ic)%type.le.-1.and.this%current_list(ic)%type.ge.-6)) then
+          elseif (is_antiquark(this%current_list(ic)%type)) then
              ! an anti-quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_aquark_propagator()
+             endif
+          elseif (is_massiveboson(this%current_list(ic)%type)) then
+             call combine_interactions(4)
+             ! a massive vector boson current
+             if (isize.ne.n-1)  then
+                call include_gluon_propagator_mass()
+             endif
+          elseif (is_higgs(this%current_list(ic)%type)) then
+             ! a scalar current
+             call combine_interactions(1)
+             if (isize.ne.n-1)  then
+                call include_scalar_propagator()
              endif
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
@@ -2214,8 +2119,6 @@ contains
             enddo
             endif
          endif
-
-
       elseif(this%imode.eq.2) then
          if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
             do iamp=1,this%n_amps
@@ -2265,7 +2168,7 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv,i
-      if (use_real_gluons .and. abs(this%current_list(ic)%type).eq.21) then
+      if (use_real_gluons .and. (is_gluon(this%current_list(ic)%type).or.is_tensor_g(this%current_list(ic)%type))) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
             if (this%current_list(ic)%vertex_sign(iv))then
@@ -2301,6 +2204,13 @@ contains
       endif
     end subroutine include_gluon_propagator
 
+    subroutine include_gluon_propagator_mass()
+      implicit none
+      call GluonPropagator_mass(this%current_list(ic)%val_c, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%current_list(ic)%mass,this%current_list(ic)%width)
+    end subroutine include_gluon_propagator_mass
+
     subroutine include_quark_propagator()
       implicit none
       call QuarkPropagator(this%current_list(ic)%val_c, &
@@ -2316,6 +2226,13 @@ contains
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_aquark_propagator
+    subroutine include_scalar_propagator()
+      implicit none
+      call ScalarPropagator(this%current_list(ic)%val_c, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
+    end subroutine include_scalar_propagator
   end subroutine evaluate
 
   subroutine init_col(this,n,col_acc)
@@ -3131,13 +3048,14 @@ contains
 
   subroutine assign_interaction(lhs,rhs)
     ! sets non-custom 'lhs' = 'rhs' for interactions
+    use particles
     implicit none
     type(interaction),intent(inout) :: lhs
     type(interaction),intent(in) :: rhs
     integer :: val_size
     lhs%type=rhs%type
     lhs%currents(1:2)=rhs%currents(1:2)
-    lhs%coupl=rhs%coupl
+    lhs%coupl(1:2)=rhs%coupl(1:2)
     if (allocated(rhs%singlet_mv)) then
        if (rhs%singlet_mv(0).gt.0) then
           if (.not.allocated(lhs%singlet_mv)) allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
@@ -3148,7 +3066,7 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(lhs%type.eq.-21) then
+       if(is_tensor6(lhs%type)) then
           val_size=6
        else
           val_size=4
@@ -3158,7 +3076,7 @@ contains
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(lhs%type.eq.-21) then
+       if(is_tensor6(lhs%type)) then
           val_size=6
        else
           val_size=4
@@ -3170,6 +3088,7 @@ contains
   
   subroutine assign_current(lhs,rhs)
     ! sets non-custom 'lhs' = 'rhs' for currents
+    use particles
     implicit none
     type(current),intent(inout) :: lhs
     type(current),intent(in) :: rhs
@@ -3206,7 +3125,7 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(lhs%type.eq.-21) then
+       if(is_tensor6(lhs%type)) then
           val_size=6
        else
           val_size=4
@@ -3216,7 +3135,7 @@ contains
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(lhs%type.eq.-21) then
+       if(is_tensor6(lhs%type)) then
           val_size=6
        else
           val_size=4
