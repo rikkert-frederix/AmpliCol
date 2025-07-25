@@ -8,6 +8,8 @@ program matrix_integrate_QCD
   use phase_space_haag_mod
   use math_functions
   use particles
+  use amplitude_QCD_mod
+  use cuts
   implicit none
   type(physics_model) :: phys_model
   integer :: next,iproc
@@ -32,36 +34,6 @@ program matrix_integrate_QCD
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 
-  type :: multichan_info
-     ! if adding variables here, also update the finalize_multichan_info subroutine
-     integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
-     integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
-     integer :: max_channels,n_unique_channels,n_unique_channelgroups
-  end type multichan_info
-
-  type phase_space_order_group
-     ! if adding variables here, also update the finalize_phase_space_order_group subroutine
-     type(amplitude_QCD) :: amps
-     class(phase_space_type),allocatable :: phase_space
-     type(multichan_info) :: multichan
-     integer,dimension(:,:),allocatable :: processes,color_orders
-     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
-     integer :: nproc
-     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
-     integer,dimension(:,:,:),allocatable :: iden_processes
-     integer(kind=4),dimension(:,:),allocatable :: spin
-     integer(kind=8),dimension(:),allocatable :: iden
-     logical,dimension(-6:7,2) :: ipdgs
-     integer(kind=4) :: nhel
-     integer,dimension(:),allocatable :: col_fac
-     real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
-     integer(kind=4),dimension(:),allocatable :: hel,hel_fac
-     integer(kind=4) :: passed=0,all_evt=0
-     integer,dimension(:),allocatable :: include_hel
-     ! cuts
-     double precision,dimension(:),allocatable :: pT_min,eta_max
-     double precision,dimension(:,:),allocatable :: DR_min,sqrt_s_min
-  end type phase_space_order_group
   type(phase_space_order_group),dimension(:),allocatable :: pgl
   type(phase_space_order_group),allocatable :: pgl_unique
   real(kind=8),dimension(:),allocatable :: unique_map_value
@@ -501,47 +473,6 @@ contains
     t_mat=t_mat+tAfter-tBefore
   end function integrand
 
-  logical function pass_cuts(pgl)
-    ! Cuts on the phase-space point. Note that these cuts need to be symmetric
-    ! under pz -> -pz.
-    implicit none
-    type(phase_space_order_group),intent(in) :: pgl
-    integer :: i,j
-    ! cuts on single particles
-    pass_cuts=.true.
-    do i=1,next
-       if (pgl%pT_min(i).gt.0d0) then
-          if (pt(pgl%phase_space%p(0,i)).lt.pgl%pT_min(i)) then
-             pass_cuts=.false.
-             return
-          endif
-       endif
-       if (pgl%eta_max(i).gt.0d0) then
-          if (abs(eta(pgl%phase_space%p(0,i))).gt.pgl%eta_max(i)) then
-             pass_cuts=.false.
-             return
-          endif
-       endif
-    enddo
-    ! cuts on pairs of particles
-    do i=1,next-1
-       do j=i+1,next
-          if (pgl%sqrt_s_min(i,j).gt.0d0) then
-             if (abs(sumdot(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%sqrt_s_min(i,j)**2) then
-                pass_cuts=.false.
-                return
-             endif
-          endif
-          if (pgl%DR_min(i,j).gt.0d0) then
-             if (abs(deltaR(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%DR_min(i,j)) then
-                pass_cuts=.false.
-                return
-             endif
-          endif
-       enddo
-    enddo
-  end function pass_cuts
-
   subroutine compute_multichannel_weight(ichan,x,p,jac,weight)
     ! Computes the multichannel weight 'weight' when there are
     ! 'chans(0)' channels (that are listed in the array 'chans(1:)') and
@@ -640,66 +571,6 @@ contains
     deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
-  real(kind=8) function pt(p)
-    ! transverse momentum of 'p'
-    implicit none
-    real(kind=8), dimension(0:3) :: p
-    pt=sqrt(p(1)**2+p(2)**2)
-  end function pt
-  
-  real(kind=8) function dot(p1,p2)
-    ! Inner product between two 4-vectors
-    implicit none
-    real(kind=8),intent(in),dimension(0:3) :: p1,p2
-    dot=p1(0)*p2(0)-p1(1)*p2(1)-p1(2)*p2(2)-p1(3)*p2(3)
-  end function dot
-
-  real(kind=8) function sumdot(p1,p2)
-    ! Inner product between two 4-vectors
-    implicit none
-    real(kind=8),intent(in),dimension(0:3) :: p1,p2
-    real(kind=8),dimension(0:3) :: p
-    p=p1+p2
-    sumdot=dot(p,p)
-  end function sumdot
-
-  real(kind=8) function eta(p)
-    ! pseudo-rapidity of 'p'
-    implicit none
-    real(kind=8), dimension(0:3) :: p
-    real(kind=8) :: theta
-    theta=acos(p(3)/sqrt(p(1)**2+p(2)**2+p(3)**2))
-    eta=-log(dtan(theta/2d0))
-  end function eta
-
-  real(kind=8) function delta_phi(p1,p2)
-    ! azimuthal difference of 'p1' and 'p2'
-    implicit none
-    real(kind=8), dimension(0:3) :: p1,p2
-    real(kind=8) :: denom,arg
-    real(kind=8),parameter :: tiny=1d-8
-    denom=pt(p1)*pt(p2)
-    arg=(p1(1)*p2(1)+p1(2)*p2(2))/denom
-    if (arg.lt.-1d0-tiny) then
-       write (*,*) 'cosine is complex'
-       stop 1
-    elseif (arg.lt.-1d0) then
-       arg=-1d0
-    elseif(arg.gt.1d0+tiny) then
-       write (*,*) 'cosine is complex'
-       stop 1
-    elseif(arg.gt.1d0) then
-       arg=1d0
-    endif
-    delta_phi=acos(arg)
-  end function delta_phi
-
-  real(kind=8) function deltaR(p1,p2)
-    ! Distance (Delta-R) between 'p1' and 'p2'
-    implicit none
-    real(kind=8), dimension(0:3) :: p1,p2
-    deltaR=sqrt(delta_phi(p1,p2)**2+(eta(p1)-eta(p2))**2)
-  end function deltaR
 
   subroutine write_event(iunit,wgt)
     implicit none
@@ -862,6 +733,7 @@ contains
           read(10,*) unique_procs(1:next,iproc)
        enddo
        allocate(pgl_unique)
+       pgl_unique%next=next
        call check_unique_processes()
        read(10,*)
        read(10,*)
@@ -893,6 +765,7 @@ contains
              read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
              call add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
           enddo
+          pgl(igroup)%next=next
           pgl(igroup)%nproc=nprocs
           pgl(igroup)%multichan%max_channels=max_channels
           allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
@@ -2040,135 +1913,4 @@ contains
     enddo
   end function ifindloc
 
-  subroutine finalize_multichan_info(mi)
-    type(multichan_info),intent(inout) :: mi
-    if (allocated(mi%channels)) deallocate(mi%channels)
-    if (allocated(mi%unique_channelgroup_list)) deallocate(mi%unique_channelgroup_list)
-    if (allocated(mi%unique_channel_list)) deallocate(mi%unique_channel_list)
-    if (allocated(mi%map_proc_to_channelgroup)) deallocate(mi%map_proc_to_channelgroup)
-    if (allocated(mi%number_of_channels)) deallocate(mi%number_of_channels)
-  end subroutine finalize_multichan_info
-
-  subroutine finalize_phase_space_order_group(pgl)
-    type(phase_space_order_group),intent(inout) :: pgl
-    call finalize_amplitude_QCD(pgl%amps)
-    if(allocated(pgl%phase_space)) then
-       call pgl%phase_space%cleanup()
-       deallocate(pgl%phase_space)
-    endif
-    call finalize_multichan_info(pgl%multichan)
-    if (allocated(pgl%processes)) deallocate(pgl%processes)
-    if (allocated(pgl%color_orders)) deallocate(pgl%color_orders)
-    if (allocated(pgl%iden_iproc)) deallocate(pgl%iden_iproc)
-    if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
-    if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
-    if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
-    if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
-    if (allocated(pgl%spin)) deallocate(pgl%spin)
-    if (allocated(pgl%iden)) deallocate(pgl%iden)
-    if (allocated(pgl%col_fac)) deallocate(pgl%col_fac)
-    if (allocated(pgl%amp2)) deallocate(pgl%amp2)
-    if (allocated(pgl%amp2_hel)) deallocate(pgl%amp2_hel)
-    if (allocated(pgl%hel)) deallocate(pgl%hel)
-    if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
-    if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)
-    if (allocated(pgl%pT_min)) deallocate(pgl%pT_min)
-    if (allocated(pgl%eta_max)) deallocate(pgl%eta_max)
-    if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
-    if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
-  end subroutine finalize_phase_space_order_group
-
-
-  subroutine setup_cuts_for_each_particle(pgl)
-    implicit none
-    type(phase_space_order_group),intent(inout) :: pgl
-    integer :: i,j
-    if (allocated(pgl%pT_min)) then
-       write (*,*) 'ERROR: setting-up phase space cuts already'//&
-            ' done for this phase-space group'
-       stop 1
-    endif
-    ! check consistency among processes
-    do i=1,next
-       if (is_jet(pgl%processes(i,1))) then
-          do j=2,pgl%nproc
-             if (.not.is_jet(pgl%processes(i,j))) then
-                write (*,*) 'inconsistent processes and cuts #1'
-                stop 1
-             endif
-          enddo
-       elseif(is_photon(pgl%processes(i,1))) then
-          do j=2,pgl%nproc
-             if (.not.is_photon(pgl%processes(i,j))) then
-                write (*,*) 'inconsistent processes and cuts #2'
-                stop 1
-             endif
-          enddo
-       else
-          do j=2,pgl%nproc
-             if (is_jet(pgl%processes(i,j)) .or. is_photon(pgl%processes(i,j))) then
-                write (*,*) 'inconsistent processes and cuts #3'
-                stop 1
-             endif
-          enddo
-       endif
-    enddo
-    ! initialize all:
-    allocate(pgl%pT_min(1:next))
-    allocate(pgl%eta_max(1:next))
-    allocate(pgl%DR_min(1:next,1:next))
-    allocate(pgl%sqrt_s_min(1:next,1:next))
-    pgl%pT_min(1:next)=-1d0
-    pgl%eta_max(1:next)=-1d0
-    pgl%DR_min(1:next,1:next)=-1d0
-    pgl%sqrt_s_min(1:next,1:next)=-1d0
-    ! cuts on single jets
-    do i=3,next
-       if (.not. is_jet(pgl%processes(i,1))) cycle
-       pgl%pT_min(i)=ptj_min
-       pgl%eta_max(i)=etaj_max
-    enddo
-    ! cuts on single photons
-    do i=3,next
-       if (.not. is_photon(pgl%processes(i,1))) cycle
-       pgl%pT_min(i)=pta_min
-       pgl%eta_max(i)=etaa_max
-    enddo
-    ! cuts on pair of jets
-    do i=1,next
-       if (.not. is_jet(pgl%processes(i,1))) cycle
-          do j=1,next
-          if (i.eq.j) cycle
-          if (.not. is_jet(pgl%processes(j,1))) cycle
-          pgl%sqrt_s_min(i,j)=sqrt_sjj_min
-          if (i.ge.3 .and. j.ge.3) then
-             pgl%DR_min(i,j)=DRjj_min
-          endif
-       enddo
-    enddo
-    ! cuts on pair of photons
-    do i=1,next
-       if (.not. is_photon(pgl%processes(i,1))) cycle
-          do j=1,next
-          if (i.eq.j) cycle
-          if (.not. is_photon(pgl%processes(j,1))) cycle
-          pgl%sqrt_s_min(i,j)=sqrt_saa_min
-          if (i.ge.3 .and. j.ge.3) then
-             pgl%DR_min(i,j)=DRaa_min
-          endif
-       enddo
-    enddo
-    ! cuts on jet-photon pair
-    do i=1,next
-       do j=1,next
-          if (i.eq.j) cycle
-          if (.not.((is_jet(pgl%processes(i,1)) .and. is_photon(pgl%processes(j,1))) .or. &
-                    (is_photon(pgl%processes(i,1)) .and. is_jet(pgl%processes(j,1))))) cycle
-          pgl%sqrt_s_min(i,j)=sqrt_sja_min
-          if (i.ge.3 .and. j.ge.3) then
-             pgl%DR_min(i,j)=DRja_min
-          endif
-       enddo
-    enddo
-  end subroutine setup_cuts_for_each_particle
 end program matrix_integrate_QCD
