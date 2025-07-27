@@ -26,7 +26,8 @@ pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','d~':'-1','u~':'-
 anti_particle={'g':'g','d':'d~','u':'u~','s':'s~','c':'c~','b':'b~','t':'t~','d~':'d','u~':'u','s~':'s','c~':'c','b~':'b','t~':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
 #sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
 sort_particles={'g':13,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':80,'z':81,'w+':82,'w-':83,'e+':84,'e-':85,'mu+':86,'mu-':87,'ta+':88,'ta-':89,'ve':90,'ve~':91,'vm':92,'vm~':93,'vt':94,'vt~':95,'h':96}
-
+charges3={'g':0,'d':-1,'u':2,'s':-1,'c':2,'b':-1,'t':2,'d~':1,'u~':-2,'s~':1,'c~':-2,'b~':1,'t~':-2,'a':0,'z':1,'w+':3,'w-':-3,'e+':3,'e-':-3,'mu+':3,'mu-':-3,'ta+':3,'ta-':-3,'ve':0,'ve~':0,'vm':0,'vm~':0,'vt':0,'vt~':0,'h':0}
+family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'c~':-11,'b~':-21,'t~':-21,'a':0,'z':0,'w+':0,'w-':0,'e+':-31,'e-':31,'mu+':-41,'mu-':41,'ta+':-51,'ta-':51,'ve':31,'ve~':-31,'vm':41,'vm~':-41,'vt':51,'vt~':-51,'h':0}
 
 
 def ProcessProcess(proc):
@@ -155,9 +156,13 @@ def ValidProc(proc):
     if nq > 2 : return False    # at most two quarks
     if naq > 2 : return False   # at most two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
+    # check charge conservation:
+    if sum([charges3[x] for x in proc]) != 0 : return False
     # remove flavour changing currents:
-#    for q in quarks:
-#        if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
+    if sum([family[x] for x in proc]) != 0 : return False
+    if 'w+' not in proc and 'w-' not in proc:
+        for q in quarks:
+            if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
     # need at least one quark line if there are colour singlets:
     if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
     return True
