@@ -1,5 +1,5 @@
 module pdf_wrap
-  use common
+  use handling_processes
 contains
     subroutine set_ipdgs_for_PDF(pgl)
     ! determines for which flavours the PDFs should be evolved

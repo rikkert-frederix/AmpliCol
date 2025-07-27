@@ -1,5 +1,6 @@
 module handling_events
   use common
+  use handling_processes
   integer :: iproc_picked,iproc_iden_picked
   integer,dimension(2) :: hel_picked
   real(kind=8) :: evt_sign
@@ -134,7 +135,6 @@ contains
   
   subroutine create_run_tag(integration_step)
     use mint_module
-    use handling_processes
     implicit none
     integer :: i1,i2,i,integration_step
     tag='_'       ! tag of current run

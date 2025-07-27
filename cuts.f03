@@ -1,24 +1,7 @@
 module cuts
   use common
   use particles
-  
-  ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
-  ! jets:
-  real(kind=8),parameter :: pTj_min      = 30d0
-  real(kind=8),parameter :: DRjj_min     = 0.4d0  ! max allowed value: Drjj_min=1d0
-  real(kind=8),parameter :: etaj_max     = 6d0
-  real(kind=8),parameter :: sqrt_sjj_min = -1d0
-
-  ! photons:
-  real(kind=8),parameter :: pTa_min      = 30d0
-  real(kind=8),parameter :: DRaa_min     = 0.4d0  ! max allowed value: Draa_min=1d0
-  real(kind=8),parameter :: etaa_max     = 6d0
-  real(kind=8),parameter :: sqrt_saa_min = -1d0
-
-  ! jets+photons:
-  real(kind=8),parameter :: DRja_min     = 0.4d0  ! max allowed value: Drja_min=1d0
-  real(kind=8),parameter :: sqrt_sja_min = -1d0
-
+  use handling_processes
 contains
   logical function pass_cuts(pgl)
     ! Cuts on the phase-space point. Note that these cuts need to be symmetric

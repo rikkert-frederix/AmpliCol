@@ -1,5 +1,4 @@
 module read_process_file
-  use common
   use mint_module
   use handling_processes
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
