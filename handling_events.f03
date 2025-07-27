@@ -92,15 +92,6 @@ contains
     integer :: i,iproc
     real(kind=8) :: random
     real(kind=8),external :: ran2
-
-!!$    if (.not.read_proc_from_file .and. pgl%amps%nprocs.eq.3) then
-!!$       do iproc=1,pgl%amps%nprocs
-!!$          if (pgl%amps%same_flav(iproc)) then
-!!$             iproc_picked=iproc
-!!$             exit
-!!$          endif
-!!$       enddo
-!!$    endif
     random=ran2()*pgl%amp2(iproc_picked)
     i=pgl%amps%iproc_start(iproc_picked)
     do

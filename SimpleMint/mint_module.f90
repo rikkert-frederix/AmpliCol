@@ -1756,5 +1756,32 @@ contains
   subroutine initplot
     implicit none
   end subroutine initplot
+  
+  subroutine set_mint_module_special_parameters()
+    ! these parameters need to be set for the mint-module to work correctly,
+    ! but are irrelevant for any LO process; except for 'nchans'!)
+    implicit none
+    fixed_order=.false.
+    nlo_ps=.true.
+    n_ord_virt=1
+    nchans=1
+    iconfig=1
+    ichan=1
+    ifold_energy=1
+    ifold_yij=1
+    ifold_phi=1
+    ifold(1:ndimmax)=1
+    iconfigs(1:maxchannels)=1
+    min_virt_fraction_mint=1d0
+    virt_fraction=1d0
+    wgt_mult=1d0
+    average_virtual(0:n_ave_virt,maxchannels)=0d0
+    virt_wgt_mint(0:n_ave_virt)=0d0
+    born_wgt_mint(0:n_ave_virt)=0d0
+    virtual_fraction(1:maxchannels)=1d0
+    ans(1:nintegrals,0:maxchannels)=0d0
+    unc(1:nintegrals,0:maxchannels)=0d0
+    only_virt=.false.
+  end subroutine set_mint_module_special_parameters
 
 end module mint_module
