@@ -1,4 +1,4 @@
-module pdf_help
+module pdf_wrap
   use common
 contains
     subroutine set_ipdgs_for_PDF(pgl)
@@ -63,4 +63,4 @@ contains
     enddo
   end subroutine include_PDF_and_identical_procs
 
-end module pdf_help
+end module pdf_wrap

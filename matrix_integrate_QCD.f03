@@ -10,7 +10,7 @@ program matrix_integrate_QCD
   use particles
   use amplitude_QCD_mod
   use cuts
-  use pdf_help
+  use pdf_wrap
   use handling_events
   implicit none
   type(physics_model) :: phys_model
