@@ -3,7 +3,7 @@
 FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o	\
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
-phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o
+phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o
 
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
@@ -59,6 +59,7 @@ phase_space_gen23.o : phase_space.o LUPdecompose.o
 phase_space_genpt.o : phase_space.o
 haag.o : phase_space.o
 amplitude_QCD.o : math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o
+matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o
 common.o : amplitude_QCD.o
+handling_events.o : common.o
 

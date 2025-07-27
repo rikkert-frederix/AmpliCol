@@ -125,6 +125,20 @@ contains
     endif
   end subroutine unwgt_helicity
   
-
+  subroutine write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
+    implicit none
+    type(phase_space_order_group),allocatable :: pgl_unique
+    real(kind=8),dimension(pgl_unique%nproc) :: unique_map_value
+    integer,dimension(pgl_unique%nproc) :: unique_map
+    integer :: iproc
+    write(11,*) pgl_unique%next,pgl_unique%nproc
+    do iproc=1,pgl_unique%nproc
+       write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
+    enddo
+    ! make sure pgl_unique_unique is deallocated consistently:
+    call finalize_phase_space_order_group(pgl_unique)
+    deallocate(pgl_unique)
+  end subroutine write_unique_in_file_and_deallocate
+  
   
 end module handling_events
