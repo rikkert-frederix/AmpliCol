@@ -62,7 +62,7 @@ haag.o : phase_space.o
 amplitude_QCD.o : math_functions.o feynmanrules.o color_algebra.o particles.o
 matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o
 common.o : amplitude_QCD.o
-handling_events.o : common.o
+handling_events.o : common.o mint_module.o handling_processes.o
 read_process_file.o : common.o mint_module.o phase_space_gen23.o cuts.o handling_processes.o
 multichannel.o : handling_processes.o mint_module.o
 handling_processes.o : math_functions.o common.o

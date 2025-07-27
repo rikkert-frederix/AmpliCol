@@ -132,4 +132,73 @@ contains
   end subroutine write_unique_in_file_and_deallocate
   
   
+  subroutine create_run_tag(integration_step)
+    use mint_module
+    use handling_processes
+    implicit none
+    integer :: i1,i2,i,integration_step
+    tag='_'       ! tag of current run
+    tag_read='_'  ! same as 'tag', but with previous integration_step (i.e., defines the file to read the integration grids from)
+!    call add_to_string(tag,PS_choice,.true.)
+!    call add_to_string(tag_read,PS_choice,.true.)
+    call add_to_string(tag,next,.true.)
+    call add_to_string(tag_read,next,.true.)
+    call add_to_string(tag,integration_step,.true.)
+    if(integration_step.gt.0) then
+       call add_to_string(tag_read,integration_step-1,.true.)
+    else
+       call add_to_string(tag_read,integration_step,.true.)
+    endif
+    if (allocated(part)) then
+       do i=1,next
+          call add_to_string(tag,part(i),.true.)
+          call add_to_string(tag_read,part(i),.true.)
+       enddo
+       do i=1,next-1
+          call add_to_string(tag,o(i),.true.)
+          call add_to_string(tag_read,o(i),.true.)
+       enddo
+       call add_to_string(tag,o(next),.false.)
+       call add_to_string(tag_read,o(next),.false.)
+    else
+!!$        ! just to the first process; the should all give the same value for 'i'
+!!$       i1=ifindloc(color_orders(1:next,1),next,1)
+!!$       i2=ifindloc(color_orders(1:next,1),next,2)
+!!$       i=i2-i1 -1
+!!$       if (i.lt.0) i=i+next
+!!$       call add_to_string(tag,i,.false.)
+!!$       call add_to_string(tag_read,i,.false.)
+    endif
+    write (*,*) 'File tag is: ',tag,'   ',add_arg
+  end subroutine create_run_tag
+
+  subroutine add_to_string(string,inter,add_underscore)
+    ! Adds an integer 'inter' to the end of the string 'string' (followed by
+    ! an underscore if 'add_underscore=.true.')
+    use mint_module
+    implicit none
+    character(len=string_len) :: string
+    integer :: inter
+    logical :: add_underscore
+    character(len=1) :: s1
+    character(len=2) :: s2
+    character(len=3) :: s3
+    if (inter.ge.0 .and. inter.le.9) then
+       write(s1,'(i1)') inter
+       string=trim(adjustl(string))//trim(adjustl(s1))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-9 .and. inter.le.99) then
+       write(s2,'(i2)') inter
+       string=trim(adjustl(string))//trim(adjustl(s2))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    elseif(inter.ge.-99 .and. inter.le.999) then
+       write(s3,'(i3)') inter
+       string=trim(adjustl(string))//trim(adjustl(s3))
+       if (add_underscore) string=trim(adjustl(string))//'_'
+    else
+       write (*,*) 'value too large to add to the run tag',inter
+    endif
+  end subroutine add_to_string
+
+  
 end module handling_events
