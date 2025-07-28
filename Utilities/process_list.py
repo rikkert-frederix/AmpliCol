@@ -9,9 +9,6 @@ from collections import defaultdict
 import multiprocessing
 import math
 
-# This index should be built once — outside of the function
-# Recommended: build this during initialization
-process_order_to_index = {}
 
 
 # Global sets (make then 'frozenset' so that they are immutable):
@@ -35,6 +32,7 @@ sort_particles={'g':13,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,
 charges3={'g':0,'d':-1,'u':2,'s':-1,'c':2,'b':-1,'t':2,'d~':1,'u~':-2,'s~':1,'c~':-2,'b~':1,'t~':-2,'a':0,'z':0,'w+':3,'w-':-3,'e+':3,'e-':-3,'mu+':3,'mu-':-3,'ta+':3,'ta-':-3,'ve':0,'ve~':0,'vm':0,'vm~':0,'vt':0,'vt~':0,'h':0}
 family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'c~':-11,'b~':-21,'t~':-21,'a':0,'z':0,'w+':0,'w-':0,'e+':-31,'e-':31,'mu+':-41,'mu-':41,'ta+':-51,'ta-':51,'ve':31,'ve~':-31,'vm':41,'vm~':-41,'vt':51,'vt~':-51,'h':0}
 
+process_order_to_index = {}
 
 def ProcessProcess(proc):
     """Function to process each 'proc' in parallel"""
@@ -399,9 +397,9 @@ if __name__ == "__main__":
     all_unique_procs=GenerateAllUniqueProcs(process)
     all_procs=GenerateAllProcs(all_unique_procs,process)
     
-#    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-#        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
-    results=[ProcessProcess(x) for x in all_procs]
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
+#    results=[ProcessProcess(x) for x in all_procs]
     phase_space_orders=CombineResults(results)
     all_keys_sorted=sorted(phase_space_orders.keys())
     DetermineMultiChannelPartnersAndSymmetryFactor() # updates the phase_space_orders dictionary
