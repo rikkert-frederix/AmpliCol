@@ -5,8 +5,14 @@ import copy
 import re
 import argparse
 from collections import Counter
+from collections import defaultdict
 import multiprocessing
 import math
+
+# This index should be built once — outside of the function
+# Recommended: build this during initialization
+process_order_to_index = {}
+
 
 # Global sets (make then 'frozenset' so that they are immutable):
 quarks=frozenset({'d','u','s','c','b','t'})
@@ -26,7 +32,7 @@ pdgs={'g':'21','d':'1','u':'2','s':'3','c':'4','b':'5','t':'6','d~':'-1','u~':'-
 anti_particle={'g':'g','d':'d~','u':'u~','s':'s~','c':'c~','b':'b~','t':'t~','d~':'d','u~':'u','s~':'s','c~':'c','b~':'b','t~':'t','a':'a','z':'z','w+':'w-','w-':'w+','e+':'e-','e-':'e+','mu+':'mu-','mu-':'mu+','ta+':'ta-','ta-':'ta+','ve':'ve~','ve~':'ve','vm':'vm~','vm~':'vm','vt':'vt~','vt~':'vt','h':'h'}
 #sort_particles={'g':0,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':99,'z':99,'w+':99,'w-':99,'e+':99,'e-':99,'mu+':99,'mu-':99,'ta+':99,'ta-':99,'ve':99,'ve~':99,'vm':99,'vm~':99,'vt':99,'vt~':99,'h':99}
 sort_particles={'g':13,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,'c~':10,'b~':11,'t~':12,'a':80,'z':81,'w+':82,'w-':83,'e+':84,'e-':85,'mu+':86,'mu-':87,'ta+':88,'ta-':89,'ve':90,'ve~':91,'vm':92,'vm~':93,'vt':94,'vt~':95,'h':96}
-charges3={'g':0,'d':-1,'u':2,'s':-1,'c':2,'b':-1,'t':2,'d~':1,'u~':-2,'s~':1,'c~':-2,'b~':1,'t~':-2,'a':0,'z':1,'w+':3,'w-':-3,'e+':3,'e-':-3,'mu+':3,'mu-':-3,'ta+':3,'ta-':-3,'ve':0,'ve~':0,'vm':0,'vm~':0,'vt':0,'vt~':0,'h':0}
+charges3={'g':0,'d':-1,'u':2,'s':-1,'c':2,'b':-1,'t':2,'d~':1,'u~':-2,'s~':1,'c~':-2,'b~':1,'t~':-2,'a':0,'z':0,'w+':3,'w-':-3,'e+':3,'e-':-3,'mu+':3,'mu-':-3,'ta+':3,'ta-':-3,'ve':0,'ve~':0,'vm':0,'vm~':0,'vt':0,'vt~':0,'h':0}
 family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'c~':-11,'b~':-21,'t~':-21,'a':0,'z':0,'w+':0,'w-':0,'e+':-31,'e-':31,'mu+':-41,'mu-':41,'ta+':-51,'ta-':51,'ve':31,'ve~':-31,'vm':41,'vm~':-41,'vt':51,'vt~':-51,'h':0}
 
 
@@ -262,53 +268,59 @@ def IdenticalParticleSymmetryFactor(proc):
     return i_fac
 
 
-def MultiChannelPartners(proc,perm,k,l):
-    all_possible_perms={perm}
-    colour_singlets_in_proc=[perm.index(i) for i,p in enumerate(proc) if p in singlets]
-    anti_quarks_in_proc=tuple([perm.index(i) for i,p in enumerate(proc) if p in antiquarks])
-    if colour_singlets_in_proc:
-        all_singlet_orders=tuple(itertools.permutations(colour_singlets_in_proc))
+def build_process_index():
+    for i, key in enumerate(all_keys_sorted):
+        for (process, order, _) in phase_space_orders[key]:
+            process_order_to_index[(process, order)] = i
+
+def MultiChannelPartners(proc, perm, k, l):
+    all_possible_perms = {perm}
+    singlet_indices = [perm.index(i) for i, p in enumerate(proc) if p in singlets]
+    anti_quark_indices = tuple([perm.index(i) for i, p in enumerate(proc) if p in antiquarks])
+    # Precompute singlet permutations
+    if len(singlet_indices) > 1:
+        singlet_perms = tuple(itertools.permutations(singlet_indices))
+    elif len(singlet_indices) == 1:
+        singlet_perms = (tuple(singlet_indices),)
     else:
-        all_singlet_orders=()
-    if len(anti_quarks_in_proc) == 1:
-        for s in all_singlet_orders:
-            order=[]
+        singlet_perms = ()
+    # Build new permutations
+    if len(anti_quark_indices) == 1:
+        for s in singlet_perms:
+            order = []
             for i in range(len(perm)):
-                if i == anti_quarks_in_proc[0]:
-                    order.extend([perm[p] for p in list(anti_quarks_in_proc+s)])
-                elif i not in colour_singlets_in_proc:
+                if i == anti_quark_indices[0]:
+                    order.extend(perm[p] for p in (anti_quark_indices + s))
+                elif i not in singlet_indices:
                     order.append(perm[i])
             all_possible_perms.add(tuple(order))
-    elif len(anti_quarks_in_proc) == 2:
-        for j in range(len(all_singlet_orders)+1):
-            for s in all_singlet_orders:
-                order=[]
+    elif len(anti_quark_indices) == 2:
+        for j in range(len(singlet_perms) + 1):
+            for s in singlet_perms:
+                order = []
                 for i in range(len(perm)):
-                    if i == anti_quarks_in_proc[0]:
-                        order.extend([perm[p] for p in list((anti_quarks_in_proc[0],)+s[:j])])
-                    elif i == anti_quarks_in_proc[1]:
-                        order.extend([perm[p] for p in list((anti_quarks_in_proc[1],)+s[j:])])
-                    elif i not in colour_singlets_in_proc:
+                    if i == anti_quark_indices[0]:
+                        order.extend(perm[p] for p in ((anti_quark_indices[0],) + s[:j]))
+                    elif i == anti_quark_indices[1]:
+                        order.extend(perm[p] for p in ((anti_quark_indices[1],) + s[j:]))
+                    elif i not in singlet_indices:
                         order.append(perm[i])
                 all_possible_perms.add(tuple(order))
-    mt=[]
+    # Lookup instead of brute-force search
+    mt = []
     for o in all_possible_perms:
-        found=False
-        for i,key in enumerate(all_keys_sorted):
-            for (process,order,multichannel) in phase_space_orders[key]:
-                if process == proc and order==o:
-                    if found:
-                        print('FOUND DOUBLE')
-                    else:
-                        found=True
-                        mt.append(i)
-#                        print('found',process,proc,order,o,i)
-        if not found:
-            print('NOT FOUND')
-    phase_space_orders[k][l]=(proc,perm,tuple(sorted(mt)))
-#    print(proc,':',all_singlet_orders,':',anti_quarks_in_proc,':',all_possible_perms)
+        idx = process_order_to_index.get((proc, o))
+        if idx is not None:
+            if idx in mt:
+                print("FOUND DOUBLE")
+            else:
+                mt.append(idx)
+        else:
+            print("NOT FOUND")
+    phase_space_orders[k][l] = (proc, perm, tuple(sorted(mt)))
 
 def DetermineMultiChannelPartnersAndSymmetryFactor():
+    build_process_index()
     for j,key in enumerate(all_keys_sorted):
         for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
             MultiChannelPartners(process,order,key,i)
@@ -387,8 +399,9 @@ if __name__ == "__main__":
     all_unique_procs=GenerateAllUniqueProcs(process)
     all_procs=GenerateAllProcs(all_unique_procs,process)
     
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
+#    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+#        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
+    results=[ProcessProcess(x) for x in all_procs]
     phase_space_orders=CombineResults(results)
     all_keys_sorted=sorted(phase_space_orders.keys())
     DetermineMultiChannelPartnersAndSymmetryFactor() # updates the phase_space_orders dictionary
