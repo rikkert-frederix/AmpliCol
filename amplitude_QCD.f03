@@ -1812,7 +1812,7 @@ contains
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)
              ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
-                ih_in=0
+                ih_in=hel(this%current_list(ic)%order(1))
              else
                 ih_in=this%current_list(ic)%spin(1)
              endif
@@ -2419,6 +2419,11 @@ contains
          if (ui.eq.1 .and. gi.eq.iunique-1) return
          if (ui.eq.2 .and. gi.eq.iunique-1-((nOrd-4)+1)) return
       enddo
+      if (irow.gt.this%nColOrd) then
+         write (*,*) 'Could not determine ui and gi correctly'
+         write (*,*) this%nColOrd,ui,gi,iunique,nOrd
+         stop 1
+      endif
     end subroutine get_unique_row
 
     subroutine determine_gi(iper,gi)

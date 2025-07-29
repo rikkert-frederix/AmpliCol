@@ -16,28 +16,15 @@ contains
        wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
     endif
   end subroutine ext_gluon_real
-  subroutine ext_gluon_cmplx(p,ihel,ifinal,wf)
+  subroutine ext_gluon_cmplx(p,ihel,idum,wf)
     ! External gluon wavefunction. From HELAS.
     implicit none
-    integer :: ihel,ifinal
+    integer :: ihel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     real(kind=8),parameter :: rZero=0d0,sqh=sqrt(0.5d0)
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: hel,pp,pt,pzpt
-!!$    hel = dble(2*ihel-1)
-!!$    pp = p(0)
-!!$    pt = sqrt(p(1)**2+p(2)**2)
-!!$    wf(1) = cZero
-!!$    wf(4) = dcmplx( hel*pt/pp*sqh )
-!!$    if ( pt.ne.rZero ) then
-!!$       pzpt = p(3)/(pp*pt)*sqh*hel
-!!$       wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-!!$       wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
-!!$    else
-!!$       wf(2) = dcmplx( -hel*sqh )
-!!$       wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
-!!$    endif
     if (p(0).eq.0d0) then
        write (*,*) 'Cannot generate external gluon with zero energy'
        write (*,*) p
@@ -50,34 +37,25 @@ contains
        wf(4) = dcmplx( hel*pt/pp*sqh )
        if ( pt.ne.rZero ) then
           pzpt = p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-          wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+          wf(2) = dcmplx( -p(1)*pzpt , -p(2)/pt*sqh )
+          wf(3) = dcmplx( -p(2)*pzpt ,  p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
-!!$       hel = -dble(2*ihel-1)
        hel = dble(2*ihel-1)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
        wf(4) = dcmplx( hel*pt/pp*sqh )
-!!$       if ( pt.ne.rZero ) then
-!!$          pzpt = -p(3)/(pp*pt)*sqh*hel
-!!$          wf(2) = dcmplx( p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-!!$          wf(3) = dcmplx( p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
-!!$       else
-!!$          wf(2) = dcmplx( -hel*sqh )
-!!$          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
-!!$       endif
        if ( pt.ne.rZero ) then
           pzpt = -p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( p(1)*pzpt ,  ifinal*p(2)/pt*sqh )
-          wf(3) = dcmplx( p(2)*pzpt , -ifinal*p(1)/pt*sqh )
+          wf(2) = dcmplx( p(1)*pzpt ,  p(2)/pt*sqh )
+          wf(3) = dcmplx( p(2)*pzpt , -p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , -ifinal*sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , -sign(sqh,p(3)) )
        endif
     endif
   
@@ -147,11 +125,11 @@ contains
 
   end subroutine ext_gluon_mass
 
-  subroutine ext_quark(p,ihel,ifinal,wf,fmass)
+  subroutine ext_quark(p,ihel,idum,wf,fmass)
   ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
   ! state anti-quark (p(0)<0)
     implicit none
-    integer :: ihel,ifinal
+    integer :: ihel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     complex(kind=8), dimension(2) :: chi
@@ -170,116 +148,120 @@ contains
        ! outgoing final state momenta
        nhel = 2*ihel-1
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
-         else
-            chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
-         endif
-         if ( nhel.eq.1 ) then
-            ! oxxx, nsf=+1, nhel=+1
-            wf(1) = chi(1)
-            wf(2) = chi(2)
-            wf(3) = cZero
-            wf(4) = cZero
-         else
-            ! oxxx, nsf=+1, nhel=-1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(2)
-            wf(4) = chi(1)
-         endif
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
+          else
+             chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
+          endif
+          if ( nhel.eq.1 ) then
+             ! oxxx, nsf=+1, nhel=+1
+             wf(1) = chi(1)
+             wf(2) = chi(2)
+             wf(3) = cZero
+             wf(4) = cZero
+          else
+             ! oxxx, nsf=+1, nhel=-1
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(2)
+             wf(4) = chi(1)
+          endif
        else
-         nsf=+1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(p(0)+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+p(3),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-              chi(2) = dcmplx(-nh )
-         else
-              chi(2) = dcmplx( nh*p(1) , -p(2) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(2)*chi(im)
-         wf(2) = sfomeg(2)*chi(ip)
-         wf(3) = sfomeg(1)*chi(im)
-         wf(4) = sfomeg(1)*chi(ip)
-        endif
+          write (*,*) 'CHECK THIS'
+          stop 1
+          nsf=+1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(p(0)+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+p(3),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*p(1) , -p(2) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(2)*chi(im)
+          wf(2) = sfomeg(2)*chi(ip)
+          wf(3) = sfomeg(1)*chi(im)
+          wf(4) = sfomeg(1)*chi(ip)
+       endif
 
     else
        ! "outgoing" initial state momenta
        nhel = (2*ihel-1)
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx(-nhel )*dsqrt(rTwo*abs(p(0)))
-         else
-            chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
-         endif
-         if ( -nhel.eq.1 ) then
-            ! oxxx, nsf=-1, nhel=+1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(2)
-            wf(4) = chi(1)
-         else
-            ! oxxx, nsf=-1, nhel=-1
-            wf(1) = chi(1)
-            wf(2) = chi(2)
-            wf(3) = cZero
-            wf(4) = cZero
-         endif
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx(-nhel )*dsqrt(rTwo*abs(p(0)))
+          else
+             chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
+          endif
+          if ( -nhel.eq.1 ) then
+             ! oxxx, nsf=-1, nhel=+1
+             wf(1) = chi(1)
+             wf(2) = chi(2)
+             wf(3) = cZero
+             wf(4) = cZero
+          else
+             ! oxxx, nsf=-1, nhel=-1
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(2)
+             wf(4) = chi(1)
+          endif
        else
-         nsf=-1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(abs(p(0))+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+(-p(3)),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-              chi(2) = dcmplx(-nh )
-         else
-              chi(2) = dcmplx( nh*(-p(1)) , -(-p(2)) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(2)*chi(im)
-         wf(2) = sfomeg(2)*chi(ip)
-         wf(3) = sfomeg(1)*chi(im)
-         wf(4) = sfomeg(1)*chi(ip)
+          write (*,*) 'CHECK THIS'
+          stop 1
+          nsf=-1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(abs(p(0))+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+(-p(3)),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*(-p(1)) , -(-p(2)) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(2)*chi(im)
+          wf(2) = sfomeg(2)*chi(ip)
+          wf(3) = sfomeg(1)*chi(im)
+          wf(4) = sfomeg(1)*chi(ip)
        endif
     endif
   end subroutine ext_quark
 
 
-  subroutine ext_antiquark(p,ihel,ifinal,wf,fmass)
-  ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
-  ! initial state quark (p(0)<0)
+  subroutine ext_antiquark(p,ihel,idum,wf,fmass)
+    ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
+    ! initial state quark (p(0)<0)
     implicit none
-    integer :: ihel,ifinal
+    integer :: ihel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     complex(kind=8), dimension(2) :: chi
@@ -291,128 +273,131 @@ contains
     real(kind=8) :: fmass, pp,pp3,lim
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
     integer :: im,ip,nsf,nh
-    
+
     lim=tiny
 
     if(p(0).gt.0d0) then
-! outgoing final state momenta
+       ! outgoing final state momenta
        nhel = (2*ihel-1)
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
-         else
-            chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
-         endif
-         if ( -nhel.eq.1 ) then
-            ! ixxx, nsf=-1, nhel=-1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(1)
-            wf(4) = chi(2)
-         else
-            ! ixxx, nsf=-1, nhel=+1
-            wf(1) = chi(2)
-            wf(2) = chi(1)
-            wf(3) = cZero
-            wf(4) = cZero
-         endif
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
+          else
+             chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
+          endif
+          if ( -nhel.eq.1 ) then
+             ! ixxx, nsf=-1, nhel=-1
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(1)
+             wf(4) = chi(2)
+          else
+             ! ixxx, nsf=-1, nhel=+1
+             wf(1) = chi(2)
+             wf(2) = chi(1)
+             wf(3) = cZero
+             wf(4) = cZero
+          endif
        else
-         nsf=-1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(p(0)+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+p(3),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-            chi(2) = dcmplx(-nh )
-         else
-            chi(2) = dcmplx( nh*p(1) , p(2) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(1)*chi(im)
-         wf(2) = sfomeg(1)*chi(ip)
-         wf(3) = sfomeg(2)*chi(im)
-         wf(4) = sfomeg(2)*chi(ip)
+          write (*,*) 'CHECK THIS'
+          stop 1
+          nsf=-1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(p(0)+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+p(3),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*p(1) , p(2) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(1)*chi(im)
+          wf(2) = sfomeg(1)*chi(ip)
+          wf(3) = sfomeg(2)*chi(im)
+          wf(4) = sfomeg(2)*chi(ip)
 
        endif
 
     else
-! "outgoing" initial state momenta
+       ! "outgoing" initial state momenta
        nhel = 2*ihel-1
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
-         else
-            chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
-         endif
-         if ( -nhel.eq.1 ) then
-            ! ixxx, nsf=+1, nhel=-1
-            wf(1) = chi(2)
-            wf(2) = chi(1)
-            wf(3) = cZero
-            wf(4) = cZero
-         else
-            ! ixxx, nsf=+1, nhel=+1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(1)
-            wf(4) = chi(2)
-         endif
-
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
+          else
+             chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
+          endif
+          if ( nhel.eq.1 ) then
+             ! ixxx, nsf=+1, nhel=+1
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(1)
+             wf(4) = chi(2)
+          else
+             ! ixxx, nsf=+1, nhel=-1
+             wf(1) = chi(2)
+             wf(2) = chi(1)
+             wf(3) = cZero
+             wf(4) = cZero
+          endif
        else
-         nsf=+1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(abs(p(0))+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+(-p(3)),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-            chi(2) = dcmplx(-nh )
-         else
-            chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(1)*chi(im)
-         wf(2) = sfomeg(1)*chi(ip)
-         wf(3) = sfomeg(2)*chi(im)
-         wf(4) = sfomeg(2)*chi(ip)
+          write (*,*) 'CHECK THIS'
+          stop 1
+          nsf=+1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(abs(p(0))+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+(-p(3)),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(1)*chi(im)
+          wf(2) = sfomeg(1)*chi(ip)
+          wf(3) = sfomeg(2)*chi(im)
+          wf(4) = sfomeg(2)*chi(ip)
        endif
     endif
   end subroutine ext_antiquark
 
-  subroutine ext_scalar(p,ifinal,wf)
+  subroutine ext_scalar(p,idum,wf)
     implicit none
-    integer :: ifinal
+    integer :: idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(1) :: wf
     real(kind=8),parameter :: rOne=1d0
     wf(1)=(rOne,0d0)
-  end subroutine
-
+  end subroutine ext_scalar
+  
 
 
 
@@ -697,10 +682,10 @@ contains
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
     TMP4=wfg2(2)-cImag*wfg2(3)
-    TMP5=prefact*coupl(1) ! R
+    TMP5=prefact*coupl(2) ! L
     wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4))
     wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3))
-    TMP5=prefact*coupl(2) ! L
+    TMP5=prefact*coupl(1) ! R
     wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
     wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
   end subroutine QuarkGluontoQuark_coupl
@@ -717,10 +702,10 @@ contains
     TMP2=wfg2(1)-wfg2(4)
     TMP3=dcmplx(wfg2(2),wfg2(3))
     TMP4=dcmplx(wfg2(2),-wfg2(3))
-    TMP5=prefact*coupl(1)
+    TMP5=prefact*coupl(2)
     wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4)) !sl1
     wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3)) !sl2
-    TMP5=prefact*coupl(2)
+    TMP5=prefact*coupl(1)
     wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2)) !sr1
     wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1)) !sr2
   end subroutine QuarkGluontoQuark_coupl_real
@@ -731,6 +716,8 @@ contains
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
+    write (*,*) 'CHECK THIS GluonQuarktoQuark_coupl'
+    stop 1
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
@@ -751,6 +738,8 @@ contains
     real(kind=8),dimension(2) :: coupl
     real(kind=8) :: TMP1,TMP2
     complex(kind=8) :: TMP3,TMP4,TMP5
+    write (*,*) 'CHECK THIS GluonQuarktoQuark_coupl_real'
+    stop 1
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=dcmplx(wfg1(2),wfg1(3))
@@ -769,6 +758,8 @@ contains
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
+    write (*,*) 'CHECK THIS AquarkGluontoAquark_coupl'
+    stop 1
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
@@ -787,6 +778,8 @@ contains
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
+    write (*,*) 'CHECK THIS GluonAquarktoAquark_coupl'
+    stop 1
     TMP1=wfg1(1)+wfg1(4)
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
@@ -805,6 +798,8 @@ contains
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
+    write (*,*) 'CHECK THIS QuarkAquarktoGluon_coupl'
+    stop 1
     TMP1=wfq1(3)*wfq2(1)*coupl(1)+wfq1(2)*wfq2(4)*coupl(2)
     TMP2=wfq1(4)*wfq2(2)*coupl(1)+wfq1(1)*wfq2(3)*coupl(2)
     TMP3=wfq1(2)*wfq2(3)*coupl(2)-wfq1(4)*wfq2(1)*coupl(1)
@@ -822,6 +817,8 @@ contains
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     real(kind=8),dimension(2) :: coupl
+    write (*,*) 'CHECK THIS AquarkQuarktoGluon_coupl'
+    stop 1
     TMP1=wfq2(3)*wfq1(1)*coupl(1)+wfq2(2)*wfq1(4)*coupl(1)
     TMP2=wfq2(4)*wfq1(2)*coupl(1)+wfq2(1)*wfq1(3)*coupl(1)
     TMP3=wfq2(2)*wfq1(3)*coupl(2)-wfq2(4)*wfq1(1)*coupl(2)
@@ -958,6 +955,8 @@ contains
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: fm,fw
+    write (*,*) 'CHECK THIS AquarkPropagator'
+    stop 1
     prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
     tmp_val(1:4)=wfq(1:4)
     tmp_p(1)=-(p(0)+p(3))
