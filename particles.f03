@@ -248,7 +248,7 @@ contains
           Vf=-0.5d0+2d0*sw**2/3d0
           Af=-0.5d0
        endif
-       this%vertex_list(l)%coupl=[Vf-Af,Vf+Af]*gw*fact
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
     enddo
     ! antiquark-Zboson to antiquark vertices
     do i=1,6
@@ -266,7 +266,7 @@ contains
           Vf=-0.5d0+2d0*sw**2/3d0
           Af=-0.5d0
        endif
-       this%vertex_list(l)%coupl=[Vf-Af,Vf+Af]*gw*fact
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
     enddo
     ! quark-Wboson to quark vertices
     do i=1,6
@@ -282,7 +282,7 @@ contains
        endif
        gw=1d0/sw
        fact=1d0/(sqrt(2d0))
-       this%vertex_list(l)%coupl=[0d0,gw*fact]
+       this%vertex_list(l)%coupl=[gw*fact,0d0]
     enddo
     ! antiquark-Wboson to antiquark vertices
     do i=1,6
@@ -298,7 +298,7 @@ contains
        endif
        gw=1d0/sw
        fact=1d0/(sqrt(2d0))
-       this%vertex_list(l)%coupl=[0d0,gw*fact]
+       this%vertex_list(l)%coupl=[gw*fact,0d0]
     enddo
     ! Wboson-Wboson to Z-boson
     l=l+1
@@ -621,9 +621,6 @@ contains
     gw=1d0/sw
     fact=sqrt(1d0-sw**2)
     this%vertex_list(l)%coupl=[gw*fact,0d0] !!
-
-
-
     
     write (*,*) l,'interactions loaded'
   end subroutine init_vert
