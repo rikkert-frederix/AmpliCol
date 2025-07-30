@@ -8,11 +8,11 @@ contains
     complex(kind=8),dimension(4) :: wf0,wf1
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8),parameter :: sqh=sqrt(0.5d0)
-    call ext_gluon_cmplx(p,1,ifinal,wf1)
-    call ext_gluon_cmplx(p,0,ifinal,wf0)
+    call ext_gluon_cmplx(p, 1,ifinal,wf1)
+    call ext_gluon_cmplx(p,-1,ifinal,wf0)
     if (ihel.eq.1) then
        wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqh
-    elseif (ihel.eq.0) then
+    elseif (ihel.eq.-1) then
        wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
     endif
   end subroutine ext_gluon_real
@@ -30,7 +30,7 @@ contains
        write (*,*) p
        stop 1
     elseif (p(0).gt.0d0) then
-       hel = dble(2*ihel-1)
+       hel = dble(ihel)
        pp = p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
@@ -44,7 +44,7 @@ contains
           wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
-       hel = dble(2*ihel-1)
+       hel = dble(ihel)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
@@ -125,18 +125,17 @@ contains
 
   end subroutine ext_gluon_mass
 
-  subroutine ext_quark(p,ihel,idum,wf,fmass)
+  subroutine ext_quark(p,nhel,idum,wf,fmass)
   ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
   ! state anti-quark (p(0)<0)
     implicit none
-    integer :: ihel,idum
+    integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     complex(kind=8), dimension(2) :: chi
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    integer :: nhel
     real(kind=8), parameter :: tiny=1d-8
     real(kind=8) :: fmass, pp,pp3,lim
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
@@ -146,7 +145,6 @@ contains
 
     if (p(0).gt.0d0) then
        ! outgoing final state momenta
-       nhel = 2*ihel-1
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
              sqp0p3 = 0d0
@@ -201,7 +199,6 @@ contains
 
     else
        ! "outgoing" initial state momenta
-       nhel = (2*ihel-1)
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
              sqp0p3 = 0d0
@@ -257,18 +254,17 @@ contains
   end subroutine ext_quark
 
 
-  subroutine ext_antiquark(p,ihel,idum,wf,fmass)
+  subroutine ext_antiquark(p,nhel,idum,wf,fmass)
     ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
     ! initial state quark (p(0)<0)
     implicit none
-    integer :: ihel,idum
+    integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     complex(kind=8), dimension(2) :: chi
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    integer :: nhel
     real(kind=8), parameter :: tiny=1d-8
     real(kind=8) :: fmass, pp,pp3,lim
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
@@ -278,7 +274,6 @@ contains
 
     if(p(0).gt.0d0) then
        ! outgoing final state momenta
-       nhel = (2*ihel-1)
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
              sqp0p3 = 0d0
@@ -334,7 +329,6 @@ contains
 
     else
        ! "outgoing" initial state momenta
-       nhel = 2*ihel-1
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
              sqp0p3 = 0d0

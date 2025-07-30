@@ -93,12 +93,12 @@ contains
     do i=1,next
        pgl%spin(0,i)=phys_model%get_spin(pgl%processes(i,1))
        if (pgl%spin(0,i).eq.2) then
-          pgl%spin(1,i)=0
+          pgl%spin(1,i)=-1
           pgl%spin(2,i)=1
        elseif (pgl%spin(0,i).eq.3) then
           pgl%spin(1,i)=-1
-          pgl%spin(2,i)=1
-          pgl%spin(3,i)=0
+          pgl%spin(2,i)=0
+          pgl%spin(3,i)=1
        elseif (pgl%spin(0,i).eq.1) then
           pgl%spin(1,i)=0
        else
