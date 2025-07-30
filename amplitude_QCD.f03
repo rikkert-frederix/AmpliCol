@@ -1947,29 +1947,15 @@ contains
                                      this%interaction_list(iv)%val_c(1:4))
 
           elseif(this%interaction_list(iv)%type.eq.10) then
-             if (use_real_gluons) then
-                call QuarkGluontoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                                                  this%interaction_list(iv)%val_c(1:4),&
-                                                  this%interaction_list(iv)%coupl(1:2))
-             else
-                call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                             this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl(1:2))
-             endif
+             call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                          this%interaction_list(iv)%val_c(1:4)
+                                          this%interaction_list(iv)%coupl(1:2))
           elseif(this%interaction_list(iv)%type.eq.11) then
-             if (use_real_gluons) then
-                call AquarkGluontoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                                                    this%interaction_list(iv)%val_c(1:4),&
-                                                    this%interaction_list(iv)%coupl(1:2))
-             else
-                call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                               this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl(1:2))
-             endif
+             call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                            this%interaction_list(iv)%val_c(1:4),&
+                                            this%interaction_list(iv)%coupl(1:2))
           elseif (this%interaction_list(iv)%type.eq.12) then
              call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
