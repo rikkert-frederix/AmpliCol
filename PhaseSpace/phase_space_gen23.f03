@@ -1895,6 +1895,11 @@ contains
       real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
       real(kind=8) :: cosphi,x
       cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
+      if (cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
+         write (*,*) 'WARNING cosphi does not have a reasonable value',cosphi
+         getphifroms=0d0
+         return
+      endif
       x=ran
       if (x.gt.0.5d0) then
          getphifroms=acos(cosphi)
@@ -1902,6 +1907,5 @@ contains
          getphifroms=-acos(cosphi)+2d0*pi
       endif
     end function getphifroms
-
 
 end module phase_space_gen23_mod
