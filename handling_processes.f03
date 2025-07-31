@@ -266,10 +266,10 @@ contains
                'colour factor is not an integer',ifac,fac
           stop 1
        endif
-       if (abs(pgl%processes(pgl%color_orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%color_orders(next,iproc),iproc)) &
-            .and. .not.pgl%amps%same_flav(iproc)) then
-          if (all(abs(pgl%processes(1:next,iproc)).ne.24)) ifac=ifac-2
-       endif
+!!$       if (abs(pgl%processes(pgl%color_orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%color_orders(next,iproc),iproc)) &
+!!$            .and. .not.pgl%amps%same_flav(iproc)) then
+!!$          if (all(abs(pgl%processes(1:next,iproc)).ne.24)) ifac=ifac-2
+!!$       endif
        pgl%col_fac(iproc)=3**ifac
     enddo
   end subroutine compute_LC_colour_factor
