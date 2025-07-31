@@ -656,7 +656,7 @@ contains
   end subroutine ThreeGluon_Coupl
 
 
-  subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfqcoupl) ! from fvoxxx.f
+  subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl) ! from fvoxxx.f
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
