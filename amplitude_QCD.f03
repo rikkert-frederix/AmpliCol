@@ -249,6 +249,7 @@ contains
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
+               if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
                curr2amp(2,this%n_amps)=jcur
@@ -516,7 +517,8 @@ contains
       integer,dimension(n),intent(in) :: process
       logical,intent(out) :: is_same_flavour_process
       integer :: i,iflav
-      is_same_flavour_process=.true.
+!!$      is_same_flavour_process=.true.
+      is_same_flavour_process=.false.
       number_of_quark_lines=0
       iflav=0
       do i=1,n
@@ -1949,7 +1951,7 @@ contains
           elseif(this%interaction_list(iv)%type.eq.10) then
              call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                          this%interaction_list(iv)%val_c(1:4)
+                                          this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
           elseif(this%interaction_list(iv)%type.eq.11) then
              call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2056,53 +2058,53 @@ contains
          if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
             do iamp=1,this%n_amps
                this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                                     this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
+                    this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             enddo
          else
             if (.not.read_file) then
                do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (.not.this%same_flav(iproc)) then
-                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                  else
-                     ! same-flavour amps are build from two different-flavour amps
-                     if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                        this%amps(this%same_flavour_sum(iamp,2))/3d0
-                     elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                     elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+                  do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                     if (.not.this%same_flav(iproc)) then
+                        this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
-                        write (*,*) 'At least one should contribute'
-                        stop 1
+                        ! same-flavour amps are build from two different-flavour amps
+                        if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
+                                this%amps(this%same_flavour_sum(iamp,2))/3d0
+                        elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
+                        elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+                        else
+                           write (*,*) 'At least one should contribute'
+                           stop 1
+                        endif
                      endif
-                  endif
-               enddo
+                  enddo
                enddo
             else   
-             do iproc=1,this%nprocs
-                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (.not.this%same_flav(iproc)) then
-                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                  else
-                     ! same-flavour amps are build from two different-flavour amps
-                     if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                        this%amps(this%same_flavour_sum(iamp,2))/3d0
-                     elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                     elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+               do iproc=1,this%nprocs
+                  do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                     if (.not.this%same_flav(iproc)) then
+                        this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
-                        write (*,*) 'At least one should contribute'
-                        stop 1
+                        ! same-flavour amps are build from two different-flavour amps
+                        if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
+                                this%amps(this%same_flavour_sum(iamp,2))/3d0
+                        elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
+                        elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+                        else
+                           write (*,*) 'At least one should contribute'
+                           stop 1
+                        endif
                      endif
-                  endif
+                  enddo
                enddo
-            enddo
             endif
          endif
       elseif(this%imode.eq.2) then

@@ -611,9 +611,18 @@ contains
   end subroutine GluonAquarktoAquark
 
   subroutine QuarkAquarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
+    !
+    ! This subroutine is only used to compute the off-shell gluon that
+    ! connects the two quark lines in nqq=2 processes. Moreover, the
+    ! combination of quark+anti-quark is ONLY there when these the
+    ! quark and anti-quark are from *THE SAME* colour string. Hence,
+    ! this is the "photon" (-1/N_C) contribution. Hence, include the
+    ! factor -1/N_C=-1/3 here, instead of in the colour factor.
+    !
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),parameter :: N_C=3d0
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)/N_C
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
     TMP1=wfq1(3)*wfq2(1)+wfq1(2)*wfq2(4)
     TMP2=wfq1(4)*wfq2(2)+wfq1(1)*wfq2(3)
@@ -656,7 +665,7 @@ contains
   end subroutine ThreeGluon_Coupl
 
 
-  subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfqcoupl) ! from fvoxxx.f
+  subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl) ! from fvoxxx.f
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
