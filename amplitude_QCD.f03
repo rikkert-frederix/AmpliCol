@@ -1949,7 +1949,7 @@ contains
           elseif(this%interaction_list(iv)%type.eq.10) then
              call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                          this%interaction_list(iv)%val_c(1:4)
+                                          this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
           elseif(this%interaction_list(iv)%type.eq.11) then
              call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
