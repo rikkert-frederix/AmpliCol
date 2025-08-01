@@ -165,7 +165,6 @@ contains
     write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
 
     call deallocate_unneeded()
-
   contains
 
     subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
@@ -292,7 +291,7 @@ contains
                endif
                exit
             enddo
-            if (jamp.gt.this%n_amps) then
+            if (jamp.gt.this%iproc_start(this%same_flavour_proc_map(iproc,2)+1)-1) then
                write (*,*) 'permutation not found',jamp,this%n_amps
                stop 1
             endif
@@ -1091,7 +1090,7 @@ contains
       integer,intent(in) :: ic1,ic2,ctype
       integer,intent(in) :: invert
       integer,dimension(0:isize),intent(out) :: singlet_mv
-      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2
+      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2,n_mv12_1
       integer,dimension(isize) :: ord
       integer,dimension(:),allocatable :: ord1,spin1,et1,ord2,spin2,et2
       allocate(combine_currents%order(1:isize))
@@ -1176,6 +1175,7 @@ contains
             if (ns2.gt.n2) exit
          enddo
          ord(ns1+nc2:ns1+ns2-2)=ord2(nc2+1:ns2-1)
+         n_mv12_1=0
          do ipos=ns1+ns2-1,n1+n2
             if (ns1.gt.n1) then
                mv12=2
@@ -1189,7 +1189,8 @@ contains
             singlet_mv(0)=singlet_mv(0)+1
             if (mv12.eq.1) then
                ord(ipos)=ord1(ns1)
-               singlet_mv(singlet_mv(0))=ns1 - (singlet_mv(0)-1)
+               singlet_mv(singlet_mv(0))=ns1 - n_mv12_1
+               n_mv12_1=n_mv12_1+1
                ns1=ns1+1
             elseif (mv12.eq.2) then
                ord(ipos)=ord2(ns2)
@@ -2058,7 +2059,7 @@ contains
          if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
             do iamp=1,this%n_amps
                this%amps_r(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_r(1:4)* &
-                    this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
+                                     this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             enddo
          else
             if (.not.read_file) then
