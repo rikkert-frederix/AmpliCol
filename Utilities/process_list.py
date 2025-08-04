@@ -159,6 +159,8 @@ def ValidProc(proc):
     naq=count_matching_elements(proc,antiquarks)
     if nq > 2 : return False    # at most two quarks
     if naq > 2 : return False   # at most two anti-quarks
+#    if nq < 2 : return False    # at least two quarks
+#    if naq < 2 : return False   # at least two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
     # check charge conservation:
     if sum([charges3[x] for x in proc]) != 0 : return False
@@ -375,6 +377,12 @@ def Add2qq_dfProcesses(sorted_procs):
         if proc[2] in antiquarks and proc[3] in antiquarks and proc[2] != proc[3]:
             swapped_proc=proc[:]
             swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
+            sorted_procs.insert(i+1,swapped_proc)
+            i+=1
+        elif proc[2] in antiquarks and proc[3] in antiquarks and proc[2] == proc[3] and \
+             proc[0] in quarks and proc[1] in quarks and proc[0] != proc[1] :
+            swapped_proc=proc[:]
+            swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
             sorted_procs.insert(i+1,swapped_proc)
             i+=1
         i+=1
