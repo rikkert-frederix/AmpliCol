@@ -186,10 +186,6 @@ contains
         write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:pgl_unique%next,iproc),&
                 ':',pgl_unique%color_orders(1:pgl_unique%next,iproc)
      enddo
-
-
-     stop
-     
      deallocate(pgl_unique%spin)
      deallocate(pgl_unique%phase_space)
      deallocate(amp2)
@@ -235,6 +231,11 @@ contains
            enddo
         enddo
      enddo
+     write (*,*) &
+          "Currently, not all SF amplitudes will be decomposed, since "// &
+          "curr2amp() will not always result in the same order of the "// &
+          "amplitudes. That is, the spin assignments might be different "// &
+          "in 'i', 'j' and 'k'."
    end subroutine find_same_flavour
 
    subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
@@ -250,6 +251,11 @@ contains
      real(kind=8),parameter :: tiny=1d-6
      unique_map=-1d0
      do i=1,pgl%nproc
+        if (all(amp2(1:nevent,i).eq.0d0)) then
+           unique_map(i)=0
+           unique_map_value(i)=0d0
+           cycle
+        endif
         do j=1,i-1
            if (all(amp2(1:nevent,j).eq.0d0)) cycle
            ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
@@ -261,13 +267,8 @@ contains
            endif
         enddo
         if (j.eq.i) then
-           if (all(amp2(1:nevent,i).eq.0d0)) then
-              unique_map(i)=0
-              unique_map_value(i)=0d0
-           else
-              unique_map(i)=-1
-              unique_map_value(i)=1d0
-           endif
+           unique_map(i)=-1
+           unique_map_value(i)=1d0
         endif
      enddo
    end subroutine find_unique

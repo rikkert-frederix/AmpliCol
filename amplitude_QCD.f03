@@ -438,6 +438,10 @@ contains
          write (*,*) 'ERROR: no valid matrix elements found: check your process definition'
          stop 1
       endif
+      if (this%nprocs.gt.128) then
+         write (*,*) 'ERROR: too many processes. Not compatible with the "integer(kind=16) :: iproc" variable'
+         stop 1
+      endif
     end subroutine simple_consistency_checks
 
     subroutine define_canonical_color_order()
@@ -2411,6 +2415,8 @@ contains
       if (irow.gt.this%nColOrd) then
          write (*,*) 'Could not determine ui and gi correctly'
          write (*,*) this%nColOrd,ui,gi,iunique,nOrd
+         write (*,*) part(1:n)
+         write (*,*) part(iper(1:n))
          stop 1
       endif
     end subroutine get_unique_row
@@ -2432,11 +2438,19 @@ contains
       implicit none
       integer :: ui
       integer,dimension(n) :: iper
-      if (abs(part(iper(1))).eq.abs(part(iper(n-this%n_sing(1))))) then
+      ! check if quarks are connected in the same (or opposite way) as
+      ! compared to the very first permutation
+      if ((iper(1).eq.this%perm(1,ioff+1) .and. iper(nOrd).eq.this%perm(nOrd,ioff+1)) .or. &
+           (iper(1).ne.this%perm(1,ioff+1) .and. iper(nOrd).ne.this%perm(nOrd,ioff+1))) then
          ui=1
       else
          ui=2
       endif
+!!$      if (abs(part(iper(1))).eq.abs(part(iper(n-this%n_sing(1))))) then
+!!$         ui=1
+!!$      else
+!!$         ui=2
+!!$      endif
     end subroutine determine_ui
     
     subroutine determine_gi_ui(iper,gi,ui)
@@ -2574,7 +2588,7 @@ contains
                if (ui.eq.1 .and. uj.eq.1) then
                   col_fac(1)=dble(3**(n-2))
                elseif (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav(iproc)) then
-                  col_fac(1)=dble(3**(n-4))
+                  col_fac(1)=dble(3**(n-4))  * 9d0 ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                elseif (ui.eq.2 .and. uj.eq.2 .and. this%same_flav(iproc)) then
                   col_fac(1)=dble(3**(n-2))
                endif
@@ -2638,21 +2652,23 @@ contains
                k=k+1
             enddo
             call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
-            if (.not.this%same_flav(iproc)) then
-               call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
-               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
-               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
-            else
+!!$            if (.not.this%same_flav(iproc)) then
+!!$               call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+!!$               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+!!$               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
+!!$               write (*,*) 'DF',col_fac(2),acc
+!!$            else
                call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
                if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
                if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
-            endif
+!!$               write (*,*) 'SF',col_fac(2),acc
+!!$            endif
             ! include the full expansion
             if (acc.ne.0) then
                call Tr_allocate(n)
                if (ui.eq.uj) then
                   Tr(0,0,0)=1 ! one term
-                  Tr(0,0,1)=2
+                  Tr(0,0,1)=2 ! two traces
                   Tr(0,1,1) = gi+gj  ! number of generators in first trace
                   Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
                   Tr(1:gi,1,1) = iper(2:2+gi-1)
@@ -2660,7 +2676,7 @@ contains
                   Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
                   Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
                   if (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav(iproc)) then
-                     coef(1)=1d0/9d0
+                     coef(1)=1d0/9d0 *9d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                   else
                      coef(1)=1d0
                   endif
@@ -2674,7 +2690,7 @@ contains
                   Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
                   Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
                   if (.not.this%same_flav(iproc)) then
-                     coef(1)=-1d0/3d0
+                     coef(1)=-1d0/3d0 *3d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                   else
                      coef(1)=-1d0
                   endif
@@ -2735,7 +2751,7 @@ contains
                Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
                Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
                if (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav(iproc)) then
-                  coef(1)=1d0/9d0
+                  coef(1)=1d0/9d0  *9d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                else
                   coef(1)=1d0
                endif
@@ -2749,7 +2765,7 @@ contains
                Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
                Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
                if (.not.this%same_flav(iproc)) then
-                  coef(1)=-1d0/3d0
+                  coef(1)=-1d0/3d0   * 3d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                else
                   coef(1)=-1d0
                endif
