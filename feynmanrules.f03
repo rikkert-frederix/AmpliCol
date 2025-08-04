@@ -44,7 +44,7 @@ contains
           wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
-       hel = dble(ihel)
+       hel = dble(-ihel)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
