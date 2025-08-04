@@ -107,6 +107,7 @@ contains
     integer :: i,iproc,ievent,ih,nqq
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
+    complex(kind=8),dimension(:,:),allocatable :: amp
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(ndim) :: x
     real(kind=8),external :: ran2
@@ -149,6 +150,7 @@ contains
              pgl_unique%spin,pgl_unique%color_orders,phys_model,read_proc_from_file)
      
      allocate(amp2(nevent,pgl_unique%nproc))
+     allocate(amp(nevent,pgl_unique%amps%n_amps))
 
      ievent=0
      do while (ievent.lt.nevent)
@@ -171,21 +173,69 @@ contains
               do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
               amp2(ievent,iproc)=amp2(ievent,iproc)+dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
            enddo
+           amp(ievent,1:pgl_unique%amps%n_amps)=pgl_unique%amps%amps(1:pgl_unique%amps%n_amps)
         endif
      enddo
      allocate(unique_map(1:pgl_unique%nproc))
      allocate(unique_map_value(1:pgl_unique%nproc))
      call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
 
+     call find_same_flavour(pgl_unique,nevent,amp)
+     
      do iproc=1,pgl_unique%nproc
         write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:pgl_unique%next,iproc),&
                 ':',pgl_unique%color_orders(1:pgl_unique%next,iproc)
      enddo
 
+
+     stop
+     
      deallocate(pgl_unique%spin)
      deallocate(pgl_unique%phase_space)
      deallocate(amp2)
+     deallocate(amp)
    end subroutine check_unique_processes
+
+   subroutine find_same_flavour(pgl,nevent,amp)
+     type(phase_space_order_group),intent(in) :: pgl
+     integer,intent(in) :: nevent
+     complex(kind=8),dimension(nevent,pgl%amps%n_amps),intent(in) :: amp
+     integer :: i,j,k,ii,jj,kk,ievent
+     real(kind=8),parameter :: tiny=1d-6
+     ievent=1
+     do i=1,pgl%nproc
+        if (unique_map(i).ne.-1) cycle
+        if (pgl_unique%amps%n_qqbar(i).ne.2) cycle
+        do j=1,pgl%nproc
+           if (i.eq.j) cycle
+           if (unique_map(j).ne.-1) cycle
+           if (pgl_unique%amps%n_qqbar(j).ne.2) cycle
+           do k=1,j-1
+              if (k.eq.i) cycle
+              if (unique_map(k).ne.-1) cycle
+              if (pgl_unique%amps%n_qqbar(k).ne.2) cycle
+              do ih=0,pgl_unique%amps%iproc_start(k+1)-pgl_unique%amps%iproc_start(k)-1
+                 if ( amp(ievent,pgl_unique%amps%iproc_start(i)+ih).ne.(0d0,0d0) .or. &
+                      amp(ievent,pgl_unique%amps%iproc_start(j)+ih).ne.(0d0,0d0) .or. &
+                      amp(ievent,pgl_unique%amps%iproc_start(k)+ih).ne.(0d0,0d0) ) then
+                    if (any((abs(amp(1:nevent,pgl_unique%amps%iproc_start(i)+ih)- &
+                         (amp(1:nevent,pgl_unique%amps%iproc_start(j)+ih)+ &
+                         amp(1:nevent,pgl_unique%amps%iproc_start(k)+ih)))/&
+                         abs(amp(1:nevent,pgl_unique%amps%iproc_start(i)+ih)+ &
+                         (amp(1:nevent,pgl_unique%amps%iproc_start(j)+ih)+ &
+                         amp(1:nevent,pgl_unique%amps%iproc_start(k)+ih)))).gt.tiny)) then
+                       exit
+                    endif
+                 endif
+              enddo
+              if (ih.eq.pgl_unique%amps%iproc_start(k+1)-pgl_unique%amps%iproc_start(k)) then
+                 write (*,'(a,x,i4,x,a,i4,x,a,i4)') &
+                      "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
+              endif
+           enddo
+        enddo
+     enddo
+   end subroutine find_same_flavour
 
    subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
      implicit none
@@ -211,8 +261,13 @@ contains
            endif
         enddo
         if (j.eq.i) then
-           unique_map(i)=-1
-           unique_map_value(i)=1d0
+           if (all(amp2(1:nevent,i).eq.0d0)) then
+              unique_map(i)=0
+              unique_map_value(i)=0d0
+           else
+              unique_map(i)=-1
+              unique_map_value(i)=1d0
+           endif
         endif
      enddo
    end subroutine find_unique
@@ -227,6 +282,7 @@ contains
     call map_to_canonical_form(process,process_mapped,mapping)
     call get_unique_process(process,process_mapped,process_unique,idenMAPfactor,mapping)
     idenCOMAPfactor=idenMAPfactor*idenCOfactor
+    if (idenCOMAPfactor.eq.0d0) return
     call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
   end subroutine add_to_process_list
 
