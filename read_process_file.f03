@@ -76,7 +76,7 @@ contains
        allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%amps%same_flavour_process_map(2,sf_nprocs))
+       allocate(pgl(igroup)%amps%same_flavour_process_map(2,1:pgl(igroup)%nproc))
        pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
        pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
        pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
@@ -87,7 +87,7 @@ contains
             iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
-       pgl(igroup)%amps%same_flavour_process_map(1:2,1:sf_nprocs)=same_flavour_process_map(1:2,1:sf_nprocs)
+       pgl(igroup)%amps%same_flavour_process_map(1:2,1:pgl(igroup)%nproc)=same_flavour_process_map(1:2,1:pgl(igroup)%nproc)
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
@@ -217,6 +217,7 @@ contains
      real(kind=8),parameter :: tiny=1d-6
      allocate(proc_sf_map(pgl%nproc,2))
      proc_sf_map=0
+     if (.not.decompose_same_flavour_into_two_diff_flavour) return
      do i=1,pgl%nproc
         if (unique_map(i).ne.-1) cycle
         if (pgl_unique%amps%n_qqbar(i).ne.2) cycle
@@ -306,10 +307,6 @@ contains
         if (idenCOMAPfactor.eq.0d0) cycle
         call add_to_unique_process_list(same_flavour_process(1,iproc),process_unique, &
              same_flavour_order(1,iproc),idenCOMAPfactor,max_channels,same_flavour_ichans(0,iproc),quarks_to_map)
-     enddo
-     sf_nprocs=0
-     do iproc=1,nprocs
-        if (same_flavour_process_map(1,nprocs).ne.0) sf_nprocs=sf_nprocs+1
      enddo
    end subroutine add_same_flavour_processes_to_list
   

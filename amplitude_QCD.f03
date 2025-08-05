@@ -549,7 +549,7 @@ contains
       order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
       if (.not.allocated(this%same_flavour_process_map)) then
          allocate(this%same_flavour_process_map(1:2,1:this%nprocs))
-         this%same_flavour_process_map=0
+         this%same_flavour_process_map(1:2,1:this%nprocs)=0
       endif
       allocate(this%n_sing(1:this%nprocs))
       allocate(this%n_qqbar(1:this%nprocs))

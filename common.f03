@@ -13,6 +13,7 @@ module common
   ! technical
   logical,parameter :: include_pdf=.true.
   logical,parameter :: use_colour_singlet_multichannel=.true.
+  logical,parameter :: decompose_same_flavour_into_two_diff_flavour=.true.
 
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   ! jets:
