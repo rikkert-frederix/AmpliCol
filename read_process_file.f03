@@ -303,7 +303,11 @@ contains
            write (*,*) 'ERROR: current process must be a same-flavour process'
            stop 1
         endif
-        idenCOMAPfactor=idenMAPfactor*same_flavour_idenCOfactor(iproc)
+        if (reduce_to_unique_matrix_elements) then
+           idenCOMAPfactor=idenMAPfactor*same_flavour_idenCOfactor(iproc)
+        else
+           idenCOMAPfactor=same_flavour_idenCOfactor(iproc)
+        endif
         if (idenCOMAPfactor.eq.0d0) cycle
         call add_to_unique_process_list(same_flavour_process(1,iproc),process_unique, &
              same_flavour_order(1,iproc),idenCOMAPfactor,max_channels,same_flavour_ichans(0,iproc),quarks_to_map)
@@ -329,7 +333,11 @@ contains
        same_flavour_idenCOfactor(sf_nprocs)=idenCOfactor
        return ! do not add it to the list yet; first finish all the different-flavour processes
     endif
-    idenCOMAPfactor=idenMAPfactor*idenCOfactor
+    if (reduce_to_unique_matrix_elements) then
+       idenCOMAPfactor=idenMAPfactor*idenCOfactor
+    else
+       idenCOMAPfactor=idenCOfactor
+    endif
     if (idenCOMAPfactor.eq.0d0) return
     call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans,quarks_to_map)
   end subroutine add_to_process_list
@@ -482,6 +490,18 @@ contains
     real(kind=8) :: idenCOMAPfactor
     integer :: iproc
     call move_colour_singlet_in_order(process,order)
+    if (.not.reduce_to_unique_matrix_elements) then
+       ! always add the (unaltered) process
+       nprocs=nprocs+1
+       processes(1:next,nprocs)=process(1:next)
+       color_orders(1:next,nprocs)=order(1:next)
+       iden_iproc(nprocs)=1
+       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
+       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+       same_flavour_process_map(1:2,nprocs)=0
+       return
+    endif
     do iproc=1,nprocs
        if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
             .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
@@ -525,6 +545,7 @@ contains
     integer,dimension(4,2) :: quarks_to_map
     integer,dimension(next) :: proc
     integer :: i,iproc,iq,ia,isum
+    logical :: found
     do isum=1,2
        iq=0
        ia=2
@@ -547,10 +568,16 @@ contains
              proc(i)=processes(i,nprocs)
           endif
        enddo
+       found=.false.
        do iproc=1,nprocs
           if (all(proc(1:next).eq.processes(1:next,iproc)) .and. &
                all(color_orders(1:next,nprocs).eq.color_orders(1:next,iproc))) then
              same_flavour_process_map(isum,nprocs)=iproc
+             if (found) then
+                write (*,*) 'found more than one DF process to be part of SF process'
+                stop 1
+             endif
+             found=.true.
           endif
        enddo
     enddo

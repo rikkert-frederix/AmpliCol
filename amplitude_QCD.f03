@@ -233,6 +233,7 @@ contains
          do icur=this%n_cur_start(n-1),this%n_cur_end(n-1)
             do jcur=this%n_cur_start(n),this%n_cur_end(n)
                if ( current_list_local(icur)%type .ne. anti_current(current_list_local(jcur)%type) ) cycle
+               if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                proc=iand(current_list_local(icur)%iproc,current_list_local(jcur)%iproc)
                if (popcnt(proc).eq.0) then
                   ! combination of icur and jcur does not contribute to any of the processes
@@ -240,15 +241,14 @@ contains
                elseif (popcnt(proc).ne.1) then
                   write (*,*) 'A given amplitude should only contribute to one process'
                   write (*,*) proc,icur,jcur
-                  write (*,'(a,i40,B64)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
-                  write (*,'(a,i40,B64)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
+                  write (*,'(a,i40,B128)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
+                  write (*,'(a,i40,B128)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
                   write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
                   stop 1
                elseif (.not. btest(proc,iproc-1)) then
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
-               if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
                curr2amp(2,this%n_amps)=jcur
@@ -2971,7 +2971,11 @@ contains
           exit
        endif
     enddo
-    this%iproc_start(this%nprocs+1)=this%n_amps+1
+    do iproc=this%nprocs+1,2,-1
+       if (this%iproc_start(iproc).gt.this%n_amps+1) then
+          this%iproc_start(iproc)=this%n_amps+1
+       endif
+    enddo
     deallocate(is_needed_ver)
     deallocate(is_needed_cur)
     deallocate(where_to_ver)
