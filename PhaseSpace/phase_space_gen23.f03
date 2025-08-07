@@ -52,8 +52,7 @@ contains
     logical,intent(in) :: t_chan
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
-    integer(kind=4) :: i,j,ns,nns
-    real(kind=8) :: ptcut
+    integer(kind=4) :: i,j
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     this%t_channel=t_chan

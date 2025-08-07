@@ -53,7 +53,7 @@ module amplitude_QCD_mod
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm,read_file)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
     use math_functions
     use particles
     implicit none
@@ -65,10 +65,9 @@ contains
     integer,dimension(:,:),allocatable :: order
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc,jproc
+    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
-    logical :: read_file
 
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
@@ -128,7 +127,7 @@ contains
                 ! corresponding two different-flavour amplitudes
                 if (this%same_flav(iproc)) cycle
                 do ispin=1, spin(0,order(nc,iproc))
-                   call create_external_current(nc,iproc,spin(ispin,order(nc,iproc)),&
+                   call create_external_current(iproc,spin(ispin,order(nc,iproc)),&
                         this%processes(order(nc,iproc),iproc),order(nc,iproc))
                 enddo
              enddo
@@ -167,10 +166,10 @@ contains
     call deallocate_unneeded()
   contains
 
-    subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
+    subroutine create_external_current(iproc,ispin,ipart,iorder)
       implicit none
-      integer,intent(in) :: nc,ispin,ipart,iorder,iproc
-      integer :: i,ic
+      integer,intent(in) :: ispin,ipart,iorder,iproc
+      integer :: ic
       do ic=1,this%n_cur
          if (current_list_local(ic)%order(1).ne.iorder) cycle
          if (iorder.le.2 .and. abs(ipart).le.6) then
@@ -532,10 +531,8 @@ contains
     
     subroutine check_input_consistency(part)
       implicit none
-      integer :: i,j,k,iflav,iproc,jproc,ichan
+      integer :: i,j,iproc
       integer,dimension(n,n_processes),intent(in) :: part
-      integer,dimension(n,2) :: part_sf
-      integer,dimension(n) :: jord
       if (this%imode.eq.2) then
          if (n_processes.ne.1) then
             write (*,*) 'There should only be one process when doing imode=2'
@@ -628,87 +625,6 @@ contains
          endif
       enddo
     end subroutine check_input_consistency
-
-    subroutine define_symm_2qq(part_in,part_out,chan)
-      implicit none
-      integer :: chan
-      integer,dimension(n),intent(in) :: part_in
-      integer,dimension(n,2),intent(out) :: part_out
-      integer :: i,iq,ia,i_same,n_sing,add_or_subtract
-      integer,dimension(2,2) :: connection
-      n_sing=0
-      do i=1,n
-         if (is_singlet(part_in(i))) n_sing=n_sing+1
-      enddo
-      if (n_sing.eq.0) then
-         i_same=1
-      else
-         i_same=2
-      endif
-      do i=1,n
-         if (is_quark(part_in(i)).or.is_antiquark(part_in(i))) then
-            if (abs(part_in(i)).gt.2) then
-               add_or_subtract=-1
-            else
-               add_or_subtract=1
-            endif
-            exit
-         endif
-      enddo
-      part_out(1:n,1)=part_in(1:n)
-      part_out(1:n,2)=part_in(1:n)
-      iq=0
-      ia=0
-      do i=1,n
-         if (i.le.2 .and. is_quark(part_in(i))) then
-            ia=ia+1
-            connection(2,ia)=i
-         elseif(i.le.2 .and. is_antiquark(part_in(i))) then
-            iq=iq+1
-            connection(1,iq)=i
-         elseif (i.gt.2 .and. is_quark(part_in(i))) then
-            iq=iq+1
-            connection(1,iq)=i
-         elseif (i.gt.2 .and. is_antiquark(part_in(i))) then
-            ia=ia+1
-            connection(2,ia)=i
-         endif
-      enddo
-      if (chan.eq.1) then
-         ! change the 2nd quark and an anti-quark in the process
-         part_out(connection(1,2),1)=sign(abs(part_in(connection(1,2)))+add_or_subtract*i_same,part_in(connection(1,2)))
-         part_out(connection(2,2),1)=sign(abs(part_in(connection(2,2)))+add_or_subtract*i_same,part_in(connection(2,2)))
-         ! change the 1st quark and an anti-quark in the process
-         part_out(connection(1,1),2)=sign(abs(part_in(connection(1,1)))+add_or_subtract*i_same,part_in(connection(1,1)))
-         part_out(connection(2,1),2)=sign(abs(part_in(connection(2,1)))+add_or_subtract*i_same,part_in(connection(2,1)))
-
-      elseif(chan.eq.2) then
-!!$         if (abs(part_in(connection(1,1))).lt.4) then
-            ! change the mixed quark and an anti-quark in the process; leave the
-            ! first (anti-)quark unchanged.
-               part_out(connection(1,2),1)=sign(abs(part_in(connection(1,2)))+&
-                       add_or_subtract*i_same,part_in(connection(1,2)))
-               part_out(connection(2,1),1)=sign(abs(part_in(connection(2,1)))+&
-                       add_or_subtract*i_same,part_in(connection(2,1)))
-               part_out(connection(1,1),2)=sign(abs(part_in(connection(1,1)))+&
-                       add_or_subtract*i_same,part_in(connection(1,1)))
-               part_out(connection(2,2),2)=sign(abs(part_in(connection(2,2)))+&
-                       add_or_subtract*i_same,part_in(connection(2,2)))
-!!$         else
-!!$            ! change the mixed quark and an anti-quark in the process; leave the
-!!$            ! second (anti-)quark unchanged.
-!!$               part_out(connection(1,1),1)=sign(abs(part_in(connection(1,1)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(1,1)))
-!!$               part_out(connection(2,2),1)=sign(abs(part_in(connection(2,2)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(2,2)))
-!!$               part_out(connection(1,2),2)=sign(abs(part_in(connection(1,2)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(1,2)))
-!!$               part_out(connection(2,1),2)=sign(abs(part_in(connection(2,1)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(2,1)))
-!!$         endif
-      endif
-    end subroutine define_symm_2qq
-
     
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
@@ -1394,7 +1310,7 @@ contains
       ! the current type.
       implicit none
       integer,dimension(isize) :: ips
-      integer :: j,itype,i
+      integer :: j,itype
       integer(kind=8) :: val,offset
       if (isize.eq.1) then
          write (*,*) 'current_dict only setup for isize.ge.2',isize
@@ -1703,7 +1619,7 @@ contains
     integer :: n
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih_in,ip,ifinal,dim
+    integer :: ic,iv,isize,ih_in,ifinal,dim
     logical :: read_file 
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
@@ -1980,7 +1896,7 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: iamp,ih1,ih2,ih,ic,ihc,iproc
+      integer :: iamp,iproc
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
             do iamp=1,this%n_amps
@@ -2082,7 +1998,7 @@ contains
 
     subroutine combine_interactions(dim)
       implicit none
-      integer :: dim,iv,i
+      integer :: dim,iv
       if (use_real_gluons .and. (is_gluon(this%current_list(ic)%type).or.is_tensor_g(this%current_list(ic)%type))) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
@@ -2156,8 +2072,9 @@ contains
     implicit none
     class(amplitude_qcd) :: this
     integer,parameter :: max_vals=10000
-    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,gj,ui,uj,uj_upper,iperm_upper,&
-         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique,iproc,ioff,nOrd
+    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,gi,gj,ui,uj,key &
+         ,max_keys,jperm_lower,n_unique_rows,irow,iunique,iproc,ioff &
+         ,nOrd
     integer,dimension(n) :: iper,jper,part
     integer,dimension(:),allocatable :: n_vals
     real(kind=8),dimension(1:3) :: col_fac
@@ -2294,7 +2211,7 @@ contains
           if (this%n_qqbar(iproc).eq.2)  call determine_gi_ui(jper,gj,uj)
           if (use_cm_dict) then
              ! GET color factors from permuting first row
-             call get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
+             call get_col_fac(iper,jper,ui,gi,col_fac)
           else
              ! COMPUTE color factors again
              call compute_color_factor(col_acc,nOrd,iper,jper,ui,uj,gi,gj,col_fac)
@@ -2383,9 +2300,9 @@ contains
       call determine_ui(iper,ui)
     end subroutine determine_gi_ui
     
-   subroutine get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
+   subroutine get_col_fac(iper,jper,ui,gi,col_fac)
      implicit none
-     integer,intent(in) :: gi,gj,ui,uj
+     integer,intent(in) :: gi,ui
      integer,dimension(n),intent(in) :: iper,jper
      integer,dimension(n) :: col_new,row_first,row_per,col_per
      integer :: i,j,key,iunique
@@ -2819,7 +2736,7 @@ contains
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver,where_to_amp
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n,iamp,i,iproc
+    integer :: to_skip,isize,nc,iv,n,iamp,iproc
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))

@@ -21,7 +21,7 @@ contains
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
     real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
-    integer :: i,j,iproc,ii
+    integer :: i,j,ii
     real(kind=8) :: vol_ichan,vol
     if (.not. use_colour_singlet_multichannel) then
        weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))

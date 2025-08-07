@@ -248,10 +248,7 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,ifac,iproc
     real(kind=8) :: fac
-    integer :: it,lim
-    lim=pgl%nproc
-!    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
-    do iproc=1,lim
+    do iproc=1,pgl%nproc
        fac=0d0
        do i=1,next
           if (pgl%processes(i,iproc).eq.21) then
@@ -266,10 +263,6 @@ contains
                'colour factor is not an integer',ifac,fac
           stop 1
        endif
-!!$       if (abs(pgl%processes(pgl%color_orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%color_orders(next,iproc),iproc)) &
-!!$            .and. .not.pgl%amps%same_flav(iproc)) then
-!!$          if (all(abs(pgl%processes(1:next,iproc)).ne.24)) ifac=ifac-2
-!!$       endif
        pgl%col_fac(iproc)=3**ifac
     enddo
   end subroutine compute_LC_colour_factor

@@ -120,7 +120,7 @@ contains
     use phase_space_gen23_mod
     use cuts
     implicit none
-    integer :: i,iproc,ievent,ih,nqq
+    integer :: i,iproc,ievent,ih
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
     complex(kind=8),dimension(:,:),allocatable :: amp
@@ -163,7 +163,7 @@ contains
           pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf)
 
      call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
-             pgl_unique%spin,pgl_unique%color_orders,phys_model,read_proc_from_file)
+             pgl_unique%spin,pgl_unique%color_orders,phys_model)
      
      allocate(amp2(nevent,pgl_unique%nproc))
      allocate(amp(nevent,pgl_unique%amps%n_amps))
@@ -213,7 +213,7 @@ contains
      real(kind=8),dimension(nevent,pgl%nproc),intent(in) :: amp2
      real(kind=8),dimension(pgl%nproc),intent(out) :: unique_map_value
      integer,dimension(pgl%nproc),intent(out) :: unique_map
-     integer :: i,j,n
+     integer :: i,j
      real(kind=8),dimension(nevent) :: ratio
      real(kind=8) :: ave
      real(kind=8),parameter :: tiny=1d-6
@@ -246,8 +246,8 @@ contains
      integer :: max_channels
      integer,dimension(0:max_channels) :: ichans
      integer,dimension(next) :: process,order,process_unique
-     integer :: idenCOfactor,idenMAPfactor
-     real(kind=8) :: idenCOMAPfactor
+     integer :: idenCOfactor
+     real(kind=8) :: idenCOMAPfactor,idenMAPfactor
      integer,dimension(0:4) :: quarks
      call find_quarks(process,order,quarks)
      call get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor)
@@ -264,7 +264,7 @@ contains
     implicit none
     integer,intent(in) :: max_channels
     integer,dimension(0:max_channels),intent(in) :: ichans
-    integer,dimension(next) :: process,process_unique,order,process_flipped
+    integer,dimension(next) :: process,process_unique,order
     real(kind=8) :: idenCOMAPfactor
     integer :: iproc
     call move_colour_singlet_in_order(process,order)
@@ -319,7 +319,8 @@ contains
      implicit none
      integer,dimension(0:4) :: quarks
      integer,dimension(next) :: process,order,process_unique,process_mapped,mapping
-     integer :: idenMAPfactor,i,iproc,iq
+     integer :: i,iproc,iq
+     real(kind=8) :: idenMAPfactor
      call map_to_canonical_form(process,process_mapped,mapping)
      do iproc=1,pgl_unique%nproc
         if (pgl_unique%amps%n_qqbar(iproc)*2.ne.quarks(0)) cycle
@@ -438,7 +439,7 @@ contains
     implicit none
     integer,dimension(next),intent(in) :: process
     integer,dimension(next),intent(inout) :: order
-    integer :: i,iord,aq,iaq,itmp,ipart
+    integer :: i,iord,aq,iaq,ipart
     ! find the final anti-quark
     do i=next,1,-1
        iord=order(i)
