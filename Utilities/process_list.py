@@ -16,7 +16,6 @@ quarks=frozenset({'d','u','s','c','b','t'})
 antiquarks=frozenset({'d~','u~','s~','c~','b~','t~'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
-#gluons=frozenset({})
 flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
 #flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
@@ -342,7 +341,8 @@ def sort_by_pdg_codes(process):
     nq=count_matching_elements(process,quarks)
     if nq == 2:
         quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
-        same_flavour=quarks_in_proc[0]==quarks_in_proc[1]
+        antiquarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in antiquarks])
+        same_flavour=(quarks_in_proc[0]==quarks_in_proc[1]) or (antiquarks_in_proc[0]==antiquarks_in_proc[1])
     else:
         same_flavour=False
     val=0
@@ -391,12 +391,12 @@ def Add2qq_dfProcesses(sorted_procs):
             # Also interchange quark and anti-quarks
             swapped_proc=sorted_procs[i][:]
             swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
-            if swapped_proc != sorted_procs[i]:
+            if swapped_proc not in sorted_procs:
                 sorted_procs.insert(i+1,swapped_proc)
                 i+=1
             swapped_proc=proc[:]
             swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
-            if swapped_proc != proc:
+            if swapped_proc not in sorted_procs:
                 sorted_procs.insert(i+1,swapped_proc)
                 i+=1
         i+=1

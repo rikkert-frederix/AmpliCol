@@ -44,7 +44,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
-          same_flavour_sum,same_flavour_process_map
+          same_flavour_sum
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
    contains
@@ -209,9 +209,9 @@ contains
       ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur,iamp,jamp,i,j,iproc,n_diff_flavour_amps
+      integer :: icur,jcur,iamp,jamp,i,j,iproc
       integer(kind=16) :: proc
-      integer,dimension(:,:),allocatable :: curr2amp,same_flavour_sum
+      integer,dimension(:,:),allocatable :: curr2amp
       integer,dimension(n) :: iord,jord,ispn,jspn
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
@@ -243,7 +243,7 @@ contains
                   write (*,'(a,i40,B128)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
                   write (*,'(a,i40,B128)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
                   write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
-!!$                  stop 1
+                  stop 1
                elseif (.not. btest(proc,iproc-1)) then
                   ! one process, but it is not equal to process 'iproc'
                   cycle
@@ -254,56 +254,6 @@ contains
             enddo
          enddo
       enddo
-      n_diff_flavour_amps=this%n_amps
-      allocate(same_flavour_sum(2*this%n_amps,2))
-      same_flavour_sum=-1
-      do iproc=1,this%nprocs
-         if (.not. this%same_flav(iproc)) cycle
-         this%iproc_start(iproc)=this%n_amps+1
-         do iamp=this%iproc_start(this%same_flavour_process_map(1,iproc)), &
-              this%iproc_start(this%same_flavour_process_map(1,iproc)+1)-1
-            iord=[current_list_local(curr2amp(1,iamp))%order(1:n-1),current_list_local(curr2amp(2,iamp))%order(1)]
-            ispn=[current_list_local(curr2amp(1,iamp))%spin(1:n-1) ,current_list_local(curr2amp(2,iamp))%spin(1) ]
-            do jamp=this%iproc_start(this%same_flavour_process_map(2,iproc)), &
-                 this%iproc_start(this%same_flavour_process_map(2,iproc)+1)-1
-               ! if they have the same colour order and spins, they need to be added together
-               jord=[current_list_local(curr2amp(1,jamp))%order(1:n-1),current_list_local(curr2amp(2,jamp))%order(1)]
-               jspn=[current_list_local(curr2amp(1,jamp))%spin(1:n-1) ,current_list_local(curr2amp(2,jamp))%spin(1) ]
-               ! check that the two quarks are in similar order (the anti-quarks might be different order). 
-               if (iord(1).ne.jord(1)) then
-                  ! different order of the quarks, switch the two colour strings:
-                  do i=1,n
-                     if (jord(i).eq.iord(1)) then
-                        jord(1:n)=[jord(i:n),jord(1:i-1)]
-                        jspn(1:n)=[jspn(i:n),jspn(1:i-1)]
-                        exit
-                     endif
-                  enddo
-               endif
-               if (any(jord(1:n).ne.iord(1:n)) .or. any(jspn(1:n).ne.ispn(1:n))) cycle
-               this%n_amps=this%n_amps+1
-!!$               if ( abs(this%processes(iord(1),this%same_flavour_proc_map(iproc,1))).eq. &
-!!$                    abs(this%processes(iord(n),this%same_flavour_proc_map(iproc,1)))) then
-                  same_flavour_sum(this%n_amps,1)=iamp ! in iamp, the different-flavour quarks are connected
-                  same_flavour_sum(this%n_amps,2)=jamp ! in jamp, the different-flavour quarks are not connected
-!!$               else
-!!$                  same_flavour_sum(this%n_amps,1)=jamp ! in jamp, the different-flavour quarks are connected    
-!!$                  same_flavour_sum(this%n_amps,2)=iamp ! in iamp, the different-flavour quarks are not connected
-!!$               endif
-               exit
-            enddo
-            if (jamp.gt.this%iproc_start(this%same_flavour_process_map(2,iproc)+1)-1) then
-               write (*,*) 'permutation not found',jamp,this%n_amps
-               stop 1
-            endif
-         enddo
-         if (any(same_flavour_sum(this%iproc_start(iproc):this%n_amps,1:2).eq.-1)) then
-            write (*,*) same_flavour_sum(this%iproc_start(iproc):this%n_amps,1)
-            write (*,*) same_flavour_sum(this%iproc_start(iproc):this%n_amps,2)
-            write (*,*) 'not all permutations mapped'
-            stop 1
-         endif
-      enddo
 
       if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. this%imode.eq.2) then
          allocate(this%curr2amp(1:2,1:2*this%n_amps))
@@ -311,8 +261,8 @@ contains
          this%curr2amp(1:2,this%n_amps+1:2*this%n_amps)=curr2amp(1:2,1:this%n_amps)
          this%n_amps=this%n_amps*2
       else
-         allocate(this%curr2amp(1:2,1:n_diff_flavour_amps))
-         this%curr2amp(1:2,1:n_diff_flavour_amps)=curr2amp(1:2,1:n_diff_flavour_amps)
+         allocate(this%curr2amp(1:2,1:this%n_amps))
+         this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
       endif
       if (this%imode.eq.3 .and. this%n_amps.ne.1) then
          write (*,*) 'For this%imode==3, there should only be one amplitude',this%n_amps
@@ -322,7 +272,7 @@ contains
       endif
 
       allocate(this%same_flavour_sum(this%n_amps,2))
-      this%same_flavour_sum(1:this%n_amps,1:2)=same_flavour_sum(1:this%n_amps,1:2)
+      this%same_flavour_sum=-1
       this%iproc_start(this%nprocs+1)=this%n_amps+1
 
       allocate(this%include_amp(1:this%n_amps))
@@ -335,23 +285,15 @@ contains
       allocate(this%spins(n,1,1:this%n_amps))
       do iproc=1,this%nprocs
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-            if (.not.this%same_flav(iproc)) then
-               do i=1,n
-                  if (i.lt.n) then
-                     this%spins(this%current_list(this%curr2amp(1,iamp))%order(i),1,iamp)= &
-                          this%current_list(this%curr2amp(1,iamp))%spin(i)
-                  elseif (i.eq.n) then
-                     this%spins(this%current_list(this%curr2amp(2,iamp))%order(1),1,iamp)= &
-                          this%current_list(this%curr2amp(2,iamp))%spin(1)
-                  endif
-               enddo
-            else
-               if (any(this%spins(1:n,1,this%same_flavour_sum(iamp,1)).ne.this%spins(1:n,1,this%same_flavour_sum(iamp,2)))) then
-                  write (*,*) 'ERROR in spin mapping'
-                  stop 1
+            do i=1,n
+               if (i.lt.n) then
+                  this%spins(this%current_list(this%curr2amp(1,iamp))%order(i),1,iamp)= &
+                       this%current_list(this%curr2amp(1,iamp))%spin(i)
+               elseif (i.eq.n) then
+                  this%spins(this%current_list(this%curr2amp(2,iamp))%order(1),1,iamp)= &
+                       this%current_list(this%curr2amp(2,iamp))%spin(1)
                endif
-               this%spins(1:n,1,iamp)=this%spins(1:n,1,this%same_flavour_sum(iamp,1))
-            endif
+            enddo
          enddo
       enddo
     end subroutine allocate_and_fill_spins
@@ -377,30 +319,26 @@ contains
             iamp_to_compare=1
          endif
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-            if (.not.this%same_flav(iproc)) then
-               this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
-                                                   this%current_list(this%curr2amp(2,iamp))%order(1)]
-               if (use_symmetry .and. this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
-                  this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing(1):1:-1),&
-                                                      this%current_list(this%curr2amp(2,iamp))%order(1)]
+            this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
+                 this%current_list(this%curr2amp(2,iamp))%order(1)]
+            if (use_symmetry .and. this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
+               this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing(1):1:-1),&
+                    this%current_list(this%curr2amp(2,iamp))%order(1)]
+            endif
+            if (this%n_qqbar(iproc).eq.2) then
+               ! make sure that orders of the quarks is fixed among all
+               ! perm's. (The order of the anti-quarks may vary). Without
+               ! this, the computation of the colour factor will be incorrect.
+               if (iamp.eq.iamp_to_compare) cycle
+               if (this%perm(1,iamp).ne.this%perm(1,iamp_to_compare)) then
+                  ! different order, switch the two colour strings:
+                  do i=1,n-this%n_sing(1)
+                     if (this%perm(i,iamp).eq.this%perm(1,iamp_to_compare)) then
+                        this%perm(1:n-this%n_sing(1),iamp)=[this%perm(i:n-this%n_sing(1),iamp),this%perm(1:i-1,iamp)]
+                        exit
+                     endif
+                  enddo
                endif
-               if (this%n_qqbar(iproc).eq.2) then
-                  ! make sure that orders of the quarks is fixed among all
-                  ! perm's. (The order of the anti-quarks may vary). Without
-                  ! this, the computation of the colour factor will be incorrect.
-                  if (iamp.eq.iamp_to_compare) cycle
-                  if (this%perm(1,iamp).ne.this%perm(1,iamp_to_compare)) then
-                     ! different order, switch the two colour strings:
-                     do i=1,n-this%n_sing(1)
-                        if (this%perm(i,iamp).eq.this%perm(1,iamp_to_compare)) then
-                           this%perm(1:n-this%n_sing(1),iamp)=[this%perm(i:n-this%n_sing(1),iamp),this%perm(1:i-1,iamp)]
-                           exit
-                        endif
-                     enddo
-                  endif
-               endif
-            else
-               this%perm(1:n-this%n_sing(1),iamp)=this%perm(1:n-this%n_sing(1),this%same_flavour_sum(iamp,1))
             endif
          enddo
       enddo
@@ -544,16 +482,12 @@ contains
       this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
       allocate(order(1:n,this%nprocs))
       order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
-      if (.not.allocated(this%same_flavour_process_map)) then
-         allocate(this%same_flavour_process_map(1:2,1:this%nprocs))
-         this%same_flavour_process_map(1:2,1:this%nprocs)=0
-      endif
       allocate(this%n_sing(1:this%nprocs))
       allocate(this%n_qqbar(1:this%nprocs))
       allocate(this%same_flav(1:this%nprocs))
       do iproc=1,this%nprocs
          this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc))
-         this%same_flav(iproc)=.not.(this%same_flavour_process_map(1,iproc).eq.0)
+         this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
          this%n_sing(iproc)=0
          do i=1,n
             if (is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
@@ -1480,7 +1414,7 @@ contains
     write (iunit) this%pp_i_to_bin(1:this%max_pp)
     ! process specific information
     do iproc=1,this%nprocs
-       write (iunit) this%iproc_start(iproc),this%same_flav(iproc),this%same_flavour_process_map(1:2,iproc),&
+       write (iunit) this%iproc_start(iproc),this%same_flav(iproc),&
             this%n_qqbar(iproc),this%n_sing(iproc)
        write (iunit) this%processes(1:n,iproc)
     enddo
@@ -1546,12 +1480,11 @@ contains
     ! process specific information
     allocate(this%iproc_start(1:this%nprocs+1))
     allocate(this%same_flav(1:this%nprocs))
-    allocate(this%same_flavour_process_map(1:2,1:this%nprocs))
     allocate(this%n_qqbar(1:this%nprocs))
     allocate(this%n_sing(1:this%nprocs))
     allocate(this%processes(1:n,1:this%nprocs))
     do iproc=1,this%nprocs
-       read (iunit) this%iproc_start(iproc),this%same_flav(iproc),this%same_flavour_process_map(1:2,iproc),&
+       read (iunit) this%iproc_start(iproc),this%same_flav(iproc),&
             this%n_qqbar(iproc),this%n_sing(iproc)
        read (iunit) this%processes(1:n,iproc)
     enddo
@@ -1598,7 +1531,6 @@ contains
       if (allocated(this%pp_i_to_bin)) deallocate(this%pp_i_to_bin)
       if (allocated(this%iproc_start)) deallocate(this%iproc_start)
       if (allocated(this%same_flav)) deallocate(this%same_flav)
-      if (allocated(this%same_flavour_process_map)) deallocate(this%same_flavour_process_map)
       if (allocated(this%n_qqbar)) deallocate(this%n_qqbar)
       if (allocated(this%n_sing)) deallocate(this%n_sing)
       if (allocated(this%processes)) deallocate(this%processes)
@@ -3031,7 +2963,6 @@ contains
     if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
     if (allocated(amp%processes)) deallocate(amp%processes)
-    if (allocated(amp%same_flavour_process_map)) deallocate(amp%same_flavour_process_map)
     if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)
     if (allocated(amp%spins)) deallocate(amp%spins)
     if (allocated(amp%row_index)) deallocate(amp%row_index)

@@ -81,6 +81,75 @@ contains
     enddo
   end subroutine determine_phase_space_orders
 
+  subroutine find_same_flavour(pgl,nevent)
+    use mint_module
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer :: i,j,k,ii,jj,kk,nevent
+    real(kind=8),parameter :: tiny=1d-8
+    if (.not.decompose_same_flavour_into_two_diff_flavour) return
+    if (.not.allocated(pgl%same_flavour)) then
+       allocate(pgl%same_flavour(nevent,pgl%nproc,2))
+       pgl%same_flavour=0
+    endif
+    do i=1,pgl%nproc
+       if (pgl%amps%n_qqbar(i).ne.2) cycle
+       do j=1,pgl%nproc
+          if (i.eq.j) cycle
+          if (pgl%amps%n_qqbar(j).ne.2) cycle
+          do k=1,j-1
+             if (k.eq.i) cycle
+             if (pgl%amps%n_qqbar(k).ne.2) cycle
+             do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
+                if (pgl%amps%amps(ii).eq.(0d0,0d0)) cycle
+                do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
+                   if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,jj))) exit
+                enddo
+                do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
+                   if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
+                enddo
+                if (pgl%amps%amps(ii)+pgl%amps%amps(jj)+pgl%amps%amps(kk).eq.(0d0,0d0)) cycle
+                if (abs(pgl%amps%amps(ii)-(pgl%amps%amps(jj)+pgl%amps%amps(kk)))/&
+                     abs(pgl%amps%amps(ii)+pgl%amps%amps(jj)+pgl%amps%amps(kk)).gt.tiny) then
+                   exit
+                endif
+             enddo
+             if (ii.eq.pgl%amps%iproc_start(i+1)) then
+                pgl%same_flavour(pgl%passed,i,1)=j
+                pgl%same_flavour(pgl%passed,i,2)=k
+             endif
+          enddo
+       enddo
+    enddo
+    if (pgl%passed.lt.nevent) return
+    do i=1,pgl%nproc
+       if (any(pgl%same_flavour(1,i,1).ne.pgl%same_flavour(2:nevent,i,1)) .or. &
+            any(pgl%same_flavour(1,i,2).ne.pgl%same_flavour(2:nevent,i,2)) ) then
+          write (*,*) 'Inconsistent same flavour decomposition'
+          write (*,*) i
+          write (*,*) pgl%same_flavour(1:nevent,i,1)
+          write (*,*) pgl%same_flavour(1:nevent,i,2)
+          stop 1
+       endif
+       if (pgl%same_flavour(1,i,1).ne.0 .or. pgl%same_flavour(1,i,2).ne.0) then
+          j=pgl%same_flavour(1,i,1)
+          k=pgl%same_flavour(1,i,2)
+          write (*,'(a,x,i4,x,a,i4,x,a,i4)') &
+               "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
+          pgl%amps%same_flav(i)=.true.
+          do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
+             do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
+                if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,jj))) exit
+             enddo
+             do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
+                if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
+             enddo
+             pgl%amps%same_flavour_sum(ii,1)=jj
+             pgl%amps%same_flavour_sum(ii,2)=kk
+          enddo
+       endif
+    enddo
+  end subroutine find_same_flavour
   
   subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible

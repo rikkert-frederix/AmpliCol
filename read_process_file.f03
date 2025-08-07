@@ -2,8 +2,7 @@ module read_process_file
   use mint_module
   use handling_processes
   integer :: sf_nprocs
-  integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans &
-       ,same_flavour_process,same_flavour_order,same_flavour_ichans,same_flavour_process_map
+  integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
   type(phase_space_order_group),allocatable :: pgl_unique
   real(kind=8),dimension(:),allocatable :: unique_map_value
   integer,dimension(:),allocatable :: unique_map,iden_iproc,same_flavour_idenCOfactor
@@ -13,7 +12,7 @@ contains
   subroutine read_processes_from_file(filename)
     implicit none
     character(len=80) :: filename
-    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,idenCOfactor
+    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,idenCOfactor,iflav
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
     open(unit=10,file=filename,status='old')
@@ -52,18 +51,24 @@ contains
        allocate(idenCOandMAPfactor(nproc_in_group,nproc_in_group))
        allocate(multi_chans(0:max_channels,nproc_in_group))
        allocate(ichans(0:max_channels))
-       allocate(same_flavour_process(1:next,nproc_in_group))
-       allocate(same_flavour_order(1:next,nproc_in_group))
-       allocate(same_flavour_ichans(0:max_channels,nproc_in_group))
-       allocate(same_flavour_idenCOfactor(nproc_in_group))
-       allocate(same_flavour_process_map(2,nproc_in_group))
-       do iproc=1,nproc_in_group
-          read(10,'(a)') buff
-          read(buff,*) ichans(0)
-          read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
-          call add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
+       do iflav=1,2
+          do iproc=1,nproc_in_group
+             read(10,'(a)') buff
+             read(buff,*) ichans(0)
+             read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
+             if (iflav.eq.1) then
+                call add_to_process_list(process,order,idenCOfactor,max_channels,ichans,.true.)
+             else
+                call add_to_process_list(process,order,idenCOfactor,max_channels,ichans,.false.)
+             endif
+          enddo
+          if (iflav.eq.1) then
+             if (.not.decompose_same_flavour_into_two_diff_flavour) exit
+             do iproc=1,nproc_in_group
+                backspace(10)
+             enddo
+          endif
        enddo
-
        pgl(igroup)%next=next
        pgl(igroup)%nproc=nprocs
        pgl(igroup)%multichan%max_channels=max_channels
@@ -76,7 +81,6 @@ contains
        allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%amps%same_flavour_process_map(2,1:pgl(igroup)%nproc))
        pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
        pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
        pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
@@ -87,7 +91,6 @@ contains
             iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
-       pgl(igroup)%amps%same_flavour_process_map(1:2,1:pgl(igroup)%nproc)=same_flavour_process_map(1:2,1:pgl(igroup)%nproc)
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
@@ -96,11 +99,6 @@ contains
        deallocate(idenCOandMAPfactor)
        deallocate(multi_chans)
        deallocate(ichans)
-       deallocate(same_flavour_process)
-       deallocate(same_flavour_order)
-       deallocate(same_flavour_ichans)
-       deallocate(same_flavour_idenCOfactor)
-       deallocate(same_flavour_process_map)
        write (*,*) '****************************************************'
        do iproc=1,pgl(igroup)%nproc
           write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
@@ -120,7 +118,7 @@ contains
     use phase_space_gen23_mod
     use cuts
     implicit none
-    integer :: i,iproc,ievent,ih
+    integer :: i,iproc,ih
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
     complex(kind=8),dimension(:,:),allocatable :: amp
@@ -168,29 +166,32 @@ contains
      allocate(amp2(nevent,pgl_unique%nproc))
      allocate(amp(nevent,pgl_unique%amps%n_amps))
 
-     ievent=0
-     do while (ievent.lt.nevent)
+     pgl_unique%passed=0
+     do while (pgl_unique%passed.lt.nevent)
         do i=1,ndim
            x(i)=ran2()
         enddo
         call pgl_unique%phase_space%generate_momenta(x)
         if (pgl_unique%phase_space%jac.lt.0d0) cycle
-        ievent=ievent+1
+        pgl_unique%passed=pgl_unique%passed+1
         call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model)
         iproc=0
-        amp2(ievent,:)=0d0
+        amp2(pgl_unique%passed,:)=0d0
         if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
            do ih=1,pgl_unique%amps%n_amps
               do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-              amp2(ievent,iproc)=amp2(ievent,iproc)+pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
+              amp2(pgl_unique%passed,iproc)=amp2(pgl_unique%passed,iproc)+&
+                   pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
            enddo
         else
            do ih=1,pgl_unique%amps%n_amps
               do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-              amp2(ievent,iproc)=amp2(ievent,iproc)+dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
+              amp2(pgl_unique%passed,iproc)=amp2(pgl_unique%passed,iproc)+&
+                   dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
            enddo
-           amp(ievent,1:pgl_unique%amps%n_amps)=pgl_unique%amps%amps(1:pgl_unique%amps%n_amps)
+           amp(pgl_unique%passed,1:pgl_unique%amps%n_amps)=pgl_unique%amps%amps(1:pgl_unique%amps%n_amps)
         endif
+        call find_same_flavour(pgl_unique,nevent)
      enddo
      allocate(unique_map(1:pgl_unique%nproc))
      allocate(unique_map_value(1:pgl_unique%nproc))
@@ -241,7 +242,7 @@ contains
      enddo
    end subroutine find_unique
 
-   subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
+   subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans,skip_same_flavour)
      implicit none
      integer :: max_channels
      integer,dimension(0:max_channels) :: ichans
@@ -249,8 +250,13 @@ contains
      integer :: idenCOfactor
      real(kind=8) :: idenCOMAPfactor,idenMAPfactor
      integer,dimension(0:4) :: quarks
+     logical :: skip_same_flavour,is_same_flavour
      call find_quarks(process,order,quarks)
-     call get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor)
+     call get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor,is_same_flavour)
+     if (decompose_same_flavour_into_two_diff_flavour) then
+        if (skip_same_flavour .and. is_same_flavour) return
+        if ((.not.skip_same_flavour) .and. (.not.is_same_flavour)) return
+     endif
      if (reduce_to_unique_matrix_elements) then
         idenCOMAPfactor=idenMAPfactor*idenCOfactor
      else
@@ -260,67 +266,14 @@ contains
      call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
    end subroutine add_to_process_list
    
-  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
-    implicit none
-    integer,intent(in) :: max_channels
-    integer,dimension(0:max_channels),intent(in) :: ichans
-    integer,dimension(next) :: process,process_unique,order
-    real(kind=8) :: idenCOMAPfactor
-    integer :: iproc
-    call move_colour_singlet_in_order(process,order)
-    if (.not.reduce_to_unique_matrix_elements) then
-       ! always add the (unaltered) process
-       nprocs=nprocs+1
-       processes(1:next,nprocs)=process(1:next)
-       color_orders(1:next,nprocs)=order(1:next)
-       iden_iproc(nprocs)=1
-       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
-       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
-       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
-       same_flavour_process_map(1:2,nprocs)=0
-       return
-    endif
-    do iproc=1,nprocs
-       if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
-            .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
-    enddo
-    
-    if (iproc.gt.nprocs) then
-       ! new matrix element to generate
-       nprocs=nprocs+1
-       processes(1:next,nprocs)=process_unique(1:next)
-       color_orders(1:next,nprocs)=order(1:next)
-       iden_iproc(nprocs)=1
-       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
-       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
-       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
-          same_flavour_process_map(1:2,nprocs)=0
-    else
-       ! identical to another matrix element
-       iden_iproc(iproc)=iden_iproc(iproc)+1
-       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
-       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
-       if (ichans(0).ne.multi_chans(0,iproc)) then
-          write (*,*) 'Number of multi-channels not the same among identical processes',&
-               ichans(0),multi_chans(0,iproc)
-          stop 1
-       endif
-       if (any(ichans(1:ichans(0)).ne.multi_chans(1:ichans(0),iproc))) then
-          write (*,*) 'Multi-channels not the same among identical processes'
-          write (*,*) ichans(1:ichans(0))
-          write (*,*) multi_chans(1:ichans(0),iproc)
-          stop 1
-       endif
-    endif
-  end subroutine add_to_unique_process_list
-
    
-   subroutine get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor)
+   subroutine get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor,is_same_flavour)
      implicit none
      integer,dimension(0:4) :: quarks
      integer,dimension(next) :: process,order,process_unique,process_mapped,mapping
      integer :: i,iproc,iq
      real(kind=8) :: idenMAPfactor
+     logical :: is_same_flavour
      call map_to_canonical_form(process,process_mapped,mapping)
      do iproc=1,pgl_unique%nproc
         if (pgl_unique%amps%n_qqbar(iproc)*2.ne.quarks(0)) cycle
@@ -357,7 +310,64 @@ contains
            endif
         enddo
      endif
+     if (pgl_unique%amps%same_flav(iproc)) then
+        is_same_flavour=.true.
+     else
+        is_same_flavour=.false.
+     endif
    end subroutine get_unique_process_from_quarks
+
+  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
+    implicit none
+    integer,intent(in) :: max_channels
+    integer,dimension(0:max_channels),intent(in) :: ichans
+    integer,dimension(next) :: process,process_unique,order
+    real(kind=8) :: idenCOMAPfactor
+    integer :: iproc
+    call move_colour_singlet_in_order(process,order)
+    if (.not.reduce_to_unique_matrix_elements) then
+       ! always add the (unaltered) process
+       nprocs=nprocs+1
+       processes(1:next,nprocs)=process(1:next)
+       color_orders(1:next,nprocs)=order(1:next)
+       iden_iproc(nprocs)=1
+       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
+       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+       return
+    endif
+    do iproc=1,nprocs
+       if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
+            .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
+    enddo
+    
+    if (iproc.gt.nprocs) then
+       ! new matrix element to generate
+       nprocs=nprocs+1
+       processes(1:next,nprocs)=process_unique(1:next)
+       color_orders(1:next,nprocs)=order(1:next)
+       iden_iproc(nprocs)=1
+       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
+       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+    else
+       ! identical to another matrix element
+       iden_iproc(iproc)=iden_iproc(iproc)+1
+       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
+       if (ichans(0).ne.multi_chans(0,iproc)) then
+          write (*,*) 'Number of multi-channels not the same among identical processes',&
+               ichans(0),multi_chans(0,iproc)
+          stop 1
+       endif
+       if (any(ichans(1:ichans(0)).ne.multi_chans(1:ichans(0),iproc))) then
+          write (*,*) 'Multi-channels not the same among identical processes'
+          write (*,*) ichans(1:ichans(0))
+          write (*,*) multi_chans(1:ichans(0),iproc)
+          stop 1
+       endif
+    endif
+  end subroutine add_to_unique_process_list
 
 
   subroutine find_quarks(process,order,quarks)
@@ -376,7 +386,7 @@ contains
        quarks(1:4)=[quarks(1),quarks(3),quarks(2),quarks(4)]
     endif
   end subroutine find_quarks
-  
+
   subroutine map_to_canonical_form(process,part,mapping)
     ! cross the two initial state particle PDGs, order according to
     ! the PDG value, (and reflip the two initial states again)
