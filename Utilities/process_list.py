@@ -370,21 +370,35 @@ def WriteAllProcsIntoList():
     return towrite
 
 def Add2qq_dfProcesses(sorted_procs):
-    # add the 2qq_df processes with the two incoming particles interchanged:
+    # add all the 2qq_df processes by flipping orders
     i=0
     while i < len(sorted_procs):
         proc = sorted_procs[i]
-        if proc[2] in antiquarks and proc[3] in antiquarks and proc[2] != proc[3]:
+        if proc[2] in antiquarks and proc[3] in antiquarks: # 2-quark-line process
+            # first add the other connection in the colour ordering
+            if proc[2] != proc[3]:
+                # swap the two anti-quarks
+                swapped_proc=proc[:]
+                swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
+            elif proc[2] == proc[3] and proc[0] != proc[1] :
+                # swap the two quarks
+                swapped_proc=proc[:]
+                swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
+            # Also interchange quark and anti-quarks
+            swapped_proc=sorted_procs[i][:]
+            swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
+            if swapped_proc != sorted_procs[i]:
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
             swapped_proc=proc[:]
-            swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
-            sorted_procs.insert(i+1,swapped_proc)
-            i+=1
-        elif proc[2] in antiquarks and proc[3] in antiquarks and proc[2] == proc[3] and \
-             proc[0] in quarks and proc[1] in quarks and proc[0] != proc[1] :
-            swapped_proc=proc[:]
-            swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
-            sorted_procs.insert(i+1,swapped_proc)
-            i+=1
+            swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
+            if swapped_proc != proc:
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
         i+=1
     return sorted_procs
 

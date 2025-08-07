@@ -244,7 +244,7 @@ contains
                   write (*,'(a,i40,B128)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
                   write (*,'(a,i40,B128)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
                   write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
-                  stop 1
+!!$                  stop 1
                elseif (.not. btest(proc,iproc-1)) then
                   ! one process, but it is not equal to process 'iproc'
                   cycle

@@ -3,7 +3,7 @@ module read_process_file
   use handling_processes
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans &
-       ,proc_sf_map,same_flavour_process,same_flavour_order,same_flavour_ichans,same_flavour_process_map
+       ,same_flavour_process,same_flavour_order,same_flavour_ichans,same_flavour_process_map
   type(phase_space_order_group),allocatable :: pgl_unique
   real(kind=8),dimension(:),allocatable :: unique_map_value
   integer,dimension(:),allocatable :: unique_map,iden_iproc,same_flavour_idenCOfactor
@@ -63,7 +63,7 @@ contains
           read(buff,*) ichans(0),ichans(1:ichans(0)),process(1:next),order(1:next),idenCOfactor
           call add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
        enddo
-       call add_same_flavour_processes_to_list(max_channels)
+
        pgl(igroup)%next=next
        pgl(igroup)%nproc=nprocs
        pgl(igroup)%multichan%max_channels=max_channels
@@ -134,7 +134,7 @@ contains
     allocate(mass(next))
     allocate(width(next))
     pgl_unique%nproc=nproc_unique
-    pgl_unique%processes=unique_procs
+    pgl_unique%processes(1:next,1:nproc_unique)=unique_procs(1:next,1:nproc_unique)
     do i=1,pgl_unique%next
         mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
         width(i)=phys_model%get_width(pgl_unique%processes(i,1))
@@ -148,7 +148,7 @@ contains
      enddo
      call setup_spin(pgl_unique)
      call setup_color_order(pgl_unique)
-
+     
      do iproc=1,pgl_unique%nproc
         do i=1,2
            pgl_unique%processes(i,iproc)=phys_model%get_antipart(pgl_unique%processes(i,iproc))
@@ -195,8 +195,6 @@ contains
      allocate(unique_map(1:pgl_unique%nproc))
      allocate(unique_map_value(1:pgl_unique%nproc))
      call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
-
-     call find_same_flavour(pgl_unique,nevent,amp)
      
      do iproc=1,pgl_unique%nproc
         write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:pgl_unique%next,iproc),&
@@ -207,51 +205,6 @@ contains
      deallocate(amp2)
      deallocate(amp)
    end subroutine check_unique_processes
-
-   subroutine find_same_flavour(pgl,nevent,amp)
-     implicit none
-     type(phase_space_order_group),intent(in) :: pgl
-     integer,intent(in) :: nevent
-     complex(kind=8),dimension(nevent,pgl%amps%n_amps),intent(in) :: amp
-     integer :: i,j,k,ii,jj,kk,ievent
-     real(kind=8),parameter :: tiny=1d-6
-     allocate(proc_sf_map(pgl%nproc,2))
-     proc_sf_map=0
-     if (.not.decompose_same_flavour_into_two_diff_flavour) return
-     do i=1,pgl%nproc
-        if (unique_map(i).ne.-1) cycle
-        if (pgl_unique%amps%n_qqbar(i).ne.2) cycle
-        do j=1,pgl%nproc
-           if (i.eq.j) cycle
-           if (unique_map(j).ne.-1) cycle
-           if (pgl_unique%amps%n_qqbar(j).ne.2) cycle
-           do k=1,j-1
-              if (k.eq.i) cycle
-              if (unique_map(k).ne.-1) cycle
-              if (pgl_unique%amps%n_qqbar(k).ne.2) cycle
-              do ii=pgl_unique%amps%iproc_start(i),pgl_unique%amps%iproc_start(i+1)-1
-                 if (any(amp(1:nevent,ii).eq.(0d0,0d0))) cycle
-                 do jj=pgl_unique%amps%iproc_start(j),pgl_unique%amps%iproc_start(j+1)-1
-                    if (all(pgl_unique%amps%spins(:,1,ii).eq.pgl_unique%amps%spins(:,1,jj))) exit
-                 enddo
-                 do kk=pgl_unique%amps%iproc_start(k),pgl_unique%amps%iproc_start(k+1)-1
-                    if (all(pgl_unique%amps%spins(:,1,ii).eq.pgl_unique%amps%spins(:,1,kk))) exit
-                 enddo
-                 if (any((abs(amp(1:nevent,ii)-(amp(1:nevent,jj)+amp(1:nevent,kk)))/&
-                          abs(amp(1:nevent,ii)+(amp(1:nevent,jj)+amp(1:nevent,kk)))).gt.tiny)) then
-                    exit
-                 endif
-              enddo
-              if (ii.eq.pgl_unique%amps%iproc_start(i+1)) then
-                 write (*,'(a,x,i4,x,a,i4,x,a,i4)') &
-                      "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
-                 proc_sf_map(i,1)=j
-                 proc_sf_map(i,2)=k
-              endif
-           enddo
-        enddo
-     enddo
-   end subroutine find_same_flavour
 
    subroutine find_unique(pgl,nevent,amp2,unique_map,unique_map_value)
      implicit none
@@ -288,60 +241,141 @@ contains
      enddo
    end subroutine find_unique
 
-   subroutine add_same_flavour_processes_to_list(max_channels)
+   subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
      implicit none
-     integer :: iproc,max_channels
-     integer,dimension(next) :: process_mapped,mapping,process_unique
-     integer,dimension(4,2) :: quarks_to_map
-     real(kind=8) :: idenMAPfactor,idenCOMAPfactor
-     logical :: check_sf
-     do iproc=1,sf_nprocs
-        call map_to_canonical_form(same_flavour_process(1,iproc),process_mapped,mapping)
-        call get_unique_process(same_flavour_process(1,iproc),process_mapped,mapping,&
-             check_sf,process_unique,idenMAPfactor,quarks_to_map)
-        if (.not. check_sf) then
-           write (*,*) 'ERROR: current process must be a same-flavour process'
-           stop 1
-        endif
-        if (reduce_to_unique_matrix_elements) then
-           idenCOMAPfactor=idenMAPfactor*same_flavour_idenCOfactor(iproc)
-        else
-           idenCOMAPfactor=same_flavour_idenCOfactor(iproc)
-        endif
-        if (idenCOMAPfactor.eq.0d0) cycle
-        call add_to_unique_process_list(same_flavour_process(1,iproc),process_unique, &
-             same_flavour_order(1,iproc),idenCOMAPfactor,max_channels,same_flavour_ichans(0,iproc),quarks_to_map)
-     enddo
-   end subroutine add_same_flavour_processes_to_list
-  
-  subroutine add_to_process_list(process,order,idenCOfactor,max_channels,ichans)
+     integer :: max_channels
+     integer,dimension(0:max_channels) :: ichans
+     integer,dimension(next) :: process,order,process_unique
+     integer :: idenCOfactor,idenMAPfactor
+     real(kind=8) :: idenCOMAPfactor
+     integer,dimension(0:4) :: quarks
+     call find_quarks(process,order,quarks)
+     call get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor)
+     if (reduce_to_unique_matrix_elements) then
+        idenCOMAPfactor=idenMAPfactor*idenCOfactor
+     else
+        idenCOMAPfactor=idenCOfactor
+     endif
+     if (idenCOMAPfactor.eq.0d0) return
+     call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
+   end subroutine add_to_process_list
+   
+  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
     implicit none
-    integer :: max_channels
-    integer,dimension(0:max_channels) :: ichans
-    integer,dimension(next) :: process,order,process_mapped,process_unique,mapping
-    integer,dimension(4,2) :: quarks_to_map
-    integer :: idenCOfactor
-    real(kind=8) :: idenMAPfactor,idenCOMAPfactor
-    logical :: check_sf
-    call map_to_canonical_form(process,process_mapped,mapping)
-    call get_unique_process(process,process_mapped,mapping,check_sf,process_unique,idenMAPfactor,quarks_to_map)
-    if (check_sf) then
-       sf_nprocs=sf_nprocs+1
-       same_flavour_process(1:next,sf_nprocs)=process(1:next)
-       same_flavour_order(1:next,sf_nprocs)=order(1:next)
-       same_flavour_ichans(0:ichans(0),sf_nprocs)=ichans(0:ichans(0))
-       same_flavour_idenCOfactor(sf_nprocs)=idenCOfactor
-       return ! do not add it to the list yet; first finish all the different-flavour processes
+    integer,intent(in) :: max_channels
+    integer,dimension(0:max_channels),intent(in) :: ichans
+    integer,dimension(next) :: process,process_unique,order,process_flipped
+    real(kind=8) :: idenCOMAPfactor
+    integer :: iproc
+    call move_colour_singlet_in_order(process,order)
+    if (.not.reduce_to_unique_matrix_elements) then
+       ! always add the (unaltered) process
+       nprocs=nprocs+1
+       processes(1:next,nprocs)=process(1:next)
+       color_orders(1:next,nprocs)=order(1:next)
+       iden_iproc(nprocs)=1
+       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
+       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+       same_flavour_process_map(1:2,nprocs)=0
+       return
     endif
-    if (reduce_to_unique_matrix_elements) then
-       idenCOMAPfactor=idenMAPfactor*idenCOfactor
+    do iproc=1,nprocs
+       if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
+            .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
+    enddo
+    
+    if (iproc.gt.nprocs) then
+       ! new matrix element to generate
+       nprocs=nprocs+1
+       processes(1:next,nprocs)=process_unique(1:next)
+       color_orders(1:next,nprocs)=order(1:next)
+       iden_iproc(nprocs)=1
+       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
+       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
+          same_flavour_process_map(1:2,nprocs)=0
     else
-       idenCOMAPfactor=idenCOfactor
+       ! identical to another matrix element
+       iden_iproc(iproc)=iden_iproc(iproc)+1
+       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
+       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
+       if (ichans(0).ne.multi_chans(0,iproc)) then
+          write (*,*) 'Number of multi-channels not the same among identical processes',&
+               ichans(0),multi_chans(0,iproc)
+          stop 1
+       endif
+       if (any(ichans(1:ichans(0)).ne.multi_chans(1:ichans(0),iproc))) then
+          write (*,*) 'Multi-channels not the same among identical processes'
+          write (*,*) ichans(1:ichans(0))
+          write (*,*) multi_chans(1:ichans(0),iproc)
+          stop 1
+       endif
     endif
-    if (idenCOMAPfactor.eq.0d0) return
-    call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans,quarks_to_map)
-  end subroutine add_to_process_list
+  end subroutine add_to_unique_process_list
 
+   
+   subroutine get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor)
+     implicit none
+     integer,dimension(0:4) :: quarks
+     integer,dimension(next) :: process,order,process_unique,process_mapped,mapping
+     integer :: idenMAPfactor,i,iproc,iq
+     call map_to_canonical_form(process,process_mapped,mapping)
+     do iproc=1,pgl_unique%nproc
+        if (pgl_unique%amps%n_qqbar(iproc)*2.ne.quarks(0)) cycle
+        if (quarks(0).eq.4) then
+           if (all(pgl_unique%processes(1:4,iproc).eq.-abs(quarks(1:4)))) then ! quarks are consistent 
+              if (all(process_mapped(5:next).eq.pgl_unique%processes(5:next,iproc))) exit ! and the rest as well
+           endif
+        else
+           if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
+        endif
+     enddo
+     if (iproc.gt.pgl_unique%nproc) then
+        write (*,*) 'Process not found',quarks
+        stop 1
+     endif
+     process_unique(1:next)=process(1:next)
+     idenMAPfactor=unique_map_value(iproc)
+     if (unique_map(iproc).gt.0) then
+        iq=0
+        do i=1,next
+           if (is_quark(process(order(i))) .or. is_antiquark(process(order(i)))) then
+              iq=iq+1
+              if (quarks(0).eq.4) then
+                 if (iq.eq.1 .or. iq.eq.4) then
+                    process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
+                 elseif (iq.eq.2) then
+                    process_unique(order(i))=sign(pgl_unique%processes(3,unique_map(iproc)),quarks(3))
+                 elseif (iq.eq.3) then
+                    process_unique(order(i))=sign(pgl_unique%processes(2,unique_map(iproc)),quarks(2))
+                 endif
+              elseif (quarks(0).eq.2) then
+                 process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
+              endif
+           endif
+        enddo
+     endif
+   end subroutine get_unique_process_from_quarks
+
+
+  subroutine find_quarks(process,order,quarks)
+    implicit none
+    integer,dimension(next) :: process,order
+    integer,dimension(0:4) :: quarks
+    integer :: i
+    quarks(0)=0
+    do i=1,next
+       if (is_quark(process(order(i))) .or. is_antiquark(process(order(i)))) then
+          quarks(0)=quarks(0)+1
+          quarks(quarks(0))=process(order(i))
+       endif
+    enddo
+    if (quarks(0).eq.4) then
+       quarks(1:4)=[quarks(1),quarks(3),quarks(2),quarks(4)]
+    endif
+  end subroutine find_quarks
+  
   subroutine map_to_canonical_form(process,part,mapping)
     ! cross the two initial state particle PDGs, order according to
     ! the PDG value, (and reflip the two initial states again)
@@ -398,198 +432,7 @@ contains
     enddo
   end subroutine sort_with_mapping
 
-  subroutine get_unique_process(process,process_mapped,mapping,check_sf,process_unique,idenMAPfactor,quarks_to_map)
-    implicit none
-    integer,dimension(next) :: process,process_mapped,process_unique,mapping
-    integer :: iproc,map_from,map_to,i,j
-    integer,dimension(4,2) :: quarks_to_map
-    real(kind=8) :: idenMAPfactor
-    logical :: check_sf
-    do iproc=1,pgl_unique%nproc
-       if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
-    enddo
-    if (iproc.gt.pgl_unique%nproc) then
-       write (*,*) 'Process not found'
-       write (*,*) process(1:next)
-       write (*,*) process_mapped(1:next)
-       stop 1
-    endif
-    idenMAPfactor=unique_map_value(iproc)
-    if (unique_map(iproc).gt.0) then
-       do i=1,next
-          if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
-             process_unique(mapping(i))=phys_model%get_antipart(pgl_unique%processes(i,unique_map(iproc)))
-          else
-             process_unique(mapping(i))=pgl_unique%processes(i,unique_map(iproc))
-          endif
-       enddo
-    else
-       do i=1,next
-          if ((i.le.2 .and. mapping(i).gt.2) .or. (i.gt.2 .and. mapping(i).le.2)) then
-             process_unique(mapping(i))=phys_model%get_antipart(pgl_unique%processes(i,iproc))
-          else
-             process_unique(mapping(i))=pgl_unique%processes(i,iproc)
-          endif
-       enddo
-    endif
-    ! Check if this is a same-flavour process whose amplitudes are
-    ! equal to the sum of the amplitudes of two other processes.
-    if (unique_map(iproc).lt.0) then
-       call find_to_map(iproc,proc_sf_map(iproc,1:2),quarks_to_map)
-    elseif (unique_map(iproc).gt.0) then
-       call find_to_map(unique_map(iproc),proc_sf_map(unique_map(iproc),1:2),quarks_to_map)
-    endif
-    if (any(quarks_to_map(1:4,1:2).ne.0)) then
-       check_sf=.true.
-    else
-       check_sf=.false.
-    endif
-  end subroutine get_unique_process
 
-  subroutine find_to_map(iproc,sf_map,quarks_to_map)
-    implicit none
-    integer :: iproc
-    integer,dimension(2) :: sf_map
-    integer,dimension(4,2),intent(out) :: quarks_to_map
-    integer :: i,iq,ia
-    quarks_to_map(1:4,1:2)=0
-    if (all(sf_map.ne.0)) then
-       iq=0
-       ia=2
-       do i=1,next
-          if ((is_quark(pgl_unique%processes(i,iproc)) .and. i.gt.2) .or. &
-               (is_antiquark(pgl_unique%processes(i,iproc)) .and. i.le.2)) then
-             iq=iq+1
-             quarks_to_map(iq,1)=abs(pgl_unique%processes(i,sf_map(1)))
-             quarks_to_map(iq,2)=abs(pgl_unique%processes(i,sf_map(2)))
-          elseif ((is_antiquark(pgl_unique%processes(i,iproc)) .and. i.gt.2) .or. &
-                  (is_quark(pgl_unique%processes(i,iproc)) .and. i.le.2)) then
-             ia=ia+1
-             quarks_to_map(ia,1)=-abs(pgl_unique%processes(i,sf_map(1)))
-             quarks_to_map(ia,2)=-abs(pgl_unique%processes(i,sf_map(2)))
-          elseif (pgl_unique%processes(i,iproc).ne.pgl_unique%processes(i,sf_map(1)) .or. &
-               pgl_unique%processes(i,iproc).ne.pgl_unique%processes(i,sf_map(2))) then
-             write (*,*) 'ERROR in sf_map: inconsistent process definitions',sf_map
-             write (*,*) pgl_unique%processes(i,iproc)
-             write (*,*) pgl_unique%processes(i,sf_map(1))
-             write (*,*) pgl_unique%processes(i,sf_map(2))
-             stop 1
-          endif
-       enddo
-    elseif(any(sf_map.ne.0)) then
-       write (*,*) 'ERROR in sf_map',sf_map
-    endif
-  end subroutine find_to_map
-  
-  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans,quarks_to_map)
-    implicit none
-    integer,intent(in) :: max_channels
-    integer,dimension(0:max_channels),intent(in) :: ichans
-    integer,dimension(next) :: process,process_unique,order
-    integer,dimension(4,2) :: quarks_to_map
-    real(kind=8) :: idenCOMAPfactor
-    integer :: iproc
-    call move_colour_singlet_in_order(process,order)
-    if (.not.reduce_to_unique_matrix_elements) then
-       ! always add the (unaltered) process
-       nprocs=nprocs+1
-       processes(1:next,nprocs)=process(1:next)
-       color_orders(1:next,nprocs)=order(1:next)
-       iden_iproc(nprocs)=1
-       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
-       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
-       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
-       same_flavour_process_map(1:2,nprocs)=0
-       return
-    endif
-    do iproc=1,nprocs
-       if (all(process_unique(1:next).eq.processes(1:next,iproc)) &
-            .and. all(order(1:next).eq.color_orders(1:next,iproc))) exit
-    enddo
-    if (iproc.gt.nprocs) then
-       ! new matrix element to generate
-       nprocs=nprocs+1
-       processes(1:next,nprocs)=process_unique(1:next)
-       color_orders(1:next,nprocs)=order(1:next)
-       iden_iproc(nprocs)=1
-       iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
-       idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
-       multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
-       if (any(quarks_to_map.ne.0)) then
-          call fill_same_flavour_process_map(nprocs,quarks_to_map)
-       else
-          same_flavour_process_map(1:2,nprocs)=0
-       endif
-    else
-       ! identical to another matrix element
-       iden_iproc(iproc)=iden_iproc(iproc)+1
-       iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
-       idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
-       if (ichans(0).ne.multi_chans(0,iproc)) then
-          write (*,*) 'Number of multi-channels not the same among identical processes',&
-               ichans(0),multi_chans(0,iproc)
-          stop 1
-       endif
-       if (any(ichans(1:ichans(0)).ne.multi_chans(1:ichans(0),iproc))) then
-          write (*,*) 'Multi-channels not the same among identical processes'
-          write (*,*) ichans(1:ichans(0))
-          write (*,*) multi_chans(1:ichans(0),iproc)
-          stop 1
-       endif
-    endif
-  end subroutine add_to_unique_process_list
-
-  subroutine fill_same_flavour_process_map(nprocs,quarks_to_map)
-    implicit none
-    integer :: nprocs
-    integer,dimension(4,2) :: quarks_to_map
-    integer,dimension(next) :: proc
-    integer :: i,iproc,iq,ia,isum
-    logical :: found
-    do isum=1,2
-       iq=0
-       ia=2
-       do i=1,next
-          if ((is_quark(processes(i,nprocs)) .and. i.gt.2) .or. (is_antiquark(processes(i,nprocs)) .and. i.le.2)) then
-             iq=iq+1
-             if (i.gt.2) then
-                proc(i)=quarks_to_map(iq,isum)
-             else
-                proc(i)=-quarks_to_map(iq,isum)
-             endif
-          elseif ((is_antiquark(processes(i,nprocs)) .and. i.gt.2) .or. (is_quark(processes(i,nprocs)) .and. i.le.2)) then
-             ia=ia+1
-             if (i.gt.2) then
-                proc(i)=quarks_to_map(ia,isum)
-             else
-                proc(i)=-quarks_to_map(ia,isum)
-             endif
-          else
-             proc(i)=processes(i,nprocs)
-          endif
-       enddo
-       found=.false.
-       do iproc=1,nprocs
-          if (all(proc(1:next).eq.processes(1:next,iproc)) .and. &
-               all(color_orders(1:next,nprocs).eq.color_orders(1:next,iproc))) then
-             same_flavour_process_map(isum,nprocs)=iproc
-             if (found) then
-                write (*,*) 'found more than one DF process to be part of SF process'
-                stop 1
-             endif
-             found=.true.
-          endif
-       enddo
-    enddo
-    if (same_flavour_process_map(1,nprocs).eq.same_flavour_process_map(2,nprocs)) then
-       write (*,*) 'ERROR: found twice the same process',nprocs
-       stop 1
-    elseif (any(same_flavour_process_map(1:2,nprocs).eq.0)) then
-       write (*,*) 'Could not find (one of the) processes',nprocs,same_flavour_process_map(1:2,nprocs)
-       stop 1
-    endif
-  end subroutine fill_same_flavour_process_map
-  
   subroutine move_colour_singlet_in_order(process,order)
     ! Move the colour singlet(s) to go *before* the final anti-quark in the order
     implicit none

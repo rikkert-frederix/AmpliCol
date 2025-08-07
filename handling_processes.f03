@@ -17,7 +17,7 @@ module handling_processes
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
-     integer,dimension(:,:,:),allocatable :: iden_processes
+     integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
@@ -616,5 +616,6 @@ contains
     if (allocated(pgl%eta_max)) deallocate(pgl%eta_max)
     if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
     if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
+    if (allocated(pgl%same_flavour)) deallocate(pgl%same_flavour)
   end subroutine finalize_phase_space_order_group
 end module handling_processes
