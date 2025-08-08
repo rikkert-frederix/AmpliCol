@@ -116,7 +116,7 @@ contains
        hel_picked(1)=1
     endif
   end subroutine unwgt_helicity
-  
+
   subroutine write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
     implicit none
     type(phase_space_order_group),allocatable :: pgl_unique
@@ -131,8 +131,7 @@ contains
     call finalize_phase_space_order_group(pgl_unique)
     deallocate(pgl_unique)
   end subroutine write_unique_in_file_and_deallocate
-  
-  
+
   subroutine create_run_tag(integration_step)
     use mint_module
     implicit none
@@ -190,5 +189,4 @@ contains
     endif
   end subroutine add_to_string
 
-  
 end module handling_events

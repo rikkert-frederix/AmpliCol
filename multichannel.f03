@@ -94,7 +94,6 @@ contains
           map_proc_to_group(iproc)=nchans_group
        endif
     enddo
-
     pgl%multichan%n_unique_channels=nchans
     pgl%multichan%n_unique_channelgroups=nchans_group
     allocate(pgl%multichan%unique_channel_list(nchans))
@@ -106,7 +105,7 @@ contains
     pgl%multichan%map_proc_to_channelgroup(1:pgl%nproc)=map_proc_to_group(1:pgl%nproc)
     deallocate(pgl%multichan%channels)
   end subroutine setup_optimised_multichannel_weight_computation
-    
+
   subroutine determine_multi_channel_size(part,n_ps)
     use math_functions
     implicit none
@@ -123,7 +122,5 @@ contains
     enddo
     n_ps=factorial(n_ps)
   end subroutine determine_multi_channel_size
-  
-
 
 end module multichannel

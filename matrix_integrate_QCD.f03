@@ -34,7 +34,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-500000
+     ncalls0=-1000000
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
@@ -55,7 +55,7 @@ program matrix_integrate_QCD
   call get_run_arguments()
 
   if (integration_step.eq.0) then
-     accuracy=0.01d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
      accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)

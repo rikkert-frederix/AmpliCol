@@ -150,7 +150,7 @@ contains
        endif
     enddo
   end subroutine find_same_flavour
-  
+
   subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible
     ! spin states. Note that this assumes that all the processes() have the
@@ -282,7 +282,7 @@ contains
        enddo
     enddo
   end subroutine set_initial_state_average_factor
-  
+
   subroutine set_final_state_identical_particle_factor(pgl)
     use math_functions
     implicit none
@@ -335,7 +335,7 @@ contains
        pgl%col_fac(iproc)=3**ifac
     enddo
   end subroutine compute_LC_colour_factor
-  
+
   subroutine define_identical_procs(pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
@@ -396,8 +396,8 @@ contains
           ngl=ngl+1
        endif
        do j=1,6
-         if (part(i).eq.j) nq(j)=nq(j)+1
-         if (part(i).eq.-j) naq(j)=naq(j)+1
+          if (part(i).eq.j) nq(j)=nq(j)+1
+          if (part(i).eq.-j) naq(j)=naq(j)+1
        enddo
     enddo
     do i=1,next
@@ -435,12 +435,12 @@ contains
     elseif (nquarks.eq.2) then
        tot_ord=factorial8(ngl_tot)
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
-           (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
           ! which would result in the following symmetry factor:
           sym_fac=factorial8(ngl)
        elseif ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .or. &
-               (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! one incoming quark (or anti-quark). There are ngluons
           ! channels needed: they correspond to having the incoming
           ! gluon at all possible positions between the quark and
@@ -473,7 +473,7 @@ contains
           ! Hence
           sym_fac=factorial8(ngl)*2
           if (ngl.gt.0) then
-               sym_fac=factorial8(ngl)*2
+             sym_fac=factorial8(ngl)*2
           endif
           if (ifindloc(o,next,1).ne.next-ifindloc(o,next,2)+1) then
              sym_fac=sym_fac*2
@@ -488,7 +488,7 @@ contains
 
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
-              (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+               (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
              if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
                 same_flavour=.true.
              else
@@ -497,7 +497,7 @@ contains
              exit
           endif
        enddo
-       
+
        allocate(io_list(1:next,tot_ord))
        allocate(io(1:next,5))
        ic=0
@@ -508,7 +508,7 @@ contains
              if (.not. same_flavour) cycle
              do i=2,next-1
                 if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
-                    (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+                     (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
                    ! check if it would give the same result:
                    if ( ((o(1   ).le.2 .and. o(i+1).gt.2) .or. (o(1   ).gt.2 .and. o(i+1).le.2)) .and. &
                         ((o(next).le.2 .and. o(i  ).gt.2) .or. (o(next).gt.2 .and. o(i  ).le.2)) ) then
@@ -566,10 +566,10 @@ contains
                          if ((io(i,3).gt.2 .and. part(io(i,3)).le.-1 .and. part(io(i,3)).ge.-6) .or. &
                               (io(i,3).le.2 .and. part(io(i,3)).ge. 1 .and. part(io(i,3)).le. 6) ) then
                             if ((io(1,3).gt.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).gt.2) .or. &
-                                (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) .or. &
-                                (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
-                                (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
-                                (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) ) then
+                                 (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) .or. &
+                                 (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
+                                 (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
+                                 (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) ) then
                                io(2:next-i-1,4)=io(i+2:next-1,3) ! gluons
                                io(next-i:next-i+1,4)=io(i:i+1,3) ! qbarq
                                io(2+next-i:next-1,4)=io(2:i-1,3) ! gluons
