@@ -61,7 +61,7 @@ program matrix_reweight
         call cpu_time(tBefore)
         nprocs=nprocs+1
         processes(1:next,iproc)=part(1:next,1)
-        call amps(iproc)%init(2,next,1,part,spin,o,phys_model,read_proc_from_file)
+        call amps(iproc)%init(2,next,1,part,spin,o,phys_model)
         call amps(iproc)%init_col(next,col_acc)
         call cpu_time(tAfter)
         t_amp_init=t_amp_init+tAfter-tBefore
