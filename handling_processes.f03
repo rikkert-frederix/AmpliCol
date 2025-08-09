@@ -86,7 +86,7 @@ contains
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,j,k,ii,jj,kk,nevent
-    real(kind=8),parameter :: tiny=1d-10
+    real(kind=8),parameter :: tiny=1d-8
     if (.not.decompose_same_flavour_into_two_diff_flavour) return
     if (.not.allocated(pgl%same_flavour)) then
        allocate(pgl%same_flavour(nevent,pgl%nproc,2))
