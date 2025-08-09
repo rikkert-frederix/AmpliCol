@@ -1542,7 +1542,7 @@ contains
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel,read_file,pm)
+  subroutine evaluate(this,n,p,hel,read_file,pm,optimise)
     use FeynmanRules
     use particles
     implicit none
@@ -1552,7 +1552,7 @@ contains
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ifinal,dim
-    logical :: read_file 
+    logical :: read_file ,optimise
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (use_real_gluons .and. &
@@ -1575,9 +1575,9 @@ contains
           endif
        enddo
        if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
-          allocate(this%amps_r(1:this%n_amps))
+          if (.not. allocated(this%amps_r)) allocate(this%amps_r(1:this%n_amps))
        else
-          allocate(this%amps(1:this%n_amps))
+          if (.not. allocated(this%amps)) allocate(this%amps(1:this%n_amps))
        endif
     endif
     
@@ -1809,7 +1809,126 @@ contains
 
     call compute_amps_from_currents
 
+    if (optimise) call optimise_evaluation
+    
   contains
+
+    subroutine optimise_evaluation
+!
+! POTENTIAL OTHER OPTIMISATIONS:
+!
+! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
+! 2. INCLUDE MULTIPLICATIVE COUPLING CONSTANT AT LATER STAGE
+! 3. WEYL SPINORS & SEPARATE VERTEX ROUTINES FOR LEFT AND RIGHT-HANDED INTERACTIONS?
+!      
+      implicit none
+      integer :: isize,ic1,ic2,iv1,iv2,i
+      integer,dimension(:,:),allocatable :: map_cur,map_vert
+      integer,dimension(n-1) :: identical_curr,identical_vert
+      real(kind=8),parameter :: tiny=1d-10
+      logical,dimension(:),allocatable :: include_cur,include_vert
+      allocate(include_cur(1:this%n_cur))
+      allocate(include_vert(1:this%n_vert))
+      include_cur=.true.
+      include_vert=.true.
+      allocate(map_cur(0:this%n_cur,1:2))
+      allocate(map_vert(0:this%n_vert,1:2))
+      map_cur(0,1)=0
+      map_vert(0,1)=0
+      identical_curr=0
+      identical_vert=0
+      do isize=1,n-1
+         do ic1=this%n_cur_start(isize),this%n_cur_end(isize)-1
+            if (.not.include_cur(ic1)) cycle
+            if (sum(abs(this%current_list(ic1)%val_c)).eq.0d0) then
+               map_cur(0,1)=map_cur(0,1)+1
+               map_cur(map_cur(0,1),1)=ic1
+!!$               map_cur(map_cur(0,1),2)=0
+               map_cur(map_cur(0,1),2)=ic1
+               include_cur(ic1)=.false.
+               cycle
+            endif
+            do ic2=ic1+1,this%n_cur_end(isize)
+               if (.not.include_cur(ic2)) cycle
+               if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
+               if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
+                    sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
+                  map_cur(0,1)=map_cur(0,1)+1
+                  map_cur(map_cur(0,1),1)=ic2
+                  map_cur(map_cur(0,1),2)=ic1
+                  identical_curr(isize)=identical_curr(isize)+1
+                  include_cur(ic2)=.false.
+               endif
+            enddo
+         enddo
+      enddo
+      do i=1,map_cur(0,1)
+         do iv1=1,this%n_vert
+            if (this%interaction_list(iv1)%currents(1).eq.map_cur(i,1)) then
+               this%interaction_list(iv1)%currents(1)=map_cur(i,2)
+            endif
+            if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) then
+               this%interaction_list(iv1)%currents(2)=map_cur(i,2)
+            endif
+         enddo
+      enddo
+      do isize=2,n-1
+         do iv1=this%n_vert_start(isize),this%n_vert_end(isize)-1
+            if (.not.include_vert(iv1)) cycle
+            if (sum(abs(this%interaction_list(iv1)%val_c)).eq.0d0) then
+               map_vert(0,1)=map_vert(0,1)+1
+               map_vert(map_vert(0,1),1)=iv1
+!!$               map_vert(map_vert(0,1),2)=0
+               map_vert(map_vert(0,1),2)=iv1
+               include_vert(iv1)=.false.
+               cycle
+            endif
+            do iv2=iv1+1,this%n_vert_end(isize)
+               if (.not.include_vert(iv2)) cycle
+               if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
+               if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
+                    sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
+                  map_vert(0,1)=map_vert(0,1)+1
+                  map_vert(map_vert(0,1),1)=iv2
+                  map_vert(map_vert(0,1),2)=iv1
+                  identical_vert(isize)=identical_vert(isize)+1
+                  include_vert(iv2)=.false.
+               endif
+            enddo
+         enddo
+      enddo
+      do i=1,map_vert(0,1)
+         do ic1=1,this%n_cur
+            do iv1=1,this%current_list(ic1)%n_vert
+               if (this%current_list(ic1)%vertices(iv1).eq.map_vert(i,1)) then
+                  this%current_list(ic1)%vertices(iv1)=map_vert(i,2)
+               endif
+            enddo
+         enddo
+      enddo
+!!$      write (*,*) identical_curr
+!!$      write (*,*) map_cur(0,1)
+!!$      write (*,*) map_cur(1:map_cur(0,1),1)
+!!$      write (*,*) map_cur(1:map_cur(0,1),2)
+!!$      write (*,*) identical_vert
+!!$      write (*,*) map_vert(0,1)
+!!$      write (*,*) map_vert(1:map_vert(0,1),1)
+!!$      write (*,*) map_vert(1:map_vert(0,1),2)
+      allocate(this%include_amp(1:this%n_amps))
+      this%include_amp=.true.
+      call this%filter_dead_trees(n)
+      deallocate(this%include_amp)
+      do ic=1,this%n_cur
+         if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
+         if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
+      enddo
+      do iv=1,this%n_vert
+         if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
+         if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
+      enddo
+      write (*,*) 'Total number of currents and vertices after optimisation',this%n_cur,this%n_vert,this%n_amps
+    end subroutine optimise_evaluation
+    
 
     subroutine fill_momentum_array
       implicit none
@@ -2668,7 +2787,7 @@ contains
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver,where_to_amp
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n,iamp,iproc
+    integer :: to_skip,isize,nc,iv,n,iamp,iproc,i
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -2756,13 +2875,15 @@ contains
     ! do the actual shifting of the amplitudes in the list
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
-       if (this%same_flavour_sum(iamp,1).le.0) then
-          this%curr2amp(1,where_to_amp(iamp))=where_to_cur(this%curr2amp(1,iamp))
-          this%curr2amp(2,where_to_amp(iamp))=where_to_cur(this%curr2amp(2,iamp))
-       else
-          this%same_flavour_sum(where_to_amp(iamp),1)=where_to_amp(this%same_flavour_sum(iamp,1))
-          this%same_flavour_sum(where_to_amp(iamp),2)=where_to_amp(this%same_flavour_sum(iamp,2))
-       endif
+       do i=1,2
+          if (this%same_flavour_sum(iamp,i).lt.0) then
+             this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
+          elseif (this%same_flavour_sum(iamp,i).eq.0) then
+             this%same_flavour_sum(where_to_amp(iamp),i)=0
+          else
+             this%same_flavour_sum(where_to_amp(iamp),i)=where_to_amp(this%same_flavour_sum(iamp,i))
+          endif
+       enddo
     enddo
     
     ! and also the shifting of the auxiliary arrays and variables

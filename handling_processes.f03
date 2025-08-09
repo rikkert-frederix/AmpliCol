@@ -86,7 +86,7 @@ contains
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,j,k,ii,jj,kk,nevent
-    real(kind=8),parameter :: tiny=1d-8
+    real(kind=8),parameter :: tiny=1d-10
     if (.not.decompose_same_flavour_into_two_diff_flavour) return
     if (.not.allocated(pgl%same_flavour)) then
        allocate(pgl%same_flavour(nevent,pgl%nproc,2))
@@ -108,9 +108,9 @@ contains
                 do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
                    if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
                 enddo
-                if (pgl%amps%amps(ii)+pgl%amps%amps(jj)+pgl%amps%amps(kk).eq.(0d0,0d0)) cycle
+                if (abs(pgl%amps%amps(ii))+abs(pgl%amps%amps(jj))+abs(pgl%amps%amps(kk)).eq.0d0) cycle
                 if (abs(pgl%amps%amps(ii)-(pgl%amps%amps(jj)+pgl%amps%amps(kk)))/&
-                     abs(pgl%amps%amps(ii)+pgl%amps%amps(jj)+pgl%amps%amps(kk)).gt.tiny) then
+                     (abs(pgl%amps%amps(ii))+abs(pgl%amps%amps(jj))+abs(pgl%amps%amps(kk))).gt.tiny) then
                    exit
                 endif
              enddo

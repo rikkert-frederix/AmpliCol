@@ -267,7 +267,13 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model)
+    if (use_cross_process_optimisation_of_currents .and. &
+         pgl(ichan)%passed.eq.nevent_hel_filter+1) then
+       call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
+    else
+       call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
+    endif
+    
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     
@@ -309,7 +315,7 @@ contains
           pgl(ichan)%amp2(1:pgl(ichan)%nproc)=0d0
        endif
     endif
- 
+    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%phase_space%jac*conv
 

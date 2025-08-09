@@ -174,7 +174,7 @@ contains
        call pgl_unique%phase_space%generate_momenta(x)
        if (pgl_unique%phase_space%jac.lt.0d0) cycle
        pgl_unique%passed=pgl_unique%passed+1
-       call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model)
+       call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model,.false.)
        iproc=0
        amp2(pgl_unique%passed,:)=0d0
        if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
