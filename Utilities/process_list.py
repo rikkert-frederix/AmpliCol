@@ -16,7 +16,6 @@ quarks=frozenset({'d','u','s','c','b','t'})
 antiquarks=frozenset({'d~','u~','s~','c~','b~','t~'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
-#gluons=frozenset({})
 flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
 #flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
@@ -159,6 +158,8 @@ def ValidProc(proc):
     naq=count_matching_elements(proc,antiquarks)
     if nq > 2 : return False    # at most two quarks
     if naq > 2 : return False   # at most two anti-quarks
+#    if nq < 2 : return False    # at least two quarks
+#    if naq < 2 : return False   # at least two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
     # check charge conservation:
     if sum([charges3[x] for x in proc]) != 0 : return False
@@ -340,7 +341,8 @@ def sort_by_pdg_codes(process):
     nq=count_matching_elements(process,quarks)
     if nq == 2:
         quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
-        same_flavour=quarks_in_proc[0]==quarks_in_proc[1]
+        antiquarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in antiquarks])
+        same_flavour=(quarks_in_proc[0]==quarks_in_proc[1]) or (antiquarks_in_proc[0]==antiquarks_in_proc[1])
     else:
         same_flavour=False
     val=0
@@ -368,15 +370,35 @@ def WriteAllProcsIntoList():
     return towrite
 
 def Add2qq_dfProcesses(sorted_procs):
-    # add the 2qq_df processes with the two incoming particles interchanged:
+    # add all the 2qq_df processes by flipping orders
     i=0
     while i < len(sorted_procs):
         proc = sorted_procs[i]
-        if proc[2] in antiquarks and proc[3] in antiquarks and proc[2] != proc[3]:
+        if proc[2] in antiquarks and proc[3] in antiquarks: # 2-quark-line process
+            # first add the other connection in the colour ordering
+            if proc[2] != proc[3]:
+                # swap the two anti-quarks
+                swapped_proc=proc[:]
+                swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
+            elif proc[2] == proc[3] and proc[0] != proc[1] :
+                # swap the two quarks
+                swapped_proc=proc[:]
+                swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
+            # Also interchange quark and anti-quarks
+            swapped_proc=sorted_procs[i][:]
+            swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
+            if swapped_proc not in sorted_procs:
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
             swapped_proc=proc[:]
-            swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
-            sorted_procs.insert(i+1,swapped_proc)
-            i+=1
+            swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
+            if swapped_proc not in sorted_procs:
+                sorted_procs.insert(i+1,swapped_proc)
+                i+=1
         i+=1
     return sorted_procs
 

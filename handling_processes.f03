@@ -17,7 +17,7 @@ module handling_processes
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
-     integer,dimension(:,:,:),allocatable :: iden_processes
+     integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
@@ -81,7 +81,76 @@ contains
     enddo
   end subroutine determine_phase_space_orders
 
-  
+  subroutine find_same_flavour(pgl,nevent)
+    use mint_module
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer :: i,j,k,ii,jj,kk,nevent
+    real(kind=8),parameter :: tiny=1d-8
+    if (.not.decompose_same_flavour_into_two_diff_flavour) return
+    if (.not.allocated(pgl%same_flavour)) then
+       allocate(pgl%same_flavour(nevent,pgl%nproc,2))
+       pgl%same_flavour=0
+    endif
+    do i=1,pgl%nproc
+       if (pgl%amps%n_qqbar(i).ne.2) cycle
+       do j=1,pgl%nproc
+          if (i.eq.j) cycle
+          if (pgl%amps%n_qqbar(j).ne.2) cycle
+          do k=1,j-1
+             if (k.eq.i) cycle
+             if (pgl%amps%n_qqbar(k).ne.2) cycle
+             do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
+                if (pgl%amps%amps(ii).eq.(0d0,0d0)) cycle
+                do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
+                   if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,jj))) exit
+                enddo
+                do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
+                   if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
+                enddo
+                if (abs(pgl%amps%amps(ii))+abs(pgl%amps%amps(jj))+abs(pgl%amps%amps(kk)).eq.0d0) cycle
+                if (abs(pgl%amps%amps(ii)-(pgl%amps%amps(jj)+pgl%amps%amps(kk)))/&
+                     (abs(pgl%amps%amps(ii))+abs(pgl%amps%amps(jj))+abs(pgl%amps%amps(kk))).gt.tiny) then
+                   exit
+                endif
+             enddo
+             if (ii.eq.pgl%amps%iproc_start(i+1)) then
+                pgl%same_flavour(pgl%passed,i,1)=j
+                pgl%same_flavour(pgl%passed,i,2)=k
+             endif
+          enddo
+       enddo
+    enddo
+    if (pgl%passed.lt.nevent) return
+    do i=1,pgl%nproc
+       if (any(pgl%same_flavour(1,i,1).ne.pgl%same_flavour(2:nevent,i,1)) .or. &
+            any(pgl%same_flavour(1,i,2).ne.pgl%same_flavour(2:nevent,i,2)) ) then
+          write (*,*) 'Inconsistent same flavour decomposition'
+          write (*,*) i
+          write (*,*) pgl%same_flavour(1:nevent,i,1)
+          write (*,*) pgl%same_flavour(1:nevent,i,2)
+          stop 1
+       endif
+       if (pgl%same_flavour(1,i,1).ne.0 .or. pgl%same_flavour(1,i,2).ne.0) then
+          j=pgl%same_flavour(1,i,1)
+          k=pgl%same_flavour(1,i,2)
+          write (*,'(a,x,i4,x,a,i4,x,a,i4)') &
+               "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
+          pgl%amps%same_flav(i)=.true.
+          do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
+             do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
+                if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,jj))) exit
+             enddo
+             do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
+                if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
+             enddo
+             pgl%amps%same_flavour_sum(ii,1)=jj
+             pgl%amps%same_flavour_sum(ii,2)=kk
+          enddo
+       endif
+    enddo
+  end subroutine find_same_flavour
+
   subroutine setup_spin(pgl)
     ! Use the first process in the processes() array to setup all the possible
     ! spin states. Note that this assumes that all the processes() have the
@@ -213,7 +282,7 @@ contains
        enddo
     enddo
   end subroutine set_initial_state_average_factor
-  
+
   subroutine set_final_state_identical_particle_factor(pgl)
     use math_functions
     implicit none
@@ -248,10 +317,7 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,ifac,iproc
     real(kind=8) :: fac
-    integer :: it,lim
-    lim=pgl%nproc
-!    if (.not.read_proc_from_file.and.pgl%amps%same_flav(3)) lim=pgl%amps%nprocs
-    do iproc=1,lim
+    do iproc=1,pgl%nproc
        fac=0d0
        do i=1,next
           if (pgl%processes(i,iproc).eq.21) then
@@ -266,14 +332,10 @@ contains
                'colour factor is not an integer',ifac,fac
           stop 1
        endif
-       if (abs(pgl%processes(pgl%color_orders(1,iproc),iproc)).ne.abs(pgl%processes(pgl%color_orders(next,iproc),iproc)) &
-            .and. .not.pgl%amps%same_flav(iproc)) then
-          if (all(abs(pgl%processes(1:next,iproc)).ne.24)) ifac=ifac-2
-       endif
        pgl%col_fac(iproc)=3**ifac
     enddo
   end subroutine compute_LC_colour_factor
-  
+
   subroutine define_identical_procs(pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
@@ -334,8 +396,8 @@ contains
           ngl=ngl+1
        endif
        do j=1,6
-         if (part(i).eq.j) nq(j)=nq(j)+1
-         if (part(i).eq.-j) naq(j)=naq(j)+1
+          if (part(i).eq.j) nq(j)=nq(j)+1
+          if (part(i).eq.-j) naq(j)=naq(j)+1
        enddo
     enddo
     do i=1,next
@@ -373,12 +435,12 @@ contains
     elseif (nquarks.eq.2) then
        tot_ord=factorial8(ngl_tot)
        if ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .and. &
-           (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! quark and anti-quark are incoming. Only 1 channel needed,
           ! which would result in the following symmetry factor:
           sym_fac=factorial8(ngl)
        elseif ((abs(part(1)).ge.1 .and. abs(part(1)).le.6) .or. &
-               (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
+            (abs(part(2)).ge.1 .and. abs(part(2)).le.6) )then
           ! one incoming quark (or anti-quark). There are ngluons
           ! channels needed: they correspond to having the incoming
           ! gluon at all possible positions between the quark and
@@ -411,7 +473,7 @@ contains
           ! Hence
           sym_fac=factorial8(ngl)*2
           if (ngl.gt.0) then
-               sym_fac=factorial8(ngl)*2
+             sym_fac=factorial8(ngl)*2
           endif
           if (ifindloc(o,next,1).ne.next-ifindloc(o,next,2)+1) then
              sym_fac=sym_fac*2
@@ -426,7 +488,7 @@ contains
 
        do i=2,next-1
           if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
-              (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+               (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
              if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
                 same_flavour=.true.
              else
@@ -435,7 +497,7 @@ contains
              exit
           endif
        enddo
-       
+
        allocate(io_list(1:next,tot_ord))
        allocate(io(1:next,5))
        ic=0
@@ -446,7 +508,7 @@ contains
              if (.not. same_flavour) cycle
              do i=2,next-1
                 if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
-                    (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
+                     (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
                    ! check if it would give the same result:
                    if ( ((o(1   ).le.2 .and. o(i+1).gt.2) .or. (o(1   ).gt.2 .and. o(i+1).le.2)) .and. &
                         ((o(next).le.2 .and. o(i  ).gt.2) .or. (o(next).gt.2 .and. o(i  ).le.2)) ) then
@@ -504,10 +566,10 @@ contains
                          if ((io(i,3).gt.2 .and. part(io(i,3)).le.-1 .and. part(io(i,3)).ge.-6) .or. &
                               (io(i,3).le.2 .and. part(io(i,3)).ge. 1 .and. part(io(i,3)).le. 6) ) then
                             if ((io(1,3).gt.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).gt.2) .or. &
-                                (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) .or. &
-                                (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
-                                (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
-                                (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) ) then
+                                 (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) .or. &
+                                 (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
+                                 (io(1,3).gt.2 .and. io(i,3).le.2 .and. io(i+1,3).gt.2 .and. io(next,3).le.2) .or. &
+                                 (io(1,3).le.2 .and. io(i,3).gt.2 .and. io(i+1,3).le.2 .and. io(next,3).gt.2) ) then
                                io(2:next-i-1,4)=io(i+2:next-1,3) ! gluons
                                io(next-i:next-i+1,4)=io(i:i+1,3) ! qbarq
                                io(2+next-i:next-1,4)=io(2:i-1,3) ! gluons
@@ -616,5 +678,6 @@ contains
     if (allocated(pgl%eta_max)) deallocate(pgl%eta_max)
     if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
     if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
+    if (allocated(pgl%same_flavour)) deallocate(pgl%same_flavour)
   end subroutine finalize_phase_space_order_group
 end module handling_processes

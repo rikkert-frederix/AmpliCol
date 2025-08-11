@@ -75,7 +75,7 @@ module mint_module
   integer, parameter, private :: min_it0=4        ! minimal number of iterations in the mint step 0 phase
   integer, parameter, private :: min_it1=5        ! minimal number of iterations in the mint step 1 phase
   integer, parameter, private :: max_points=1000000! maximum number of points to trow per iteration if not enough non-zero points can be found.
-  integer, parameter, public  :: maxchannels=128 ! set as least as large as in amcatnlo_run_interface
+  integer, parameter, public  :: maxchannels=256 ! set as least as large as in amcatnlo_run_interface
   double precision, parameter, public :: min_virt_fraction=1d0
   ! Note that the number of intervals in the integration grids, 'nintervals', cannot be arbitrarily large.
   ! It should be equal to

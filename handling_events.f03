@@ -90,7 +90,7 @@ contains
   subroutine unwgt_helicity(pgl)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    integer :: i,iproc
+    integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
     random=ran2()*pgl%amp2(iproc_picked)
@@ -116,7 +116,7 @@ contains
        hel_picked(1)=1
     endif
   end subroutine unwgt_helicity
-  
+
   subroutine write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
     implicit none
     type(phase_space_order_group),allocatable :: pgl_unique
@@ -131,16 +131,13 @@ contains
     call finalize_phase_space_order_group(pgl_unique)
     deallocate(pgl_unique)
   end subroutine write_unique_in_file_and_deallocate
-  
-  
+
   subroutine create_run_tag(integration_step)
     use mint_module
     implicit none
-    integer :: i1,i2,i,integration_step
+    integer :: i,integration_step
     tag='_'       ! tag of current run
     tag_read='_'  ! same as 'tag', but with previous integration_step (i.e., defines the file to read the integration grids from)
-!    call add_to_string(tag,PS_choice,.true.)
-!    call add_to_string(tag_read,PS_choice,.true.)
     call add_to_string(tag,next,.true.)
     call add_to_string(tag_read,next,.true.)
     call add_to_string(tag,integration_step,.true.)
@@ -160,14 +157,6 @@ contains
        enddo
        call add_to_string(tag,o(next),.false.)
        call add_to_string(tag_read,o(next),.false.)
-    else
-!!$        ! just to the first process; the should all give the same value for 'i'
-!!$       i1=ifindloc(color_orders(1:next,1),next,1)
-!!$       i2=ifindloc(color_orders(1:next,1),next,2)
-!!$       i=i2-i1 -1
-!!$       if (i.lt.0) i=i+next
-!!$       call add_to_string(tag,i,.false.)
-!!$       call add_to_string(tag_read,i,.false.)
     endif
     write (*,*) 'File tag is: ',tag,'   ',add_arg
   end subroutine create_run_tag
@@ -200,5 +189,4 @@ contains
     endif
   end subroutine add_to_string
 
-  
 end module handling_events

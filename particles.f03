@@ -48,7 +48,7 @@ contains
     this%particle_list(l)%spin=2 ! two spin states
     this%particle_list(l)%anti_type=-6
     this%particle_list(l)%dim=4
-       
+
     ! gluon
     l=l+1
     this%particle_list(l)%type=21
@@ -75,7 +75,7 @@ contains
     this%particle_list(l)%spin=2 ! two spin states
     this%particle_list(l)%anti_type=22
     this%particle_list(l)%dim=4
-    
+
     ! Z-boson
     l=l+1
     this%particle_list(l)%type=23
@@ -84,7 +84,7 @@ contains
     this%particle_list(l)%spin=3 ! three spin states
     this%particle_list(l)%anti_type=23
     this%particle_list(l)%dim=4
-    
+
     ! Ztensor (non-propagator auxiliary particle to decompose 4-Wboson interaction)
     l=l+1
     this%particle_list(l)%type=-23
@@ -93,7 +93,7 @@ contains
     this%particle_list(l)%spin=-1 ! ill defined
     this%particle_list(l)%anti_type=-23
     this%particle_list(l)%dim=6
-    
+
     ! W-boson
     l=l+1
     this%particle_list(l)%type=24
@@ -113,7 +113,7 @@ contains
     this%particle_list(l)%dim=6
 
     write (*,*) l,'particles loaded'
-    
+
   end subroutine init_part
 
   subroutine init_vert(this)
@@ -621,10 +621,10 @@ contains
     gw=1d0/sw
     fact=sqrt(1d0-sw**2)
     this%vertex_list(l)%coupl=[gw*fact,0d0] !!
-    
+
     write (*,*) l,'interactions loaded'
   end subroutine init_vert
-    
+
   integer function get_antipart(this,ipdg)
     implicit none
     class(physics_model) :: this

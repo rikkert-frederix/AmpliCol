@@ -34,7 +34,7 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-500000
+     ncalls0=-1000000
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
@@ -55,7 +55,7 @@ program matrix_integrate_QCD
   call get_run_arguments()
 
   if (integration_step.eq.0) then
-     accuracy=0.001d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+     accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
      accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
@@ -135,7 +135,7 @@ program matrix_integrate_QCD
         call pgl(igroup)%amps%read_init_amps_from_file(next,32)
      else
         call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
-                pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model,read_proc_from_file)
+                pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model)
      endif
 
      !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
@@ -214,7 +214,7 @@ contains
     real(kind=8), dimension(nintegrals) :: f1
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc,i
+    integer :: ih,iproc
     real(kind=8) :: vol
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
@@ -267,7 +267,13 @@ contains
     ! compute amplitudes
     call cpu_time(tBefore)
 
-    call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model)
+    if (use_cross_process_optimisation_of_currents .and. &
+         pgl(ichan)%passed.eq.nevent_hel_filter+1) then
+       call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
+    else
+       call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
+    endif
+    
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     
@@ -298,7 +304,9 @@ contains
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
+    
     if (pgl(ichan)%passed.le.nevent_hel_filter) then
+       call find_same_flavour(pgl(ichan),nevent_hel_filter)
        call setup_helicity_filter(pgl(ichan))
        if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
@@ -307,7 +315,7 @@ contains
           pgl(ichan)%amp2(1:pgl(ichan)%nproc)=0d0
        endif
     endif
-
+    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%phase_space%jac*conv
 
@@ -386,7 +394,7 @@ contains
   subroutine get_run_arguments()
     implicit none
     integer :: argc,n_ps
-    integer :: i,k,iproc
+    integer :: i,k
     character(len=256) :: argv
     logical :: found_1
     integer(kind=8) :: sym_fac
@@ -419,7 +427,6 @@ contains
           call finalize_phase_space_order_group(pgl_unique)
           deallocate(pgl_unique)
        endif
-999    continue
        close(10)
     elseif (argc.le.10) then
        write(*,*) 'Inconsistent arguments:'

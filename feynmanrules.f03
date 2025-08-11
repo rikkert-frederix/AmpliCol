@@ -44,7 +44,7 @@ contains
           wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
-       hel = dble(ihel)
+       hel = dble(-ihel)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
@@ -58,76 +58,76 @@ contains
           wf(3) = dcmplx( rZero , -sign(sqh,p(3)) )
        endif
     endif
-  
+
   end subroutine ext_gluon_cmplx
 
 
   subroutine ext_gluon_mass(p,nhel,nsv,wf,vmass)
-      implicit none
-      double complex wf(4)
-      double precision p(0:3),vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
-      integer nhel,nsv,nsvahl
+    implicit none
+    double complex wf(4)
+    double precision p(0:3),vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
+    integer nhel,nsv,nsvahl
 
-      double precision rZero, rHalf, rOne, rTwo
-      parameter( rZero = 0.0d0, rHalf = 0.5d0 )
-      parameter( rOne = 1.0d0, rTwo = 2.0d0 )
+    double precision rZero, rHalf, rOne, rTwo
+    parameter( rZero = 0.0d0, rHalf = 0.5d0 )
+    parameter( rOne = 1.0d0, rTwo = 2.0d0 )
 
-      sqh = dsqrt(rHalf)
-      hel = dble(nhel)
-      nsvahl = nsv*dabs(hel)
-      pt2 = p(1)**2+p(2)**2
-      pp = min(p(0),dsqrt(pt2+p(3)**2))
-      pt = min(pp,dsqrt(pt2))
+    sqh = dsqrt(rHalf)
+    hel = dble(nhel)
+    nsvahl = nsv*abs(nhel)
+    pt2 = p(1)**2+p(2)**2
+    pp = min(p(0),dsqrt(pt2+p(3)**2))
+    pt = min(pp,dsqrt(pt2))
 
-      if ( vmass.ne.rZero ) then
+    if ( vmass.ne.rZero ) then
 
-         hel0 = rOne-dabs(hel)
+       hel0 = rOne-dabs(hel)
 
-         if ( pp.eq.rZero ) then
+       if ( pp.eq.rZero ) then
 
-            wf(1) = dcmplx( rZero )
-            wf(2) = dcmplx(-hel*sqh )
-            wf(3) = dcmplx( rZero , nsvahl*sqh )
-            wf(4) = dcmplx( hel0 )
+          wf(1) = dcmplx( rZero )
+          wf(2) = dcmplx(-hel*sqh )
+          wf(3) = dcmplx( rZero , nsvahl*sqh )
+          wf(4) = dcmplx( hel0 )
 
-         else
+       else
 
-            emp = p(0)/(vmass*pp)
-            wf(1) = dcmplx( hel0*pp/vmass )
-            wf(4) = dcmplx( hel0*p(3)*emp+hel*pt/pp*sqh )
-            if ( pt.ne.rZero ) then
-               pzpt = p(3)/(pp*pt)*sqh*hel
-               wf(2) = dcmplx( hel0*p(1)*emp-p(1)*pzpt , -nsvahl*p(2)/pt*sqh       )
-               wf(3) = dcmplx( hel0*p(2)*emp-p(2)*pzpt ,  nsvahl*p(1)/pt*sqh       )
-            else
-               wf(2) = dcmplx( -hel*sqh )
-               wf(3) = dcmplx( rZero , nsvahl*sign(sqh,p(3)) )
-            endif
+          emp = p(0)/(vmass*pp)
+          wf(1) = dcmplx( hel0*pp/vmass )
+          wf(4) = dcmplx( hel0*p(3)*emp+hel*pt/pp*sqh )
+          if ( pt.ne.rZero ) then
+             pzpt = p(3)/(pp*pt)*sqh*hel
+             wf(2) = dcmplx( hel0*p(1)*emp-p(1)*pzpt , -nsvahl*p(2)/pt*sqh       )
+             wf(3) = dcmplx( hel0*p(2)*emp-p(2)*pzpt ,  nsvahl*p(1)/pt*sqh       )
+          else
+             wf(2) = dcmplx( -hel*sqh )
+             wf(3) = dcmplx( rZero , nsvahl*sign(sqh,p(3)) )
+          endif
 
-         endif
+       endif
 
-      else
-         pp = p(0)
-         pt = sqrt(p(1)**2+p(2)**2)
-         wf(1) = dcmplx( rZero )
-         wf(4) = dcmplx( hel*pt/pp*sqh )
-         if ( pt.ne.rZero ) then
-            pzpt = p(3)/(pp*pt)*sqh*hel
-            wf(2) = dcmplx( -p(1)*pzpt , -nsv*p(2)/pt*sqh )
-            wf(3) = dcmplx( -p(2)*pzpt ,  nsv*p(1)/pt*sqh )
-         else
-            wf(2) = dcmplx( -hel*sqh )
-            wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
-         endif
+    else
+       pp = p(0)
+       pt = sqrt(p(1)**2+p(2)**2)
+       wf(1) = dcmplx( rZero )
+       wf(4) = dcmplx( hel*pt/pp*sqh )
+       if ( pt.ne.rZero ) then
+          pzpt = p(3)/(pp*pt)*sqh*hel
+          wf(2) = dcmplx( -p(1)*pzpt , -nsv*p(2)/pt*sqh )
+          wf(3) = dcmplx( -p(2)*pzpt ,  nsv*p(1)/pt*sqh )
+       else
+          wf(2) = dcmplx( -hel*sqh )
+          wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
+       endif
 
-      endif
+    endif
 
 
   end subroutine ext_gluon_mass
 
   subroutine ext_quark(p,nhel,idum,wf,fmass)
-  ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
-  ! state anti-quark (p(0)<0)
+    ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
+    ! state anti-quark (p(0)<0)
     implicit none
     integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
@@ -389,7 +389,7 @@ contains
     real(kind=8),parameter :: rOne=1d0
     wf(1)=(rOne,0d0)
   end subroutine ext_scalar
-  
+
 
 
 
@@ -611,9 +611,18 @@ contains
   end subroutine GluonAquarktoAquark
 
   subroutine QuarkAquarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
+    !
+    ! This subroutine is only used to compute the off-shell gluon that
+    ! connects the two quark lines in nqq=2 processes. Moreover, the
+    ! combination of quark+anti-quark is ONLY there when these the
+    ! quark and anti-quark are from *THE SAME* colour string. Hence,
+    ! this is the "photon" (-1/N_C) contribution. Hence, include the
+    ! factor -1/N_C=-1/3 here, instead of in the colour factor.
+    !
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),parameter :: N_C=3d0
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)/N_C
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
     TMP1=wfq1(3)*wfq2(1)+wfq1(2)*wfq2(4)
     TMP2=wfq1(4)*wfq2(2)+wfq1(1)*wfq2(3)
