@@ -52,7 +52,10 @@ program matrix_integrate_QCD
 !!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
   call phys_model%init_vert()
 
+  call cpu_time(tBefore)
   call get_run_arguments()
+  call cpu_time(tAfter)
+  t_Proc_init=t_Proc_init+tAfter-tBefore
 
   if (integration_step.eq.0) then
      accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
@@ -197,6 +200,7 @@ program matrix_integrate_QCD
   t_all=tTot_a-tTot_b
   write(*,*) 'Time spent in phase-space initialisation:',t_PS_init 
   write(*,*) 'Time spent in amplitude initialisation',t_Amp_init
+  write(*,*) 'Time spent in process initialisation',t_Proc_init
   write(*,*) 'Time spent in phase-space generation:',t_PS
   write(*,*) 'Time spent in amplitude evaluation',t_Amp
   write(*,*) 'Time spent in squaring amplitudes',t_mat
@@ -240,33 +244,32 @@ contains
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
     call pgl(ichan)%phase_space%generate_momenta(x)
-    call cpu_time(tAfter)
-    t_PS= t_PS +tAfter-tBefore
-    
     if (debug ) then
        write (*,*) pgl(ichan)%phase_space%jac
        stop 1
     endif
-    
     pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
-    
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
        pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
-
     if (.not.pass_cuts(pgl(ichan))) then
        pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
-
     pgl(ichan)%passed = pgl(ichan)%passed + 1
+    call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
+                                     pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
+    call cpu_time(tAfter)
+    t_PS= t_PS +tAfter-tBefore
 
+    
     ! compute amplitudes
-    call cpu_time(tBefore)
-
+!!$    call cpu_time(tBefore)
+    tBefore=tAfter
+    
     if (use_cross_process_optimisation_of_currents .and. &
          pgl(ichan)%passed.eq.nevent_hel_filter+1) then
        call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
@@ -277,9 +280,8 @@ contains
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     
-    call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
-                                     pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
-    call cpu_time(tBefore)
+!!$    call cpu_time(tBefore)
+    tBefore=tAfter
     iproc=0
     pgl(ichan)%amp2(:)=0d0
     if (use_real_gluons .and. all(pgl(ichan)%amps%n_qqbar(1:pgl(ichan)%amps%nprocs).eq.0)) then
@@ -294,13 +296,6 @@ contains
           do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
           pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
                pgl(ichan)%hel_fac(ih)
-!          if (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
-!                  .not. pgl(ichan)%amps%same_flav(iproc)) then
-!               cycle
-!          elseif (.not.read_proc_from_file .and. pgl(ichan)%amps%nprocs.eq.3 .and. &
-!                  pgl(ichan)%amps%same_flav(iproc)) then 
-!               iproc=1
-!          endif
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif

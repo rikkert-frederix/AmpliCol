@@ -159,9 +159,9 @@ contains
     call allocate_and_fill_momentum_array()
 
     ! All done. But there could be currents that are not needed. Filter them out
-    write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
+    write (*,*) 'Total number of currents, vertices and amplitudes before filter',this%n_cur,this%n_vert,this%n_amps
     call this%filter_dead_trees(n)
-    write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
+    write (*,*) 'Total number of currents, vertices and amplitudes after filter',this%n_cur,this%n_vert,this%n_amps
 
     call deallocate_unneeded()
   contains
@@ -248,7 +248,6 @@ contains
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
-               if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
                curr2amp(2,this%n_amps)=jcur
@@ -1926,7 +1925,7 @@ contains
          if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
          if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
       enddo
-      write (*,*) 'Total number of currents and vertices after optimisation',this%n_cur,this%n_vert,this%n_amps
+      write (*,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
     end subroutine optimise_evaluation
     
 
@@ -2767,7 +2766,7 @@ contains
     call this%filter_dead_trees(n,include_current)
     
     nhel=this%n_amps
-    write (*,*) 'Total number of currents and vertices after filtering helicities',this%n_cur,this%n_vert,this%n_amps
+    write (*,*) 'Total number of currents, vertices and amplitudes after filtering helicities',this%n_cur,this%n_vert,this%n_amps
     deallocate(this%include_amp)
 
   end subroutine filter_helicity

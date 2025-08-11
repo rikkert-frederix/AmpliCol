@@ -8,7 +8,7 @@ module common
 
   ! timing
   real(kind=4) :: tBefore,tAfter,tTot_A,tTot_B
-  real(kind=4) :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.
+  real(kind=4) :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.,t_Proc_init=0.
 
   ! technical
   logical,parameter :: include_pdf=.true.
