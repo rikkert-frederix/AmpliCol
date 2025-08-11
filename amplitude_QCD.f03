@@ -248,6 +248,7 @@ contains
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
+               if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
                this%n_amps=this%n_amps+1
                curr2amp(1,this%n_amps)=icur
                curr2amp(2,this%n_amps)=jcur
@@ -912,7 +913,6 @@ contains
          if (is_singlet(et2(i))) exit
       enddo
       nc2=i-1
-
       ! The order of the coloured particles can be concatinated:
       ord(1:nc1+nc2)=[ord1(1:nc1),ord2(1:nc2)]
       ! Setup the singlet_mv and put the colour singlets in the right order in
