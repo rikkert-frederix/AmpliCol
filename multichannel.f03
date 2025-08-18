@@ -29,7 +29,7 @@ contains
        return
     endif
 !!$    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
-    call simple_integrator%get_jacobian()
+    call simple_integrator%compute_wgt_from_x(ichan,x,vol_ichan)
     do j=1,pgl(ichan)%multichan%n_unique_channels
        i=pgl(ichan)%multichan%unique_channel_list(j)
        if (i.eq.ichan) then
@@ -43,8 +43,8 @@ contains
           weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
           return
        endif
-!!$       call mint_get_jacobian_from_x(i,pgl(i)%phase_space%x,vol)
-       call simple_integrator%get_jacobian()
+!!$       call mint_get_jacobian_from_x(i,pgl(i)x%phase_space%x,vol)
+       call simple_integrator%compute_wgt_from_x(i,pgl(i)%phase_space%x,vol)
        factors(j)=pgl(i)%phase_space%jac*vol
     enddo
     do i=1,pgl(ichan)%multichan%n_unique_channelgroups
