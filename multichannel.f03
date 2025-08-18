@@ -1,6 +1,7 @@
 module multichannel
   use handling_processes
-  use mint_module
+  use integrator_mod
+!  use mint_module
 contains
   subroutine compute_multichannel_weight(ichan,x,p,jac,weight)
     ! Computes the multichannel weight 'weight' when there are
@@ -16,7 +17,7 @@ contains
     implicit none
     integer,intent(in) :: ichan
     real(kind=8),dimension(0:3,next),intent(in) :: p
-    real(kind=8),dimension(ndim),intent(in) :: x
+    real(kind=8),dimension(pgl(ichan)%ndim),intent(in) :: x
     real(kind=8),intent(in) :: jac
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
@@ -27,7 +28,8 @@ contains
        weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
        return
     endif
-    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
+!!$    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
+    call simple_integrator%get_jacobian()
     do j=1,pgl(ichan)%multichan%n_unique_channels
        i=pgl(ichan)%multichan%unique_channel_list(j)
        if (i.eq.ichan) then
@@ -41,7 +43,8 @@ contains
           weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
           return
        endif
-       call mint_get_jacobian_from_x(i,pgl(i)%phase_space%x,vol)
+!!$       call mint_get_jacobian_from_x(i,pgl(i)%phase_space%x,vol)
+       call simple_integrator%get_jacobian()
        factors(j)=pgl(i)%phase_space%jac*vol
     enddo
     do i=1,pgl(ichan)%multichan%n_unique_channelgroups

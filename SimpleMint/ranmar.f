@@ -1,13 +1,13 @@
 
       function ran2()
-      use mint_module
 !     Wrapper for the random numbers; needed for the NLO stuff
       implicit none
       double precision ran2,x,a,b
       integer jconfig
       a=0d0                     ! min allowed value for x
       b=1d0                     ! max allowed value for x
-      jconfig=iconfig           ! integration channel (for off-set)
+c$$$      jconfig=iconfig           ! integration channel (for off-set)
+      jconfig=1
       call ntuple(x,a,b,jconfig)
       ran2=x
       return

@@ -1,5 +1,4 @@
 module read_process_file
-  use mint_module
   use handling_processes
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
@@ -12,7 +11,7 @@ contains
   subroutine read_processes_from_file(filename)
     implicit none
     character(len=80) :: filename
-    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,idenCOfactor,iflav
+    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,idenCOfactor,iflav,ndim
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
     open(unit=10,file=filename,status='old')
@@ -25,6 +24,7 @@ contains
     enddo
     allocate(pgl_unique)
     pgl_unique%next=next
+    pgl_unique%ndim=ndim
     call check_unique_processes()
     read(10,*)
     read(10,*)
@@ -71,6 +71,7 @@ contains
        enddo
        pgl(igroup)%next=next
        pgl(igroup)%nproc=nprocs
+       pgl(igroup)%ndim=ndim
        pgl(igroup)%multichan%max_channels=max_channels
        allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc))
@@ -123,7 +124,7 @@ contains
     real(kind=8),dimension(:,:),allocatable :: amp2
     complex(kind=8),dimension(:,:),allocatable :: amp
     real(kind=8),dimension(:),allocatable :: mass,width
-    real(kind=8),dimension(ndim) :: x
+    real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
     allocate(phase_space_gen23 :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
@@ -168,7 +169,7 @@ contains
 
     pgl_unique%passed=0
     do while (pgl_unique%passed.lt.nevent)
-       do i=1,ndim
+       do i=1,pgl_unique%ndim
           x(i)=ran2()
        enddo
        call pgl_unique%phase_space%generate_momenta(x)

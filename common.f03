@@ -1,5 +1,6 @@
 module common
   use particles
+  use integrator_mod
   implicit none
   ! Model and process parameters
   type(physics_model) :: phys_model
@@ -34,5 +35,7 @@ module common
   real(kind=8),parameter :: DRja_min     = 0.4d0  ! max allowed value: Drja_min=1d0
   real(kind=8),parameter :: sqrt_sja_min = -1d0
 
+  ! integrator
+  type(integrator) :: simple_integrator
 end module common
 

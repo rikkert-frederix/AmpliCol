@@ -4,7 +4,7 @@ FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o	\
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
-read_process_file.o multichannel.o handling_processes.o
+read_process_file.o multichannel.o handling_processes.o integrator.o
 
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
@@ -33,6 +33,8 @@ FFLAGS=-ffast-math -O3
 	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
 %.o: SimpleMint/%.f90
 	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: SimpleMint/%.f03
+	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
 %.o: PhaseSpace/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 %.o: PhaseSpace/%.f03
@@ -60,11 +62,11 @@ phase_space_gen23.o : phase_space.o LUPdecompose.o
 phase_space_genpt.o : phase_space.o
 haag.o : phase_space.o
 amplitude_QCD.o : math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o
-common.o : particles.o
-handling_events.o : common.o mint_module.o handling_processes.o
-read_process_file.o : mint_module.o phase_space_gen23.o cuts.o handling_processes.o
-multichannel.o : handling_processes.o mint_module.o math_functions.o
+matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o integrator.o
+common.o : particles.o integrator.o
+handling_events.o : common.o mint_module.o handling_processes.o integrator.o
+read_process_file.o : mint_module.o phase_space_gen23.o cuts.o handling_processes.o integrator.o
+multichannel.o : handling_processes.o mint_module.o math_functions.o integrator.o
 handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o

@@ -21,7 +21,7 @@ module handling_processes
      integer(kind=4),dimension(:,:),allocatable :: spin
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
-     integer(kind=4) :: nhel,next
+     integer(kind=4) :: nhel,next,ndim
      integer,dimension(:),allocatable :: col_fac
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
      integer(kind=4),dimension(:),allocatable :: hel,hel_fac
@@ -82,7 +82,6 @@ contains
   end subroutine determine_phase_space_orders
 
   subroutine find_same_flavour(pgl,nevent)
-    use mint_module
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,j,k,ii,jj,kk,nevent

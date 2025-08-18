@@ -1,7 +1,7 @@
 
 program matrix_integrate_QCD
   use common
-  use mint_module
+!  use mint_module
   use phase_space_base
   use phase_space_gen23_mod
   use phase_space_genpt_mod
@@ -24,8 +24,12 @@ program matrix_integrate_QCD
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup,integration_step
-  logical :: read_amps_from_file=.false.,write_amps_to_file=.false.
-
+  logical :: read_amps_from_file=.false.,write_amps_to_file=.false.,done
+  logical,dimension(1) :: to_write
+  integer,dimension(:),allocatable :: nintegrals
+  integer :: ichan,iint,itmax,ncalls0
+  real(kind=8),dimension(1) :: f,f_abs
+  
   call cpu_time(tTot_B)
 
   ! relevant input parameters for integration
@@ -34,12 +38,12 @@ program matrix_integrate_QCD
   ! iteration. If positive, this is the number of
   ! points per iteration as well).
 !!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-1000000
+     ncalls0=-6400
 !!$  else
 !!$     ncalls0=640000
 !!$  endif
 
-  itmax=16         ! Number of iterations. (If ncalls0 < 0, the
+  itmax=10         ! Number of iterations. (If ncalls0 < 0, the
                    ! integration is aborted if accuracy (next line)
                    ! has been reached.
 
@@ -58,23 +62,25 @@ program matrix_integrate_QCD
   t_Proc_init=t_Proc_init+tAfter-tBefore
 
   if (integration_step.eq.0) then
-     accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
+!!$     accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
      write_amps_to_file=.true.
   else
-     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
+!!$     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
      read_amps_from_file=.true.
   endif
 
   
   ! Not so relevant mint-module parameters: only used in special cases.
-  call set_mint_module_special_parameters()
-  nchans=ngroups ! overwrite the number of mint-channels to the number of
-                 ! needed integration channels.
+!!$  call set_mint_module_special_parameters()
+!!$  nchans=ngroups ! overwrite the number of mint-channels to the number of
+!!$                 ! needed integration channels.
 
   call create_run_tag(integration_step)
   
   if (read_amps_from_file .or. write_amps_to_file) then
-       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
+!!$       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
+!!$            unit=32,access='stream',form='unformatted',status='UNKNOWN')
+       open(file='Outputs/Res_files/amplitudes.bin',&
             unit=32,access='stream',form='unformatted',status='UNKNOWN')
   endif
 
@@ -175,26 +181,44 @@ program matrix_integrate_QCD
      close(32)
   endif
 
-  if (integration_step.le.1) then
-     ! grid setup, or computation of upper bounding envelope
-     call mint(integrand)
-  else
-     ! actual (unweighted) event generation
-     call read_grids_from_file
-     call gen(integrand,0,-1) ! initialise counters
-     filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
-     open(unit=11,file=filename,status='unknown')
-     if (COMMAND_ARGUMENT_COUNT().le.10) &
-          call write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
-     do j=1,abs(ncalls0)
-        call gen(integrand,1,2) ! generate an unweighted event
-        call unwgt_process(pgl(ichan))      ! pick a random process
-        call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
-        call write_event(11,pgl(ichan),ans(1,0))
-     enddo
-     close(11)
-     call gen(integrand,3,-1) ! print counters
-  endif
+  allocate(nintegrals(ngroups))
+  nintegrals=1
+  call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,nintegrals,abs(ncalls0),abs(itmax))
+  do
+     call simple_integrator%get_points(1,ichan,iint)
+
+     call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
+     
+     call simple_integrator%fill_points(1,f_abs,f,to_write,done)
+
+     if (to_write(1)) then
+        write (*,*) 'need to write the event. not implemented'
+        stop 1
+     endif
+     if (done) exit
+  enddo
+
+  
+!!$  if (integration_step.le.1) then
+!!$     ! grid setup, or computation of upper bounding envelope
+!!$     call mint(integrand)
+!!$  else
+!!$     ! actual (unweighted) event generation
+!!$     call read_grids_from_file
+!!$     call gen(integrand,0,-1) ! initialise counters
+!!$     filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
+!!$     open(unit=11,file=filename,status='unknown')
+!!$     if (COMMAND_ARGUMENT_COUNT().le.10) &
+!!$          call write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
+!!$     do j=1,abs(ncalls0)
+!!$        call gen(integrand,1,2) ! generate an unweighted event
+!!$        call unwgt_process(pgl(ichan))      ! pick a random process
+!!$        call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
+!!$        call write_event(11,pgl(ichan),ans(1,0))
+!!$     enddo
+!!$     close(11)
+!!$     call gen(integrand,3,-1) ! print counters
+!!$  endif
      
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
@@ -211,15 +235,15 @@ program matrix_integrate_QCD
  
 contains
 
-  real(kind=8) function integrand(x,vol,ifirst,f1)
+  subroutine integrand(ichan,iint,x,vol,f,f_abs)
     implicit none
-    integer :: ifirst
-    real(kind=8), dimension(ndim) :: x
-    real(kind=8), dimension(nintegrals) :: f1
+    integer,intent(in) :: ichan,iint
+    real(kind=8), dimension(pgl(ichan)%ndim),intent(in) :: x
+    real(kind=8),intent(in) :: vol
+    real(kind=8),intent(out) :: f,f_abs
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
-    real(kind=8) :: vol
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
     if (.not.allocated(val)) then
@@ -228,17 +252,18 @@ contains
        allocate(vol_ichan(1:ngroups))
     endif
     ! some point-by-point initialisation
-    f1(1:nintegrals)=0d0
+    f=0d0
+    f_abs=0d0
     if (pgl(ichan)%nproc.eq.0) return
-    if (ifirst.eq.2) then
-       ! use previously computed integrand
-       f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
-       f1(2)=sum(val(1:pgl(ichan)%nproc))
-       f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
-       return
-    endif
-    new_point=.true.
-    pass_cuts_check=.true.
+!!$    if (ifirst.eq.2) then
+!!$       ! use previously computed integrand
+!!$       f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
+!!$       f1(2)=sum(val(1:pgl(ichan)%nproc))
+!!$       f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
+!!$       return
+!!$    endif
+!!$    new_point=.true.
+!!$    pass_cuts_check=.true.
     val_abs(1:pgl(ichan)%nproc)=0d0
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
@@ -250,12 +275,12 @@ contains
     endif
     pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
-       pass_cuts_check=.false.
+!!$       pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
     if (.not.pass_cuts(pgl(ichan))) then
-       pass_cuts_check=.false.
+!!$       pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
        return
     endif
@@ -330,14 +355,14 @@ contains
     call include_PDF_and_identical_procs(val,val_abs,pgl(ichan))
 
     ! pass the result to the mint module
-    f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
-    f1(2)=sum(val(1:pgl(ichan)%nproc))
-    f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
+    f_abs=sum(val_abs(1:pgl(ichan)%nproc))
+    f=sum(val(1:pgl(ichan)%nproc))
+!!$    f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
     
-    integrand=f1(1)
+!!$    integrand=f1(1)
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
-  end function integrand
+  end subroutine integrand
 
   subroutine setup_helicity_filter(pgl)
     implicit none
@@ -387,6 +412,7 @@ contains
 
 
   subroutine get_run_arguments()
+    use mint_module
     implicit none
     integer :: argc,n_ps
     integer :: i,k
