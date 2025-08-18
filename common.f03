@@ -1,6 +1,6 @@
 module common
   use particles
-  use integrator_mod
+  use simple_integrator_mod
   implicit none
   ! Model and process parameters
   type(physics_model) :: phys_model

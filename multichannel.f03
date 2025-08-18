@@ -1,6 +1,6 @@
 module multichannel
   use handling_processes
-  use integrator_mod
+  use simple_integrator_mod
 !  use mint_module
 contains
   subroutine compute_multichannel_weight(ichan,x,p,jac,weight)
