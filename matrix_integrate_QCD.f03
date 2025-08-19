@@ -265,11 +265,15 @@ contains
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
 !!$       pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
+       call cpu_time(tAfter)
+       t_PS= t_PS +tAfter-tBefore
        return
     endif
     if (.not.pass_cuts(pgl(ichan))) then
 !!$       pass_cuts_check=.false.
        val(1:pgl(ichan)%nproc)=0d0
+       call cpu_time(tAfter)
+       t_PS= t_PS +tAfter-tBefore
        return
     endif
     pgl(ichan)%passed = pgl(ichan)%passed + 1

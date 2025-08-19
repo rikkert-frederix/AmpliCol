@@ -19,7 +19,7 @@ module simple_integrator_mod
           &,npoints,npoints_iter,number,max_iterations
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter&
           &,chi2
-     logical :: done
+     logical :: done,evgen_done
      type(grid),allocatable,dimension(:,:) :: grids
      type(integral),allocatable,dimension(:) :: integrals
    contains
@@ -42,8 +42,8 @@ module simple_integrator_mod
           &,accum2,unc_iter,chi2
      integer :: npoints_iter,npoints,npoints_requested,ichan,n_unwgt&
           &,npoints_nonzero,event,nevent_in_list,ndim&
-          &,current_iteration,max_iterations
-     logical :: done
+          &,current_iteration,max_iterations,nevents_unw
+     logical :: done,evgen_done
      type(event),dimension(:),allocatable :: event_list
    contains
      procedure,private :: init => integral_init
@@ -73,7 +73,7 @@ module simple_integrator_mod
      logical :: unwgt
   end type event
   type,public :: integrator
-     integer :: nchans,current_channel,npoints_generated,npoints_requested
+     integer :: nchannel,current_channel,npoints_generated,npoints_requested,nevents_unw
      real(kind=8),dimension(2) :: res,unc
      real(kind=8),allocatable,dimension(:,:),public :: x
      real(kind=8),allocatable,dimension(:),public :: wgt
@@ -101,19 +101,20 @@ module simple_integrator_mod
   integer,parameter :: iterations_without_events=5
 contains
 
-  subroutine init(this,nchans,ndims,nintegrals,npoints,niters)
+  subroutine init(this,nchannel,ndim,nintegral,nevents_unw,niters)
     implicit none
     class(integrator),intent(inout) :: this
-    integer,intent(in) :: nchans,npoints,niters
-    integer,dimension(nchans),intent(in) :: ndims,nintegrals
+    integer,intent(in) :: nchannel,nevents_unw,niters
+    integer,dimension(nchannel),intent(in) :: ndim,nintegral
     integer :: i
-    this%nchans=nchans
+    this%nchannel=nchannel
+    this%nevents_unw=nevents_unw
     ! if we assume 0.3% unweighting efficiency, we expect ~10% time
     ! spend in iterations that do not produce events:
-    this%npoints_requested=npoints/(0.03*2**iterations_without_events)
-    allocate(this%channels(this%nchans))
-    do i=1,this%nchans
-       call this%channels(i)%init(ndims(i),nintegrals(i),this%npoints_requested/nchans,niters,i)
+    this%npoints_requested=nevents_unw/(0.03*2**iterations_without_events)
+    allocate(this%channels(this%nchannel))
+    do i=1,this%nchannel
+       call this%channels(i)%init(ndim(i),nintegral(i),this%npoints_requested/nchannel,niters,i)
     enddo
     this%current_channel=0
     this%npoints_generated=0
@@ -143,6 +144,7 @@ contains
     this%res=0d0
     this%unc=0d0
     call this%init_next_iteration()
+    this%evgen_done=.false.
   end subroutine channel_init
 
   subroutine channel_init_next_iteration(this)
@@ -155,6 +157,12 @@ contains
     this%chi2=0d0
     this%npoints_iter=0
     this%done=.false.
+    if (all(this%integrals%evgen_done)) then
+       this%evgen_done=.true.
+       this%done=.true.
+    else
+       this%evgen_done=.false.
+    endif
     do i=1,this%nintegral
        call this%integrals(i)%init_next_iteration()
     enddo
@@ -173,7 +181,7 @@ contains
     this%npoints_iter=0
     this%npoints_nonzero=0
     this%event=0
-    this%done=.false.
+    if (.not. this%evgen_done) this%done=.false.
     if (this%current_iteration.eq.1) then
        this%f_max(this%current_iteration)=-1d0
     elseif (this%current_iteration.le.iterations_without_events+1) then
@@ -184,7 +192,7 @@ contains
   
   subroutine grid_init(this,current)
     implicit none
-    integer,parameter :: grid_size=64
+    integer,parameter :: grid_size=32
     class(grid),intent(inout) :: this
     real(kind=8),dimension(0:grid_size),optional :: current
     integer :: i
@@ -216,6 +224,7 @@ contains
     this%f_max=-1d0
     allocate(this%event_list(npoints))
     this%nevent_in_list=0
+    this%evgen_done=.false.
     this%current_iteration=0
   end subroutine integral_init
   
@@ -250,6 +259,10 @@ contains
     logical,dimension(npoints),intent(out) :: to_write
     logical,intent(out) :: done
     integer :: i
+    character(len=8) :: date
+    character(len=10) :: time
+    character(len=5) :: zone
+    character(len=19) :: formatted
     done=.false.
     if (npoints.gt.this%npoints_generated) then
        write (*,*) 'ERROR: too many points returned'
@@ -260,9 +273,13 @@ contains
     enddo
     this%npoints_generated=0
     if (all(this%channels%done)) then
+       call date_and_time(date, time, zone)
+       write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
+            date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
        write (*,'(a,x,i4,x,a,x,i10,x,a)') &
-            'iteration',this%channels(1)%current_iteration,'(',this%npoints_requested,'points) :'
-       do i=1,this%nchans
+            'iteration',this%channels(1)%current_iteration,'(',this%npoints_requested, &
+            'points) '//trim(formatted)//' :'
+       do i=1,this%nchannel
           call this%channels(i)%finalise_iteration()
        enddo
        call this%compute_total_rate()
@@ -270,6 +287,7 @@ contains
        call this%print_results()
        write (*,*) ''
        call this%init_next_iteration()
+       if (all(this%channels%evgen_done)) done=.true.
     endif
     if (all(this%channels%done)) done=.true.
     deallocate(this%x)
@@ -281,11 +299,11 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
-    do i=1,this%nchans
+    do i=1,this%nchannel
        if (this%channels(i)%current_iteration.lt.this%channels(i)%max_iterations) then
           call this%channels(i)%init_next_iteration()
-          this%channels(i)%done=.false.
-          this%channels(i)%integrals%done=.false.
+!!$          this%channels(i)%done=.false.
+!!$          this%channels(i)%integrals%done=.false.
        endif
     enddo
     call this%update_points_requested()
@@ -294,9 +312,10 @@ contains
   subroutine check_if_done(this)
     implicit none
     class(integrator),intent(inout) :: this
-    integer :: i
-    do i=1,this%nchans
-       call this%channels(i)%check_generated_events()
+    integer :: i,nevents_unw
+    do i=1,this%nchannel
+       nevents_unw=int(this%nevents_unw*this%channels(i)%res(1)/this%res(1))+1
+       call this%channels(i)%check_generated_events(nevents_unw)
     enddo
   end subroutine check_if_done
 
@@ -305,8 +324,8 @@ contains
     class(integrator),intent(inout) :: this
     integer :: i
     do i=1,2
-       this%res(i)=sum(this%channels(1:this%nchans)%res(i))
-       this%unc(i)=sqrt(sum(this%channels(1:this%nchans)%unc(i)**2))
+       this%res(i)=sum(this%channels(1:this%nchannel)%res(i))
+       this%unc(i)=sqrt(sum(this%channels(1:this%nchannel)%unc(i)**2))
     enddo
   end subroutine compute_total_rate
   
@@ -314,8 +333,8 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
-    do i=1,this%nchans
-       call this%channels(i)%print_result_iteration()
+    do i=1,this%nchannel
+       if (.not. this%channels(i)%evgen_done) call this%channels(i)%print_result_iteration()
        call this%channels(i)%print_combined_result()
     enddo
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
@@ -331,7 +350,7 @@ contains
     integer :: i,j
     this%npoints_requested=this%npoints_requested*2
     total=this%res(1)
-    do i=1,this%nchans
+    do i=1,this%nchannel
        do j=1,this%channels(i)%nintegral
           this%channels(i)%integrals(j)%npoints_requested=&
                int(this%channels(i)%integrals(j)%res(1)/total*dble(this%npoints_requested))
@@ -344,22 +363,34 @@ contains
     class(channel),intent(inout) :: this
     type(grid) :: new_grid
     integer :: i
-    call this%update_result_iteration()
+    if (.not. this%evgen_done) call this%update_result_iteration()
     do i=1,this%ndim
-       call this%grids(i,this%current_iteration)%update(new_grid)
-       if (this%current_iteration .lt. this%max_iterations) &
-            this%grids(i,this%current_iteration+1)=new_grid
+       if (.not. this%evgen_done) then
+          call this%grids(i,this%current_iteration)%update(new_grid)
+          if (this%current_iteration .lt. this%max_iterations) then
+             this%grids(i,this%current_iteration+1)=new_grid
+          endif
+       else
+          this%grids(i,this%current_iteration+1)=this%grids(i,this%current_iteration)
+       endif
     enddo
-    call this%combine_iterations()
+    if (.not. this%evgen_done) call this%combine_iterations()
   end subroutine channel_finalise_iteration
 
-  subroutine channel_check_generated_events(this)
+  subroutine channel_check_generated_events(this,nevents_unw)
     implicit none
     class(channel),intent(inout) :: this
+    integer,intent(in) :: nevents_unw
     integer :: i
     do i=1,this%nintegral
        call this%integrals(i)%compute_fmax(this)
        call this%integrals(i)%unwgt()
+       this%integrals(i)%nevents_unw=int(this%integrals(i)%res(1)/this%res(1)*nevents_unw)+1
+       if (this%integrals(i)%n_unwgt.gt.this%integrals(i)%nevents_unw) then
+          this%integrals(i)%evgen_done=.true.
+       else
+          this%integrals(i)%evgen_done=.false.
+       endif
        if (this%current_iteration .lt. this%max_iterations) &
             call this%integrals(i)%compute_fmax_next_iteration(this)
     enddo
@@ -391,7 +422,7 @@ contains
        x=this%event_list(j)%x
        wgt=this%event_list(j)%wgt
        do k=iterations_without_events+1,this%current_iteration
-          if (k.ne.this%current_iteration) then
+          if (k.ne.iter) then
              call thischan%recompute_wgt_from_x(k,x,wgt_new)
              this%event_list(j)%f_abs(k)=this%event_list(j)%f_abs(iter)*wgt_new/wgt
           endif
@@ -457,10 +488,17 @@ contains
          this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
     write(*,'(24x,a,1x,f7.3)') 'chi2:',this%chi2(1)
     do i=1,this%nintegral
-       write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10)') &
-            i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
-            '--',this%integrals(i)%nevent_in_list,&
-            '--',this%integrals(i)%n_unwgt
+       if (this%integrals(i)%n_unwgt.gt.this%integrals(i)%nevents_unw) then
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
+               i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
+               '--',this%integrals(i)%nevent_in_list,&
+               '--',this%integrals(i)%n_unwgt,'(',this%integrals(i)%nevents_unw,') DONE'
+       else
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
+               i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
+               '--',this%integrals(i)%nevent_in_list,&
+               '--',this%integrals(i)%n_unwgt,'(',this%integrals(i)%nevents_unw,')'
+       endif
     enddo
   end subroutine channel_print_combined_result
     
@@ -473,7 +511,7 @@ contains
     write(*,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel    :',this%res_iter(2),'+/-',this%unc_iter(2),'(',this%unc_iter(1)/this%res_iter(1)*100d0,'%)'
   end subroutine channel_print_result_iteration
-  
+
   subroutine channel_combine_iterations(this)
     implicit none
     class(channel),intent(inout) :: this
@@ -579,6 +617,7 @@ contains
     real(kind=8),intent(in) :: f_abs,f,wgt
     real(kind=8),dimension(this%ndim),intent(in) :: x
     logical,intent(out) :: to_write
+    logical :: enough
     this%npoints_iter=this%npoints_iter+1
     if (f_abs.ne.0d0) this%npoints_nonzero=this%npoints_nonzero+1
     this%accum(1)=this%accum(1)+f_abs
@@ -586,8 +625,8 @@ contains
     this%accum2(1)=this%accum2(1)+f_abs**2
     this%accum2(2)=this%accum2(2)+f**2
     call this%update_max_value(f_abs)
-    call this%check_write_event(x,wgt,f_abs,to_write)
-    if (this%npoints_nonzero.ge.this%npoints_requested) this%done=.true.
+    call this%check_write_event(x,wgt,f_abs,to_write,enough)
+    if (this%npoints_nonzero.ge.this%npoints_requested .or. enough) this%done=.true.
   end subroutine integral_add_point
 
   subroutine update_max_value(this,f_abs)
@@ -597,14 +636,15 @@ contains
     this%max_value=max(this%max_value,f_abs)
   end subroutine update_max_value
   
-  subroutine check_write_event(this,x,wgt,f_abs,to_write)
+  subroutine check_write_event(this,x,wgt,f_abs,to_write,enough)
     implicit none
     class(integral),intent(inout) :: this
     real(kind=8),intent(in) :: f_abs,wgt
     real(kind=8),dimension(this%ndim),intent(in) :: x
-    logical,intent(out) :: to_write
+    logical,intent(out) :: to_write,enough
     real(kind=8) :: rnd
     to_write=.false.
+    enough=.false.
     if (this%current_iteration.le.iterations_without_events) return
     rnd=ran2()
     if (f_abs.gt.this%f_max(this%current_iteration)*rnd*write_event_fraction) then
@@ -619,6 +659,10 @@ contains
        this%event_list(this%nevent_in_list)%wgt=wgt
        this%event_list(this%nevent_in_list)%x=x
        this%event_list(this%nevent_in_list)%iter=this%current_iteration
+       if (f_abs.gt.this%f_max(this%current_iteration)*rnd) this%n_unwgt=this%n_unwgt+1
+!!$       write (*,*) this%n_unwgt,this%nevents_unw
+       if (this%n_unwgt.gt.1.1d0*this%nevents_unw) enough=.true.
+       if (f_abs.gt.this%f_max(this%current_iteration)) this%f_max(this%current_iteration)=f_abs
     endif
   end subroutine check_write_event
   
@@ -758,14 +802,14 @@ contains
     real(kind=8),intent(out) :: wgt_chan
     logical :: done
     do
-       ichan=int(ran2()*this%nchans)+1
-       if (.not.this%channels(ichan)%done) exit
+       ichan=int(ran2()*this%nchannel)+1
+       if (.not.(this%channels(ichan)%done.or.this%channels(ichan)%evgen_done)) exit
     enddo
-    wgt_chan=1d0!dble(this%nchans)
+    wgt_chan=1d0!dble(this%nchannel)
     done=.false.
     do
        iint=int(ran2()*this%channels(ichan)%nintegral)+1
-       if (.not.this%channels(ichan)%integrals(iint)%done) exit
+       if (.not.(this%channels(ichan)%integrals(iint)%done.or.this%channels(ichan)%integrals(iint)%evgen_done)) exit
     enddo
     wgt_chan=wgt_chan*1d0!dble(this%channels(ichan)%nintegral)
     this%channels(ichan)%current_integral=iint
