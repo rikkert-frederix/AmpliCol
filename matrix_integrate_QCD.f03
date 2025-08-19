@@ -32,20 +32,8 @@ program matrix_integrate_QCD
   
   call cpu_time(tTot_B)
 
-  ! relevant input parameters for integration
-  ! Number of events to generate. (If negative, start
-  ! from a small number of points and double it each
-  ! iteration. If positive, this is the number of
-  ! points per iteration as well).
-!!$  if (integration_step.eq.0 .or. integration_step.eq.2) then
-     ncalls0=-6400
-!!$  else
-!!$     ncalls0=640000
-!!$  endif
-
-  itmax=10         ! Number of iterations. (If ncalls0 < 0, the
-                   ! integration is aborted if accuracy (next line)
-                   ! has been reached.
+  ncalls0=10000
+  itmax=16
 
   ! setting energy
   sqrts=14000.d0
