@@ -52,6 +52,8 @@ module simple_integrator_mod
      procedure,private :: combine_iterations => integral_combine_iterations
      procedure,private :: update_max_value,check_write_event,increase_size_event_list
      procedure,private :: init_next_iteration => integral_init_next_iteration
+     procedure,private :: compute_fmax => integral_compute_fmax
+     procedure,private :: unwgt => integral_unwgt
   end type integral
   type :: grid
      integer :: size
@@ -324,54 +326,54 @@ contains
   subroutine channel_check_generated_events(this)
     implicit none
     class(channel),intent(inout) :: this
-    real(kind=8),dimension(this%ndim) :: x
-    real(kind=8) :: wgt,wgt_new
-    integer :: i,j,k,nevent,iter
+    integer :: i
     do i=1,this%nintegral
-       nevent=this%integrals(i)%nevent_in_list
-       do j=1,nevent
-          iter=this%integrals(i)%event_list(j)%iter
-          x=this%integrals(i)%event_list(j)%x
-          wgt=this%integrals(i)%event_list(j)%wgt
-          if (iter.ne.this%current_iteration) then
-             call this%recompute_wgt_from_x(this%current_iteration,x,wgt_new)
-             this%integrals(i)%event_list(j)%f_abs(this%current_iteration)=&
-                  this%integrals(i)%event_list(j)%f_abs(iter)*wgt_new/wgt
-             this%integrals(i)%f_max(this%current_iteration)= &
-                  max(this%integrals(i)%f_max(this%current_iteration),this%integrals(i)%event_list(j)%f_abs(this%current_iteration))
-          else
-             do k=iterations_without_events+1,this%current_iteration
-                if (k.ne.this%current_iteration) then
-                   call this%recompute_wgt_from_x(k,x,wgt_new)
-                   this%integrals(i)%event_list(j)%f_abs(k)=&
-                        this%integrals(i)%event_list(j)%f_abs(iter)*wgt_new/wgt
-                endif
-                this%integrals(i)%f_max(k)= &
-                     max(this%integrals(i)%f_max(k),this%integrals(i)%event_list(j)%f_abs(k))
-             enddo
-          endif
-       enddo
-       this%integrals(i)%n_unwgt=0
-       do j=1,nevent
-          iter=this%integrals(i)%event_list(j)%iter
-          this%integrals(i)%event_list(j)%unwgt= &
-               this%integrals(i)%event_list(j)%f_abs(iter).gt.this%integrals(i)%f_max(iter)*this%integrals(i)%event_list(j)%rnd
-          if (this%integrals(i)%event_list(j)%unwgt)  &
-               this%integrals(i)%n_unwgt=this%integrals(i)%n_unwgt+1
-       enddo
+       call this%integrals(i)%compute_fmax(this)
+       call this%integrals(i)%unwgt()
     enddo
   end subroutine channel_check_generated_events
 
-  integer function count_true(isize,arr)
+  subroutine integral_unwgt(this)
     implicit none
-    integer,intent(in) :: isize
-    logical,dimension(isize) :: arr
-    integer :: i
-    count_true=0
-    do i=1,isize
-       if (arr(i)) count_true=count_true+1
+    class(integral),intent(inout) :: this
+    integer :: j,iter
+    this%n_unwgt=0
+    do j=1,this%nevent_in_list
+       iter=this%event_list(j)%iter
+       this%event_list(j)%unwgt=this%event_list(j)%f_abs(iter).gt.this%f_max(iter)*this%event_list(j)%rnd
+       if (this%event_list(j)%unwgt) this%n_unwgt=this%n_unwgt+1
     enddo
-  end function count_true
+  end subroutine integral_unwgt
+  
+  subroutine integral_compute_fmax(this,thischan)
+    implicit none
+    class(integral),intent(inout) :: this
+    class(channel),intent(inout) :: thischan
+    real(kind=8),dimension(this%ndim) :: x
+    real(kind=8) :: wgt,wgt_new
+    integer :: j,k,nevent,iter
+    nevent=this%nevent_in_list
+    do j=1,nevent
+       iter=this%event_list(j)%iter
+       x=this%event_list(j)%x
+       wgt=this%event_list(j)%wgt
+       if (iter.ne.this%current_iteration) then
+          call thischan%recompute_wgt_from_x(this%current_iteration,x,wgt_new)
+          this%event_list(j)%f_abs(this%current_iteration)=this%event_list(j)%f_abs(iter)*wgt_new/wgt
+          this%f_max(this%current_iteration)= &
+               max(this%f_max(this%current_iteration),this%event_list(j)%f_abs(this%current_iteration))
+       else
+          do k=iterations_without_events+1,this%current_iteration
+             if (k.ne.this%current_iteration) then
+                call thischan%recompute_wgt_from_x(k,x,wgt_new)
+                this%event_list(j)%f_abs(k)=this%event_list(j)%f_abs(iter)*wgt_new/wgt
+             endif
+             this%f_max(k)=max(this%f_max(k),this%event_list(j)%f_abs(k))
+          enddo
+       endif
+    enddo
+  end subroutine integral_compute_fmax
+
   
   subroutine recompute_wgt_from_x(this,iter,x,wgt)
     implicit none
