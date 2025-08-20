@@ -98,7 +98,8 @@ module simple_integrator_mod
   double precision, external :: ran2
   integer,parameter :: importance_sampling_strategy=3
   real(kind=8),parameter :: write_event_fraction=1d0
-  integer,parameter :: iterations_without_events=5
+  integer :: iterations_without_events
+  integer,parameter :: min_points_per_channel=1024
 contains
 
   subroutine init(this,nchannel,ndim,nintegral,nevents_unw,niters)
@@ -111,7 +112,14 @@ contains
     this%nevents_unw=nevents_unw
     ! if we assume 0.3% unweighting efficiency, we expect ~10% time
     ! spend in iterations that do not produce events:
+    iterations_without_events=5
     this%npoints_requested=nevents_unw/(0.03*2**iterations_without_events)
+    do while (this%npoints_requested/this%nchannel.lt.min_points_per_channel &
+         .and. iterations_without_events.gt.3)
+       iterations_without_events=iterations_without_events-1
+       this%npoints_requested=nevents_unw/(0.03*2**iterations_without_events)
+    enddo
+    this%npoints_requested=max(this%npoints_requested,min_points_per_channel*this%nchannel)
     allocate(this%channels(this%nchannel))
     do i=1,this%nchannel
        call this%channels(i)%init(ndim(i),nintegral(i),this%npoints_requested/nchannel,niters,i)
@@ -347,15 +355,18 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     real(kind=8) :: total
-    integer :: i,j
+    integer :: i,j,npoints
     this%npoints_requested=this%npoints_requested*2
+    npoints=0
     total=this%res(1)
     do i=1,this%nchannel
        do j=1,this%channels(i)%nintegral
           this%channels(i)%integrals(j)%npoints_requested=&
-               int(this%channels(i)%integrals(j)%res(1)/total*dble(this%npoints_requested))
+               max(int(this%channels(i)%integrals(j)%res(1)/total*dble(this%npoints_requested)),min_points_per_channel)
+          npoints=npoints+this%channels(i)%integrals(j)%npoints_requested
        enddo
     enddo
+    this%npoints_requested=npoints
   end subroutine update_points_requested
   
   subroutine channel_finalise_iteration(this)
