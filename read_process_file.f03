@@ -1,5 +1,6 @@
 module read_process_file
   use handling_processes
+  implicit none
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
   type(phase_space_order_group),allocatable :: pgl_unique

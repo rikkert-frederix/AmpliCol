@@ -47,8 +47,10 @@ module amplitude_QCD_mod
           same_flavour_sum
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
+     logical :: lib_created=.false.
    contains
-     procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file
+     procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
+          ,create_library,create_library_vertices
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
@@ -1821,11 +1823,14 @@ contains
 ! 3. WEYL SPINORS & SEPARATE VERTEX ROUTINES FOR LEFT AND RIGHT-HANDED INTERACTIONS?
 !      
       implicit none
-      integer :: isize,ic1,ic2,iv1,iv2,i
+      integer :: isize,ic1,ic2,iv1,iv2,i,n_vert
       integer,dimension(:,:),allocatable :: map_cur,map_vert
       integer,dimension(n-1) :: identical_curr,identical_vert
       real(kind=8),parameter :: tiny=1d-10
-      logical,dimension(:),allocatable :: include_cur,include_vert
+      logical,dimension(:),allocatable :: include_cur,include_vert,reordered_interactions
+      type(current),dimension(:),allocatable :: current_list_local
+      type(interaction),dimension(:),allocatable :: interaction_list_local
+      integer,dimension(:),allocatable :: interactions_map
       allocate(include_cur(1:this%n_cur))
       allocate(include_vert(1:this%n_vert))
       include_cur=.true.
@@ -1926,6 +1931,60 @@ contains
          if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
       enddo
       write (*,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
+      ! try to reorder to optimise memory usage???
+      allocate(reordered_interactions(1:this%n_vert))
+      allocate(interactions_map(1:this%n_vert))
+      reordered_interactions(1:this%n_vert)=.false.
+      interactions_map(1:this%n_vert)=0
+      allocate(interaction_list_local(1:this%n_vert))
+      allocate(current_list_local(1:this%n_cur))
+
+      
+      do isize=n-1,2,-1
+         n_vert=this%n_vert_start(isize)
+         do ic1=this%n_cur_start(isize),this%n_cur_end(isize)
+            current_list_local(ic1)=this%current_list(ic1)
+            do iv1=1,this%current_list(ic1)%n_vert
+               if(reordered_interactions(this%current_list(ic1)%vertices(iv1))) then
+                  current_list_local(ic1)%vertices(iv1)=interactions_map(this%current_list(ic1)%vertices(iv1))
+               else
+                  interaction_list_local(n_vert)=this%interaction_list(this%current_list(ic1)%vertices(iv1))
+                  interactions_map(this%current_list(ic1)%vertices(iv1))=n_vert
+                  current_list_local(ic1)%vertices(iv1)=n_vert
+                  reordered_interactions(this%current_list(ic1)%vertices(iv1))=.true.
+                  n_vert=n_vert+1
+               endif
+            enddo
+         enddo
+      enddo
+      do ic1=this%n_cur_start(1),this%n_cur_end(1)
+         current_list_local(ic1)=this%current_list(ic1)
+      enddo
+      do ic1=this%n_cur_start(n),this%n_cur_end(n)
+         current_list_local(ic1)=this%current_list(ic1)
+      enddo
+      do iv1=1,size(this%interaction_list)
+         call finalize_interaction(this%interaction_list(iv1))
+      enddo
+      do iv1=1,size(interaction_list_local)
+         this%interaction_list(iv1)=interaction_list_local(iv1)
+      enddo
+      do ic1=1,size(this%current_list)
+         call finalize_current(this%current_list(ic1))
+      enddo
+      do ic1=1,size(current_list_local)
+         this%current_list(ic1)=current_list_local(ic1)
+      enddo
+
+      
+      do iv1=1,size(interaction_list_local)
+         call finalize_interaction(interaction_list_local(iv1))
+      enddo
+      deallocate(interaction_list_local)
+      do ic1=1,size(current_list_local)
+         call finalize_current(current_list_local(ic1))
+      enddo
+      deallocate(current_list_local)
     end subroutine optimise_evaluation
     
 
@@ -2698,6 +2757,1224 @@ contains
     end subroutine convert_gluon_string
 
   end subroutine init_col
+  
+  subroutine create_library(this,n,hel,igroup,iint,pm)
+    use particles
+    implicit none
+    class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
+    integer :: n,igroup,iint
+    integer,parameter :: iunit=14
+    integer,dimension(n)::hel
+    character(len=170) :: line,tmp
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
+    open(file=line,unit=iunit,status='unknown')
+    write(line,*) iint
+    write(iunit,*) 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    write(iunit,*) 'use FeynmanRules'
+    write(iunit,*) 'implicit none'
+    write(iunit,*) 'private'
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
+    write(tmp,*) this%n_vert
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'contains'
+    write(iunit,*) 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(amps,p)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
+    write(iunit,*) 'call fill_momentum_array(p)'
+    write(iunit,*) 'call compute_external_currents()'
+    do isize=2,n-1
+       write(tmp,*) isize
+       write(iunit,*) 'call compute_vertices'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'call compute_currents'//trim(adjustl(tmp))//'()'
+    enddo
+    write(iunit,*) 'call compute_amps(amps)'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'subroutine fill_momentum_array(p)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
+    ! fill_momentum_array
+    do ip=1,this%max_pp
+       ibin=this%pp_i_to_bin(ip)
+       write(tmp,*) ip
+       line='pp(0:3,'//trim(adjustl(tmp))//')='
+       do i=1,n
+          write(tmp,*) i
+          if (btest(ibin,i-1) .and. i.le.2) &
+               line=trim(adjustl(line))//'-p(0:3,'//trim(adjustl(tmp))//')'
+          if (btest(ibin,i-1) .and. i.ge.3) &
+               line=trim(adjustl(line))//'+p(0:3,'//trim(adjustl(tmp))//')'
+       enddo
+       write (iunit,*) trim(adjustl(line))
+    enddo
+    write(iunit,*) 'end subroutine fill_momentum_array'
+    do isize=1,n-1
+       write(tmp,*) isize
+       if (isize.eq.1) then
+          write(iunit,*) 'subroutine compute_external_currents()'
+          write(iunit,*) 'implicit none'
+          ! external wave-functions
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+             ifinal=1
+             if (this%current_list(ic)%spin(1).eq.-9) then
+                ih_in=hel(this%current_list(ic)%order(1))
+             else
+                ih_in=this%current_list(ic)%spin(1)
+             endif
+             if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
+                   write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
+                   write(tmp,*) ih_in
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                   write(tmp,*) ifinal
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                   write(tmp,*) ic
+                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             elseif (is_quark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_quark(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (is_antiquark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_antiquark(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (is_massiveboson(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (is_higgs(this%current_list(ic)%type)) then
+                line='call ext_scalar(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             else
+                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
+                stop 1
+             endif
+             write(iunit,*) trim(adjustl(line))
+          enddo
+          write(iunit,*) 'end subroutine compute_external_currents'
+          cycle
+       endif
+       ! interactions
+       ! loop over the vertices required to create all the currents with isize
+       ! number of external particles combined
+       write(tmp,*) isize
+       write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'implicit none'
+       do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+          if (this%interaction_list(iv)%type.eq.0) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call threeGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+                line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.1) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call TwoGluonToTensor(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.2) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call TensorGluontoGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.3) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call GluonTensortoGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.4) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call GluonQuarktoQuark(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.5) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call GluonAquarktoAquark(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.6) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call QuarkGluontoQuark(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.7) then
+                write(tmp,*) this%interaction_list(iv)%currents(1)
+                line='call AquarkGluontoAuark(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%interaction_list(iv)%currents(2)
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) iv
+                line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.8) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call QuarkAquarktoGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.9) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call AquarkQuarktoGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'))'
+          elseif(this%interaction_list(iv)%type.eq.10) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call QuarkGluontoQuark_coupl(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(1)
+             line=trim(adjustl(line))//'['//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(2)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+          elseif(this%interaction_list(iv)%type.eq.11) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call AquarkGluontoAquark_coupl(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(1)
+             line=trim(adjustl(line))//'['//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(2)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+          elseif(this%interaction_list(iv)%type.eq.12) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call threeGluon_coupl(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(1)
+             line=trim(adjustl(line))//'['//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(2)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+          elseif(this%interaction_list(iv)%type.eq.13) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call TwoGluonToTensor(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(1)
+             line=trim(adjustl(line))//'['//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(2)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+          elseif(this%interaction_list(iv)%type.eq.14) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call TensorGluonToGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(1)
+             line=trim(adjustl(line))//'['//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(2)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+          elseif(this%interaction_list(iv)%type.eq.15) then
+             write(tmp,*) this%interaction_list(iv)%currents(1)
+             line='call GluonTensorToGluon(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%interaction_list(iv)%currents(2)
+             line=trim(adjustl(line))//'val_c(1:5,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) iv
+             line=trim(adjustl(line))//'int_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(1)
+             line=trim(adjustl(line))//'['//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%interaction_list(iv)%coupl(2)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+          else
+             write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
+             stop 1
+          endif
+          write(iunit,*)trim(adjustl(line))
+       enddo
+       write(tmp,*) isize
+       write(iunit,*) 'end subroutine compute_vertices'//trim(adjustl(tmp))
+       write(iunit,*) 'subroutine compute_currents'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'implicit none'
+       ! compute the currents by combining the interactions
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          if (pm%get_dim(this%current_list(ic)%type).eq.4) then
+                write(tmp,*) ic
+                line='val_c(1:4,'//trim(adjustl(tmp))//')='
+                do iv=1,this%current_list(ic)%n_vert
+                   if (this%current_list(ic)%vertex_sign(iv))then
+                      write(tmp,*) this%current_list(ic)%vertices(iv)
+                      line=trim(adjustl(line))//'-int_c(1:4,'//trim(adjustl(tmp))//')'
+                   else
+                      write(tmp,*) this%current_list(ic)%vertices(iv)
+                      line=trim(adjustl(line))//'+int_c(1:4,'//trim(adjustl(tmp))//')'
+                   endif
+                   if(mod(iv,3).eq.0 .and. iv.ne.this%current_list(ic)%n_vert) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+          elseif (pm%get_dim(this%current_list(ic)%type).eq.6) then
+                write(tmp,*) ic
+                line='val_c(1:6,'//trim(adjustl(tmp))//')='
+                do iv=1,this%current_list(ic)%n_vert
+                   if (this%current_list(ic)%vertex_sign(iv))then
+                      write(tmp,*) this%current_list(ic)%vertices(iv)
+                      line=trim(adjustl(line))//'-int_c(1:6,'//trim(adjustl(tmp))//')'
+                   else
+                      write(tmp,*) this%current_list(ic)%vertices(iv)
+                      line=trim(adjustl(line))//'+int_c(1:6,'//trim(adjustl(tmp))//')'
+                   endif
+                   if(mod(iv,3).eq.0 .and. iv.ne.this%current_list(ic)%n_vert) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+          endif
+          write(iunit,*) trim(adjustl(line))
+          if (isize.eq.n-1  .or. is_tensor(this%current_list(ic)%type)) cycle
+          if (is_gluon(this%current_list(ic)%type)) then
+                write(tmp,*) ic
+                line='call GluonPropagator(val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'))'
+          elseif (is_quark(this%current_list(ic)%type)) then
+             write(tmp,*) ic
+             line='call QuarkPropagator(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%current_list(ic)%mass
+             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%current_list(ic)%width
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+          elseif (is_antiquark(this%current_list(ic)%type)) then
+             write(tmp,*) ic
+             line='call AquarkPropagator(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%current_list(ic)%mass
+             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%current_list(ic)%width
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+          elseif (is_massiveboson(this%current_list(ic)%type)) then
+             write(tmp,*) ic
+             line='call GluonPropagator_mass(val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%current_list(ic)%mass
+             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%current_list(ic)%width
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+          elseif (is_higgs(this%current_list(ic)%type)) then
+             write(tmp,*) ic
+             line='call ScalarPropagator(val_c,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+             write(tmp,'(d20.12)') this%current_list(ic)%mass
+             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+             write(tmp,'(d20.12)') this%current_list(ic)%width
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+          endif
+          write(iunit,*) trim(adjustl(line))
+       enddo
+       write(tmp,*) isize
+       write(iunit,*) 'end subroutine compute_currents'//trim(adjustl(tmp))
+    enddo
+!!$
+!!$    call compute_amps_from_currents
+
+    write(iunit,*) 'subroutine compute_amps(amps)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
+
+    if (this%imode.eq.1 .or. this%imode.eq.3) then
+          do iproc=1,this%nprocs
+             do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                if (.not.this%same_flav(iproc)) then
+                   write(tmp,*) iamp
+                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                else
+                   ! same-flavour amps are build from two different-flavour amps
+                   if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')='
+                      write(tmp,*) this%same_flavour_sum(iamp,1)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')+'
+                      write(tmp,*) this%same_flavour_sum(iamp,2)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')='
+                      write(tmp,*) this%same_flavour_sum(iamp,1)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')='
+                      write(tmp,*) this%same_flavour_sum(iamp,2)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                   endif
+                endif
+                write(iunit,*) trim(adjustl(line))
+             enddo
+          enddo
+    elseif(this%imode.eq.2) then
+          do iproc=1,this%nprocs
+             do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
+                   write(tmp,*) iamp
+                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                else
+                   if (.not.this%same_flav(iproc)) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                      write(tmp,*) this%curr2amp(1,iamp)
+                      line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+                      write(tmp,*) this%curr2amp(2,iamp)
+                      line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                   else
+                      if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                         write(tmp,*) iamp
+                         line='amps('//trim(adjustl(tmp))//')='
+                         write(tmp,*) this%same_flavour_sum(iamp,1)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')+'
+                         write(tmp,*) this%same_flavour_sum(iamp,2)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                      elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                         write(tmp,*) iamp
+                         line='amps('//trim(adjustl(tmp))//')='
+                         write(tmp,*) this%same_flavour_sum(iamp,1)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                      elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                         write(tmp,*) iamp
+                         line='amps('//trim(adjustl(tmp))//')='
+                         write(tmp,*) this%same_flavour_sum(iamp,2)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                      endif
+                   endif
+                endif
+                write(iunit,*) trim(adjustl(line))
+             enddo
+          enddo
+    endif
+    write(iunit,*) 'end subroutine compute_amps'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    close(iunit)
+  end subroutine create_library
+
+
+
+  
+  subroutine create_library_vertices(this,n,hel,igroup,iint,pm)
+    use particles
+    implicit none
+    class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
+    integer :: n,igroup,iint
+    integer,parameter :: iunit=14
+    integer,dimension(n)::hel
+    character(len=170) :: line,tmp
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj
+    integer,dimension(0:15) :: icount
+    integer,dimension(150,6) :: icount_type
+    integer,dimension(:,:),allocatable :: curs
+    integer,dimension(:),allocatable :: pp
+    integer,dimension(this%n_vert,0:15) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:15) :: coupl
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
+    open(file=line,unit=iunit,status='unknown')
+    write(line,*) iint
+    write(iunit,*) 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    write(iunit,*) 'use FeynmanRules'
+    write(iunit,*) 'implicit none'
+    write(iunit,*) 'private'
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
+    write(tmp,*) this%n_vert
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'contains'
+    write(iunit,*) 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(amps,p)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
+    write(iunit,*) 'call fill_momentum_array(p)'
+    write(iunit,*) 'call compute_external_currents()'
+    do isize=2,n-1
+       write(tmp,*) isize
+       write(iunit,*) 'call compute_vertices'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'call compute_currents'//trim(adjustl(tmp))//'()'
+    enddo
+    write(iunit,*) 'call compute_amps(amps)'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'subroutine fill_momentum_array(p)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
+    ! fill_momentum_array
+    do ip=1,this%max_pp
+       ibin=this%pp_i_to_bin(ip)
+       write(tmp,*) ip
+       line='pp(0:3,'//trim(adjustl(tmp))//')='
+       do i=1,n
+          write(tmp,*) i
+          if (btest(ibin,i-1) .and. i.le.2) &
+               line=trim(adjustl(line))//'-p(0:3,'//trim(adjustl(tmp))//')'
+          if (btest(ibin,i-1) .and. i.ge.3) &
+               line=trim(adjustl(line))//'+p(0:3,'//trim(adjustl(tmp))//')'
+       enddo
+       write (iunit,*) trim(adjustl(line))
+    enddo
+    write(iunit,*) 'end subroutine fill_momentum_array'
+    do isize=1,n-1
+       write(tmp,*) isize
+       if (isize.eq.1) then
+          write(iunit,*) 'subroutine compute_external_currents()'
+          write(iunit,*) 'implicit none'
+          ! external wave-functions
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+             ifinal=1
+             if (this%current_list(ic)%spin(1).eq.-9) then
+                ih_in=hel(this%current_list(ic)%order(1))
+             else
+                ih_in=this%current_list(ic)%spin(1)
+             endif
+             if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
+                   write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
+                   write(tmp,*) ih_in
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                   write(tmp,*) ifinal
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                   write(tmp,*) ic
+                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             elseif (is_quark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_quark(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (is_antiquark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_antiquark(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (is_massiveboson(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (is_higgs(this%current_list(ic)%type)) then
+                line='call ext_scalar(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             else
+                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
+                stop 1
+             endif
+             write(iunit,*) trim(adjustl(line))
+          enddo
+          write(iunit,*) 'end subroutine compute_external_currents'
+          cycle
+       endif
+
+
+       if (use_real_gluons) then
+          write (*,*) 'create library not implemented for use_real_gluons'
+          stop 1
+       endif
+
+       
+       ! interactions
+       ! loop over the vertices required to create all the currents with isize
+       ! number of external particles combined
+       write(tmp,*) isize
+       write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'implicit none'
+
+       icount(0:15)=0
+       do itype=0,15 ! vertex type
+          do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+             if (this%interaction_list(iv)%type.eq.itype) then
+                icount(itype)=icount(itype)+1
+                cur1(icount(itype),itype)=this%interaction_list(iv)%currents(1)
+                cur2(icount(itype),itype)=this%interaction_list(iv)%currents(2)
+                pp1(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+                pp2(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                int1(icount(itype),itype)=iv
+                coupl(1:2,icount(itype),itype)=this%interaction_list(iv)%coupl(1:2)
+             endif
+          enddo
+       enddo
+       do itype=0,15
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='call vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'()'
+          write(iunit,*) trim(adjustl(line))
+       enddo
+       write(tmp,*) isize
+       write(iunit,*) 'end subroutine compute_vertices'//trim(adjustl(tmp))
+
+
+       do itype=0,15
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'()'
+          write(iunit,*) trim(adjustl(line))
+          write(iunit,*) 'implicit none'
+          write(iunit,*) 'integer :: i'
+          write(tmp,*) icount(itype)
+          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[&'
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur1(i,itype)
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                line=trim(adjustl(line))//' &'
+                write(iunit,*) trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,*) trim(adjustl(line))//']'
+          write(tmp,*) icount(itype)
+          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur2=[&'
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur2(i,itype)
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                line=trim(adjustl(line))//' &'
+                write(iunit,*) trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,*) trim(adjustl(line))//']'
+          write(tmp,*) icount(itype)
+          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: int1=[&'
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) int1(i,itype)
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                line=trim(adjustl(line))//' &'
+                write(iunit,*) trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,*) trim(adjustl(line))//']'
+          if (itype.eq.0 .or. itype.eq.12) then
+             write(tmp,*) icount(itype)
+             write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp1(i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,*) trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,*) trim(adjustl(line))//']'
+             write(tmp,*) icount(itype)
+             write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp2=[&'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp2(i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,*) trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,*) trim(adjustl(line))//']'
+          endif
+          if (itype.ge.10) then
+             write(tmp,*) icount(itype)*2
+             write(iunit,*) 'real(kind=2),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) coupl(1,i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                   write(tmp,*) coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   write(tmp,*) coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,3).eq.0 .and. i.ne.icount(itype)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,*) trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,*) trim(adjustl(line))//']'
+          endif
+
+       
+          write(tmp,*) icount(itype)
+          write(iunit,*)'do i=1,'//trim(adjustl(tmp))
+          if (itype.eq.0) then
+             line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.1) then
+             line='call TwoGluonToTensor(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.2) then
+             line='call TensorGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.3) then
+             line='call GluonTensortoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.4) then
+             line='call GluonQuarktoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.5) then
+             line='call GluonAQuarktoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.6) then
+             line='call QuarkGluontoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.7) then
+             line='call AQuarkGluontoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.8) then
+             line='call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.9) then
+             line='call AquarkQuarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.10) then
+             line='call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.11) then
+             line='call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.12) then
+             line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
+                  'pp(0,pp2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.13) then
+             line='call TwoGluontoTensor_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.14) then
+             line='call TensorGluontoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.15) then
+             line='call GluonTensortoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          endif
+          write(iunit,*)trim(adjustl(line))
+          write(iunit,*)'enddo'
+
+          write(tmp,*) isize
+          line='end subroutine vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))
+          write(iunit,*) trim(adjustl(line))
+
+       enddo
+
+       write(tmp,*) isize
+       write(iunit,*) 'subroutine compute_currents'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'implicit none'
+
+       icount_type=0
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          if (is_gluon(this%current_list(ic)%type)) then
+             itype=1
+          elseif (is_quark(this%current_list(ic)%type)) then
+             itype=2
+          elseif (is_antiquark(this%current_list(ic)%type)) then
+             itype=3
+          elseif (is_massiveboson(this%current_list(ic)%type)) then
+             itype=4
+          elseif (is_higgs(this%current_list(ic)%type)) then
+             itype=5
+          elseif (is_tensor(this%current_list(ic)%type)) then
+             itype=6
+          endif
+          icount_type(this%current_list(ic)%n_vert,itype)=icount_type(this%current_list(ic)%n_vert,itype)+1
+       enddo
+
+       do i=1,150
+          do j=1,6
+             if (icount_type(i,j).eq.0) cycle
+             write(tmp,*) isize
+             line='call combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'()'
+             write(iunit,*) trim(adjustl(line))
+          enddo
+       enddo
+       write(tmp,*) isize
+       write(iunit,*) 'end subroutine compute_currents'//trim(adjustl(tmp))
+
+       
+       do i=1,150
+          do j=1,6
+             if (icount_type(i,j).eq.0) cycle
+
+             allocate(curs(0:i,icount_type(i,j)))
+             allocate(pp(icount_type(i,j)))
+             curs=0
+             ii=0
+             do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+                if (is_gluon(this%current_list(ic)%type)) then
+                   itype=1
+                elseif (is_quark(this%current_list(ic)%type)) then
+                   itype=2
+                elseif (is_antiquark(this%current_list(ic)%type)) then
+                   itype=3
+                elseif (is_massiveboson(this%current_list(ic)%type)) then
+                   itype=4
+                elseif (is_higgs(this%current_list(ic)%type)) then
+                   itype=5
+                elseif (is_tensor(this%current_list(ic)%type)) then
+                   itype=6
+                endif
+                if (itype.ne.j) cycle
+                if (this%current_list(ic)%n_vert.ne.i) cycle
+                ii=ii+1
+                curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
+                curs(0,ii)=ic
+                pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
+             enddo
+             write(tmp,*) isize
+             line='subroutine combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'()'
+             write(iunit,*) trim(adjustl(line))
+             write(iunit,*) 'implicit none'
+             write(iunit,*) 'integer :: i'
+             write(tmp,*) i
+             line='integer,parameter,dimension(0:'//trim(adjustl(tmp))//','
+             write(tmp,*) icount_type(i,j)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//') :: int1=reshape([&'
+             write(iunit,*) trim(adjustl(line))
+             line=''
+             do ii=1,icount_type(i,j)
+                do jj=0,i
+                   write(tmp,*) curs(jj,ii)
+                   if (ii.eq.1.and.jj.eq.0) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(jj+1+(ii-1)*(i+1),12).eq.0 .and. .not.(ii.eq.icount_type(i,j) .and. jj.eq.i)) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+             enddo
+             write(tmp,*) i+1
+             line=trim(adjustl(line))//'], shape=['//trim(adjustl(tmp))//','
+             write(tmp,*) icount_type(i,j)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+             write(iunit,*) trim(adjustl(line))
+
+             if (j.ne.6) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,*) pp(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,12).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,*) trim(adjustl(line))//']'
+             endif
+
+             write(tmp,*) icount_type(i,j)
+             write(iunit,*) 'do i=1,'//trim(adjustl(tmp))
+             write(tmp,*) i
+             if (j.eq.6) then
+                write(iunit,*) 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             else
+                write(iunit,*) 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             endif
+             if (j.eq.1 .and. isize.ne.n-1) then
+                write(iunit,*) 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+             elseif(j.eq.2 .and. isize.ne.n-1) then
+                write(iunit,*) 'call QuarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),0d0,0d0)'
+             elseif(j.eq.3 .and. isize.ne.n-1) then
+                write(iunit,*) 'call AquarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),0d0,0d0)'
+             elseif(j.eq.4 .and. isize.ne.n-1) then
+                write (*,*)'not implemented'
+                stop 1
+             elseif(j.eq.5 .and. isize.ne.n-1) then
+                write (*,*)'not implemented'
+                stop 1
+             endif
+             write(iunit,*) 'enddo'
+             write(tmp,*) isize
+             line='end subroutine combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(iunit,*) trim(adjustl(line))
+             deallocate(curs)
+             deallocate(pp)
+          enddo
+       enddo
+       
+       
+!!$       ! compute the currents by combining the interactions
+!!$       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+!!$          if (pm%get_dim(this%current_list(ic)%type).eq.4) then
+!!$             if (use_real_gluons .and. is_gluon(this%current_list(ic)%type)) then
+!!$                write(tmp,*) ic
+!!$                line='val_r(1:4,'//trim(adjustl(tmp))//')='
+!!$                do iv=1,this%current_list(ic)%n_vert
+!!$                   if (this%current_list(ic)%vertex_sign(iv))then
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'-int_r(1:4,'//trim(adjustl(tmp))//')'
+!!$                   else
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'+int_r(1:4,'//trim(adjustl(tmp))//')'
+!!$                   endif
+!!$                   if(mod(iv,3).eq.0 .and. iv.ne.this%current_list(ic)%n_vert) then
+!!$                      line=trim(adjustl(line))//' &'
+!!$                      write(iunit,*) trim(adjustl(line))
+!!$                      line=''
+!!$                   endif
+!!$                enddo
+!!$             else
+!!$                write(tmp,*) ic
+!!$                line='val_c(1:4,'//trim(adjustl(tmp))//')='
+!!$                do iv=1,this%current_list(ic)%n_vert
+!!$                   if (this%current_list(ic)%vertex_sign(iv))then
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'-int_c(1:4,'//trim(adjustl(tmp))//')'
+!!$                   else
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'+int_c(1:4,'//trim(adjustl(tmp))//')'
+!!$                   endif
+!!$                   if(mod(iv,3).eq.0 .and. iv.ne.this%current_list(ic)%n_vert) then
+!!$                      line=trim(adjustl(line))//' &'
+!!$                      write(iunit,*) trim(adjustl(line))
+!!$                      line=''
+!!$                   endif
+!!$                enddo
+!!$             endif
+!!$          elseif (pm%get_dim(this%current_list(ic)%type).eq.6) then
+!!$             if (use_real_gluons .and. is_tensor_g(this%current_list(ic)%type)) then
+!!$                write(tmp,*) ic
+!!$                line='val_r(1:6,'//trim(adjustl(tmp))//')='
+!!$                do iv=1,this%current_list(ic)%n_vert
+!!$                   if (this%current_list(ic)%vertex_sign(iv))then
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'-int_r(1:6,'//trim(adjustl(tmp))//')'
+!!$                   else
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'+int_r(1:6,'//trim(adjustl(tmp))//')'
+!!$                   endif
+!!$                   if(mod(iv,3).eq.0 .and. iv.ne.this%current_list(ic)%n_vert) then
+!!$                      line=trim(adjustl(line))//' &'
+!!$                      write(iunit,*) trim(adjustl(line))
+!!$                      line=''
+!!$                   endif
+!!$                enddo
+!!$             else
+!!$                write(tmp,*) ic
+!!$                line='val_c(1:6,'//trim(adjustl(tmp))//')='
+!!$                do iv=1,this%current_list(ic)%n_vert
+!!$                   if (this%current_list(ic)%vertex_sign(iv))then
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'-int_c(1:6,'//trim(adjustl(tmp))//')'
+!!$                   else
+!!$                      write(tmp,*) this%current_list(ic)%vertices(iv)
+!!$                      line=trim(adjustl(line))//'+int_c(1:6,'//trim(adjustl(tmp))//')'
+!!$                   endif
+!!$                   if(mod(iv,3).eq.0 .and. iv.ne.this%current_list(ic)%n_vert) then
+!!$                      line=trim(adjustl(line))//' &'
+!!$                      write(iunit,*) trim(adjustl(line))
+!!$                      line=''
+!!$                   endif
+!!$                enddo
+!!$             endif
+!!$          endif
+!!$          write(iunit,*) trim(adjustl(line))
+!!$          if (isize.eq.n-1  .or. is_tensor(this%current_list(ic)%type)) cycle
+!!$          if (is_gluon(this%current_list(ic)%type)) then
+!!$             if (use_real_gluons) then
+!!$                write(tmp,*) ic
+!!$                line='call GluonPropagator_real(val_r(1,'//trim(adjustl(tmp))//'),'
+!!$                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+!!$                line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'))'
+!!$             else
+!!$                write(tmp,*) ic
+!!$                line='call GluonPropagator(val_c(1,'//trim(adjustl(tmp))//'),'
+!!$                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+!!$                line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'))'
+!!$             endif
+!!$          elseif (is_quark(this%current_list(ic)%type)) then
+!!$             write(tmp,*) ic
+!!$             line='call QuarkPropagator(val_c(1,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+!!$             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%mass
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%width
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+!!$          elseif (is_antiquark(this%current_list(ic)%type)) then
+!!$             write(tmp,*) ic
+!!$             line='call AquarkPropagator(val_c(1,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+!!$             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%mass
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%width
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+!!$          elseif (is_massiveboson(this%current_list(ic)%type)) then
+!!$             write(tmp,*) ic
+!!$             line='call GluonPropagator_mass(val_c(1,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+!!$             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%mass
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%width
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+!!$          elseif (is_higgs(this%current_list(ic)%type)) then
+!!$             write(tmp,*) ic
+!!$             line='call ScalarPropagator(val_c,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+!!$             line=trim(adjustl(line))//'pp(0,'//trim(adjustl(tmp))//'),'
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%mass
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//','
+!!$             write(tmp,'(d20.12)') this%current_list(ic)%width
+!!$             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+!!$          endif
+!!$          write(iunit,*) trim(adjustl(line))
+!!$       enddo
+!!$       write(tmp,*) isize
+!!$       write(iunit,*) 'end subroutine compute_currents'//trim(adjustl(tmp))
+
+
+
+
+
+
+
+
+
+
+    enddo
+
+    write(iunit,*) 'subroutine compute_amps(amps)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
+
+    if (this%imode.eq.1 .or. this%imode.eq.3) then
+          do iproc=1,this%nprocs
+             do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                if (.not.this%same_flav(iproc)) then
+                   write(tmp,*) iamp
+                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                else
+                   ! same-flavour amps are build from two different-flavour amps
+                   if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')='
+                      write(tmp,*) this%same_flavour_sum(iamp,1)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')+'
+                      write(tmp,*) this%same_flavour_sum(iamp,2)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')='
+                      write(tmp,*) this%same_flavour_sum(iamp,1)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')='
+                      write(tmp,*) this%same_flavour_sum(iamp,2)
+                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                   endif
+                endif
+                write(iunit,*) trim(adjustl(line))
+             enddo
+          enddo
+    elseif(this%imode.eq.2) then
+          do iproc=1,this%nprocs
+             do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
+                   write(tmp,*) iamp
+                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                else
+                   if (.not.this%same_flav(iproc)) then
+                      write(tmp,*) iamp
+                      line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                      write(tmp,*) this%curr2amp(1,iamp)
+                      line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+                      write(tmp,*) this%curr2amp(2,iamp)
+                      line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                   else
+                      if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
+                         write(tmp,*) iamp
+                         line='amps('//trim(adjustl(tmp))//')='
+                         write(tmp,*) this%same_flavour_sum(iamp,1)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')+'
+                         write(tmp,*) this%same_flavour_sum(iamp,2)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                      elseif (this%same_flavour_sum(iamp,1).gt.0) then
+                         write(tmp,*) iamp
+                         line='amps('//trim(adjustl(tmp))//')='
+                         write(tmp,*) this%same_flavour_sum(iamp,1)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                      elseif (this%same_flavour_sum(iamp,2).gt.0) then
+                         write(tmp,*) iamp
+                         line='amps('//trim(adjustl(tmp))//')='
+                         write(tmp,*) this%same_flavour_sum(iamp,2)
+                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
+                      endif
+                   endif
+                endif
+                write(iunit,*) trim(adjustl(line))
+             enddo
+          enddo
+    endif
+    write(iunit,*) 'end subroutine compute_amps'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    close(iunit)
+  end subroutine create_library_vertices
+
+
 
   subroutine filter_helicity(this,n,nhel,include_hel)
     implicit none

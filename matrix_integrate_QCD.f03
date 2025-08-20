@@ -44,7 +44,11 @@ program matrix_integrate_QCD
   call phys_model%init_vert()
 
   call cpu_time(tBefore)
-  call get_run_arguments()
+  if (.not.use_amplitude_library) then
+     call get_run_arguments()
+  else
+     call read_amplitude_lib()
+  endif
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
 
@@ -63,9 +67,9 @@ program matrix_integrate_QCD
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
      endif
 
-     allocate(mass(next))
-     allocate(width(next))
-     do i=1,next
+     allocate(mass(pgl(igroup)%next))
+     allocate(width(pgl(igroup)%next))
+     do i=1,pgl(igroup)%next
         mass(i)=phys_model%get_mass(pgl(igroup)%processes(i,1))
         width(i)=phys_model%get_width(pgl(igroup)%processes(i,1))
         do iproc=2,pgl(igroup)%nproc
@@ -76,22 +80,24 @@ program matrix_integrate_QCD
            endif
         enddo
      enddo
-     call setup_spin(pgl(igroup))
-
      ! Initialise the phase-space parametrisation
      call cpu_time(tBefore)
      call setup_cuts_for_each_particle(pgl(igroup))
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
-        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
+        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
              pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      elseif (PS_choice.eq.4) then
-        call pgl(igroup)%phase_space%init(sqrts,next,mass,pgl(igroup)%phase_space_orders,&
+        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
              pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      endif
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
      deallocate(mass)
      deallocate(width)
+
+     if (use_amplitude_library) cycle
+     
+     call setup_spin(pgl(igroup))
 
      allocate(pgl(igroup)%iden(pgl(igroup)%nproc))
      pgl(igroup)%iden(1:pgl(igroup)%nproc)=1
@@ -108,11 +114,11 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
-           call pgl(igroup)%amps(iamp)%init(1,next,1,pgl(igroup)%processes(1,iamp),&
+           call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
         enddo
      else
-        call pgl(igroup)%amps(1)%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
+        call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
              pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model)
      endif
 
@@ -139,7 +145,7 @@ program matrix_integrate_QCD
 
      ! number of helicities to sum over
      allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
-     allocate(pgl(igroup)%hel(1:next))
+     allocate(pgl(igroup)%hel(1:pgl(igroup)%next))
      if (keep_processes_separate) then
         allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
      else
@@ -163,6 +169,13 @@ program matrix_integrate_QCD
      
      call simple_integrator%fill_points(1,f_abs,f,to_write,done)
 
+     if (create_amplitude_library) then
+        done=.true.
+        do igroup=1,ngroups
+           done=done.and.all(pgl(igroup)%amps%lib_created)
+        enddo
+        if (done) call create_amplitude_lib()
+     endif
      if (any(to_write)) then
         write (*,*) 'need to write the event. not implemented'
         stop 1
@@ -204,6 +217,7 @@ program matrix_integrate_QCD
 contains
 
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
+    use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
     real(kind=8), dimension(pgl(ichan)%ndim),intent(in) :: x
@@ -214,6 +228,9 @@ contains
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
+    if (create_amplitude_library) then
+       if (pgl(ichan)%amps(iint)%lib_created) return
+    endif
     if (.not.allocated(val)) then
        if (keep_processes_separate) then
           allocate(val(1))
@@ -250,19 +267,34 @@ contains
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
-                                     pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
+         pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
+
+
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
     ! compute amplitudes
 !!$    call cpu_time(tBefore)
     tBefore=tAfter
     
-    if (use_cross_process_optimisation_of_currents .and. &
-         pgl(ichan)%passed(iint).eq.nevent_hel_filter+1) then
-       call pgl(ichan)%amps(iint)%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
+    if ((.not. use_amplitude_library) .or. pgl(ichan)%passed(iint) .le. nevent_hel_filter+1) then
+       if (use_cross_process_optimisation_of_currents .and. &
+            pgl(ichan)%passed(iint).eq.nevent_hel_filter+1) then
+          call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
+               pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
+       else
+          call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
+               pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
+       endif
+       if (pgl(ichan)%passed(iint).eq.nevent_hel_filter+1 .and. create_amplitude_library) then
+!!$          call pgl(ichan)%amps%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
+          call pgl(ichan)%amps(iint)%create_library_vertices(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
+          pgl(ichan)%amps(iint)%lib_created=.true.
+          return
+       endif
     else
-       call pgl(ichan)%amps(iint)%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
+       call evaluate_amp(ichan,iint,pgl(ichan)%phase_space%p,pgl(ichan)%amps(iint)%amps)
     endif
+       
     
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
@@ -271,22 +303,40 @@ contains
     tBefore=tAfter
     iproc=0
     pgl(ichan)%amp2=0d0
-    if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-       do ih=1,pgl(ichan)%amps(iint)%n_amps
-          do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-          pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
+    if (keep_processes_separate) then
+       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
                   pgl(ichan)%col_fac(iint)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-       enddo
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       else
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
+                  pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       endif
     else
-       do ih=1,pgl(ichan)%amps(iint)%n_amps
-          do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-          pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
-               pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
-          pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-       enddo
+       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
+                  pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       else
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
+                  pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       endif
     endif
-    
+ 
     if (pgl(ichan)%passed(iint).le.nevent_hel_filter) then
        call find_same_flavour(pgl(ichan),nevent_hel_filter)
        call setup_helicity_filter(pgl(ichan),iint)
@@ -302,8 +352,8 @@ contains
     weight=vol*pgl(ichan)%phase_space%jac*conv
 
     ! multiply by the strong coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).lt.next-2) then
-       weight=weight*(4*pi*alphas)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))
+    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
+       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
     endif
     
     ! multiply by the EW coupling
@@ -373,14 +423,209 @@ contains
        if (pgl%include_hel(ih1,iint).gt.0) ih2=ih2+1
     enddo
 
-    call pgl%amps(iint)%filter_helicity(next,pgl%nhel(iint),pgl%include_hel(1,iint)) ! this updates 'nhel' and 'include_hel'
+    call pgl%amps(iint)%filter_helicity(pgl%next,pgl%nhel(iint),pgl%include_hel(1,iint)) ! this updates 'nhel' and 'include_hel'
 !!$    deallocate(pgl%hel_fac)
 !!$    allocate(pgl%hel_fac(pgl%nhel))
     pgl%hel_fac(1:pgl%nhel(iint),iint)=pgl%include_hel(1:pgl%nhel(iint),iint)
 !!$    deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
+  subroutine create_amplitude_lib()
+    implicit none
+    character(len=170) :: tmp,line
+    integer :: igroup,j
+    filename='library/amplib.f03'
+    open(unit=14,file=filename,status='unknown')
+    write(14,*) 'module amp_lib'
+    do igroup=1,ngroups
+       do j=1,size(pgl(igroup)%amps)
+          write(tmp,*) igroup
+          line=trim(adjustl(tmp))//'_'
+          write(tmp,*) j
+          line=trim(adjustl(line))//trim(adjustl(tmp))
+          write(14,*) 'use amp'//trim(adjustl(line))//'_lib'
+       enddo
+    enddo
+    write(14,*) 'implicit none'
+    write(14,*) 'contains'
+    write(14,*) 'subroutine evaluate_amp(ichan,iint,p,amps)'
+    write(14,*) 'implicit none'
+    write(14,*) 'integer :: ichan,iint'
+    write(tmp,*) maxval(pgl(:)%next)
+    write(14,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
+    write(14,*) 'complex(kind=8),dimension(*) :: amps'
+    do igroup=1,ngroups
+       if (igroup.eq.1) then
+          write(14,*) 'if (ichan.eq.1) then'
+          do j=1,size(pgl(igroup)%amps)
+             if (j.eq.1) then
+                write(14,*) 'if (iint.eq.1) then'
+                write(14,*) 'call evaluate_amp1_1(amps,p)'
+             else
+                write(tmp,*) j
+                write(14,*) 'elseif (iint.eq.'//trim(adjustl(tmp))//') then'
+                write(14,*) 'call evaluate_amp1_'//trim(adjustl(tmp))//'(amps,p)'
+             endif
+          enddo
+          write(14,*) 'endif'
+       else
+          write(tmp,*) igroup
+          write(14,*) 'elseif (ichan.eq.'//trim(adjustl(tmp))//') then'
+          do j=1,size(pgl(igroup)%amps)
+             if (j.eq.1) then
+                write(14,*) 'if (iint.eq.1) then'
+                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_1(amps,p)'
+             else
+                write(line,*) j
+                write(14,*) 'elseif (iint.eq.'//trim(adjustl(line))//') then'
+                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(amps,p)'
+             endif
+          enddo
+          write(14,*) 'endif'
+       endif
+    enddo
+    write(14,*) 'endif'
+    write(14,*) 'end subroutine evaluate_amp'
+    write(14,*) 'end module amp_lib'
+    close(14)
+    filename='library/amplitudes.bin'
+    open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
+    write(14)PS_choice
+    write(14)ngroups
+    do igroup=1,ngroups
+       ! amplitudes
+       write(14) size(pgl(igroup)%amps)
+       do iamp=1,size(pgl(igroup)%amps)
+          write(14) pgl(igroup)%amps(iamp)%n_amps
+          write(14) size(pgl(igroup)%amps(iamp)%iproc_start)
+          write(14) pgl(igroup)%amps(iamp)%iproc_start
+          write(14) size(pgl(igroup)%amps(iamp)%n_sing),pgl(igroup)%amps(iamp)%n_sing
+          write(14) size(pgl(igroup)%amps(iamp)%n_qqbar),pgl(igroup)%amps(iamp)%n_qqbar
+          write(14) shape(pgl(igroup)%amps(iamp)%spins),pgl(igroup)%amps(iamp)%spins
+          write(14) size(pgl(igroup)%amps(iamp)%amps)
+       enddo
+       ! multichannel
+       write(14) pgl(igroup)%multichan%n_unique_channels,pgl(igroup)%multichan%n_unique_channelgroups
+       write(14) shape(pgl(igroup)%multichan%unique_channelgroup_list),&
+            pgl(igroup)%multichan%unique_channelgroup_list
+       write(14) size(pgl(igroup)%multichan%unique_channel_list),pgl(igroup)%multichan%unique_channel_list
+       write(14) size(pgl(igroup)%multichan%map_proc_to_channelgroup),&
+            pgl(igroup)%multichan%map_proc_to_channelgroup
+       write(14) size(pgl(igroup)%multichan%number_of_channels),pgl(igroup)%multichan%number_of_channels
+       ! rest
+       write(14) shape(pgl(igroup)%processes),pgl(igroup)%processes
+       write(14) size(pgl(igroup)%iden_iproc),pgl(igroup)%iden_iproc
+       write(14) size(pgl(igroup)%phase_space_orders),pgl(igroup)%phase_space_orders
+       write(14) size(pgl(igroup)%nhel),pgl(igroup)%nhel
+       write(14) pgl(igroup)%nproc
+       write(14) shape(pgl(igroup)%val_procs),pgl(igroup)%val_procs
+       write(14) shape(pgl(igroup)%idenCOandMAPfactor),pgl(igroup)%idenCOandMAPfactor
+       write(14) shape(pgl(igroup)%iden_processes),pgl(igroup)%iden_processes
+       write(14) shape(pgl(igroup)%spin),pgl(igroup)%spin
+       write(14) shape(pgl(igroup)%hel_fac),pgl(igroup)%hel_fac
+       write(14) size(pgl(igroup)%iden),pgl(igroup)%iden
+       write(14) pgl(igroup)%ipdgs
+       write(14) pgl(igroup)%next,pgl(igroup)%ndim
+       write(14) size(pgl(igroup)%col_fac),pgl(igroup)%col_fac
+       write(14) size(pgl(igroup)%amp2)
+       write(14) size(pgl(igroup)%amp2_hel)
+       write(14) size(pgl(igroup)%passed),pgl(igroup)%passed
+    enddo
+    close(14)
+  end subroutine create_amplitude_lib
 
+  subroutine read_amplitude_lib()
+    implicit none
+    integer :: dim1,dim2,dim3
+    filename='library/amplitudes.bin'
+    open(unit=14,file=filename,form='unformatted',access='stream',status='old')
+    read(14)PS_choice
+    read(14)ngroups
+    allocate(pgl(ngroups))
+    do igroup=1,ngroups
+       ! amplitudes
+       read(14) dim1
+       allocate(pgl(igroup)%amps(dim1))
+       do iamp=1,dim1
+          read(14) pgl(igroup)%amps(iamp)%n_amps
+          read(14) dim1
+          allocate(pgl(igroup)%amps(iamp)%iproc_start(dim1))
+          read(14) pgl(igroup)%amps(iamp)%iproc_start
+          read(14) dim1
+          allocate(pgl(igroup)%amps(iamp)%n_sing(dim1))
+          read(14) pgl(igroup)%amps(iamp)%n_sing
+          read(14) dim1
+          allocate(pgl(igroup)%amps(iamp)%n_qqbar(dim1))
+          read(14) pgl(igroup)%amps(iamp)%n_qqbar
+          read(14) dim1,dim2,dim3
+          allocate(pgl(igroup)%amps(iamp)%spins(dim1,dim2,dim3))
+          read(14) pgl(igroup)%amps(iamp)%spins
+          read(14) dim1
+          allocate(pgl(igroup)%amps(iamp)%amps(dim1))
+       enddo
+       ! multichannel
+       read(14) pgl(igroup)%multichan%n_unique_channels,pgl(igroup)%multichan%n_unique_channelgroups
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%multichan%unique_channelgroup_list(0:dim1-1,dim2))
+       read(14) pgl(igroup)%multichan%unique_channelgroup_list
+       read(14) dim1
+       allocate(pgl(igroup)%multichan%unique_channel_list(dim1))
+       read(14) pgl(igroup)%multichan%unique_channel_list
+       read(14) dim1
+       allocate(pgl(igroup)%multichan%map_proc_to_channelgroup(dim1))
+       read(14)pgl(igroup)%multichan%map_proc_to_channelgroup
+       read(14) dim1
+       allocate(pgl(igroup)%multichan%number_of_channels(dim1))
+       read(14) pgl(igroup)%multichan%number_of_channels
+       ! rest
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%processes(dim1,dim2))
+       read(14) pgl(igroup)%processes
+       read(14) dim1
+       allocate(pgl(igroup)%iden_iproc(dim1))
+       read(14) pgl(igroup)%iden_iproc
+       read(14) dim1
+       allocate(pgl(igroup)%phase_space_orders(dim1))
+       read(14) pgl(igroup)%phase_space_orders
+       read(14) dim1
+       allocate(pgl(igroup)%nhel(dim1))
+       read(14) pgl(igroup)%nhel
+       read(14) pgl(igroup)%nproc
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%val_procs(dim1,dim2))
+       read(14) pgl(igroup)%val_procs
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%idenCOandMAPfactor(dim1,dim2))
+       read(14) pgl(igroup)%idenCOandMAPfactor
+       read(14) dim1,dim2,dim3
+       allocate(pgl(igroup)%iden_processes(dim1,dim2,dim3))
+       read(14) pgl(igroup)%iden_processes
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%spin(dim1,dim2))
+       read(14) pgl(igroup)%spin
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%hel_fac(dim1,dim2))
+       read(14) pgl(igroup)%hel_fac
+       read(14) dim1
+       allocate(pgl(igroup)%iden(dim1))
+       read(14) pgl(igroup)%iden
+       read(14) pgl(igroup)%ipdgs
+       read(14) pgl(igroup)%next,pgl(igroup)%ndim
+       allocate(pgl(igroup)%hel(next))
+       read(14) dim1
+       allocate(pgl(igroup)%col_fac(dim1))
+       read(14) pgl(igroup)%col_fac
+       read(14) dim1
+       allocate(pgl(igroup)%amp2(dim1))
+       read(14) dim1
+       allocate(pgl(igroup)%amp2_hel(dim1))
+       read(14) dim1
+       allocate(pgl(igroup)%passed(dim1))
+       read(14) pgl(igroup)%passed
+    enddo
+    close(14)
+  end subroutine read_amplitude_lib
+  
   subroutine get_run_arguments()
     use mint_module
     implicit none
