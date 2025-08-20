@@ -73,6 +73,15 @@ contains
        pgl(igroup)%nproc=nprocs
        pgl(igroup)%ndim=ndim
        pgl(igroup)%multichan%max_channels=max_channels
+       if (keep_processes_separate) then
+          allocate(pgl(igroup)%amps(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%nhel(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup)%passed(1:pgl(igroup)%nproc))
+       else
+          allocate(pgl(igroup)%amps(1))
+          allocate(pgl(igroup)%nhel(1))
+          allocate(pgl(igroup)%passed(1))
+       endif
        allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%phase_space_orders(1:next))
@@ -92,6 +101,7 @@ contains
             iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
+       pgl(igroup)%passed=0
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
@@ -130,6 +140,7 @@ contains
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%color_orders(next,nproc_unique))
     allocate(pgl_unique%phase_space_orders(next))
+    allocate(pgl_unique%amps(1))
     allocate(mass(next))
     allocate(width(next))
     pgl_unique%nproc=nproc_unique
@@ -161,36 +172,37 @@ contains
     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
          pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf)
 
-    call pgl_unique%amps%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
+    call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
          pgl_unique%spin,pgl_unique%color_orders,phys_model)
 
     allocate(amp2(nevent,pgl_unique%nproc))
-    allocate(amp(nevent,pgl_unique%amps%n_amps))
+    allocate(amp(nevent,pgl_unique%amps(1)%n_amps))
+    allocate(pgl_unique%passed(1))
 
     pgl_unique%passed=0
-    do while (pgl_unique%passed.lt.nevent)
+    do while (pgl_unique%passed(1).lt.nevent)
        do i=1,pgl_unique%ndim
           x(i)=ran2()
        enddo
        call pgl_unique%phase_space%generate_momenta(x)
        if (pgl_unique%phase_space%jac.lt.0d0) cycle
-       pgl_unique%passed=pgl_unique%passed+1
-       call pgl_unique%amps%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model,.false.)
+       pgl_unique%passed(1)=pgl_unique%passed(1)+1
+       call pgl_unique%amps(1)%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model,.false.)
        iproc=0
-       amp2(pgl_unique%passed,:)=0d0
-       if (use_real_gluons .and. all(pgl_unique%amps%n_qqbar(1:pgl_unique%amps%nprocs).eq.0)) then
-          do ih=1,pgl_unique%amps%n_amps
-             do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             amp2(pgl_unique%passed,iproc)=amp2(pgl_unique%passed,iproc)+&
-                  pgl_unique%amps%amps_r(ih)*pgl_unique%amps%amps_r(ih)
+       amp2(pgl_unique%passed(1),:)=0d0
+       if (use_real_gluons .and. all(pgl_unique%amps(1)%n_qqbar(1:pgl_unique%amps(1)%nprocs).eq.0)) then
+          do ih=1,pgl_unique%amps(1)%n_amps
+             do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
+                  pgl_unique%amps(1)%amps_r(ih)*pgl_unique%amps(1)%amps_r(ih)
           enddo
        else
-          do ih=1,pgl_unique%amps%n_amps
-             do while (pgl_unique%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             amp2(pgl_unique%passed,iproc)=amp2(pgl_unique%passed,iproc)+&
-                  dble(pgl_unique%amps%amps(ih)*dconjg(pgl_unique%amps%amps(ih)))
+          do ih=1,pgl_unique%amps(1)%n_amps
+             do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
+                  dble(pgl_unique%amps(1)%amps(ih)*dconjg(pgl_unique%amps(1)%amps(ih)))
           enddo
-          amp(pgl_unique%passed,1:pgl_unique%amps%n_amps)=pgl_unique%amps%amps(1:pgl_unique%amps%n_amps)
+          amp(pgl_unique%passed(1),1:pgl_unique%amps(1)%n_amps)=pgl_unique%amps(1)%amps(1:pgl_unique%amps(1)%n_amps)
        endif
        call find_same_flavour(pgl_unique,nevent)
     enddo
@@ -277,7 +289,7 @@ contains
     logical :: is_same_flavour
     call map_to_canonical_form(process,process_mapped,mapping)
     do iproc=1,pgl_unique%nproc
-       if (pgl_unique%amps%n_qqbar(iproc)*2.ne.quarks(0)) cycle
+       if (pgl_unique%amps(1)%n_qqbar(iproc)*2.ne.quarks(0)) cycle
        if (quarks(0).eq.4) then
           if (all(pgl_unique%processes(1:4,iproc).eq.-abs(quarks(1:4)))) then ! quarks are consistent 
              if (all(process_mapped(5:next).eq.pgl_unique%processes(5:next,iproc))) exit ! and the rest as well
@@ -311,7 +323,7 @@ contains
           endif
        enddo
     endif
-    if (pgl_unique%amps%same_flav(iproc)) then
+    if (pgl_unique%amps(1)%same_flav(iproc)) then
        is_same_flavour=.true.
     else
        is_same_flavour=.false.

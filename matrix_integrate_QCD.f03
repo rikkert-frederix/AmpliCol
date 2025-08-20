@@ -24,15 +24,14 @@ program matrix_integrate_QCD
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup,integration_step
-  logical :: read_amps_from_file=.false.,write_amps_to_file=.false.,done
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
-  integer :: ichan,iint,itmax,ncalls0
+  integer :: ichan,iint,itmax,ncalls0,iamp
   real(kind=8),dimension(1) :: f,f_abs
-  
+  logical :: done
   call cpu_time(tTot_B)
 
-  ncalls0=10000
+  ncalls0=100000
   itmax=16
 
   ! setting energy
@@ -49,29 +48,8 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
 
-  if (integration_step.eq.0) then
-!!$     accuracy=0.003d0 ! Accuracy of the integration. (Ignored if ncalls0 > 0).
-     write_amps_to_file=.true.
-  else
-!!$     accuracy=max(1d0/sqrt(dble(abs(ncalls0))),0.0005d0)
-     read_amps_from_file=.true.
-  endif
-
-  
-  ! Not so relevant mint-module parameters: only used in special cases.
-!!$  call set_mint_module_special_parameters()
-!!$  nchans=ngroups ! overwrite the number of mint-channels to the number of
-!!$                 ! needed integration channels.
-
   call create_run_tag(integration_step)
   
-  if (read_amps_from_file .or. write_amps_to_file) then
-!!$       open(file='Outputs'//trim(adjustl(add_arg))//'/Res_files/amplitudes.bin',&
-!!$            unit=32,access='stream',form='unformatted',status='UNKNOWN')
-       open(file='Outputs/Res_files/amplitudes.bin',&
-            unit=32,access='stream',form='unformatted',status='UNKNOWN')
-  endif
-
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
      ! allocate the amplitudes and the phase-space for each of the integration channels
@@ -128,49 +106,55 @@ program matrix_integrate_QCD
      ! which the amps%evaluation() can compute the amplitudes for given
      ! phase-space points.
      call cpu_time(tBefore)
-     if (read_amps_from_file) then
-        call pgl(igroup)%amps%read_init_amps_from_file(next,32)
+     if (keep_processes_separate) then
+        do iamp=1,pgl(igroup)%nproc
+           call pgl(igroup)%amps(iamp)%init(1,next,1,pgl(igroup)%processes(1,iamp),&
+                pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
+        enddo
      else
-        call pgl(igroup)%amps%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
-                pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model)
-     endif
-
-     !if (.not.read_proc_from_file .and. pgl(ichan)%amps%same_flav(3)) pgl(igroup)%nproc=3
-     
-     if (write_amps_to_file) then
-        call pgl(igroup)%amps%write_init_amps_to_file(next,32)
+        call pgl(igroup)%amps(1)%init(1,next,pgl(igroup)%nproc,pgl(igroup)%processes,&
+             pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model)
      endif
 
      call cpu_time(tAfter)
      t_amp_init=t_amp_init+tAfter-tBefore
 
      ! Total number of amplitudes is stored in 'nhel'
-     pgl(igroup)%nhel=pgl(igroup)%amps%n_amps
-
-!     if (.not.read_proc_from_file.and.pgl(igroup)%amps%same_flav(3)) then
-!        allocate(pgl(igroup)%col_fac(pgl(igroup)%amps%nprocs))
-!     else
-        allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
-!     endif
+     if (keep_processes_separate) then
+        do iamp=1,pgl(igroup)%nproc
+           pgl(igroup)%nhel(iamp)=pgl(igroup)%amps(iamp)%n_amps
+        enddo
+     else
+        pgl(igroup)%nhel=pgl(igroup)%amps(1)%n_amps
+     endif
+     allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
 
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
 
-     allocate(pgl(igroup)%amp2(pgl(igroup)%nproc))
+     if (keep_processes_separate) then
+        allocate(pgl(igroup)%amp2(1))
+     else
+        allocate(pgl(igroup)%amp2(1:pgl(igroup)%nproc))
+     endif
 
      ! number of helicities to sum over
-     allocate(pgl(igroup)%amp2_hel(1:pgl(igroup)%nhel))
+     allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
      allocate(pgl(igroup)%hel(1:next))
-     allocate(pgl(igroup)%hel_fac(1:pgl(igroup)%nhel))
-     pgl(igroup)%hel_fac(1:pgl(igroup)%nhel)=1
+     if (keep_processes_separate) then
+        allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
+     else
+        allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),1))
+     endif
+     pgl(igroup)%hel_fac=1
 
   enddo ! loop over phase-space-order groups
-  
-  if (read_amps_from_file .or. write_amps_to_file) then
-     close(32)
-  endif
 
   allocate(nintegrals(ngroups))
-  nintegrals=1
+  if (keep_processes_separate) then
+     nintegrals(1:ngroups)=pgl(1:ngroups)%nproc
+  else
+     nintegrals(1:ngroups)=1
+  endif
   call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,nintegrals,abs(ncalls0),abs(itmax))
   do
      call simple_integrator%get_points(1,ichan,iint)
@@ -179,13 +163,12 @@ program matrix_integrate_QCD
      
      call simple_integrator%fill_points(1,f_abs,f,to_write,done)
 
-     if (to_write(1)) then
+     if (any(to_write)) then
         write (*,*) 'need to write the event. not implemented'
         stop 1
      endif
      if (done) exit
   enddo
-
   
 !!$  if (integration_step.le.1) then
 !!$     ! grid setup, or computation of upper bounding envelope
@@ -217,9 +200,6 @@ program matrix_integrate_QCD
   write(*,*) 'Time spent in amplitude evaluation',t_Amp
   write(*,*) 'Time spent in squaring amplitudes',t_mat
   write(*,*) 'Total time:',t_all
-  write(*,*) 'Number of events:',pgl(1:ngroups)%all_evt
-  write(*,*) 'Number passing cuts:',pgl(1:ngroups)%passed
-  write(*,*) 'Fraction passing:',float(pgl(1:ngroups)%passed)/float(pgl(1:ngroups)%all_evt)
  
 contains
 
@@ -235,24 +215,19 @@ contains
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
     if (.not.allocated(val)) then
-       allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
-       allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
+       if (keep_processes_separate) then
+          allocate(val(1))
+          allocate(val_abs(1))
+       else
+          allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
+          allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
+       endif
        allocate(vol_ichan(1:ngroups))
     endif
     ! some point-by-point initialisation
     f=0d0
     f_abs=0d0
-    if (pgl(ichan)%nproc.eq.0) return
-!!$    if (ifirst.eq.2) then
-!!$       ! use previously computed integrand
-!!$       f1(1)=sum(val_abs(1:pgl(ichan)%nproc))
-!!$       f1(2)=sum(val(1:pgl(ichan)%nproc))
-!!$       f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
-!!$       return
-!!$    endif
-!!$    new_point=.true.
-!!$    pass_cuts_check=.true.
-    val_abs(1:pgl(ichan)%nproc)=0d0
+    val_abs=0d0
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
@@ -261,37 +236,32 @@ contains
        write (*,*) pgl(ichan)%phase_space%jac
        stop 1
     endif
-    pgl(ichan)%all_evt=pgl(ichan)%all_evt+1
     if (pgl(ichan)%phase_space%jac.lt.0d0) then
-!!$       pass_cuts_check=.false.
-       val(1:pgl(ichan)%nproc)=0d0
+       val=0d0
        call cpu_time(tAfter)
        t_PS= t_PS +tAfter-tBefore
        return
     endif
     if (.not.pass_cuts(pgl(ichan))) then
-!!$       pass_cuts_check=.false.
-       val(1:pgl(ichan)%nproc)=0d0
+       val=0d0
        call cpu_time(tAfter)
        t_PS= t_PS +tAfter-tBefore
        return
     endif
-    pgl(ichan)%passed = pgl(ichan)%passed + 1
+    pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
                                      pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
-
-    
     ! compute amplitudes
 !!$    call cpu_time(tBefore)
     tBefore=tAfter
     
     if (use_cross_process_optimisation_of_currents .and. &
-         pgl(ichan)%passed.eq.nevent_hel_filter+1) then
-       call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
+         pgl(ichan)%passed(iint).eq.nevent_hel_filter+1) then
+       call pgl(ichan)%amps(iint)%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
     else
-       call pgl(ichan)%amps%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
+       call pgl(ichan)%amps(iint)%evaluate(next,pgl(ichan)%phase_space%p,pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
     endif
     
     call cpu_time(tAfter)
@@ -300,31 +270,31 @@ contains
 !!$    call cpu_time(tBefore)
     tBefore=tAfter
     iproc=0
-    pgl(ichan)%amp2(:)=0d0
-    if (use_real_gluons .and. all(pgl(ichan)%amps%n_qqbar(1:pgl(ichan)%amps%nprocs).eq.0)) then
-       do ih=1,pgl(ichan)%amps%n_amps
-          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-          pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps%amps_r(ih)*pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps%amps_r(ih)*&
-                  pgl(ichan)%hel_fac(ih)
+    pgl(ichan)%amp2=0d0
+    if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
+       do ih=1,pgl(ichan)%amps(iint)%n_amps
+          do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+          pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
+                  pgl(ichan)%col_fac(iint)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     else
-       do ih=1,pgl(ichan)%amps%n_amps
-          do while (pgl(ichan)%amps%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-          pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps%amps(ih)*pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps%amps(ih)))*&
-               pgl(ichan)%hel_fac(ih)
+       do ih=1,pgl(ichan)%amps(iint)%n_amps
+          do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+          pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
+               pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
           pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
        enddo
     endif
     
-    if (pgl(ichan)%passed.le.nevent_hel_filter) then
+    if (pgl(ichan)%passed(iint).le.nevent_hel_filter) then
        call find_same_flavour(pgl(ichan),nevent_hel_filter)
-       call setup_helicity_filter(pgl(ichan))
-       if (integration_step.eq.2 .and. pgl(ichan)%passed.eq.nevent_hel_filter) then
+       call setup_helicity_filter(pgl(ichan),iint)
+       if (integration_step.eq.2 .and. pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
           ! passed==nevent_hel_filter, the unweighting of the helicities goes
           ! wrong for this phase-space point. Hence, we need to skip it.
-          pgl(ichan)%amp2(1:pgl(ichan)%nproc)=0d0
+          pgl(ichan)%amp2=0d0
        endif
     endif
     
@@ -332,74 +302,82 @@ contains
     weight=vol*pgl(ichan)%phase_space%jac*conv
 
     ! multiply by the strong coupling
-    if (pgl(ichan)%amps%n_sing(1).lt.next-2) then
-       weight=weight*(4*pi*alphas)**(next-2-pgl(ichan)%amps%n_sing(1))
+    if (pgl(ichan)%amps(iint)%n_sing(1).lt.next-2) then
+       weight=weight*(4*pi*alphas)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))
     endif
     
     ! multiply by the EW coupling
-    if (pgl(ichan)%amps%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps%n_sing(1)
+    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
+       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
     endif
 
-    val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-    val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-
-    call include_PDF_and_identical_procs(val,val_abs,pgl(ichan))
-
-    ! pass the result to the mint module
-    f_abs=sum(val_abs(1:pgl(ichan)%nproc))
-    f=sum(val(1:pgl(ichan)%nproc))
-!!$    f1(3:pgl(ichan)%nproc+2)=val(1:pgl(ichan)%nproc)
-    
-!!$    integrand=f1(1)
+    if (keep_processes_separate) then
+       val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
+       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
+       f_abs=sum(val_abs(1:1))
+       f=sum(val(1:1))
+    else
+       val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
+       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
+       f=sum(val(1:pgl(ichan)%nproc))
+    endif
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end subroutine integrand
 
-  subroutine setup_helicity_filter(pgl)
+  subroutine setup_helicity_filter(pgl,iint)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     real(kind=8) :: max_value
-    integer :: ih1,ih2,iproc1,iproc2
+    integer :: ih1,ih2,iproc1,iproc2,iint
     if (.not.allocated(pgl%include_hel)) then
-       allocate(pgl%include_hel(pgl%nhel))
-       pgl%include_hel(1:pgl%nhel)=0
+       allocate(pgl%include_hel(maxval(pgl%nhel),pgl%nproc))
+       pgl%include_hel=0
     endif
     ! filter zero helicities and helicities that are identical
-    max_value=maxval(pgl%amp2_hel(1:pgl%nhel))
-    do ih1=1,pgl%nhel
-       if (pgl%include_hel(ih1).ne.0) cycle
+    max_value=maxval(pgl%amp2_hel(1:pgl%nhel(iint)))
+    do ih1=1,pgl%nhel(iint)
+       if (pgl%include_hel(ih1,iint).ne.0) cycle
        if (pgl%amp2_hel(ih1)/max_value.gt.1d-10) then
           ! non-zero
-          pgl%include_hel(ih1)=1
+          pgl%include_hel(ih1,iint)=1
        else
           cycle
        endif
-       do ih2=ih1+1,pgl%nhel
+       do ih2=ih1+1,pgl%nhel(iint)
           if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-10) then
              ! identical value. Now check that they belong to the same process
-             iproc1=1; do while (iproc1.lt.pgl%nproc .and. (pgl%amps%iproc_start(iproc1+1)-ih1).le.0) ; iproc1=iproc1+1 ; enddo
-             iproc2=1; do while (iproc2.lt.pgl%nproc .and. (pgl%amps%iproc_start(iproc2+1)-ih2).le.0) ; iproc2=iproc2+1 ; enddo
+             iproc1=1
+             do while (iproc1.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc1+1)-ih1).le.0)
+                iproc1=iproc1+1
+             enddo
+             iproc2=1
+             do while (iproc2.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc2+1)-ih2).le.0)
+                iproc2=iproc2+1
+             enddo
              if (iproc1.ne.iproc2) cycle
              ! identical process
-             pgl%include_hel(ih2)=-ih1
-             pgl%include_hel(ih1)=pgl%include_hel(ih1)+1
+             pgl%include_hel(ih2,iint)=-ih1
+             pgl%include_hel(ih1,iint)=pgl%include_hel(ih1,iint)+1
           endif
        enddo
     enddo
 
-    if (pgl%passed.lt.nevent_hel_filter) return
+    if (pgl%passed(iint).lt.nevent_hel_filter) return
 
     ih2=0
-    do ih1=1,pgl%nhel
-       if (pgl%include_hel(ih1).gt.0) ih2=ih2+1
+    do ih1=1,pgl%nhel(iint)
+       if (pgl%include_hel(ih1,iint).gt.0) ih2=ih2+1
     enddo
 
-    call pgl%amps%filter_helicity(next,pgl%nhel,pgl%include_hel) ! this updates 'nhel' and 'include_hel'
-    deallocate(pgl%hel_fac)
-    allocate(pgl%hel_fac(pgl%nhel))
-    pgl%hel_fac(1:pgl%nhel)=pgl%include_hel(1:pgl%nhel)
-    deallocate(pgl%include_hel)
+    call pgl%amps(iint)%filter_helicity(next,pgl%nhel(iint),pgl%include_hel(1,iint)) ! this updates 'nhel' and 'include_hel'
+!!$    deallocate(pgl%hel_fac)
+!!$    allocate(pgl%hel_fac(pgl%nhel))
+    pgl%hel_fac(1:pgl%nhel(iint),iint)=pgl%include_hel(1:pgl%nhel(iint),iint)
+!!$    deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
 

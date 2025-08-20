@@ -17,6 +17,7 @@ module common
   logical,parameter :: reduce_to_unique_matrix_elements=.true.
   logical,parameter :: decompose_same_flavour_into_two_diff_flavour=.true.
   logical,parameter :: use_cross_process_optimisation_of_currents=.true.
+  logical,parameter :: keep_processes_separate=.true.
 
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   ! jets:

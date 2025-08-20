@@ -17,8 +17,7 @@ module simple_integrator_mod
   type :: channel
      integer :: ndim,nintegral,current_integral,current_iteration&
           &,npoints,npoints_iter,number,max_iterations
-     real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter&
-          &,chi2
+     real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
      logical :: done,evgen_done
      type(grid),allocatable,dimension(:,:) :: grids
      type(integral),allocatable,dimension(:) :: integrals
@@ -39,9 +38,9 @@ module simple_integrator_mod
      real(kind=8) :: max_value
      real(kind=8),dimension(:),allocatable :: f_max
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,accum&
-          &,accum2,unc_iter,chi2
+          &,accum2,unc_iter
      integer :: npoints_iter,npoints,npoints_requested,ichan,n_unwgt&
-          &,npoints_nonzero,event,nevent_in_list,ndim&
+          &,npoints_nonzero,npoints_nonzero_total,event,nevent_in_list,ndim&
           &,current_iteration,max_iterations,nevents_unw
      logical :: done,evgen_done
      type(event),dimension(:),allocatable :: event_list
@@ -84,7 +83,8 @@ module simple_integrator_mod
      procedure,public :: init,get_points,fill_points,compute_wgt_from_x
      procedure,private :: read_all_grids,write_all_grids&
           &,get_channel_and_integral,update_points_requested&
-          &,print_results,compute_total_rate,check_if_done,init_next_iteration
+          &,print_results,compute_total_rate,check_if_done&
+          &,init_next_iteration,get_npoints_nonzero_iter
      ! fill_points should return 'done' when ready; also it should
      ! keep track of number of points thrown and determine if it needs
      ! re-gridding; furthermore, it should tell the main codes which
@@ -100,6 +100,7 @@ module simple_integrator_mod
   real(kind=8),parameter :: write_event_fraction=1d0
   integer :: iterations_without_events
   integer,parameter :: min_points_per_channel=1024
+  integer,parameter :: min_points_per_integral=128
 contains
 
   subroutine init(this,nchannel,ndim,nintegral,nevents_unw,niters)
@@ -162,7 +163,6 @@ contains
     this%res_iter=0d0
     this%res2_iter=0d0
     this%unc_iter=0d0
-    this%chi2=0d0
     this%npoints_iter=0
     this%done=.false.
     if (all(this%integrals%evgen_done)) then
@@ -234,6 +234,7 @@ contains
     this%nevent_in_list=0
     this%evgen_done=.false.
     this%current_iteration=0
+    this%npoints_nonzero_total=0
   end subroutine integral_init
   
   subroutine get_points(this,npoints,ichan,iint)
@@ -266,7 +267,7 @@ contains
     real(kind=8),dimension(npoints),intent(in) :: f,f_abs
     logical,dimension(npoints),intent(out) :: to_write
     logical,intent(out) :: done
-    integer :: i
+    integer :: i,npoints_nonzero
     character(len=8) :: date
     character(len=10) :: time
     character(len=5) :: zone
@@ -284,8 +285,9 @@ contains
        call date_and_time(date, time, zone)
        write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
             date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
+       call this%get_npoints_nonzero_iter(npoints_nonzero)
        write (*,'(a,x,i4,x,a,x,i10,x,a)') &
-            'iteration',this%channels(1)%current_iteration,'(',this%npoints_requested, &
+            'iteration',this%channels(1)%current_iteration,'(',npoints_nonzero, &
             'points) '//trim(formatted)//' :'
        do i=1,this%nchannel
           call this%channels(i)%finalise_iteration()
@@ -302,6 +304,16 @@ contains
     deallocate(this%cell)
     deallocate(this%wgt)
   end subroutine fill_points
+  
+  subroutine get_npoints_nonzero_iter(this,npoints_nonzero)
+    implicit none
+    class(integrator),intent(inout) :: this
+    integer :: i,j,npoints_nonzero
+    npoints_nonzero=0
+    do i=1,this%nchannel
+       npoints_nonzero=npoints_nonzero+sum(this%channels(i)%integrals(1:this%channels(i)%nintegral)%npoints_nonzero)
+    enddo
+  end subroutine get_npoints_nonzero_iter
   
   subroutine init_next_iteration(this)
     implicit none
@@ -354,15 +366,19 @@ contains
   subroutine update_points_requested(this)
     implicit none
     class(integrator),intent(inout) :: this
-    real(kind=8) :: total
-    integer :: i,j,npoints
+    real(kind=8) :: total,total_channel
+    integer :: i,j,npoints,npoints_channel
     this%npoints_requested=this%npoints_requested*2
     npoints=0
     total=this%res(1)
     do i=1,this%nchannel
+       npoints_channel=max(int(this%channels(i)%res(1)/total*dble(this%npoints_requested)),&
+            min_points_per_channel)
+       total_channel=this%channels(i)%res(1)
        do j=1,this%channels(i)%nintegral
           this%channels(i)%integrals(j)%npoints_requested=&
-               max(int(this%channels(i)%integrals(j)%res(1)/total*dble(this%npoints_requested)),min_points_per_channel)
+               max(int(this%channels(i)%integrals(j)%res(1)/total_channel*dble(npoints_channel)),&
+               min_points_per_integral)
           npoints=npoints+this%channels(i)%integrals(j)%npoints_requested
        enddo
     enddo
@@ -497,17 +513,17 @@ contains
          this%number,'channel ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
     write(*,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
-    write(*,'(24x,a,1x,f7.3)') 'chi2:',this%chi2(1)
     do i=1,this%nintegral
+       this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
        if (this%integrals(i)%n_unwgt.gt.this%integrals(i)%nevents_unw) then
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
-               '--',this%integrals(i)%nevent_in_list,&
+               '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevent_in_list,&
                '--',this%integrals(i)%n_unwgt,'(',this%integrals(i)%nevents_unw,') DONE'
        else
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
-               '--',this%integrals(i)%nevent_in_list,&
+               '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevent_in_list,&
                '--',this%integrals(i)%n_unwgt,'(',this%integrals(i)%nevents_unw,')'
        endif
     enddo
@@ -527,20 +543,19 @@ contains
     implicit none
     class(channel),intent(inout) :: this
     integer :: i
+    do i=1,this%nintegral
+       if (.not. this%integrals(i)%evgen_done) &
+            call this%integrals(i)%combine_iterations(this%current_iteration)
+    enddo
+    do i=1,2
+       this%res(i)=sum(this%integrals(1:this%nintegral)%res(i))
+       this%unc(i)=sqrt(sum(this%integrals(1:this%nintegral)%unc(i)**2))
+    enddo
     if (this%current_iteration.eq.1) then
-       this%res=this%res_iter
-       this%unc=this%unc_iter
        this%npoints=this%npoints_iter
     else
-       do i=1,2
-          call update_res_and_unc(this%res(i),this%unc(i),this%npoints,this%res_iter(i),this%unc_iter(i),this%npoints_iter)
-       enddo
        this%npoints=this%npoints+this%npoints_iter
-       this%chi2=this%chi2+(this%res_iter(1)-this%res(1))**2/this%unc_iter(1)**2
     endif
-    do i=1,this%nintegral
-       call this%integrals(i)%combine_iterations(this%current_iteration)
-    enddo
   end subroutine channel_combine_iterations
 
   subroutine integral_combine_iterations(this,iter)
@@ -577,13 +592,12 @@ contains
     implicit none
     class(channel),intent(inout) :: this
     integer :: i
-    do i=1,2
-       this%res_iter(i)=sum(this%integrals(1:this%nintegral)%accum(i))/dble(this%npoints_iter)
-       this%res2_iter(i)=sum(this%integrals(1:this%nintegral)%accum2(i))/dble(this%npoints_iter)
-       call compute_uncertainty(this%res_iter(i),this%res2_iter(i),this%npoints_iter,this%unc_iter(i))
-    enddo
     do i=1,this%nintegral
        call this%integrals(i)%update_result_iteration()
+    enddo
+    do i=1,2
+       this%res_iter(i)=sum(this%integrals(1:this%nintegral)%res_iter(i))
+       this%unc_iter(i)=sqrt(sum(this%integrals(1:this%nintegral)%unc_iter(i)**2))
     enddo
   end subroutine channel_update_result_iteration
 
@@ -599,11 +613,13 @@ contains
     implicit none
     class(integral),intent(inout) :: this
     integer :: i
-    this%res_iter=this%accum/dble(this%npoints_iter)
-    this%res2_iter=this%accum2/dble(this%npoints_iter)
-    do i=1,2
-       call compute_uncertainty(this%res_iter(i),this%res2_iter(i),this%npoints_iter,this%unc_iter(i))
-    enddo
+    if (this%npoints_iter.ne.0) then
+       this%res_iter=this%accum/dble(this%npoints_iter)
+       this%res2_iter=this%accum2/dble(this%npoints_iter)
+       do i=1,2
+          call compute_uncertainty(this%res_iter(i),this%res2_iter(i),this%npoints_iter,this%unc_iter(i))
+       enddo
+    endif
   end subroutine integral_update_result_iteration
   
   subroutine channel_add_point(this,x,wgt,cell,f_abs,f,to_write)

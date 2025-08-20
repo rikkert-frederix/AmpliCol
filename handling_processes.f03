@@ -10,23 +10,22 @@ module handling_processes
   end type multichan_info
   type phase_space_order_group
      ! if adding variables here, also update the finalize_phase_space_order_group subroutine
-     type(amplitude_QCD) :: amps
+     type(amplitude_QCD),dimension(:),allocatable :: amps
      class(phase_space_type),allocatable :: phase_space
      type(multichan_info) :: multichan
      integer,dimension(:,:),allocatable :: processes,color_orders
-     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders
+     integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
-     integer(kind=4),dimension(:,:),allocatable :: spin
+     integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
-     integer(kind=4) :: nhel,next,ndim
+     integer(kind=4) :: next,ndim
      integer,dimension(:),allocatable :: col_fac
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
-     integer(kind=4),dimension(:),allocatable :: hel,hel_fac
-     integer(kind=4) :: passed=0,all_evt=0
-     integer,dimension(:),allocatable :: include_hel
+     integer(kind=4),dimension(:),allocatable :: hel,passed
+     integer,dimension(:,:),allocatable :: include_hel
      ! cuts
      double precision,dimension(:),allocatable :: pT_min,eta_max
      double precision,dimension(:,:),allocatable :: DR_min,sqrt_s_min
@@ -86,41 +85,42 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,j,k,ii,jj,kk,nevent
     real(kind=8),parameter :: tiny=1d-8
+    if (keep_processes_separate) return
     if (.not.decompose_same_flavour_into_two_diff_flavour) return
     if (.not.allocated(pgl%same_flavour)) then
        allocate(pgl%same_flavour(nevent,pgl%nproc,2))
        pgl%same_flavour=0
     endif
     do i=1,pgl%nproc
-       if (pgl%amps%n_qqbar(i).ne.2) cycle
+       if (pgl%amps(1)%n_qqbar(i).ne.2) cycle
        do j=1,pgl%nproc
           if (i.eq.j) cycle
-          if (pgl%amps%n_qqbar(j).ne.2) cycle
+          if (pgl%amps(1)%n_qqbar(j).ne.2) cycle
           do k=1,j-1
              if (k.eq.i) cycle
-             if (pgl%amps%n_qqbar(k).ne.2) cycle
-             do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
-                if (pgl%amps%amps(ii).eq.(0d0,0d0)) cycle
-                do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
-                   if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,jj))) exit
+             if (pgl%amps(1)%n_qqbar(k).ne.2) cycle
+             do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
+                if (pgl%amps(1)%amps(ii).eq.(0d0,0d0)) cycle
+                do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
+                   if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
                 enddo
-                do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
-                   if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
+                do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
+                   if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
                 enddo
-                if (abs(pgl%amps%amps(ii))+abs(pgl%amps%amps(jj))+abs(pgl%amps%amps(kk)).eq.0d0) cycle
-                if (abs(pgl%amps%amps(ii)-(pgl%amps%amps(jj)+pgl%amps%amps(kk)))/&
-                     (abs(pgl%amps%amps(ii))+abs(pgl%amps%amps(jj))+abs(pgl%amps%amps(kk))).gt.tiny) then
+                if (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk)).eq.0d0) cycle
+                if (abs(pgl%amps(1)%amps(ii)-(pgl%amps(1)%amps(jj)+pgl%amps(1)%amps(kk)))/&
+                     (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk))).gt.tiny) then
                    exit
                 endif
              enddo
-             if (ii.eq.pgl%amps%iproc_start(i+1)) then
-                pgl%same_flavour(pgl%passed,i,1)=j
-                pgl%same_flavour(pgl%passed,i,2)=k
+             if (ii.eq.pgl%amps(1)%iproc_start(i+1)) then
+                pgl%same_flavour(pgl%passed(1),i,1)=j
+                pgl%same_flavour(pgl%passed(1),i,2)=k
              endif
           enddo
        enddo
     enddo
-    if (pgl%passed.lt.nevent) return
+    if (pgl%passed(1).lt.nevent) return
     do i=1,pgl%nproc
        if (any(pgl%same_flavour(1,i,1).ne.pgl%same_flavour(2:nevent,i,1)) .or. &
             any(pgl%same_flavour(1,i,2).ne.pgl%same_flavour(2:nevent,i,2)) ) then
@@ -135,16 +135,16 @@ contains
           k=pgl%same_flavour(1,i,2)
           write (*,'(a,x,i4,x,a,i4,x,a,i4)') &
                "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
-          pgl%amps%same_flav(i)=.true.
-          do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
-             do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
-                if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,jj))) exit
+          pgl%amps(1)%same_flav(i)=.true.
+          do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
+             do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
+                if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
              enddo
-             do kk=pgl%amps%iproc_start(k),pgl%amps%iproc_start(k+1)-1
-                if (all(pgl%amps%spins(:,1,ii).eq.pgl%amps%spins(:,1,kk))) exit
+             do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
+                if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
              enddo
-             pgl%amps%same_flavour_sum(ii,1)=jj
-             pgl%amps%same_flavour_sum(ii,2)=kk
+             pgl%amps(1)%same_flavour_sum(ii,1)=jj
+             pgl%amps(1)%same_flavour_sum(ii,2)=kk
           enddo
        endif
     enddo
@@ -652,7 +652,11 @@ contains
 
   subroutine finalize_phase_space_order_group(pgl)
     type(phase_space_order_group),intent(inout) :: pgl
-    call finalize_amplitude_QCD(pgl%amps)
+    integer :: i
+    do i=1,size(pgl%amps)
+       call finalize_amplitude_QCD(pgl%amps(i))
+    enddo
+    deallocate(pgl%amps)
     if(allocated(pgl%phase_space)) then
        call pgl%phase_space%cleanup()
        deallocate(pgl%phase_space)

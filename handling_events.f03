@@ -13,7 +13,11 @@ contains
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
     write (iunit,*) pgl%next,sign(wgt,evt_sign)
-    write (iunit,'(100i3)') pgl%amps%spins(1:pgl%next,hel_picked(1),hel_picked(2))
+    if (keep_processes_separate) then
+       write (iunit,'(100i3)') pgl%amps(iproc_picked)%spins(1:pgl%next,hel_picked(1),hel_picked(2))
+    else
+       write (iunit,'(100i3)') pgl%amps(1)%spins(1:pgl%next,hel_picked(1),hel_picked(2))
+    endif
 !!$    if (.not.read_proc_from_file) iproc_picked=1
     write (iunit,'(100i3)') pgl%color_orders(1:pgl%next,iproc_picked)
     ! Since some of the symmetry factors (in particular for gg->qqbar+ng)
@@ -72,10 +76,10 @@ contains
     enddo
     iproc_picked=iproc
     iproc_iden_picked=i
-    if (iproc_picked.gt.pgl%amps%nprocs) then
-       write (*,*) "Could not unweight process",iproc_picked,pgl%amps%nprocs
-       stop 1
-    endif
+!!$    if (iproc_picked.gt.pgl%amps%nprocs) then
+!!$       write (*,*) "Could not unweight process",iproc_picked,pgl%amps%nprocs
+!!$       stop 1
+!!$    endif
     if (iproc_iden_picked.gt.pgl%iden_iproc(iproc)) then
        write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl%iden_iproc(iproc)
        stop 1
@@ -93,8 +97,13 @@ contains
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
-    random=ran2()*pgl%amp2(iproc_picked)
-    i=pgl%amps%iproc_start(iproc_picked)
+    if (keep_processes_separate) then
+       random=ran2()*pgl%amp2(1)
+       i=pgl%amps(iproc_picked)%iproc_start(1)
+    else
+       random=ran2()*pgl%amp2(iproc_picked)
+       i=pgl%amps(1)%iproc_start(iproc_picked)
+    endif
     do
        if (pgl%amp2_hel(i).gt.random) then
           exit
@@ -104,16 +113,30 @@ contains
        endif
     enddo
     hel_picked(2)=i
-    if ( hel_picked(2).lt.pgl%amps%iproc_start(iproc_picked) .or. &
-         hel_picked(2).ge.pgl%amps%iproc_start(iproc_picked+1)) then
-       write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,pgl%amps%iproc_start(iproc_picked),&
-            pgl%amps%iproc_start(iproc_picked+1)
-       stop 1
-    endif
-    if (pgl%hel_fac(hel_picked(2)).gt.1) then
-       hel_picked(1)=1+int(ran2()*pgl%hel_fac(hel_picked(2)))
+    if (keep_processes_separate) then
+       if ( hel_picked(2).lt.pgl%amps(iproc_picked)%iproc_start(1) .or. &
+            hel_picked(2).ge.pgl%amps(iproc_picked)%iproc_start(1+1)) then
+          write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked, &
+               pgl%amps(iproc_picked)%iproc_start(1),pgl%amps(iproc_picked)%iproc_start(1+1)
+          stop 1
+       endif
+       if (pgl%hel_fac(hel_picked(2),iproc_picked).gt.1) then
+          hel_picked(1)=1+int(ran2()*pgl%hel_fac(hel_picked(2),iproc_picked))
+       else
+          hel_picked(1)=1
+       endif
     else
-       hel_picked(1)=1
+       if ( hel_picked(2).lt.pgl%amps(1)%iproc_start(iproc_picked) .or. &
+            hel_picked(2).ge.pgl%amps(1)%iproc_start(iproc_picked+1)) then
+          write (*,*) 'Could not unweight helicity',hel_picked,iproc_picked,pgl%amps(1)%iproc_start(iproc_picked),&
+               pgl%amps(1)%iproc_start(iproc_picked+1)
+          stop 1
+       endif
+       if (pgl%hel_fac(hel_picked(2),1).gt.1) then
+          hel_picked(1)=1+int(ran2()*pgl%hel_fac(hel_picked(2),1))
+       else
+          hel_picked(1)=1
+       endif
     endif
   end subroutine unwgt_helicity
 

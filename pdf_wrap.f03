@@ -23,11 +23,12 @@ contains
     enddo
   end subroutine set_ipdgs_for_PDF
 
-  subroutine include_PDF_and_identical_procs(val,val_abs,pgl)
+  subroutine include_PDF_and_identical_procs(val,val_abs,pgl,iint)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     real(kind=8),intent(inout),dimension(*) :: val,val_abs
-    integer :: iproc,ip
+    integer,intent(in) :: iint
+    integer :: iproc,ip,iip,ip_start,ip_end
     real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
     if (include_pdf) then
@@ -36,8 +37,17 @@ contains
        call PDF_eval(1,pgl%ipdgs(-6,1),pgl%phase_space%xbjrk(1),xmu_fac,PDF(-6,1))
        call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
-    do iproc=1,pgl%nproc
-       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iproc)*pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
+    if (iint.gt.0) then
+       ip_start=iint
+       ip_end=iint
+    else
+       ip_start=1
+       ip_end=pgl%nproc
+    endif
+    iip=0
+    do iproc=ip_start,ip_end
+       iip=iip+1
+       pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)=val(iip)*pgl%idenCOandMAPfactor(1:pgl%iden_iproc(iproc),iproc)
        if (include_pdf) then
           do ip=1,pgl%iden_iproc(iproc)
              ! first incoming particle
@@ -58,8 +68,8 @@ contains
              endif
           enddo
        endif
-       val(iproc)=sum(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc))
-       val_abs(iproc)=sum(abs(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)))
+       val(iip)=sum(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc))
+       val_abs(iip)=sum(abs(pgl%val_procs(1:pgl%iden_iproc(iproc),iproc)))
     enddo
   end subroutine include_PDF_and_identical_procs
 
