@@ -3515,7 +3515,7 @@ contains
           endif
           if (itype.ge.10) then
              write(tmp,*) icount(itype)*2
-             write(iunit,*) 'real(kind=2),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
+             write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
              line=''
              do i=1,icount(itype)
                 write(tmp,*) coupl(1,i,itype)
