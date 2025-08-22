@@ -16,7 +16,8 @@ module simple_integrator_mod
   private
   type :: channel
      integer :: ndim,nintegral,current_integral,current_iteration&
-          &,npoints,npoints_iter,number,max_iterations
+          &,number,max_iterations
+     integer(kind=8) :: npoints,npoints_iter
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
      logical :: done,evgen_done
      type(grid),allocatable,dimension(:,:) :: grids
@@ -39,9 +40,10 @@ module simple_integrator_mod
      real(kind=8),dimension(:),allocatable :: f_max
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,accum&
           &,accum2,unc_iter
-     integer :: npoints_iter,npoints,npoints_requested,ichan,n_unwgt&
-          &,npoints_nonzero,npoints_nonzero_total,event,nevent_in_list,ndim&
+     integer :: ichan,n_unwgt,event,nevent_in_list,ndim &
           &,current_iteration,max_iterations,nevents_unw
+     integer(kind=8) :: npoints_iter,npoints,npoints_requested&
+          &,npoints_nonzero,npoints_nonzero_total
      logical :: done,evgen_done
      type(event),dimension(:),allocatable :: event_list
    contains
@@ -72,7 +74,8 @@ module simple_integrator_mod
      logical :: unwgt
   end type event
   type,public :: integrator
-     integer :: nchannel,current_channel,npoints_generated,npoints_requested,nevents_unw
+     integer :: nchannel,current_channel,nevents_unw,npoints_generated
+     integer(kind=8) :: npoints_requested
      real(kind=8),dimension(2) :: res,unc
      real(kind=8),allocatable,dimension(:,:),public :: x
      real(kind=8),allocatable,dimension(:),public :: wgt
@@ -114,7 +117,7 @@ contains
     ! if we assume 0.3% unweighting efficiency, we expect ~10% time
     ! spend in iterations that do not produce events:
     iterations_without_events=5
-    this%npoints_requested=nevents_unw/(0.03*2**iterations_without_events)
+    this%npoints_requested=int(nevents_unw/(0.03*2**iterations_without_events),kind=8)
     do while (this%npoints_requested/this%nchannel.lt.min_points_per_channel &
          .and. iterations_without_events.gt.3)
        iterations_without_events=iterations_without_events-1
@@ -133,7 +136,8 @@ contains
   subroutine channel_init(this,ndim,nintegral,npoints,niters,ichan)
     implicit none
     class(channel),intent(inout) :: this
-    integer,intent(in) :: ndim,nintegral,npoints,niters,ichan
+    integer,intent(in) :: ndim,nintegral,niters,ichan
+    integer(kind=8) :: npoints
     integer :: i
     this%ndim=ndim
     this%max_iterations=niters
@@ -149,7 +153,7 @@ contains
     enddo
     this%current_integral=0
     this%current_iteration=0
-    this%npoints=0
+    this%npoints=0_8
     this%res=0d0
     this%unc=0d0
     call this%init_next_iteration()
@@ -163,7 +167,7 @@ contains
     this%res_iter=0d0
     this%res2_iter=0d0
     this%unc_iter=0d0
-    this%npoints_iter=0
+    this%npoints_iter=0_8
     this%done=.false.
     if (all(this%integrals%evgen_done)) then
        this%evgen_done=.true.
@@ -186,8 +190,8 @@ contains
     this%accum=0d0
     this%accum2=0d0
     this%unc_iter=0d0
-    this%npoints_iter=0
-    this%npoints_nonzero=0
+    this%npoints_iter=0_8
+    this%npoints_nonzero=0_8
     this%event=0
     if (.not. this%evgen_done) this%done=.false.
     if (this%current_iteration.eq.1) then
@@ -222,10 +226,11 @@ contains
   subroutine integral_init(this,ndim,npoints,ichan,niters)
     implicit none
     class(integral),intent(inout) :: this
-    integer,intent(in) :: ndim,npoints,ichan,niters
+    integer,intent(in) :: ndim,ichan,niters
+    integer(kind=8) :: npoints
     this%ndim=ndim
     this%ichan=ichan
-    this%npoints=0
+    this%npoints=0_8
     this%npoints_requested=npoints
     this%max_iterations=niters
     allocate(this%f_max(this%max_iterations))
@@ -234,7 +239,7 @@ contains
     this%nevent_in_list=0
     this%evgen_done=.false.
     this%current_iteration=0
-    this%npoints_nonzero_total=0
+    this%npoints_nonzero_total=0_8
   end subroutine integral_init
   
   subroutine get_points(this,npoints,ichan,iint)
@@ -267,11 +272,12 @@ contains
     real(kind=8),dimension(npoints),intent(in) :: f,f_abs
     logical,dimension(npoints),intent(out) :: to_write
     logical,intent(out) :: done
-    integer :: i,npoints_nonzero
+    integer :: i
     character(len=8) :: date
     character(len=10) :: time
     character(len=5) :: zone
     character(len=19) :: formatted
+    integer(kind=8) :: npoints_nonzero
     done=.false.
     if (npoints.gt.this%npoints_generated) then
        write (*,*) 'ERROR: too many points returned'
@@ -308,8 +314,9 @@ contains
   subroutine get_npoints_nonzero_iter(this,npoints_nonzero)
     implicit none
     class(integrator),intent(inout) :: this
-    integer :: i,j,npoints_nonzero
-    npoints_nonzero=0
+    integer :: i,j
+    integer(kind=8) :: npoints_nonzero
+    npoints_nonzero=0_8
     do i=1,this%nchannel
        npoints_nonzero=npoints_nonzero+sum(this%channels(i)%integrals(1:this%channels(i)%nintegral)%npoints_nonzero)
     enddo
@@ -361,15 +368,17 @@ contains
          'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
          'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
+    call flush()
   end subroutine print_results
   
   subroutine update_points_requested(this)
     implicit none
     class(integrator),intent(inout) :: this
     real(kind=8) :: total,total_channel
-    integer :: i,j,npoints,npoints_channel
+    integer :: i,j
+    integer(kind=8) :: npoints,npoints_channel
     this%npoints_requested=this%npoints_requested*2
-    npoints=0
+    npoints=0_8
     total=this%res(1)
     do i=1,this%nchannel
        npoints_channel=max(int(this%channels(i)%res(1)/total*dble(this%npoints_requested)),&
@@ -579,8 +588,8 @@ contains
     implicit none
     real(kind=8),intent(inout) :: res,unc
     real(kind=8),intent(in) :: res_iter,unc_iter
-    integer,intent(inout) :: npoints,npoints_iter
-    integer :: np
+    integer(kind=8),intent(inout) :: npoints,npoints_iter
+    integer(kind=8) :: np
     np=npoints+npoints_iter
     unc=sqrt((unc**2*dble(npoints)**2+unc_iter**2*dble(npoints_iter)**2)&
          &/dble(np)**2+npoints*(res-res_iter)**2*dble(npoints_iter)&
@@ -604,7 +613,7 @@ contains
   subroutine compute_uncertainty(acc,acc2,np,unc)
     implicit none
     real(kind=8),intent(in) :: acc,acc2
-    integer,intent(in) :: np
+    integer(kind=8),intent(in) :: np
     real(kind=8),intent(out) :: unc
     unc=sqrt(abs(acc2-acc**2)/dble(np))
   end subroutine compute_uncertainty
@@ -613,7 +622,7 @@ contains
     implicit none
     class(integral),intent(inout) :: this
     integer :: i
-    if (this%npoints_iter.ne.0) then
+    if (this%npoints_iter.ne.0_8) then
        this%res_iter=this%accum/dble(this%npoints_iter)
        this%res2_iter=this%accum2/dble(this%npoints_iter)
        do i=1,2
