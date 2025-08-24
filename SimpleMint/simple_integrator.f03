@@ -58,13 +58,14 @@ module simple_integrator_mod
      procedure,private :: unwgt => integral_unwgt
   end type integral
   type :: grid
-     integer :: size
-     real(kind=8),allocatable,dimension(:) :: current,accum
+     integer :: size,size_fill
+     real(kind=8),allocatable,dimension(:) :: current,accum,current_for_fillcell
      integer,allocatable,dimension(:) :: nhits
    contains
      procedure,private :: init => grid_init
      procedure,private :: add_point => grid_add_point
-     procedure,private :: get_x,get_wgt,massage_accum,find_cell
+     procedure,private :: get_x,get_wgt,massage_accum,find_cell&
+          &,interpolate_current,find_cell_to_fill
      procedure,private :: update => grid_update
   end type grid
   type :: evnt
@@ -106,6 +107,8 @@ module simple_integrator_mod
   integer,parameter :: min_points_per_integral=128
   logical,parameter :: turn_off_evnt_generation=.false.
   real(kind=8),parameter :: required_accuracy_factor=10d0
+  integer,parameter :: min_grid_size=8
+  integer,parameter :: max_grid_size=2048
 contains
 
   subroutine init(this,nchannel,ndim,nintegral,nevts_unw_req,niters)
@@ -149,7 +152,7 @@ contains
     allocate(this%grids(1:this%ndim,1:this%max_iters+1))
     allocate(this%integrals(1:this%nintegral))
     do i=1,this%ndim
-       call this%grids(i,1)%init()
+       call this%grids(i,1)%init(npoints)
     enddo
     do i=1,this%nintegral
        call this%integrals(i)%init(ndim,npoints/this%nintegral,this%number,this%max_iters)
@@ -208,26 +211,46 @@ contains
     this%max_value=0d0
   end subroutine integral_init_next_iter
   
-  subroutine grid_init(this,current)
+  subroutine grid_init(this,npoints,current)
     implicit none
-    integer,parameter :: grid_size=32
     class(grid),intent(inout) :: this
-    real(kind=8),dimension(0:grid_size),optional :: current
-    integer :: i
-    this%size=grid_size
+    integer(kind=8),intent(in) :: npoints
+    real(kind=8),dimension(:),intent(in),optional :: current
+    integer :: i,isize
+    isize=size(current)-1
+    this%size=max_grid_size
+    call determine_sizefill(npoints,this%size_fill)
     allocate(this%current(0:this%size))
+    allocate(this%current_for_fillcell(0:this%size_fill))
     if (present(current)) then
-       this%current=current
+       if (isize.ne.this%size_fill) then
+          call this%interpolate_current(isize,this%size_fill,current,this%current_for_fillcell)
+       else
+          this%current_for_fillcell=current
+       endif
+       call this%interpolate_current(isize,this%size,current,this%current)
     else
+       do i=0,this%size_fill
+          this%current_for_fillcell(i)=dble(i)/this%size_fill
+       enddo
        do i=0,this%size
           this%current(i)=dble(i)/this%size
        enddo
     endif
-    allocate(this%accum(0:this%size))
-    allocate(this%nhits(this%size))
+    allocate(this%accum(0:this%size_fill))
+    allocate(this%nhits(this%size_fill))
     this%accum=0d0
     this%nhits=0
   end subroutine grid_init
+
+  subroutine determine_sizefill(npoints,isize)
+    implicit none
+    integer(kind=8),intent(in) :: npoints
+    integer,intent(out) :: isize
+    isize=int(sqrt(dble(npoints))/10)
+    isize=max(isize,min_grid_size)
+    isize=min(isize,max_grid_size)
+  end subroutine determine_sizefill
   
   subroutine integral_init(this,ndim,npoints,ichan,niters)
     implicit none
@@ -434,7 +457,7 @@ contains
     endif
     do i=1,this%ndim
        if (update_grids) then
-          call this%grids(i,this%current_iter)%update(new_grid)
+          call this%grids(i,this%current_iter)%update(this%npoints_iter,new_grid)
           if (this%current_iter .lt. this%max_iters) then
              this%grids(i,this%current_iter+1)=new_grid
           endif
@@ -558,6 +581,26 @@ contains
     enddo
     cell=lo
   end subroutine find_cell
+  
+  subroutine find_cell_to_fill(this,x,cell)
+    implicit none
+    class(grid),intent(inout) :: this
+    real(kind=8),intent(in) :: x
+    integer,intent(out) :: cell
+    integer :: lo,hi,mid
+    lo=0
+    hi=this%size_fill
+    do
+       mid=(lo+hi)/2
+       if (x.lt.this%current_for_fillcell(mid)) then
+          hi=mid
+       else
+          lo=mid+1
+       end if
+       if (lo.ge.hi) exit
+    enddo
+    cell=lo
+  end subroutine find_cell_to_fill
   
   subroutine channel_print_combined_result(this)
     implicit none
@@ -762,7 +805,7 @@ contains
     class(grid),intent(inout) :: this
     real(kind=8),intent(in) :: x,f_abs
     integer :: cell
-    call this%find_cell(x,cell)
+    call this%find_cell_to_fill(x,cell)
     if (importance_sampling_strategy.eq.1) then
        this%accum(cell)=this%accum(cell)+f_abs
     elseif (importance_sampling_strategy.eq.2) then
@@ -781,38 +824,49 @@ contains
     this%nhits(cell)=this%nhits(cell)+1
   end subroutine grid_add_point
 
-  subroutine grid_update(this,new_grid)
+  subroutine grid_update(this,npoints,new_grid)
     implicit none
     class(grid),intent(inout) :: this
+    integer(kind=8),intent(in) :: npoints
     class(grid),intent(out) :: new_grid
-    real(kind=8),dimension(0:this%size) :: current
+    real(kind=8),dimension(0:this%size_fill) :: current
     integer :: i,j
     real(kind=8) :: r
     call this%massage_accum()
     current(0)=0d0
-    do i=1,this%size
-       r=dble(i)/dble(this%size)
-       do j=1,this%size
+    do i=1,this%size_fill
+       r=dble(i)/dble(this%size_fill)
+       do j=1,this%size_fill
           if (r.lt.this%accum(j)) then
-             current(i)=this%current(j-1)+(r-this%accum(j-1))/ &
-                  (this%accum(j)-this%accum(j-1))*(this%current(j)-this%current(j-1))
+             current(i)=this%current_for_fillcell(j-1)+(r-this%accum(j-1))/ &
+                  (this%accum(j)-this%accum(j-1))*(this%current_for_fillcell(j)-this%current_for_fillcell(j-1))
              exit
           endif
        enddo
     enddo
     deallocate(this%accum)
     deallocate(this%nhits)
-    current(this%size)=1d0
-    call new_grid%init(current)
+    current(this%size_fill)=1d0
+    call new_grid%init(npoints,current)
   end subroutine grid_update
-
+  
+  subroutine interpolate_current(this,size_in,size_out,current_in,current_out)
+    use pchip_uniform_strict
+    implicit none
+    class(grid),intent(inout) :: this
+    integer,intent(in) :: size_in,size_out
+    real(kind=8),dimension(0:size_in),intent(in) :: current_in
+    real(kind=8),dimension(0:size_out),intent(out) :: current_out
+    call resize_arr_pchip_strict(current_in,size_out,current_out)
+  end subroutine interpolate_current
+  
   subroutine massage_accum(this)
     implicit none
     class(grid),intent(inout) :: this
     integer :: i
     real(kind=8) :: total
     real(kind=8), parameter :: tiny=1d-8
-    do i=1,this%size
+    do i=1,this%size_fill
        if (this%nhits(i).eq.0) cycle
        if (importance_sampling_strategy.eq.1) then
           this%accum(i)=this%accum(i)/this%nhits(i)
@@ -821,7 +875,7 @@ contains
        endif
     enddo
     total=sum(this%accum)
-    do i=1,this%size
+    do i=1,this%size_fill
        if (this%accum(i).lt.1d-12*total) then
           this%accum(i)=0d0
        elseif (this%accum(i).lt.(1d0-1d-12)*total) then
@@ -831,21 +885,14 @@ contains
        endif
        this%accum(i)=this%accum(i-1)+max(this%accum(i),0d0)
     enddo
-    this%accum=this%accum/this%accum(this%size)
+    this%accum=this%accum/this%accum(this%size_fill)
     ! make sure the elements are at least 'tiny' apart
-    do i=1,this%size
+    do i=1,this%size_fill
        if (this%accum(i).lt.this%accum(i-1)+tiny) then
           this%accum(i)=this%accum(i-1)+tiny
        endif
     enddo
-    this%accum(this%size)=1d0
-    do i=this%size-1,1,-1
-       if (this%accum(i).gt.this%accum(i+1)-tiny) then
-          this%accum(i)=1d0-dble(i)*tiny
-       else
-          exit
-       endif
-    enddo
+    this%accum=this%accum/this%accum(this%size_fill)
   end subroutine massage_accum
 
   subroutine channel_get_point(this,x,wgt)
@@ -915,3 +962,6 @@ contains
   end subroutine write_all_grids
   
 end module simple_integrator_mod
+
+
+
