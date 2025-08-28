@@ -742,6 +742,70 @@ contains
   end subroutine GluonTensortoGluon_coupl
 
 
+  subroutine QuarkScalartoQuark(wfq1,wfs2,wfq,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq
+    complex(kind=8),dimension(1) :: wfs2
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    wfq(1:4)=-prefact*coupl(1)*wfs2(1)*wfq1(1:4)
+  end subroutine QuarkScalartoQuark
+
+  subroutine GluonGluontoScalar(wfg1,wfg2,wfs,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg2
+    complex(kind=8),dimension(1) :: wfs
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8) :: TMP
+    TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
+    wfs(1)= prefact*coupl(1)*TMP
+  end subroutine GluonGluontoScalar
+
+  subroutine ScalarGluontoGluon(wfs1,wfg2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(1) :: wfs1
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: M2
+    complex(kind=8) :: TMP
+
+    !if (coupl(2).ne.0d0) M2=1d0/coupl(2)**2
+    !pwf(0:3)=pwf1(0:3)+pwf2(0:3)
+    !TMP = wfg2(1)*pwf(0)-wfg2(2)*pwf(1)-wfg2(3)*pwf(2)-wfg2(4)*pwf(3)
+
+    wfg(1:4)= prefact*coupl(1)*wfs1(1)*(wfg2(1:4))! - M2*TMP*pwf(0:3))
+  end subroutine ScalarGluontoGluon
+
+  subroutine GluonScalartoGluon(wfg1,wfs2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(1) :: wfs2
+    real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: M2
+    complex(kind=8) :: TMP
+
+    !if (coupl(2).ne.0d0) M2=1d0/coupl(2)**2
+    !pwf(0:3)=pwf1(0:3)+pwf2(0:3)
+    !TMP = wfg1(1)*pwf(0)-wfg1(2)*pwf(1)-wfg1(3)*pwf(2)-wfg1(4)*pwf(3)
+
+    wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))! - M2*TMP*pwf(0:3))
+  end subroutine GluonScalartoGluon
+
+
+  subroutine ScalarScalartoScalar(wfs1,wfs2,wfs,coupl)
+    implicit none
+    complex(kind=8),dimension(1) :: wfs1,wfs2,wfs
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: TMP1
+    TMP1 = 1d0 ! 
+    wfs(1)= TMP1*prefact*coupl(1)*wfs1(1)*wfs2(1)
+  end subroutine ScalarScalartoScalar
 
 
 

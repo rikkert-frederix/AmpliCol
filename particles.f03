@@ -18,15 +18,17 @@ module particles
      procedure,public :: init_part,get_mass,get_width,get_spin,get_antipart,init_vert,get_dim,get_inter_dim
   end type physics_model
 contains
-  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth)
+  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
     class(physics_model) :: this
     integer :: i,l
     real(kind=8) :: tmass,twidth
     real(kind=8) :: zmass,zwidth
     real(kind=8) :: wmass,wwidth
+    real(kind=8) :: hmass,hwidth
+    
     l=0
-    this%npart=13! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, etc.
+    this%npart=15! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -103,6 +105,24 @@ contains
     this%particle_list(l)%anti_type=-24
     this%particle_list(l)%dim=4
 
+    ! H-boson
+    l=l+1
+    this%particle_list(l)%type=25
+    this%particle_list(l)%mass=hmass
+    this%particle_list(l)%width=hwidth
+    this%particle_list(l)%spin=1 ! one spin states
+    this%particle_list(l)%anti_type=25
+    this%particle_list(l)%dim=1
+
+    ! H"tensor" (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    l=l+1
+    this%particle_list(l)%type=-25
+    this%particle_list(l)%mass=0d0
+    this%particle_list(l)%width=0d0
+    this%particle_list(l)%spin=-1 ! ill-defined
+    this%particle_list(l)%anti_type=-25
+    this%particle_list(l)%dim=1
+
     ! Wtensor (non-propagator auxiliary particle to decompose 4-boson interactions)
     l=l+1
     this%particle_list(l)%type=26
@@ -122,7 +142,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 118 ! number of vertices
+    this%nint = 140 ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -188,7 +208,7 @@ contains
        this%vertex_list(l)%particles(3)=-i
        this%vertex_list(l)%coupl=[1d0,0d0]
     enddo
-    ! quark-antiquark to quark vertices
+    ! quark-antiquark to gluon vertices
     do i=1,6
        l=l+1
        this%vertex_list(l)%type=8
@@ -197,7 +217,7 @@ contains
        this%vertex_list(l)%particles(3)=21
        this%vertex_list(l)%coupl=[1d0,0d0]
     enddo
-    ! antiquark-quark to quark vertices
+    ! antiquark-quark to gluon vertices
     do i=1,6
        l=l+1
        this%vertex_list(l)%type=9
@@ -622,6 +642,92 @@ contains
     fact=sqrt(1d0-sw**2)
     this%vertex_list(l)%coupl=[gw*fact,0d0] !!
 
+    ! quark-higgs to quark vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=16
+       this%vertex_list(l)%particles(1)=i
+       this%vertex_list(l)%particles(2)=25
+       this%vertex_list(l)%particles(3)=i
+       this%vertex_list(l)%coupl=[this%get_mass(i)/(2d0*sw),0d0]
+    enddo
+    ! antiquark-higgs to antiquark vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=16
+       this%vertex_list(l)%particles(1)=-i
+       this%vertex_list(l)%particles(2)=25
+       this%vertex_list(l)%particles(3)=-i
+       this%vertex_list(l)%coupl=[this%get_mass(i)/(2d0*sw),0d0]
+    enddo
+    ! Wboson-Wboson to Higgs
+    l=l+1
+    this%vertex_list(l)%type=117
+    this%vertex_list(l)%particles(1)=24
+    this%vertex_list(l)%particles(2)=-24
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    l=l+1
+    this%vertex_list(l)%type=117
+    this%vertex_list(l)%particles(1)=-24
+    this%vertex_list(l)%particles(2)=24
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    ! Higgs-Wboson to Wboson
+    l=l+1
+    this%vertex_list(l)%type=18
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=24
+    this%vertex_list(l)%particles(3)=24
+    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    l=l+1
+    this%vertex_list(l)%type=18
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=-24
+    this%vertex_list(l)%particles(3)=-24
+    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    ! Wboson-Higgs to Wboson
+    l=l+1
+    this%vertex_list(l)%type=19
+    this%vertex_list(l)%particles(1)=24
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=24
+    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    l=l+1
+    this%vertex_list(l)%type=19
+    this%vertex_list(l)%particles(1)=-24
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=-24
+    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    ! Zboson-Zboson to Higgs
+    l=l+1
+    this%vertex_list(l)%type=117
+    this%vertex_list(l)%particles(1)=23
+    this%vertex_list(l)%particles(2)=23
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
+    ! Higgs-Zboson to Zboson
+    l=l+1
+    this%vertex_list(l)%type=18
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=23
+    this%vertex_list(l)%particles(3)=23
+    this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
+    ! Zboson-Higgs to Zboson
+    l=l+1
+    this%vertex_list(l)%type=19
+    this%vertex_list(l)%particles(1)=23
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=23
+    this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
+    ! higgs-higgs to higgs
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[(-3d0/2d0)/sw*(this%get_mass(25)**2/this%get_mass(24)),0d0]  !!
+
     write (*,*) l,'interactions loaded'
   end subroutine init_vert
 
@@ -734,6 +840,14 @@ contains
        is_gluon=.false.
     endif
   end function is_gluon
+  logical function is_scalar(iPDG)
+    integer :: iPDG
+    if (abs(iPDG).eq.25) then
+       is_scalar=.true.
+    else
+       is_scalar=.false.
+    endif
+  end function is_scalar
   logical function is_tensor_g(iPDG)
     implicit none
     integer :: iPDG

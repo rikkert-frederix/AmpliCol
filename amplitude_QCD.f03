@@ -1758,6 +1758,39 @@ contains
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl(1:2))
 
+          elseif(this%interaction_list(iv)%type.eq.16) then
+             call QuarkScalartoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl(1:2))
+
+          elseif(this%interaction_list(iv)%type.eq.117) then
+             call GluonGluontoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                     this%interaction_list(iv)%val_c(1),&
+                                     this%interaction_list(iv)%coupl(1:2))
+
+          elseif(this%interaction_list(iv)%type.eq.18) then
+             call ScalarGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.19) then
+             call GluonScalartoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.120) then
+             call ScalarScalartoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                       this%interaction_list(iv)%val_c(1),&
+                                       this%interaction_list(iv)%coupl(1:2))
+
+
+
+
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -2971,7 +3004,9 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(is_tensor6(lhs%type)) then
+       if (lhs%type.gt.100) then
+         val_size=1
+      elseif(is_tensor6(lhs%type)) then
           val_size=6
        else
           val_size=4
@@ -2981,7 +3016,9 @@ contains
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(is_tensor6(lhs%type)) then
+       if (lhs%type.gt.100) then
+         val_size=1
+       elseif(is_tensor6(lhs%type)) then
           val_size=6
        else
           val_size=4
@@ -3032,6 +3069,8 @@ contains
     if (allocated(rhs%val_c)) then
        if(is_tensor6(lhs%type)) then
           val_size=6
+       elseif(is_scalar(lhs%type)) then
+          val_size=1
        else
           val_size=4
        endif
@@ -3042,6 +3081,8 @@ contains
     if (allocated(rhs%val_r)) then
        if(is_tensor6(lhs%type)) then
           val_size=6
+       elseif(is_scalar(lhs%type)) then
+          val_size=1
        else
           val_size=4
        endif
