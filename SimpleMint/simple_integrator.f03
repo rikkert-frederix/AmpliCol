@@ -19,6 +19,7 @@ module simple_integrator_mod
           &,number,max_iters,nevts_unw_req
      integer(kind=8) :: npoints,npoints_iter
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
+     real(kind=8) :: overweight
      logical :: done,evgen_done
      type(grid),allocatable,dimension(:,:) :: grids
      type(integral),allocatable,dimension(:) :: integrals
@@ -33,10 +34,11 @@ module simple_integrator_mod
      procedure,private :: init_next_iter => channel_init_next_iter
      procedure,private :: check_gen_evnts => channel_check_gen_evnts
      procedure,private :: update_grids => channel_update_grids
+     procedure,private :: update_nevts_unw_req => channel_update_nevts_unw_req
      procedure,private :: recompute_wgt_from_x
   end type channel
   type :: integral
-     real(kind=8) :: max_value
+     real(kind=8) :: max_value,overweight
      real(kind=8),dimension(:),allocatable :: f_max
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,accum&
           &,accum2,unc_iter
@@ -51,11 +53,11 @@ module simple_integrator_mod
      procedure,private :: add_point => integral_add_point
      procedure,private :: update_result_iter => integral_update_result_iter
      procedure,private :: combine_iters => integral_combine_iters
-     procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list
      procedure,private :: init_next_iter => integral_init_next_iter
      procedure,private :: compute_fmax => integral_compute_fmax
      procedure,private :: compute_fmax_next_iter => integral_compute_fmax_next_iter
      procedure,private :: unwgt => integral_unwgt
+     procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list,compute_wgts,is_it_really_done
   end type integral
   type :: grid
      integer :: size,size_fill
@@ -71,7 +73,7 @@ module simple_integrator_mod
   type :: evnt
      real(kind=8),allocatable,dimension(:) :: x,f_abs
      real(kind=8) :: wgt,rnd
-     integer :: iter
+     integer :: iter,label
      logical :: unwgt
   end type evnt
   type,public :: integrator
@@ -83,10 +85,10 @@ module simple_integrator_mod
      type(channel),allocatable,dimension(:) :: channels
      ! keep track of maximum weights of all evnts written---integral-by-integral---and approx how many more we should generate in that channel.
    contains
-     procedure,public :: init,get_points,fill_points,compute_wgt_from_x
+     procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts
      procedure,private :: read_all_grids,write_all_grids&
           &,get_channel_and_integral,update_points_requested&
-          &,print_results,compute_total_rate&
+          &,print_results,compute_total_rate,update_nevts_unw_req&
           &,count_unweighted_evnts,init_next_iter&
           &,get_npoints_nonzero_iter,finalise_iter,update_grids
      ! fill_points should return 'done' when ready; also it should
@@ -100,15 +102,16 @@ module simple_integrator_mod
      ! were 'lost' and should be treated as not-even-generated.
   end type integrator
   double precision, external :: ran2
-  integer :: iters_without_evnts
+  integer,save :: iters_without_evnts,evnt_label=0
   integer,parameter :: importance_sampling_strategy=3
-  real(kind=8),parameter :: write_evnt_fraction=1d0
+  real(kind=8),parameter :: write_evnt_fraction=0.05d0 ! neglect write_evnt_fraction of largest weights to determine fmax for writing
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
   logical,parameter :: turn_off_evnt_generation=.false.
   real(kind=8),parameter :: required_accuracy_factor=10d0
   integer,parameter :: min_grid_size=8
   integer,parameter :: max_grid_size=2048
+  real(kind=8),parameter :: allowed_overweight_factor=0.001d0
 contains
 
   subroutine init(this,nchannel,ndim,nintegral,nevts_unw_req,niters)
@@ -119,10 +122,10 @@ contains
     integer :: i
     this%nchannel=nchannel
     this%nevts_unw_req=nevts_unw_req
-    ! if we assume 0.3% unweighting efficiency, we expect ~10% time
+    ! if we assume 1% unweighting efficiency, we expect ~10% time
     ! spend in iterations that do not produce events:
     iters_without_evnts=5
-    this%npoints_requested=int(nevts_unw_req/(0.03*2**iters_without_evnts),kind=8)
+    this%npoints_requested=int(nevts_unw_req/(0.1d0*2**iters_without_evnts),kind=8)
     do while (this%npoints_requested/this%nchannel.lt.max(min_points_per_channel,min_points_per_integral*maxval(nintegral)) &
          .and. iters_without_evnts.gt.3)
        iters_without_evnts=iters_without_evnts-1
@@ -269,6 +272,7 @@ contains
     this%evgen_done=.false.
     this%current_iter=0
     this%npoints_nonzero_total=0_8
+    this%overweight=0d0
   end subroutine integral_init
   
   subroutine get_points(this,npoints,ichan,iint)
@@ -332,7 +336,7 @@ contains
     call this%get_npoints_nonzero_iter(npoints_nonzero)
     write (*,*) ''
     write (*,'(a,x,i4,x,a,x,i10,x,a)') &
-         'iter',this%channels(1)%current_iter,'(',npoints_nonzero, &
+         'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
          'points) '//trim(formatted)//' :'
     call this%compute_total_rate()
     call this%count_unweighted_evnts()
@@ -381,12 +385,65 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
+    real(kind=8) :: nominal_evt_wgt
+    call this%update_nevts_unw_req
+    nominal_evt_wgt=this%res(1)/dble(this%nevts_unw_req)
     do i=1,this%nchannel
-       this%channels(i)%nevts_unw_req=int(this%nevts_unw_req*this%channels(i)%res(1)/this%res(1))+1
        call this%channels(i)%check_gen_evnts()
     enddo
   end subroutine count_unweighted_evnts
 
+  subroutine update_nevts_unw_req(this)
+    use sort_array_mod
+    implicit none
+    class(integrator),intent(inout) :: this
+    real(kind=8),dimension(this%nchannel) :: res
+    integer :: nevts_to_distribute,i
+    integer,dimension(this%nchannel) :: idx
+    real(kind=8) :: total
+    res=this%channels%res(1)
+    call sort_indices_by_values(res,idx)
+    nevts_to_distribute=this%nevts_unw_req
+    total=this%res(1)
+    do i=1,this%nchannel-1
+       this%channels(idx(i))%nevts_unw_req=int(nevts_to_distribute*this%channels(idx(i))%res(1)/total)
+       if (ran2().lt.nevts_to_distribute*this%channels(idx(i))%res(1)/this%res(1)-&
+                     this%channels(idx(i))%nevts_unw_req) then
+          this%channels(idx(i))%nevts_unw_req=this%channels(idx(i))%nevts_unw_req+1
+       endif
+       nevts_to_distribute=nevts_to_distribute-this%channels(idx(i))%nevts_unw_req
+       total=total-this%channels(idx(i))%res(1)
+    enddo
+    this%channels(idx(this%nchannel))%nevts_unw_req=nevts_to_distribute
+    do i=1,this%nchannel
+       call this%channels(i)%update_nevts_unw_req()
+    enddo
+  end subroutine update_nevts_unw_req
+
+  subroutine channel_update_nevts_unw_req(this)
+    use sort_array_mod
+    implicit none
+    class(channel),intent(inout) :: this
+    real(kind=8),dimension(this%nintegral) :: res
+    integer :: nevts_to_distribute,i
+    integer,dimension(this%nintegral) :: idx
+    real(kind=8) :: total
+    res=this%integrals%res(1)
+    call sort_indices_by_values(res,idx)
+    nevts_to_distribute=this%nevts_unw_req
+    total=this%res(1)
+    do i=1,this%nintegral-1
+       this%integrals(idx(i))%nevts_unw_req=int(nevts_to_distribute*this%integrals(idx(i))%res(1)/total)
+       if (ran2().lt.nevts_to_distribute*this%integrals(idx(i))%res(1)/this%res(1)-&
+                     this%integrals(idx(i))%nevts_unw_req) then
+          this%integrals(idx(i))%nevts_unw_req=this%integrals(idx(i))%nevts_unw_req+1
+       endif
+       nevts_to_distribute=nevts_to_distribute-this%integrals(idx(i))%nevts_unw_req
+       total=total-this%integrals(idx(i))%res(1)
+    enddo
+    this%integrals(idx(this%nintegral))%nevts_unw_req=nevts_to_distribute
+  end subroutine channel_update_nevts_unw_req
+  
   subroutine compute_total_rate(this)
     implicit none
     class(integrator),intent(inout) :: this
@@ -449,9 +506,10 @@ contains
     type(grid) :: new_grid
     integer :: i
     logical update_grids
-    update_grids=((.not.this%evgen_done) .and. &
+    update_grids=(((.not.this%evgen_done) .and. &
          this%unc(1)/this%res(1).gt.1d0/(sqrt(dble(this%nevts_unw_req))*required_accuracy_factor)) .or. &
-         this%current_iter.le.iters_without_evnts
+         this%current_iter.le.iters_without_evnts) .and. &
+         this%npoints_iter.gt.int(this%npoints*0.2d0)
     if (.not.update_grids) then
        write (*,*) 'keeping grids fixed for channel',this%number
     endif
@@ -471,18 +529,78 @@ contains
     implicit none
     class(channel),intent(inout) :: this
     integer :: i
+    logical :: done
     do i=1,this%nintegral
        call this%integrals(i)%compute_fmax(this)
        call this%integrals(i)%unwgt()
-       this%integrals(i)%nevts_unw_req=int(this%integrals(i)%res(1)/this%res(1)*this%nevts_unw_req)+1
        if (this%integrals(i)%nevts_unw_gen.gt.this%integrals(i)%nevts_unw_req) then
-          this%integrals(i)%evgen_done=.true.
+          ! iteratively improve fmax to get exactly nevts_unw_req and
+          ! check if overweight fraction is not too large
+          call this%integrals(i)%is_it_really_done(done)
+          if (done) then
+             this%integrals(i)%evgen_done=.true.
+          else
+             this%integrals(i)%evgen_done=.false.
+             this%integrals(i)%nevts_unw_gen=min(int(this%integrals(i)%nevts_unw_req*0.8d0),&
+                  int(this%integrals(i)%nevts_unw_req*allowed_overweight_factor/this%integrals(i)%overweight))
+          endif
        else
           this%integrals(i)%evgen_done=.false.
        endif
     enddo
+    this%overweight=sum(this%integrals%overweight)
   end subroutine channel_check_gen_evnts
 
+  
+  subroutine is_it_really_done(this,done)
+    use topk_heap_mod
+    implicit none
+    class(integral),intent(inout) :: this
+    logical,intent(out) :: done
+    integer :: j,k
+    real(kind=8),dimension(this%current_iter) :: fmax
+    real(kind=8),dimension(this%nevnt_in_list) :: fabs
+    real(kind=8),dimension(this%nevts_unw_req) :: fabs_top
+    integer,dimension(this%nevts_unw_req) :: top_idx
+    real(kind=8) :: fmax_req,tmp
+    ! rescale all f_abs such that they are equivalent for all iterations
+    fmax=0d0
+    do j=1,this%nevnt_in_list
+       this%evnt_list(j)%unwgt=.false.
+       do k=iters_without_evnts+1,this%current_iter
+          fmax(k)=max(fmax(k),this%evnt_list(j)%f_abs(k))
+       enddo
+    enddo
+    ! rescale
+    do j=1,this%nevnt_in_list
+       fabs(j)=(this%evnt_list(j)%f_abs(this%evnt_list(j)%iter)/this%evnt_list(j)%rnd)/fmax(this%evnt_list(j)%iter)
+    enddo
+    ! Take the nevts_unw_req largest
+    k=this%nevts_unw_req
+    call topk_largest(fabs,k,fabs_top,top_idx)
+    ! find the fmax such that all remain
+    fmax_req=fabs_top(k)
+    ! check the overweight fraction
+    this%overweight=0d0
+    do j=1,this%nevts_unw_req
+       this%evnt_list(top_idx(j))%unwgt=.true.
+       tmp=this%evnt_list(top_idx(j))%f_abs(this%evnt_list(top_idx(j))%iter)/fmax(this%evnt_list(top_idx(j))%iter)
+       if (tmp.lt.fmax_req) cycle
+       this%overweight=this%overweight+(tmp/fmax_req-1d0)
+    enddo
+    this%overweight=this%overweight/dble(this%nevts_unw_req)
+    if (this%overweight.lt.allowed_overweight_factor) then
+       done=.true.
+    else
+       done=.false.
+    endif
+!!$    write (*,*) fabs
+!!$    write (*,*) fabs_top
+!!$    write (*,*) this%overweight,fmax_req,done
+!!$    stop 1
+  end subroutine is_it_really_done
+
+  
   subroutine integral_unwgt(this)
     implicit none
     class(integral),intent(inout) :: this
@@ -490,19 +608,24 @@ contains
     this%nevts_unw_gen=0
     do j=1,this%nevnt_in_list
        iter=this%evnt_list(j)%iter
-       this%evnt_list(j)%unwgt=this%evnt_list(j)%f_abs(iter).gt.this%f_max(iter)*this%evnt_list(j)%rnd
-       if (this%evnt_list(j)%unwgt) this%nevts_unw_gen=this%nevts_unw_gen+1
+       if (this%evnt_list(j)%f_abs(iter).gt.this%f_max(iter)*this%evnt_list(j)%rnd) &
+            this%nevts_unw_gen=this%nevts_unw_gen+1
     enddo
   end subroutine integral_unwgt
   
   subroutine integral_compute_fmax(this,thischan)
+    use topk_heap_mod
     implicit none
     class(integral),intent(inout) :: this
     class(channel),intent(inout) :: thischan
     real(kind=8),dimension(this%ndim) :: x
     real(kind=8) :: wgt,wgt_new
     integer :: j,k,nevnt,iter
+    integer,allocatable,dimension(:) :: index_fmax_top
+    real(kind=8),allocatable,dimension(:) :: fmax_top
+    real(kind=8),allocatable,dimension(:,:) :: fabs
     nevnt=this%nevnt_in_list
+    allocate(fabs(nevnt,this%current_iter))
     do j=1,nevnt
        iter=this%evnt_list(j)%iter
        if (iter.ne.this%current_iter) cycle
@@ -513,28 +636,50 @@ contains
              call thischan%recompute_wgt_from_x(k,x,wgt_new)
              this%evnt_list(j)%f_abs(k)=this%evnt_list(j)%f_abs(iter)*wgt_new/wgt
           endif
-          this%f_max(k)=max(this%f_max(k),this%evnt_list(j)%f_abs(k))
+          fabs(j,k)=this%evnt_list(j)%f_abs(k)
        enddo
     enddo
+    nevnt=max(int(write_evnt_fraction*nevnt),1)
+    allocate(fmax_top(nevnt))
+    allocate(index_fmax_top(nevnt))
+    do k=iters_without_evnts+1,this%current_iter
+       call topk_largest(fabs(:,k),nevnt,fmax_top,index_fmax_top)
+       this%f_max(k)=fmax_top(nevnt)
+    enddo
+    deallocate(fabs)
+    deallocate(fmax_top)
+    deallocate(index_fmax_top)
   end subroutine integral_compute_fmax
 
   subroutine integral_compute_fmax_next_iter(this,thischan)
+    use topk_heap_mod
     implicit none
     class(integral),intent(inout) :: this
     class(channel),intent(inout) :: thischan
     real(kind=8),dimension(this%ndim) :: x
     real(kind=8) :: wgt,wgt_new
     integer :: j,k,nevnt,iter,next_iter
+    integer,allocatable,dimension(:) :: index_fmax_top
+    real(kind=8),allocatable,dimension(:) :: fmax_top,fabs
     next_iter=this%current_iter
     nevnt=this%nevnt_in_list
+    allocate(fabs(nevnt))
     do j=1,nevnt
        iter=this%evnt_list(j)%iter
        x=this%evnt_list(j)%x
        wgt=this%evnt_list(j)%wgt
        call thischan%recompute_wgt_from_x(next_iter,x,wgt_new)
        this%evnt_list(j)%f_abs(next_iter)=this%evnt_list(j)%f_abs(iter)*wgt_new/wgt
-       this%f_max(next_iter)=max(this%f_max(next_iter),this%evnt_list(j)%f_abs(next_iter))
+       fabs(j)=this%evnt_list(j)%f_abs(next_iter)
     enddo
+    nevnt=max(int(write_evnt_fraction*nevnt),1)
+    allocate(fmax_top(nevnt))
+    allocate(index_fmax_top(nevnt))
+    call topk_largest(fabs,nevnt,fmax_top,index_fmax_top)
+    this%f_max(next_iter)=fmax_top(nevnt)
+    deallocate(fabs)
+    deallocate(fmax_top)
+    deallocate(index_fmax_top)
   end subroutine integral_compute_fmax_next_iter
   
   subroutine recompute_wgt_from_x(this,iter,x,wgt)
@@ -613,15 +758,15 @@ contains
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
        if (this%integrals(i)%nevts_unw_gen.gt.this%integrals(i)%nevts_unw_req) then
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,e8.2,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
-               '--',this%integrals(i)%nevts_unw_gen,'(',this%integrals(i)%nevts_unw_req,') DONE'
+               '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req,'-- DONE'
        else
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,i10,1x,a)') &
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,e8.2,1x,a,1x,i10)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
-               '--',this%integrals(i)%nevts_unw_gen,'(',this%integrals(i)%nevts_unw_req,')'
+               '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req
        endif
     enddo
   end subroutine channel_print_combined_result
@@ -747,7 +892,7 @@ contains
     this%accum(2)=this%accum(2)+f
     this%accum2(1)=this%accum2(1)+f_abs**2
     this%accum2(2)=this%accum2(2)+f**2
-    call this%update_max_value(f_abs)
+    if (this%current_iter.le.iters_without_evnts) call this%update_max_value(f_abs)
     call this%check_write_evnt(x,wgt,f_abs,to_write,enough)
     if (this%npoints_nonzero.ge.this%npoints_requested .or. enough) this%done=.true.
   end subroutine integral_add_point
@@ -771,9 +916,12 @@ contains
     if (turn_off_evnt_generation) return
     if (this%current_iter.le.iters_without_evnts) return
     rnd=ran2()
-    if (f_abs.gt.this%f_max(this%current_iter)*rnd*write_evnt_fraction) then
+    if (f_abs.gt.this%f_max(this%current_iter)*rnd) then
+       to_write=.true.
+       evnt_label=evnt_label+1
        this%evnt=this%evnt+1
        this%nevnt_in_list=this%nevnt_in_list+1
+!!$       write (*,*) evnt_label,this%evnt+1,this%nevnt_in_list,f_abs,this%f_max(this%current_iter)
        if (this%nevnt_in_list.gt.size(this%evnt_list)) call this%increase_size_evnt_list()
        allocate(this%evnt_list(this%nevnt_in_list)%f_abs(this%max_iters))
        allocate(this%evnt_list(this%nevnt_in_list)%x(this%ndim))
@@ -783,11 +931,66 @@ contains
        this%evnt_list(this%nevnt_in_list)%wgt=wgt
        this%evnt_list(this%nevnt_in_list)%x=x
        this%evnt_list(this%nevnt_in_list)%iter=this%current_iter
+       this%evnt_list(this%nevnt_in_list)%label=evnt_label
        if (f_abs.gt.this%f_max(this%current_iter)*rnd) this%nevts_unw_gen=this%nevts_unw_gen+1
        if (this%nevts_unw_gen.gt.1.1d0*this%nevts_unw_req) enough=.true.
-       if (f_abs.gt.this%f_max(this%current_iter)) this%f_max(this%current_iter)=f_abs
     endif
   end subroutine check_write_evnt
+
+  subroutine assign_evnt_wgts(this,wgts)
+    implicit none
+    class(integrator) :: this
+    real(kind=8),allocatable,dimension(:),intent(out) :: wgts
+    integer :: i,j
+    real(kind=8) :: nominal_wgt
+    allocate(wgts(evnt_label))
+    nominal_wgt=this%res(1)
+    do i=1,this%nchannel
+       do j=1,this%channels(i)%nintegral
+          call this%channels(i)%integrals(j)%compute_wgts(nominal_wgt,wgts)
+       enddo
+    enddo
+  end subroutine assign_evnt_wgts
+
+  subroutine compute_wgts(this,nominal_wgt,wgts)
+    implicit none
+    class(integral) :: this
+    real(kind=8),dimension(*),intent(inout) :: wgts
+    real(kind=8),intent(in) :: nominal_wgt
+    real(kind=8) :: number_of_evnts,wgt
+    integer :: i
+    number_of_evnts=0d0
+    do i=1,this%nevnt_in_list
+!!$       if (this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .gt.&
+!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction) then
+!!$          ! overweight
+!!$          number_of_evnts=number_of_evnts+&
+!!$               this%evnt_list(i)%f_abs(this%evnt_list(i)%iter)/(this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction)
+!!$       elseif(this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .gt.&
+!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction*this%evnt_list(i)%rnd) then
+          ! normal weight
+       if (this%evnt_list(i)%unwgt) number_of_evnts=number_of_evnts+1d0
+!!$       endif
+    enddo
+    do i=1,this%nevnt_in_list
+!!$       wgt=this%res(1)/number_of_evnts*dble(evnt_label)
+!!$       if (this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .gt.&
+!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction) then
+!!$          ! overweight
+!!$          wgt=wgt*this%evnt_list(i)%f_abs(this%evnt_list(i)%iter)/&
+!!$               (this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction)
+!!$       elseif (this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .lt.&
+!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction*this%evnt_list(i)%rnd) then
+!!$          ! did not pass unweighting
+!!$          wgt=0d0
+!!$       endif
+       if (this%evnt_list(i)%unwgt) then
+          wgts(this%evnt_list(i)%label)=nominal_wgt
+       else
+          wgts(this%evnt_list(i)%label)=0d0
+       endif
+    enddo
+  end subroutine compute_wgts
   
   subroutine increase_size_evnt_list(this)
     implicit none

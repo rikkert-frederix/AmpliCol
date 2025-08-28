@@ -29,10 +29,11 @@ program matrix_integrate_QCD
   integer :: ichan,iint,itmax,ncalls0,iamp
   real(kind=8),dimension(1) :: f,f_abs
   logical :: done
+  real(kind=8),dimension(:),allocatable :: wgts
   call cpu_time(tTot_B)
 
   ncalls0=100000
-  itmax=16
+  itmax=32
 
   ! setting energy
   sqrts=14000.d0
@@ -155,6 +156,11 @@ program matrix_integrate_QCD
 
   enddo ! loop over phase-space-order groups
 
+  filename='Outputs/events.lhe'
+  open(unit=11,file=filename,action='readwrite',status='unknown')
+  if (COMMAND_ARGUMENT_COUNT().le.10) &
+       call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
+  
   allocate(nintegrals(ngroups))
   if (keep_processes_separate) then
      nintegrals(1:ngroups)=pgl(1:ngroups)%nproc
@@ -176,12 +182,22 @@ program matrix_integrate_QCD
         enddo
         if (done) call create_amplitude_lib()
      endif
-     if (any(to_write)) then
-        write (*,*) 'need to write the event. not implemented'
-        stop 1
+     if (to_write(1)) then
+        call unwgt_process(pgl(ichan))      ! pick a random process
+        call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
+        call write_event(11,pgl(ichan),1d0)
      endif
      if (done) exit
   enddo
+  call flush(11)
+  call simple_integrator%assign_evnt_wgts(wgts)
+  rewind(11)
+  filename='Outputs/events_wgts.lhe'
+  open(unit=12,file=filename,action='write',status='unknown')
+  do i=1,size(wgts)
+     call event_update_wgt(11,12,wgts(i))
+  enddo
+  close(11)
   
 !!$  if (integration_step.le.1) then
 !!$     ! grid setup, or computation of upper bounding envelope
@@ -490,8 +506,12 @@ contains
     close(14)
     filename='library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
-    write(14)PS_choice
-    write(14)ngroups
+    write(14) PS_choice
+    write(14) pgl_unique%next,pgl_unique%nproc
+    write(14) unique_map
+    write(14) unique_map_value
+    write(14) pgl_unique%processes
+    write(14) ngroups
     do igroup=1,ngroups
        ! amplitudes
        write(14) size(pgl(igroup)%amps)
@@ -530,6 +550,7 @@ contains
        write(14) size(pgl(igroup)%amp2)
        write(14) size(pgl(igroup)%amp2_hel)
        write(14) size(pgl(igroup)%passed),pgl(igroup)%passed
+       write(14) shape(pgl(igroup)%color_orders),pgl(igroup)%color_orders
     enddo
     close(14)
   end subroutine create_amplitude_lib
@@ -540,6 +561,14 @@ contains
     filename='library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
     read(14)PS_choice
+    allocate(pgl_unique)
+    read(14) pgl_unique%next,pgl_unique%nproc
+    allocate(unique_map(pgl_unique%nproc))
+    read(14) unique_map
+    allocate(unique_map_value(pgl_unique%nproc))
+    read(14) unique_map_value
+    allocate(pgl_unique%processes(pgl_unique%next,pgl_unique%nproc))
+    read(14) pgl_unique%processes
     read(14)ngroups
     allocate(pgl(ngroups))
     do igroup=1,ngroups
@@ -622,6 +651,9 @@ contains
        read(14) dim1
        allocate(pgl(igroup)%passed(dim1))
        read(14) pgl(igroup)%passed
+       read(14) dim1,dim2
+       allocate(pgl(igroup)%color_orders(dim1,dim2))
+       read(14) pgl(igroup)%color_orders
     enddo
     close(14)
   end subroutine read_amplitude_lib
@@ -658,11 +690,6 @@ contains
           endif
        enddo
        call read_processes_from_file(filename)
-       if (integration_step.le.1) then
-          ! make sure pgl_unique is deallocated consistently:
-          call finalize_phase_space_order_group(pgl_unique)
-          deallocate(pgl_unique)
-       endif
        close(10)
     elseif (argc.le.10) then
        write(*,*) 'Inconsistent arguments:'

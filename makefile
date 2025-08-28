@@ -7,7 +7,7 @@ LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
-pchip_uniform_strict.o
+helper_modules.o
 
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
@@ -85,4 +85,4 @@ multichannel.o : handling_processes.o mint_module.o math_functions.o simple_inte
 handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
-simple_integrator.o : pchip_uniform_strict.o
+simple_integrator.o : helper_modules.o

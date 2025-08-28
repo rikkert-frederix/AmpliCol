@@ -19,7 +19,7 @@ module common
   logical,parameter :: use_cross_process_optimisation_of_currents=.true.
   logical,parameter :: keep_processes_separate=.false.
   logical,parameter :: create_amplitude_library=.false.
-  logical,parameter :: use_amplitude_library=.true.
+  logical,parameter :: use_amplitude_library=.false.
 
   ! setup cuts. Set to '-1d0' means do not apply any cut on this variable
   ! jets:

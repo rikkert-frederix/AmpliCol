@@ -12,7 +12,7 @@ contains
     real(kind=8) :: wgt
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
-    write (iunit,*) pgl%next,sign(wgt,evt_sign)
+    write (iunit,'(i4,e18.10)') pgl%next,sign(wgt,evt_sign)
     if (keep_processes_separate) then
        write (iunit,'(100i3)') pgl%amps(iproc_picked)%spins(1:pgl%next,hel_picked(1),hel_picked(2))
     else
@@ -46,6 +46,31 @@ contains
     write (iunit,*) '</event>'
   end subroutine write_event
 
+  subroutine event_update_wgt(iunit,ounit,wgt)
+    implicit none
+    character(len=1024) :: string
+    integer :: next,iunit,ounit
+    real(kind=8) :: wgt
+    logical,save :: firsttime=.true.
+    if (firsttime) then
+       do
+          read(iunit,'(a)') string
+          write(ounit,'(a)') trim(string)
+          if (index(string,"<event>").ne.0) exit
+       enddo
+    else
+       read(iunit,'(a)') string
+       if (wgt.ne.0d0) write(ounit,'(a)') trim(string)
+    endif
+    read(iunit,*) next
+    if (wgt.ne.0d0) write(ounit,'(i4,e18.10)') next,wgt
+    do
+       read(iunit,'(a)') string
+       if (wgt.ne.0d0) write(ounit,'(a)') trim(string)
+       if (index(string,"</event>").ne.0) exit
+    enddo
+  end subroutine event_update_wgt
+  
   subroutine unwgt_process(pgl)
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
@@ -140,7 +165,7 @@ contains
     endif
   end subroutine unwgt_helicity
 
-  subroutine write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
+  subroutine write_unique_in_file(pgl_unique,unique_map,unique_map_value)
     implicit none
     type(phase_space_order_group),allocatable :: pgl_unique
     real(kind=8),dimension(pgl_unique%nproc) :: unique_map_value
@@ -150,10 +175,7 @@ contains
     do iproc=1,pgl_unique%nproc
        write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
     enddo
-    ! make sure pgl_unique_unique is deallocated consistently:
-    call finalize_phase_space_order_group(pgl_unique)
-    deallocate(pgl_unique)
-  end subroutine write_unique_in_file_and_deallocate
+  end subroutine write_unique_in_file
 
   subroutine create_run_tag(integration_step)
     use mint_module
