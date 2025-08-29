@@ -769,15 +769,23 @@ contains
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
        if (this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,e8.2,1x,a,1x,i10,1x,a)') &
+          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
                '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req,'-- DONE'
        else
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,e8.2,1x,a,1x,i10)') &
-               i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
-               '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
-               '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req
+          if (this%integrals(i)%nevnt_in_list.lt.this%integrals(i)%nevts_unw_req) then
+             write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,a,1x,a,1x,i10)') &
+                  i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
+                  '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
+                  '--','    N/A ','--',this%integrals(i)%nevts_unw_req
+
+          else
+             write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10)') &
+                  i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
+                  '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
+                  '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req
+          endif
        endif
     enddo
   end subroutine channel_print_combined_result
