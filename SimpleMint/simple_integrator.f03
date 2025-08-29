@@ -57,7 +57,7 @@ module simple_integrator_mod
      procedure,private :: compute_fmax => integral_compute_fmax
      procedure,private :: compute_fmax_next_iter => integral_compute_fmax_next_iter
      procedure,private :: unwgt => integral_unwgt
-     procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list,compute_wgts,is_it_really_done
+     procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list,compute_wgts,check_overweight
   end type integral
   type :: grid
      integer :: size,size_fill
@@ -540,9 +540,7 @@ contains
        endif
        call this%integrals(i)%unwgt()
        if (this%integrals(i)%nevts_unw_gen.gt.this%integrals(i)%nevts_unw_req) then
-          ! iteratively improve fmax to get exactly nevts_unw_req and
-          ! check if overweight fraction is not too large
-          call this%integrals(i)%is_it_really_done(done)
+          call this%integrals(i)%check_overweight(done)
           if (done) then
              this%integrals(i)%evgen_done=.true.
           else
@@ -558,7 +556,7 @@ contains
   end subroutine channel_check_gen_evnts
 
   
-  subroutine is_it_really_done(this,done)
+  subroutine check_overweight(this,done)
     use topk_heap_mod
     implicit none
     class(integral),intent(inout) :: this
@@ -600,12 +598,7 @@ contains
     else
        done=.false.
     endif
-!!$    write (*,*) fabs
-!!$    write (*,*) fabs_top
-!!$    write (*,*) this%overweight,fmax_req,done
-!!$    stop 1
-  end subroutine is_it_really_done
-
+  end subroutine check_overweight
   
   subroutine integral_unwgt(this)
     implicit none
@@ -629,10 +622,9 @@ contains
     integer :: j,k,nevnt,iter
     integer,allocatable,dimension(:) :: index_fmax_top
     real(kind=8),allocatable,dimension(:) :: fmax_top
-    real(kind=8),allocatable,dimension(:,:) :: fabs
+    real(kind=8),dimension(this%nevnt_in_list,this%current_iter) :: fabs
     nevnt=this%nevnt_in_list
     if (nevnt.eq.0) return
-    allocate(fabs(nevnt,this%current_iter))
     do j=1,nevnt
        iter=this%evnt_list(j)%iter
        x=this%evnt_list(j)%x
@@ -653,7 +645,6 @@ contains
        call topk_largest(fabs(:,k),nevnt,fmax_top,index_fmax_top)
        this%f_max(k)=fmax_top(nevnt)
     enddo
-    deallocate(fabs)
     deallocate(fmax_top)
     deallocate(index_fmax_top)
   end subroutine integral_compute_fmax
