@@ -28,7 +28,7 @@ contains
     real(kind=8) :: hmass,hwidth
     
     l=0
-    this%npart=15! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
+    this%npart=16! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -105,7 +105,7 @@ contains
     this%particle_list(l)%anti_type=-24
     this%particle_list(l)%dim=4
 
-    ! H-boson
+    ! Higgs-boson
     l=l+1
     this%particle_list(l)%type=25
     this%particle_list(l)%mass=hmass
@@ -114,13 +114,21 @@ contains
     this%particle_list(l)%anti_type=25
     this%particle_list(l)%dim=1
 
-    ! H"tensor" (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    ! Higgs"or"A (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
     l=l+1
-    this%particle_list(l)%type=-25
+    this%particle_list(l)%type=125
     this%particle_list(l)%mass=0d0
     this%particle_list(l)%width=0d0
     this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=-25
+    this%particle_list(l)%anti_type=125
+    this%particle_list(l)%dim=1
+    ! Higgs"or"B (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    l=l+1
+    this%particle_list(l)%type=126
+    this%particle_list(l)%mass=0d0
+    this%particle_list(l)%width=0d0
+    this%particle_list(l)%spin=-1 ! ill-defined
+    this%particle_list(l)%anti_type=126
     this%particle_list(l)%dim=1
 
     ! Wtensor (non-propagator auxiliary particle to decompose 4-boson interactions)
@@ -142,7 +150,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 140 ! number of vertices
+    this%nint = 155 ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -642,7 +650,7 @@ contains
     fact=sqrt(1d0-sw**2)
     this%vertex_list(l)%coupl=[gw*fact,0d0] !!
 
-    ! quark-higgs to quark vertices
+    ! quark-Higgs to quark vertices
     do i=1,6
        l=l+1
        this%vertex_list(l)%type=16
@@ -651,7 +659,7 @@ contains
        this%vertex_list(l)%particles(3)=i
        this%vertex_list(l)%coupl=[this%get_mass(i)/(2d0*sw),0d0]
     enddo
-    ! antiquark-higgs to antiquark vertices
+    ! antiquark-Higgs to antiquark vertices
     do i=1,6
        l=l+1
        this%vertex_list(l)%type=16
@@ -720,13 +728,118 @@ contains
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=23
     this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
-    ! higgs-higgs to higgs
+    ! Higgs-Higgs to Higgs
     l=l+1
     this%vertex_list(l)%type=120
     this%vertex_list(l)%particles(1)=25
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[(-3d0/2d0)/sw*(this%get_mass(25)**2/this%get_mass(24)),0d0]  !!
+
+    ! Wboson-Wboson to HiggsorB
+    l=l+1
+    this%vertex_list(l)%type=117
+    this%vertex_list(l)%particles(1)=24
+    this%vertex_list(l)%particles(2)=-24
+    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
+    l=l+1
+    this%vertex_list(l)%type=117
+    this%vertex_list(l)%particles(1)=-24
+    this%vertex_list(l)%particles(2)=24
+    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
+    !! Zboson-Zboson to HiggsorB
+    l=l+1
+    this%vertex_list(l)%type=117
+    this%vertex_list(l)%particles(1)=23
+    this%vertex_list(l)%particles(2)=23
+    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%coupl=[1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
+    ! HiggsorA-Higgs to Higgs
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=125
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    ! Higgs-HiggsorA to Higgs
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=125
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    ! Higgs-Higgs to HiggsorA
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=125
+    this%vertex_list(l)%coupl=[(-3d0/4d0)/sw**2*this%get_mass(25)**2/this%get_mass(24)**2,0d0]  !!
+    ! HiggsorB-Higgs to Higgs
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=126
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    ! Higgs-HiggsorB to Higgs
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=126
+    this%vertex_list(l)%particles(3)=25
+    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    ! Higgs-Higgs to HiggsorB
+    l=l+1
+    this%vertex_list(l)%type=120
+    this%vertex_list(l)%particles(1)=25
+    this%vertex_list(l)%particles(2)=25
+    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%coupl=[1d0,-10d0]  !!
+
+    ! HiggsorB-Zboson to Zboson
+    l=l+1
+    this%vertex_list(l)%type=18
+    this%vertex_list(l)%particles(1)=126
+    this%vertex_list(l)%particles(2)=23
+    this%vertex_list(l)%particles(3)=23
+    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
+    ! Zboson-HiggsorB to Zboson
+    l=l+1
+    this%vertex_list(l)%type=19
+    this%vertex_list(l)%particles(1)=23
+    this%vertex_list(l)%particles(2)=126
+    this%vertex_list(l)%particles(3)=23
+    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
+
+    ! HiggsorB-Wboson to Wboson
+    l=l+1
+    this%vertex_list(l)%type=18
+    this%vertex_list(l)%particles(1)=126
+    this%vertex_list(l)%particles(2)=24
+    this%vertex_list(l)%particles(3)=24
+    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
+    l=l+1
+    this%vertex_list(l)%type=18
+    this%vertex_list(l)%particles(1)=126
+    this%vertex_list(l)%particles(2)=-24
+    this%vertex_list(l)%particles(3)=-24
+    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
+    ! Wboson-HiggsorB to Wboson
+    l=l+1
+    this%vertex_list(l)%type=19
+    this%vertex_list(l)%particles(1)=24
+    this%vertex_list(l)%particles(2)=126
+    this%vertex_list(l)%particles(3)=24
+    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
+    l=l+1
+    this%vertex_list(l)%type=19
+    this%vertex_list(l)%particles(1)=-24
+    this%vertex_list(l)%particles(2)=126
+    this%vertex_list(l)%particles(3)=-24
+    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
 
     write (*,*) l,'interactions loaded'
   end subroutine init_vert
@@ -842,7 +955,7 @@ contains
   end function is_gluon
   logical function is_scalar(iPDG)
     integer :: iPDG
-    if (abs(iPDG).eq.25) then
+    if (abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126) then
        is_scalar=.true.
     else
        is_scalar=.false.
@@ -921,6 +1034,15 @@ contains
        is_higgs=.false.
     endif
   end function is_higgs
+  logical function is_higgsor(iPDG)
+    implicit none
+    integer :: iPDG
+    if (iPDG.eq.125.or.IPDG.eq.126) then
+       is_higgsor=.true.
+    else
+       is_higgsor=.false.
+    endif
+  end function is_higgsor
   logical function is_jet(iPDG)
     implicit none
     integer :: iPDG

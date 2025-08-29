@@ -1832,6 +1832,10 @@ contains
              if (isize.ne.n-1)  then
                 call include_scalar_propagator()
              endif
+          elseif (is_higgsor(this%current_list(ic)%type)) then
+             ! a non-propagating scalar current
+             call combine_interactions(1)
+
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
              stop 1

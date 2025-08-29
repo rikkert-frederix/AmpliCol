@@ -802,9 +802,10 @@ contains
     complex(kind=8),dimension(1) :: wfs1,wfs2,wfs
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: TMP1
-    TMP1 = 1d0 ! 
-    wfs(1)= TMP1*prefact*coupl(1)*wfs1(1)*wfs2(1)
+    complex(kind=8) :: TMP
+    TMP=(1d0,0d0)
+    if (coupl(2).eq.-10d0) TMP=(0d0,1d0)
+    wfs(1)= prefact*TMP*coupl(1)*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar
 
 
