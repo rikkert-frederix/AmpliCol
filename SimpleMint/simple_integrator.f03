@@ -532,6 +532,12 @@ contains
     logical :: done
     do i=1,this%nintegral
        call this%integrals(i)%compute_fmax(this)
+       if (this%integrals(i)%nevts_unw_req.eq.0) then
+          this%integrals(i)%evgen_done=.true.
+          this%integrals(i)%nevts_unw_gen=0
+          this%integrals(i)%overweight=0d0
+          cycle
+       endif
        call this%integrals(i)%unwgt()
        if (this%integrals(i)%nevts_unw_gen.gt.this%integrals(i)%nevts_unw_req) then
           ! iteratively improve fmax to get exactly nevts_unw_req and
@@ -625,14 +631,15 @@ contains
     real(kind=8),allocatable,dimension(:) :: fmax_top
     real(kind=8),allocatable,dimension(:,:) :: fabs
     nevnt=this%nevnt_in_list
+    if (nevnt.eq.0) return
     allocate(fabs(nevnt,this%current_iter))
     do j=1,nevnt
        iter=this%evnt_list(j)%iter
-       if (iter.ne.this%current_iter) cycle
        x=this%evnt_list(j)%x
        wgt=this%evnt_list(j)%wgt
        do k=iters_without_evnts+1,this%current_iter
-          if (k.ne.iter) then
+          if ( (k.eq.iter .and. iter.ne.this%current_iter) .or. &
+               (k.ne.iter .and. iter.eq.this%current_iter) ) then
              call thischan%recompute_wgt_from_x(k,x,wgt_new)
              this%evnt_list(j)%f_abs(k)=this%evnt_list(j)%f_abs(iter)*wgt_new/wgt
           endif
@@ -663,6 +670,10 @@ contains
     real(kind=8),allocatable,dimension(:) :: fmax_top,fabs
     next_iter=this%current_iter
     nevnt=this%nevnt_in_list
+    if (nevnt.le.200) then
+       this%f_max(next_iter)=this%f_max(next_iter-1)
+       return
+    endif
     allocate(fabs(nevnt))
     do j=1,nevnt
        iter=this%evnt_list(j)%iter
@@ -757,7 +768,7 @@ contains
          this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
-       if (this%integrals(i)%nevts_unw_gen.gt.this%integrals(i)%nevts_unw_req) then
+       if (this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
           write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,e8.2,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
@@ -933,7 +944,7 @@ contains
        this%evnt_list(this%nevnt_in_list)%iter=this%current_iter
        this%evnt_list(this%nevnt_in_list)%label=evnt_label
        if (f_abs.gt.this%f_max(this%current_iter)*rnd) this%nevts_unw_gen=this%nevts_unw_gen+1
-       if (this%nevts_unw_gen.gt.1.1d0*this%nevts_unw_req) enough=.true.
+       if (this%nevts_unw_gen.gt.1.5d0*this%nevts_unw_req) enough=.true.
     endif
   end subroutine check_write_evnt
 

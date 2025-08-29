@@ -32,7 +32,7 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:),allocatable :: wgts
   call cpu_time(tTot_B)
 
-  ncalls0=100000
+  ncalls0=20000
   itmax=32
 
   ! setting energy
@@ -170,11 +170,8 @@ program matrix_integrate_QCD
   call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,nintegrals,abs(ncalls0),abs(itmax))
   do
      call simple_integrator%get_points(1,ichan,iint)
-
      call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
-     
      call simple_integrator%fill_points(1,f_abs,f,to_write,done)
-
      if (create_amplitude_library) then
         done=.true.
         do igroup=1,ngroups
@@ -183,7 +180,7 @@ program matrix_integrate_QCD
         if (done) call create_amplitude_lib()
      endif
      if (to_write(1)) then
-        call unwgt_process(pgl(ichan))      ! pick a random process
+        call unwgt_process(pgl(ichan),iint) ! pick a random process
         call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
         call write_event(11,pgl(ichan),1d0)
      endif
@@ -198,27 +195,6 @@ program matrix_integrate_QCD
      call event_update_wgt(11,12,wgts(i))
   enddo
   close(11)
-  
-!!$  if (integration_step.le.1) then
-!!$     ! grid setup, or computation of upper bounding envelope
-!!$     call mint(integrand)
-!!$  else
-!!$     ! actual (unweighted) event generation
-!!$     call read_grids_from_file
-!!$     call gen(integrand,0,-1) ! initialise counters
-!!$     filename='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe'
-!!$     open(unit=11,file=filename,status='unknown')
-!!$     if (COMMAND_ARGUMENT_COUNT().le.10) &
-!!$          call write_unique_in_file_and_deallocate(pgl_unique,unique_map,unique_map_value)
-!!$     do j=1,abs(ncalls0)
-!!$        call gen(integrand,1,2) ! generate an unweighted event
-!!$        call unwgt_process(pgl(ichan))      ! pick a random process
-!!$        call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
-!!$        call write_event(11,pgl(ichan),ans(1,0))
-!!$     enddo
-!!$     close(11)
-!!$     call gen(integrand,3,-1) ! print counters
-!!$  endif
      
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b

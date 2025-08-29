@@ -72,20 +72,26 @@ contains
     enddo
   end subroutine event_update_wgt
   
-  subroutine unwgt_process(pgl)
+  subroutine unwgt_process(pgl,iint)
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iint
     integer :: i,iproc
     real(kind=8) :: random,accum,target
     real(kind=8),external :: ran2
     target=0d0
     do iproc=1,pgl%nproc
+       if (keep_processes_separate .and. iproc.ne.iint) cycle
        do i=1,pgl%iden_iproc(iproc)
           target=target+abs(pgl%val_procs(i,iproc))
        enddo
     enddo
     random=ran2()*target
-    iproc=1
+    if (keep_processes_separate) then
+       iproc=iint
+    else
+       iproc=1
+    endif
     i=1
     accum=abs(pgl%val_procs(i,iproc))
     do
@@ -102,10 +108,6 @@ contains
     enddo
     iproc_picked=iproc
     iproc_iden_picked=i
-!!$    if (iproc_picked.gt.pgl%amps%nprocs) then
-!!$       write (*,*) "Could not unweight process",iproc_picked,pgl%amps%nprocs
-!!$       stop 1
-!!$    endif
     if (iproc_iden_picked.gt.pgl%iden_iproc(iproc)) then
        write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl%iden_iproc(iproc)
        stop 1
@@ -114,6 +116,10 @@ contains
        evt_sign=-1d0
     else
        evt_sign=+1d0
+    endif
+    if (keep_processes_separate .and. iproc_picked.ne.iint) then
+       write (*,*) 'Could not unweight process correctly (keep_processes_separate=true)'
+       stop 1
     endif
   end subroutine unwgt_process
 
