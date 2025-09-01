@@ -1131,8 +1131,8 @@ contains
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          elseif (is_tensor(new_current%type)) then
-            allocate(current_list_local(this%n_cur)%vertices(isize-1))
-            allocate(current_list_local(this%n_cur)%vertex_sign(isize-1))
+            allocate(current_list_local(this%n_cur)%vertices(2*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(2*(isize-1)))
          elseif (is_massiveboson(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
