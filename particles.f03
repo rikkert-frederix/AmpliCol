@@ -28,7 +28,7 @@ contains
     real(kind=8) :: hmass,hwidth
     
     l=0
-    this%npart=16! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
+    this%npart=17! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -129,6 +129,14 @@ contains
     this%particle_list(l)%width=0d0
     this%particle_list(l)%spin=-1 ! ill-defined
     this%particle_list(l)%anti_type=126
+    this%particle_list(l)%dim=1
+    ! Higgs"or"C (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
+    l=l+1
+    this%particle_list(l)%type=127
+    this%particle_list(l)%mass=0d0
+    this%particle_list(l)%width=0d0
+    this%particle_list(l)%spin=-1 ! ill-defined
+    this%particle_list(l)%anti_type=127
     this%particle_list(l)%dim=1
 
     ! Wtensor (non-propagator auxiliary particle to decompose 4-boson interactions)
@@ -736,25 +744,25 @@ contains
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[(-3d0/2d0)/sw*(this%get_mass(25)**2/this%get_mass(24)),0d0]  !!
 
-    ! Wboson-Wboson to HiggsorB
+    ! Wboson-Wboson to HiggsorC
     l=l+1
     this%vertex_list(l)%type=117
     this%vertex_list(l)%particles(1)=24
     this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%particles(3)=127
     this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
     l=l+1
     this%vertex_list(l)%type=117
     this%vertex_list(l)%particles(1)=-24
     this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%particles(3)=127
     this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
-    !! Zboson-Zboson to HiggsorB
+    !! Zboson-Zboson to HiggsorC
     l=l+1
     this%vertex_list(l)%type=117
     this%vertex_list(l)%particles(1)=23
     this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=126
+    this%vertex_list(l)%particles(3)=127
     this%vertex_list(l)%coupl=[1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
     ! HiggsorA-Higgs to Higgs
     l=l+1
@@ -777,18 +785,18 @@ contains
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=125
     this%vertex_list(l)%coupl=[(-3d0/4d0)/sw**2*this%get_mass(25)**2/this%get_mass(24)**2,0d0]  !!
-    ! HiggsorB-Higgs to Higgs
+    ! HiggsorC-Higgs to Higgs
     l=l+1
     this%vertex_list(l)%type=120
-    this%vertex_list(l)%particles(1)=126
+    this%vertex_list(l)%particles(1)=127
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[1d0,0d0]  !!
-    ! Higgs-HiggsorB to Higgs
+    ! Higgs-HiggsorC to Higgs
     l=l+1
     this%vertex_list(l)%type=120
     this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=126
+    this%vertex_list(l)%particles(2)=127
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[1d0,0d0]  !!
     ! Higgs-Higgs to HiggsorB
@@ -955,7 +963,7 @@ contains
   end function is_gluon
   logical function is_scalar(iPDG)
     integer :: iPDG
-    if (abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126) then
+    if (abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126.or.abs(iPDG).eq.127) then
        is_scalar=.true.
     else
        is_scalar=.false.
@@ -1037,7 +1045,7 @@ contains
   logical function is_higgsor(iPDG)
     implicit none
     integer :: iPDG
-    if (iPDG.eq.125.or.IPDG.eq.126) then
+    if (iPDG.eq.125.or.iPDG.eq.126.or.iPDG.eq.127) then
        is_higgsor=.true.
     else
        is_higgsor=.false.
