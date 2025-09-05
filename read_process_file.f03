@@ -136,13 +136,9 @@ contains
     do i=1,pgl_unique%next
        mass(i)=phys_model%get_mass(pgl_unique%processes(i,1))
        width(i)=phys_model%get_width(pgl_unique%processes(i,1))
-       do iproc=2,pgl_unique%nproc
-          if ( mass(i).ne.phys_model%get_mass(pgl_unique%processes(i,iproc)) .or. &
-               width(i).ne.phys_model%get_width(pgl_unique%processes(i,iproc))) then
-             write (*,*) 'masses and widths not compatible among processes'
-             stop 1
-          endif
-       enddo
+       ! For this unique_prcess checks, use only massless particles
+       if (mass(i).ne.0d0) mass(i)=0d0
+       if (width(i).ne.0d0) width(i)=0d0
     enddo
     call setup_spin(pgl_unique)
     call setup_color_order(pgl_unique)

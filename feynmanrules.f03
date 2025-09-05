@@ -171,8 +171,6 @@ contains
              wf(4) = chi(1)
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=+1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -224,8 +222,6 @@ contains
              wf(4) = chi(1)
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=-1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -299,8 +295,6 @@ contains
              wf(4) = cZero
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=-1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -353,8 +347,6 @@ contains
              wf(4) = cZero
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=+1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -580,7 +572,7 @@ contains
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
   end subroutine GluonQuarktoQuark_real
 
-  subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) ! TV from fvixxx.f
+  subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -595,7 +587,7 @@ contains
     wfq(4)=prefact*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
   end subroutine AquarkGluontoAquark
 
-  subroutine GluonAquarktoAquark(wfg1,wfq2,wfq) ! TV from fvixxx.f
+  subroutine GluonAquarktoAquark(wfg1,wfq2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -610,30 +602,22 @@ contains
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
   end subroutine GluonAquarktoAquark
 
-  subroutine QuarkAquarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
-    !
-    ! This subroutine is only used to compute the off-shell gluon that
-    ! connects the two quark lines in nqq=2 processes. Moreover, the
-    ! combination of quark+anti-quark is ONLY there when these the
-    ! quark and anti-quark are from *THE SAME* colour string. Hence,
-    ! this is the "photon" (-1/N_C) contribution. Hence, include the
-    ! factor -1/N_C=-1/3 here, instead of in the colour factor.
-    !
+  subroutine QuarkAquarktoGluon(wfq1,wfq2,wfg,coupl) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
-    real(kind=8),parameter :: N_C=3d0
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)/N_C
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
     TMP1=wfq1(3)*wfq2(1)+wfq1(2)*wfq2(4)
     TMP2=wfq1(4)*wfq2(2)+wfq1(1)*wfq2(3)
     TMP3=wfq1(2)*wfq2(3)-wfq1(4)*wfq2(1)
     TMP4=wfq1(1)*wfq2(4)-wfq1(3)*wfq2(2)
-    wfg(1)=( TMP1 + TMP2 )*prefact
-    wfg(2)=( TMP4 + TMP3 )*prefact
-    wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
-    wfg(4)=(-TMP1 + TMP2 )*prefact
+    wfg(1)=( TMP1 + TMP2 )*prefact*coupl(1)
+    wfg(2)=( TMP4 + TMP3 )*prefact*coupl(1)
+    wfg(3)=(-TMP4 + TMP3 )*cImag*prefact*coupl(1)
+    wfg(4)=(-TMP1 + TMP2 )*prefact*coupl(1)
   end subroutine QuarkAquarktoGluon
-  subroutine AquarkQuarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
+  subroutine AquarkQuarktoGluon(wfq1,wfq2,wfg) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -683,7 +667,7 @@ contains
     wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
   end subroutine QuarkGluontoQuark_coupl
 
-  subroutine AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl) ! TV from fvixxx.f
+  subroutine AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)

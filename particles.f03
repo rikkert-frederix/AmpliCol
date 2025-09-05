@@ -231,7 +231,7 @@ contains
        this%vertex_list(l)%particles(1)=i
        this%vertex_list(l)%particles(2)=-i
        this%vertex_list(l)%particles(3)=21
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       this%vertex_list(l)%coupl=[1d0/3d0,0d0]
     enddo
     ! antiquark-quark to gluon vertices
     do i=1,6
@@ -1009,7 +1009,7 @@ contains
   logical function is_singlet(iPDG)
     implicit none
     integer :: iPDG
-    if (abs(iPDG).lt.6 .or. iPDG.eq.21) then
+    if (abs(iPDG).le.6 .or. iPDG.eq.21) then
        is_singlet=.false.
     else
        is_singlet=.true.
