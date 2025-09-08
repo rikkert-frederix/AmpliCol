@@ -58,7 +58,6 @@ contains
           wf(3) = dcmplx( rZero , -sign(sqh,p(3)) )
        endif
     endif
-
   end subroutine ext_gluon_cmplx
 
 
@@ -67,7 +66,6 @@ contains
     double complex wf(4)
     double precision p(0:3),vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
     integer nhel,nsv,nsvahl
-
     double precision rZero, rHalf, rOne, rTwo
     parameter( rZero = 0.0d0, rHalf = 0.5d0 )
     parameter( rOne = 1.0d0, rTwo = 2.0d0 )
@@ -80,18 +78,13 @@ contains
     pt = min(pp,dsqrt(pt2))
 
     if ( vmass.ne.rZero ) then
-
        hel0 = rOne-dabs(hel)
-
        if ( pp.eq.rZero ) then
-
           wf(1) = dcmplx( rZero )
           wf(2) = dcmplx(-hel*sqh )
           wf(3) = dcmplx( rZero , nsvahl*sqh )
           wf(4) = dcmplx( hel0 )
-
        else
-
           emp = p(0)/(vmass*pp)
           wf(1) = dcmplx( hel0*pp/vmass )
           wf(4) = dcmplx( hel0*p(3)*emp+hel*pt/pp*sqh )
@@ -103,9 +96,7 @@ contains
              wf(2) = dcmplx( -hel*sqh )
              wf(3) = dcmplx( rZero , nsvahl*sign(sqh,p(3)) )
           endif
-
        endif
-
     else
        pp = p(0)
        pt = sqrt(p(1)**2+p(2)**2)
@@ -119,7 +110,6 @@ contains
           wf(2) = dcmplx( -hel*sqh )
           wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
        endif
-
     endif
 
 
@@ -158,13 +148,11 @@ contains
              chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
           endif
           if ( nhel.eq.1 ) then
-             ! oxxx, nsf=+1, nhel=+1
              wf(1) = chi(1)
              wf(2) = chi(2)
              wf(3) = cZero
              wf(4) = cZero
           else
-             ! oxxx, nsf=+1, nhel=-1
              wf(1) = cZero
              wf(2) = cZero
              wf(3) = chi(2)
@@ -209,13 +197,11 @@ contains
              chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
           endif
           if ( -nhel.eq.1 ) then
-             ! oxxx, nsf=-1, nhel=+1
              wf(1) = chi(1)
              wf(2) = chi(2)
              wf(3) = cZero
              wf(4) = cZero
           else
-             ! oxxx, nsf=-1, nhel=-1
              wf(1) = cZero
              wf(2) = cZero
              wf(3) = chi(2)
@@ -282,13 +268,11 @@ contains
              chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
           endif
           if ( -nhel.eq.1 ) then
-             ! ixxx, nsf=-1, nhel=-1
              wf(1) = cZero
              wf(2) = cZero
              wf(3) = chi(1)
              wf(4) = chi(2)
           else
-             ! ixxx, nsf=-1, nhel=+1
              wf(1) = chi(2)
              wf(2) = chi(1)
              wf(3) = cZero
@@ -318,7 +302,6 @@ contains
           wf(3) = sfomeg(2)*chi(im)
           wf(4) = sfomeg(2)*chi(ip)
        endif
-
     else
        ! "outgoing" initial state momenta
        if (abs(fmass).lt.lim) then
@@ -334,13 +317,11 @@ contains
              chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
           endif
           if ( nhel.eq.1 ) then
-             ! ixxx, nsf=+1, nhel=+1
              wf(1) = cZero
              wf(2) = cZero
              wf(3) = chi(1)
              wf(4) = chi(2)
           else
-             ! ixxx, nsf=+1, nhel=-1
              wf(1) = chi(2)
              wf(2) = chi(1)
              wf(3) = cZero
@@ -434,9 +415,6 @@ contains
     wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))! * prefact
     wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))! * prefact
     wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))! * prefact
-!!$    do i=1,4
-!!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
-!!$    enddo
   end subroutine TwoGluontoTensor
   subroutine TwoGluontoTensor_real(wfg1,wfg2,wfT)
     ! This vertex includes the all factors such that the tensor "propagator"
@@ -455,16 +433,11 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(6) :: wfT1
-!!$    complex(kind=8),parameter :: prefact=(-0.5d0,0d0)
     complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
-!!$    do i=1,4
-!!$       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
-!!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.25d0
-!!$    enddo
   end subroutine TensorGluontoGluon
   subroutine TensorGluontoGluon_real(wfT1,wfg2,wfg)
     implicit none
@@ -480,16 +453,11 @@ contains
     implicit none 
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(6) :: wfT2
-!!$    complex(kind=8),parameter :: prefact=(-0.5d0,0d0)
     complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
-!!$    do i=1,4
-!!$       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
-!!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.25d0
-!!$    enddo
   end subroutine GluonTensortoGluon
   subroutine GluonTensortoGluon_real(wfg1,wfT2,wfg)
     implicit none 
@@ -508,7 +476,7 @@ contains
 
 
 
-  subroutine QuarkGluontoQuark(wfq1,wfg2,wfq) ! from fvoxxx.f
+  subroutine QuarkGluontoQuark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -540,7 +508,7 @@ contains
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1)) !sr2
   end subroutine QuarkGluontoQuark_real
 
-  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) ! from fvoxxx.f
+  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -555,7 +523,7 @@ contains
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
   end subroutine GluonQuarktoQuark
 
-  subroutine GluonQuarktoQuark_real(wfg1,wfq2,wfq) ! from fvoxxx.f
+  subroutine GluonQuarktoQuark_real(wfg1,wfq2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq2,wfq
     real(kind=8),dimension(4) :: wfg1
@@ -596,7 +564,7 @@ contains
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
-    wfq(1)=prefact*(TMP2*wfq2(3)-TMP4*wfq2(4)) !sr1 ! minus sign!
+    wfq(1)=prefact*(TMP2*wfq2(3)-TMP4*wfq2(4)) !sr1 
     wfq(2)=prefact*(TMP1*wfq2(4)-TMP3*wfq2(3)) !sr2
     wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
@@ -755,12 +723,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     real(kind=8) :: M2
     complex(kind=8) :: TMP
-
-    !if (coupl(2).ne.0d0) M2=1d0/coupl(2)**2
-    !pwf(0:3)=pwf1(0:3)+pwf2(0:3)
-    !TMP = wfg2(1)*pwf(0)-wfg2(2)*pwf(1)-wfg2(3)*pwf(2)-wfg2(4)*pwf(3)
-
-    wfg(1:4)= prefact*coupl(1)*wfs1(1)*(wfg2(1:4))! - M2*TMP*pwf(0:3))
+    wfg(1:4)= prefact*coupl(1)*wfs1(1)*(wfg2(1:4))
   end subroutine ScalarGluontoGluon
 
   subroutine GluonScalartoGluon(wfg1,wfs2,wfg,coupl)
@@ -772,12 +735,7 @@ contains
     real(kind=8),dimension(2) :: coupl
     real(kind=8) :: M2
     complex(kind=8) :: TMP
-
-    !if (coupl(2).ne.0d0) M2=1d0/coupl(2)**2
-    !pwf(0:3)=pwf1(0:3)+pwf2(0:3)
-    !TMP = wfg1(1)*pwf(0)-wfg1(2)*pwf(1)-wfg1(3)*pwf(2)-wfg1(4)*pwf(3)
-
-    wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))! - M2*TMP*pwf(0:3))
+    wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))
   end subroutine GluonScalartoGluon
 
 
@@ -826,7 +784,6 @@ contains
     real(kind=8) :: vm,vw
     complex(kind=8) :: TMP
     propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-vm**2+cImag*vm*vw)
-!!$    TMP=(p(0)*wfg(1)-p(1)*wfg(2)-p(2)*wfg(3)-p(3)*wfg(4))/(vm**2-cImag*vm*vw)
     TMP=(p(0)*wfg(1)-p(1)*wfg(2)-p(2)*wfg(3)-p(3)*wfg(4))/vm**2
     wfg(1)=(wfg(1)-p(0)*TMP)*propagator
     wfg(2)=(wfg(2)-p(1)*TMP)*propagator
