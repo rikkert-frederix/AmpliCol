@@ -278,8 +278,7 @@ contains
                pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
        endif
        if (pgl(ichan)%passed(iint).eq.nevent_hel_filter+1 .and. create_amplitude_library) then
-!!$          call pgl(ichan)%amps%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
-          call pgl(ichan)%amps(iint)%create_library_vertices(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
+          call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
           pgl(ichan)%amps(iint)%lib_created=.true.
           return
        endif
