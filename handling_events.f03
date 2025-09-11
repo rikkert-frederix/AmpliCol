@@ -50,13 +50,13 @@ contains
     implicit none
     character(len=1024) :: string
     integer :: next,iunit,ounit
-    real(kind=8) :: wgt
+    real(kind=8),dimension(3) :: wgt
     logical,save :: firsttime=.true.
     if (firsttime) then
        do
           read(iunit,'(a)') string
           if (index(string,"<event>").ne.0) then
-             if (wgt.ne.0d0) write(ounit,'(a)') trim(string)
+             if (wgt(1).ne.0d0) write(ounit,'(a)') trim(string)
              exit
           endif
           write(ounit,'(a)') trim(string)
@@ -64,13 +64,13 @@ contains
        firsttime=.false.
     else
        read(iunit,'(a)') string
-       if (wgt.ne.0d0) write(ounit,'(a)') trim(string)
+       if (wgt(1).ne.0d0) write(ounit,'(a)') trim(string)
     endif
     read(iunit,*) next
-    if (wgt.ne.0d0) write(ounit,'(i4,e18.10)') next,wgt
+    if (wgt(1).ne.0d0) write(ounit,'(i4,1x,e18.10,1x,e18.10,1x,e18.10)') next,wgt(1:3)
     do
        read(iunit,'(a)') string
-       if (wgt.ne.0d0) write(ounit,'(a)') trim(string)
+       if (wgt(1).ne.0d0) write(ounit,'(a)') trim(string)
        if (index(string,"</event>").ne.0) exit
     enddo
   end subroutine event_update_wgt

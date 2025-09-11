@@ -72,7 +72,7 @@ module simple_integrator_mod
   end type grid
   type :: evnt
      real(kind=8),allocatable,dimension(:) :: x,f_abs
-     real(kind=8) :: wgt,rnd
+     real(kind=8) :: wgt,rnd,overwgt
      integer :: iter,label
      logical :: unwgt
   end type evnt
@@ -588,7 +588,8 @@ contains
     this%overweight=0d0
     do j=1,this%nevts_unw_req
        this%evnt_list(top_idx(j))%unwgt=.true.
-       tmp=this%evnt_list(top_idx(j))%f_abs(this%evnt_list(top_idx(j))%iter)/fmax(this%evnt_list(top_idx(j))%iter)
+       tmp=this%evnt_list(top_idx(j))%f_abs(this%evnt_list(top_idx(j))%iter)/fmax(this%evnt_list(top_idx(j))%iter) 
+       this%evnt_list(top_idx(j))%overwgt=tmp/fmax_req
        if (tmp.lt.fmax_req) cycle
        this%overweight=this%overweight+(tmp/fmax_req-1d0)
     enddo
@@ -950,10 +951,10 @@ contains
   subroutine assign_evnt_wgts(this,wgts)
     implicit none
     class(integrator) :: this
-    real(kind=8),allocatable,dimension(:),intent(out) :: wgts
+    real(kind=8),allocatable,dimension(:,:),intent(out) :: wgts
     integer :: i,j
     real(kind=8) :: nominal_wgt
-    allocate(wgts(evnt_label))
+    allocate(wgts(3,evnt_label))
     nominal_wgt=this%res(1)
     do i=1,this%nchannel
        do j=1,this%channels(i)%nintegral
@@ -965,43 +966,30 @@ contains
   subroutine compute_wgts(this,nominal_wgt,wgts)
     implicit none
     class(integral) :: this
-    real(kind=8),dimension(*),intent(inout) :: wgts
+    real(kind=8),dimension(3,evnt_label),intent(inout) :: wgts
     real(kind=8),intent(in) :: nominal_wgt
-    real(kind=8) :: number_of_evnts,wgt
+    real(kind=8) :: number_of_evnts,number_of_wgts
     integer :: i
     number_of_evnts=0d0
+    number_of_wgts=0d0
     do i=1,this%nevnt_in_list
-!!$       if (this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .gt.&
-!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction) then
-!!$          ! overweight
-!!$          number_of_evnts=number_of_evnts+&
-!!$               this%evnt_list(i)%f_abs(this%evnt_list(i)%iter)/(this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction)
-!!$       elseif(this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .gt.&
-!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction*this%evnt_list(i)%rnd) then
-          ! normal weight
-       if (this%evnt_list(i)%unwgt) number_of_evnts=number_of_evnts+1d0
-!!$       endif
+       if (this%evnt_list(i)%unwgt) then
+          number_of_evnts=number_of_evnts+1d0
+          number_of_wgts=number_of_wgts+max(1d0,this%evnt_list(i)%overwgt)
+       endif
     enddo
     do i=1,this%nevnt_in_list
-!!$       wgt=this%res(1)/number_of_evnts*dble(evnt_label)
-!!$       if (this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .gt.&
-!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction) then
-!!$          ! overweight
-!!$          wgt=wgt*this%evnt_list(i)%f_abs(this%evnt_list(i)%iter)/&
-!!$               (this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction)
-!!$       elseif (this%evnt_list(i)%f_abs(this%evnt_list(i)%iter) .lt.&
-!!$            this%f_max(this%evnt_list(i)%iter)*write_evnt_fraction*this%evnt_list(i)%rnd) then
-!!$          ! did not pass unweighting
-!!$          wgt=0d0
-!!$       endif
        if (this%evnt_list(i)%unwgt) then
-          wgts(this%evnt_list(i)%label)=nominal_wgt
+          wgts(1,this%evnt_list(i)%label)=nominal_wgt
+          wgts(2,this%evnt_list(i)%label)=nominal_wgt*max(1d0,this%evnt_list(i)%overwgt) &
+               *number_of_evnts/number_of_wgts
+          wgts(3,this%evnt_list(i)%label)=max(0d0,this%evnt_list(i)%overwgt-1d0)
        else
-          wgts(this%evnt_list(i)%label)=0d0
+          wgts(1:3,this%evnt_list(i)%label)=0d0
        endif
     enddo
   end subroutine compute_wgts
-  
+
   subroutine increase_size_evnt_list(this)
     implicit none
     class(integral),intent(inout) :: this

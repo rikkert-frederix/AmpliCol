@@ -29,7 +29,7 @@ program matrix_integrate_QCD
   integer :: ichan,iint,itmax,ncalls0,iamp
   real(kind=8),dimension(1) :: f,f_abs
   logical :: done
-  real(kind=8),dimension(:),allocatable :: wgts
+  real(kind=8),dimension(:,:),allocatable :: wgts
   call cpu_time(tTot_B)
 
   ncalls0=20000
@@ -156,7 +156,7 @@ program matrix_integrate_QCD
 
   enddo ! loop over phase-space-order groups
 
-  filename='Outputs/events.lhe'
+  filename='Outputs/events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
   if (COMMAND_ARGUMENT_COUNT().le.10) &
        call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
@@ -189,12 +189,13 @@ program matrix_integrate_QCD
   call flush(11)
   call simple_integrator%assign_evnt_wgts(wgts)
   rewind(11)
-  filename='Outputs/events_wgts.lhe'
+  filename='Outputs/events.lhe'
   open(unit=12,file=filename,action='write',status='unknown')
-  do i=1,size(wgts)
-     call event_update_wgt(11,12,wgts(i))
+  do i=1,size(wgts,dim=2)
+     call event_update_wgt(11,12,wgts(1,i))
   enddo
   close(11)
+  close(12)
      
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
