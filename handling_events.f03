@@ -55,8 +55,11 @@ contains
     if (firsttime) then
        do
           read(iunit,'(a)') string
+          if (index(string,"<event>").ne.0) then
+             if (wgt.ne.0d0) write(ounit,'(a)') trim(string)
+             exit
+          endif
           write(ounit,'(a)') trim(string)
-          if (index(string,"<event>").ne.0) exit
        enddo
        firsttime=.false.
     else
