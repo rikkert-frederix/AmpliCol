@@ -104,7 +104,7 @@ module simple_integrator_mod
   double precision, external :: ran2
   integer,save :: iters_without_evnts,evnt_label=0
   integer,parameter :: importance_sampling_strategy=3
-  real(kind=8),parameter :: write_evnt_fraction=0.05d0 ! neglect write_evnt_fraction of largest weights to determine fmax for writing
+  real(kind=8),parameter :: write_evnt_fraction=0.08d0 ! neglect write_evnt_fraction of largest weights to determine fmax for writing
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
   logical,parameter :: turn_off_evnt_generation=.false.
@@ -112,6 +112,7 @@ module simple_integrator_mod
   integer,parameter :: min_grid_size=8
   integer,parameter :: max_grid_size=2048
   real(kind=8),parameter :: allowed_overweight_factor=0.001d0
+  integer,parameter :: final_n_iters_for_evnt_gen=8
 contains
 
   subroutine init(this,nchannel,ndim,nintegral,nevts_unw_req,niters)
@@ -567,6 +568,19 @@ contains
     real(kind=8),dimension(this%nevts_unw_req) :: fabs_top
     integer,dimension(this%nevts_unw_req) :: top_idx
     real(kind=8) :: fmax_req,tmp
+    logical,dimension(this%current_iter) :: to_include
+    ! check which iterations to include (only the final
+    ! 'final_n_iters_for_evnt_gen' that generated events for this
+    ! integral will be included)
+    to_include=.false.
+    k=0
+    do j=this%nevnt_in_list,1,-1
+       if (.not.to_include(this%evnt_list(j)%iter)) then
+          k=k+1
+          to_include(this%evnt_list(j)%iter)=.true.
+       endif
+       if (k.eq.final_n_iters_for_evnt_gen) exit
+    enddo
     ! rescale all f_abs such that they are equivalent for all iterations
     fmax=0d0
     do j=1,this%nevnt_in_list
@@ -577,7 +591,11 @@ contains
     enddo
     ! rescale
     do j=1,this%nevnt_in_list
-       fabs(j)=(this%evnt_list(j)%f_abs(this%evnt_list(j)%iter)/this%evnt_list(j)%rnd)/fmax(this%evnt_list(j)%iter)
+       if (to_include(this%evnt_list(j)%iter)) then
+          fabs(j)=(this%evnt_list(j)%f_abs(this%evnt_list(j)%iter)/this%evnt_list(j)%rnd)/fmax(this%evnt_list(j)%iter)
+       else
+          fabs(j)=0d0
+       endif
     enddo
     ! Take the nevts_unw_req largest
     k=this%nevts_unw_req
@@ -676,6 +694,7 @@ contains
        fabs(j)=this%evnt_list(j)%f_abs(next_iter)
     enddo
     nevnt=max(int(write_evnt_fraction*nevnt),1)
+    nevnt=max(int(nevnt*dble(thischan%max_iters-this%current_iter)/dble(thischan%max_iters)),1)
     allocate(fmax_top(nevnt))
     allocate(index_fmax_top(nevnt))
     call topk_largest(fabs,nevnt,fmax_top,index_fmax_top)
@@ -932,7 +951,6 @@ contains
        evnt_label=evnt_label+1
        this%evnt=this%evnt+1
        this%nevnt_in_list=this%nevnt_in_list+1
-!!$       write (*,*) evnt_label,this%evnt+1,this%nevnt_in_list,f_abs,this%f_max(this%current_iter)
        if (this%nevnt_in_list.gt.size(this%evnt_list)) call this%increase_size_evnt_list()
        allocate(this%evnt_list(this%nevnt_in_list)%f_abs(this%max_iters))
        allocate(this%evnt_list(this%nevnt_in_list)%x(this%ndim))
@@ -943,7 +961,7 @@ contains
        this%evnt_list(this%nevnt_in_list)%x=x
        this%evnt_list(this%nevnt_in_list)%iter=this%current_iter
        this%evnt_list(this%nevnt_in_list)%label=evnt_label
-       if (f_abs.gt.this%f_max(this%current_iter)*rnd) this%nevts_unw_gen=this%nevts_unw_gen+1
+       this%nevts_unw_gen=this%nevts_unw_gen+1
        if (this%nevts_unw_gen.gt.1.5d0*this%nevts_unw_req) enough=.true.
     endif
   end subroutine check_write_evnt
