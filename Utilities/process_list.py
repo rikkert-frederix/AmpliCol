@@ -156,8 +156,8 @@ def count_matching_elements(main_list,check_list):
 def ValidProc(proc):
     nq=count_matching_elements(proc,quarks)
     naq=count_matching_elements(proc,antiquarks)
-    if nq > 2 : return False    # at most two quarks
-    if naq > 2 : return False   # at most two anti-quarks
+    if nq > 4 : return False    # at most four quarks
+    if naq > 4 : return False   # at most four anti-quarks
 #    if nq < 2 : return False    # at least two quarks
 #    if naq < 2 : return False   # at least two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
@@ -212,7 +212,7 @@ def GenerateAllUniqueProcs(process):
         procs_new=[]
         for proc in procs:
             for p in jet:
-                if part > 3 and p not in gluons: continue
+                if part > 5 and p not in gluons: continue
                 if not procs_new:
                     procs_new=[sorted(proc+[p])]
                 else:

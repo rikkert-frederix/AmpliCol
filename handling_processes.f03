@@ -188,7 +188,7 @@ contains
   subroutine setup_color_order(pgl_unique)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl_unique
-    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig
+    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig,naq
     do iproc=1,pgl_unique%nproc
        nq=0
        ng=0
@@ -205,6 +205,7 @@ contains
              stop 1
           endif
        enddo
+
        if (nq.eq.0 .and. nsing.ne.0) then
           ig=nsing+1
           is=1
@@ -251,6 +252,32 @@ contains
              elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iaq,iproc)=i
                 iaq=next
+             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(ig,iproc)=i
+                ig=ig+1
+             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(is,iproc)=i
+                is=is+1
+             endif
+          enddo
+        elseif (nq.eq.6) then
+          naq=0
+          iq=1
+          iaq=2
+          ig=4
+          is=ng+4
+          do i=1,next
+          if (is_quark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(iq,iproc)=i
+                iq=iq+2
+             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+                pgl_unique%color_orders(iaq,iproc)=i
+                naq=naq+1
+                if (naq.eq.3) then
+                        iaq=next
+                else
+                        iaq=iaq+2
+                endif
              elseif (is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i
                 ig=ig+1
