@@ -171,8 +171,6 @@ contains
              wf(4) = chi(1)
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=+1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -224,8 +222,6 @@ contains
              wf(4) = chi(1)
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=-1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -299,8 +295,6 @@ contains
              wf(4) = cZero
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=-1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
@@ -353,8 +347,6 @@ contains
              wf(4) = cZero
           endif
        else
-          write (*,*) 'CHECK THIS'
-          stop 1
           nsf=+1
           nh=nsf*nhel
           pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))

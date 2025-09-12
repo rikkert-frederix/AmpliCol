@@ -774,7 +774,7 @@ contains
   logical function is_singlet(iPDG)
     implicit none
     integer :: iPDG
-    if (abs(iPDG).lt.6 .or. iPDG.eq.21) then
+    if (abs(iPDG).le.6 .or. iPDG.eq.21) then
        is_singlet=.false.
     else
        is_singlet=.true.
