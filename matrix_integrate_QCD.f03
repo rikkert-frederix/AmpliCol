@@ -23,7 +23,7 @@ program matrix_integrate_QCD
   character(len=80) :: filename
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
-  integer :: igroup,integration_step
+  integer :: igroup
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
   integer :: ichan,iint,itmax,ncalls0,iamp
@@ -32,7 +32,7 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:,:),allocatable :: wgts
   call cpu_time(tTot_B)
 
-  ncalls0=20000
+!!$  ncalls0=20000
   itmax=32
 
   ! setting energy
@@ -52,8 +52,6 @@ program matrix_integrate_QCD
   endif
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
-
-  call create_run_tag(integration_step)
   
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
@@ -332,7 +330,7 @@ contains
     if (pgl(ichan)%passed(iint).le.nevent_hel_filter) then
        call find_same_flavour(pgl(ichan),nevent_hel_filter)
        call setup_helicity_filter(pgl(ichan),iint)
-       if (integration_step.eq.2 .and. pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
+       if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
           ! passed==nevent_hel_filter, the unweighting of the helicities goes
           ! wrong for this phase-space point. Hence, we need to skip it.
@@ -635,7 +633,6 @@ contains
   end subroutine read_amplitude_lib
   
   subroutine get_run_arguments()
-    use mint_module
     implicit none
     integer :: argc,n_ps
     integer :: i,k
@@ -647,158 +644,35 @@ contains
     logical :: same_flavour
     common /to_seed/iseed
     iseed=0
-    ! integration steps:
-    ! integration_step=0  (Setting up grids)
-    ! integration_step=-1 (same as integration_step=0, but starting from existing grids)
-    ! integration_step=1  (computing bounding envelope)
-    ! integration_step=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ge.3 .and. argc .le. 4) then
+    if (argc.ge.3 .and. argc.le.4) then
        read_proc_from_file=.true.
        do i=1,argc
           CALL GET_COMMAND_ARGUMENT(i, argv)
           if (i.eq.1) read(argv,'(a)') filename
           if (i.eq.2) read(argv,*) PS_choice
-          if (i.eq.3) read(argv,*) integration_step
+          if (i.eq.3) read(argv,*) ncalls0
           if (i.eq.4) then
              read(argv,*) iseed
-             write(add_arg(1:),*) iseed
           endif
        enddo
        call read_processes_from_file(filename)
        close(10)
-    elseif (argc.le.10) then
+    else
        write(*,*) 'Inconsistent arguments:'
        write(*,*) '--------- Should be: --------'
-       write(*,*) 'PS_choice, mode, next, *process*, *order*'
-       stop 2
-    else
-       read_proc_from_file=.false.
-       do i = 1, argc
-          CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,*) PS_choice
-          if (i.eq.2) read(argv,*) integration_step
-          if (i.eq.3) then
-             read(argv,*) next
-             if (next.le.3) then
-                write (*,*) 'Need at least 4 particles (2->2 scattering)',next
-                stop 1
-             endif
-             ndim=3*(next-2)-4
-             if (include_pdf) ndim=ndim+2
-             allocate(part(1:next))
-             allocate(o(1:next))
-          endif
-          do k=0,next-1
-             if (i.eq.4+k) then
-                read(argv,*) part(k+1)
-             endif
-          enddo
-          do k=0,next-1
-             if (i.eq.4+next+k) then
-                read(argv,*) o(k+1)
-             endif
-          enddo
-          if (argc.eq.3+2*next +1 .and. i.eq.argc) then
-             ! Special case: we have an additional argument. Use it as a special tag
-             read(argv,*) add_arg
-             read (add_arg((index(add_arg,'S'))+1:(index(add_arg,'I'))-1),*,err=99) iseed
-99           continue             
-          endif
-       enddo
-       write (*,*) '******************************************'
-       write (*,*) 'Process is     ',part
-       write (*,*) 'Colour order is',o
-       write (*,*) '******************************************'
-       nquarks = 0
-       do i=1,next
-          if ((abs(part(i)).ge.1).and.(abs(part(i)).le.6)) then
-             nquarks = nquarks + 1
-          endif
-       enddo
-       if (nquarks.eq.0) then
-          ! count the number of gluons between '1' and '2' in the colour order
-          c_o=0
-          i=0
-          found_1=.false.
-          do
-             i=i+1
-             if (i.gt.next) i=1
-             if (found_1) c_o=c_o+1
-             if (o(i).eq.1) then
-                found_1=.true.
-             endif
-             if (o(i).eq.2 .and. found_1) then
-                c_o=c_o-1
-                exit
-             endif
-          enddo
-       endif
-
-       do i=2,next-1
-          if ((o(i).gt.2 .and. part(o(i)).le.-1 .and. part(o(i)).ge.-6) .or. &
-              (o(i).le.2 .and. part(o(i)).ge. 1 .and. part(o(i)).le. 6) ) then
-             if (abs(part(o(i))).eq.abs(part(o(1))) .and. abs(part(o(i))).eq.abs(part(o(next)))) then
-                same_flavour=.true.
-             else
-                same_flavour=.false.
-             endif
-             exit
-          endif
-       enddo
-
-       if ((nquarks.ne.0 .and. nquarks.ne.2 .and. nquarks.ne.4) .or. (nquarks.gt.next)) then
-          write (*,*) 'Not consistent number of external quarks (up to 2)',nquarks
-          stop
-       endif
-       call compute_multichannel_symmetry_factor(sym_fac)
-
-       call determine_multi_channel_size(part,n_ps)
-       
-       allocate(ps_o(1:next,1:n_ps))
-       call determine_phase_space_orders(part,o,n_ps,ps_o)
-       
-       ngroups=n_ps
-       allocate(pgl(ngroups))
-       do i=1,ngroups
-          pgl(i)%nproc=1
-          allocate(pgl(i)%multichan%channels(1:n_ps,1))
-          allocate(pgl(i)%multichan%number_of_channels(1))
-          pgl(i)%multichan%number_of_channels(1)=n_ps
-          do k=1,n_ps
-             pgl(i)%multichan%channels(k,1)=k
-          enddo
-          allocate(pgl(i)%processes(1:next,pgl(i)%nproc))
-          pgl(i)%processes(1:next,1)=part(1:next)
-          allocate(pgl(i)%color_orders(1:next,pgl(i)%nproc))
-          pgl(i)%color_orders(1:next,1)=o(1:next)
-          allocate(pgl(i)%phase_space_orders(1:next))
-          pgl(i)%phase_space_orders(1:next)=ps_o(1:next,i)
-          allocate(pgl(i)%idenCOandMAPfactor(1,1))
-          pgl(i)%idenCOandMAPfactor(1,1)=sym_fac
-          allocate(pgl(i)%iden_iproc(1))
-          pgl(i)%iden_iproc(1)=1
-          allocate(pgl(i)%val_procs(1,1))
-          allocate(pgl(i)%iden_processes(1:next,1,1))
-          pgl(i)%iden_processes(1:next,1,1)=pgl(i)%processes(1:next,1)
-       enddo
+       write(*,*) 'process_file, PS_choice, nevents, seed'
+       stop 1
     endif
 
     do i=1,ngroups
        call setup_optimised_multichannel_weight_computation(pgl(i))
     enddo
     
-    
     ! basic checks:
     if (next.lt.4) then
        write (*,*) 'Not enough external particles',next
        stop 1
-    endif
-    if (integration_step.ne.0 .and. integration_step.ne.1 .and. integration_step.ne.2) then
-       write (*,*) 'Incorrect integration_step',integration_step
-       stop
-    else
-       imode=integration_step ! imode is used in MINT
     endif
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice

@@ -37,7 +37,6 @@ program matrix_reweight
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
-  character(len=string_len) :: tag,tag_read,add_arg=''
   
   call get_run_arguments()
 
@@ -152,48 +151,10 @@ contains
        call read_unique_in_file()
        call allocate_process_info()
        open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
-    elseif (argc.le.8) then
-       write(*,*) 'Inconsistent arguments:'
-       write(*,*) '--------- Should be: --------'
-       write(*,*) 'next, *process*, *order*'
-       write(*,*) '--------- or: ---------------'
-       write(*,*) 'event_file_name_to_reweight'
-       stop 1
     else
-       read_proc_from_file=.false.
-       do i = 1, argc
-          CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) then
-             read(argv,*) next
-             if (next.le.3) then
-                write (*,*) 'Need at least 4 particles (2->2 scattering)',next
-                stop 1
-             endif
-             unique_nproc=0
-             call allocate_process_info()
-          endif
-          do k=0,next-1
-             if (i.eq.2+k) then
-                read(argv,*) part(k+1,1)
-             endif
-          enddo
-          do k=0,next-1
-             if (i.eq.2+next+k) then
-                read(argv,*) o(k+1,1)
-             endif
-          enddo
-          if (argc.eq.1+2*next +1 .and. i.eq.argc) then
-             ! Special case: we have an additional argument. Use it as a special tag
-             read(argv,*) add_arg
-          endif
-       enddo
-       if (next.lt.4) then
-          write (*,*) 'Not enough external particles',next
-          stop 1
-       endif
-       call create_run_tag_and_open_files()
+       write (*,*) 'Event file to reweight not given as argument'
+       stop 1
     endif
-    
   end subroutine get_run_arguments
 
   subroutine allocate_process_info()
@@ -232,56 +193,6 @@ contains
        spin(1,i)=-9
     enddo
   end subroutine setup_spin
-  
-  subroutine create_run_tag_and_open_files()
-    use arguments
-    implicit none
-    tag='_'       ! tag of current run
-    tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
-    call add_to_string(tag,next,.true.)
-    call add_to_string(tag_read,next,.true.)
-    call add_to_string(tag,2,.true.)
-    call add_to_string(tag_read,2,.true.)
-    do i=1,next
-       call add_to_string(tag,part(i,1),.true.)
-       call add_to_string(tag_read,part(i,1),.true.)
-    enddo
-    do i=1,next-1
-       call add_to_string(tag,o(i,1),.true.)
-       call add_to_string(tag_read,o(i,1),.true.)
-    enddo
-    call add_to_string(tag,o(next,1),.false.)
-    call add_to_string(tag_read,o(next,1),.false.)
-    open(unit=11,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe',status='old')
-    open(unit=12,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
-  end subroutine create_run_tag_and_open_files
-
-  subroutine add_to_string(string,inter,add_underscore)
-    ! Adds an integer 'inter' to the end of the string 'string' (followed by
-    ! an underscore if 'add_underscore=.true.')
-    implicit none
-    character(len=string_len) :: string
-    integer :: inter
-    logical :: add_underscore
-    character(len=1) :: s1
-    character(len=2) :: s2
-    character(len=3) :: s3
-    if (inter.ge.0 .and. inter.le.9) then
-       write(s1,'(i1)') inter
-       string=trim(adjustl(string))//trim(adjustl(s1))
-       if (add_underscore) string=trim(adjustl(string))//'_'
-    elseif(inter.ge.-9 .and. inter.le.99) then
-       write(s2,'(i2)') inter
-       string=trim(adjustl(string))//trim(adjustl(s2))
-       if (add_underscore) string=trim(adjustl(string))//'_'
-    elseif(inter.ge.-99 .and. inter.le.999) then
-       write(s3,'(i3)') inter
-       string=trim(adjustl(string))//trim(adjustl(s3))
-       if (add_underscore) string=trim(adjustl(string))//'_'
-    else
-       write (*,*) 'value too large to add to the run tag',inter
-    endif
-  end subroutine add_to_string
 
   subroutine read_event(iunit,done)
     use rw_events

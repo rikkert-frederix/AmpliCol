@@ -122,7 +122,7 @@ contains
     enddo
     if (pgl%passed(1).lt.nevent) return
     do i=1,pgl%nproc
-       if (any(pgl%same_flavour(1,i,1).ne.pgl%same_flavour(2:nevent,i,1)) .or. &
+       if ( any(pgl%same_flavour(1,i,1).ne.pgl%same_flavour(2:nevent,i,1)) .or. &
             any(pgl%same_flavour(1,i,2).ne.pgl%same_flavour(2:nevent,i,2)) ) then
           write (*,*) 'Inconsistent same flavour decomposition'
           write (*,*) i
