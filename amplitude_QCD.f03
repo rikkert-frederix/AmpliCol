@@ -309,7 +309,7 @@ contains
       ! singlets, they will not be part of the this%perm (while they are part
       ! of the elements in the this%current_list.
       allocate(this%perm(1:n-this%n_sing(1),1:this%n_amps))
-      if (is_singlet(this%current_list(this%n_cur_start(n))%type)) then
+      if (pm%is_singlet(this%current_list(this%n_cur_start(n))%type)) then
          write (*,*) 'Final current (that closes the amplitude) cannot be a colour singlet'
          write (*,*) this%current_list(this%n_cur_start(n))%type
          stop 1
@@ -393,10 +393,10 @@ contains
       do iproc=1,this%nprocs
          nq=0; naq=0 ; nglu=0 ; nsing=0
          do i=1,n
-            if (is_gluon(this%processes(i,iproc))) nglu=nglu+1
+            if (pm%is_gluon(this%processes(i,iproc))) nglu=nglu+1
             if (is_quark_from_order(i,iproc)) nq=nq+1
             if (is_antiquark_from_order(i,iproc)) naq=naq+1
-            if (is_singlet(this%processes(i,iproc))) nsing=nsing+1
+            if (pm%is_singlet(this%processes(i,iproc))) nsing=nsing+1
          enddo
          if (nq.ne.naq) then
             write (*,*) 'not the same number of quarks and anti-quarks',nq,naq
@@ -413,7 +413,7 @@ contains
          iq=0; iaq=0 ; iglu=0 ; ising=0
          order(1:n,iproc)= 0
          do i=1,n
-            if (is_gluon(this%processes(i,iproc))) then
+            if (pm%is_gluon(this%processes(i,iproc))) then
                iglu=iglu+1
                if (nq.ge.1) then
                   order(iglu+1,iproc)=i
@@ -434,7 +434,7 @@ contains
                else
                   order(n-2-nsing,iproc)=i
                endif
-            elseif (is_singlet(this%processes(i,iproc))) then
+            elseif (pm%is_singlet(this%processes(i,iproc))) then
                ising=ising+1
                if(nq.ne.0) then
                   order(n-ising,iproc)=i
@@ -462,7 +462,7 @@ contains
       integer :: i
       number_of_quark_lines=0
       do i=1,n
-         if (is_quark(process(i)) .or. is_antiquark(process(i))) then
+         if (pm%is_quark(process(i)) .or. pm%is_antiquark(process(i))) then
             number_of_quark_lines=number_of_quark_lines+1
          endif
       enddo
@@ -492,7 +492,7 @@ contains
          this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
          this%n_sing(iproc)=0
          do i=1,n
-            if (is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
+            if (pm%is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
          enddo
          if (iproc.gt.1) then
             if (this%n_qqbar(iproc-1).gt.this%n_qqbar(iproc)) then
@@ -744,11 +744,11 @@ contains
          ! order. First, find where the singlets are, since they do not matter
          ! for the colour order
          do i=1,n1
-            if (is_singlet(current_list_local(ic1)%ext_type(i))) exit
+            if (pm%is_singlet(current_list_local(ic1)%ext_type(i))) exit
          enddo
          nc1=i-1
          do i=1,n2
-            if (is_singlet(current_list_local(ic2)%ext_type(i))) exit
+            if (pm%is_singlet(current_list_local(ic2)%ext_type(i))) exit
          enddo
          nc2=i-1
          ip(1:nc1+nc2)=[current_list_local(ic1)%order(1:nc1),current_list_local(ic2)%order(1:nc2)]
@@ -787,7 +787,7 @@ contains
          found_quark=.false.
          found_antiquark=.false.
          do i=1,isize
-            if (is_quark(et(i))) then
+            if (pm%is_quark(et(i))) then
                ! found a quark.
                if (found_quark) then
                   ! no anti-quark between two quarks
@@ -795,7 +795,7 @@ contains
                endif
                found_antiquark=.false.
                found_quark=.true.
-            elseif (is_antiquark(et(i))) then
+            elseif (pm%is_antiquark(et(i))) then
                ! found an anti-quark
                if (found_antiquark) then
                   ! no quark between two anti-quarks
@@ -804,9 +804,9 @@ contains
                ! next one must be a quark:
                j=i
                do while (j.lt.isize)
-                  if (is_singlet(et(j+1))) then
+                  if (pm%is_singlet(et(j+1))) then
                      j=j+1
-                  elseif (.not.(is_quark(et(j+1)))) then
+                  elseif (.not.(pm%is_quark(et(j+1)))) then
                      return
                   else
                      exit
@@ -817,7 +817,7 @@ contains
             endif
          enddo
          ! if the current is of length n-1, the first should be a quark
-         if (isize.eq.n-1 .and. .not.is_quark(et(1))) return
+         if (isize.eq.n-1 .and. .not.pm%is_quark(et(1))) return
       endif
       ! Got all the way to the end. This must be a valid current combination
       valid_current_combination=.true.
@@ -907,11 +907,11 @@ contains
       ! nc1 and nc2 lists where the coloured particles end in currents ic1 and
       ! ic2, respectively:
       do i=1,n1
-         if (is_singlet(et1(i))) exit
+         if (pm%is_singlet(et1(i))) exit
       enddo
       nc1=i-1
       do i=1,n2
-         if (is_singlet(et2(i))) exit
+         if (pm%is_singlet(et2(i))) exit
       enddo
       nc2=i-1
       ! The order of the coloured particles can be concatinated:
@@ -1129,13 +1129,13 @@ contains
          current_list_local(this%n_cur)=new_current
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
-         if (is_gluon(new_current%type)) then
+         if (pm%is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
-         elseif (is_tensor(new_current%type)) then
+         elseif (pm%is_tensor(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(isize-1))
             allocate(current_list_local(this%n_cur)%vertex_sign(isize-1))
-         elseif (is_massiveboson(new_current%type)) then
+         elseif (pm%is_massiveboson(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          else
@@ -1163,13 +1163,13 @@ contains
                     current_list_local(ic)%spin(1:isize)
                stop 1
             endif
-            if (is_gluon(new_current%type)) then
+            if (pm%is_gluon(new_current%type)) then
                allocate(current_list_local(ic)%vertices(5*(isize-1)))
                allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
-            elseif (is_tensor(new_current%type)) then
+            elseif (pm%is_tensor(new_current%type)) then
                allocate(current_list_local(ic)%vertices(isize-1))
                allocate(current_list_local(ic)%vertex_sign(isize-1))
-            elseif (is_massiveboson(new_current%type)) then
+            elseif (pm%is_massiveboson(new_current%type)) then
                allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
                allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
             else
@@ -1316,7 +1316,7 @@ contains
       integer :: i
       all_singlet_current=.true.
       do i=1,len
-         if (.not.is_singlet(curr%ext_type(i))) then
+         if (.not.pm%is_singlet(curr%ext_type(i))) then
             all_singlet_current=.false.
             return
          endif
@@ -1326,8 +1326,8 @@ contains
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io,iproc
-      if ( (io.le.2  .and. is_antiquark(this%processes(io,iproc))) .or. &
-           (io.gt.2  .and. is_quark(this%processes(io,iproc)))) then
+      if ( (io.le.2  .and. pm%is_antiquark(this%processes(io,iproc))) .or. &
+           (io.gt.2  .and. pm%is_quark(this%processes(io,iproc)))) then
          is_quark_from_order=.true.
       else
          is_quark_from_order=.false.
@@ -1337,8 +1337,8 @@ contains
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io,iproc
-      if ( (io.le.2  .and. is_quark(this%processes(io,iproc))) .or. &
-           (io.gt.2  .and. is_antiquark(this%processes(io,iproc)))) then
+      if ( (io.le.2  .and. pm%is_quark(this%processes(io,iproc))) .or. &
+           (io.gt.2  .and. pm%is_antiquark(this%processes(io,iproc)))) then
          is_antiquark_from_order=.true.
       else
          is_antiquark_from_order=.false.
@@ -1350,7 +1350,7 @@ contains
       integer,intent(in) :: len
       integer :: i
       do i=1,len
-         if (is_quark(curr%ext_type(i)).or.is_antiquark(curr%ext_type(i))) then
+         if (pm%is_quark(curr%ext_type(i)).or.pm%is_antiquark(curr%ext_type(i))) then
             quark_in_current=.true.
             return
          endif
@@ -1557,7 +1557,7 @@ contains
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (use_real_gluons .and. &
-               (is_gluon(this%current_list(ic)%type) .or. is_tensor6(this%current_list(ic)%type))) then
+               (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_tensor6(this%current_list(ic)%type))) then
              dim=pm%get_dim(this%current_list(ic)%type)
              allocate(this%current_list(ic)%val_r(1:dim))
           else
@@ -1594,7 +1594,7 @@ contains
              else
                 ih_in=this%current_list(ic)%spin(1)
              endif
-             if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
+             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_r(1:4))
@@ -1602,16 +1602,16 @@ contains
                    call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
-             elseif (is_quark(this%current_list(ic)%type)) then
+             elseif (pm%is_quark(this%current_list(ic)%type)) then
                 call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (is_antiquark(this%current_list(ic)%type)) then
+             elseif (pm%is_antiquark(this%current_list(ic)%type)) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (is_massiveboson(this%current_list(ic)%type)) then
+             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
                 call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (is_higgs(this%current_list(ic)%type)) then
+             elseif (pm%is_higgs(this%current_list(ic)%type)) then
                 call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ifinal,this%current_list(ic)%val_c(1))
              else
@@ -1768,34 +1768,34 @@ contains
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
+          if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-          elseif (is_quark(this%current_list(ic)%type)) then
+          elseif (pm%is_quark(this%current_list(ic)%type)) then
              ! a quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
-          elseif (is_tensor6(this%current_list(ic)%type)) then
+          elseif (pm%is_tensor6(this%current_list(ic)%type)) then
              ! the non-propagating tensor current
              call combine_interactions(6)
-          elseif (is_antiquark(this%current_list(ic)%type)) then
+          elseif (pm%is_antiquark(this%current_list(ic)%type)) then
              ! an anti-quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_aquark_propagator()
              endif
-          elseif (is_massiveboson(this%current_list(ic)%type)) then
+          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
              call combine_interactions(4)
              ! a massive vector boson current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator_mass()
              endif
-          elseif (is_higgs(this%current_list(ic)%type)) then
+          elseif (pm%is_higgs(this%current_list(ic)%type)) then
              ! a scalar current
              call combine_interactions(1)
              if (isize.ne.n-1)  then
@@ -2099,7 +2099,7 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
-      if (use_real_gluons .and. (is_gluon(this%current_list(ic)%type).or.is_tensor_g(this%current_list(ic)%type))) then
+      if (use_real_gluons .and. (pm%is_gluon(this%current_list(ic)%type).or.pm%is_tensor_g(this%current_list(ic)%type))) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
             if (this%current_list(ic)%vertex_sign(iv))then
@@ -2833,7 +2833,7 @@ contains
              else
                 ih_in=this%current_list(ic)%spin(1)
              endif
-             if (is_gluon(this%current_list(ic)%type) .or. is_photon(this%current_list(ic)%type)) then
+             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
                    write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                    line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
                    write(tmp,*) ih_in
@@ -2842,7 +2842,7 @@ contains
                    line=trim(adjustl(line))//trim(adjustl(tmp))//','
                    write(tmp,*) ic
                    line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
-             elseif (is_quark(this%current_list(ic)%type)) then
+             elseif (pm%is_quark(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 line='call ext_quark(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
@@ -2853,7 +2853,7 @@ contains
                 line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
                 write(tmp,'(d20.12)') this%current_list(ic)%mass
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
-             elseif (is_antiquark(this%current_list(ic)%type)) then
+             elseif (pm%is_antiquark(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 line='call ext_antiquark(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
@@ -2864,7 +2864,7 @@ contains
                 line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
                 write(tmp,'(d20.12)') this%current_list(ic)%mass
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
-             elseif (is_massiveboson(this%current_list(ic)%type)) then
+             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
@@ -2875,7 +2875,7 @@ contains
                 line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
                 write(tmp,'(d20.12)') this%current_list(ic)%mass
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
-             elseif (is_higgs(this%current_list(ic)%type)) then
+             elseif (pm%is_higgs(this%current_list(ic)%type)) then
                 line='call ext_scalar(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ifinal
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
@@ -3107,17 +3107,17 @@ contains
 
        icount_type=0
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (is_gluon(this%current_list(ic)%type)) then
+          if (pm%is_gluon(this%current_list(ic)%type)) then
              itype=1
-          elseif (is_quark(this%current_list(ic)%type)) then
+          elseif (pm%is_quark(this%current_list(ic)%type)) then
              itype=2
-          elseif (is_antiquark(this%current_list(ic)%type)) then
+          elseif (pm%is_antiquark(this%current_list(ic)%type)) then
              itype=3
-          elseif (is_massiveboson(this%current_list(ic)%type)) then
+          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
              itype=4
-          elseif (is_higgs(this%current_list(ic)%type)) then
+          elseif (pm%is_higgs(this%current_list(ic)%type)) then
              itype=5
-          elseif (is_tensor(this%current_list(ic)%type)) then
+          elseif (pm%is_tensor(this%current_list(ic)%type)) then
              itype=6
           endif
           if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
@@ -3154,17 +3154,17 @@ contains
              curs=0
              ii=0
              do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-                if (is_gluon(this%current_list(ic)%type)) then
+                if (pm%is_gluon(this%current_list(ic)%type)) then
                    itype=1
-                elseif (is_quark(this%current_list(ic)%type)) then
+                elseif (pm%is_quark(this%current_list(ic)%type)) then
                    itype=2
-                elseif (is_antiquark(this%current_list(ic)%type)) then
+                elseif (pm%is_antiquark(this%current_list(ic)%type)) then
                    itype=3
-                elseif (is_massiveboson(this%current_list(ic)%type)) then
+                elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
                    itype=4
-                elseif (is_higgs(this%current_list(ic)%type)) then
+                elseif (pm%is_higgs(this%current_list(ic)%type)) then
                    itype=5
-                elseif (is_tensor(this%current_list(ic)%type)) then
+                elseif (pm%is_tensor(this%current_list(ic)%type)) then
                    itype=6
                 endif
                 if (itype.ne.j) cycle
@@ -3667,21 +3667,13 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(is_tensor6(lhs%type)) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_c)
        allocate(lhs%val_c(1:val_size))
        lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(is_tensor6(lhs%type)) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_r)
        allocate(lhs%val_r(1:val_size))
        lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
     endif
@@ -3726,21 +3718,13 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(is_tensor6(lhs%type)) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_c)
        allocate(lhs%val_c(1:val_size))
        lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(is_tensor6(lhs%type)) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_r)
        allocate(lhs%val_r(1:val_size))
        lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
     endif

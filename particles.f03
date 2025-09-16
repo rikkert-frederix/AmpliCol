@@ -15,7 +15,11 @@ module particles
      type(vertex),dimension(:),allocatable :: vertex_list
      integer :: npart,nint
    contains
-     procedure,public :: init_part,get_mass,get_width,get_spin,get_antipart,init_vert,get_dim,get_inter_dim
+     procedure,public :: init_part,get_mass,get_width,get_spin&
+          &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
+          &,is_antiquark,is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
+          &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
+          &,is_higgs,is_jet
   end type physics_model
 contains
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth)
@@ -710,7 +714,9 @@ contains
     write (*,*) 'Interaction not in model (dim)',itype
     stop 1
   end function get_inter_dim
-  logical function is_quark(iPDG)
+  logical function is_quark(this,iPDG)
+    implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.ge.1 .and. iPDG.le.6) then
        is_quark=.true.
@@ -718,7 +724,9 @@ contains
        is_quark=.false.
     endif
   end function is_quark
-  logical function is_antiquark(iPDG)
+  logical function is_antiquark(this,iPDG)
+    implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.le.-1 .and. iPDG.ge.-6) then
        is_antiquark=.true.
@@ -726,7 +734,9 @@ contains
        is_antiquark=.false.
     endif
   end function is_antiquark
-  logical function is_gluon(iPDG)
+  logical function is_gluon(this,iPDG)
+    implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.eq.21) then
        is_gluon=.true.
@@ -734,8 +744,9 @@ contains
        is_gluon=.false.
     endif
   end function is_gluon
-  logical function is_tensor_g(iPDG)
+  logical function is_tensor_g(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.eq.-21) then
        is_tensor_g=.true.
@@ -743,8 +754,9 @@ contains
        is_tensor_g=.false.
     endif
   end function is_tensor_g
-  logical function is_tensor_z(iPDG)
+  logical function is_tensor_z(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.eq.-23) then
        is_tensor_z=.true.
@@ -752,8 +764,9 @@ contains
        is_tensor_z=.false.
     endif
   end function is_tensor_z
-  logical function is_tensor_w(iPDG)
+  logical function is_tensor_w(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (abs(iPDG).eq.26) then
        is_tensor_w=.true.
@@ -761,18 +774,21 @@ contains
        is_tensor_w=.false.
     endif
   end function is_tensor_w
-  logical function is_tensor6(iPDG)
+  logical function is_tensor6(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
-    is_tensor6=is_tensor_g(iPDG) .or. is_tensor_z(iPDG) .or. is_tensor_w(iPDG)
+    is_tensor6=this%is_tensor_g(iPDG) .or. this%is_tensor_z(iPDG) .or. this%is_tensor_w(iPDG)
   end function is_tensor6
-  logical function is_tensor(iPDG)
+  logical function is_tensor(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
-    is_tensor=is_tensor_g(iPDG) .or. is_tensor_z(iPDG) .or. is_tensor_w(iPDG)
+    is_tensor=this%is_tensor_g(iPDG) .or. this%is_tensor_z(iPDG) .or. this%is_tensor_w(iPDG)
   end function is_tensor
-  logical function is_singlet(iPDG)
+  logical function is_singlet(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (abs(iPDG).le.6 .or. iPDG.eq.21) then
        is_singlet=.false.
@@ -780,8 +796,9 @@ contains
        is_singlet=.true.
     endif
   end function is_singlet
-  logical function is_photon(iPDG)
+  logical function is_photon(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.eq.22) then
        is_photon=.true.
@@ -789,8 +806,9 @@ contains
        is_photon=.false.
     endif
   end function is_photon
-  logical function is_massiveboson(iPDG)
+  logical function is_massiveboson(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.eq.23 .or. abs(iPDG).eq.24) then
        is_massiveboson=.true.
@@ -798,8 +816,9 @@ contains
        is_massiveboson=.false.
     endif
   end function is_massiveboson
-  logical function is_higgs(iPDG)
+  logical function is_higgs(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
     if (iPDG.eq.25) then
        is_higgs=.true.
@@ -807,10 +826,12 @@ contains
        is_higgs=.false.
     endif
   end function is_higgs
-  logical function is_jet(iPDG)
+  logical function is_jet(this,iPDG)
     implicit none
+    class(physics_model) :: this
     integer :: iPDG
-    if (is_quark(iPDG).or.is_antiquark(iPDG).or.is_gluon(iPDG)) then
+    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG)) .and. &
+         this%get_mass(iPDG).eq.0d0) then
        is_jet=.true.
     else
        is_jet=.false.

@@ -117,23 +117,23 @@ contains
     endif
     ! check consistency among processes
     do i=1,pgl%next
-       if (is_jet(pgl%processes(i,1))) then
+       if (phys_model%is_jet(pgl%processes(i,1))) then
           do j=2,pgl%nproc
-             if (.not.is_jet(pgl%processes(i,j))) then
+             if (.not.phys_model%is_jet(pgl%processes(i,j))) then
                 write (*,*) 'inconsistent processes and cuts #1'
                 stop 1
              endif
           enddo
-       elseif(is_photon(pgl%processes(i,1))) then
+       elseif(phys_model%is_photon(pgl%processes(i,1))) then
           do j=2,pgl%nproc
-             if (.not.is_photon(pgl%processes(i,j))) then
+             if (.not.phys_model%is_photon(pgl%processes(i,j))) then
                 write (*,*) 'inconsistent processes and cuts #2'
                 stop 1
              endif
           enddo
        else
           do j=2,pgl%nproc
-             if (is_jet(pgl%processes(i,j)) .or. is_photon(pgl%processes(i,j))) then
+             if (phys_model%is_jet(pgl%processes(i,j)) .or. phys_model%is_photon(pgl%processes(i,j))) then
                 write (*,*) 'inconsistent processes and cuts #3'
                 stop 1
              endif
@@ -151,22 +151,22 @@ contains
     pgl%sqrt_s_min(1:pgl%next,1:pgl%next)=-1d0
     ! cuts on single jets
     do i=3,pgl%next
-       if (.not. is_jet(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_jet(pgl%processes(i,1))) cycle
        pgl%pT_min(i)=ptj_min
        pgl%eta_max(i)=etaj_max
     enddo
     ! cuts on single photons
     do i=3,pgl%next
-       if (.not. is_photon(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_photon(pgl%processes(i,1))) cycle
        pgl%pT_min(i)=pta_min
        pgl%eta_max(i)=etaa_max
     enddo
     ! cuts on pair of jets
     do i=1,pgl%next
-       if (.not. is_jet(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_jet(pgl%processes(i,1))) cycle
           do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not. is_jet(pgl%processes(j,1))) cycle
+          if (.not. phys_model%is_jet(pgl%processes(j,1))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sjj_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRjj_min
@@ -175,10 +175,10 @@ contains
     enddo
     ! cuts on pair of photons
     do i=1,pgl%next
-       if (.not. is_photon(pgl%processes(i,1))) cycle
+       if (.not. phys_model%is_photon(pgl%processes(i,1))) cycle
           do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not. is_photon(pgl%processes(j,1))) cycle
+          if (.not. phys_model%is_photon(pgl%processes(j,1))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_saa_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRaa_min
@@ -189,8 +189,8 @@ contains
     do i=1,pgl%next
        do j=1,pgl%next
           if (i.eq.j) cycle
-          if (.not.((is_jet(pgl%processes(i,1)) .and. is_photon(pgl%processes(j,1))) .or. &
-                    (is_photon(pgl%processes(i,1)) .and. is_jet(pgl%processes(j,1))))) cycle
+          if (.not.((phys_model%is_jet(pgl%processes(i,1)) .and. phys_model%is_photon(pgl%processes(j,1))) .or. &
+                    (phys_model%is_photon(pgl%processes(i,1)) .and. phys_model%is_jet(pgl%processes(j,1))))) cycle
           pgl%sqrt_s_min(i,j)=sqrt_sja_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRja_min

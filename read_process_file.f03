@@ -304,7 +304,7 @@ contains
     if (unique_map(iproc).gt.0) then
        iq=0
        do i=1,next
-          if (is_quark(process(order(i))) .or. is_antiquark(process(order(i)))) then
+          if (phys_model%is_quark(process(order(i))) .or. phys_model%is_antiquark(process(order(i)))) then
              iq=iq+1
              if (quarks(0).eq.4) then
                 if (iq.eq.1 .or. iq.eq.4) then
@@ -387,7 +387,7 @@ contains
     integer :: i
     quarks(0)=0
     do i=1,next
-       if (is_quark(process(order(i))) .or. is_antiquark(process(order(i)))) then
+       if (phys_model%is_quark(process(order(i))) .or. phys_model%is_antiquark(process(order(i)))) then
           quarks(0)=quarks(0)+1
           quarks(quarks(0))=process(order(i))
        endif
@@ -464,7 +464,7 @@ contains
     do i=next,1,-1
        iord=order(i)
        ipart=process(iord)
-       if (((iord.le.2 .and. is_quark(ipart)).or.(iord.gt.2 .and. is_antiquark(ipart)))) then
+       if (((iord.le.2 .and. phys_model%is_quark(ipart)).or.(iord.gt.2 .and. phys_model%is_antiquark(ipart)))) then
           aq=i
           iaq=iord
           exit
@@ -475,7 +475,7 @@ contains
     do while (i.le.next)
        iord=order(i)
        ipart=process(iord)
-       if(is_singlet(ipart)) then
+       if(phys_model%is_singlet(ipart)) then
           if (i.gt.aq) then
              order(aq:i)=[order(i),order(aq)]
              aq=aq+1

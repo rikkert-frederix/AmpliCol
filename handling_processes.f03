@@ -49,12 +49,12 @@ contains
     endif
     n_sing=0
     do i=1,next
-       if (is_singlet(part(i))) n_sing=n_sing+1
+       if (phys_model%is_singlet(part(i))) n_sing=n_sing+1
     enddo
     allocate(jmap(n_sing))
     j=0
     do i=1,next
-       if (is_singlet(part(o(i)))) then
+       if (phys_model%is_singlet(part(o(i)))) then
           j=j+1
           jmap(j)=i
        endif
@@ -67,7 +67,7 @@ contains
     do j=1,n_ps
        i_sing=0
        do i=1,next
-          if (is_singlet(part(o(i)))) then
+          if (phys_model%is_singlet(part(o(i)))) then
              i_sing=i_sing+1
              ps_o(i,j)=col_o(jmap(ips(i_sing)))
           else
@@ -193,11 +193,11 @@ contains
        ng=0
        nsing=0
        do i=1,next
-          if (is_quark(abs(pgl_unique%processes(i,iproc)))) then
+          if (phys_model%is_quark(abs(pgl_unique%processes(i,iproc)))) then
              nq=nq+1
-          elseif(is_gluon(pgl_unique%processes(i,iproc))) then
+          elseif(phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
              ng=ng+1
-          elseif(is_singlet(pgl_unique%processes(i,iproc))) then
+          elseif(phys_model%is_singlet(pgl_unique%processes(i,iproc))) then
              nsing=nsing+1
           else
              write (*,*) 'unknown particle type:',pgl_unique%processes(i,iproc)
@@ -208,7 +208,7 @@ contains
           ig=nsing+1
           is=1
           do i=1,next
-             if (is_singlet(pgl_unique%processes(i,iproc))) then
+             if (phys_model%is_singlet(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(is,iproc)=i
                 is=is+1
              else
@@ -226,14 +226,14 @@ contains
           ig=2
           is=ng+2
           do i=1,next
-             if (is_quark(pgl_unique%processes(i,iproc))) then
+             if (phys_model%is_quark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(1,iproc)=i
-             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+             elseif (phys_model%is_antiquark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(next,iproc)=i
-             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+             elseif (phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i
                 ig=ig+1
-             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+             elseif (phys_model%is_singlet(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(is,iproc)=i
                 is=is+1
              endif
@@ -244,16 +244,16 @@ contains
           ig=4
           is=ng+4
           do i=1,next
-             if (is_quark(pgl_unique%processes(i,iproc))) then
+             if (phys_model%is_quark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iq,iproc)=i
                 iq=iq+2
-             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
+             elseif (phys_model%is_antiquark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iaq,iproc)=i
                 iaq=next
-             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
+             elseif (phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i
                 ig=ig+1
-             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
+             elseif (phys_model%is_singlet(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(is,iproc)=i
                 is=is+1
              endif

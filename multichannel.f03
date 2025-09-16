@@ -121,7 +121,7 @@ contains
     endif
     n_ps=0
     do i=1,next
-       if (is_singlet(part(i))) n_ps=n_ps+1
+       if (phys_model%is_singlet(part(i))) n_ps=n_ps+1
     enddo
     n_ps=factorial(n_ps)
   end subroutine determine_multi_channel_size
