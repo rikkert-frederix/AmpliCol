@@ -116,7 +116,7 @@ contains
     this%particle_list(l)%anti_type=-26
     this%particle_list(l)%dim=6
 
-    write (*,*) l,'particles loaded'
+    write (99,*) l,'particles loaded'
 
   end subroutine init_part
 
@@ -626,7 +626,7 @@ contains
     fact=sqrt(1d0-sw**2)
     this%vertex_list(l)%coupl=[gw*fact,0d0] !!
 
-    write (*,*) l,'interactions loaded'
+    write (99,*) l,'interactions loaded'
   end subroutine init_vert
 
   integer function get_antipart(this,ipdg)

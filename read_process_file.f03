@@ -111,13 +111,13 @@ contains
        deallocate(idenCOandMAPfactor)
        deallocate(multi_chans)
        deallocate(ichans)
-       write (*,*) '****************************************************'
+       write (99,*) '****************************************************'
        do iproc=1,pgl(igroup)%nproc
-          write(*,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
+          write(99,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
                pgl(igroup)%color_orders(1:next,iproc),' ; ',pgl(igroup)%iden_iproc(iproc),' ; ',&
                pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
        enddo
-       write (*,*) '****************************************************'
+       write (99,*) '****************************************************'
        read(10,*)
        read(10,*)
        read(10,*)
@@ -165,7 +165,7 @@ contains
     ! No multi-channel needed to check: simply use the color_orders for the phase-space order
     pgl_unique%phase_space_orders(1:next)=pgl_unique%color_orders(1:next,1)
 
-    call setup_cuts_for_each_particle(pgl_unique)
+    call setup_cuts_for_each_particle(pgl_unique,0)
     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
          pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf)
 
@@ -208,7 +208,7 @@ contains
     call find_unique(pgl_unique,nevent,amp2,unique_map,unique_map_value)
 
     do iproc=1,pgl_unique%nproc
-       write (*,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:pgl_unique%next,iproc),&
+       write (99,*) unique_map(iproc),unique_map_value(iproc),':',pgl_unique%processes(1:pgl_unique%next,iproc),&
             ':',pgl_unique%color_orders(1:pgl_unique%next,iproc)
     enddo
     deallocate(pgl_unique%spin)

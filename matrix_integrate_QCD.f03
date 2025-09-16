@@ -20,7 +20,7 @@ program matrix_integrate_QCD
   real(kind=8) :: weight
   integer :: j,i
   real(kind=8),dimension(:),allocatable :: mass,width
-  character(len=80) :: filename
+  character(len=80) :: filename,logfile="Outputs/log_file.txt"
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
@@ -32,7 +32,8 @@ program matrix_integrate_QCD
   real(kind=8),dimension(:,:),allocatable :: wgts
   call cpu_time(tTot_B)
 
-!!$  ncalls0=20000
+  open(unit=99,file=logfile,status='unknown')
+  
   itmax=32
 
   ! setting energy
@@ -53,6 +54,8 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
   
+  write (*,*)  'Initialise phase-space groups and amplitudes'
+  write (99,*) 'Initialise phase-space groups and amplitudes'
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
      ! allocate the amplitudes and the phase-space for each of the integration channels
@@ -81,7 +84,7 @@ program matrix_integrate_QCD
      enddo
      ! Initialise the phase-space parametrisation
      call cpu_time(tBefore)
-     call setup_cuts_for_each_particle(pgl(igroup))
+     call setup_cuts_for_each_particle(pgl(igroup),igroup)
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
              pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
@@ -166,6 +169,9 @@ program matrix_integrate_QCD
      nintegrals(1:ngroups)=1
   endif
   call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,nintegrals,abs(ncalls0),abs(itmax))
+  call flush(99)
+  write (*,*) 'Start phase-space integration'
+  write (99,*) 'Start phase-space integration'
   do
      call simple_integrator%get_points(1,ichan,iint)
      call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
@@ -189,10 +195,12 @@ program matrix_integrate_QCD
   rewind(11)
   filename='Outputs/events.lhe'
   open(unit=12,file=filename,action='write',status='unknown')
+  write (*,*) 'Updating event weights...'
+  write (99,*) 'Updating event weights...'
   do i=1,size(wgts,dim=2)
      call event_update_wgt(11,12,wgts(1,i))
   enddo
-  close(11)
+  close(11,status='DELETE')
   close(12)
      
   call cpu_time(tTot_a)
@@ -204,7 +212,15 @@ program matrix_integrate_QCD
   write(*,*) 'Time spent in amplitude evaluation',t_Amp
   write(*,*) 'Time spent in squaring amplitudes',t_mat
   write(*,*) 'Total time:',t_all
- 
+  write(99,*) 'Time spent in phase-space initialisation:',t_PS_init 
+  write(99,*) 'Time spent in amplitude initialisation',t_Amp_init
+  write(99,*) 'Time spent in process initialisation',t_Proc_init
+  write(99,*) 'Time spent in phase-space generation:',t_PS
+  write(99,*) 'Time spent in amplitude evaluation',t_Amp
+  write(99,*) 'Time spent in squaring amplitudes',t_mat
+  write(99,*) 'Total time:',t_all
+  close(99)
+  
 contains
 
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
@@ -259,12 +275,9 @@ contains
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
          pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
-
-
+    
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
-    ! compute amplitudes
-!!$    call cpu_time(tBefore)
     tBefore=tAfter
     
     if ((.not. use_amplitude_library) .or. pgl(ichan)%passed(iint) .le. nevent_hel_filter+1) then
@@ -288,8 +301,6 @@ contains
     
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
-    
-!!$    call cpu_time(tBefore)
     tBefore=tAfter
     iproc=0
     pgl(ichan)%amp2=0d0
@@ -326,7 +337,7 @@ contains
           enddo
        endif
     endif
- 
+
     if (pgl(ichan)%passed(iint).le.nevent_hel_filter) then
        call find_same_flavour(pgl(ichan),nevent_hel_filter)
        call setup_helicity_filter(pgl(ichan),iint)

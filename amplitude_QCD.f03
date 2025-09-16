@@ -72,9 +72,9 @@ contains
     integer,dimension(:,:),allocatable :: key_to_current
 
     if (imode.eq.1) then
-       write (*,*) 'Initialising amplitude for:'
-       write (*,*) '   - all polarisation/helicity configurations'
-       write (*,*) '   - a single colour order'
+       write (99,*) 'Initialising amplitude for:'
+       write (99,*) '   - all polarisation/helicity configurations'
+       write (99,*) '   - a single colour order'
     elseif (imode.eq.2) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - a single polarisation/helicity configuration'
@@ -161,9 +161,9 @@ contains
     call allocate_and_fill_momentum_array()
 
     ! All done. But there could be currents that are not needed. Filter them out
-    write (*,*) 'Total number of currents, vertices and amplitudes before filter',this%n_cur,this%n_vert,this%n_amps
+    write (99,*) 'Total number of currents, vertices and amplitudes before filter',this%n_cur,this%n_vert,this%n_amps
     call this%filter_dead_trees(n)
-    write (*,*) 'Total number of currents, vertices and amplitudes after filter',this%n_cur,this%n_vert,this%n_amps
+    write (99,*) 'Total number of currents, vertices and amplitudes after filter',this%n_cur,this%n_vert,this%n_amps
 
     call deallocate_unneeded()
   contains
@@ -1923,7 +1923,7 @@ contains
          if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
          if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
       enddo
-      write (*,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
+      write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
 !!$      ! try to reorder to optimise memory usage???
 !!$      allocate(reordered_interactions(1:this%n_vert))
 !!$      allocate(interactions_map(1:this%n_vert))
@@ -2183,13 +2183,14 @@ contains
     integer,dimension(:,:),allocatable :: ic,ir,n_colour_elements,unique_rows
     integer(kind=8),dimension(:),allocatable :: perm_dict
 
-    write (*,*) 'Initialising colour matrix ...'
+    write (99,*) 'Initialising colour matrix ...'
     if (this%nprocs.eq.1) then
        iproc=1
     elseif(this%nprocs.eq.3) then
        iproc=3
     else
        write (*,*) 'computation of color factor only for a single process at the time',this%nprocs
+       stop 1
     endif
     part(1:n)=this%processes(1:n,1)
     ioff=this%iproc_start(iproc)-1
@@ -2269,7 +2270,7 @@ contains
           enddo
        enddo
     enddo
-    write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
+    write (99,*) 'A single row in the colour matrix has',n_vals(1:3),&
          ' different colour factors at LC, NLC and full colour, respectively'
     
     ! determine i_col_i:
@@ -2339,7 +2340,7 @@ contains
        enddo
     enddo
 
-    write (*,*) '... colour matrix initialised'
+    write (99,*) '... colour matrix initialised'
   contains
     subroutine get_unique_row(iunique,irow,gi,ui)
       ! get a new row in the colour matrix corresponding to 'iunique'
@@ -3462,7 +3463,7 @@ contains
     call this%filter_dead_trees(n,include_current)
     
     nhel=this%n_amps
-    write (*,*) 'Total number of currents, vertices and amplitudes after filtering helicities',this%n_cur,this%n_vert,this%n_amps
+    write (99,*) 'Total number of currents, vertices and amplitudes after filtering helicities',this%n_cur,this%n_vert,this%n_amps
     deallocate(this%include_amp)
 
   end subroutine filter_helicity

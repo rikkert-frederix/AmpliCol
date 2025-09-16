@@ -13,7 +13,7 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false.
+  logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
   real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
@@ -57,9 +57,9 @@ contains
     this%sqrts=sqrts
     this%t_channel=t_chan
     if (verbose) then
-       write (*,*) 'Setting up',n,'particle phase-space'
-       write (*,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
-       write (*,*) 'Use the simple t-channel?',this%t_channel
+       write (99,*) 'Setting up',n,'particle phase-space'
+       write (99,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
+       write (99,*) 'Use the simple t-channel?',this%t_channel
     endif
     includePDF=include_pdf
     call gen23_cleanup(this)
@@ -90,7 +90,7 @@ contains
        this%invm(ibset(0,i-1))=m(i)**2
        this%invm(ibclr(maskr(this%next),i-1))=m(i)**2
     enddo
-    if (verbose) write (*,*) 'masses:',m(1:n)
+    if (verbose) write (99,*) 'masses:',m(1:n)
     this%drcut=0d0
     this%ptcut=0d0
     this%sqrt_s_min=0d0
@@ -137,11 +137,11 @@ contains
        this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
     enddo
     if (verbose) then
-       write (*,*) "set 1:",this%sets(:,1)
-       write (*,*) "set 2:",this%sets(:,2)
+       write (99,*) "set 1:",this%sets(:,1)
+       write (99,*) "set 2:",this%sets(:,2)
     endif
     if (verbose) then
-       write (*,*) "Power in importance sampling:",ip
+       write (99,*) "Power in importance sampling:",ip
     endif
   contains
     subroutine setup_PS_cuts()
@@ -403,7 +403,7 @@ contains
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
             write (*,*) 3-i,':',this%sets(:,3-i)
-            stop 
+            stop 1
          endif
          ! We need to get the momentum of the final particle of the set.
          this%pp(0:3,set(i))=this%pp(0:3,set(i)+inext+(3-i))+this%pp(0:3,(3-i))-this%pp(0:3,inext)
@@ -692,7 +692,7 @@ contains
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
-         write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
+         write (99,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
          this%jac=-5d0
          return
       endif
@@ -961,9 +961,9 @@ contains
          varmin=-var_max
          varmax=-var_min
       elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (*,*) 'ERROR: in random_to_var one of the two limits '/&
+         write (99,*) 'ERROR: in random_to_var one of the two limits '/&
               &/'is negative',var_min,var_max,power_in,jac,x
-         write (*,*) 'using flat transformation'
+         write (99,*) 'using flat transformation'
          power=0d0
          varmin=var_min
          varmax=var_max
@@ -1456,7 +1456,7 @@ contains
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
-         write (*,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
+         write (99,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
          this%jac=-5d0
          return
       endif
@@ -1491,11 +1491,11 @@ contains
       integer(kind=4) :: ip
       real(kind=8) :: varmin,varmax,power,var
       if (variable.lt.var_min) then
-         write (*,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
          jac=-1d0
          return
       elseif (variable.gt.var_max) then
-         write (*,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
          jac=-1d0
          return
       endif
@@ -1505,9 +1505,9 @@ contains
          varmax=-var_min
          var=-variable
       elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (*,*) 'ERROR: in var_to_random one of the two limits '/&
+         write (99,*) 'ERROR: in var_to_random one of the two limits '/&
               &/'is negative',var_min,var_max,power_in,jac,x
-         write (*,*) 'using flat transformation'
+         write (99,*) 'using flat transformation'
          power=0d0
          varmin=var_min
          varmax=var_max
@@ -1670,7 +1670,7 @@ contains
     real(kind=8) ::  t1,t2,yr
     yr = lambda(x,u,v)*lambda(x,w,z)
     if (yr.le.0d0) then
-       write (*,*) 'No allowed range for t: tmin=tmax',yr
+       write (99,*) 'No allowed range for t: tmin=tmax',yr
 !!$       stop 1
        yr=0d0
     endif
@@ -1895,7 +1895,7 @@ contains
       real(kind=8) :: cosphi,x
       cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
       if (cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
-         write (*,*) 'WARNING cosphi does not have a reasonable value',cosphi
+         write (99,*) 'WARNING cosphi does not have a reasonable value',cosphi
          getphifroms=0d0
          return
       endif

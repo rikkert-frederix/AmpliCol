@@ -104,7 +104,7 @@ module simple_integrator_mod
   double precision, external :: ran2
   integer,save :: iters_without_evnts,evnt_label=0
   integer,parameter :: importance_sampling_strategy=3
-  real(kind=8),parameter :: write_evnt_fraction=0.08d0 ! neglect write_evnt_fraction of largest weights to determine fmax for writing
+  real(kind=8),parameter :: write_evnt_fraction=0.05d0 ! neglect write_evnt_fraction of largest weights to determine fmax for writing
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
   logical,parameter :: turn_off_evnt_generation=.false.
@@ -339,6 +339,10 @@ contains
     write (*,'(a,x,i4,x,a,x,i10,x,a)') &
          'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
          'points) '//trim(formatted)//' :'
+    write (99,*) ''
+    write (99,'(a,x,i4,x,a,x,i10,x,a)') &
+         'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
+         'points) '//trim(formatted)//' :'
     call this%compute_total_rate()
     call this%count_unweighted_evnts()
     call this%print_results()
@@ -348,6 +352,7 @@ contains
     if (turn_off_evnt_generation .and. &
          this%unc(1)/this%res(1).lt.1d0/(sqrt(dble(this%nevts_unw_req))*required_accuracy_factor)) done=.true.
     if (all(this%channels%done)) done=.true.
+    call flush(99)
   end subroutine finalise_iter
 
   subroutine update_grids(this)
@@ -473,6 +478,10 @@ contains
          'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
          'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
+    write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
+         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
+    write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
+         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
     call flush()
   end subroutine print_results
   
@@ -512,7 +521,7 @@ contains
          this%current_iter.le.iters_without_evnts) .and. &
          this%npoints_iter.gt.int(this%npoints*0.2d0)
     if (.not.update_grids) then
-       write (*,*) 'keeping grids fixed for channel',this%number
+       write (99,*) 'keeping grids fixed for channel',this%number
     endif
     do i=1,this%ndim
        if (update_grids) then
@@ -773,26 +782,26 @@ contains
     implicit none
     class(channel),intent(inout) :: this
     integer :: i
-    write(*,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
+    write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
-    write(*,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
+    write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
        if (this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
-          write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10,1x,a)') &
+          write(99,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
                '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req,'-- DONE'
        else
           if (this%integrals(i)%nevnt_in_list.lt.this%integrals(i)%nevts_unw_req) then
-             write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,a,1x,a,1x,i10)') &
+             write(99,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,a,1x,a,1x,i10)') &
                   i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                   '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
                   '--','    N/A ','--',this%integrals(i)%nevts_unw_req
 
           else
-             write(*,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10)') &
+             write(99,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10)') &
                   i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                   '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
                   '--',this%integrals(i)%overweight,'--',this%integrals(i)%nevts_unw_req
@@ -805,9 +814,9 @@ contains
     implicit none
     class(channel),intent(inout) :: this
     integer :: i
-    write(*,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
+    write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel ABS:',this%res_iter(1),'+/-',this%unc_iter(1),'(',this%unc_iter(1)/this%res_iter(1)*100d0,'%)'
-    write(*,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
+    write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel    :',this%res_iter(2),'+/-',this%unc_iter(2),'(',this%unc_iter(1)/this%res_iter(1)*100d0,'%)'
   end subroutine channel_print_result_iter
 

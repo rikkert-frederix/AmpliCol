@@ -28,7 +28,6 @@ contains
        weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
        return
     endif
-!!$    call mint_get_jacobian_from_x(ichan,x,vol_ichan)
     call simple_integrator%compute_wgt_from_x(ichan,x,vol_ichan)
     do j=1,pgl(ichan)%multichan%n_unique_channels
        i=pgl(ichan)%multichan%unique_channel_list(j)
@@ -39,11 +38,10 @@ contains
        call pgl(i)%phase_space%compute_x_from_momenta(p)
        if (pgl(i)%phase_space%jac.lt.0d0) then
           ! The x's could not be correctly computed from the momenta
-          write (*,*) 'WARNING: multi-channel weight not included'
+          write (99,*) 'WARNING: multi-channel weight not included'
           weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
           return
        endif
-!!$       call mint_get_jacobian_from_x(i,pgl(i)x%phase_space%x,vol)
        call simple_integrator%compute_wgt_from_x(i,pgl(i)%phase_space%x,vol)
        factors(j)=pgl(i)%phase_space%jac*vol
     enddo

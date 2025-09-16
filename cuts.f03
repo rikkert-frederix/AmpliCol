@@ -105,10 +105,10 @@ contains
     deltaR=sqrt(delta_phi(p1,p2)**2+(eta(p1)-eta(p2))**2)
   end function deltaR
 
-
-  subroutine setup_cuts_for_each_particle(pgl)
+  subroutine setup_cuts_for_each_particle(pgl,ichan)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
+    integer,intent(in) :: ichan
     integer :: i,j
     if (allocated(pgl%pT_min)) then
        write (*,*) 'ERROR: setting-up phase space cuts already'//&
@@ -116,30 +116,32 @@ contains
        stop 1
     endif
     ! check consistency among processes
-    do i=1,pgl%next
-       if (phys_model%is_jet(pgl%processes(i,1))) then
-          do j=2,pgl%nproc
-             if (.not.phys_model%is_jet(pgl%processes(i,j))) then
-                write (*,*) 'inconsistent processes and cuts #1'
-                stop 1
-             endif
-          enddo
-       elseif(phys_model%is_photon(pgl%processes(i,1))) then
-          do j=2,pgl%nproc
-             if (.not.phys_model%is_photon(pgl%processes(i,j))) then
-                write (*,*) 'inconsistent processes and cuts #2'
-                stop 1
-             endif
-          enddo
-       else
-          do j=2,pgl%nproc
-             if (phys_model%is_jet(pgl%processes(i,j)) .or. phys_model%is_photon(pgl%processes(i,j))) then
-                write (*,*) 'inconsistent processes and cuts #3'
-                stop 1
-             endif
-          enddo
-       endif
-    enddo
+    if (ichan.gt.0) then
+       do i=1,pgl%next
+          if (phys_model%is_jet(pgl%processes(i,1))) then
+             do j=2,pgl%nproc
+                if (.not.phys_model%is_jet(pgl%processes(i,j))) then
+                   write (*,*) 'inconsistent processes and cuts #1'
+                   stop 1
+                endif
+             enddo
+          elseif(phys_model%is_photon(pgl%processes(i,1))) then
+             do j=2,pgl%nproc
+                if (.not.phys_model%is_photon(pgl%processes(i,j))) then
+                   write (*,*) 'inconsistent processes and cuts #2'
+                   stop 1
+                endif
+             enddo
+          else
+             do j=2,pgl%nproc
+                if (phys_model%is_jet(pgl%processes(i,j)) .or. phys_model%is_photon(pgl%processes(i,j))) then
+                   write (*,*) 'inconsistent processes and cuts #3'
+                   stop 1
+                endif
+             enddo
+          endif
+       enddo
+    endif
     ! initialize all:
     allocate(pgl%pT_min(1:pgl%next))
     allocate(pgl%eta_max(1:pgl%next))
@@ -197,6 +199,17 @@ contains
           endif
        enddo
     enddo
+    write (99,*) '****************************************************'
+    write (99,*) 'CUTS for channel',ichan
+    do i=1,pgl%next
+       write (99,*) i,'pT_min:',pgl%pT_min(i),'eta_max',pgl%eta_max(i)
+    enddo
+    do i=1,pgl%next-1
+       do j=i+1,pgl%next
+          write (99,*) i,j,'sqrt_s_min:',pgl%sqrt_s_min(i,j),'DR_min',pgl%DR_min(i,j)
+       enddo
+    enddo
+    write (99,*) '****************************************************'
   end subroutine setup_cuts_for_each_particle
   
 end module cuts

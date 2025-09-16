@@ -133,7 +133,7 @@ contains
        if (pgl%same_flavour(1,i,1).ne.0 .or. pgl%same_flavour(1,i,2).ne.0) then
           j=pgl%same_flavour(1,i,1)
           k=pgl%same_flavour(1,i,2)
-          write (*,'(a,x,i4,x,a,i4,x,a,i4)') &
+          write (99,'(a,x,i4,x,a,i4,x,a,i4)') &
                "Found SF amps equal to a sum of DF amps:",i,'=',j,'+',k
           pgl%amps(1)%same_flav(i)=.true.
           do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
@@ -637,7 +637,7 @@ contains
     else        
        write (*,*) 'WARNING: symmetry factor missing',nquarks
     endif
-    write (*,*) 'total number of orders is',tot_ord,' and multi-channel symmetry factor is',sym_fac,&
+    write (99,*) 'total number of orders is',tot_ord,' and multi-channel symmetry factor is',sym_fac,&
          '. They should be the same when including all channels.'
   end subroutine compute_multichannel_symmetry_factor
 
