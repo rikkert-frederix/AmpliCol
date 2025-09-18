@@ -72,9 +72,7 @@ contains
     integer, intent(in) :: left, right
     integer :: i, j
     real(kind=8) :: pivot, tmp
-
     if (left >= right) return
-
     pivot = a((left+right)/2)
     i = left
     j = right
@@ -92,7 +90,6 @@ contains
       end if
       if (i > j) exit
     end do
-
     if (left < j) call quicksort(a, left, j)
     if (i < right) call quicksort(a, i, right)
   end subroutine quicksort
@@ -101,6 +98,5 @@ contains
     real(kind=8), intent(inout) :: a(isize)
     call quicksort(a, 1, isize)
   end subroutine sort_doubles
-
   
 end program

@@ -7,7 +7,7 @@ LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
-helper_modules.o
+helper_modules.o amplitude_library.o
 
 FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
@@ -77,7 +77,7 @@ phase_space_gen23.o : phase_space.o LUPdecompose.o
 phase_space_genpt.o : phase_space.o
 haag.o : phase_space.o
 amplitude_QCD.o : math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o simple_integrator.o
+matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o mint_module.o handling_processes.o simple_integrator.o
 read_process_file.o : mint_module.o phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
@@ -86,3 +86,4 @@ handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
 simple_integrator.o : helper_modules.o
+amplitude_library.o : handling_processes.o read_process_file.o
