@@ -33,6 +33,8 @@ options = {}
 process_order_to_index = {}
 
 def SwitchToFourFlavourScheme():
+    # Overwrite the relevant global variables so that we switch to a 4
+    # flavour-scheme process definition.
     global flavour_scheme
     global massless_QCD
     global proton
@@ -43,23 +45,31 @@ def SwitchToFourFlavourScheme():
     jet=massless_QCD
 
 def ProcessProcess(proc):
-    """Function to process a single proc"""
-    phase_space_orders_local = {}  # Local dictionary to avoid race conditions
+    # For the process 'proc', consider all the possible colour
+    # orderings compatible with that input process. Then, rearrange
+    # them into a phase-space ordering dictionary.
+    phase_space_orders_local = {}
 
+    # All n! possible colour orderings:
     all_possible_color_ord = list(itertools.permutations(range(len(proc))))
+    # Restrict them to the ones compatible with the process under consideration:
     valid_color_ord = [perm for perm in all_possible_color_ord if ValidColorOrd(proc, perm)]
+    # In case we have identical final state particles, there can be
+    # multiple colour orderings that are identical. Filter those out:
     unique_color_ord = [perm for perm in valid_color_ord if UniqueColorOrd(proc, perm)]
 
+    # Group the possible colour orderings into their corresponding
+    # phase-space orderings. The OrderProcPerm() function rearranges
+    # the massless_QCD final state particles to reduce the number of
+    # required phase-space orderings. 
     for perm in unique_color_ord:
         ordered_proc, ordered_perm = OrderProcPerm(proc, perm)
         zero = ordered_perm.index(0)
         perm_mapped = tuple(ordered_perm[zero:] + ordered_perm[:zero])
-
         if perm_mapped in phase_space_orders_local:
             phase_space_orders_local[perm_mapped].append((ordered_proc, ordered_perm, []))
         else:
             phase_space_orders_local[perm_mapped] = [(ordered_proc, ordered_perm, [])]
-
     return phase_space_orders_local
 
 
@@ -94,9 +104,11 @@ def ValidColorOrd(proc,perm):
     return True
 
 def UniqueColorOrd(proc,perm):
-    # Check if 'perm' is a color order in canonical order for the process 'proc'.
+    # Check if 'perm' is a color order in canonical order for the
+    # process 'proc' in case there are identical final state
+    # particles.
     #
-    # Start at the first incoming particle. From there, the indentical
+    # Start at the first incoming particle. From there, the identical
     # final state particles should each come in *increasing* order.
     zero=perm.index(0)
     perm_mapped=perm[zero:]+perm[:zero]
@@ -114,9 +126,15 @@ def UniqueColorOrd(proc,perm):
     return True
 
 def OrderProcPerm(proc,perm):
+    # Rearrange the final state massless_QCD particles (together with
+    # their colour orderings) into a canonical order. The canonical
+    # order is obtained by rearranging the massless_QCD particles such
+    # that their corresponding colour ordering is strictly increasing.
+    #
+    # Start by bringing the colour-order ('perm') to the canonical
+    # ordering.
     zero=perm.index(0)
     perm_mapped=list(perm[zero:]+perm[:zero])
-    proc_mapped=proc[zero:]+proc[:zero]
     elements_to_order=[]
     for i in perm_mapped:
         if proc[i] in massless_QCD and i > 1:
@@ -126,12 +144,14 @@ def OrderProcPerm(proc,perm):
     for i, val in zip(indices,sorted_elements):
         perm_mapped[i]=val
     perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero]
-    
+
+    # Rearrange the process following the rearrangement of the colour ordering
     proc_ordered=[None]*len(proc)
     for i in range(len(perm_ordered)):
         proc_ordered[perm_ordered[i]]=proc[perm[i]]
         
-    # if there are two quark lines there are two options for the order. Pick the right one
+    # if there are two quark lines there are two options for the
+    # colour order. Pick the right one
     if count_matching_elements(proc,quarks) == 2:
         for q in quarks:
             qi=[(i+1,j) for i,j in enumerate(perm_ordered[1:]) if proc_ordered[j] == q]
@@ -143,6 +163,7 @@ def OrderProcPerm(proc,perm):
 
 
 def ParseCollision(input_string):
+    # Parse the process string, and cross the initial state particles.
     input_string=input_string.replace('bar','~')
     parts=input_string.split(">")
     if len(parts) != 2:
@@ -158,11 +179,16 @@ def ParseCollision(input_string):
     return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest}
 
 def count_matching_elements(main_list,check_list):
+    # Counts how many elements of main_list are there in check_list
+    # e.g., main_list=[a,b,b,b,c,c,d] ; check_list=[b,d,e] ; --> count_matching_elements=4
     main_counts=Counter(main_list)
     count=sum(main_counts[item] for item in check_list if item in main_counts)
     return count
 
 def ValidProc(proc):
+    # Checks if 'proc' is a valid process based on simple QFT rules
+    # (such as charge conservation) and some restrictions imposed by
+    # this code (e.g., maximum number of quark lines).
     nq=count_matching_elements(proc,quarks)
     naq=count_matching_elements(proc,antiquarks)
     if (options["include_3qqbar_processes"]) :
@@ -186,6 +212,10 @@ def ValidProc(proc):
     return True
 
 def CompatibleUniqueProc(process,proc):
+    # Determines what are the required particles that need to be there
+    # in the process (skipping 'p' and 'j'), and checks if all these
+    # particles are actually part of 'proc'. Ignores if particles are
+    # initial or final state.
     mandatory=[]
     proc_local=proc.copy()
     for part in process['initial_state']:
@@ -200,6 +230,8 @@ def CompatibleUniqueProc(process,proc):
         return False
     
 def CompatibleProc(process,proc):
+    # Similar to CompatibleUniqueProc, but checks for both initial and
+    # final state separately.
     proc_local=list(proc[2:])
     for i in [0,1]:
         if process['initial_state'][i] != 'p':
@@ -287,6 +319,9 @@ def GenerateAllProcs(unique_procs,process):
     return procs
 
 def CombineResults(results):
+    # Results is an array of phase-space orderings
+    # dictionaries. Concatenate/combine this into one big phase-space
+    # orderings dictionary containing everything.
     phase_space_orders = {}
     for result in results:
         for key, value in result.items():
@@ -316,6 +351,11 @@ def ParseArgument():
     return ParseCollision(args.process_string)
 
 def IdenticalParticleSymmetryFactor(proc):
+    # Determine the symmetry factor that takes into account that we
+    # are considering only a subset of all possible LC colour
+    # orderings (based on the symmetry of the phase-space); this
+    # factor is exactly identical to the usual factor coming from the
+    # identical final state particles for all the colour particles:
     i_fac=1
     for p in all_coloured:
         i_fac*=max(1,math.factorial(proc[2:].count(p)))
@@ -323,11 +363,21 @@ def IdenticalParticleSymmetryFactor(proc):
 
 
 def build_process_index():
+    # Dictionary to go from process + color order directly to the
+    # phase-space order.
     for i, key in enumerate(all_keys_sorted):
         for (process, order, _) in phase_space_orders[key]:
             process_order_to_index[(process, order)] = i
 
 def MultiChannelPartners(proc, perm, k, l):
+    # Determine the multi-channel partners for the process 'proc' with
+    # "colour-ordering" 'perm' (that belong to phase-space order 'k',
+    # with process index 'l'; these latter two are only used to
+    # overwrite the current proc+perm element in the
+    # phase_space_orders dictionary with the one that includes the
+    # multi-channel partners determined in this function). Note that
+    # in the 'perm' also contains the "colour-ordering" of the
+    # colour-singlet particles.
     all_possible_perms = {perm}
     singlet_indices = [perm.index(i) for i, p in enumerate(proc) if p in singlets]
     anti_quark_indices = tuple([perm.index(i) for i, p in enumerate(proc) if p in antiquarks])
@@ -338,53 +388,89 @@ def MultiChannelPartners(proc, perm, k, l):
         singlet_perms = (tuple(singlet_indices),)
     else:
         singlet_perms = ()
-    # Build new permutations
+    # Build all possible permutations of the colour-ordering (and
+    # therefore have different phase-space orderings) but that have
+    # the same matrix elements. These will be the multi-channel
+    # partner processes. Currently, this is only based on the order of
+    # the colour-singlets and how they are distributed among the
+    # colour-strings.
     if len(anti_quark_indices) == 1:
+        # For a single quark line, the only thing we need to consider
+        # is all the permutations of the colour singlets.
         for s in singlet_perms:
             order = []
             for i in range(len(perm)):
                 if i == anti_quark_indices[0]:
+                    # Add all singlets in one go after the anti-quark
                     order.extend(perm[p] for p in (anti_quark_indices + s))
                 elif i not in singlet_indices:
+                    # Add QCD particles one at the time
                     order.append(perm[i])
             all_possible_perms.add(tuple(order))
     elif len(anti_quark_indices) == 2:
-        for j in range(len(singlet_perms) + 1):
+        # For two quark lines, we need to consider both all the
+        # permutations of the colour singlets AND how they are
+        # distributed between the two quark-antiquark colour
+        # groupings.
+        for j in range(len(singlet_perms) + 1): # 'j' is the number of singlets attached to the 1st quark line
             for s in singlet_perms:
                 order = []
                 for i in range(len(perm)):
                     if i == anti_quark_indices[0]:
+                         # Add j singlets after first anti-quark:
                         order.extend(perm[p] for p in ((anti_quark_indices[0],) + s[:j]))
                     elif i == anti_quark_indices[1]:
+                         # Add rest of singlets after second anti-quark:
                         order.extend(perm[p] for p in ((anti_quark_indices[1],) + s[j:]))
                     elif i not in singlet_indices:
+                        # Add the QCD particles one at the time
                         order.append(perm[i])
                 all_possible_perms.add(tuple(order))
-    # Lookup instead of brute-force search
+    # The possible permutations should be processes that are already
+    # included into other phase-space orderings. Look-up to which
+    # phase-space orders these permutations belong. These are the
+    # multi-channel partners.
     mt = []
     for o in all_possible_perms:
         idx = process_order_to_index.get((proc, o))
         if idx is not None:
             if idx in mt:
-                print("FOUND DOUBLE")
+                print("ERROR: found double. Each permutation should be unique for the multi-channel partners")
+                quit()
             else:
                 mt.append(idx)
         else:
-            print("NOT FOUND")
+            print("ERROR: expected multi-channel partner not found among phase-space orderings")
+            quit()
+    # Overwrite the current proc+perm element with the one that also
+    # includes the multi-channel partners:
     phase_space_orders[k][l] = (proc, perm, tuple(sorted(mt)))
 
 def DetermineMultiChannelPartnersAndSymmetryFactor():
+    # Using what's in all_keys_sorted, determine if a process needs
+    # multi-channeling, and what are their multi-channel partners. It
+    # also adds the symmetry factor for each process determined by
+    # considering that we are including only the non-unique colour
+    # orderings (when considering that the phase-space for identical
+    # particles is symmetric) and we need to compensate for this.
+    #
+    # Build a dictionary to get the phase-space order directly from
+    # the process + color order so that we can quickly find in which
+    # phase-space order we find the multi-channel partners:
     build_process_index()
-    for j,key in enumerate(all_keys_sorted):
+    # Determine the multi-channel partners:
+    for key in all_keys_sorted:
         for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
             MultiChannelPartners(process,order,key,i)
+    # Add the identical particle symmetry factor:
     for key in all_keys_sorted:
         for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
             phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process))
 
 def ConvertProcToString(proc):
+    # Convert the process 'proc' into a string.
     process,order,multi_channel,iden=proc
-    crossed=[pdgs[p] if i>1 else pdgs[anti_particle[p]] for i,p in enumerate(process)]
+    crossed=[pdgs[p] if i>1 else pdgs[anti_particle[p]] for i,p in enumerate(process)] # cross intial state
     line=str(len(multi_channel))
     line=line+'   '+' '.join([str(m+1) for m in multi_channel])
     line=line+'   '+' '.join(crossed)
@@ -393,6 +479,11 @@ def ConvertProcToString(proc):
     return line
 
 def sort_by_pdg_codes(process):
+    # Give a label to each process that can be used to order the
+    # process in a process_list. Make sure that same-flavour processes
+    # come after different-flavour ones (although, maybe this isn't
+    # necessary anymore). For the rest, it doesn't really matter, but
+    # makes the processes.txt file look neater.
     nq=count_matching_elements(process,quarks)
     if nq == 2:
         quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
@@ -410,11 +501,15 @@ def sort_by_pdg_codes2(proc):
     return sort_by_pdg_codes(process)
 
 def WriteAllProcsIntoList():
+    # Convert all the information stored in the phase_space_orders
+    # (or, actually, all_keys_sorted) into strings that can be
+    # directly written in the processes.txt file.
     towrite=[]
-    towrite.append(str(len(all_keys_sorted)))
+    towrite.append(str(len(all_keys_sorted))) # number of phase-space orderings to consider
     towrite.append('')
     for i,key in enumerate(all_keys_sorted):
         towrite.append(str(i+1)+'   '+str(len(phase_space_orders[key]))+'   '+str(max(len(proc[2]) for proc in phase_space_orders[key]))+'   '+' '.join([str(k+1) for k in key]))
+        # order the processes in the process_list, so that we get a neat processes.txt file:
         process_list=sorted(phase_space_orders[key],key=sort_by_pdg_codes2)
         for proc in process_list:
             process_line=ConvertProcToString(proc)
@@ -443,12 +538,13 @@ def Addqq_dfProcesses(sorted_procs):
     return sorted_procs
 
 def WriteUniqueProcsIntoList(procs):
-#    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
+    # Sort the unique processes to make them ready to be written to the file
     sorted_procs=sorted([sorted(proc,key=lambda x: sort_particles[x]) for proc in procs],key=sort_by_pdg_codes)
+    # in case of different flavour multiple-quark line processes, add all the possible orders:
     sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
         line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
-    except:
+    except IndexError:
         print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
         quit()
     for proc in sorted_procs:
@@ -479,7 +575,9 @@ if __name__ == "__main__":
     #     g d~', since they are the same process).
     # No knowledge on colour orderings or phase-space orderings have
     # been considered up to now.
-    
+    #
+    # Consider all the possible colour-orderings and collect all the
+    # info into the phase_space_orders dictionary.
     if not options["serial"]:
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
             results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
