@@ -16,9 +16,8 @@ quarks=frozenset({'d','u','s','c','b','t'})
 antiquarks=frozenset({'d~','u~','s~','c~','b~','t~'})
 singlets=frozenset({'a','z','w+','w-','e+','e-','mu+','mu-','ta+','ta-','ve','ve~','vm','vm~','vt','vt~','h'})
 gluons=frozenset({'g'})
-flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
-#flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
 all_coloured=quarks | antiquarks | gluons
+flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
 massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
 proton=massless_QCD
 jet=massless_QCD
@@ -32,6 +31,16 @@ charges3={'g':0,'d':-1,'u':2,'s':-1,'c':2,'b':-1,'t':2,'d~':1,'u~':-2,'s~':1,'c~
 family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'c~':-11,'b~':-21,'t~':-21,'a':0,'z':0,'w+':0,'w-':0,'e+':-31,'e-':31,'mu+':-41,'mu-':41,'ta+':-51,'ta-':51,'ve':31,'ve~':-31,'vm':41,'vm~':-41,'vt':51,'vt~':-51,'h':0}
 
 process_order_to_index = {}
+
+def SwitchToFourFlavourScheme():
+    global flavour_scheme
+    global massless_QCD
+    global proton
+    global jet
+    flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
+    massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
+    proton=massless_QCD
+    jet=massless_QCD
 
 def ProcessProcess(proc):
     """Function to process each 'proc' in parallel"""
@@ -257,7 +266,11 @@ def CombineResults(results):
 def ParseArgument():
     parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
     parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
+    parser.add_argument("--use_4FS", action="store_true", help="Enable 4-flavor scheme (4FS) mode")
     args=parser.parse_args()
+    use_4FS=args.use_4FS
+    if (use_4FS) :
+        SwitchToFourFlavourScheme()
     return ParseCollision(args.process_string)
 
 def IdenticalParticleSymmetryFactor(proc):
