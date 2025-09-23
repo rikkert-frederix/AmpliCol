@@ -43,7 +43,7 @@ def SwitchToFourFlavourScheme():
     jet=massless_QCD
 
 def ProcessProcess(proc):
-    """Function to process each 'proc' in parallel"""
+    """Function to process a single proc"""
     phase_space_orders_local = {}  # Local dictionary to avoid race conditions
 
     all_possible_color_ord = list(itertools.permutations(range(len(proc))))
@@ -213,18 +213,32 @@ def CompatibleProc(process,proc):
     return True
     
 def GenerateAllUniqueProcs(process):
+    # Returns a set of unique_procs with the 'massless_QCD' particles
+    # in a canonical (sorted) order. Even though the particles in
+    # these processes are compatible with the input process, they are
+    # not necessarily in the same order. The way this function works
+    # is not really optimised: it first counts how many particles are
+    # in the definition of 'massless_QCD', and then simply generates all 
     procs=[[]]
     for part in process['initial_state']:
-        if part != 'p' and part not in jet:
+        if part != 'p' and part not in massless_QCD:
             raise ValueError("Initial state should be a proton ('p').")
     jp=0
     for part in process['rest']:
-        if part not in jet : continue
+        if part not in massless_QCD : continue
         jp=jp+1
-    for part in range(process['jet_count']+2+jp):
+    # The following for-loop will generate all processes of length
+    # 'part' that contain all possible massless_QCD particles. Hence,
+    # procs will have a size n^part, where n is the number of
+    # particles in massless_QCD (by default 11=10quarks+1gluon). (This
+    # is slightly reduced when part is large, since only up to 2 (or
+    # 3) qqbar pairs are considered). To check that these are valid
+    # processes (e.g., equal number of quarks and anti-quarks) is done
+    # later in this function. 
+    for part in range(process['jet_count']+2+jp): # explcit number of jets + two incoming + other massless_QCD
         procs_new=[]
         for proc in procs:
-            for p in jet:
+            for p in massless_QCD:
                 if (not options["include_3qqbar_processes"]) and part > 3 and p not in gluons: continue
                 if part > 5 and p not in gluons: continue
                 if not procs_new:
@@ -232,28 +246,42 @@ def GenerateAllUniqueProcs(process):
                 else:
                     procs_new.append(sorted(proc+[p]))
         procs=procs_new.copy()
+    # Add the non-massless_QCD particles in the process to all the
+    # procs.
     for part in process['rest']:
-        if part in jet : continue
+        if part in massless_QCD : continue
         for proc in procs:
             proc.append(part)
     unique_procs=[]
+    # Only at this stage check if they are valid (e.g., equal number
+    # of quarks and anti-quarks) and compatible with the input
+    # process.
     for proc in procs:
         if ValidProc(proc) and CompatibleUniqueProc(process,proc):
             unique_procs.append(tuple(proc))
     return set(unique_procs)
 
 def GenerateAllProcs(unique_procs,process):
+    # Determine which particles will become the actual initial state
+    # ones. Do this, for each of the unique_procs, by considering all
+    # possible pairs of two particles. Put them at then beginning of
+    # the process (in both orders), and if this results in a process
+    # compatible with the into process, its a valid process to
+    # consider and add it to the 'procs'. Note that the 'procs' is a
+    # set. Hence, the same process won't appear twice, so we do not
+    # need to worry about identical particles.
     procs=set()
     for proc in unique_procs:
+        # pick among all particles in the process two that become the two incoming ones.
         for i,j in itertools.combinations(range(len(proc)),2):
             if proc[i] in jet and proc[j] in jet:
                 pair1=[proc[i],proc[j]]
                 pair2=[proc[j],proc[i]]
                 remaining=[e for k,e in enumerate(proc) if k not in (i,j)]
-                proc1=tuple(pair1+remaining)
+                proc1=tuple(pair1+remaining) # the two incoming + all others
                 if CompatibleProc(process,proc1):
                     procs.add(proc1)
-                proc2=tuple(pair2+remaining)
+                proc2=tuple(pair2+remaining) # the two incoming (in other order) + all others
                 if CompatibleProc(process,proc2):
                     procs.add(proc2)
     return procs
@@ -430,11 +458,28 @@ def WriteUniqueProcsIntoList(procs):
     line.append('')
     return line
     
-if __name__ == "__main__":    
+if __name__ == "__main__":
+    # Parse the argument. Cross the initial state particles to the
+    # final state to avoid confusion about initial state quarks (that
+    # are treated as anti-quarks when considering
+    # e.g. colour-ordering)
     process=ParseArgument()
     all_unique_procs=GenerateAllUniqueProcs(process)
     all_procs=GenerateAllProcs(all_unique_procs,process)
-
+    # At this stage, we have two sets:
+    # 'all_unique_procs' contains all processes compatible with the
+    #     input process, where the massless_QCD particles are put in
+    #     canonical order. No distinction between incoming and
+    #     outgoing particles is made.
+    # 'all_procs' contains all processes compatible with the input
+    #     process. It has all possibilities for this two incoming
+    #     particles (even though they are not crossed to the initial
+    #     state), and only one order for all the final state
+    #     particles, (i.e, only one of 'u u~ > d d~ g ' and 'u u~ > d
+    #     g d~', since they are the same process).
+    # No knowledge on colour orderings or phase-space orderings have
+    # been considered up to now.
+    
     if not options["serial"]:
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
             results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
