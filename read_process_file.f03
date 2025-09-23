@@ -245,7 +245,7 @@ contains
     integer,dimension(next) :: process,order,process_unique
     integer :: idenCOfactor
     real(kind=8) :: idenCOMAPfactor,idenMAPfactor
-    integer,dimension(0:4) :: quarks
+    integer,dimension(0:6) :: quarks
     logical :: skip_same_flavour,is_same_flavour
     call find_quarks(process,order,quarks)
     call get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor,is_same_flavour)
@@ -265,7 +265,7 @@ contains
 
   subroutine get_unique_process_from_quarks(quarks,process,order,process_unique,idenMAPfactor,is_same_flavour)
     implicit none
-    integer,dimension(0:4) :: quarks
+    integer,dimension(0:6) :: quarks
     integer,dimension(next) :: process,order,process_unique,process_mapped,mapping
     integer :: i,iproc,iq
     real(kind=8) :: idenMAPfactor
@@ -277,12 +277,17 @@ contains
           if (all(pgl_unique%processes(1:4,iproc).eq.-abs(quarks(1:4)))) then ! quarks are consistent 
              if (all(process_mapped(5:next).eq.pgl_unique%processes(5:next,iproc))) exit ! and the rest as well
           endif
+       elseif (quarks(0).eq.6) then
+          if (all(abs(pgl_unique%processes(1:6,iproc)).eq.abs(quarks(1:6)))) then ! quarks are consistent 
+             if (all(process_mapped(7:next).eq.pgl_unique%processes(7:next,iproc))) exit ! and the rest as well
+          endif
        else
           if (all(process_mapped(1:next).eq.pgl_unique%processes(1:next,iproc))) exit
        endif
     enddo
     if (iproc.gt.pgl_unique%nproc) then
        write (*,*) 'Process not found',quarks
+       write (*,*) process
        stop 1
     endif
     process_unique(1:next)=process(1:next)
@@ -299,6 +304,18 @@ contains
                    process_unique(order(i))=sign(pgl_unique%processes(3,unique_map(iproc)),quarks(3))
                 elseif (iq.eq.3) then
                    process_unique(order(i))=sign(pgl_unique%processes(2,unique_map(iproc)),quarks(2))
+                endif
+             elseif (quarks(0).eq.6) then
+                if (iq.eq.1 .or. iq.eq.6) then
+                   process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
+                elseif (iq.eq.2) then
+                   process_unique(order(i))=sign(pgl_unique%processes(4,unique_map(iproc)),quarks(4))
+                elseif (iq.eq.3) then
+                   process_unique(order(i))=sign(pgl_unique%processes(2,unique_map(iproc)),quarks(2))
+                elseif (iq.eq.4) then
+                   process_unique(order(i))=sign(pgl_unique%processes(5,unique_map(iproc)),quarks(5))
+                elseif (iq.eq.5) then
+                   process_unique(order(i))=sign(pgl_unique%processes(3,unique_map(iproc)),quarks(3))
                 endif
              elseif (quarks(0).eq.2) then
                 process_unique(order(i))=sign(pgl_unique%processes(iq,unique_map(iproc)),quarks(iq))
@@ -369,7 +386,7 @@ contains
   subroutine find_quarks(process,order,quarks)
     implicit none
     integer,dimension(next) :: process,order
-    integer,dimension(0:4) :: quarks
+    integer,dimension(0:6) :: quarks
     integer :: i
     quarks(0)=0
     do i=1,next
@@ -380,6 +397,8 @@ contains
     enddo
     if (quarks(0).eq.4) then
        quarks(1:4)=[quarks(1),quarks(3),quarks(2),quarks(4)]
+    elseif (quarks(0).eq.6) then
+       quarks(1:6)=[quarks(1),quarks(3),quarks(5),quarks(2),quarks(4),quarks(6)]
     endif
   end subroutine find_quarks
 
