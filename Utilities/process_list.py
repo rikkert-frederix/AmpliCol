@@ -32,14 +32,26 @@ family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'
 options = {}
 process_order_to_index = {}
 
-def SwitchToFourFlavourScheme():
-    # Overwrite the relevant global variables so that we switch to a 4
-    # flavour-scheme process definition.
+def SwitchFlavourScheme(FS):
+    # Overwrite the relevant global variables so that we switch to the
+    # 'FS' flavour-scheme process definition.
     global flavour_scheme
     global massless_QCD
     global proton
     global jet
-    flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
+    if FS==1:
+        flavour_scheme=frozenset({'d'}) # all the massless quarks
+    elif FS==2:
+        flavour_scheme=frozenset({'d','u'}) # all the massless quarks
+    elif FS==3:
+        flavour_scheme=frozenset({'d','u','s'}) # all the massless quarks
+    elif FS==4:
+        flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
+    elif FS==4:
+        flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+    else:
+        print("ERROR: unknown flavour scheme",FS)
+        quit()
     massless_QCD=flavour_scheme | frozenset([q+'~' for q in flavour_scheme]) | gluons
     proton=massless_QCD
     jet=massless_QCD
@@ -79,22 +91,33 @@ def ValidColorOrd(proc,perm):
     for idx in perm:
         particle = proc[idx]
         if particle in quarks:
+            # A quark should not come directly after another quark or
+            # a gluon in the colour ordering:
             if found_quark or found_gluon:
                 return False
-            if found_antiquark and idx < perm[0]:  # Two-quark line process, reject one ordering
+            # In case of a two-quark line process, we need to reject
+            # one ordering---it does not matter which one:
+            if found_antiquark and idx > perm[0]: 
                 return False
             found_quark = True
             found_antiquark = found_singlet = found_gluon = False
         elif particle in antiquarks:
+            # An antiquark should not come directly after another
+            # anti-quark or a colour singlet. Moreover, there should
+            # have been already a quark earlier in the colour order:
             if found_antiquark or found_singlet or not found_quark:
                 return False
             found_antiquark = True
             found_quark = found_singlet = found_gluon = False
         elif particle in gluons:
+            # Gluons should not come directly after antiquarks or
+            # singlets:
             if found_antiquark or found_singlet:
                 return False
             found_gluon = True
-        else:  # Assuming the rest are singlets
+        else:  # Assuming the rest are singlets.  Singlets should come
+               # directly after other singlets or antiquarks (i.e.,
+               # not directly after quarks or gluons).
             if found_quark or found_gluon or not found_antiquark :
                 return False
             found_singlet = True
@@ -267,7 +290,7 @@ def GenerateAllUniqueProcs(process):
     # 3) qqbar pairs are considered). To check that these are valid
     # processes (e.g., equal number of quarks and anti-quarks) is done
     # later in this function. 
-    for part in range(process['jet_count']+2+jp): # explcit number of jets + two incoming + other massless_QCD
+    for part in range(process['jet_count']+2+jp): # number of jets + two incoming + other massless_QCD
         procs_new=[]
         for proc in procs:
             for p in massless_QCD:
@@ -332,14 +355,15 @@ def CombineResults(results):
     return phase_space_orders
                 
 def ParseArgument():
-    parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
-    parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
-    parser.add_argument("-4FS","--switch_to_4FS", action="store_true", help="Enable 4-flavor scheme (4FS) mode")
-    parser.add_argument("-3","--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
-    parser.add_argument("-s","--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
+    parser = argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
+    parser.add_argument("process_string", type=str, help="Process to consider (e.g., 'p p > w+ z 4j')")
+    parser.add_argument("-FS", "--flavour_scheme", type=int, choices=range(1, 6), metavar="[1-5]",
+                        help="Switch to N-flavor scheme (NFS), where N is 1-5 (default=5)")
+    parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
+    parser.add_argument("-s", "--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
     args=parser.parse_args()
-    if (args.switch_to_4FS) :
-        SwitchToFourFlavourScheme()
+    if (args.flavour_scheme):
+        SwitchFlavourScheme(args.flavour_scheme)
     if args.include_3qqbar:
         options["include_3qqbar_processes"] = True
     else:
@@ -480,21 +504,12 @@ def ConvertProcToString(proc):
 
 def sort_by_pdg_codes(process):
     # Give a label to each process that can be used to order the
-    # process in a process_list. Make sure that same-flavour processes
-    # come after different-flavour ones (although, maybe this isn't
-    # necessary anymore). For the rest, it doesn't really matter, but
+    # process in a process_list. This is not really important, but
     # makes the processes.txt file look neater.
     nq=count_matching_elements(process,quarks)
-    if nq == 2:
-        quarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in quarks])
-        antiquarks_in_proc=tuple([process[i] for i,p in enumerate(process) if p in antiquarks])
-        same_flavour=(quarks_in_proc[0]==quarks_in_proc[1]) or (antiquarks_in_proc[0]==antiquarks_in_proc[1])
-    else:
-        same_flavour=False
-    val=0
-    val+=nq*2
-    if same_flavour : val=val+1
-    return (val,[sort_particles[p] for p in process]) # first sort by 'val', then by (modified) PDG codes.
+    same_flavour=max([count_matching_elements(process,[q]) for q in quarks])
+    # first sort by 'nq', then by same_flavour, then by (modified) PDG codes:
+    return (nq,same_flavour,[sort_particles[p] for p in process])
 
 def sort_by_pdg_codes2(proc):
     process=proc[0]
