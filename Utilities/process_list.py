@@ -396,15 +396,15 @@ def WriteAllProcsIntoList():
         towrite.append('')
     return towrite
 
-def Add2qq_dfProcesses(sorted_procs):
-    # add all the 2qq_df processes by flipping orders of the quarks and anti-quarks
+def Addqq_dfProcesses(sorted_procs):
+    # add all the multiple qq diff flavour processes by flipping orders of the quarks and anti-quarks
     i=0
     while i < len(sorted_procs):
         proc = sorted_procs[i]
         nq=count_matching_elements(proc,quarks)
         if nq >= 2 :  # multi-quark-line process
-            qs=proc[0:nq]
-            aqs=proc[nq:2*nq]
+            qs=proc[0:nq]      # assume that first nq elements are the quarks
+            aqs=proc[nq:2*nq]  # then come all the anti-quarks
             for q_perm in itertools.permutations(qs):
                 for a_perm in itertools.permutations(aqs):
                     swapped_proc=list(q_perm)+list(a_perm)+proc[2*nq:]
@@ -417,7 +417,7 @@ def Add2qq_dfProcesses(sorted_procs):
 def WriteUniqueProcsIntoList(procs):
 #    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
     sorted_procs=sorted([sorted(proc,key=lambda x: sort_particles[x]) for proc in procs],key=sort_by_pdg_codes)
-    sorted_procs=Add2qq_dfProcesses(sorted_procs)
+    sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
         line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
     except:
