@@ -30,6 +30,7 @@ sort_particles={'g':13,'d':1,'u':2,'s':3,'c':4,'b':5,'t':6,'d~':7,'u~':8,'s~':9,
 charges3={'g':0,'d':-1,'u':2,'s':-1,'c':2,'b':-1,'t':2,'d~':1,'u~':-2,'s~':1,'c~':-2,'b~':1,'t~':-2,'a':0,'z':0,'w+':3,'w-':-3,'e+':3,'e-':-3,'mu+':3,'mu-':-3,'ta+':3,'ta-':-3,'ve':0,'ve~':0,'vm':0,'vm~':0,'vt':0,'vt~':0,'h':0}
 family={'g':0,'d':1,'u':1,'s':11,'c':11,'b':21,'t':21,'d~':-1,'u~':-1,'s~':-11,'c~':-11,'b~':-21,'t~':-21,'a':0,'z':0,'w+':0,'w-':0,'e+':-31,'e-':31,'mu+':-41,'mu-':41,'ta+':-51,'ta-':51,'ve':31,'ve~':-31,'vm':41,'vm~':-41,'vt':51,'vt~':-51,'h':0}
 
+options = {}
 process_order_to_index = {}
 
 def SwitchToFourFlavourScheme():
@@ -165,8 +166,12 @@ def count_matching_elements(main_list,check_list):
 def ValidProc(proc):
     nq=count_matching_elements(proc,quarks)
     naq=count_matching_elements(proc,antiquarks)
-    if nq > 4 : return False    # at most four quarks
-    if naq > 4 : return False   # at most four anti-quarks
+    if (options["include_3qqbar_processes"]) :
+        if nq > 3 : return False    # at most three quarks
+        if naq > 3 : return False   # at most three anti-quarks
+    else :
+        if nq > 2 : return False    # at most two quarks
+        if naq > 2 : return False   # at most two anti-quarks
 #    if nq < 2 : return False    # at least two quarks
 #    if naq < 2 : return False   # at least two anti-quarks
     if nq != naq : return False # same number of quarks and anti-quarks
@@ -221,6 +226,7 @@ def GenerateAllUniqueProcs(process):
         procs_new=[]
         for proc in procs:
             for p in jet:
+                if (not options["include_3qqbar_processes"]) and part > 3 and p not in gluons: continue
                 if part > 5 and p not in gluons: continue
                 if not procs_new:
                     procs_new=[sorted(proc+[p])]
@@ -266,11 +272,15 @@ def CombineResults(results):
 def ParseArgument():
     parser=argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
     parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
-    parser.add_argument("--use_4FS", action="store_true", help="Enable 4-flavor scheme (4FS) mode")
+    parser.add_argument("-4FS","--switch_to_4FS", action="store_true", help="Enable 4-flavor scheme (4FS) mode")
+    parser.add_argument("-3","--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
     args=parser.parse_args()
-    use_4FS=args.use_4FS
-    if (use_4FS) :
+    if (args.switch_to_4FS) :
         SwitchToFourFlavourScheme()
+    if args.include_3qqbar:
+        options["include_3qqbar_processes"] = True
+    else:
+        options["include_3qqbar_processes"] = False
     return ParseCollision(args.process_string)
 
 def IdenticalParticleSymmetryFactor(proc):
@@ -383,35 +393,20 @@ def WriteAllProcsIntoList():
     return towrite
 
 def Add2qq_dfProcesses(sorted_procs):
-    # add all the 2qq_df processes by flipping orders
+    # add all the 2qq_df processes by flipping orders of the quarks and anti-quarks
     i=0
     while i < len(sorted_procs):
         proc = sorted_procs[i]
-        if proc[2] in antiquarks and proc[3] in antiquarks: # 2-quark-line process
-            # first add the other connection in the colour ordering
-            if proc[2] != proc[3]:
-                # swap the two anti-quarks
-                swapped_proc=proc[:]
-                swapped_proc[2],swapped_proc[3]=swapped_proc[3],swapped_proc[2]
-                sorted_procs.insert(i+1,swapped_proc)
-                i+=1
-            elif proc[2] == proc[3] and proc[0] != proc[1] :
-                # swap the two quarks
-                swapped_proc=proc[:]
-                swapped_proc[0],swapped_proc[1]=swapped_proc[1],swapped_proc[0]
-                sorted_procs.insert(i+1,swapped_proc)
-                i+=1
-            # Also interchange quark and anti-quarks
-            swapped_proc=sorted_procs[i][:]
-            swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
-            if swapped_proc not in sorted_procs:
-                sorted_procs.insert(i+1,swapped_proc)
-                i+=1
-            swapped_proc=proc[:]
-            swapped_proc[0],swapped_proc[1],swapped_proc[2],swapped_proc[3]=swapped_proc[1],swapped_proc[0],swapped_proc[3],swapped_proc[2]
-            if swapped_proc not in sorted_procs:
-                sorted_procs.insert(i+1,swapped_proc)
-                i+=1
+        nq=count_matching_elements(proc,quarks)
+        if nq >= 2 :  # multi-quark-line process
+            qs=proc[0:nq]
+            aqs=proc[nq:2*nq]
+            for q_perm in itertools.permutations(qs):
+                for a_perm in itertools.permutations(aqs):
+                    swapped_proc=list(q_perm)+list(a_perm)+proc[2*nq:]
+                    if swapped_proc not in sorted_procs:
+                        sorted_procs.insert(i+1,swapped_proc)
+                        i+=1
         i+=1
     return sorted_procs
 
@@ -419,7 +414,11 @@ def WriteUniqueProcsIntoList(procs):
 #    sorted_procs=sorted([sorted(proc,key=lambda x: int(pdgs[x])) for proc in procs],key=sort_by_pdg_codes)
     sorted_procs=sorted([sorted(proc,key=lambda x: sort_particles[x]) for proc in procs],key=sort_by_pdg_codes)
     sorted_procs=Add2qq_dfProcesses(sorted_procs)
-    line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
+    try:
+        line=[str(len(sorted_procs[0]))+' '+str(len(sorted_procs))]
+    except:
+        print("ERROR: no processes found. Try './process_list.py --help' to get more information on usage")
+        quit()
     for proc in sorted_procs:
         line.append(' '.join(pdgs[p] for p in proc))
     line.append('')
