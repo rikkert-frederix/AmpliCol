@@ -93,13 +93,13 @@ contains
        pgl%same_flavour=0
     endif
     do i=1,pgl%nproc
-       if (pgl%amps%n_qqbar(i).ne.2) cycle
+       if (pgl%amps%n_qqbar(i).lt.2) cycle
        do j=1,pgl%nproc
           if (i.eq.j) cycle
-          if (pgl%amps%n_qqbar(j).ne.2) cycle
+          if (pgl%amps%n_qqbar(j).lt.2) cycle
           do k=1,j-1
              if (k.eq.i) cycle
-             if (pgl%amps%n_qqbar(k).ne.2) cycle
+             if (pgl%amps%n_qqbar(k).lt.2) cycle
              do ii=pgl%amps%iproc_start(i),pgl%amps%iproc_start(i+1)-1
                 if (pgl%amps%amps(ii).eq.(0d0,0d0)) cycle
                 do jj=pgl%amps%iproc_start(j),pgl%amps%iproc_start(j+1)-1
@@ -240,7 +240,7 @@ contains
                 is=is+1
              endif
           enddo
-       elseif (nq.eq.4) then
+       elseif (nq.eq.4 .or. nq.eq.6) then
           iq=1
           iaq=2
           ig=4
@@ -251,32 +251,10 @@ contains
                 iq=iq+2
              elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iaq,iproc)=i
-                iaq=next
-             elseif (is_gluon(pgl_unique%processes(i,iproc))) then
-                pgl_unique%color_orders(ig,iproc)=i
-                ig=ig+1
-             elseif (is_singlet(pgl_unique%processes(i,iproc))) then
-                pgl_unique%color_orders(is,iproc)=i
-                is=is+1
-             endif
-          enddo
-        elseif (nq.eq.6) then
-          naq=0
-          iq=1
-          iaq=2
-          ig=4
-          is=ng+4
-          do i=1,next
-          if (is_quark(pgl_unique%processes(i,iproc))) then
-                pgl_unique%color_orders(iq,iproc)=i
-                iq=iq+2
-             elseif (is_antiquark(pgl_unique%processes(i,iproc))) then
-                pgl_unique%color_orders(iaq,iproc)=i
-                naq=naq+1
-                if (naq.eq.3) then
-                        iaq=next
+                if (iaq.eq.nq-2) then
+                   iaq=next
                 else
-                        iaq=iaq+2
+                   iaq=iaq+2
                 endif
              elseif (is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i
@@ -286,6 +264,10 @@ contains
                 is=is+1
              endif
           enddo
+       else
+          write (*,*) 'Unknown number of quarks and anti-quarks'
+          write (*,*) iproc,':',pgl_unique%processes(:,iproc)
+          stop 1
        endif
     enddo
   end subroutine setup_color_order
