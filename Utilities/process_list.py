@@ -5,7 +5,6 @@ import copy
 import re
 import argparse
 from collections import Counter
-from collections import defaultdict
 import multiprocessing
 import math
 
@@ -274,6 +273,7 @@ def ParseArgument():
     parser.add_argument("process_string",type=str,help="Process to consider (e.g., 'p p > w+ z 4j')")
     parser.add_argument("-4FS","--switch_to_4FS", action="store_true", help="Enable 4-flavor scheme (4FS) mode")
     parser.add_argument("-3","--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
+    parser.add_argument("-s","--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
     args=parser.parse_args()
     if (args.switch_to_4FS) :
         SwitchToFourFlavourScheme()
@@ -281,6 +281,10 @@ def ParseArgument():
         options["include_3qqbar_processes"] = True
     else:
         options["include_3qqbar_processes"] = False
+    if args.serial:
+        options["serial"] = True
+    else:
+        options["serial"] = False
     return ParseCollision(args.process_string)
 
 def IdenticalParticleSymmetryFactor(proc):
@@ -430,10 +434,12 @@ if __name__ == "__main__":
     process=ParseArgument()
     all_unique_procs=GenerateAllUniqueProcs(process)
     all_procs=GenerateAllProcs(all_unique_procs,process)
-    
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
-#    results=[ProcessProcess(x) for x in all_procs]
+
+    if not options["serial"]:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+            results = pool.map(ProcessProcess, all_procs)  # Parallelize across procs
+    else:
+        results=[ProcessProcess(x) for x in all_procs]
     phase_space_orders=CombineResults(results)
     all_keys_sorted=sorted(phase_space_orders.keys())
     DetermineMultiChannelPartnersAndSymmetryFactor() # updates the phase_space_orders dictionary
