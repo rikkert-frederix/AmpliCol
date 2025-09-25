@@ -703,7 +703,7 @@ contains
       !    qbar" or any subset thereof.
       implicit none
       integer :: i,j,nc1,nc2
-      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,not_valid
+      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,valid
       integer,dimension(isize) :: ip,et
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
@@ -751,7 +751,7 @@ contains
          nc2=i-1
          ip(1:nc1+nc2)=[current_list_local(ic1)%order(1:nc1),current_list_local(ic2)%order(1:nc2)]
          ! do they actual checking:
-         not_valid=.true.
+         valid=.false.
          do_iproc: do iproc=1,this%nprocs
             ! check that both currents contribute to the iproc process:
             if (.not. btest(iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc),iproc-1)) cycle
@@ -765,12 +765,12 @@ contains
                      if (j-1+i.gt.n) exit do_j
                      if (order(j-1+i,iproc).ne.ip(i)) exit do_j
                   enddo
-                  not_valid=.false. ! it's compatible with the input colour order of iproc
+                  valid=.true. ! it's compatible with the input colour order of iproc
                   exit do_iproc
                endif
             enddo do_j
          enddo do_iproc
-         if (not_valid) return ! not compatible with any of the iprocs
+         if (.not.valid) return ! not compatible with any of the iprocs
       endif
 
       ! If using symmetry and the current is a combination of all external
