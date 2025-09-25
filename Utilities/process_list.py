@@ -174,7 +174,7 @@ def second_tuple_index(tup):
     return tup[1]
 
 def OrderProcPerm(proc,perm):
-    # In order to reduce the number of possible phase-space orderings,
+    # In order to reduce the number of needed phase-space orderings,
     # as well as having the largest chance of finding identical matrix
     # elements, we bring the final state massless_QCD particles (and
     # corresponding colour orderings) into a canonical order.
@@ -187,7 +187,7 @@ def OrderProcPerm(proc,perm):
     # is at position 1).
     #
     # In case of multiple quark lines, we do the above arrangement to
-    # the final state xmassless_QCD particles, but we can, on top of
+    # the final state massless_QCD particles, but we can, on top of
     # that, still re-arrange the multiple 'q,...,qbar,s,...,s' blocks
     # in the colour ordering. Also put those in a canonical order.
     #
@@ -212,7 +212,7 @@ def OrderProcPerm(proc,perm):
         
     # If there are multiple quark lines, order the
     # "q,g,...,g,qbar,s,...,s" blocks in the colour ordering such that
-    # the order for 'q' is increasing.
+    # the order of the q's is increasing.
     if count_matching_elements(proc,quarks) >= 2:
         # start positions of the blocks of the form "q,g,...,g,qbar,s,...,s".
         qs=[i for i,j in enumerate(perm_ordered) if proc_ordered[j] in quarks]
@@ -220,7 +220,7 @@ def OrderProcPerm(proc,perm):
         for k,s in enumerate(qs):
             e=qs[k+1] if k+1 < len(qs) else len(perm_ordered)
             blocks.append(perm_ordered[s:e])
-        # sort the blocks by their first element (i.e., the quark):
+        # sort the blocks array by the first element of each block (i.e., the quark):
         blocks.sort(key=lambda b:b[0])
         # Concatenate all the ordered blocks
         perm_ordered=[x for b in blocks for x in b]
