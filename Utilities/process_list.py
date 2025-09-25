@@ -47,8 +47,10 @@ def SwitchFlavourScheme(FS):
         flavour_scheme=frozenset({'d','u','s'}) # all the massless quarks
     elif FS==4:
         flavour_scheme=frozenset({'d','u','s','c'}) # all the massless quarks
-    elif FS==4:
+    elif FS==5:
         flavour_scheme=frozenset({'d','u','s','c','b'}) # all the massless quarks
+    elif FS==6:
+        flavour_scheme=frozenset({'d','u','s','c','b','t'}) # all the massless quarks
     else:
         print("ERROR: unknown flavour scheme",FS)
         quit()
@@ -86,7 +88,16 @@ def ProcessProcess(proc):
 
 
 def ValidColorOrd(proc,perm):
-    # Check if 'perm' is a valid color order for the process 'proc'
+    # Check if 'perm' is a valid color order for the process
+    # 'proc'. Valid orders are of the form:
+    #
+    # [q,g,...,g,qbar,s,...,s,q,g,...g,qbar,s,...,s]
+    #
+    # Note that we keep all possible orderings of the colour singlets;
+    # we will remove that overcounting by considering those processes
+    # to be multi-channel partners. This allows us to map all the
+    # peaks from e.g., close-to-collinear photons to any quark or
+    # anti-quark.
     found_quark = found_antiquark = found_singlet = found_gluon = False
     for idx in perm:
         particle = proc[idx]
@@ -95,12 +106,23 @@ def ValidColorOrd(proc,perm):
             # a gluon in the colour ordering:
             if found_quark or found_gluon:
                 return False
-            # In case of a two-quark line process, we need to reject
-            # one ordering---it does not matter which one:
-            if found_antiquark and idx > perm[0]: 
+            # In case of a multi-quark line process, we need to reject
+            # some orderings---interchanging 'q,...,qbar' lines in the
+            # ordering, results, in fact, not in a different
+            # ordering---it does not matter which ones we remove, as
+            # long as we keep one possible one. We take the one where
+            # the colour-order is such that they are increasing in the
+            # labels for the quarks (current idx is larger than the
+            # idx from previous quark in the ordering).
+            #
+            # ALTERNATIVELY: we could keep all and take care of it
+            # through multi-channeling (just as we do for the
+            # colour-singlet orderings).
+            if found_antiquark and idx < quark_idx: 
                 return False
             found_quark = True
             found_antiquark = found_singlet = found_gluon = False
+            quark_idx=idx
         elif particle in antiquarks:
             # An antiquark should not come directly after another
             # anti-quark or a colour singlet. Moreover, there should
@@ -148,16 +170,31 @@ def UniqueColorOrd(proc,perm):
                 previous_position=perm_mapped.index(i)
     return True
 
+def second_tuple_index(tup):
+    return tup[1]
+
 def OrderProcPerm(proc,perm):
-    # Rearrange the final state massless_QCD particles (together with
-    # their colour orderings) into a canonical order. The canonical
-    # order is obtained by rearranging the massless_QCD particles such
-    # that their corresponding colour ordering is strictly increasing.
+    # In order to reduce the number of possible phase-space orderings,
+    # as well as having the largest chance of finding identical matrix
+    # elements, we bring the final state massless_QCD particles (and
+    # corresponding colour orderings) into a canonical order.
+    #
+    # The canonical order is obtained by rearranging the massless_QCD
+    # particles such that their corresponding colour ordering is
+    # strictly increasing, when one starts counting as if the first
+    # incoming particle would be at the first position in the order
+    # (i.e., as if cyclicly permuting the order such that particle 1
+    # is at position 1).
+    #
+    # In case of multiple quark lines, we do the above arrangement to
+    # the final state xmassless_QCD particles, but we can, on top of
+    # that, still re-arrange the multiple 'q,...,qbar,s,...,s' blocks
+    # in the colour ordering. Also put those in a canonical order.
     #
     # Start by bringing the colour-order ('perm') to the canonical
     # ordering.
     zero=perm.index(0)
-    perm_mapped=list(perm[zero:]+perm[:zero])
+    perm_mapped=list(perm[zero:]+perm[:zero]) # cyclicly permute
     elements_to_order=[]
     for i in perm_mapped:
         if proc[i] in massless_QCD and i > 1:
@@ -166,22 +203,27 @@ def OrderProcPerm(proc,perm):
     sorted_elements=sorted(elements_to_order)
     for i, val in zip(indices,sorted_elements):
         perm_mapped[i]=val
-    perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero]
+    perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero] # undo the cyclic permutation
 
     # Rearrange the process following the rearrangement of the colour ordering
     proc_ordered=[None]*len(proc)
     for i in range(len(perm_ordered)):
         proc_ordered[perm_ordered[i]]=proc[perm[i]]
         
-    # if there are two quark lines there are two options for the
-    # colour order. Pick the right one
-    if count_matching_elements(proc,quarks) == 2:
-        for q in quarks:
-            qi=[(i+1,j) for i,j in enumerate(perm_ordered[1:]) if proc_ordered[j] == q]
-            if qi:
-                break
-        if qi[0][1] < perm_ordered[0]:
-            perm_ordered=perm_ordered[qi[0][0]:]+perm_ordered[:qi[0][0]]
+    # If there are multiple quark lines, order the
+    # "q,g,...,g,qbar,s,...,s" blocks in the colour ordering such that
+    # the order for 'q' is increasing.
+    if count_matching_elements(proc,quarks) >= 2:
+        # start positions of the blocks of the form "q,g,...,g,qbar,s,...,s".
+        qs=[i for i,j in enumerate(perm_ordered) if proc_ordered[j] in quarks]
+        blocks=[]
+        for k,s in enumerate(qs):
+            e=qs[k+1] if k+1 < len(qs) else len(perm_ordered)
+            blocks.append(perm_ordered[s:e])
+        # sort the blocks by their first element (i.e., the quark):
+        blocks.sort(key=lambda b:b[0])
+        # Concatenate all the ordered blocks
+        perm_ordered=[x for b in blocks for x in b]
     return tuple(proc_ordered),tuple(perm_ordered)
 
 
