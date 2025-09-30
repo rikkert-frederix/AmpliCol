@@ -28,7 +28,7 @@ contains
     real(kind=8) :: hmass,hwidth
     
     l=0
-    this%npart=17! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
+    this%npart=18! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -58,6 +58,15 @@ contains
     this%particle_list(l)%width=0d0
     this%particle_list(l)%spin=2 ! two spin states
     this%particle_list(l)%anti_type=21
+    this%particle_list(l)%dim=4
+
+    ! gluon-U1
+    l=l+1
+    this%particle_list(l)%type=99
+    this%particle_list(l)%mass=0d0
+    this%particle_list(l)%width=0d0
+    this%particle_list(l)%spin=-1 ! ill-defined
+    this%particle_list(l)%anti_type=99
     this%particle_list(l)%dim=4
 
     ! tensor (non-propagator auxiliary particle to decompose 4-gluon interaction)
@@ -158,7 +167,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 155 ! number of vertices
+    this%nint = 179 ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -224,15 +233,6 @@ contains
        this%vertex_list(l)%particles(3)=-i
        this%vertex_list(l)%coupl=[1d0,0d0]
     enddo
-    ! quark-antiquark to gluon vertices
-    do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=8
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=-i
-       this%vertex_list(l)%particles(3)=21
-       this%vertex_list(l)%coupl=[1d0/3d0,0d0]
-    enddo
     ! antiquark-quark to gluon vertices
     do i=1,6
        l=l+1
@@ -240,6 +240,51 @@ contains
        this%vertex_list(l)%particles(1)=-i
        this%vertex_list(l)%particles(2)=i
        this%vertex_list(l)%particles(3)=21
+       this%vertex_list(l)%coupl=[1d0,0d0]
+    enddo
+    ! quark-antiquark to gluonU1 vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=8
+       this%vertex_list(l)%particles(1)=i
+       this%vertex_list(l)%particles(2)=-i
+       this%vertex_list(l)%particles(3)=99
+       this%vertex_list(l)%coupl=[1d0/3d0,0d0]
+    enddo
+    ! gluonU1-quark to quark vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=4
+       this%vertex_list(l)%particles(1)=99
+       this%vertex_list(l)%particles(2)=i
+       this%vertex_list(l)%particles(3)=i
+       this%vertex_list(l)%coupl=[1d0,0d0]
+    enddo
+    ! gluonU1-antiquark to antiquark vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=5
+       this%vertex_list(l)%particles(1)=99
+       this%vertex_list(l)%particles(2)=-i
+       this%vertex_list(l)%particles(3)=-i
+       this%vertex_list(l)%coupl=[1d0,0d0]
+    enddo
+    ! quark-gluonU1 to quark vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=6
+       this%vertex_list(l)%particles(1)=i
+       this%vertex_list(l)%particles(2)=99
+       this%vertex_list(l)%particles(3)=i
+       this%vertex_list(l)%coupl=[1d0,0d0]
+    enddo
+    ! antiquark-gluonU1 to quark vertices
+    do i=1,6
+       l=l+1
+       this%vertex_list(l)%type=7
+       this%vertex_list(l)%particles(1)=-i
+       this%vertex_list(l)%particles(2)=99
+       this%vertex_list(l)%particles(3)=-i
        this%vertex_list(l)%coupl=[1d0,0d0]
     enddo
     ! quark-photon to quark vertices
@@ -955,7 +1000,7 @@ contains
   end function is_antiquark
   logical function is_gluon(iPDG)
     integer :: iPDG
-    if (iPDG.eq.21) then
+    if (iPDG.eq.21 .or. iPDG.eq.99) then
        is_gluon=.true.
     else
        is_gluon=.false.
