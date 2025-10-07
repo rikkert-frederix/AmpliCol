@@ -7,7 +7,7 @@ module amplitude_QCD_mod
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert
-     integer(kind=16) :: iproc
+     integer(kind=16) :: iproc,ext_cur
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:),allocatable :: val_c
@@ -68,7 +68,6 @@ contains
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
-
     if (imode.eq.1) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - all polarisation/helicity configurations'
@@ -201,6 +200,7 @@ contains
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
       current_list_local(this%n_cur)%iproc=ibset(int(0,kind=16),iproc-1)
+      current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -921,6 +921,7 @@ contains
       combine_currents%type=ctype
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
       combine_currents%iproc=iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc)
+      combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
       allocate(ord1(n1))
@@ -1159,9 +1160,7 @@ contains
          do ic=1,this%n_cur
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
-            if (any(new_current%order(1:isize).ne.current_list_local(ic)%order(1:isize))) cycle
-            if (any(new_current%spin(1:isize).ne.current_list_local(ic)%spin(1:isize))) cycle
-            if (any(new_current%ext_type(1:isize).ne.current_list_local(ic)%ext_type(1:isize))) cycle
+            if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
@@ -2133,6 +2132,7 @@ contains
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
+      integer :: ic1,ic2
       if (use_real_gluons .and. (is_gluon(this%current_list(ic)%type).or.is_tensor_g(this%current_list(ic)%type))) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
@@ -3093,6 +3093,7 @@ contains
     lhs%iproc=rhs%iproc
     lhs%mass=rhs%mass
     lhs%width=rhs%width
+    lhs%ext_cur=rhs%ext_cur
     if (allocated(rhs%vertices) .and. rhs%n_vert.gt.0) then
        if (.not.allocated(lhs%vertices)) allocate(lhs%vertices(1:lhs%n_vert))
        lhs%vertices(1:lhs%n_vert)=rhs%vertices(1:lhs%n_vert)
