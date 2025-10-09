@@ -1248,6 +1248,7 @@ contains
             max_key=max_key+14
          enddo
       enddo
+      max_key=max_key*2 ! maybe needs a better solution
       allocate(current_dict(max_key)) 
       key=n  ! skip the external currents.
       size=n
