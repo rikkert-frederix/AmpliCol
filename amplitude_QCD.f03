@@ -211,10 +211,9 @@ contains
       ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur,iamp,jamp,i,j,iproc
+      integer :: icur,jcur,i,j,iproc
       integer(kind=16) :: proc
       integer,dimension(:,:),allocatable :: curr2amp
-      integer,dimension(n) :: iord,jord,ispn,jspn
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
          do i=1,n
@@ -577,9 +576,8 @@ contains
     subroutine fill_alternative_quark_order(iproc)
       implicit none
       integer,intent(in) :: iproc
-      integer :: i,b1,b2
+      integer :: i
       integer,dimension(2) :: q,aq
-      integer,dimension(n) :: block1,block2
       q=0
       aq=0
       do i=1,n
@@ -1881,7 +1879,7 @@ contains
              if (isize.ne.n-1)  then
                 call include_scalar_propagator()
              endif
-          elseif (is_higgsor(this%current_list(ic)%type)) then
+          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
              ! a non-propagating scalar current
              call combine_interactions(1)
 

@@ -130,7 +130,7 @@ contains
     do while (this%npoints_requested/this%nchannel.lt.max(min_points_per_channel,min_points_per_integral*maxval(nintegral)) &
          .and. iters_without_evnts.gt.3)
        iters_without_evnts=iters_without_evnts-1
-       this%npoints_requested=nevts_unw_req/(0.03*2**iters_without_evnts)
+       this%npoints_requested=int(nevts_unw_req/(0.03*2**iters_without_evnts),kind=8)
     enddo
     this%npoints_requested=max(this%npoints_requested,min_points_per_channel*this%nchannel,&
          min_points_per_integral*maxval(nintegral)*this%nchannel)
@@ -367,7 +367,7 @@ contains
   subroutine get_npoints_nonzero_iter(this,npoints_nonzero)
     implicit none
     class(integrator),intent(inout) :: this
-    integer :: i,j
+    integer :: i
     integer(kind=8) :: npoints_nonzero
     npoints_nonzero=0_8
     do i=1,this%nchannel
@@ -684,7 +684,7 @@ contains
     class(channel),intent(inout) :: thischan
     real(kind=8),dimension(this%ndim) :: x
     real(kind=8) :: wgt,wgt_new
-    integer :: j,k,nevnt,iter,next_iter
+    integer :: j,nevnt,iter,next_iter
     integer,allocatable,dimension(:) :: index_fmax_top
     real(kind=8),allocatable,dimension(:) :: fmax_top,fabs
     next_iter=this%current_iter
@@ -813,7 +813,6 @@ contains
   subroutine channel_print_result_iter(this)
     implicit none
     class(channel),intent(inout) :: this
-    integer :: i
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
          this%number,'channel ABS:',this%res_iter(1),'+/-',this%unc_iter(1),'(',this%unc_iter(1)/this%res_iter(1)*100d0,'%)'
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &

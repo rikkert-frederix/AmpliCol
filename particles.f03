@@ -19,7 +19,7 @@ module particles
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
           &,is_antiquark,is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
-          &,is_higgs,is_jet
+          &,is_higgs,is_jet,is_higgsor
   end type physics_model
 contains
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)

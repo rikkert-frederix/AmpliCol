@@ -302,8 +302,6 @@ contains
     real(real64),   intent(out)   :: outv(n)
     integer(int32), intent(out)   :: outi(n)
     integer :: m
-    real(real64) :: tv
-    integer(int32) :: ti
     do m = 1, n
        outv(m) = hv(1)
        outi(m) = hi(1)

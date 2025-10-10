@@ -718,11 +718,8 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(1) :: wfs1
-    real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: M2
-    complex(kind=8) :: TMP
     wfg(1:4)= prefact*coupl(1)*wfs1(1)*(wfg2(1:4))
   end subroutine ScalarGluontoGluon
 
@@ -730,11 +727,8 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(1) :: wfs2
-    real(kind=8),dimension(0:3) :: pwf1,pwf2,pwf
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     real(kind=8),dimension(2) :: coupl
-    real(kind=8) :: M2
-    complex(kind=8) :: TMP
     wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))
   end subroutine GluonScalartoGluon
 

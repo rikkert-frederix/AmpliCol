@@ -19,7 +19,7 @@ program matrix_integrate_QCD
   implicit none
   integer :: iproc
   real(kind=8) :: weight
-  integer :: j,i
+  integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
   character(len=80) :: filename,logfile="Outputs/log_file.txt"
   integer(kind=4) :: PS_choice
@@ -442,14 +442,10 @@ contains
 
   subroutine get_run_arguments()
     implicit none
-    integer :: argc,n_ps
-    integer :: i,k
+    integer :: argc
+    integer :: i
     character(len=256) :: argv
-    logical :: found_1
-    integer(kind=8) :: sym_fac
     integer(kind=8) iseed
-    integer,dimension(:,:),allocatable :: ps_o
-    logical :: same_flavour
     common /to_seed/iseed
     iseed=0
     argc = COMMAND_ARGUMENT_COUNT()
