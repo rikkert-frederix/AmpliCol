@@ -92,13 +92,13 @@ contains
        pgl%same_flavour=0
     endif
     do i=1,pgl%nproc
-       if (pgl%amps(1)%n_qqbar(i).ne.2) cycle
+       if (pgl%amps(1)%n_qqbar(i).lt.2) cycle
        do j=1,pgl%nproc
           if (i.eq.j) cycle
-          if (pgl%amps(1)%n_qqbar(j).ne.2) cycle
+          if (pgl%amps(1)%n_qqbar(j).lt.2) cycle
           do k=1,j-1
              if (k.eq.i) cycle
-             if (pgl%amps(1)%n_qqbar(k).ne.2) cycle
+             if (pgl%amps(1)%n_qqbar(k).lt.2) cycle
              do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
                 if (pgl%amps(1)%amps(ii).eq.(0d0,0d0)) cycle
                 do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
@@ -187,7 +187,7 @@ contains
   subroutine setup_color_order(pgl_unique)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl_unique
-    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig
+    integer :: i,iproc,nq,ng,nsing,iq,iaq,is,ig,naq
     do iproc=1,pgl_unique%nproc
        nq=0
        ng=0
@@ -204,6 +204,7 @@ contains
              stop 1
           endif
        enddo
+
        if (nq.eq.0 .and. nsing.ne.0) then
           ig=nsing+1
           is=1
@@ -238,7 +239,7 @@ contains
                 is=is+1
              endif
           enddo
-       elseif (nq.eq.4) then
+       elseif (nq.eq.4 .or. nq.eq.6) then
           iq=1
           iaq=2
           ig=4
@@ -249,7 +250,11 @@ contains
                 iq=iq+2
              elseif (phys_model%is_antiquark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iaq,iproc)=i
-                iaq=next
+                if (iaq.eq.nq-2) then
+                   iaq=next
+                else
+                   iaq=iaq+2
+                endif
              elseif (phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i
                 ig=ig+1
@@ -258,6 +263,10 @@ contains
                 is=is+1
              endif
           enddo
+       else
+          write (*,*) 'Unknown number of quarks and anti-quarks'
+          write (*,*) iproc,':',pgl_unique%processes(:,iproc)
+          stop 1
        endif
     enddo
   end subroutine setup_color_order

@@ -11,6 +11,10 @@ module timings
   real(kind=4) :: tBefore,tAfter,tTot_A=0.,tTot_B=0.,t_amp=0.,t_amp_init=0.,&
        t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
 end module timings
+module overall
+  real(kind=8) :: xsec
+  integer :: nevt
+end module overall
 module arguments
   implicit none
   integer :: c_o,c_o_t,c_o_i,c_o_j,c_o_k,imode
@@ -21,6 +25,7 @@ program matrix_reweight
   use amplitude_QCD_mod
   use timings
   use particles
+  use overall
   implicit none
   logical,parameter :: use_only_canonical_form=.true.
   integer,parameter :: max_proc=1280
@@ -42,7 +47,8 @@ program matrix_reweight
 
   call cpu_time(tTot_B)
   
-  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
+                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
 !!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
   call phys_model%init_vert()
 
@@ -50,6 +56,8 @@ program matrix_reweight
   call setup_spin()
   col_acc=20
 
+  nevt=0
+  xsec=0d0
   do
      call read_event(11,done)
      if (done) exit
@@ -129,6 +137,7 @@ program matrix_reweight
   write(*,*) 'Time spent in squaring amplitudes (full)',t_mat_full
   write(*,*) 'Time spent in picking random colors',t_ran
   write(*,*) 'Total time:',t_all
+  write(*,*) 'Total FC cross section:',xsec/nevt
 contains  
 
 
@@ -317,12 +326,15 @@ contains
 
   subroutine write_event(iunit)
     use rw_events
+    use overall
     implicit none
     integer :: i,iunit
     rwgt_NLC=matrix2(2)/matrix2(1)
     rwgt_full=matrix2(3)/matrix2(1)
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
+    xsec=xsec+evt_wgt*rwgt_full
+    nevt=nevt+1
     write (iunit,'(100i3)') helicity(1:next)
     write (iunit,'(100i3)') col_order(1:next)
     write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)
