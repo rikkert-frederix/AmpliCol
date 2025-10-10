@@ -50,7 +50,11 @@ $(AMPLIB):
 	$(FC) $(FFLAGS) -c library/amplib.f03
 	ar rcs $(AMPLIB) amp*_lib.o amplib.o
 
-matrix_integrate_QCD:  $(FILES_M_INT_QCD) $(AMPLIB)
+matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) $(AMPLIB)
+	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) $(AMPLIB) `lhapdf-config --ldflags` -lstdc++
+	@rm -f $(AMPLIB)
+
+matrix_integrate_QCD_library: $(FILES_M_INT_QCD) $(AMPLIB)
 	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) $(AMPLIB) `lhapdf-config --ldflags` -lstdc++
 	@rm -f $(AMPLIB)
 
