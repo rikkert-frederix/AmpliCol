@@ -79,9 +79,6 @@ c
                                                      !20/6/12 to avoid
                                                      !dupes in range
                                                      !30082-31328
-         write(*,'(a,i6,a3,i6,a3,i6)') 'Using random seed offsets:'
-     &        ,jconfig," , ",ioffset," , ",joffset
-         write(*,*) ' with seed', iseed/31300
          write(99,'(a,i6,a3,i6,a3,i6)') 'Using random seed offsets:'
      &        ,jconfig," , ",ioffset," , ",joffset
          write(99,*) ' with seed', iseed/31300
@@ -208,7 +205,6 @@ c-----
 
       open(unit=lun,file='./moffset.dat',status='old',err=25)
          read(lun,*,err=14) iseed
-         write(*,*) "Got moffset",iseed
          write(99,*) "Got moffset",iseed
          close(lun)
          return
@@ -254,7 +250,6 @@ c-----
 * and the original marsaglia-zaman seeds i,j,k,l.
 * to get the standard values in the marsaglia-zaman paper (i=12,j=34
 * k=56,l=78) put ij=1802, kl=9373
-      write(*,*) "Ranmar initialization seeds",ij,kl
       write(99,*) "Ranmar initialization seeds",ij,kl
 c
 c    18/6/2012 TJS  Added check to ensure ij and kl are in range
