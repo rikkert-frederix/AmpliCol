@@ -624,7 +624,7 @@ def CheckConsistency():
             else:
                 allprocs[proc]=iden/len(multichannel)
     for proc in allprocs.keys():
-        if allprocs[proc]-ExpectedNumberOfDualAmplitudes(proc) > 1e-5:
+        if abs(allprocs[proc]-ExpectedNumberOfDualAmplitudes(proc)) > 1e-5:
             print('ERROR: inconsistent number of dual amplitudes for process:',proc,'. Found:',allprocs[proc],'. Expected:',ExpectedNumberOfDualAmplitudes(proc))
 #            quit()
 
