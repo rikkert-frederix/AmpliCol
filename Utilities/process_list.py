@@ -610,6 +610,44 @@ def WriteUniqueProcsIntoList(procs):
     line.append('')
     line.append('')
     return line
+
+def CheckConsistency():
+    print('checking consistency...')
+    allprocs={}
+    for key in all_keys_sorted:
+        for (process,order,multichannel,iden) in phase_space_orders[key]:
+            proc=[process[0],process[1]]
+            proc.extend(sorted(process[2:],key=lambda x: sort_particles[x]))
+            proc=tuple(proc)
+            if proc in allprocs:
+                allprocs[proc]=allprocs[proc]+iden/len(multichannel)
+            else:
+                allprocs[proc]=iden/len(multichannel)
+    for proc in allprocs.keys():
+        if allprocs[proc]-ExpectedNumberOfDualAmplitudes(proc) > 1e-5:
+            print('ERROR: inconsistent number of dual amplitudes for process:',proc,'. Found:',allprocs[proc],'. Expected:',ExpectedNumberOfDualAmplitudes(proc))
+#            quit()
+
+def ExpectedNumberOfDualAmplitudes(proc):
+    nq=count_matching_elements(proc,quarks)
+    if nq == 0 :
+        ng=count_matching_elements(proc,gluons)
+        return math.factorial(ng-1)
+    elif nq == 1 :
+        ng=count_matching_elements(proc,gluons)
+        return math.factorial(ng)
+    elif nq == 2 :
+        # number of gluons times number of ways gluons can be divided
+        # times two ways of connecting quarks with anti-quarks
+        ng=count_matching_elements(proc,gluons)
+        return math.factorial(ng)*(ng+1)*2
+    elif nq == 3 :
+        ng=count_matching_elements(proc,gluons)
+        return math.factorial(ng)*((ng+2)*(ng+1)/2)*6
+    else:
+        print("ERROR: unknown number of quarks",nq)
+        quit()
+        
     
 if __name__ == "__main__":
     # Parse the argument. Cross the initial state particles to the
@@ -643,6 +681,9 @@ if __name__ == "__main__":
     phase_space_orders=CombineResults(results)
     all_keys_sorted=sorted(phase_space_orders.keys())
     DetermineMultiChannelPartnersAndSymmetryFactor() # updates the phase_space_orders dictionary
+    # Check the consistency of the generated processes
+    CheckConsistency()
+    # write to disk
     towriteunique=WriteUniqueProcsIntoList(all_unique_procs)
     towriteallprocs=WriteAllProcsIntoList() # puts the phase_space_orders dictionary in a writable list
     
