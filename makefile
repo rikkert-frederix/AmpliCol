@@ -2,14 +2,14 @@
 
 AMPLIB = libamp.a
 
-FILES_M_INT_QCD=pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o	\
+FILES_M_INT_QCD=bitset.o pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o	\
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o	\
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
 helper_modules.o amplitude_library.o
 
-FILES_M_RWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o	\
+FILES_M_RWGT_QCD=bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o	\
 amplitude_QCD.o matrix_reweight_QCD.o
 
 FILES_M_UNWGT_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o    \
@@ -80,7 +80,7 @@ ranmar.o : mint_module.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o
 phase_space_genpt.o : phase_space.o
 haag.o : phase_space.o
-amplitude_QCD.o : math_functions.o feynmanrules.o color_algebra.o particles.o
+amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o particles.o
 matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o mint_module.o handling_processes.o simple_integrator.o

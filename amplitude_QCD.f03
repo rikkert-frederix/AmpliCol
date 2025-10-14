@@ -1,4 +1,5 @@
 module amplitude_QCD_mod
+  use bitset_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
@@ -7,7 +8,8 @@ module amplitude_QCD_mod
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert
-     integer(kind=16) :: iproc,ext_cur
+     type(bitset) :: iproc
+     integer(kind=16) :: ext_cur
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:),allocatable :: val_c
@@ -181,7 +183,7 @@ contains
          if (current_list_local(ic)%bin.ne.ibset(0,iorder-1)) cycle
          if (current_list_local(ic)%spin(1).ne.ispin) cycle
          ! existing current.
-         current_list_local(ic)%iproc=ibset(current_list_local(ic)%iproc,iproc-1)
+         call current_list_local(ic)%iproc%set_bit(iproc)
          return
       enddo
       ! new external current
@@ -201,8 +203,8 @@ contains
       allocate(current_list_local(this%n_cur)%spin(isize))
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
-      current_list_local(this%n_cur)%iproc=ibset(int(0,kind=16),iproc-1)
-      current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)
+      call current_list_local(this%n_cur)%iproc%init(this%nprocs)
+      call current_list_local(this%n_cur)%iproc%set_bit(iproc)
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -212,7 +214,7 @@ contains
       ! amplitudes
       implicit none
       integer :: icur,jcur,i,j,iproc
-      integer(kind=16) :: proc
+      type(bitset) :: proc
       integer,dimension(:,:),allocatable :: curr2amp
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
@@ -234,18 +236,18 @@ contains
             do jcur=this%n_cur_start(n),this%n_cur_end(n)
                if ( current_list_local(icur)%type .ne. anti_current(current_list_local(jcur)%type) ) cycle
                if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
-               proc=iand(current_list_local(icur)%iproc,current_list_local(jcur)%iproc)
-               if (popcnt(proc).eq.0) then
+               proc=current_list_local(icur)%iproc.and.current_list_local(jcur)%iproc
+               if (proc%count_bits().eq.0) then
                   ! combination of icur and jcur does not contribute to any of the processes
                   cycle
-               elseif (popcnt(proc).ne.1) then
-                  write (*,*) 'A given amplitude should only contribute to one process'
-                  write (*,*) proc,icur,jcur
-                  write (*,'(a,i40,B128)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
-                  write (*,'(a,i40,B128)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
+               elseif (proc%count_bits().ne.1) then
+                  write (*,*) 'A given amplitude should only contribute to one process',proc%count_bits()
+                  do i=1,this%nprocs
+                     if (proc%test_bit(i)) write (*,*) i
+                  enddo
                   write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
                   stop 1
-               elseif (.not. btest(proc,iproc-1)) then
+               elseif (.not.proc%test_bit(iproc)) then
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
@@ -748,6 +750,7 @@ contains
       integer :: i,j,nc1,nc2,c
       logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,valid
       integer,dimension(isize) :: ip,et
+      type(bitset) :: iproc_combined
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) return
@@ -764,7 +767,8 @@ contains
          endif
       endif
       ! check that both currents can contribute to the same process
-      if (iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc).eq.0) return
+      iproc_combined=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
+      if (iproc_combined%count_bits().eq.0) return
       ! Check for colour singlets:
       colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
@@ -797,7 +801,7 @@ contains
          valid=.false.
          do_iproc: do iproc=1,this%nprocs
             ! check that both currents contribute to the iproc process:
-            if (.not. btest(iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc),iproc-1)) cycle
+            if (.not. iproc_combined%test_bit(iproc)) cycle
             ! check that the final particle is not part of the combined
             ! current (it will be used to close the amplitude instead):
             if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,1,iproc)-1)) cycle
@@ -920,7 +924,7 @@ contains
       allocate(combine_currents%ext_type(1:isize))
       combine_currents%type=ctype
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
-      combine_currents%iproc=iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc)
+      combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
@@ -1437,8 +1441,9 @@ contains
     ! current_list
     do isize=1,n-1
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          call this%current_list(ic)%iproc%bitset_write_unformatted(iunit)
           write (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%iproc,this%current_list(ic)%mass,this%current_list(ic)%width
+               this%current_list(ic)%mass,this%current_list(ic)%width
           write (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
           write (iunit) this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)
           if (isize.eq.1 .or. isize.eq.n)  write (iunit) this%current_list(ic)%order(1),this%current_list(ic)%spin(1)
@@ -1493,8 +1498,9 @@ contains
     allocate(this%current_list(this%n_cur))
     do isize=1,n-1
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          call this%current_list(ic)%iproc%bitset_read_unformatted(iunit)
           read (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%iproc,this%current_list(ic)%mass,this%current_list(ic)%width
+               this%current_list(ic)%mass,this%current_list(ic)%width
           allocate(this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert))
           allocate(this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert))
           read (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
@@ -3773,7 +3779,11 @@ contains
     lhs%bin=rhs%bin
     isize=popcnt(lhs%bin)
     lhs%n_vert=rhs%n_vert
-    lhs%iproc=rhs%iproc
+    if (allocated(lhs%iproc%bits)) deallocate(lhs%iproc%bits)
+    if (allocated(rhs%iproc%bits)) then
+       call lhs%iproc%init(rhs%iproc%n_bits)
+       lhs%iproc%bits=rhs%iproc%bits
+    endif
     lhs%mass=rhs%mass
     lhs%width=rhs%width
     lhs%ext_cur=rhs%ext_cur
@@ -3861,6 +3871,7 @@ contains
   end subroutine finalize_interaction
   subroutine finalize_current(cur)
     type(current),intent(inout) :: cur
+    if (allocated(cur%iproc%bits)) deallocate(cur%iproc%bits)
     if (allocated(cur%vertices)) deallocate(cur%vertices)
     if (allocated(cur%order)) deallocate(cur%order)
     if (allocated(cur%spin)) deallocate(cur%spin)
