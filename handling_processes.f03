@@ -255,8 +255,6 @@ contains
                    iaq=next
                 else
                    iaq=iaq+2
-                   ig=ig+1
-                   is=is+1
                 endif
              elseif (is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i

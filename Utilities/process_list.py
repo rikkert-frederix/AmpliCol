@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python
 
 import itertools
 import copy
@@ -118,7 +118,13 @@ def ValidColorOrd(proc,perm):
             # ALTERNATIVELY: we could keep all and take care of it
             # through multi-channeling (just as we do for the
             # colour-singlet orderings).
-            if found_antiquark and idx < quark_idx: 
+#            if found_antiquark and idx < quark_idx: 
+#                return False
+            # UPDATE: Only remove duplicates from cyclic ordering. For
+            # three quark lines this will give two times as many dual
+            # amplitudes as we need; these will be taken care of
+            # through multi-channeling
+            if found_antiquark and idx < perm[0]:
                 return False
             found_quark = True
             found_antiquark = found_singlet = found_gluon = False
@@ -204,12 +210,15 @@ def OrderProcPerm(proc,perm):
     for i, val in zip(indices,sorted_elements):
         perm_mapped[i]=val
     perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero] # undo the cyclic permutation
-
+    
     # Rearrange the process following the rearrangement of the colour ordering
     proc_ordered=[None]*len(proc)
     for i in range(len(perm_ordered)):
         proc_ordered[perm_ordered[i]]=proc[perm[i]]
         
+
+#    print(proc,perm,proc_ordered,perm_ordered)
+#    
     # If there are multiple quark lines, order the
     # "q,g,...,g,qbar,s,...,s" blocks in the colour ordering such that
     # the order of the q's is increasing.
@@ -224,6 +233,9 @@ def OrderProcPerm(proc,perm):
         blocks.sort(key=lambda b:b[0])
         # Concatenate all the ordered blocks
         perm_ordered=[x for b in blocks for x in b]
+
+#        print('N',proc_ordered,perm_ordered)
+        
     return tuple(proc_ordered),tuple(perm_ordered)
 
 
@@ -416,44 +428,15 @@ def ParseArgument():
         options["serial"] = False
     return ParseCollision(args.process_string)
 
-def IdenticalParticleSymmetryFactor(proc,order):
+def IdenticalParticleSymmetryFactor(proc):
     # Determine the symmetry factor that takes into account that we
     # are considering only a subset of all possible LC colour
     # orderings (based on the symmetry of the phase-space); this
     # factor is exactly identical to the usual factor coming from the
     # identical final state particles for all the colour particles:
-    i_fac=1
+    i_fac=1.0
     for p in all_coloured:
         i_fac*=max(1,math.factorial(proc[2:].count(p)))
-
-#####  MIGHT NEED TO BE REMOVED
-    # Compensating for the fact that if the interchange of 
-    # identical particles is in a way that the symmeetry
-    # of the quark pairs is recovered, then this is a "false" 
-    # final-state symmetry factor: compensate for this
-    list_id={}
-    for ip,p in enumerate(proc[2:]):
-        if (p in list_id):
-            list_id[p]=list_id[p]+[ip+2]
-        else:
-            list_id[p]=[ip+2]
-    dord=order[:]+order[:]
-    comp=1
-    orig_fac=True
-    for idp in list_id:
-        if (len(list_id[idp])==1): continue
-        orig_fac=False
-        for inm,num in enumerate(list_id[idp]):
-            ip=num
-            if idp in quarks:
-                if (dord[ip+1] in [0,1]):
-                    orig_fac=True
-    if (not orig_fac): comp=0.5
-
-    i_fac=int(i_fac*comp)
-##########################
-
-
     return i_fac
 
 
@@ -473,7 +456,7 @@ def MultiChannelPartners(proc, perm, k, l):
     # multi-channel partners determined in this function). Note that
     # in the 'perm' also contains the "colour-ordering" of the
     # colour-singlet particles.
-    all_possible_perms = {perm}
+    all_possible_perms = [(perm,proc)]
     singlet_indices = [perm.index(i) for i, p in enumerate(proc) if p in singlets]
     anti_quark_indices = tuple([perm.index(i) for i, p in enumerate(proc) if p in antiquarks])
     # Precompute singlet permutations
@@ -501,7 +484,7 @@ def MultiChannelPartners(proc, perm, k, l):
                 elif i not in singlet_indices:
                     # Add QCD particles one at the time
                     order.append(perm[i])
-            all_possible_perms.add(tuple(order))
+            all_possible_perms.append((tuple(order),tuple(proc)))
     elif len(anti_quark_indices) == 2:
         # For two quark lines, we need to consider both all the
         # permutations of the colour singlets AND how they are
@@ -520,18 +503,55 @@ def MultiChannelPartners(proc, perm, k, l):
                     elif i not in singlet_indices:
                         # Add the QCD particles one at the time
                         order.append(perm[i])
-                all_possible_perms.add(tuple(order))
+                all_possible_perms.append((tuple(order),tuple(proc)))
+    elif len(anti_quark_indices) == 3:
+#        print('here1',all_possible_perms)
+        if singlet_perms:
+            print("ERROR: multi-channel partners not implemented for 3 quark lines and colour singlets")
+            quit()
+        # Interchange two quark-line groups. It doesn't matter which
+        # ones we switch. Take the final two
+        qs=[i for i,j in enumerate(perm) if proc[j] in quarks]
+        blocks=[]
+        for i,s in enumerate(qs):
+            e=qs[i+1] if i+1 < len(qs) else len(perm)
+            blocks.append(perm[s:e])
+        # Interchange the final two blocks:
+        blocks=[blocks[0],blocks[2],blocks[1]]
+        # Concatenate all the ordered blocks
+        perm_ordered=[x for b in blocks for x in b]
+        # re-order the final state particles
+        proc2,perm2=OrderProcPerm(proc,perm_ordered)
+#        # cyclicly permute to start order with first quark
+#        for i,j in enumerate(proc2):
+#            if proc2[i] in quarks:
+#                q1=i
+#                break
+#        q1=perm2.index(q1)
+#        perm3=tuple(perm2[q1:]+perm2[:q1])
+#        all_possible_perms.add((tuple(perm3),tuple(proc2)))
+        
+        all_possible_perms.append((tuple(perm2),tuple(proc2)))
+#        print(proc,perm,perm_ordered,proc2,perm2,perm3)
+#        print('here2',all_possible_perms)
+
+#    print(len(anti_quark_indices),len(all_possible_perms))
+        
     # The possible permutations should be processes that are already
     # included into other phase-space orderings. Look-up to which
     # phase-space orders these permutations belong. These are the
     # multi-channel partners.
     mt = []
-    for o in all_possible_perms:
-        idx = process_order_to_index.get((proc, o))
+    iden=1.
+    for (o,p) in all_possible_perms:
+        idx = process_order_to_index.get((p, o))
         if idx is not None:
             if idx in mt:
-                print("ERROR: found double. Each permutation should be unique for the multi-channel partners")
-                quit()
+                if idx == mt[0]:
+                    iden+=1.
+                else:
+                    print("ERROR: found double. Each permutation should be unique for the multi-channel partners")
+                    quit()
             else:
                 mt.append(idx)
         else:
@@ -539,7 +559,7 @@ def MultiChannelPartners(proc, perm, k, l):
             quit()
     # Overwrite the current proc+perm element with the one that also
     # includes the multi-channel partners:
-    phase_space_orders[k][l] = (proc, perm, tuple(sorted(mt)))
+    phase_space_orders[k][l] = (proc, perm, tuple(sorted(mt)),1/iden)
 
 def DetermineMultiChannelPartnersAndSymmetryFactor():
     # Using what's in all_keys_sorted, determine if a process needs
@@ -559,8 +579,8 @@ def DetermineMultiChannelPartnersAndSymmetryFactor():
             MultiChannelPartners(process,order,key,i)
     # Add the identical particle symmetry factor:
     for key in all_keys_sorted:
-        for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
-            phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process,order))
+        for i,(process,order,multichannel,iden) in enumerate(phase_space_orders[key]):
+            phase_space_orders[key][i]=(process,order,multichannel,iden*IdenticalParticleSymmetryFactor(process))
 
 def ConvertProcToString(proc):
     # Convert the process 'proc' into a string.
@@ -655,7 +675,8 @@ def CheckConsistency():
     for proc in allprocs.keys():
         if abs(allprocs[proc]-ExpectedNumberOfDualAmplitudes(proc)) > 1e-5:
             print('ERROR: inconsistent number of dual amplitudes for process:',proc,'. Found:',allprocs[proc],'. Expected:',ExpectedNumberOfDualAmplitudes(proc))
-#            quit()
+            quit()
+    print('...found consistency')
 
 def ExpectedNumberOfDualAmplitudes(proc):
     nq=count_matching_elements(proc,quarks)
