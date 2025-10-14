@@ -5,14 +5,15 @@ module read_process_file
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
   type(phase_space_order_group),allocatable :: pgl_unique
   real(kind=8),dimension(:),allocatable :: unique_map_value
-  integer,dimension(:),allocatable :: unique_map,iden_iproc,same_flavour_idenCOfactor
+  integer,dimension(:),allocatable :: unique_map,iden_iproc
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
   subroutine read_processes_from_file(filename)
     implicit none
     character(len=80) :: filename
-    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,idenCOfactor,iflav,ndim
+    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim
+    real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
     open(unit=10,file=filename,status='old')
@@ -257,8 +258,7 @@ contains
     integer :: max_channels
     integer,dimension(0:max_channels) :: ichans
     integer,dimension(next) :: process,order,process_unique
-    integer :: idenCOfactor
-    real(kind=8) :: idenCOMAPfactor,idenMAPfactor
+    real(kind=8) :: idenCOfactor,idenCOMAPfactor,idenMAPfactor
     integer,dimension(0:6) :: quarks
     logical :: skip_same_flavour,is_same_flavour
     call find_quarks(process,order,quarks)
