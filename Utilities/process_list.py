@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3.8
 
 import itertools
 import copy
@@ -416,7 +416,7 @@ def ParseArgument():
         options["serial"] = False
     return ParseCollision(args.process_string)
 
-def IdenticalParticleSymmetryFactor(proc):
+def IdenticalParticleSymmetryFactor(proc,order):
     # Determine the symmetry factor that takes into account that we
     # are considering only a subset of all possible LC colour
     # orderings (based on the symmetry of the phase-space); this
@@ -425,6 +425,35 @@ def IdenticalParticleSymmetryFactor(proc):
     i_fac=1
     for p in all_coloured:
         i_fac*=max(1,math.factorial(proc[2:].count(p)))
+
+#####  MIGHT NEED TO BE REMOVED
+    # Compensating for the fact that if the interchange of 
+    # identical particles is in a way that the symmeetry
+    # of the quark pairs is recovered, then this is a "false" 
+    # final-state symmetry factor: compensate for this
+    list_id={}
+    for ip,p in enumerate(proc[2:]):
+        if (p in list_id):
+            list_id[p]=list_id[p]+[ip+2]
+        else:
+            list_id[p]=[ip+2]
+    dord=order[:]+order[:]
+    comp=1
+    orig_fac=True
+    for idp in list_id:
+        if (len(list_id[idp])==1): continue
+        orig_fac=False
+        for inm,num in enumerate(list_id[idp]):
+            ip=num
+            if idp in quarks:
+                if (dord[ip+1] in [0,1]):
+                    orig_fac=True
+    if (not orig_fac): comp=0.5
+
+    i_fac=int(i_fac*comp)
+##########################
+
+
     return i_fac
 
 
@@ -531,7 +560,7 @@ def DetermineMultiChannelPartnersAndSymmetryFactor():
     # Add the identical particle symmetry factor:
     for key in all_keys_sorted:
         for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
-            phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process))
+            phase_space_orders[key][i]=(process,order,multichannel,IdenticalParticleSymmetryFactor(process,order))
 
 def ConvertProcToString(proc):
     # Convert the process 'proc' into a string.
