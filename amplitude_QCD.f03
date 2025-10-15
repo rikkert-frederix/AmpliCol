@@ -205,6 +205,7 @@ contains
       current_list_local(this%n_cur)%n_vert=0
       call current_list_local(this%n_cur)%iproc%init(this%nprocs)
       call current_list_local(this%n_cur)%iproc%set_bit(iproc)
+      current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -380,10 +381,10 @@ contains
          write (*,*) 'ERROR: no valid matrix elements found: check your process definition'
          stop 1
       endif
-      if (this%nprocs.gt.128) then
-         write (*,*) 'ERROR: too many processes. Not compatible with the "integer(kind=16) :: iproc" variable'
-         stop 1
-      endif
+!!$      if (this%nprocs.gt.128) then
+!!$         write (*,*) 'ERROR: too many processes. Not compatible with the "integer(kind=16) :: iproc" variable'
+!!$         stop 1
+!!$      endif
     end subroutine simple_consistency_checks
 
     subroutine define_canonical_color_order()
