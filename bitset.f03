@@ -14,6 +14,7 @@ module bitset_mod
     procedure :: clear_bit
     procedure :: test_bit
     procedure :: count_bits
+    procedure :: bitset_to_integer
 
     procedure, pass :: bitset_write_unformatted
     procedure, pass :: bitset_read_unformatted
@@ -166,5 +167,26 @@ contains
 
     if (present(iostat)) iostat = 0
   end subroutine bitset_read_unformatted
+
+  function bitset_to_integer(this) result(val)
+    class(bitset), intent(in) :: this
+    integer(kind=8) :: val
+    integer :: total_bits, i
+
+    ! Check if the bitset fits in a single integer
+    total_bits = this%n_bits
+    if (total_bits > bit_size(val)) then
+       print *, "Error: bitset too large to fit in a single integer of kind=", int_kind
+       stop 1
+    end if
+
+    val = 0_16
+    do i = 1, total_bits
+       if (test_bit(this, i)) then
+          val = ibset(val, i - 1)
+       end if
+    end do
+  end function bitset_to_integer
+  
 end module bitset_mod
 

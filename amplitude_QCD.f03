@@ -1195,12 +1195,12 @@ contains
       elseif (this%imode.eq.2) then
          call get_value(new_current%order,new_current%type,val)
          call solve_dict(val,key)
-         ic=key_to_current(key,new_current%iproc)
+         ic=key_to_current(key,new_current%iproc%bitset_to_integer())
          if (ic.eq.0) then
             ! initialise new current
             this%n_cur=this%n_cur+1
             if (this%n_cur.gt.max_cur) call increase_max_cur()
-            key_to_current(key,new_current%iproc)=this%n_cur
+            key_to_current(key,new_current%iproc%bitset_to_integer())=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
