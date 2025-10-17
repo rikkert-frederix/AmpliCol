@@ -243,7 +243,7 @@ contains
        elseif (nq.eq.4 .or. nq.eq.6) then
           iq=1
           iaq=2
-          ig=4
+          ig=nq
           is=ng+4
           do i=1,next
              if (phys_model%is_quark(pgl_unique%processes(i,iproc))) then

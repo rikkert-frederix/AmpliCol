@@ -517,7 +517,7 @@ contains
     integer :: i
     logical update_grids
     update_grids=(((.not.this%evgen_done) .and. &
-         this%unc(1)/this%res(1).gt.1d0/(sqrt(dble(this%nevts_unw_req))*required_accuracy_factor)) .or. &
+         this%unc(1)/this%res(1).gt.1d0/(sqrt(dble(max(this%nevts_unw_req,1)))*required_accuracy_factor)) .or. &
          this%current_iter.le.iters_without_evnts) .and. &
          this%npoints_iter.gt.int(this%npoints*0.2d0)
     if (.not.update_grids) then
