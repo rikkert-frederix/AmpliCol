@@ -348,7 +348,7 @@ contains
     endif
 
     if (pgl(ichan)%passed(iint).le.nevent_hel_filter) then
-       call find_same_flavour(pgl(ichan),nevent_hel_filter)
+       call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
        call setup_helicity_filter(pgl(ichan),iint)
        if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
           ! since we update the helicities we need to compute when
@@ -428,6 +428,18 @@ contains
 
     if (pgl%passed(iint).lt.nevent_hel_filter) return
 
+    do i=1,2
+       do ih1=1,pgl%nhel(iint)
+          if (pgl%amps(iint)%same_flavour_sum(ih1,i).le.0) cycle
+          pgl%amps(iint)%same_flavour_sum_operation(ih1,i)=0
+          do while (pgl%include_hel(pgl%amps(iint)%same_flavour_sum(ih1,i),iint).lt.0)
+             pgl%amps(iint)%same_flavour_sum_operation(ih1,i)= &
+                  ieor(pgl%amps(iint)%same_flavour_sum_operation(ih1,i),find_operation(pgl,iint,ih1,i))
+             pgl%amps(iint)%same_flavour_sum(ih1,i)=-pgl%include_hel(pgl%amps(iint)%same_flavour_sum(ih1,i),iint)
+          enddo
+       enddo
+    enddo
+
     ih2=0
     do ih1=1,pgl%nhel(iint)
        if (pgl%include_hel(ih1,iint).gt.0) ih2=ih2+1
@@ -440,6 +452,30 @@ contains
 !!$    deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
+  integer function find_operation(pgl,iint,iamp,idau)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iamp,idau,iint
+    complex(kind=8) :: amp1,amp2
+    if (use_real_gluons) then
+       write (*,*) 'Find operation for same flavour sum only for complex amplitudes'
+       stop 1
+    endif
+    amp1=pgl%amps(iint)%amps(pgl%amps(iint)%same_flavour_sum(iamp,idau))
+    amp2=pgl%amps(iint)%amps(-pgl%include_hel(pgl%amps(iint)%same_flavour_sum(iamp,idau),iint))
+    find_operation=0
+    if (abs((abs(dble(amp1))-abs(dble(amp2)))).lt.abs((abs(dble(amp1))-abs(aimag(amp2))))) then
+       ! real==real and iamag==iamag
+       if (sign(1d0,dble(amp1)).ne.sign(1d0,dble(amp2))) find_operation=find_operation+1
+       if (sign(1d0,aimag(amp1)).ne.sign(1d0,aimag(amp2))) find_operation=find_operation+2
+    else
+       ! real==iamag and iamag==real
+       find_operation=find_operation+4
+       if (sign(1d0,dble(amp1)).ne.sign(1d0,aimag(amp2))) find_operation=find_operation+1
+       if (sign(1d0,aimag(amp1)).ne.sign(1d0,dble(amp2))) find_operation=find_operation+2
+    endif
+  end function find_operation
+    
   subroutine get_run_arguments()
     implicit none
     integer :: argc

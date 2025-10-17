@@ -202,7 +202,7 @@ contains
           enddo
           amp(pgl_unique%passed(1),1:pgl_unique%amps(1)%n_amps)=pgl_unique%amps(1)%amps(1:pgl_unique%amps(1)%n_amps)
        endif
-       call find_same_flavour(pgl_unique,nevent)
+       call find_same_flavour(pgl_unique,nevent,amp2(1,:))
     enddo
     allocate(unique_map(1:pgl_unique%nproc))
     allocate(unique_map_value(1:pgl_unique%nproc))

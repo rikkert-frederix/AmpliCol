@@ -80,9 +80,10 @@ contains
     enddo
   end subroutine determine_phase_space_orders
 
-  subroutine find_same_flavour(pgl,nevent)
+  subroutine find_same_flavour(pgl,nevent,amp2)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
+    real(kind=8),dimension(pgl%nproc),intent(in) :: amp2
     integer :: i,j,k,ii,jj,kk,nevent
     real(kind=8),parameter :: tiny=1d-8
     if (keep_processes_separate) return
@@ -95,10 +96,10 @@ contains
        if (pgl%amps(1)%n_qqbar(i).lt.2) cycle
        do j=1,pgl%nproc
           if (i.eq.j) cycle
-          if (pgl%amps(1)%n_qqbar(j).lt.2) cycle
+          if (pgl%amps(1)%n_qqbar(j).ne.pgl%amps(1)%n_qqbar(i)) cycle
           do k=1,j-1
              if (k.eq.i) cycle
-             if (pgl%amps(1)%n_qqbar(k).lt.2) cycle
+             if (pgl%amps(1)%n_qqbar(k).ne.pgl%amps(1)%n_qqbar(i)) cycle
              do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
                 if (pgl%amps(1)%amps(ii).eq.(0d0,0d0)) cycle
                 do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1

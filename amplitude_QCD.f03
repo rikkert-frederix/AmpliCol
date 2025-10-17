@@ -46,7 +46,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
-          same_flavour_sum
+          same_flavour_sum,same_flavour_sum_operation
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
      logical :: lib_created=.false.
@@ -102,6 +102,10 @@ contains
     call set_max_vert()
     
     if (this%imode.eq.2) then
+       if (this%nprocs.ne.1) then
+          write (*,*) 'For imode==2 there should only be a single process at a time'
+          stop 1
+       endif
        call create_current_dict()
        allocate(key_to_current(max_key,maskr(this%nprocs)))
        key_to_current(1:max_key,1:maskr(this%nprocs))=0
@@ -276,6 +280,7 @@ contains
       endif
 
       allocate(this%same_flavour_sum(this%n_amps,2))
+      allocate(this%same_flavour_sum_operation(this%n_amps,2))
       this%same_flavour_sum=-1
       this%iproc_start(this%nprocs+1)=this%n_amps+1
 
@@ -289,15 +294,14 @@ contains
       allocate(this%spins(n,1,1:this%n_amps))
       do iproc=1,this%nprocs
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-            do i=1,n
-               if (i.lt.n) then
-                  this%spins(this%current_list(this%curr2amp(1,iamp))%order(i),1,iamp)= &
-                       this%current_list(this%curr2amp(1,iamp))%spin(i)
-               elseif (i.eq.n) then
-                  this%spins(this%current_list(this%curr2amp(2,iamp))%order(1),1,iamp)= &
-                       this%current_list(this%curr2amp(2,iamp))%spin(1)
+            do i=this%n_cur_start(1),this%n_cur_end(1)
+               if (btest(this%current_list(this%curr2amp(1,iamp))%ext_cur,i-1)) then
+                  this%spins(this%current_list(i)%order(1),1,iamp)=&
+                       this%current_list(i)%spin(1)
                endif
             enddo
+            this%spins(order(n,1,iproc),1,iamp)=this&
+                 %current_list(this%curr2amp(2,iamp))%spin(1)
          enddo
       enddo
     end subroutine allocate_and_fill_spins
@@ -509,16 +513,19 @@ contains
             if (pm%is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
          enddo
          if (iproc.gt.1) then
-            if (this%n_qqbar(iproc-1).gt.this%n_qqbar(iproc)) then
-               write (*,*) 'ERROR: processes not correctly ordered in the list.'
-               write (*,*) 'Need to be in increasing number of quark lines.'
-               stop 1
-            endif
-            if (this%same_flav(iproc-1) .and. (.not.this%same_flav(iproc))) then
-               write (*,*) 'ERROR: processes not correctly ordered in the list.'
-               write (*,*) 'Need first different-flavour and then same-flavour processes.'
-               stop 1
-            endif
+!!$            if (this%n_qqbar(iproc-1).gt.this%n_qqbar(iproc)) then
+!!$               write (*,*) 'ERROR: processes not correctly ordered in the list.'
+!!$               write (*,*) 'Need to be in increasing number of quark lines.',iproc
+!!$               do i=1,iproc
+!!$                  write (*,*) this%processes(:,i),':',this%n_qqbar(i)
+!!$               enddo
+!!$               stop 1
+!!$            endif
+!!$            if (this%same_flav(iproc-1) .and. (.not.this%same_flav(iproc))) then
+!!$               write (*,*) 'ERROR: processes not correctly ordered in the list.'
+!!$               write (*,*) 'Need first different-flavour and then same-flavour processes.'
+!!$               stop 1
+!!$            endif
          endif
          if (this%n_qqbar(iproc).gt.3) then
             write (*,*) 'ERROR: code only working for 0, 1, 2 or 3 qqbar pairs',this%n_qqbar(iproc),iproc
@@ -1250,10 +1257,9 @@ contains
       do isize=2,n-1
          size=size*(n-isize+1)
          do i=1,size
-            max_key=max_key+14
+            max_key=max_key+pm%npart
          enddo
       enddo
-      max_key=max_key*2 ! maybe needs a better solution
       allocate(current_dict(max_key)) 
       key=n  ! skip the external currents.
       size=n
@@ -1473,7 +1479,7 @@ contains
     ! amp specific information
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2)
+          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           write (iunit) this%spins(1:n,1,iamp)
           write (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) write (iunit) this%curr2amp(1:2,iamp)
@@ -1552,7 +1558,7 @@ contains
     allocate(this%curr2amp(1:2,1:this%iproc_start(iproc)-1))
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2)
+          read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           read (iunit) this%spins(1:n,1,iamp)
           read (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) read (iunit) this%curr2amp(1:2,iamp)
@@ -1588,6 +1594,7 @@ contains
       if (allocated(this%processes)) deallocate(this%processes)
       if (allocated(this%include_amp)) deallocate(this%include_amp)
       if (allocated(this%same_flavour_sum)) deallocate(this%same_flavour_sum)
+      if (allocated(this%same_flavour_sum_operation)) deallocate(this%same_flavour_sum_operation)
       if (allocated(this%spins)) deallocate(this%spins)
       if (allocated(this%perm)) deallocate(this%perm)
       if (allocated(this%curr2amp)) deallocate(this%curr2amp)
@@ -2085,7 +2092,7 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: iamp,iproc
+      integer :: iamp,iproc,idau
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
             do iamp=1,this%n_amps
@@ -2101,17 +2108,12 @@ contains
                              this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
                         ! same-flavour amps are build from two different-flavour amps
-                        if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                this%amps(this%same_flavour_sum(iamp,2))
-                        elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                        elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))
-                        else
-                           write (*,*) 'At least one should contribute'
-                           stop 1
-                        endif
+                        this%amps(iamp)=(0d0,0d0)
+                        do idau=1,2
+                           if (this%same_flavour_sum(iamp,idau).gt.0) then
+                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+                           endif
+                        enddo
                      endif
                   enddo
                enddo
@@ -2123,17 +2125,12 @@ contains
                              this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
                         ! same-flavour amps are build from two different-flavour amps
-                        if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                this%amps(this%same_flavour_sum(iamp,2))
-                        elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                        elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))
-                        else
-                           write (*,*) 'At least one should contribute'
-                           stop 1
-                        endif
+                        this%amps(iamp)=(0d0,0d0)
+                        do idau=1,2
+                           if (this%same_flavour_sum(iamp,idau).gt.0) then
+                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+                           endif
+                        enddo
                      endif
                   enddo
                enddo
@@ -2166,17 +2163,13 @@ contains
                                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
                         ! same-flavour amps are build from two different-flavour amps
-                        if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                           this%amps(this%same_flavour_sum(iamp,2))
-                        elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                        elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))
-                        else
-                           write (*,*) 'At least one should contribute'
-                           stop 1
-                        endif
+                        this%amps(iamp)=(0d0,0d0)
+                        do idau=1,2
+                           if (this%same_flavour_sum(iamp,idau).gt.0) then
+                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+!!$                              this%amps(iamp)=this%amps(iamp)+this%amps(this%same_flavour_sum(iamp,idau))
+                           endif
+                        enddo
                      endif
                   endif
                enddo
@@ -2185,6 +2178,15 @@ contains
       endif
     end subroutine compute_amps_from_currents
 
+    complex (kind=8) function apply_operation(iamp,idau)
+      implicit none
+      integer,intent(in) :: iamp,idau
+      apply_operation=this%amps(this%same_flavour_sum(iamp,idau))
+      if (btest(this%same_flavour_sum_operation(iamp,idau),2)) apply_operation=cmplx(aimag(apply_operation),dble(apply_operation))
+      if (btest(this%same_flavour_sum_operation(iamp,idau),0)) apply_operation=-conjg(apply_operation)
+      if (btest(this%same_flavour_sum_operation(iamp,idau),1)) apply_operation=conjg(apply_operation)
+    end function apply_operation
+    
     subroutine combine_interactions(dim)
       implicit none
       integer :: dim,iv
@@ -3524,13 +3526,23 @@ contains
           else
              ! same-flavour amplitude.
              if (all(include_hel(this%same_flavour_sum(iamp,1:2)).eq.0)) then
-                write (*,*) 'inconsistency in helicity filter for same-flavour process'
+                write (*,*) 'inconsistency in helicity filter for same-flavour process #1'
                 stop 1
              endif
-             if (include_hel(this%same_flavour_sum(iamp,1)).lt.0) &
-                  this%same_flavour_sum(iamp,1)=-include_hel(this%same_flavour_sum(iamp,1))
-             if (include_hel(this%same_flavour_sum(iamp,2)).lt.0) &
-                  this%same_flavour_sum(iamp,2)=-include_hel(this%same_flavour_sum(iamp,2))
+             if (include_hel(this%same_flavour_sum(iamp,1)).lt.0) then
+                this%same_flavour_sum(iamp,1)=-include_hel(this%same_flavour_sum(iamp,1))
+                if (.not. this%include_amp(this%same_flavour_sum(iamp,1))) then
+                   write (*,*) 'inconsistency in helicity filter for same-flavour process #2'
+                   stop 1
+                endif
+             endif
+             if (include_hel(this%same_flavour_sum(iamp,2)).lt.0) then
+                this%same_flavour_sum(iamp,2)=-include_hel(this%same_flavour_sum(iamp,2))
+                if (.not. this%include_amp(this%same_flavour_sum(iamp,2))) then
+                   write (*,*) 'inconsistency in helicity filter for same-flavour process #3'
+                   stop 1
+                endif
+             endif
           endif
           nspin=nspin+1
           tmp_spin(1:n,1,nspin)=this%spins(1:n,1,iamp)
@@ -3665,8 +3677,10 @@ contains
              this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
           elseif (this%same_flavour_sum(iamp,i).eq.0) then
              this%same_flavour_sum(where_to_amp(iamp),i)=0
+             this%same_flavour_sum_operation(where_to_amp(iamp),i)=0
           else
              this%same_flavour_sum(where_to_amp(iamp),i)=where_to_amp(this%same_flavour_sum(iamp,i))
+             this%same_flavour_sum_operation(where_to_amp(iamp),i)=this%same_flavour_sum_operation(iamp,i)
           endif
        enddo
     enddo
@@ -3859,6 +3873,7 @@ contains
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
     if (allocated(amp%processes)) deallocate(amp%processes)
     if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)
+    if (allocated(amp%same_flavour_sum_operation)) deallocate(amp%same_flavour_sum_operation)
     if (allocated(amp%spins)) deallocate(amp%spins)
     if (allocated(amp%row_index)) deallocate(amp%row_index)
     if (allocated(amp%include_amp)) deallocate(amp%include_amp)
