@@ -240,11 +240,11 @@ contains
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
-    real(kind=8), dimension(:),allocatable :: amp2_save
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
+    logical :: done
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
@@ -299,34 +299,8 @@ contains
 
     if ((.not. use_amplitude_library) &
          .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
-       call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
-       call setup_helicity_filter(pgl(ichan),iint)
-       if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
-          ! recompute the amplitudes (to make sure that helicities are
-          ! all filled correctly). We can also check that they are
-          ! consistent.
-          allocate(amp2_save(1:pgl(ichan)%nproc))
-          amp2_save=pgl(ichan)%amp2
-          call compute_the_amps(iint,ichan)
-          call square_the_amps(iint,ichan)
-          if (use_cross_process_optimisation_of_currents) then
-             call pgl(ichan)%amps(iint)%optimise_evaluation(pgl(ichan)%next)
-             call compute_the_amps(iint,ichan)
-             call square_the_amps(iint,ichan)
-          endif
-          if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-12)) then
-             write (*,*) 'Find same flavour and helicity filter give different matrix elements'
-             write (*,*) amp2_save
-             write (*,*) pgl(ichan)%amp2
-             stop 1
-          endif
-          deallocate(amp2_save)
-          if (create_amplitude_library) then
-             call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
-             pgl(ichan)%amps(iint)%lib_created=.true.
-             return
-          endif
-       endif
+       call optimise_the_amplitudes(iint,ichan,done)
+       if (done) return
     endif
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
@@ -358,6 +332,42 @@ contains
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end subroutine integrand
+
+  subroutine optimise_the_amplitudes(iint,ichan,done)
+    implicit none
+    integer,intent(in) :: iint,ichan
+    logical,intent(out) :: done
+    real(kind=8), dimension(:),allocatable :: amp2_save
+    done=.false.
+    call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
+    call setup_helicity_filter(pgl(ichan),iint)
+    if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
+       ! recompute the amplitudes (to make sure that helicities are
+       ! all filled correctly). We can also check that they are
+       ! consistent with the non-optimised ones.
+       allocate(amp2_save(1:pgl(ichan)%nproc))
+       amp2_save=pgl(ichan)%amp2
+       call compute_the_amps(iint,ichan)
+       call square_the_amps(iint,ichan)
+       if (use_cross_process_optimisation_of_currents) then
+          call pgl(ichan)%amps(iint)%optimise_evaluation(pgl(ichan)%next)
+          call compute_the_amps(iint,ichan)
+          call square_the_amps(iint,ichan)
+       endif
+       if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-12)) then
+          write (*,*) 'Find same flavour and helicity filter give different matrix elements'
+          write (*,*) amp2_save
+          write (*,*) pgl(ichan)%amp2
+          stop 1
+       endif
+       deallocate(amp2_save)
+       if (create_amplitude_library) then
+          call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
+          pgl(ichan)%amps(iint)%lib_created=.true.
+          done=.true.
+       endif
+    endif
+  end subroutine optimise_the_amplitudes
 
   subroutine compute_the_amps(iint,ichan)
     implicit none
