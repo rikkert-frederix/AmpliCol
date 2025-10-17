@@ -52,7 +52,7 @@ module amplitude_QCD_mod
      logical :: lib_created=.false.
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
-          ,create_library
+          ,create_library,optimise_evaluation
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
@@ -1601,7 +1601,7 @@ contains
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel,read_file,pm,optimise)
+  subroutine evaluate(this,n,p,hel,read_file,pm)
     use FeynmanRules
     use particles
     implicit none
@@ -1611,7 +1611,7 @@ contains
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ifinal,dim
-    logical :: read_file ,optimise
+    logical :: read_file
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (use_real_gluons .and. &
@@ -1906,174 +1906,7 @@ contains
 
     call compute_amps_from_currents
 
-    if (optimise) call optimise_evaluation
-    
   contains
-
-    subroutine optimise_evaluation
-!
-! POTENTIAL OTHER OPTIMISATIONS:
-!
-! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
-! 2. INCLUDE MULTIPLICATIVE COUPLING CONSTANT AT LATER STAGE
-! 3. WEYL SPINORS & SEPARATE VERTEX ROUTINES FOR LEFT AND RIGHT-HANDED INTERACTIONS?
-!      
-      implicit none
-      integer :: isize,ic1,ic2,iv1,iv2,i,n_vert
-      integer,dimension(:,:),allocatable :: map_cur,map_vert
-      integer,dimension(n-1) :: identical_curr,identical_vert
-      real(kind=8),parameter :: tiny=1d-10
-      logical,dimension(:),allocatable :: include_cur,include_vert,reordered_interactions
-      type(current),dimension(:),allocatable :: current_list_local
-      type(interaction),dimension(:),allocatable :: interaction_list_local
-      integer,dimension(:),allocatable :: interactions_map
-      allocate(include_cur(1:this%n_cur))
-      allocate(include_vert(1:this%n_vert))
-      include_cur=.true.
-      include_vert=.true.
-      allocate(map_cur(0:this%n_cur,1:2))
-      allocate(map_vert(0:this%n_vert,1:2))
-      map_cur(0,1)=0
-      map_vert(0,1)=0
-      identical_curr=0
-      identical_vert=0
-      do isize=1,n-1
-         do ic1=this%n_cur_start(isize),this%n_cur_end(isize)-1
-            if (.not.include_cur(ic1)) cycle
-            if (sum(abs(this%current_list(ic1)%val_c)).eq.0d0) then
-               map_cur(0,1)=map_cur(0,1)+1
-               map_cur(map_cur(0,1),1)=ic1
-!!$               map_cur(map_cur(0,1),2)=0
-               map_cur(map_cur(0,1),2)=ic1
-               include_cur(ic1)=.false.
-               cycle
-            endif
-            do ic2=ic1+1,this%n_cur_end(isize)
-               if (.not.include_cur(ic2)) cycle
-               if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
-               if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
-                    sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
-                  map_cur(0,1)=map_cur(0,1)+1
-                  map_cur(map_cur(0,1),1)=ic2
-                  map_cur(map_cur(0,1),2)=ic1
-                  identical_curr(isize)=identical_curr(isize)+1
-                  include_cur(ic2)=.false.
-               endif
-            enddo
-         enddo
-      enddo
-      do i=1,map_cur(0,1)
-         do iv1=1,this%n_vert
-            if (this%interaction_list(iv1)%currents(1).eq.map_cur(i,1)) then
-               this%interaction_list(iv1)%currents(1)=map_cur(i,2)
-            endif
-            if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) then
-               this%interaction_list(iv1)%currents(2)=map_cur(i,2)
-            endif
-         enddo
-      enddo
-      do isize=2,n-1
-         do iv1=this%n_vert_start(isize),this%n_vert_end(isize)-1
-            if (.not.include_vert(iv1)) cycle
-            if (sum(abs(this%interaction_list(iv1)%val_c)).eq.0d0) then
-               map_vert(0,1)=map_vert(0,1)+1
-               map_vert(map_vert(0,1),1)=iv1
-!!$               map_vert(map_vert(0,1),2)=0
-               map_vert(map_vert(0,1),2)=iv1
-               include_vert(iv1)=.false.
-               cycle
-            endif
-            do iv2=iv1+1,this%n_vert_end(isize)
-               if (.not.include_vert(iv2)) cycle
-               if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
-               if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
-                    sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
-                  map_vert(0,1)=map_vert(0,1)+1
-                  map_vert(map_vert(0,1),1)=iv2
-                  map_vert(map_vert(0,1),2)=iv1
-                  identical_vert(isize)=identical_vert(isize)+1
-                  include_vert(iv2)=.false.
-               endif
-            enddo
-         enddo
-      enddo
-      do i=1,map_vert(0,1)
-         do ic1=1,this%n_cur
-            do iv1=1,this%current_list(ic1)%n_vert
-               if (this%current_list(ic1)%vertices(iv1).eq.map_vert(i,1)) then
-                  this%current_list(ic1)%vertices(iv1)=map_vert(i,2)
-               endif
-            enddo
-         enddo
-      enddo
-
-      allocate(this%include_amp(1:this%n_amps))
-      this%include_amp=.true.
-      call this%filter_dead_trees(n)
-      deallocate(this%include_amp)
-      do ic=1,this%n_cur
-         if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
-         if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
-      enddo
-      do iv=1,this%n_vert
-         if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
-         if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
-      enddo
-      write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
-!!$      ! try to reorder to optimise memory usage???
-!!$      allocate(reordered_interactions(1:this%n_vert))
-!!$      allocate(interactions_map(1:this%n_vert))
-!!$      reordered_interactions(1:this%n_vert)=.false.
-!!$      interactions_map(1:this%n_vert)=0
-!!$      allocate(interaction_list_local(1:this%n_vert))
-!!$      allocate(current_list_local(1:this%n_cur))
-!!$      do isize=n-1,2,-1
-!!$         n_vert=this%n_vert_start(isize)
-!!$         do ic1=this%n_cur_start(isize),this%n_cur_end(isize)
-!!$            current_list_local(ic1)=this%current_list(ic1)
-!!$            do iv1=1,this%current_list(ic1)%n_vert
-!!$               if(reordered_interactions(this%current_list(ic1)%vertices(iv1))) then
-!!$                  current_list_local(ic1)%vertices(iv1)=interactions_map(this%current_list(ic1)%vertices(iv1))
-!!$               else
-!!$                  interaction_list_local(n_vert)=this%interaction_list(this%current_list(ic1)%vertices(iv1))
-!!$                  interactions_map(this%current_list(ic1)%vertices(iv1))=n_vert
-!!$                  current_list_local(ic1)%vertices(iv1)=n_vert
-!!$                  reordered_interactions(this%current_list(ic1)%vertices(iv1))=.true.
-!!$                  n_vert=n_vert+1
-!!$               endif
-!!$            enddo
-!!$         enddo
-!!$      enddo
-!!$      do ic1=this%n_cur_start(1),this%n_cur_end(1)
-!!$         current_list_local(ic1)=this%current_list(ic1)
-!!$      enddo
-!!$      do ic1=this%n_cur_start(n),this%n_cur_end(n)
-!!$         current_list_local(ic1)=this%current_list(ic1)
-!!$      enddo
-!!$      do iv1=1,size(this%interaction_list)
-!!$         call finalize_interaction(this%interaction_list(iv1))
-!!$      enddo
-!!$      do iv1=1,size(interaction_list_local)
-!!$         this%interaction_list(iv1)=interaction_list_local(iv1)
-!!$      enddo
-!!$      do ic1=1,size(this%current_list)
-!!$         call finalize_current(this%current_list(ic1))
-!!$      enddo
-!!$      do ic1=1,size(current_list_local)
-!!$         this%current_list(ic1)=current_list_local(ic1)
-!!$      enddo
-!!$
-!!$      
-!!$      do iv1=1,size(interaction_list_local)
-!!$         call finalize_interaction(interaction_list_local(iv1))
-!!$      enddo
-!!$      deallocate(interaction_list_local)
-!!$      do ic1=1,size(current_list_local)
-!!$         call finalize_current(current_list_local(ic1))
-!!$      enddo
-!!$      deallocate(current_list_local)
-    end subroutine optimise_evaluation
-    
 
     subroutine fill_momentum_array
       implicit none
@@ -2840,6 +2673,119 @@ contains
     end subroutine convert_gluon_string
 
   end subroutine init_col
+
+  subroutine optimise_evaluation(this,n)
+    !
+    ! POTENTIAL OTHER OPTIMISATIONS:
+    !
+    ! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
+    ! 2. INCLUDE MULTIPLICATIVE COUPLING CONSTANT AT LATER STAGE
+    ! 3. WEYL SPINORS & SEPARATE VERTEX ROUTINES FOR LEFT AND RIGHT-HANDED INTERACTIONS?
+    !      
+    implicit none
+    class(amplitude_QCD),intent(inout) :: this
+    integer :: isize,ic1,ic2,iv1,iv2,i,n_vert,n,ic,iv
+    integer,dimension(:,:),allocatable :: map_cur,map_vert
+    integer,dimension(n-1) :: identical_curr,identical_vert
+    real(kind=8),parameter :: tiny=1d-10
+    logical,dimension(:),allocatable :: include_cur,include_vert,reordered_interactions
+    type(current),dimension(:),allocatable :: current_list_local
+    type(interaction),dimension(:),allocatable :: interaction_list_local
+    integer,dimension(:),allocatable :: interactions_map
+    allocate(include_cur(1:this%n_cur))
+    allocate(include_vert(1:this%n_vert))
+    include_cur=.true.
+    include_vert=.true.
+    allocate(map_cur(0:this%n_cur,1:2))
+    allocate(map_vert(0:this%n_vert,1:2))
+    map_cur(0,1)=0
+    map_vert(0,1)=0
+    identical_curr=0
+    identical_vert=0
+    do isize=1,n-1
+       do ic1=this%n_cur_start(isize),this%n_cur_end(isize)-1
+          if (.not.include_cur(ic1)) cycle
+          if (sum(abs(this%current_list(ic1)%val_c)).eq.0d0) then
+             map_cur(0,1)=map_cur(0,1)+1
+             map_cur(map_cur(0,1),1)=ic1
+!!$               map_cur(map_cur(0,1),2)=0
+             map_cur(map_cur(0,1),2)=ic1
+             include_cur(ic1)=.false.
+             cycle
+          endif
+          do ic2=ic1+1,this%n_cur_end(isize)
+             if (.not.include_cur(ic2)) cycle
+             if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
+             if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
+                  sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
+                map_cur(0,1)=map_cur(0,1)+1
+                map_cur(map_cur(0,1),1)=ic2
+                map_cur(map_cur(0,1),2)=ic1
+                identical_curr(isize)=identical_curr(isize)+1
+                include_cur(ic2)=.false.
+             endif
+          enddo
+       enddo
+    enddo
+    do i=1,map_cur(0,1)
+       do iv1=1,this%n_vert
+          if (this%interaction_list(iv1)%currents(1).eq.map_cur(i,1)) then
+             this%interaction_list(iv1)%currents(1)=map_cur(i,2)
+          endif
+          if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) then
+             this%interaction_list(iv1)%currents(2)=map_cur(i,2)
+          endif
+       enddo
+    enddo
+    do isize=2,n-1
+       do iv1=this%n_vert_start(isize),this%n_vert_end(isize)-1
+          if (.not.include_vert(iv1)) cycle
+          if (sum(abs(this%interaction_list(iv1)%val_c)).eq.0d0) then
+             map_vert(0,1)=map_vert(0,1)+1
+             map_vert(map_vert(0,1),1)=iv1
+!!$               map_vert(map_vert(0,1),2)=0
+             map_vert(map_vert(0,1),2)=iv1
+             include_vert(iv1)=.false.
+             cycle
+          endif
+          do iv2=iv1+1,this%n_vert_end(isize)
+             if (.not.include_vert(iv2)) cycle
+             if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
+             if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
+                  sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
+                map_vert(0,1)=map_vert(0,1)+1
+                map_vert(map_vert(0,1),1)=iv2
+                map_vert(map_vert(0,1),2)=iv1
+                identical_vert(isize)=identical_vert(isize)+1
+                include_vert(iv2)=.false.
+             endif
+          enddo
+       enddo
+    enddo
+    do i=1,map_vert(0,1)
+       do ic1=1,this%n_cur
+          do iv1=1,this%current_list(ic1)%n_vert
+             if (this%current_list(ic1)%vertices(iv1).eq.map_vert(i,1)) then
+                this%current_list(ic1)%vertices(iv1)=map_vert(i,2)
+             endif
+          enddo
+       enddo
+    enddo
+
+    allocate(this%include_amp(1:this%n_amps))
+    this%include_amp=.true.
+    call this%filter_dead_trees(n)
+    deallocate(this%include_amp)
+    do ic=1,this%n_cur
+       if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
+       if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
+    enddo
+    do iv=1,this%n_vert
+       if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
+       if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
+    enddo
+    write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
+  end subroutine optimise_evaluation
 
   subroutine create_library(this,n,hel,igroup,iint,pm)
     use particles
@@ -3896,4 +3842,5 @@ contains
     if (allocated(cur%val_c)) deallocate(cur%val_c)
     if (allocated(cur%val_r)) deallocate(cur%val_r)
   end subroutine finalize_current
+
 end module amplitude_QCD_mod

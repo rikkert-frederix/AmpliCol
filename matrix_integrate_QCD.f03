@@ -240,6 +240,7 @@ contains
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
+    real(kind=8), dimension(:),allocatable :: amp2_save
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
@@ -288,29 +289,91 @@ contains
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
     tBefore=tAfter
+    call compute_the_amps(iint,ichan)
     
-    if ((.not. use_amplitude_library) .or. pgl(ichan)%passed(iint) .le. nevent_hel_filter+1) then
-       if (use_cross_process_optimisation_of_currents .and. &
-            pgl(ichan)%passed(iint).eq.nevent_hel_filter+1) then
-          call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
-               pgl(ichan)%hel,read_proc_from_file,phys_model,.true.)
-       else
-          call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
-               pgl(ichan)%hel,read_proc_from_file,phys_model,.false.)
-       endif
-       if (pgl(ichan)%passed(iint).eq.nevent_hel_filter+1 .and. create_amplitude_library) then
-          call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
-          pgl(ichan)%amps(iint)%lib_created=.true.
-          return
-       endif
-    else
-       call evaluate_amp(ichan,iint,pgl(ichan)%phase_space%p,pgl(ichan)%amps(iint)%amps)
-    endif
-       
     
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     tBefore=tAfter
+    call square_the_amps(iint,ichan)
+
+    if ((.not. use_amplitude_library) &
+         .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
+       call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
+       call setup_helicity_filter(pgl(ichan),iint)
+       if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
+          ! recompute the amplitudes (to make sure that helicities are
+          ! all filled correctly). We can also check that they are
+          ! consistent.
+          allocate(amp2_save(1:pgl(ichan)%nproc))
+          amp2_save=pgl(ichan)%amp2
+          call compute_the_amps(iint,ichan)
+          call square_the_amps(iint,ichan)
+          if (use_cross_process_optimisation_of_currents) then
+             call pgl(ichan)%amps(iint)%optimise_evaluation(pgl(ichan)%next)
+             call compute_the_amps(iint,ichan)
+             call square_the_amps(iint,ichan)
+          endif
+          if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-12)) then
+             write (*,*) 'Find same flavour and helicity filter give different matrix elements'
+             write (*,*) amp2_save
+             write (*,*) pgl(ichan)%amp2
+             stop 1
+          endif
+          deallocate(amp2_save)
+          if (create_amplitude_library) then
+             call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
+             pgl(ichan)%amps(iint)%lib_created=.true.
+             return
+          endif
+       endif
+    endif
+    
+    ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
+    weight=vol*pgl(ichan)%phase_space%jac*conv
+
+    ! multiply by the strong coupling
+    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
+       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
+    endif
+    
+    ! multiply by the EW coupling
+    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
+       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
+    endif
+
+    if (keep_processes_separate) then
+       val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
+       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
+       f_abs=sum(val_abs(1:1))
+       f=sum(val(1:1))
+    else
+       val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
+       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
+       f=sum(val(1:pgl(ichan)%nproc))
+    endif
+    call cpu_time(tAfter)
+    t_mat=t_mat+tAfter-tBefore
+  end subroutine integrand
+
+  subroutine compute_the_amps(iint,ichan)
+    implicit none
+    integer,intent(in) :: iint,ichan
+    if ((.not. use_amplitude_library) .or. pgl(ichan)%passed(iint).le.nevent_hel_filter+1) then
+       call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
+            pgl(ichan)%hel,read_proc_from_file,phys_model)
+    else
+       call evaluate_amp(ichan,iint,pgl(ichan)%phase_space%p,pgl(ichan)%amps(iint)%amps)
+    endif
+  end subroutine compute_the_amps
+    
+  subroutine square_the_amps(iint,ichan)
+    implicit none
+    integer,intent(in) :: iint,ichan
+    integer :: iproc,ih
     iproc=0
     pgl(ichan)%amp2=0d0
     if (keep_processes_separate) then
@@ -346,48 +409,8 @@ contains
           enddo
        endif
     endif
-
-    if (pgl(ichan)%passed(iint).le.nevent_hel_filter) then
-       call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
-       call setup_helicity_filter(pgl(ichan),iint)
-       if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
-          ! since we update the helicities we need to compute when
-          ! passed==nevent_hel_filter, the unweighting of the helicities goes
-          ! wrong for this phase-space point. Hence, we need to skip it.
-          pgl(ichan)%amp2=0d0
-       endif
-    endif
-    
-    ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
-    weight=vol*pgl(ichan)%phase_space%jac*conv
-
-    ! multiply by the strong coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
-       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
-    endif
-    
-    ! multiply by the EW coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
-    endif
-
-    if (keep_processes_separate) then
-       val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
-       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
-       f_abs=sum(val_abs(1:1))
-       f=sum(val(1:1))
-    else
-       val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
-       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
-       f=sum(val(1:pgl(ichan)%nproc))
-    endif
-    call cpu_time(tAfter)
-    t_mat=t_mat+tAfter-tBefore
-  end subroutine integrand
-
+  end subroutine square_the_amps
+  
   subroutine setup_helicity_filter(pgl,iint)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
