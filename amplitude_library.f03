@@ -218,4 +218,35 @@ contains
     enddo
     close(14)
   end subroutine read_amplitude_lib
+
+  subroutine test_lib
+    use amp_lib
+    implicit none
+    integer :: igroup,iint
+    real(kind=8),dimension(:,:),allocatable :: p
+    complex(kind=8),dimension(:),allocatable :: amps_save,amps
+    character(len=170) :: line,tmp
+    do igroup=1,ngroups
+       do iint=1,size(pgl(igroup)%amps)
+          allocate(p(0:3,pgl(igroup)%next))
+          allocate(amps(size(pgl(igroup)%amps(iint)%amps)))
+          allocate(amps_save(size(pgl(igroup)%amps(iint)%amps)))
+          write(tmp,*) igroup
+          write(line,*) iint
+          line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
+          open(file=line,unit=14,form='unformatted',access='stream',status='old')
+          read(14) p
+          read(14) amps_save
+          close(14)
+          call evaluate_amp(igroup,iint,p,amps)
+          if (any(abs(amps_save-amps)/(abs(amps_save)+abs(amps)).gt.1d-10)) then
+             write (*,*) 'Process library not compatible with saved amplitudes',igroup,iint
+             stop 1
+          endif
+          deallocate(p)
+          deallocate(amps)
+          deallocate(amps_save)
+       enddo
+    enddo
+  end subroutine test_lib
 end module amplitude_library

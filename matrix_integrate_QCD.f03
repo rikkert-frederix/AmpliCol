@@ -163,6 +163,8 @@ program matrix_integrate_QCD
 
   enddo ! loop over phase-space-order groups
 
+  if (use_amplitude_library) call test_lib
+  
   filename='Outputs/events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
   if (COMMAND_ARGUMENT_COUNT().le.10) &
@@ -362,7 +364,8 @@ contains
        endif
        deallocate(amp2_save)
        if (create_amplitude_library) then
-          call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,ichan,iint,phys_model)
+          call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,&
+               ichan,iint,phys_model,pgl(ichan)%phase_space%p)
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
@@ -370,9 +373,10 @@ contains
   end subroutine optimise_the_amplitudes
 
   subroutine compute_the_amps(iint,ichan)
+    use amp_lib 
     implicit none
     integer,intent(in) :: iint,ichan
-    if ((.not. use_amplitude_library) .or. pgl(ichan)%passed(iint).le.nevent_hel_filter+1) then
+    if (.not. use_amplitude_library) then
        call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
             pgl(ichan)%hel,read_proc_from_file,phys_model)
     else

@@ -68,7 +68,7 @@ matrix_combine_QCD: $(FILES_M_COMBINE_QCD)
 	$(FC) $(FFLAGS) -o matrix_combine_QCD $(FILES_M_COMBINE_QCD)
 
 clean:
-	rm -f *.o *.mod
+	rm -f *.o *.mod library/amp*.f03 library/amp*.data library/amplitudes.bin
 
 cleanlib:
 	rm -f amp*lib.o amp*lib.mod library/amp*lib*

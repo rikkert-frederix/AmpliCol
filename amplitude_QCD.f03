@@ -2787,14 +2787,15 @@ contains
     write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
   end subroutine optimise_evaluation
 
-  subroutine create_library(this,n,hel,igroup,iint,pm)
+  subroutine create_library(this,n,hel,igroup,iint,pm,p)
     use particles
     implicit none
     class(amplitude_QCD) :: this
     type(physics_model),intent(in) :: pm
-    integer :: n,igroup,iint
+    integer,intent(in) :: n,igroup,iint
+    real(kind=8),dimension(0:3,n),intent(in) :: p
     integer,parameter :: iunit=14
-    integer,dimension(n)::hel
+    integer,dimension(n),intent(in)::hel
     character(len=170) :: line,tmp
     integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj
     integer,dimension(0:15) :: icount
@@ -2804,6 +2805,13 @@ contains
     real(kind=8),dimension(:),allocatable :: m,w
     integer,dimension(this%n_vert,0:15) :: cur1,cur2,int1,pp1,pp2
     real(kind=8),dimension(2,this%n_vert,0:15) :: coupl
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
+    open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
+    write(iunit) p
+    write(iunit) this%amps
+    close(iunit)
     write(tmp,*) igroup
     write(line,*) iint
     line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
@@ -3062,20 +3070,20 @@ contains
              enddo
              write(iunit,*) trim(adjustl(line))//']'
           endif
-          if (itype.ge.10) then
+          if (itype.ge.10 .or. itype.eq.8) then
              write(tmp,*) icount(itype)*2
              write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
              line=''
              do i=1,icount(itype)
-                write(tmp,*) coupl(1,i,itype)
+                write(tmp,'(D24.16)') coupl(1,i,itype)
                 if (i.eq.1) then
-                   line=trim(adjustl(tmp))//'d0'
-                   write(tmp,*) coupl(2,i,itype)
-                   line=trim(adjustl(line))//','//trim(adjustl(tmp))//'d0'
+                   line=trim(adjustl(tmp))
+                   write(tmp,'(D24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
                 else
-                   line=trim(adjustl(line))//','//trim(adjustl(tmp))//'d0'
-                   write(tmp,*) coupl(2,i,itype)
-                   line=trim(adjustl(line))//','//trim(adjustl(tmp))//'d0'
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   write(tmp,'(D24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
                 endif
                 if (mod(i,2).eq.0 .and. i.ne.icount(itype)) then
                    line=trim(adjustl(line))//' &'
@@ -3106,7 +3114,8 @@ contains
           elseif(itype.eq.7) then
              line='call AQuarkGluontoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.8) then
-             line='call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             line='call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.9) then
              line='call AquarkQuarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.10) then
@@ -3275,11 +3284,11 @@ contains
                 write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: m=[&'
                 line=''
                 do ii=1,icount_type(i,j)
-                   write(tmp,*) m(ii)
+                   write(tmp,'(D24.16)') m(ii)
                    if (ii.eq.1) then
-                      line=trim(adjustl(tmp))//'d0'
+                      line=trim(adjustl(tmp))
                    else
-                      line=trim(adjustl(line))//','//trim(adjustl(tmp))//'d0'
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
                    endif
                    if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
                       line=trim(adjustl(line))//' &'
@@ -3292,11 +3301,11 @@ contains
                 write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: w=[&'
                 line=''
                 do ii=1,icount_type(i,j)
-                   write(tmp,*) w(ii)
+                   write(tmp,'(D24.16)') w(ii)
                    if (ii.eq.1) then
-                      line=trim(adjustl(tmp))//'d0'
+                      line=trim(adjustl(tmp))
                    else
-                      line=trim(adjustl(line))//','//trim(adjustl(tmp))//'d0'
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
                    endif
                    if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
                       line=trim(adjustl(line))//' &'
