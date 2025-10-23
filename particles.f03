@@ -727,13 +727,13 @@ contains
     enddo
     ! Wboson-Wboson to Higgs
     l=l+1
-    this%vertex_list(l)%type=117
+    this%vertex_list(l)%type=17
     this%vertex_list(l)%particles(1)=24
     this%vertex_list(l)%particles(2)=-24
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
     l=l+1
-    this%vertex_list(l)%type=117
+    this%vertex_list(l)%type=17
     this%vertex_list(l)%particles(1)=-24
     this%vertex_list(l)%particles(2)=24
     this%vertex_list(l)%particles(3)=25
@@ -766,7 +766,7 @@ contains
     this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
     ! Zboson-Zboson to Higgs
     l=l+1
-    this%vertex_list(l)%type=117
+    this%vertex_list(l)%type=17
     this%vertex_list(l)%particles(1)=23
     this%vertex_list(l)%particles(2)=23
     this%vertex_list(l)%particles(3)=25
@@ -787,7 +787,7 @@ contains
     this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
     ! Higgs-Higgs to Higgs
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=25
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=25
@@ -795,62 +795,62 @@ contains
 
     ! Wboson-Wboson to HiggsorC
     l=l+1
-    this%vertex_list(l)%type=117
+    this%vertex_list(l)%type=17
     this%vertex_list(l)%particles(1)=24
     this%vertex_list(l)%particles(2)=-24
     this%vertex_list(l)%particles(3)=127
     this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
     l=l+1
-    this%vertex_list(l)%type=117
+    this%vertex_list(l)%type=17
     this%vertex_list(l)%particles(1)=-24
     this%vertex_list(l)%particles(2)=24
     this%vertex_list(l)%particles(3)=127
     this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
     !! Zboson-Zboson to HiggsorC
     l=l+1
-    this%vertex_list(l)%type=117
+    this%vertex_list(l)%type=17
     this%vertex_list(l)%particles(1)=23
     this%vertex_list(l)%particles(2)=23
     this%vertex_list(l)%particles(3)=127
     this%vertex_list(l)%coupl=[1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
     ! HiggsorA-Higgs to Higgs
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=125
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[1d0,0d0]  !!
     ! Higgs-HiggsorA to Higgs
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=25
     this%vertex_list(l)%particles(2)=125
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[1d0,0d0]  !!
     ! Higgs-Higgs to HiggsorA
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=25
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=125
     this%vertex_list(l)%coupl=[(-3d0/4d0)/sw**2*this%get_mass(25)**2/this%get_mass(24)**2,0d0]  !!
     ! HiggsorC-Higgs to Higgs
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=127
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[1d0,0d0]  !!
     ! Higgs-HiggsorC to Higgs
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=25
     this%vertex_list(l)%particles(2)=127
     this%vertex_list(l)%particles(3)=25
     this%vertex_list(l)%coupl=[1d0,0d0]  !!
     ! Higgs-Higgs to HiggsorB
     l=l+1
-    this%vertex_list(l)%type=120
+    this%vertex_list(l)%type=20
     this%vertex_list(l)%particles(1)=25
     this%vertex_list(l)%particles(2)=25
     this%vertex_list(l)%particles(3)=126

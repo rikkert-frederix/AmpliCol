@@ -287,18 +287,14 @@ contains
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
          pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
-    
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
     tBefore=tAfter
     call compute_the_amps(iint,ichan)
-    
-    
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     tBefore=tAfter
     call square_the_amps(iint,ichan)
-
     if ((.not. use_amplitude_library) &
          .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
        call optimise_the_amplitudes(iint,ichan,done)

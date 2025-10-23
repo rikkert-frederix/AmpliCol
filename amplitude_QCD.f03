@@ -587,7 +587,7 @@ contains
       implicit none
       integer,intent(in) :: iproc
       integer :: i
-      integer,dimension(2) :: q,aq
+      integer,dimension(3) :: q,aq
       q=0
       aq=0
       do i=1,n
@@ -596,6 +596,8 @@ contains
                q(1)=i
             elseif (q(2).eq.0) then
                q(2)=i
+            elseif (q(3).eq.0) then
+               q(3)=i
             endif
          endif
          if (is_antiquark_from_order(order(i,1,iproc),iproc)) then
@@ -603,6 +605,8 @@ contains
                aq(1)=i
             elseif (aq(2).eq.0) then
                aq(2)=i
+            elseif (aq(3).eq.0) then
+               aq(3)=i
             endif
          endif
       enddo
@@ -610,7 +614,15 @@ contains
          write (*,*) 'Second quark should come right after first anti-quark in colour order'
          stop 1
       endif
-      order(:,2,iproc)=[order(q(2):aq(2),1,iproc),order(q(1):aq(1),1,iproc),order(aq(2)+1:,1,iproc)]
+      if (aq(2).ne.q(3)-1) then
+         write (*,*) 'Third quark should come right after second anti-quark in colour order'
+         stop 1
+      endif
+      if (aq(3).ne.n) then
+         write (*,*) 'there are more particles after final anti-quark'
+         stop 1
+      endif
+      order(:,2,iproc)=[order(q(2):aq(2),1,iproc),order(q(1):aq(1),1,iproc),order(q(3):aq(3),1,iproc)]
     end subroutine fill_alternative_quark_order
     
     subroutine set_max_cur()
@@ -1825,7 +1837,7 @@ contains
                                      this%interaction_list(iv)%val_c(1:4),&
                                      this%interaction_list(iv)%coupl(1:2))
 
-          elseif(this%interaction_list(iv)%type.eq.117) then
+          elseif(this%interaction_list(iv)%type.eq.17) then
              call GluonGluontoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                      this%interaction_list(iv)%val_c(1),&
@@ -1843,7 +1855,7 @@ contains
                                      this%interaction_list(iv)%val_c(1:4),&
                                      this%interaction_list(iv)%coupl)
 
-          elseif(this%interaction_list(iv)%type.eq.120) then
+          elseif(this%interaction_list(iv)%type.eq.20) then
              call ScalarScalartoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                        this%interaction_list(iv)%val_c(1),&
@@ -2797,14 +2809,14 @@ contains
     integer,parameter :: iunit=14
     integer,dimension(n),intent(in)::hel
     character(len=170) :: line,tmp
-    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj
-    integer,dimension(0:15) :: icount
-    integer,dimension(150,6) :: icount_type
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau
+    integer,dimension(0:20) :: icount
+    integer,dimension(150,7) :: icount_type
     integer,dimension(:,:),allocatable :: curs
     integer,dimension(:),allocatable :: pp
     real(kind=8),dimension(:),allocatable :: m,w
-    integer,dimension(this%n_vert,0:15) :: cur1,cur2,int1,pp1,pp2
-    real(kind=8),dimension(2,this%n_vert,0:15) :: coupl
+    integer,dimension(this%n_vert,0:20) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:20) :: coupl
     write(tmp,*) igroup
     write(line,*) iint
     line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
@@ -2922,6 +2934,7 @@ contains
                 write(tmp,'(d20.12)') this%current_list(ic)%mass
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
              elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 line='call ext_scalar(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ifinal
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
@@ -2949,8 +2962,8 @@ contains
        write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'()'
        write(iunit,*) 'implicit none'
 
-       icount(0:15)=0
-       do itype=0,15 ! vertex type
+       icount(0:20)=0
+       do itype=0,20 ! vertex type
           do iv=this%n_vert_start(isize),this%n_vert_end(isize)
              if (this%interaction_list(iv)%type.eq.itype) then
                 icount(itype)=icount(itype)+1
@@ -2963,7 +2976,7 @@ contains
              endif
           enddo
        enddo
-       do itype=0,15
+       do itype=0,20
           if (icount(itype).eq.0) cycle
           write(tmp,*) isize
           line='call vertex_type'//trim(adjustl(tmp))//'_'
@@ -2974,7 +2987,7 @@ contains
        write(tmp,*) isize
        write(iunit,*) 'end subroutine compute_vertices'//trim(adjustl(tmp))
 
-       do itype=0,15
+       do itype=0,20
           if (icount(itype).eq.0) cycle
           write(tmp,*) isize
           line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
@@ -3070,7 +3083,7 @@ contains
              enddo
              write(iunit,*) trim(adjustl(line))//']'
           endif
-          if (itype.ge.10 .or. itype.eq.8) then
+          if (itype.eq.8 .or. itype.ge.10) then
              write(tmp,*) icount(itype)*2
              write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
              line=''
@@ -3136,6 +3149,21 @@ contains
           elseif(itype.eq.15) then
              line='call GluonTensortoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.16) then
+             line='call QuarkScalartoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.17) then
+             line='call GluonGluontoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.18) then
+             line='call ScalarGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.19) then
+             line='call GluonScalartoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.20) then
+             line='call ScalarScalartoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
           endif
           write(iunit,*)trim(adjustl(line))
           write(iunit,*)'enddo'
@@ -3166,6 +3194,8 @@ contains
              itype=5
           elseif (pm%is_tensor(this%current_list(ic)%type)) then
              itype=6
+          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+             itype=7
           endif
           if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
              write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
@@ -3175,7 +3205,7 @@ contains
        enddo
 
        do i=1,150
-          do j=1,6
+          do j=1,7
              if (icount_type(i,j).eq.0) cycle
              write(tmp,*) isize
              line='call combine_currents_'//trim(adjustl(tmp))
@@ -3191,7 +3221,7 @@ contains
 
        
        do i=1,150
-          do j=1,6
+          do j=1,7
              if (icount_type(i,j).eq.0) cycle
 
              allocate(curs(0:i,icount_type(i,j)))
@@ -3213,6 +3243,8 @@ contains
                    itype=5
                 elseif (pm%is_tensor(this%current_list(ic)%type)) then
                    itype=6
+                elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+                   itype=7
                 endif
                 if (itype.ne.j) cycle
                 if (this%current_list(ic)%n_vert.ne.i) cycle
@@ -3259,7 +3291,7 @@ contains
              line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
              write(iunit,*) trim(adjustl(line))
 
-             if (j.ne.6) then
+             if (j.ne.6 .and. j.ne.7) then
                 write(tmp,*) icount_type(i,j)
                 write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
                 line=''
@@ -3321,6 +3353,8 @@ contains
              write(tmp,*) i
              if (j.eq.6) then
                 write(iunit,*) 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             elseif (j.eq.5 .or. j.eq.7) then
+                write(iunit,*) 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              else
                 write(iunit,*) 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              endif
@@ -3355,84 +3389,54 @@ contains
     write(iunit,*) 'implicit none'
     write(tmp,*) this%n_amps
     write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
-
-    if (this%imode.eq.1 .or. this%imode.eq.3) then
-          do iproc=1,this%nprocs
-             do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                if (.not.this%same_flav(iproc)) then
-                   write(tmp,*) iamp
-                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
-                   write(tmp,*) this%curr2amp(1,iamp)
-                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
-                   write(tmp,*) this%curr2amp(2,iamp)
-                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-                else
-                   ! same-flavour amps are build from two different-flavour amps
-                   if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                      write(tmp,*) iamp
-                      line='amps('//trim(adjustl(tmp))//')='
-                      write(tmp,*) this%same_flavour_sum(iamp,1)
-                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')+'
-                      write(tmp,*) this%same_flavour_sum(iamp,2)
-                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
-                   elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                      write(tmp,*) iamp
-                      line='amps('//trim(adjustl(tmp))//')='
-                      write(tmp,*) this%same_flavour_sum(iamp,1)
-                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
-                   elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                      write(tmp,*) iamp
-                      line='amps('//trim(adjustl(tmp))//')='
-                      write(tmp,*) this%same_flavour_sum(iamp,2)
-                      line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
-                   endif
-                endif
-                write(iunit,*) trim(adjustl(line))
-             enddo
-          enddo
-    elseif(this%imode.eq.2) then
-          do iproc=1,this%nprocs
-             do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
-                   write(tmp,*) iamp
-                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
-                   write(tmp,*) this%curr2amp(1,iamp)
-                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
-                   write(tmp,*) this%curr2amp(2,iamp)
-                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-                else
-                   if (.not.this%same_flav(iproc)) then
-                      write(tmp,*) iamp
-                      line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
-                      write(tmp,*) this%curr2amp(1,iamp)
-                      line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
-                      write(tmp,*) this%curr2amp(2,iamp)
-                      line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+    
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          if (.not.this%same_flav(iproc)) then
+             write(tmp,*) iamp
+             line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+             write(tmp,*) this%curr2amp(1,iamp)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+             write(tmp,*) this%curr2amp(2,iamp)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+          else
+             ! same-flavour amps are build from two different-flavour amps
+             write(tmp,*) iamp
+             line='amps('//trim(adjustl(tmp))//')='
+             do idau=1,2
+                if (this%same_flavour_sum(iamp,idau).gt.0) then
+                   write(tmp,*) this%same_flavour_sum(iamp,idau)
+                   if (this%same_flavour_sum_operation(iamp,idau) .eq. 0) then
+                      line=trim(adjustl(line))//'+amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
+                      line=trim(adjustl(line))//'-conjg(amps('//trim(adjustl(tmp))//'))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
+                      line=trim(adjustl(line))//'conjg(amps('//trim(adjustl(tmp))//'))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
+                      line=trim(adjustl(line))//'-amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
+                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                           ')),dble(amps('//trim(adjustl(tmp))//')))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
+                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                           ')),dble(amps('//trim(adjustl(tmp))//')))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
+                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                           ')),-dble(amps('//trim(adjustl(tmp))//')))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
+                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                           ')),-dble(amps('//trim(adjustl(tmp))//')))'
                    else
-                      if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                         write(tmp,*) iamp
-                         line='amps('//trim(adjustl(tmp))//')='
-                         write(tmp,*) this%same_flavour_sum(iamp,1)
-                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')+'
-                         write(tmp,*) this%same_flavour_sum(iamp,2)
-                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
-                      elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                         write(tmp,*) iamp
-                         line='amps('//trim(adjustl(tmp))//')='
-                         write(tmp,*) this%same_flavour_sum(iamp,1)
-                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
-                      elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                         write(tmp,*) iamp
-                         line='amps('//trim(adjustl(tmp))//')='
-                         write(tmp,*) this%same_flavour_sum(iamp,2)
-                         line=trim(adjustl(line))//'amps('//trim(adjustl(tmp))//')'
-                      endif
+                      write (*,*) 'ERROR: unknown operation in creating library', &
+                           this%same_flavour_sum_operation(iamp,idau)
+                      stop 1
                    endif
                 endif
-                write(iunit,*) trim(adjustl(line))
              enddo
-          enddo
-    endif
+          endif
+          write(iunit,*) trim(adjustl(line))
+       enddo
+    enddo
     write(iunit,*) 'end subroutine compute_amps'
     write(tmp,*) igroup
     write(line,*) iint
