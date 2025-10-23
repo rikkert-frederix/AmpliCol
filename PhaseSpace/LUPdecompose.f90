@@ -41,7 +41,7 @@ contains
           endif
        enddo
        if (maxA .lt. tol) then
-          write (*,*) 'LUP decomposition failure: matrix is degenerate'
+          write (99,*) 'LUP decomposition failure: matrix is degenerate'
           success=.false.
           return
        endif
