@@ -48,7 +48,7 @@ contains
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
   end subroutine haag_cleanup
-  subroutine haag_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine haag_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
     implicit none
     class(phase_space_haag),intent(inout) :: this
     real(kind=8),intent(in) :: sqrts
@@ -62,6 +62,7 @@ contains
     real(kind=8),dimension(2) :: s_cut
     logical,intent(in) :: t_chan
     logical,intent(in) :: include_pdf
+    logical,intent(in),optional :: flat
     integer(kind=4) :: i,j
     real(kind=8) :: drjj_min,pt_min,sqrt_smin
     integer(kind=4),dimension(n) :: order

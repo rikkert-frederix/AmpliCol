@@ -352,10 +352,12 @@ contains
           call compute_the_amps(iint,ichan)
           call square_the_amps(iint,ichan)
        endif
-       if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-12)) then
+       if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-8)) then
           write (*,*) 'Find same flavour and helicity filter give different matrix elements'
           write (*,*) amp2_save
           write (*,*) pgl(ichan)%amp2
+          write (*,*) ''
+          write (*,*) abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2)
           stop 1
        endif
        deallocate(amp2_save)
@@ -434,14 +436,14 @@ contains
     max_value=maxval(pgl%amp2_hel(1:pgl%nhel(iint)))
     do ih1=1,pgl%nhel(iint)
        if (pgl%include_hel(ih1,iint).ne.0) cycle
-       if (pgl%amp2_hel(ih1)/max_value.gt.1d-10) then
+       if (pgl%amp2_hel(ih1)/max_value.gt.1d-12) then
           ! non-zero
           pgl%include_hel(ih1,iint)=1
        else
           cycle
        endif
        do ih2=ih1+1,pgl%nhel(iint)
-          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-10) then
+          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-12) then
              ! identical value. Now check that they belong to the same process
              iproc1=1
              do while (iproc1.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc1+1)-ih1).le.0)

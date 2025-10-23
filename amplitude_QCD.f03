@@ -3486,6 +3486,7 @@ contains
              ! same-flavour amplitude.
              if (all(include_hel(this%same_flavour_sum(iamp,1:2)).eq.0)) then
                 write (*,*) 'inconsistency in helicity filter for same-flavour process #1'
+                write (*,*) iamp,this%same_flavour_sum(iamp,1:2)
                 stop 1
              endif
              if (include_hel(this%same_flavour_sum(iamp,1)).lt.0) then

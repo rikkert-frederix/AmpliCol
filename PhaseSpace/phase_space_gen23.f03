@@ -16,14 +16,14 @@ module phase_space_gen23_mod
   logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
+  real(kind=8) :: ip=-1d0,ip_shat=-1.2d0
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
 
 contains
-  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -52,6 +52,7 @@ contains
     logical,intent(in) :: t_chan
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
+    logical,intent(in),optional :: flat
     integer(kind=4) :: i,j
     this%sqrtshat=sqrts
     this%sqrts=sqrts
@@ -139,6 +140,12 @@ contains
     if (verbose) then
        write (99,*) "set 1:",this%sets(:,1)
        write (99,*) "set 2:",this%sets(:,2)
+    endif
+    if (present(flat)) then
+       if (flat) then
+          ip=0d0
+          ip_shat=0d0
+       endif
     endif
     if (verbose) then
        write (99,*) "Power in importance sampling:",ip

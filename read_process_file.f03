@@ -168,7 +168,7 @@ contains
 
     call setup_cuts_for_each_particle(pgl_unique,0)
     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
-         pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf)
+         pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf,.true.)
 
     call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
          pgl_unique%spin,pgl_unique%color_orders,phys_model)
