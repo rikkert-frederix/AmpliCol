@@ -2824,6 +2824,14 @@ contains
     write(iunit) p
     write(iunit) this%amps
     close(iunit)
+
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
+    write(tmp,*) this%n_vert
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    
     write(tmp,*) igroup
     write(line,*) iint
     line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
@@ -2833,37 +2841,39 @@ contains
     write(iunit,*) 'use FeynmanRules'
     write(iunit,*) 'implicit none'
     write(iunit,*) 'private'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'contains'
+    write(iunit,*) 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
     write(tmp,*) this%max_pp
     write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
     write(tmp,*) this%n_cur
     write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
     write(tmp,*) this%n_vert
     write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
-    write(tmp,*) igroup
-    write(line,*) iint
-    write(iunit,*) 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
-    write(iunit,*) 'contains'
-    write(iunit,*) 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(amps,p)'
-    write(iunit,*) 'implicit none'
-    write(tmp,*) n
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
-    write(tmp,*) this%n_amps
-    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
-    write(iunit,*) 'call fill_momentum_array(p)'
-    write(iunit,*) 'call compute_external_currents()'
+    write(iunit,*) 'call fill_momentum_array(p,pp)'
+    write(iunit,*) 'call compute_external_currents(pp,val_c)'
     do isize=2,n-1
        write(tmp,*) isize
-       write(iunit,*) 'call compute_vertices'//trim(adjustl(tmp))//'()'
-       write(iunit,*) 'call compute_currents'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,*) 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
     enddo
-    write(iunit,*) 'call compute_amps(amps)'
+    write(iunit,*) 'call compute_amps(amps,val_c)'
     write(tmp,*) igroup
     write(line,*) iint
     write(iunit,*) 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
-    write(iunit,*) 'subroutine fill_momentum_array(p)'
+    write(iunit,*) 'subroutine fill_momentum_array(p,pp)'
     write(iunit,*) 'implicit none'
     write(tmp,*) n
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(out) :: pp'
     ! fill_momentum_array
     do ip=1,this%max_pp
        ibin=this%pp_i_to_bin(ip)
@@ -2881,8 +2891,12 @@ contains
     write(iunit,*) 'end subroutine fill_momentum_array'
     do isize=1,n-1
        if (isize.eq.1) then
-          write(iunit,*) 'subroutine compute_external_currents()'
+          write(iunit,*) 'subroutine compute_external_currents(pp,val_c)'
           write(iunit,*) 'implicit none'
+          write(tmp,*) this%max_pp
+          write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+          write(tmp,*) this%n_cur
+          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(out) :: val_c'
           ! external wave-functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
              ifinal=1
@@ -2959,8 +2973,14 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        write(tmp,*) isize
-       write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
        write(iunit,*) 'implicit none'
+       write(tmp,*) this%max_pp
+       write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+       write(tmp,*) this%n_cur
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+       write(tmp,*) this%n_vert
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
 
        icount(0:20)=0
        do itype=0,20 ! vertex type
@@ -2981,7 +3001,7 @@ contains
           write(tmp,*) isize
           line='call vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
-          line=trim(adjustl(line))//trim(adjustl(tmp))//'()'
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
           write(iunit,*) trim(adjustl(line))
        enddo
        write(tmp,*) isize
@@ -2992,9 +3012,15 @@ contains
           write(tmp,*) isize
           line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
-          line=trim(adjustl(line))//trim(adjustl(tmp))//'()'
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
           write(iunit,*) trim(adjustl(line))
           write(iunit,*) 'implicit none'
+          write(tmp,*) this%max_pp
+          write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+          write(tmp,*) this%n_cur
+          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+          write(tmp,*) this%n_vert
+          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
           write(iunit,*) 'integer :: i'
           write(tmp,*) icount(itype)
           write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[&'
@@ -3177,8 +3203,14 @@ contains
        enddo
 
        write(tmp,*) isize
-       write(iunit,*) 'subroutine compute_currents'//trim(adjustl(tmp))//'()'
+       write(iunit,*) 'subroutine compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
        write(iunit,*) 'implicit none'
+       write(tmp,*) this%max_pp
+       write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+       write(tmp,*) this%n_cur
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
+       write(tmp,*) this%n_vert
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
 
        icount_type=0
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
@@ -3212,7 +3244,7 @@ contains
              write(tmp,*) i
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
              write(tmp,*) j
-             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'()'
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
              write(iunit,*) trim(adjustl(line))
           enddo
        enddo
@@ -3260,9 +3292,15 @@ contains
              write(tmp,*) i
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
              write(tmp,*) j
-             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'()'
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
              write(iunit,*) trim(adjustl(line))
              write(iunit,*) 'implicit none'
+             write(tmp,*) this%max_pp
+             write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+             write(tmp,*) this%n_cur
+             write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
+             write(tmp,*) this%n_vert
+             write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
              write(iunit,*) 'integer :: i'
              write(tmp,*) i
              line='integer,parameter,dimension(0:'//trim(adjustl(tmp))//','
@@ -3385,10 +3423,12 @@ contains
        enddo
     enddo
 
-    write(iunit,*) 'subroutine compute_amps(amps)'
+    write(iunit,*) 'subroutine compute_amps(amps,val_c)'
     write(iunit,*) 'implicit none'
     write(tmp,*) this%n_amps
-    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//') :: amps'
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
     
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1

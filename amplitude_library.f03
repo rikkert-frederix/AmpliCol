@@ -20,24 +20,26 @@ contains
        enddo
     enddo
     write(14,*) 'implicit none'
+    write(14,*) 'private'
+    write(14,*) 'public :: evaluate_amp'
     write(14,*) 'contains'
     write(14,*) 'subroutine evaluate_amp(ichan,iint,p,amps)'
     write(14,*) 'implicit none'
-    write(14,*) 'integer :: ichan,iint'
+    write(14,*) 'integer,intent(in) :: ichan,iint'
     write(tmp,*) maxval(pgl(:)%next)
-    write(14,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: p'
-    write(14,*) 'complex(kind=8),dimension(*) :: amps'
+    write(14,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(14,*) 'complex(kind=8),intent(out) :: amps(*)'
     do igroup=1,ngroups
        if (igroup.eq.1) then
           write(14,*) 'if (ichan.eq.1) then'
           do j=1,size(pgl(igroup)%amps)
              if (j.eq.1) then
                 write(14,*) 'if (iint.eq.1) then'
-                write(14,*) 'call evaluate_amp1_1(amps,p)'
+                write(14,*) 'call evaluate_amp1_1(p,amps)'
              else
                 write(tmp,*) j
                 write(14,*) 'elseif (iint.eq.'//trim(adjustl(tmp))//') then'
-                write(14,*) 'call evaluate_amp1_'//trim(adjustl(tmp))//'(amps,p)'
+                write(14,*) 'call evaluate_amp1_'//trim(adjustl(tmp))//'(p,amps)'
              endif
           enddo
           write(14,*) 'endif'
@@ -47,11 +49,11 @@ contains
           do j=1,size(pgl(igroup)%amps)
              if (j.eq.1) then
                 write(14,*) 'if (iint.eq.1) then'
-                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_1(amps,p)'
+                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_1(p,amps)'
              else
                 write(line,*) j
                 write(14,*) 'elseif (iint.eq.'//trim(adjustl(line))//') then'
-                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(amps,p)'
+                write(14,*) 'call evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
              endif
           enddo
           write(14,*) 'endif'
