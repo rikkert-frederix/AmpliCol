@@ -1,5 +1,5 @@
       integer max_plots,max_bins,max_wgts,max_points
-      parameter (max_plots=200)
+      parameter (max_plots=2000)
       parameter (max_bins=500)
       parameter (max_wgts=1024)
       parameter (max_points=max_plots*40)
