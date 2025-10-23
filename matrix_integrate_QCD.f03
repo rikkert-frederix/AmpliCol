@@ -60,8 +60,11 @@ program matrix_integrate_QCD
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
   
-  write (*,*)  'Initialise phase-space groups and amplitudes'
-  write (99,*) 'Initialise phase-space groups and amplitudes'
+  call date_and_time(date, time, zone)
+  write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
+       date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
+  write (*,*)  'Initialise phase-space groups and amplitudes '//trim(formatted)
+  write (99,*) 'Initialise phase-space groups and amplitudes '//trim(formatted)
   do igroup=1,ngroups
      if (pgl(igroup)%nproc.eq.0) cycle
      ! allocate the amplitudes and the phase-space for each of the integration channels
