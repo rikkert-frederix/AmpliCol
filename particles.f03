@@ -710,7 +710,7 @@ contains
        this%vertex_list(l)%particles(1)=i
        this%vertex_list(l)%particles(2)=25
        this%vertex_list(l)%particles(3)=i
-       this%vertex_list(l)%coupl=[this%get_mass(i)/(2d0*sw),0d0]
+       this%vertex_list(l)%coupl=[this%get_mass(i)/(this%get_mass(24)*2d0*sw),0d0]
     enddo
     ! antiquark-Higgs to antiquark vertices
     do i=1,6
@@ -719,7 +719,7 @@ contains
        this%vertex_list(l)%particles(1)=-i
        this%vertex_list(l)%particles(2)=25
        this%vertex_list(l)%particles(3)=-i
-       this%vertex_list(l)%coupl=[this%get_mass(i)/(2d0*sw),0d0]
+       this%vertex_list(l)%coupl=[this%get_mass(i)/(this%get_mass(24)*2d0*sw),0d0]
     enddo
     ! Wboson-Wboson to Higgs
     l=l+1
