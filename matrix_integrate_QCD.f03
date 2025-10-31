@@ -519,6 +519,17 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library)
+    if (library.eq.'none') then
+       create_amplitude_library=.false.
+       use_amplitude_library=.false.
+    elseif (library.eq.'create') then
+       create_amplitude_library=.true.
+       use_amplitude_library=.false.
+    elseif (library.eq.'use') then
+       create_amplitude_library=.false.
+       use_amplitude_library=.true.
+       return
+    endif
     call read_processes_from_file(filename)
     close(10)
 
@@ -534,16 +545,6 @@ contains
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice
        stop
-    endif
-    if (library.eq.'none') then
-       create_amplitude_library=.false.
-       use_amplitude_library=.false.
-    elseif (library.eq.'create') then
-       create_amplitude_library=.true.
-       use_amplitude_library=.false.
-    elseif (library.eq.'use') then
-       create_amplitude_library=.false.
-       use_amplitude_library=.true.
     endif
   end subroutine get_run_arguments
 
