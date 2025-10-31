@@ -2,9 +2,8 @@ module amplitude_library
   use handling_processes
   use read_process_file
 contains
-  subroutine create_amplitude_lib(ncalls0,PS_choice)
+  subroutine create_amplitude_lib()
     implicit none
-    integer,intent(in) :: ncalls0,PS_choice
     character(len=170) :: tmp,line,filename
     integer :: igroup,j,iamp
     filename='library/amplib.f03'
@@ -65,8 +64,6 @@ contains
     close(14)
     filename='library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
-    write(14) PS_choice
-    write(14) ncalls0
     write(14) pgl_unique%next,pgl_unique%nproc
     write(14) unique_map
     write(14) unique_map_value
@@ -115,15 +112,12 @@ contains
     close(14)
   end subroutine create_amplitude_lib
 
-  subroutine read_amplitude_lib(ncalls0,PS_choice)
+  subroutine read_amplitude_lib()
     implicit none
-    integer,intent(out) :: ncalls0,PS_choice
     character(len=170) :: filename
     integer :: dim1,dim2,dim3,iamp,igroup
     filename='library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
-    read(14)PS_choice
-    read(14)ncalls0
     allocate(pgl_unique)
     read(14) pgl_unique%next,pgl_unique%nproc
     allocate(unique_map(pgl_unique%nproc))

@@ -35,11 +35,10 @@ program matrix_integrate_QCD
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
+  logical :: create_amplitude_library,use_amplitude_library
   call cpu_time(tTot_B)
 
   open(unit=99,file=logfile,status='unknown')
-  
-  itmax=32
 
   ! setting energy
   sqrts=14000.d0
@@ -52,11 +51,8 @@ program matrix_integrate_QCD
   call phys_model%init_vert()
 
   call cpu_time(tBefore)
-  if (.not.use_amplitude_library) then
-     call get_run_arguments()
-  else
-     call read_amplitude_lib(ncalls0,PS_choice)
-  endif
+  call get_run_arguments()
+  if (use_amplitude_library) call read_amplitude_lib()
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
   
@@ -170,8 +166,7 @@ program matrix_integrate_QCD
   
   filename='Outputs/events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
-  if (COMMAND_ARGUMENT_COUNT().le.10) &
-       call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
+  call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
   
   allocate(nintegrals(ngroups))
   if (keep_processes_separate) then
@@ -195,7 +190,7 @@ program matrix_integrate_QCD
         do igroup=1,ngroups
            done=done.and.all(pgl(igroup)%amps%lib_created)
         enddo
-        if (done) call create_amplitude_lib(ncalls0,PS_choice)
+        if (done) call create_amplitude_lib()
      endif
      if (to_write(1)) then
         call unwgt_process(pgl(ichan),iint) ! pick a random process
@@ -515,33 +510,17 @@ contains
   end function find_operation
     
   subroutine get_run_arguments()
+    use argument_parser
     implicit none
     integer :: argc
     integer :: i
     character(len=256) :: argv
+    character(len=80) :: library
     integer(kind=8) iseed
     common /to_seed/iseed
-    iseed=0
-    argc = COMMAND_ARGUMENT_COUNT()
-    if (argc.ge.3 .and. argc.le.4) then
-       read_proc_from_file=.true.
-       do i=1,argc
-          CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) read(argv,'(a)') filename
-          if (i.eq.2) read(argv,*) PS_choice
-          if (i.eq.3) read(argv,*) ncalls0
-          if (i.eq.4) then
-             read(argv,*) iseed
-          endif
-       enddo
-       call read_processes_from_file(filename)
-       close(10)
-    else
-       write(*,*) 'Inconsistent arguments:'
-       write(*,*) '--------- Should be: --------'
-       write(*,*) 'process_file, PS_choice, nevents, seed'
-       stop 1
-    endif
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library)
+    call read_processes_from_file(filename)
+    close(10)
 
     do i=1,ngroups
        call setup_optimised_multichannel_weight_computation(pgl(i))
@@ -555,6 +534,16 @@ contains
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice
        stop
+    endif
+    if (library.eq.'none') then
+       create_amplitude_library=.false.
+       use_amplitude_library=.false.
+    elseif (library.eq.'create') then
+       create_amplitude_library=.true.
+       use_amplitude_library=.false.
+    elseif (library.eq.'use') then
+       create_amplitude_library=.false.
+       use_amplitude_library=.true.
     endif
   end subroutine get_run_arguments
 
