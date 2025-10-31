@@ -11,6 +11,10 @@ module timings
   real(kind=4) :: tBefore,tAfter,tTot_A=0.,tTot_B=0.,t_amp=0.,t_amp_init=0.,&
        t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
 end module timings
+module overall
+  real(kind=8) :: xsec
+  integer :: nevt
+end module overall
 module arguments
   implicit none
   integer :: c_o,c_o_t,c_o_i,c_o_j,c_o_k,imode
@@ -21,6 +25,7 @@ program matrix_reweight
   use amplitude_QCD_mod
   use timings
   use particles
+  use overall
   implicit none
   logical,parameter :: use_only_canonical_form=.true.
   integer,parameter :: max_proc=1280
@@ -37,18 +42,22 @@ program matrix_reweight
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
-  character(len=string_len) :: tag,tag_read,add_arg=''
   
   call get_run_arguments()
 
   call cpu_time(tTot_B)
   
-  call phys_model%init_part(173d0,1.491500d0)
+  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
+                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+!!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
+  call phys_model%init_vert()
 
   nprocs=0
   call setup_spin()
   col_acc=20
 
+  nevt=0
+  xsec=0d0
   do
      call read_event(11,done)
      if (done) exit
@@ -59,7 +68,7 @@ program matrix_reweight
         call cpu_time(tBefore)
         nprocs=nprocs+1
         processes(1:next,iproc)=part(1:next,1)
-        call amps(iproc)%init(2,next,1,part,spin,o,phys_model,read_proc_from_file)
+        call amps(iproc)%init(2,next,1,part,spin,o,phys_model)
         call amps(iproc)%init_col(next,col_acc)
         call cpu_time(tAfter)
         t_amp_init=t_amp_init+tAfter-tBefore
@@ -68,7 +77,7 @@ program matrix_reweight
 
      call cpu_time(tBefore)
      
-     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file)
+     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file,phys_model,.false.)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
@@ -128,6 +137,7 @@ program matrix_reweight
   write(*,*) 'Time spent in squaring amplitudes (full)',t_mat_full
   write(*,*) 'Time spent in picking random colors',t_ran
   write(*,*) 'Total time:',t_all
+  write(*,*) 'Total FC cross section:',xsec/nevt
 contains  
 
 
@@ -150,48 +160,10 @@ contains
        call read_unique_in_file()
        call allocate_process_info()
        open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
-    elseif (argc.le.8) then
-       write(*,*) 'Inconsistent arguments:'
-       write(*,*) '--------- Should be: --------'
-       write(*,*) 'next, *process*, *order*'
-       write(*,*) '--------- or: ---------------'
-       write(*,*) 'event_file_name_to_reweight'
-       stop 1
     else
-       read_proc_from_file=.false.
-       do i = 1, argc
-          CALL GET_COMMAND_ARGUMENT(i, argv)
-          if (i.eq.1) then
-             read(argv,*) next
-             if (next.le.3) then
-                write (*,*) 'Need at least 4 particles (2->2 scattering)',next
-                stop 1
-             endif
-             unique_nproc=0
-             call allocate_process_info()
-          endif
-          do k=0,next-1
-             if (i.eq.2+k) then
-                read(argv,*) part(k+1,1)
-             endif
-          enddo
-          do k=0,next-1
-             if (i.eq.2+next+k) then
-                read(argv,*) o(k+1,1)
-             endif
-          enddo
-          if (argc.eq.1+2*next +1 .and. i.eq.argc) then
-             ! Special case: we have an additional argument. Use it as a special tag
-             read(argv,*) add_arg
-          endif
-       enddo
-       if (next.lt.4) then
-          write (*,*) 'Not enough external particles',next
-          stop 1
-       endif
-       call create_run_tag_and_open_files()
+       write (*,*) 'Event file to reweight not given as argument'
+       stop 1
     endif
-    
   end subroutine get_run_arguments
 
   subroutine allocate_process_info()
@@ -230,56 +202,6 @@ contains
        spin(1,i)=-9
     enddo
   end subroutine setup_spin
-  
-  subroutine create_run_tag_and_open_files()
-    use arguments
-    implicit none
-    tag='_'       ! tag of current run
-    tag_read='_'  ! same as 'tag', but with previous imode (i.e., defines the file to read the integration grids from)
-    call add_to_string(tag,next,.true.)
-    call add_to_string(tag_read,next,.true.)
-    call add_to_string(tag,2,.true.)
-    call add_to_string(tag_read,2,.true.)
-    do i=1,next
-       call add_to_string(tag,part(i,1),.true.)
-       call add_to_string(tag_read,part(i,1),.true.)
-    enddo
-    do i=1,next-1
-       call add_to_string(tag,o(i,1),.true.)
-       call add_to_string(tag_read,o(i,1),.true.)
-    enddo
-    call add_to_string(tag,o(next,1),.false.)
-    call add_to_string(tag_read,o(next,1),.false.)
-    open(unit=11,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe',status='old')
-    open(unit=12,file='Outputs'//trim(adjustl(add_arg))//'/events'//trim(adjustl(tag))//'.lhe.rwgt',status='unknown')
-  end subroutine create_run_tag_and_open_files
-
-  subroutine add_to_string(string,inter,add_underscore)
-    ! Adds an integer 'inter' to the end of the string 'string' (followed by
-    ! an underscore if 'add_underscore=.true.')
-    implicit none
-    character(len=string_len) :: string
-    integer :: inter
-    logical :: add_underscore
-    character(len=1) :: s1
-    character(len=2) :: s2
-    character(len=3) :: s3
-    if (inter.ge.0 .and. inter.le.9) then
-       write(s1,'(i1)') inter
-       string=trim(adjustl(string))//trim(adjustl(s1))
-       if (add_underscore) string=trim(adjustl(string))//'_'
-    elseif(inter.ge.-9 .and. inter.le.99) then
-       write(s2,'(i2)') inter
-       string=trim(adjustl(string))//trim(adjustl(s2))
-       if (add_underscore) string=trim(adjustl(string))//'_'
-    elseif(inter.ge.-99 .and. inter.le.999) then
-       write(s3,'(i3)') inter
-       string=trim(adjustl(string))//trim(adjustl(s3))
-       if (add_underscore) string=trim(adjustl(string))//'_'
-    else
-       write (*,*) 'value too large to add to the run tag',inter
-    endif
-  end subroutine add_to_string
 
   subroutine read_event(iunit,done)
     use rw_events
@@ -320,12 +242,17 @@ contains
     integer,dimension(n),intent(inout) :: array
     integer,dimension(n),intent(out) :: mapping
     integer :: i, j, temp
+    ! 'array_map' maps the PDG codes to the 'sort_particle' codes
+    ! (see Utilities/process_list.py)
+    integer,dimension(-24:25),parameter :: array_map=[83,0,0,0,0,0,0&
+         &,0,95,88,93,86,91,84,0,0,0,0,12,11,10,9,8,7,0,1,2,3,4,5,6,0,0&
+         &,0,0,85,90,87,92,89,94,0,0,0,0,13,80,81,82,96]
     ! Initialize mapping
     mapping = [(i,i=1,n)]
     ! Sort the array and mapping using a simple bubble sort
     do i=1,n-1
        do j=1,n-i
-          if (array(j) .gt. array(j+1)) then
+          if (array_map(array(j)) .gt. array_map(array(j+1))) then
              ! Swap array elements
              temp = array(j)
              array(j) = array(j+1)
@@ -399,12 +326,15 @@ contains
 
   subroutine write_event(iunit)
     use rw_events
+    use overall
     implicit none
     integer :: i,iunit
     rwgt_NLC=matrix2(2)/matrix2(1)
     rwgt_full=matrix2(3)/matrix2(1)
     write (iunit,*) '<event>'
     write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
+    xsec=xsec+evt_wgt*rwgt_full
+    nevt=nevt+1
     write (iunit,'(100i3)') helicity(1:next)
     write (iunit,'(100i3)') col_order(1:next)
     write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)

@@ -118,4 +118,15 @@ contains
     enddo
   end subroutine get_next_iperm
 
+  integer(kind=4) function ifindloc(a,n,i)
+    ! returns the location of the value 'i' in the array 'a' (of size 'n'). If
+    ! the array 'a' does not contain 'i', the value 'n+1' is returned.
+    implicit none
+    integer,intent(in) :: i,n
+    integer,dimension(n),intent(in) :: a
+    do ifindloc=1,n
+       if (a(ifindloc).eq.i) return
+    enddo
+  end function ifindloc
+
 end module math_functions

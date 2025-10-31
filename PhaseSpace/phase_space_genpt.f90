@@ -42,7 +42,7 @@ contains
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
   end subroutine genpt_cleanup
-  subroutine genpt_init(this,sqrts,n,m,o,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine genpt_init(this,sqrts,n,m,o,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf,flat)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
     ! INPUT
@@ -58,6 +58,7 @@ contains
     real(kind=8),dimension(n),intent(in) :: m
     integer,dimension(n),intent(in) :: o
     logical,intent(in) :: include_pdf,t_chan
+    logical,intent(in),optional :: flat
     integer :: i,j
     allocate(this%ptcut(1:n))
     this%ptcut=pt_cut

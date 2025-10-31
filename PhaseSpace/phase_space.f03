@@ -23,7 +23,7 @@ module phase_space_base
   
   ! Declare the abstract interface for the procedures
   abstract interface
-     subroutine phase_space_interface_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+     subroutine phase_space_interface_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
        import :: phase_space_type
        class(phase_space_type),intent(inout) :: this
        real(kind=8),intent(in) :: sqrts
@@ -33,6 +33,7 @@ module phase_space_base
        real(kind=8),dimension(n),intent(in) :: m,pt_cut,rap_cut
        logical,intent(in) :: t_chan
        logical,intent(in) :: include_pdf
+       logical,intent(in),optional :: flat
      end subroutine phase_space_interface_init
      subroutine phase_space_interface_generate_momenta(this,xx)
        import :: phase_space_type

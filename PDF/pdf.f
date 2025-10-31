@@ -55,6 +55,7 @@ c The actual call to the PDFs
       call NNinitPDF(0)
       asmz=0.119d0
       write (*,*) 'NNPDF 23 NLO (alpha_s 0.119) QED set initialised'
+      write (99,*) 'NNPDF 23 NLO (alpha_s 0.119) QED set initialised'
       return
       end
 

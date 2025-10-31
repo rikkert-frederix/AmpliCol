@@ -1,4 +1,5 @@
 module amplitude_QCD_mod
+  use bitset_mod
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
@@ -7,7 +8,8 @@ module amplitude_QCD_mod
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert
-     integer(kind=16) :: iproc
+     type(bitset) :: iproc
+     integer(kind=16) :: ext_cur
      integer,dimension(:),allocatable :: vertices,order,spin,ext_type
      logical,dimension(:),allocatable :: vertex_sign
      complex(kind=8),dimension(:),allocatable :: val_c
@@ -23,7 +25,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
-     real(kind=8) :: coupl
+     real(kind=8),dimension(2) :: coupl
    contains
      final :: finalize_interaction ! custom deallocation of interaction
   end type interaction
@@ -44,16 +46,18 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
-          same_flavour_proc_map,same_flavour_sum
+          same_flavour_sum,same_flavour_sum_operation
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
+     logical :: lib_created=.false.
    contains
-     procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file
+     procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
+          ,create_library,optimise_evaluation
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm,read_file)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
     use math_functions
     use particles
     implicit none
@@ -62,18 +66,16 @@ contains
     integer,intent(in) :: n,imode,n_processes
     integer,dimension(n,n_processes),intent(in) :: part,o
     integer,dimension(0:3,n),intent(in) :: spin
-    integer,dimension(:,:),allocatable :: order
+    integer,dimension(:,:,:),allocatable :: order
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc,jproc
+    integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
-    logical :: read_file
-
     if (imode.eq.1) then
-       write (*,*) 'Initialising amplitude for:'
-       write (*,*) '   - all polarisation/helicity configurations'
-       write (*,*) '   - a single colour order'
+       write (99,*) 'Initialising amplitude for:'
+       write (99,*) '   - all polarisation/helicity configurations'
+       write (99,*) '   - a single colour order'
     elseif (imode.eq.2) then
        write (*,*) 'Initialising amplitude for:'
        write (*,*) '   - a single polarisation/helicity configuration'
@@ -100,6 +102,10 @@ contains
     call set_max_vert()
     
     if (this%imode.eq.2) then
+       if (this%nprocs.ne.1) then
+          write (*,*) 'For imode==2 there should only be a single process at a time'
+          stop 1
+       endif
        call create_current_dict()
        allocate(key_to_current(max_key,maskr(this%nprocs)))
        key_to_current(1:max_key,1:maskr(this%nprocs))=0
@@ -127,9 +133,9 @@ contains
                 ! the currents; they will be reconstructed from the
                 ! corresponding two different-flavour amplitudes
                 if (this%same_flav(iproc)) cycle
-                do ispin=1, spin(0,order(nc,iproc))
-                   call create_external_current(nc,iproc,spin(ispin,order(nc,iproc)),&
-                        this%processes(order(nc,iproc),iproc),order(nc,iproc))
+                do ispin=1, spin(0,order(nc,1,iproc))
+                   call create_external_current(iproc,spin(ispin,order(nc,1,iproc)),&
+                        this%processes(order(nc,1,iproc),iproc),order(nc,1,iproc))
                 enddo
              enddo
              if (nc.eq.n) this%n_cur_end(n)=this%n_cur
@@ -160,18 +166,17 @@ contains
     call allocate_and_fill_momentum_array()
 
     ! All done. But there could be currents that are not needed. Filter them out
-    write (*,*) 'Total number of currents and vertices before filter',this%n_cur,this%n_vert
+    write (99,*) 'Total number of currents, vertices and amplitudes before filter',this%n_cur,this%n_vert,this%n_amps
     call this%filter_dead_trees(n)
-    write (*,*) 'Total number of currents and vertices',this%n_cur,this%n_vert
+    write (99,*) 'Total number of currents, vertices and amplitudes after filter',this%n_cur,this%n_vert,this%n_amps
 
     call deallocate_unneeded()
-
   contains
 
-    subroutine create_external_current(nc,iproc,ispin,ipart,iorder)
+    subroutine create_external_current(iproc,ispin,ipart,iorder)
       implicit none
-      integer,intent(in) :: nc,ispin,ipart,iorder,iproc
-      integer :: i,ic
+      integer,intent(in) :: ispin,ipart,iorder,iproc
+      integer :: ic
       do ic=1,this%n_cur
          if (current_list_local(ic)%order(1).ne.iorder) cycle
          if (iorder.le.2 .and. abs(ipart).le.6) then
@@ -182,7 +187,7 @@ contains
          if (current_list_local(ic)%bin.ne.ibset(0,iorder-1)) cycle
          if (current_list_local(ic)%spin(1).ne.ispin) cycle
          ! existing current.
-         current_list_local(ic)%iproc=ibset(current_list_local(ic)%iproc,iproc-1)
+         call current_list_local(ic)%iproc%set_bit(iproc)
          return
       enddo
       ! new external current
@@ -202,7 +207,9 @@ contains
       allocate(current_list_local(this%n_cur)%spin(isize))
       current_list_local(this%n_cur)%spin(1)=ispin
       current_list_local(this%n_cur)%n_vert=0
-      current_list_local(this%n_cur)%iproc=ibset(int(0,kind=16),iproc-1)
+      call current_list_local(this%n_cur)%iproc%init(this%nprocs)
+      call current_list_local(this%n_cur)%iproc%set_bit(iproc)
+      current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -211,17 +218,16 @@ contains
       ! subroutine also sets the include_amp(iamp) to .true. for all
       ! amplitudes
       implicit none
-      integer :: icur,jcur,iamp,jamp,i,j,iproc,n_diff_flavour_amps
-      integer(kind=16) :: proc
-      integer,dimension(:,:),allocatable :: curr2amp,same_flavour_sum
-      integer,dimension(n) :: iord,jord,ispn,jspn
+      integer :: icur,jcur,i,j,iproc
+      type(bitset) :: proc
+      integer,dimension(:,:),allocatable :: curr2amp
       integer,dimension(n,this%nprocs) :: procs
       do j=1,this%nprocs
          do i=1,n
-            if (order(i,j).le.2) then
-               procs(i,j)=anti_current(this%processes(order(i,j),j))
+            if (order(i,1,j).le.2) then
+               procs(i,j)=anti_current(this%processes(order(i,1,j),j))
             else
-               procs(i,j)=this%processes(order(i,j),j)
+               procs(i,j)=this%processes(order(i,1,j),j)
             endif
          enddo
       enddo
@@ -234,18 +240,19 @@ contains
          do icur=this%n_cur_start(n-1),this%n_cur_end(n-1)
             do jcur=this%n_cur_start(n),this%n_cur_end(n)
                if ( current_list_local(icur)%type .ne. anti_current(current_list_local(jcur)%type) ) cycle
-               proc=iand(current_list_local(icur)%iproc,current_list_local(jcur)%iproc)
-               if (popcnt(proc).eq.0) then
+               if (iand(current_list_local(icur)%bin,current_list_local(jcur)%bin).ne.0) cycle
+               proc=current_list_local(icur)%iproc.and.current_list_local(jcur)%iproc
+               if (proc%count_bits().eq.0) then
                   ! combination of icur and jcur does not contribute to any of the processes
                   cycle
-               elseif (popcnt(proc).ne.1) then
-                  write (*,*) 'A given amplitude should only contribute to one process'
-                  write (*,*) proc,icur,jcur
-                  write (*,'(a,i40,B64)') 'cur-i',current_list_local(icur)%iproc,current_list_local(icur)%iproc
-                  write (*,'(a,i40,B64)') 'cur-j',current_list_local(jcur)%iproc,current_list_local(jcur)%iproc
+               elseif (proc%count_bits().ne.1) then
+                  write (*,*) 'A given amplitude should only contribute to one process',proc%count_bits()
+                  do i=1,this%nprocs
+                     if (proc%test_bit(i)) write (*,*) i
+                  enddo
                   write (*,*) current_list_local(icur)%ext_type(1:n-1),'   , ',current_list_local(jcur)%ext_type(1)
                   stop 1
-               elseif (.not. btest(proc,iproc-1)) then
+               elseif (.not.proc%test_bit(iproc)) then
                   ! one process, but it is not equal to process 'iproc'
                   cycle
                endif
@@ -255,54 +262,6 @@ contains
             enddo
          enddo
       enddo
-      n_diff_flavour_amps=this%n_amps
-      allocate(same_flavour_sum(2*this%n_amps,2))
-      same_flavour_sum=-1
-      do iproc=1,this%nprocs
-         if (.not. this%same_flav(iproc)) cycle
-         this%iproc_start(iproc)=this%n_amps+1
-         do iamp=this%iproc_start(this%same_flavour_proc_map(iproc,1)),this%iproc_start(this%same_flavour_proc_map(iproc,1)+1)-1
-            iord=[current_list_local(curr2amp(1,iamp))%order(1:n-1),current_list_local(curr2amp(2,iamp))%order(1)]
-            ispn=[current_list_local(curr2amp(1,iamp))%spin(1:n-1) ,current_list_local(curr2amp(2,iamp))%spin(1) ]
-            do jamp=this%iproc_start(this%same_flavour_proc_map(iproc,2)),this%iproc_start(this%same_flavour_proc_map(iproc,2)+1)-1
-               ! if they have the same colour order and spins, they need to be added together
-               jord=[current_list_local(curr2amp(1,jamp))%order(1:n-1),current_list_local(curr2amp(2,jamp))%order(1)]
-               jspn=[current_list_local(curr2amp(1,jamp))%spin(1:n-1) ,current_list_local(curr2amp(2,jamp))%spin(1) ]
-               ! check that the two quarks are in similar order (the anti-quarks might be different order). 
-               if (iord(1).ne.jord(1)) then
-                  ! different order of the quarks, switch the two colour strings:
-                  do i=1,n
-                     if (jord(i).eq.iord(1)) then
-                        jord(1:n)=[jord(i:n),jord(1:i-1)]
-                        jspn(1:n)=[jspn(i:n),jspn(1:i-1)]
-                        exit
-                     endif
-                  enddo
-               endif
-               if (any(jord(1:n).ne.iord(1:n)) .or. any(jspn(1:n).ne.ispn(1:n))) cycle
-               this%n_amps=this%n_amps+1
-               if ( abs(this%processes(iord(1),this%same_flavour_proc_map(iproc,1))).eq. &
-                    abs(this%processes(iord(n),this%same_flavour_proc_map(iproc,1)))) then
-                  same_flavour_sum(this%n_amps,1)=iamp ! in iamp, the different-flavour quarks are connected
-                  same_flavour_sum(this%n_amps,2)=jamp ! in jamp, the different-flavour quarks are not connected
-               else
-                  same_flavour_sum(this%n_amps,1)=jamp ! in jamp, the different-flavour quarks are connected    
-                  same_flavour_sum(this%n_amps,2)=iamp ! in iamp, the different-flavour quarks are not connected
-               endif
-               exit
-            enddo
-            if (jamp.gt.this%n_amps) then
-               write (*,*) 'permutation not found',jamp,this%n_amps
-               stop 1
-            endif
-         enddo
-         if (any(same_flavour_sum(this%iproc_start(iproc):this%n_amps,1:2).eq.-1)) then
-            write (*,*) same_flavour_sum(this%iproc_start(iproc):this%n_amps,1)
-            write (*,*) same_flavour_sum(this%iproc_start(iproc):this%n_amps,2)
-            write (*,*) 'not all permutations mapped'
-            stop 1
-         endif
-      enddo
 
       if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. this%imode.eq.2) then
          allocate(this%curr2amp(1:2,1:2*this%n_amps))
@@ -310,8 +269,8 @@ contains
          this%curr2amp(1:2,this%n_amps+1:2*this%n_amps)=curr2amp(1:2,1:this%n_amps)
          this%n_amps=this%n_amps*2
       else
-         allocate(this%curr2amp(1:2,1:n_diff_flavour_amps))
-         this%curr2amp(1:2,1:n_diff_flavour_amps)=curr2amp(1:2,1:n_diff_flavour_amps)
+         allocate(this%curr2amp(1:2,1:this%n_amps))
+         this%curr2amp(1:2,1:this%n_amps)=curr2amp(1:2,1:this%n_amps)
       endif
       if (this%imode.eq.3 .and. this%n_amps.ne.1) then
          write (*,*) 'For this%imode==3, there should only be one amplitude',this%n_amps
@@ -321,7 +280,8 @@ contains
       endif
 
       allocate(this%same_flavour_sum(this%n_amps,2))
-      this%same_flavour_sum(1:this%n_amps,1:2)=same_flavour_sum(1:this%n_amps,1:2)
+      allocate(this%same_flavour_sum_operation(this%n_amps,2))
+      this%same_flavour_sum=-1
       this%iproc_start(this%nprocs+1)=this%n_amps+1
 
       allocate(this%include_amp(1:this%n_amps))
@@ -334,23 +294,14 @@ contains
       allocate(this%spins(n,1,1:this%n_amps))
       do iproc=1,this%nprocs
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-            if (.not.this%same_flav(iproc)) then
-               do i=1,n
-                  if (i.lt.n) then
-                     this%spins(this%current_list(this%curr2amp(1,iamp))%order(i),1,iamp)= &
-                          this%current_list(this%curr2amp(1,iamp))%spin(i)
-                  elseif (i.eq.n) then
-                     this%spins(this%current_list(this%curr2amp(2,iamp))%order(1),1,iamp)= &
-                          this%current_list(this%curr2amp(2,iamp))%spin(1)
-                  endif
-               enddo
-            else
-               if (any(this%spins(1:n,1,this%same_flavour_sum(iamp,1)).ne.this%spins(1:n,1,this%same_flavour_sum(iamp,2)))) then
-                  write (*,*) 'ERROR in spin mapping'
-                  stop 1
+            do i=this%n_cur_start(1),this%n_cur_end(1)
+               if (btest(this%current_list(this%curr2amp(1,iamp))%ext_cur,i-1)) then
+                  this%spins(this%current_list(i)%order(1),1,iamp)=&
+                       this%current_list(i)%spin(1)
                endif
-               this%spins(1:n,1,iamp)=this%spins(1:n,1,this%same_flavour_sum(iamp,1))
-            endif
+            enddo
+            this%spins(order(n,1,iproc),1,iamp)=this&
+                 %current_list(this%curr2amp(2,iamp))%spin(1)
          enddo
       enddo
     end subroutine allocate_and_fill_spins
@@ -364,7 +315,7 @@ contains
       ! singlets, they will not be part of the this%perm (while they are part
       ! of the elements in the this%current_list.
       allocate(this%perm(1:n-this%n_sing(1),1:this%n_amps))
-      if (is_singlet(this%current_list(this%n_cur_start(n))%type)) then
+      if (pm%is_singlet(this%current_list(this%n_cur_start(n))%type)) then
          write (*,*) 'Final current (that closes the amplitude) cannot be a colour singlet'
          write (*,*) this%current_list(this%n_cur_start(n))%type
          stop 1
@@ -376,30 +327,26 @@ contains
             iamp_to_compare=1
          endif
          do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-            if (.not.this%same_flav(iproc)) then
-               this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
-                                                   this%current_list(this%curr2amp(2,iamp))%order(1)]
-               if (use_symmetry .and. this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
-                  this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing(1):1:-1),&
-                                                      this%current_list(this%curr2amp(2,iamp))%order(1)]
+            this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(1:n-1-this%n_sing(1)),&
+                 this%current_list(this%curr2amp(2,iamp))%order(1)]
+            if (use_symmetry .and. this%n_qqbar(iproc).eq.0 .and. iamp.gt.this%n_amps/2) then
+               this%perm(1:n-this%n_sing(1),iamp)=[this%current_list(this%curr2amp(1,iamp))%order(n-1-this%n_sing(1):1:-1),&
+                    this%current_list(this%curr2amp(2,iamp))%order(1)]
+            endif
+            if (this%n_qqbar(iproc).eq.2) then
+               ! make sure that orders of the quarks is fixed among all
+               ! perm's. (The order of the anti-quarks may vary). Without
+               ! this, the computation of the colour factor will be incorrect.
+               if (iamp.eq.iamp_to_compare) cycle
+               if (this%perm(1,iamp).ne.this%perm(1,iamp_to_compare)) then
+                  ! different order, switch the two colour strings:
+                  do i=1,n-this%n_sing(1)
+                     if (this%perm(i,iamp).eq.this%perm(1,iamp_to_compare)) then
+                        this%perm(1:n-this%n_sing(1),iamp)=[this%perm(i:n-this%n_sing(1),iamp),this%perm(1:i-1,iamp)]
+                        exit
+                     endif
+                  enddo
                endif
-               if (this%n_qqbar(iproc).eq.2) then
-                  ! make sure that orders of the quarks is fixed among all
-                  ! perm's. (The order of the anti-quarks may vary). Without
-                  ! this, the computation of the colour factor will be incorrect.
-                  if (iamp.eq.iamp_to_compare) cycle
-                  if (this%perm(1,iamp).ne.this%perm(1,iamp_to_compare)) then
-                     ! different order, switch the two colour strings:
-                     do i=1,n-this%n_sing(1)
-                        if (this%perm(i,iamp).eq.this%perm(1,iamp_to_compare)) then
-                           this%perm(1:n-this%n_sing(1),iamp)=[this%perm(i:n-this%n_sing(1),iamp),this%perm(1:i-1,iamp)]
-                           exit
-                        endif
-                     enddo
-                  endif
-               endif
-            else
-               this%perm(1:n-this%n_sing(1),iamp)=this%perm(1:n-this%n_sing(1),this%same_flavour_sum(iamp,1))
             endif
          enddo
       enddo
@@ -434,6 +381,14 @@ contains
          write (*,*) 'ERROR: too many currents: max_cur not set correctly',max_cur,this%n_cur
          stop 1
       endif
+      if (this%n_cur_start(n-1).gt.this%n_cur_end(n-1)) then
+         write (*,*) 'ERROR: no valid matrix elements found: check your process definition'
+         stop 1
+      endif
+!!$      if (this%nprocs.gt.128) then
+!!$         write (*,*) 'ERROR: too many processes. Not compatible with the "integer(kind=16) :: iproc" variable'
+!!$         stop 1
+!!$      endif
     end subroutine simple_consistency_checks
 
     subroutine define_canonical_color_order()
@@ -444,10 +399,10 @@ contains
       do iproc=1,this%nprocs
          nq=0; naq=0 ; nglu=0 ; nsing=0
          do i=1,n
-            if (is_gluon(this%processes(i,iproc))) nglu=nglu+1
+            if (pm%is_gluon(this%processes(i,iproc))) nglu=nglu+1
             if (is_quark_from_order(i,iproc)) nq=nq+1
             if (is_antiquark_from_order(i,iproc)) naq=naq+1
-            if (is_singlet(this%processes(i,iproc))) nsing=nsing+1
+            if (pm%is_singlet(this%processes(i,iproc))) nsing=nsing+1
          enddo
          if (nq.ne.naq) then
             write (*,*) 'not the same number of quarks and anti-quarks',nq,naq
@@ -462,35 +417,35 @@ contains
             stop 1
          endif
          iq=0; iaq=0 ; iglu=0 ; ising=0
-         order(1:n,iproc)= 0
+         order(1:n,1,iproc)= 0
          do i=1,n
-            if (is_gluon(this%processes(i,iproc))) then
+            if (pm%is_gluon(this%processes(i,iproc))) then
                iglu=iglu+1
                if (nq.ge.1) then
-                  order(iglu+1,iproc)=i
+                  order(iglu+1,1,iproc)=i
                else
-                  order(iglu,iproc)=i
+                  order(iglu,1,iproc)=i
                endif
             elseif(is_quark_from_order(i,iproc)) then
                iq=iq+1
                if (iq.eq.1) then
-                  order(1,iproc)=i
+                  order(1,1,iproc)=i
                else
-                  order(n-1-nsing,iproc)=i
+                  order(n-1-nsing,1,iproc)=i
                endif
             elseif (is_antiquark_from_order(i,iproc)) then
                iaq=iaq+1
                if (iaq.eq.1) then
-                  order(n,iproc)=i
+                  order(n,1,iproc)=i
                else
-                  order(n-2-nsing,iproc)=i
+                  order(n-2-nsing,1,iproc)=i
                endif
-            elseif (is_singlet(this%processes(i,iproc))) then
+            elseif (pm%is_singlet(this%processes(i,iproc))) then
                ising=ising+1
                if(nq.ne.0) then
-                  order(n-ising,iproc)=i
+                  order(n-ising,1,iproc)=i
                else
-                  order(nglu+ising,iproc)=i
+                  order(nglu+ising,1,iproc)=i
                endif
             endif
          enddo
@@ -507,147 +462,113 @@ contains
       endif
     end subroutine define_canonical_color_order
 
-    integer function number_of_quark_lines(process,is_same_flavour_process)
+    integer function number_of_quark_lines(process)
       implicit none
       integer,dimension(n),intent(in) :: process
-      logical,intent(out) :: is_same_flavour_process
-      integer :: i,iflav
-      is_same_flavour_process=.true.
+      integer :: i
       number_of_quark_lines=0
-      iflav=0
       do i=1,n
-         if (is_quark(process(i)) .or. is_antiquark(process(i))) then
+         if (pm%is_quark(process(i)) .or. pm%is_antiquark(process(i))) then
             number_of_quark_lines=number_of_quark_lines+1
-            if (iflav.eq.0) iflav=abs(process(i))
-            if (abs(process(i)).ne.iflav) is_same_flavour_process=.false.
          endif
       enddo
       number_of_quark_lines=number_of_quark_lines/2
-      if (number_of_quark_lines.lt.2) is_same_flavour_process=.false.
     end function number_of_quark_lines
     
     subroutine check_input_consistency(part)
       implicit none
-      integer :: i,j,k,iflav,iproc,jproc,idum,ichan
+      integer :: i,j,iproc
       integer,dimension(n,n_processes),intent(in) :: part
-      integer,dimension(n,2) :: part_sf
-      integer,dimension(n) :: jord
-      logical :: sf
       if (this%imode.eq.2) then
          if (n_processes.ne.1) then
             write (*,*) 'There should only be one process when doing imode=2'
             stop 1
          endif
-         idum=number_of_quark_lines(part(1,1),sf)
-         if (sf) then
-            ! add the two different-flavour processes that make up the same-flavour process
-            this%nprocs=3
-            allocate(this%processes(n,this%nprocs))
-            call define_symm_2qq(part(1,1),part_sf,1)
-            this%processes(1:n,1)=part_sf(1:n,1)
-            call define_symm_2qq(part(1,1),part_sf,2)
-            this%processes(1:n,2)=part_sf(1:n,1)
-            this%processes(1:n,3)=part(1:n,1)
-            allocate(order(1:n,this%nprocs))
-            order(1:n,1)=o(1:n,1)
-            order(1:n,2)=o(1:n,1)
-            order(1:n,3)=o(1:n,1)
-         else
-            this%nprocs=n_processes
-            allocate(this%processes(n,this%nprocs))
-            this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
-            allocate(order(1:n,this%nprocs))
-            order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
-         endif
-      else
-         idum=number_of_quark_lines(part(1,1),sf)
-         if (sf .and. .not.read_file) then
-            ! add the two different-flavour processes that make up the same-flavour process
-            this%nprocs=3
-            allocate(this%processes(n,this%nprocs))
-            call define_symm_2qq(part(1,1),part_sf,1)
-            this%processes(1:n,1)=part_sf(1:n,1)
-            call define_symm_2qq(part(1,1),part_sf,2)
-            this%processes(1:n,2)=part_sf(1:n,1)
-            this%processes(1:n,3)=part(1:n,1)
-            allocate(order(1:n,this%nprocs))
-            order(1:n,1)=o(1:n,1)
-            order(1:n,2)=o(1:n,1)
-            order(1:n,3)=o(1:n,1)
-         else
-            this%nprocs=n_processes
-            allocate(this%processes(n,this%nprocs))
-            this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
-            allocate(order(1:n,this%nprocs))
-            order(1:n,1:this%nprocs)=o(1:n,1:this%nprocs)
-         endif
       endif
-      
-      allocate(this%n_sing(1:this%nprocs))
+      this%nprocs=n_processes
+      allocate(this%processes(n,this%nprocs))
       allocate(this%n_qqbar(1:this%nprocs))
-      allocate(this%same_flav(1:this%nprocs))
-      allocate(this%same_flavour_proc_map(1:this%nprocs,2))
+      this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
       do iproc=1,this%nprocs
-         this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc),this%same_flav(iproc))
-         this%same_flavour_proc_map(iproc,1:2)=0
+         this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc))
+      enddo
+      if (all(this%n_qqbar.le.2)) then
+         allocate(order(1:n,1,this%nprocs))
+      elseif (all(this%n_qqbar.le.3)) then
+         allocate(order(1:n,2,this%nprocs))
+      else
+         write (*,*) 'Cannot allocated all the needed orders'
+         stop 1
+      endif
+      order(1:n,1,1:this%nprocs)=o(1:n,1:this%nprocs)
+      allocate(this%n_sing(1:this%nprocs))
+      allocate(this%same_flav(1:this%nprocs))
+      do iproc=1,this%nprocs
+         if (this%n_qqbar(iproc).eq.3) then
+            call fill_alternative_quark_order(iproc)
+         endif
+         this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
          this%n_sing(iproc)=0
          do i=1,n
-            if (is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
+            if (pm%is_singlet(this%processes(i,iproc))) this%n_sing(iproc)=this%n_sing(iproc)+1
          enddo
          if (iproc.gt.1) then
-            if (this%n_qqbar(iproc-1).gt.this%n_qqbar(iproc)) then
-               write (*,*) 'ERROR: processes not correctly ordered in the list.'
-               write (*,*) 'Need to be in increasing number of quark lines.'
-               stop 1
-            endif
-            if (this%same_flav(iproc-1) .and. (.not.this%same_flav(iproc))) then
-               write (*,*) 'ERROR: processes not correctly ordered in the list.'
-               write (*,*) 'Need first different-flavour and then same-flavour processes.'
-               stop 1
-            endif
+!!$            if (this%n_qqbar(iproc-1).gt.this%n_qqbar(iproc)) then
+!!$               write (*,*) 'ERROR: processes not correctly ordered in the list.'
+!!$               write (*,*) 'Need to be in increasing number of quark lines.',iproc
+!!$               do i=1,iproc
+!!$                  write (*,*) this%processes(:,i),':',this%n_qqbar(i)
+!!$               enddo
+!!$               stop 1
+!!$            endif
+!!$            if (this%same_flav(iproc-1) .and. (.not.this%same_flav(iproc))) then
+!!$               write (*,*) 'ERROR: processes not correctly ordered in the list.'
+!!$               write (*,*) 'Need first different-flavour and then same-flavour processes.'
+!!$               stop 1
+!!$            endif
          endif
          if (this%n_qqbar(iproc).gt.3) then
-            write (*,*) 'ERROR: code only working for 0, 1 or 2 qqbar pairs',this%n_qqbar(iproc),iproc
+            write (*,*) 'ERROR: code only working for 0, 1, 2 or 3 qqbar pairs',this%n_qqbar(iproc),iproc
             write (*,*) this%processes(1:n,iproc)
             stop 1
          endif
          if (imode.eq.1.or.imode.eq.3) then
-            if (any(order(:,iproc).gt.n) .or. any(order(:,iproc).lt.1)) then
-               write (*,*) 'ERROR: inconsistent colour order. An element is too large or too small',order(1:n,iproc),iproc
+            if (any(order(:,1,iproc).gt.n) .or. any(order(:,1,iproc).lt.1)) then
+               write (*,*) 'ERROR: inconsistent colour order. An element is too large or too small',order(1:n,1,iproc),iproc
                stop 1
             endif
             do i=1,n-1
                do j=i+1,n
-                  if (order(i,iproc).eq.order(j,iproc)) then
-                     write (*,*) 'ERROR: inconsistent colour order. An element appears twice',order(1:n,iproc),iproc
+                  if (order(i,1,iproc).eq.order(j,1,iproc)) then
+                     write (*,*) 'ERROR: inconsistent colour order. An element appears twice',order(1:n,1,iproc),iproc
                      stop 1
                   endif
                enddo
             enddo
             if (this%n_qqbar(iproc).gt.0) then
-               if (.not.(is_quark_from_order(order(1,iproc),iproc))) then
+               if (.not.(is_quark_from_order(order(1,1,iproc),iproc))) then
                   write (*,*) 'ERROR: first particle in order is not a final state quark (or initial state anti-quark)'
                   write (*,*) iproc
-                  write (*,*) order(1:n,iproc)
+                  write (*,*) order(1:n,1,iproc)
                   write (*,*) this%processes(1:n,iproc)
                   stop 1
                endif
-               if (.not.(is_antiquark_from_order(order(n,iproc),iproc))) then
+               if (.not.(is_antiquark_from_order(order(n,1,iproc),iproc))) then
                   write (*,*) 'ERROR: final particle in order is not a final state anti-quark (or initial state quark)'
                   write (*,*) iproc
-                  write (*,*) order(1:n,iproc)
+                  write (*,*) order(1:n,1,iproc)
                   write (*,*) this%processes(1:n,iproc)
                   stop 1
                endif
             endif
             if (this%n_qqbar(iproc).ge.2) then
                do i=2,n-1
-                  if (is_antiquark_from_order(order(i,iproc),iproc)) then
+                  if (is_antiquark_from_order(order(i,1,iproc),iproc)) then
                      ! next should be a quark
-                     if (.not.(is_quark_from_order(order(i+1,iproc),iproc))) then
+                     if (.not.(is_quark_from_order(order(i+1,1,iproc),iproc))) then
                         write (*,*) 'ERROR: in the colour order, after an initial state quark should come a final state quark'
                         write (*,*) iproc
-                        write (*,*) order(1:n,iproc)
+                        write (*,*) order(1:n,1,iproc)
                         write (*,*) this%processes(1:n,iproc)
                         stop 1
                      endif
@@ -659,125 +580,50 @@ contains
                endif
             endif
          endif
-         if (this%same_flav(iproc)) then
-            ! check that the corresponding different-flavour processes are included.
-            if (this%n_qqbar(iproc).lt.2) then
-               write (*,*) 'ERROR: Same-flavour process, but there are less than two quark lines'
-               write (*,*) iproc,':',this%processes(1:n,iproc)
-               stop 1
-            endif
-            do ichan=1,2
-               call define_symm_2qq(this%processes(1,iproc),part_sf,ichan)
-               do jproc=1,iproc-1
-                  if (this%n_qqbar(jproc).ne.this%n_qqbar(iproc) .or. this%same_flav(jproc)) cycle
-                  jord(1:n)=order(1:n,jproc)
-                  if (jord(1).ne.order(1,iproc)) then
-                     ! different order of the quarks, switch the two colour strings:
-                     do i=1,n
-                        if (jord(i).eq.order(1,iproc)) then
-                           jord(1:n)=[jord(i:n),jord(1:i-1)]
-                           exit
-                        endif
-                     enddo
-                  endif
-                  if (any(jord(1:n).ne.order(1:n,iproc))) cycle
-                  if (all(this%processes(1:n,jproc).eq.part_sf(1:n,1))) then
-                     this%same_flavour_proc_map(iproc,ichan)=jproc
-                  elseif (all(this%processes(1:n,jproc).eq.part_sf(1:n,2))) then
-                     this%same_flavour_proc_map(iproc,ichan)=jproc
-                  endif
-               enddo
-            enddo
-            if (any(this%same_flavour_proc_map(iproc,1:2).eq.0)) then
-               write (*,*) 'Same flavour process not found',iproc
-               write (*,*) part_sf(1:n,1)
-               write (*,*) part_sf(1:n,2)
-               stop 1
-            endif
-         endif
       enddo
     end subroutine check_input_consistency
 
-    subroutine define_symm_2qq(part_in,part_out,chan)
+    subroutine fill_alternative_quark_order(iproc)
       implicit none
-      integer :: chan
-      integer,dimension(n),intent(in) :: part_in
-      integer,dimension(n,2),intent(out) :: part_out
-      integer :: i,iq,ia,i_same,n_sing,add_or_subtract
-      integer,dimension(2,2) :: connection
-      n_sing=0
+      integer,intent(in) :: iproc
+      integer :: i
+      integer,dimension(3) :: q,aq
+      q=0
+      aq=0
       do i=1,n
-         if (is_singlet(part_in(i))) n_sing=n_sing+1
-      enddo
-      if (n_sing.eq.0) then
-         i_same=1
-      else
-         i_same=2
-      endif
-      do i=1,n
-         if (is_quark(part_in(i)).or.is_antiquark(part_in(i))) then
-            if (abs(part_in(i)).gt.2) then
-               add_or_subtract=-1
-            else
-               add_or_subtract=1
+         if (is_quark_from_order(order(i,1,iproc),iproc)) then
+            if (q(1).eq.0) then
+               q(1)=i
+            elseif (q(2).eq.0) then
+               q(2)=i
+            elseif (q(3).eq.0) then
+               q(3)=i
             endif
-            exit
+         endif
+         if (is_antiquark_from_order(order(i,1,iproc),iproc)) then
+            if (aq(1).eq.0) then
+               aq(1)=i
+            elseif (aq(2).eq.0) then
+               aq(2)=i
+            elseif (aq(3).eq.0) then
+               aq(3)=i
+            endif
          endif
       enddo
-      part_out(1:n,1)=part_in(1:n)
-      part_out(1:n,2)=part_in(1:n)
-      iq=0
-      ia=0
-      do i=1,n
-         if (i.le.2 .and. is_quark(part_in(i))) then
-            ia=ia+1
-            connection(2,ia)=i
-         elseif(i.le.2 .and. is_antiquark(part_in(i))) then
-            iq=iq+1
-            connection(1,iq)=i
-         elseif (i.gt.2 .and. is_quark(part_in(i))) then
-            iq=iq+1
-            connection(1,iq)=i
-         elseif (i.gt.2 .and. is_antiquark(part_in(i))) then
-            ia=ia+1
-            connection(2,ia)=i
-         endif
-      enddo
-      if (chan.eq.1) then
-         ! change the 2nd quark and an anti-quark in the process
-         part_out(connection(1,2),1)=sign(abs(part_in(connection(1,2)))+add_or_subtract*i_same,part_in(connection(1,2)))
-         part_out(connection(2,2),1)=sign(abs(part_in(connection(2,2)))+add_or_subtract*i_same,part_in(connection(2,2)))
-         ! change the 1st quark and an anti-quark in the process
-         part_out(connection(1,1),2)=sign(abs(part_in(connection(1,1)))+add_or_subtract*i_same,part_in(connection(1,1)))
-         part_out(connection(2,1),2)=sign(abs(part_in(connection(2,1)))+add_or_subtract*i_same,part_in(connection(2,1)))
-
-      elseif(chan.eq.2) then
-!!$         if (abs(part_in(connection(1,1))).lt.4) then
-            ! change the mixed quark and an anti-quark in the process; leave the
-            ! first (anti-)quark unchanged.
-               part_out(connection(1,2),1)=sign(abs(part_in(connection(1,2)))+&
-                       add_or_subtract*i_same,part_in(connection(1,2)))
-               part_out(connection(2,1),1)=sign(abs(part_in(connection(2,1)))+&
-                       add_or_subtract*i_same,part_in(connection(2,1)))
-               part_out(connection(1,1),2)=sign(abs(part_in(connection(1,1)))+&
-                       add_or_subtract*i_same,part_in(connection(1,1)))
-               part_out(connection(2,2),2)=sign(abs(part_in(connection(2,2)))+&
-                       add_or_subtract*i_same,part_in(connection(2,2)))
-!!$         else
-!!$            ! change the mixed quark and an anti-quark in the process; leave the
-!!$            ! second (anti-)quark unchanged.
-!!$               part_out(connection(1,1),1)=sign(abs(part_in(connection(1,1)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(1,1)))
-!!$               part_out(connection(2,2),1)=sign(abs(part_in(connection(2,2)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(2,2)))
-!!$               part_out(connection(1,2),2)=sign(abs(part_in(connection(1,2)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(1,2)))
-!!$               part_out(connection(2,1),2)=sign(abs(part_in(connection(2,1)))+&
-!!$                       add_or_subtract*i_same,part_in(connection(2,1)))
-!!$         endif
+      if (aq(1).ne.q(2)-1) then
+         write (*,*) 'Second quark should come right after first anti-quark in colour order'
+         stop 1
       endif
-    end subroutine define_symm_2qq
-
+      if (aq(2).ne.q(3)-1) then
+         write (*,*) 'Third quark should come right after second anti-quark in colour order'
+         stop 1
+      endif
+      if (aq(3).ne.n) then
+         write (*,*) 'there are more particles after final anti-quark'
+         stop 1
+      endif
+      order(:,2,iproc)=[order(q(2):aq(2),1,iproc),order(q(1):aq(1),1,iproc),order(q(3):aq(3),1,iproc)]
+    end subroutine fill_alternative_quark_order
     
     subroutine set_max_cur()
       ! rough upper bound for the maximum number of currents
@@ -883,75 +729,18 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      real(kind=8) :: coupl
+      integer :: i
       if (.not.valid_current_combination())  then
          return
       endif
-
-      if (is_gluon(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add the gluon-gluon to gluon vertex
-         call add_vertex(0,21)
-         ! add the gluon-gluon to tensor vertex
-         call add_vertex(1,-21)
-      elseif (is_tensor(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add a tensor-gluon to gluon vertex
-         call add_vertex(2,21)
-      elseif (is_gluon(current_list_local(ic1)%type) .and. is_tensor(current_list_local(ic2)%type)) then
-         ! add a gluon-tensor to gluon vertex
-         call add_vertex(3,21)
-      elseif (is_gluon(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
-         ! add a gluon-quark to quark vertex
-         call add_vertex(4,current_list_local(ic2)%type)
-      elseif (is_gluon(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
-         ! add a gluon-antiquark to antiquark vertex
-         call add_vertex(5,current_list_local(ic2)%type)
-      elseif (is_quark(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add a quark-gluon to quark vertex
-         call add_vertex(6,current_list_local(ic1)%type)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_gluon(current_list_local(ic2)%type)) then
-         ! add a antiquark-gluon to antiquark vertex
-         call add_vertex(7,current_list_local(ic1)%type)
-      elseif (is_quark(current_list_local(ic1)%type) .and. &
-           (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
-         ! add a quark-antiquark to gluon vertex
-         call add_vertex(8,21)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. &
-           (current_list_local(ic2)%type.eq.anti_current(current_list_local(ic1)%type))) then
-         ! add a antiquark-quark to gluon vertex
-         call add_vertex(9,21)
-      elseif (is_singlet(current_list_local(ic1)%type) .and. is_quark(current_list_local(ic2)%type)) then
-         ! add a photon-quark to quark vertex
-         if (mod(current_list_local(ic2)%type,2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
+      do i=1,pm%nint
+         if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
+              current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
+            call add_vertex(pm%vertex_list(i)%type, &
+                            pm%vertex_list(i)%particles(3), &
+                            pm%vertex_list(i)%coupl)
          endif
-         call add_vertex(10,current_list_local(ic2)%type,coupl)
-      elseif (is_quark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
-         ! add a quark-photon to quark vertex
-         if (mod(current_list_local(ic1)%type,2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
-         endif
-         call add_vertex(12,current_list_local(ic1)%type,coupl)
-      elseif (is_singlet(current_list_local(ic1)%type) .and. is_antiquark(current_list_local(ic2)%type)) then
-         ! add a photon-antiquark to quark vertex
-         if (mod(abs(current_list_local(ic2)%type),2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
-         endif
-         call add_vertex(11,current_list_local(ic2)%type,coupl)
-      elseif (is_antiquark(current_list_local(ic1)%type) .and. is_singlet(current_list_local(ic2)%type)) then
-         ! add a antiquark-photon to quark vertex
-         if (mod(abs(current_list_local(ic1)%type),2).eq.0) then
-            coupl=2d0/3d0
-         else
-            coupl=-1d0/3d0
-         endif
-         call add_vertex(13,current_list_local(ic1)%type,coupl)
-      endif
+      enddo
     end subroutine add_if_allowed_threevertex
 
     
@@ -978,26 +767,28 @@ contains
       ! 6. In general, the current must be of the format "q g..g qbar q g..g
       !    qbar" or any subset thereof.
       implicit none
-      integer :: i,j,nc1,nc2
-      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,not_valid
+      integer :: i,j,nc1,nc2,c
+      logical :: gluon_current,colour_singlet1,colour_singlet2,found_quark,found_antiquark,valid
       integer,dimension(isize) :: ip,et
+      type(bitset) :: iproc_combined
       valid_current_combination=.false.
       ! check that all particles are different in the two currents:
       if (popcnt(ieor(current_list_local(ic1)%bin,current_list_local(ic2)%bin)).ne.isize) return
       ! final particle should never be part of any combined currents: it will
       ! be used to close the amplitude instead
       if (n1.eq.1) then
-         if (all(current_list_local(ic1)%order(n1).eq.order(n,1:this%nprocs))) then
+         if (all(current_list_local(ic1)%order(n1).eq.order(n,1,1:this%nprocs))) then
             return
           endif
       endif
       if (n2.eq.1) then
-         if (all(current_list_local(ic2)%order(n2).eq.order(n,1:this%nprocs))) then
+         if (all(current_list_local(ic2)%order(n2).eq.order(n,1,1:this%nprocs))) then
             return
          endif
       endif
       ! check that both currents can contribute to the same process
-      if (iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc).eq.0) return
+      iproc_combined=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
+      if (iproc_combined%count_bits().eq.0) return
       ! Check for colour singlets:
       colour_singlet1=all_singlet_current(current_list_local(ic1),n1)
       colour_singlet2=all_singlet_current(current_list_local(ic2),n2)
@@ -1018,35 +809,38 @@ contains
          ! order. First, find where the singlets are, since they do not matter
          ! for the colour order
          do i=1,n1
-            if (is_singlet(current_list_local(ic1)%ext_type(i))) exit
+            if (pm%is_singlet(current_list_local(ic1)%ext_type(i))) exit
          enddo
          nc1=i-1
          do i=1,n2
-            if (is_singlet(current_list_local(ic2)%ext_type(i))) exit
+            if (pm%is_singlet(current_list_local(ic2)%ext_type(i))) exit
          enddo
          nc2=i-1
          ip(1:nc1+nc2)=[current_list_local(ic1)%order(1:nc1),current_list_local(ic2)%order(1:nc2)]
          ! do they actual checking:
-         not_valid=.true.
+         valid=.false.
          do_iproc: do iproc=1,this%nprocs
             ! check that both currents contribute to the iproc process:
-            if (.not. btest(iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc),iproc-1)) cycle
+            if (.not. iproc_combined%test_bit(iproc)) cycle
             ! check that the final particle is not part of the combined
             ! current (it will be used to close the amplitude instead):
-            if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,iproc)-1)) cycle
-            ! Check if they are compatible with the colour order of the iproc:
-            do_j: do j=1,n
-               if (order(j,iproc).eq.ip(1)) then
-                  do i=2,nc1+nc2
-                     if (j-1+i.gt.n) exit do_j
-                     if (order(j-1+i,iproc).ne.ip(i)) exit do_j
-                  enddo
-                  not_valid=.false. ! it's compatible with the input colour order of iproc
-                  exit do_iproc
-               endif
-            enddo do_j
+            if (btest(current_list_local(ic1)%bin+current_list_local(ic2)%bin,order(n,1,iproc)-1)) cycle
+            do_c: do c=1,2 ! check both orders for the quark-antiquark blocks when n_qqbar=3
+               if (this%n_qqbar(iproc).ne.3 .and. c.eq.2) cycle
+               ! Check if they are compatible with the colour order of the iproc:
+               do_j: do j=1,n
+                  if (order(j,c,iproc).eq.ip(1)) then
+                     do i=2,nc1+nc2
+                        if (j-1+i.gt.n) exit do_j
+                        if (order(j-1+i,c,iproc).ne.ip(i)) exit do_j
+                     enddo
+                     valid=.true. ! it's compatible with the input colour order of iproc
+                     exit do_iproc
+                  endif
+               enddo do_j
+            enddo do_c
          enddo do_iproc
-         if (not_valid) return ! not compatible with any of the iprocs
+         if (.not.valid) return ! not compatible with any of the iprocs
       endif
 
       ! If using symmetry and the current is a combination of all external
@@ -1061,7 +855,7 @@ contains
          found_quark=.false.
          found_antiquark=.false.
          do i=1,isize
-            if (is_quark(et(i))) then
+            if (pm%is_quark(et(i))) then
                ! found a quark.
                if (found_quark) then
                   ! no anti-quark between two quarks
@@ -1069,7 +863,7 @@ contains
                endif
                found_antiquark=.false.
                found_quark=.true.
-            elseif (is_antiquark(et(i))) then
+            elseif (pm%is_antiquark(et(i))) then
                ! found an anti-quark
                if (found_antiquark) then
                   ! no quark between two anti-quarks
@@ -1078,9 +872,9 @@ contains
                ! next one must be a quark:
                j=i
                do while (j.lt.isize)
-                  if (is_singlet(et(j+1))) then
+                  if (pm%is_singlet(et(j+1))) then
                      j=j+1
-                  elseif (.not.(is_quark(et(j+1)))) then
+                  elseif (.not.(pm%is_quark(et(j+1)))) then
                      return
                   else
                      exit
@@ -1091,7 +885,7 @@ contains
             endif
          enddo
          ! if the current is of length n-1, the first should be a quark
-         if (isize.eq.n-1 .and. .not.is_quark(et(1))) return
+         if (isize.eq.n-1 .and. .not.pm%is_quark(et(1))) return
       endif
       ! Got all the way to the end. This must be a valid current combination
       valid_current_combination=.true.
@@ -1100,7 +894,7 @@ contains
     subroutine add_vertex(itype,ctype,coupl)
       implicit none
       integer :: itype,ctype,ic
-      real(kind=8),optional :: coupl
+      real(kind=8),dimension(2) :: coupl
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -1112,11 +906,7 @@ contains
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
-      if (present(coupl)) then
-         interaction_list_local(this%n_vert)%coupl=coupl
-      else
-         interaction_list_local(this%n_vert)%coupl=1d0
-      endif
+      interaction_list_local(this%n_vert)%coupl=coupl
       allocate(interaction_list_local(this%n_vert)%singlet_mv(0:isize))
       call add_all_currents(ctype)
     end subroutine add_vertex
@@ -1146,7 +936,7 @@ contains
       integer,intent(in) :: ic1,ic2,ctype
       integer,intent(in) :: invert
       integer,dimension(0:isize),intent(out) :: singlet_mv
-      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2
+      integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2,n_mv12_1
       integer,dimension(isize) :: ord
       integer,dimension(:),allocatable :: ord1,spin1,et1,ord2,spin2,et2
       allocate(combine_currents%order(1:isize))
@@ -1154,7 +944,8 @@ contains
       allocate(combine_currents%ext_type(1:isize))
       combine_currents%type=ctype
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
-      combine_currents%iproc=iand(current_list_local(ic1)%iproc,current_list_local(ic2)%iproc)
+      combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
+      combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
       allocate(ord1(n1))
@@ -1185,14 +976,13 @@ contains
       ! nc1 and nc2 lists where the coloured particles end in currents ic1 and
       ! ic2, respectively:
       do i=1,n1
-         if (is_singlet(et1(i))) exit
+         if (pm%is_singlet(et1(i))) exit
       enddo
       nc1=i-1
       do i=1,n2
-         if (is_singlet(et2(i))) exit
+         if (pm%is_singlet(et2(i))) exit
       enddo
       nc2=i-1
-
       ! The order of the coloured particles can be concatinated:
       ord(1:nc1+nc2)=[ord1(1:nc1),ord2(1:nc2)]
       ! Setup the singlet_mv and put the colour singlets in the right order in
@@ -1231,6 +1021,7 @@ contains
             if (ns2.gt.n2) exit
          enddo
          ord(ns1+nc2:ns1+ns2-2)=ord2(nc2+1:ns2-1)
+         n_mv12_1=0
          do ipos=ns1+ns2-1,n1+n2
             if (ns1.gt.n1) then
                mv12=2
@@ -1244,7 +1035,8 @@ contains
             singlet_mv(0)=singlet_mv(0)+1
             if (mv12.eq.1) then
                ord(ipos)=ord1(ns1)
-               singlet_mv(singlet_mv(0))=ns1 - (singlet_mv(0)-1)
+               singlet_mv(singlet_mv(0))=ns1 - n_mv12_1
+               n_mv12_1=n_mv12_1+1
                ns1=ns1+1
             elseif (mv12.eq.2) then
                ord(ipos)=ord2(ns2)
@@ -1392,9 +1184,7 @@ contains
          do ic=1,this%n_cur
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
-            if (any(new_current%order(1:isize).ne.current_list_local(ic)%order(1:isize))) cycle
-            if (any(new_current%spin(1:isize).ne.current_list_local(ic)%spin(1:isize))) cycle
-            if (any(new_current%ext_type(1:isize).ne.current_list_local(ic)%ext_type(1:isize))) cycle
+            if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
@@ -1406,40 +1196,31 @@ contains
          current_list_local(this%n_cur)=new_current
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
-         if (is_gluon(new_current%type)) then
+         if (pm%is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
-         elseif (is_tensor(new_current%type)) then
-            allocate(current_list_local(this%n_cur)%vertices(isize-1))
-            allocate(current_list_local(this%n_cur)%vertex_sign(isize-1))
-         else
+         elseif (pm%is_tensor(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(2*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(2*(isize-1)))
+         elseif (pm%is_massiveboson(new_current%type)) then
+            allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
+         else
+            allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
       elseif (this%imode.eq.2) then
-         if (is_gluon(new_current%type)) then
-            ! gluon current
-            call get_value(new_current%order,0,val)
-         elseif (is_tensor(new_current%type)) then
-            ! tensor current
-            call get_value(new_current%order,-1,val)
-         elseif (is_quark(new_current%type)) then
-            ! quark current
-            call get_value(new_current%order,2*new_current%type-1,val)
-         elseif (is_antiquark(new_current%type)) then
-            ! anti-quark current
-            call get_value(new_current%order,2*abs(new_current%type),val)
-         endif
+         call get_value(new_current%order,new_current%type,val)
          call solve_dict(val,key)
-         ic=key_to_current(key,new_current%iproc)
+         ic=key_to_current(key,new_current%iproc%bitset_to_integer())
          if (ic.eq.0) then
             ! initialise new current
             this%n_cur=this%n_cur+1
             if (this%n_cur.gt.max_cur) call increase_max_cur()
-            key_to_current(key,new_current%iproc)=this%n_cur
+            key_to_current(key,new_current%iproc%bitset_to_integer())=this%n_cur
             ic=this%n_cur
             current_list_local(ic)=new_current
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
@@ -1449,15 +1230,18 @@ contains
                     current_list_local(ic)%spin(1:isize)
                stop 1
             endif
-            if (is_gluon(new_current%type)) then
+            if (pm%is_gluon(new_current%type)) then
                allocate(current_list_local(ic)%vertices(5*(isize-1)))
                allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
-            elseif (is_gluon(new_current%type)) then
+            elseif (pm%is_tensor(new_current%type)) then
                allocate(current_list_local(ic)%vertices(isize-1))
                allocate(current_list_local(ic)%vertex_sign(isize-1))
+            elseif (pm%is_massiveboson(new_current%type)) then
+               allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
+               allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
             else
-               allocate(current_list_local(ic)%vertices(2*(isize-1)))
-               allocate(current_list_local(ic)%vertex_sign(2*(isize-1)))
+               allocate(current_list_local(ic)%vertices(5*(isize-1)))
+               allocate(current_list_local(ic)%vertex_sign(5*(isize-1)))
             endif
             current_list_local(ic)%n_vert=0
          endif
@@ -1485,7 +1269,7 @@ contains
       do isize=2,n-1
          size=size*(n-isize+1)
          do i=1,size
-            max_key=max_key+14
+            max_key=max_key+pm%npart
          enddo
       enddo
       allocate(current_dict(max_key)) 
@@ -1506,35 +1290,11 @@ contains
                call get_next_iperm(isize,ips_in,ips,n)
                ips_in=ips
             endif
-            ! add the gluon:
-            key=key+1
-            call get_value(ips_in,0,val)
-            if (val.le.previous_val) then
-               write (*,*) 'inconsistent current dictionary #1',val,previous_val
-               stop 1
-            endif
-            current_dict(key)=val
-            ! add the tensor
-            key=key+1
-            call get_value(ips_in,-1,val)
-            if (val.le.previous_val) then
-               write (*,*) 'inconsistent current dictionary #2',val,previous_val
-               stop 1
-            endif
-            current_dict(key)=val
-            ! add the quarks and anti-quarks
-            do j=1,6
+            do j=1,pm%npart
                key=key+1
-               call get_value(ips_in,2*j-1,val) ! quarks are the odd ones
+               call get_value(ips_in,pm%particle_list(j)%type,val)
                if (val.le.previous_val) then
-                  write (*,*) 'inconsistent current dictionary #3',val,previous_val
-                  stop 1
-               endif
-               current_dict(key)=val
-               key=key+1
-               call get_value(ips_in,2*j,val)   ! anti-quarks are the even ones
-               if (val.le.previous_val) then
-                  write (*,*) 'inconsistent current dictionary #4',val,previous_val
+                  write (*,*) 'inconsistent current dictionary #1',val,previous_val
                   stop 1
                endif
                current_dict(key)=val
@@ -1553,7 +1313,7 @@ contains
       implicit none
       integer,dimension(isize) :: ips
       integer :: j,itype
-      integer(kind=8) :: val
+      integer(kind=8) :: val,offset
       if (isize.eq.1) then
          write (*,*) 'current_dict only setup for isize.ge.2',isize
          stop 1
@@ -1565,14 +1325,15 @@ contains
       do j=1,isize
          val=val+int(ips(isize+1-j),kind=8)*int(n+1,kind=8)**int(j-1,kind=8)
       enddo
-      ! Take the types into account (we have only 14 types (gluon,
-      ! tensor and 6 quarks and 6 anti-quarks):
-      val=val*int(14,kind=8) ! gluon
-      if (itype.eq.-1) then
-         val=val+int(1,kind=8) ! tensor
-      elseif (itype.ge.1) then
-         val=val+int(itype+1,kind=8) ! quark or anti-quark
-      endif
+      ! Take the types into account (don't worry about particle
+      ! vs. anti-particle, since there should be no confusion given
+      ! the (external) particles that are part of the current).
+      do j=1,pm%npart
+         if (itype.eq.pm%particle_list(j)%type .or. itype.eq.pm%particle_list(j)%anti_type) then
+            offset=int(j-1,kind=8)
+         endif
+      enddo
+      val=val*int(pm%npart,kind=8) + offset
     end subroutine get_value
 
     subroutine solve_dict(val,key)
@@ -1601,11 +1362,7 @@ contains
     integer function anti_current(ctype)
       implicit none
       integer :: ctype
-      if (abs(ctype).le.6) then
-         anti_current=-ctype
-      else
-         anti_current=ctype
-      endif
+      anti_current=pm%get_antipart(ctype)
     end function anti_current
     logical function all_gluon_current(curr,len)
       ! returns .true. only if all external particles are gluons
@@ -1623,18 +1380,21 @@ contains
       implicit none
       type(current),intent(in) :: curr
       integer,intent(in) :: len
-      if (any(abs(curr%ext_type(1:len)).lt.22)) then
-         all_singlet_current=.false.
-      else
-         all_singlet_current=.true.
-      endif
+      integer :: i
+      all_singlet_current=.true.
+      do i=1,len
+         if (.not.pm%is_singlet(curr%ext_type(i))) then
+            all_singlet_current=.false.
+            return
+         endif
+      enddo
     end function all_singlet_current
     logical function is_quark_from_order(io,iproc)
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io,iproc
-      if ( (io.le.2  .and. (this%processes(io,iproc).le.-1 .and. this%processes(io,iproc).ge.-6)) .or. &
-           (io.gt.2  .and. (this%processes(io,iproc).ge. 1 .and. this%processes(io,iproc).le. 6))) then
+      if ( (io.le.2  .and. pm%is_antiquark(this%processes(io,iproc))) .or. &
+           (io.gt.2  .and. pm%is_quark(this%processes(io,iproc)))) then
          is_quark_from_order=.true.
       else
          is_quark_from_order=.false.
@@ -1644,8 +1404,8 @@ contains
       ! 'io' should be a label in the colour order
       implicit none
       integer :: io,iproc
-      if ( (io.le.2  .and. (this%processes(io,iproc).ge. 1 .and. this%processes(io,iproc).le. 6)) .or. &
-           (io.gt.2  .and. (this%processes(io,iproc).le.-1 .and. this%processes(io,iproc).ge.-6))) then
+      if ( (io.le.2  .and. pm%is_quark(this%processes(io,iproc))) .or. &
+           (io.gt.2  .and. pm%is_antiquark(this%processes(io,iproc)))) then
          is_antiquark_from_order=.true.
       else
          is_antiquark_from_order=.false.
@@ -1657,7 +1417,7 @@ contains
       integer,intent(in) :: len
       integer :: i
       do i=1,len
-         if (is_quark(curr%ext_type(i)).or.is_antiquark(curr%ext_type(i))) then
+         if (pm%is_quark(curr%ext_type(i)).or.pm%is_antiquark(curr%ext_type(i))) then
             quark_in_current=.true.
             return
          endif
@@ -1700,8 +1460,9 @@ contains
     ! current_list
     do isize=1,n-1
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          call this%current_list(ic)%iproc%bitset_write_unformatted(iunit)
           write (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%iproc,this%current_list(ic)%mass,this%current_list(ic)%width
+               this%current_list(ic)%mass,this%current_list(ic)%width
           write (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
           write (iunit) this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert)
           if (isize.eq.1 .or. isize.eq.n)  write (iunit) this%current_list(ic)%order(1),this%current_list(ic)%spin(1)
@@ -1710,7 +1471,7 @@ contains
     ! interaction_list
     do iv=1,this%n_vert
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),&
-            this%interaction_list(iv)%coupl
+            this%interaction_list(iv)%coupl(1:2)
        if (allocated(this%interaction_list(iv)%singlet_mv)) then
           write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
        else
@@ -1722,7 +1483,7 @@ contains
     write (iunit) this%pp_i_to_bin(1:this%max_pp)
     ! process specific information
     do iproc=1,this%nprocs
-       write (iunit) this%iproc_start(iproc),this%same_flav(iproc),this%same_flavour_proc_map(iproc,1:2),&
+       write (iunit) this%iproc_start(iproc),this%same_flav(iproc),&
             this%n_qqbar(iproc),this%n_sing(iproc)
        write (iunit) this%processes(1:n,iproc)
     enddo
@@ -1730,7 +1491,7 @@ contains
     ! amp specific information
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2)
+          write (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           write (iunit) this%spins(1:n,1,iamp)
           write (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) write (iunit) this%curr2amp(1:2,iamp)
@@ -1756,8 +1517,9 @@ contains
     allocate(this%current_list(this%n_cur))
     do isize=1,n-1
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          call this%current_list(ic)%iproc%bitset_read_unformatted(iunit)
           read (iunit) this%current_list(ic)%type,this%current_list(ic)%bin,this%current_list(ic)%n_vert, &
-               this%current_list(ic)%iproc,this%current_list(ic)%mass,this%current_list(ic)%width
+               this%current_list(ic)%mass,this%current_list(ic)%width
           allocate(this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert))
           allocate(this%current_list(ic)%vertex_sign(1:this%current_list(ic)%n_vert))
           read (iunit) this%current_list(ic)%vertices(1:this%current_list(ic)%n_vert)
@@ -1772,7 +1534,7 @@ contains
     ! interaction_list
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
-       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl,itmp
+       read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl(1:2),itmp
        if (itmp.gt.0) then
           allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
           this%interaction_list(iv)%singlet_mv(0)=itmp
@@ -1788,12 +1550,11 @@ contains
     ! process specific information
     allocate(this%iproc_start(1:this%nprocs+1))
     allocate(this%same_flav(1:this%nprocs))
-    allocate(this%same_flavour_proc_map(1:this%nprocs,1:2))
     allocate(this%n_qqbar(1:this%nprocs))
     allocate(this%n_sing(1:this%nprocs))
     allocate(this%processes(1:n,1:this%nprocs))
     do iproc=1,this%nprocs
-       read (iunit) this%iproc_start(iproc),this%same_flav(iproc),this%same_flavour_proc_map(iproc,1:2),&
+       read (iunit) this%iproc_start(iproc),this%same_flav(iproc),&
             this%n_qqbar(iproc),this%n_sing(iproc)
        read (iunit) this%processes(1:n,iproc)
     enddo
@@ -1809,7 +1570,7 @@ contains
     allocate(this%curr2amp(1:2,1:this%iproc_start(iproc)-1))
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-          read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2)
+          read (iunit) this%include_amp(iamp),this%same_flavour_sum(iamp,1:2),this%same_flavour_sum_operation(iamp,1:2)
           read (iunit) this%spins(1:n,1,iamp)
           read (iunit) this%perm(1:n-this%n_sing(1),iamp)
           if (.not.this%same_flav(iproc)) read (iunit) this%curr2amp(1:2,iamp)
@@ -1840,76 +1601,70 @@ contains
       if (allocated(this%pp_i_to_bin)) deallocate(this%pp_i_to_bin)
       if (allocated(this%iproc_start)) deallocate(this%iproc_start)
       if (allocated(this%same_flav)) deallocate(this%same_flav)
-      if (allocated(this%same_flavour_proc_map)) deallocate(this%same_flavour_proc_map)
       if (allocated(this%n_qqbar)) deallocate(this%n_qqbar)
       if (allocated(this%n_sing)) deallocate(this%n_sing)
       if (allocated(this%processes)) deallocate(this%processes)
       if (allocated(this%include_amp)) deallocate(this%include_amp)
       if (allocated(this%same_flavour_sum)) deallocate(this%same_flavour_sum)
+      if (allocated(this%same_flavour_sum_operation)) deallocate(this%same_flavour_sum_operation)
       if (allocated(this%spins)) deallocate(this%spins)
       if (allocated(this%perm)) deallocate(this%perm)
       if (allocated(this%curr2amp)) deallocate(this%curr2amp)
     end subroutine deallocate_all
   end subroutine read_init_amps_from_file
   
-  subroutine evaluate(this,n,p,hel,read_file)
+  subroutine evaluate(this,n,p,hel,read_file,pm)
     use FeynmanRules
+    use particles
     implicit none
     class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
     integer :: n
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih_in,ip,ifinal
-    logical :: read_file 
+    integer :: ic,iv,isize,ih_in,ifinal,dim
+    logical :: read_file
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
-          if (this%current_list(ic)%type.eq.-21) then
-             if (use_real_gluons) then
-                allocate(this%current_list(ic)%val_r(1:6))
-             else
-                allocate(this%current_list(ic)%val_c(1:6))
-             endif
-          elseif (this%current_list(ic)%type.eq.21 .and. use_real_gluons) then
-             allocate(this%current_list(ic)%val_r(1:4))
+          if (use_real_gluons .and. &
+               (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_tensor6(this%current_list(ic)%type))) then
+             dim=pm%get_dim(this%current_list(ic)%type)
+             allocate(this%current_list(ic)%val_r(1:dim))
           else
-             allocate(this%current_list(ic)%val_c(1:4))
+             dim=pm%get_dim(this%current_list(ic)%type)
+             allocate(this%current_list(ic)%val_c(1:dim))
           endif
        enddo
        do iv=1,this%n_vert
-          if (this%interaction_list(iv)%type.eq.1) then
-             if (use_real_gluons) then
-                allocate(this%interaction_list(iv)%val_r(1:6))
-             else
-                allocate(this%interaction_list(iv)%val_c(1:6))
-             endif
-          elseif ((this%interaction_list(iv)%type.eq.0 .or. &
-                   this%interaction_list(iv)%type.eq.2 .or. &
-                   this%interaction_list(iv)%type.eq.3) .and. use_real_gluons  ) then
-             allocate(this%interaction_list(iv)%val_r(1:4))
+          if (use_real_gluons .and. &
+               (this%interaction_list(iv)%type.ge.0 .and. this%interaction_list(iv)%type.le.3)) then
+             dim=pm%get_inter_dim(this%interaction_list(iv)%type)
+             allocate(this%interaction_list(iv)%val_r(1:dim))
           else
-             allocate(this%interaction_list(iv)%val_c(1:4))
+             dim=pm%get_inter_dim(this%interaction_list(iv)%type)
+             allocate(this%interaction_list(iv)%val_c(1:dim))
           endif
        enddo
        if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
-          allocate(this%amps_r(1:this%n_amps))
+          if (.not. allocated(this%amps_r)) allocate(this%amps_r(1:this%n_amps))
        else
-          allocate(this%amps(1:this%n_amps))
+          if (.not. allocated(this%amps)) allocate(this%amps(1:this%n_amps))
        endif
     endif
     
     call fill_momentum_array()
-   
+
     do isize=1,n-1
        if (isize.eq.1) then
           ! fill the external wave_functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize)
              ifinal=1
              if (this%current_list(ic)%spin(1).eq.-9) then
-                ih_in=max(0,hel(this%current_list(ic)%order(1)))
+                ih_in=hel(this%current_list(ic)%order(1))
              else
-                ih_in=max(0,this%current_list(ic)%spin(1))
+                ih_in=this%current_list(ic)%spin(1)
              endif
-             if (this%current_list(ic)%type.eq.21) then
+             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
                 if (use_real_gluons) then
                    call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_r(1:4))
@@ -1917,20 +1672,18 @@ contains
                    call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
-             elseif (this%current_list(ic)%type.ge.1 .and. this%current_list(ic)%type.le.6 ) then
+             elseif (pm%is_quark(this%current_list(ic)%type)) then
                 call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (this%current_list(ic)%type.ge.-6 .and. this%current_list(ic)%type.le.-1 ) then
+             elseif (pm%is_antiquark(this%current_list(ic)%type)) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (this%current_list(ic)%type.eq.22) then
-                if (use_real_gluons) then
-                   call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_r(1:4))
-                else
-                   call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:4))
-                endif
+             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+             elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ifinal,this%current_list(ic)%val_c(1))
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
@@ -1938,7 +1691,6 @@ contains
           enddo
           cycle
        endif
-
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
@@ -2035,7 +1787,8 @@ contains
           elseif(this%interaction_list(iv)%type.eq.8) then
              call QuarkAquarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                     this%interaction_list(iv)%val_c(1:4))
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.9) then
              call AquarkQuarktoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2043,66 +1796,74 @@ contains
                                      this%interaction_list(iv)%val_c(1:4))
 
           elseif(this%interaction_list(iv)%type.eq.10) then
-             if (use_real_gluons) then
-                call GluonQuarktoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                                  this%interaction_list(iv)%val_c(1:4),&
-                                                  this%interaction_list(iv)%coupl)
-             else
-                call GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                             this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl)
-             endif
-
+             call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                          this%interaction_list(iv)%val_c(1:4),&
+                                          this%interaction_list(iv)%coupl(1:2))
           elseif(this%interaction_list(iv)%type.eq.11) then
-             if (use_real_gluons) then
-                call GluonAquarktoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                                    this%interaction_list(iv)%val_c(1:4),&
-                                                    this%interaction_list(iv)%coupl)
-             else
-                call GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                               this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl)
-             endif
-          elseif(this%interaction_list(iv)%type.eq.12) then
-             if (use_real_gluons) then
-                call QuarkGluontoQuark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                                                  this%interaction_list(iv)%val_c(1:4),&
-                                                  this%interaction_list(iv)%coupl)
-             else
-                call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                             this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl)
-             endif
+             call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                            this%interaction_list(iv)%val_c(1:4),&
+                                            this%interaction_list(iv)%coupl(1:2))
+          elseif (this%interaction_list(iv)%type.eq.12) then
+             call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                       this%interaction_list(iv)%val_c(1:4),&
+                       this%interaction_list(iv)%coupl(1:2))
+
           elseif(this%interaction_list(iv)%type.eq.13) then
-             if (use_real_gluons) then
-                call AquarkGluontoAquark_coupl_real(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                                                    this%interaction_list(iv)%val_c(1:4),&
-                                                    this%interaction_list(iv)%coupl)
-             else
-                call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                               this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl)
-             endif
-                 
+             call TwoGluonToTensor_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                         this%interaction_list(iv)%val_c(1:6),&
+                                         this%interaction_list(iv)%coupl(1:2))
+
           elseif(this%interaction_list(iv)%type.eq.14) then
-             call QuarkAquarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call TensorGluontoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
                                            this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.15) then
-             call AquarkQuarktoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+             call GluonTensortoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
                                            this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl)
+                                           this%interaction_list(iv)%coupl(1:2))
+
+          elseif(this%interaction_list(iv)%type.eq.16) then
+             call QuarkScalartoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl(1:2))
+
+          elseif(this%interaction_list(iv)%type.eq.17) then
+             call GluonGluontoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                     this%interaction_list(iv)%val_c(1),&
+                                     this%interaction_list(iv)%coupl(1:2))
+
+          elseif(this%interaction_list(iv)%type.eq.18) then
+             call ScalarGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.19) then
+             call GluonScalartoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                     this%interaction_list(iv)%val_c(1:4),&
+                                     this%interaction_list(iv)%coupl)
+
+          elseif(this%interaction_list(iv)%type.eq.20) then
+             call ScalarScalartoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                       this%interaction_list(iv)%val_c(1),&
+                                       this%interaction_list(iv)%coupl(1:2))
+
+
+
+
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -2111,27 +1872,43 @@ contains
 
        ! compute the currents by combining the interactions
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (this%current_list(ic)%type.eq.21) then
+          if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
              call combine_interactions(4)
              ! a gluon current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-          elseif ((this%current_list(ic)%type.ge.1.and.this%current_list(ic)%type.le.6)) then
+          elseif (pm%is_quark(this%current_list(ic)%type)) then
              ! a quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_quark_propagator()
              endif
-          elseif (this%current_list(ic)%type.eq.-21) then
+          elseif (pm%is_tensor6(this%current_list(ic)%type)) then
              ! the non-propagating tensor current
              call combine_interactions(6)
-          elseif ((this%current_list(ic)%type.le.-1.and.this%current_list(ic)%type.ge.-6)) then
+          elseif (pm%is_antiquark(this%current_list(ic)%type)) then
              ! an anti-quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
                 call include_aquark_propagator()
              endif
+          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+             call combine_interactions(4)
+             ! a massive vector boson current
+             if (isize.ne.n-1)  then
+                call include_gluon_propagator_mass()
+             endif
+          elseif (pm%is_higgs(this%current_list(ic)%type)) then
+             ! a scalar current
+             call combine_interactions(1)
+             if (isize.ne.n-1)  then
+                call include_scalar_propagator()
+             endif
+          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+             ! a non-propagating scalar current
+             call combine_interactions(1)
+
           else
              write (*,*) 'Unknown current type',ic,this%current_list(ic)%type
              stop 1
@@ -2160,7 +1937,7 @@ contains
 
     subroutine compute_amps_from_currents
       implicit none
-      integer :: iamp,ih1,ih2,ih,ic,ihc,iproc
+      integer :: iamp,iproc,idau
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          if (use_real_gluons .and. all(this%n_qqbar(1:this%nprocs).eq.0)) then
             do iamp=1,this%n_amps
@@ -2170,52 +1947,40 @@ contains
          else
             if (.not.read_file) then
                do iproc=1,this%nprocs
-               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (.not.this%same_flav(iproc)) then
-                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                  else
-                     ! same-flavour amps are build from two different-flavour amps
-                     if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                        this%amps(this%same_flavour_sum(iamp,2))/3d0
-                     elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                     elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+                  do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                     if (.not.this%same_flav(iproc)) then
+                        this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
-                        write (*,*) 'At least one should contribute'
-                        stop 1
+                        ! same-flavour amps are build from two different-flavour amps
+                        this%amps(iamp)=(0d0,0d0)
+                        do idau=1,2
+                           if (this%same_flavour_sum(iamp,idau).gt.0) then
+                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+                           endif
+                        enddo
                      endif
-                  endif
-               enddo
+                  enddo
                enddo
             else   
-             do iproc=1,this%nprocs
-                do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                  if (.not.this%same_flav(iproc)) then
-                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                                         this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                  else
-                     ! same-flavour amps are build from two different-flavour amps
-                     if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                        this%amps(this%same_flavour_sum(iamp,2))/3d0
-                     elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                     elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                        this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
+               do iproc=1,this%nprocs
+                  do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                     if (.not.this%same_flav(iproc)) then
+                        this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
-                        write (*,*) 'At least one should contribute'
-                        stop 1
+                        ! same-flavour amps are build from two different-flavour amps
+                        this%amps(iamp)=(0d0,0d0)
+                        do idau=1,2
+                           if (this%same_flavour_sum(iamp,idau).gt.0) then
+                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+                           endif
+                        enddo
                      endif
-                  endif
+                  enddo
                enddo
-            enddo
             endif
          endif
-
-
       elseif(this%imode.eq.2) then
          if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
             do iamp=1,this%n_amps
@@ -2243,17 +2008,13 @@ contains
                                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
                      else
                         ! same-flavour amps are build from two different-flavour amps
-                        if (this%same_flavour_sum(iamp,1).gt.0 .and. this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))+ &
-                                           this%amps(this%same_flavour_sum(iamp,2))/3d0
-                        elseif (this%same_flavour_sum(iamp,1).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,1))
-                        elseif (this%same_flavour_sum(iamp,2).gt.0) then
-                           this%amps(iamp)=this%amps(this%same_flavour_sum(iamp,2))/3d0
-                        else
-                           write (*,*) 'At least one should contribute'
-                           stop 1
-                        endif
+                        this%amps(iamp)=(0d0,0d0)
+                        do idau=1,2
+                           if (this%same_flavour_sum(iamp,idau).gt.0) then
+                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+!!$                              this%amps(iamp)=this%amps(iamp)+this%amps(this%same_flavour_sum(iamp,idau))
+                           endif
+                        enddo
                      endif
                   endif
                enddo
@@ -2262,10 +2023,19 @@ contains
       endif
     end subroutine compute_amps_from_currents
 
+    complex (kind=8) function apply_operation(iamp,idau)
+      implicit none
+      integer,intent(in) :: iamp,idau
+      apply_operation=this%amps(this%same_flavour_sum(iamp,idau))
+      if (btest(this%same_flavour_sum_operation(iamp,idau),2)) apply_operation=cmplx(aimag(apply_operation),dble(apply_operation))
+      if (btest(this%same_flavour_sum_operation(iamp,idau),0)) apply_operation=-conjg(apply_operation)
+      if (btest(this%same_flavour_sum_operation(iamp,idau),1)) apply_operation=conjg(apply_operation)
+    end function apply_operation
+    
     subroutine combine_interactions(dim)
       implicit none
-      integer :: dim,iv,i
-      if (use_real_gluons .and. abs(this%current_list(ic)%type).eq.21) then
+      integer :: dim,iv
+      if (use_real_gluons .and. (pm%is_gluon(this%current_list(ic)%type).or.pm%is_tensor_g(this%current_list(ic)%type))) then
          this%current_list(ic)%val_r(1:dim)=0d0
          do iv=1,this%current_list(ic)%n_vert
             if (this%current_list(ic)%vertex_sign(iv))then
@@ -2301,6 +2071,13 @@ contains
       endif
     end subroutine include_gluon_propagator
 
+    subroutine include_gluon_propagator_mass()
+      implicit none
+      call GluonPropagator_mass(this%current_list(ic)%val_c, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           this%current_list(ic)%mass,this%current_list(ic)%width)
+    end subroutine include_gluon_propagator_mass
+
     subroutine include_quark_propagator()
       implicit none
       call QuarkPropagator(this%current_list(ic)%val_c, &
@@ -2316,6 +2093,13 @@ contains
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_aquark_propagator
+    subroutine include_scalar_propagator()
+      implicit none
+      call ScalarPropagator(this%current_list(ic)%val_c, &
+           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           this%current_list(ic)%mass,&
+           this%current_list(ic)%width)
+    end subroutine include_scalar_propagator
   end subroutine evaluate
 
   subroutine init_col(this,n,col_acc)
@@ -2324,8 +2108,9 @@ contains
     implicit none
     class(amplitude_qcd) :: this
     integer,parameter :: max_vals=10000
-    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,i,j,gi,gj,ui,uj,uj_upper,iperm_upper,&
-         gi_iperm,key,max_keys,jperm_lower,ui_upper,n_unique_rows,irow,iunique,iproc,ioff,nOrd
+    integer :: col_acc,n,iperm,jperm,ival,iacc,isum,gi,gj,ui,uj,key &
+         ,max_keys,jperm_lower,n_unique_rows,irow,iunique,iproc,ioff &
+         ,nOrd
     integer,dimension(n) :: iper,jper,part
     integer,dimension(:),allocatable :: n_vals
     real(kind=8),dimension(1:3) :: col_fac
@@ -2334,13 +2119,14 @@ contains
     integer,dimension(:,:),allocatable :: ic,ir,n_colour_elements,unique_rows
     integer(kind=8),dimension(:),allocatable :: perm_dict
 
-    write (*,*) 'Initialising colour matrix ...'
+    write (99,*) 'Initialising colour matrix ...'
     if (this%nprocs.eq.1) then
        iproc=1
     elseif(this%nprocs.eq.3) then
        iproc=3
     else
        write (*,*) 'computation of color factor only for a single process at the time',this%nprocs
+       stop 1
     endif
     part(1:n)=this%processes(1:n,1)
     ioff=this%iproc_start(iproc)-1
@@ -2420,7 +2206,7 @@ contains
           enddo
        enddo
     enddo
-    write (*,*) 'A single row in the colour matrix has',n_vals(1:3),&
+    write (99,*) 'A single row in the colour matrix has',n_vals(1:3),&
          ' different colour factors at LC, NLC and full colour, respectively'
     
     ! determine i_col_i:
@@ -2462,7 +2248,7 @@ contains
           if (this%n_qqbar(iproc).eq.2)  call determine_gi_ui(jper,gj,uj)
           if (use_cm_dict) then
              ! GET color factors from permuting first row
-             call get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
+             call get_col_fac(iper,jper,ui,gi,col_fac)
           else
              ! COMPUTE color factors again
              call compute_color_factor(col_acc,nOrd,iper,jper,ui,uj,gi,gj,col_fac)
@@ -2490,7 +2276,7 @@ contains
        enddo
     enddo
 
-    write (*,*) '... colour matrix initialised'
+    write (99,*) '... colour matrix initialised'
   contains
     subroutine get_unique_row(iunique,irow,gi,ui)
       ! get a new row in the colour matrix corresponding to 'iunique'
@@ -2502,6 +2288,13 @@ contains
          if (ui.eq.1 .and. gi.eq.iunique-1) return
          if (ui.eq.2 .and. gi.eq.iunique-1-((nOrd-4)+1)) return
       enddo
+      if (irow.gt.this%nColOrd) then
+         write (*,*) 'Could not determine ui and gi correctly'
+         write (*,*) this%nColOrd,ui,gi,iunique,nOrd
+         write (*,*) part(1:n)
+         write (*,*) part(iper(1:n))
+         stop 1
+      endif
     end subroutine get_unique_row
 
     subroutine determine_gi(iper,gi)
@@ -2521,11 +2314,19 @@ contains
       implicit none
       integer :: ui
       integer,dimension(n) :: iper
-      if (abs(part(iper(1))).eq.abs(part(iper(n-this%n_sing(1))))) then
+      ! check if quarks are connected in the same (or opposite way) as
+      ! compared to the very first permutation
+      if ((iper(1).eq.this%perm(1,ioff+1) .and. iper(nOrd).eq.this%perm(nOrd,ioff+1)) .or. &
+           (iper(1).ne.this%perm(1,ioff+1) .and. iper(nOrd).ne.this%perm(nOrd,ioff+1))) then
          ui=1
       else
          ui=2
       endif
+!!$      if (abs(part(iper(1))).eq.abs(part(iper(n-this%n_sing(1))))) then
+!!$         ui=1
+!!$      else
+!!$         ui=2
+!!$      endif
     end subroutine determine_ui
     
     subroutine determine_gi_ui(iper,gi,ui)
@@ -2536,9 +2337,9 @@ contains
       call determine_ui(iper,ui)
     end subroutine determine_gi_ui
     
-   subroutine get_col_fac(iper,jper,ui,uj,gi,gj,col_fac)
+   subroutine get_col_fac(iper,jper,ui,gi,col_fac)
      implicit none
-     integer,intent(in) :: gi,gj,ui,uj
+     integer,intent(in) :: gi,ui
      integer,dimension(n),intent(in) :: iper,jper
      integer,dimension(n) :: col_new,row_first,row_per,col_per
      integer :: i,j,key,iunique
@@ -2663,7 +2464,7 @@ contains
                if (ui.eq.1 .and. uj.eq.1) then
                   col_fac(1)=dble(3**(n-2))
                elseif (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav(iproc)) then
-                  col_fac(1)=dble(3**(n-4))
+                  col_fac(1)=dble(3**(n-4))  * 9d0 ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                elseif (ui.eq.2 .and. uj.eq.2 .and. this%same_flav(iproc)) then
                   col_fac(1)=dble(3**(n-2))
                endif
@@ -2727,21 +2528,23 @@ contains
                k=k+1
             enddo
             call convert_gluon_string(n,iper_glu,jper_glu,iper_ord,jper_ord)
-            if (.not.this%same_flav(iproc)) then
-               call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
-               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
-               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
-            else
+!!$            if (.not.this%same_flav(iproc)) then
+!!$               call check_NLC_2qqbar(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
+!!$               if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
+!!$               if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-4)) ! NLC parts
+!!$               write (*,*) 'DF',col_fac(2),acc
+!!$            else
                call check_NLC_2qqbar_SF(n,iper_ord,jper_ord,gi,gj,ui,uj,acc)
                if (acc.eq.99) col_fac(2)=dble((3)**(n-2))-dble((n-4)*(3)**(n-4)) ! LC interfence
                if (acc.le.1) col_fac(2)=dble(acc*(3)**(n-3)) ! NLC parts
-            endif
+!!$               write (*,*) 'SF',col_fac(2),acc
+!!$            endif
             ! include the full expansion
             if (acc.ne.0) then
                call Tr_allocate(n)
                if (ui.eq.uj) then
                   Tr(0,0,0)=1 ! one term
-                  Tr(0,0,1)=2
+                  Tr(0,0,1)=2 ! two traces
                   Tr(0,1,1) = gi+gj  ! number of generators in first trace
                   Tr(0,2,1) = 2*(n-4)-(gi+gj)  ! number of generators in second trace
                   Tr(1:gi,1,1) = iper(2:2+gi-1)
@@ -2749,7 +2552,7 @@ contains
                   Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
                   Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
                   if (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav(iproc)) then
-                     coef(1)=1d0/9d0
+                     coef(1)=1d0/9d0 *9d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                   else
                      coef(1)=1d0
                   endif
@@ -2763,7 +2566,7 @@ contains
                   Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
                   Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
                   if (.not.this%same_flav(iproc)) then
-                     coef(1)=-1d0/3d0
+                     coef(1)=-1d0/3d0 *3d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                   else
                      coef(1)=-1d0
                   endif
@@ -2824,7 +2627,7 @@ contains
                Tr(1:n-4-gi,2,1) = iper(2+gi+2:n-1)
                Tr(n-4-gi+1:2*(n-4)-(gi+gj),2,1) = jper(n-1:2+gj+2:-1)
                if (ui.eq.2 .and. uj.eq.2 .and. .not.this%same_flav(iproc)) then
-                  coef(1)=1d0/9d0
+                  coef(1)=1d0/9d0  *9d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                else
                   coef(1)=1d0
                endif
@@ -2838,7 +2641,7 @@ contains
                Tr(gi+(n-4-gj)+1:2*(n-4)-gj,1,1) = iper(2+gi+2:n-1)
                Tr(2*(n-4)-gj+1:2*(n-4),1,1) = jper(2+gj-1:2:-1)
                if (.not.this%same_flav(iproc)) then
-                  coef(1)=-1d0/3d0
+                  coef(1)=-1d0/3d0   * 3d0  ! compensate for the already included factor 1/3 in qqbar->g Feynman rule
                else
                   coef(1)=-1d0
                endif
@@ -2883,6 +2686,806 @@ contains
 
   end subroutine init_col
 
+  subroutine optimise_evaluation(this,n)
+    !
+    ! POTENTIAL OTHER OPTIMISATIONS:
+    !
+    ! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
+    ! 2. INCLUDE MULTIPLICATIVE COUPLING CONSTANT AT LATER STAGE
+    ! 3. WEYL SPINORS & SEPARATE VERTEX ROUTINES FOR LEFT AND RIGHT-HANDED INTERACTIONS?
+    !      
+    implicit none
+    class(amplitude_QCD),intent(inout) :: this
+    integer :: isize,ic1,ic2,iv1,iv2,i,n_vert,n,ic,iv
+    integer,dimension(:,:),allocatable :: map_cur,map_vert
+    integer,dimension(n-1) :: identical_curr,identical_vert
+    real(kind=8),parameter :: tiny=1d-10
+    logical,dimension(:),allocatable :: include_cur,include_vert,reordered_interactions
+    type(current),dimension(:),allocatable :: current_list_local
+    type(interaction),dimension(:),allocatable :: interaction_list_local
+    integer,dimension(:),allocatable :: interactions_map
+    allocate(include_cur(1:this%n_cur))
+    allocate(include_vert(1:this%n_vert))
+    include_cur=.true.
+    include_vert=.true.
+    allocate(map_cur(0:this%n_cur,1:2))
+    allocate(map_vert(0:this%n_vert,1:2))
+    map_cur(0,1)=0
+    map_vert(0,1)=0
+    identical_curr=0
+    identical_vert=0
+    do isize=1,n-1
+       do ic1=this%n_cur_start(isize),this%n_cur_end(isize)-1
+          if (.not.include_cur(ic1)) cycle
+          if (sum(abs(this%current_list(ic1)%val_c)).eq.0d0) then
+             map_cur(0,1)=map_cur(0,1)+1
+             map_cur(map_cur(0,1),1)=ic1
+!!$               map_cur(map_cur(0,1),2)=0
+             map_cur(map_cur(0,1),2)=ic1
+             include_cur(ic1)=.false.
+             cycle
+          endif
+          do ic2=ic1+1,this%n_cur_end(isize)
+             if (.not.include_cur(ic2)) cycle
+             if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
+             if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
+                  sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
+                map_cur(0,1)=map_cur(0,1)+1
+                map_cur(map_cur(0,1),1)=ic2
+                map_cur(map_cur(0,1),2)=ic1
+                identical_curr(isize)=identical_curr(isize)+1
+                include_cur(ic2)=.false.
+             endif
+          enddo
+       enddo
+    enddo
+    do i=1,map_cur(0,1)
+       do iv1=1,this%n_vert
+          if (this%interaction_list(iv1)%currents(1).eq.map_cur(i,1)) then
+             this%interaction_list(iv1)%currents(1)=map_cur(i,2)
+          endif
+          if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) then
+             this%interaction_list(iv1)%currents(2)=map_cur(i,2)
+          endif
+       enddo
+    enddo
+    do isize=2,n-1
+       do iv1=this%n_vert_start(isize),this%n_vert_end(isize)-1
+          if (.not.include_vert(iv1)) cycle
+          if (sum(abs(this%interaction_list(iv1)%val_c)).eq.0d0) then
+             map_vert(0,1)=map_vert(0,1)+1
+             map_vert(map_vert(0,1),1)=iv1
+!!$               map_vert(map_vert(0,1),2)=0
+             map_vert(map_vert(0,1),2)=iv1
+             include_vert(iv1)=.false.
+             cycle
+          endif
+          do iv2=iv1+1,this%n_vert_end(isize)
+             if (.not.include_vert(iv2)) cycle
+             if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
+             if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
+                  sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
+                map_vert(0,1)=map_vert(0,1)+1
+                map_vert(map_vert(0,1),1)=iv2
+                map_vert(map_vert(0,1),2)=iv1
+                identical_vert(isize)=identical_vert(isize)+1
+                include_vert(iv2)=.false.
+             endif
+          enddo
+       enddo
+    enddo
+    do i=1,map_vert(0,1)
+       do ic1=1,this%n_cur
+          do iv1=1,this%current_list(ic1)%n_vert
+             if (this%current_list(ic1)%vertices(iv1).eq.map_vert(i,1)) then
+                this%current_list(ic1)%vertices(iv1)=map_vert(i,2)
+             endif
+          enddo
+       enddo
+    enddo
+
+    allocate(this%include_amp(1:this%n_amps))
+    this%include_amp=.true.
+    call this%filter_dead_trees(n)
+    deallocate(this%include_amp)
+    do ic=1,this%n_cur
+       if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
+       if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
+    enddo
+    do iv=1,this%n_vert
+       if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
+       if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
+    enddo
+    write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
+  end subroutine optimise_evaluation
+
+  subroutine create_library(this,n,hel,igroup,iint,pm,p)
+    use particles
+    implicit none
+    class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
+    integer,intent(in) :: n,igroup,iint
+    real(kind=8),dimension(0:3,n),intent(in) :: p
+    integer,parameter :: iunit=14
+    integer,dimension(n),intent(in)::hel
+    character(len=170) :: line,tmp
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau
+    integer,dimension(0:20) :: icount
+    integer,dimension(150,7) :: icount_type
+    integer,dimension(:,:),allocatable :: curs
+    integer,dimension(:),allocatable :: pp
+    real(kind=8),dimension(:),allocatable :: m,w
+    integer,dimension(this%n_vert,0:20) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:20) :: coupl
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
+    open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
+    write(iunit) p
+    write(iunit) this%amps
+    close(iunit)
+
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
+    write(tmp,*) this%n_vert
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
+    open(file=line,unit=iunit,status='unknown')
+    write(line,*) iint
+    write(iunit,*) 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    write(iunit,*) 'use FeynmanRules'
+    write(iunit,*) 'implicit none'
+    write(iunit,*) 'private'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'contains'
+    write(iunit,*) 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
+    write(tmp,*) this%n_vert
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    write(iunit,*) 'call fill_momentum_array(p,pp)'
+    write(iunit,*) 'call compute_external_currents(pp,val_c)'
+    do isize=2,n-1
+       write(tmp,*) isize
+       write(iunit,*) 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,*) 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+    enddo
+    write(iunit,*) 'call compute_amps(amps,val_c)'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,*) 'subroutine fill_momentum_array(p,pp)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) n
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(tmp,*) this%max_pp
+    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(out) :: pp'
+    ! fill_momentum_array
+    do ip=1,this%max_pp
+       ibin=this%pp_i_to_bin(ip)
+       write(tmp,*) ip
+       line='pp(0:3,'//trim(adjustl(tmp))//')='
+       do i=1,n
+          write(tmp,*) i
+          if (btest(ibin,i-1) .and. i.le.2) &
+               line=trim(adjustl(line))//'-p(0:3,'//trim(adjustl(tmp))//')'
+          if (btest(ibin,i-1) .and. i.ge.3) &
+               line=trim(adjustl(line))//'+p(0:3,'//trim(adjustl(tmp))//')'
+       enddo
+       write (iunit,*) trim(adjustl(line))
+    enddo
+    write(iunit,*) 'end subroutine fill_momentum_array'
+    do isize=1,n-1
+       if (isize.eq.1) then
+          write(iunit,*) 'subroutine compute_external_currents(pp,val_c)'
+          write(iunit,*) 'implicit none'
+          write(tmp,*) this%max_pp
+          write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+          write(tmp,*) this%n_cur
+          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(out) :: val_c'
+          ! external wave-functions
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+             ifinal=1
+             if (this%current_list(ic)%spin(1).eq.-9) then
+                ih_in=hel(this%current_list(ic)%order(1))
+             else
+                ih_in=this%current_list(ic)%spin(1)
+             endif
+             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
+                   write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                   line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
+                   write(tmp,*) ih_in
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                   write(tmp,*) ifinal
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                   write(tmp,*) ic
+                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             elseif (pm%is_quark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_quark(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_antiquark(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+                write(tmp,'(d20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+             elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_scalar(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             else
+                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
+                stop 1
+             endif
+             write(iunit,*) trim(adjustl(line))
+          enddo
+          write(iunit,*) 'end subroutine compute_external_currents'
+          cycle
+       endif
+
+       if (use_real_gluons) then
+          write (*,*) 'create library not implemented for use_real_gluons'
+          stop 1
+       endif
+       
+       ! interactions
+       ! loop over the vertices required to create all the currents with isize
+       ! number of external particles combined
+       write(tmp,*) isize
+       write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,*) 'implicit none'
+       write(tmp,*) this%max_pp
+       write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+       write(tmp,*) this%n_cur
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+       write(tmp,*) this%n_vert
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
+
+       icount(0:20)=0
+       do itype=0,20 ! vertex type
+          do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+             if (this%interaction_list(iv)%type.eq.itype) then
+                icount(itype)=icount(itype)+1
+                cur1(icount(itype),itype)=this%interaction_list(iv)%currents(1)
+                cur2(icount(itype),itype)=this%interaction_list(iv)%currents(2)
+                pp1(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+                pp2(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                int1(icount(itype),itype)=iv
+                coupl(1:2,icount(itype),itype)=this%interaction_list(iv)%coupl(1:2)
+             endif
+          enddo
+       enddo
+       do itype=0,20
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='call vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+          write(iunit,*) trim(adjustl(line))
+       enddo
+       write(tmp,*) isize
+       write(iunit,*) 'end subroutine compute_vertices'//trim(adjustl(tmp))
+
+       do itype=0,20
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+          write(iunit,*) trim(adjustl(line))
+          write(iunit,*) 'implicit none'
+          write(tmp,*) this%max_pp
+          write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+          write(tmp,*) this%n_cur
+          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+          write(tmp,*) this%n_vert
+          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
+          write(iunit,*) 'integer :: i'
+          write(tmp,*) icount(itype)
+          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[&'
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur1(i,itype)
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                line=trim(adjustl(line))//' &'
+                write(iunit,*) trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,*) trim(adjustl(line))//']'
+          write(tmp,*) icount(itype)
+          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur2=[&'
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur2(i,itype)
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                line=trim(adjustl(line))//' &'
+                write(iunit,*) trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,*) trim(adjustl(line))//']'
+          write(tmp,*) icount(itype)
+          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: int1=[&'
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) int1(i,itype)
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                line=trim(adjustl(line))//' &'
+                write(iunit,*) trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,*) trim(adjustl(line))//']'
+          if (itype.eq.0 .or. itype.eq.12) then
+             write(tmp,*) icount(itype)
+             write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp1(i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,*) trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,*) trim(adjustl(line))//']'
+             write(tmp,*) icount(itype)
+             write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp2=[&'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp2(i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,*) trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,*) trim(adjustl(line))//']'
+          endif
+          if (itype.eq.8 .or. itype.ge.10) then
+             write(tmp,*) icount(itype)*2
+             write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,'(D24.16)') coupl(1,i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                   write(tmp,'(D24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   write(tmp,'(D24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,2).eq.0 .and. i.ne.icount(itype)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,*) trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,*) trim(adjustl(line))//']'
+          endif
+
+       
+          write(tmp,*) icount(itype)
+          write(iunit,*)'do i=1,'//trim(adjustl(tmp))
+          if (itype.eq.0) then
+             line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.1) then
+             line='call TwoGluonToTensor(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.2) then
+             line='call TensorGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.3) then
+             line='call GluonTensortoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.4) then
+             line='call GluonQuarktoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.5) then
+             line='call GluonAQuarktoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.6) then
+             line='call QuarkGluontoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.7) then
+             line='call AQuarkGluontoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.8) then
+             line='call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.9) then
+             line='call AquarkQuarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+          elseif(itype.eq.10) then
+             line='call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.11) then
+             line='call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.12) then
+             line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
+                  'pp(0,pp2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.13) then
+             line='call TwoGluontoTensor_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.14) then
+             line='call TensorGluontoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.15) then
+             line='call GluonTensortoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.16) then
+             line='call QuarkScalartoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.17) then
+             line='call GluonGluontoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.18) then
+             line='call ScalarGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.19) then
+             line='call GluonScalartoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.20) then
+             line='call ScalarScalartoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          endif
+          write(iunit,*)trim(adjustl(line))
+          write(iunit,*)'enddo'
+
+          write(tmp,*) isize
+          line='end subroutine vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))
+          write(iunit,*) trim(adjustl(line))
+
+       enddo
+
+       write(tmp,*) isize
+       write(iunit,*) 'subroutine compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,*) 'implicit none'
+       write(tmp,*) this%max_pp
+       write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+       write(tmp,*) this%n_cur
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
+       write(tmp,*) this%n_vert
+       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
+
+       icount_type=0
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          if (pm%is_gluon(this%current_list(ic)%type)) then
+             itype=1
+          elseif (pm%is_quark(this%current_list(ic)%type)) then
+             itype=2
+          elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+             itype=3
+          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+             itype=4
+          elseif (pm%is_higgs(this%current_list(ic)%type)) then
+             itype=5
+          elseif (pm%is_tensor(this%current_list(ic)%type)) then
+             itype=6
+          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+             itype=7
+          endif
+          if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
+             write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
+             stop 1
+          endif
+          icount_type(this%current_list(ic)%n_vert,itype)=icount_type(this%current_list(ic)%n_vert,itype)+1
+       enddo
+
+       do i=1,150
+          do j=1,7
+             if (icount_type(i,j).eq.0) cycle
+             write(tmp,*) isize
+             line='call combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+             write(iunit,*) trim(adjustl(line))
+          enddo
+       enddo
+       write(tmp,*) isize
+       write(iunit,*) 'end subroutine compute_currents'//trim(adjustl(tmp))
+
+       
+       do i=1,150
+          do j=1,7
+             if (icount_type(i,j).eq.0) cycle
+
+             allocate(curs(0:i,icount_type(i,j)))
+             allocate(pp(icount_type(i,j)))
+             allocate(m(icount_type(i,j)))
+             allocate(w(icount_type(i,j)))
+             curs=0
+             ii=0
+             do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+                if (pm%is_gluon(this%current_list(ic)%type)) then
+                   itype=1
+                elseif (pm%is_quark(this%current_list(ic)%type)) then
+                   itype=2
+                elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+                   itype=3
+                elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                   itype=4
+                elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                   itype=5
+                elseif (pm%is_tensor(this%current_list(ic)%type)) then
+                   itype=6
+                elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+                   itype=7
+                endif
+                if (itype.ne.j) cycle
+                if (this%current_list(ic)%n_vert.ne.i) cycle
+                ii=ii+1
+                curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
+                curs(0,ii)=ic
+                pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
+                m(ii)=this%current_list(ic)%mass
+                w(ii)=this%current_list(ic)%width
+             enddo
+             write(tmp,*) isize
+             line='subroutine combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+             write(iunit,*) trim(adjustl(line))
+             write(iunit,*) 'implicit none'
+             write(tmp,*) this%max_pp
+             write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+             write(tmp,*) this%n_cur
+             write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
+             write(tmp,*) this%n_vert
+             write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
+             write(iunit,*) 'integer :: i'
+             write(tmp,*) i
+             line='integer,parameter,dimension(0:'//trim(adjustl(tmp))//','
+             write(tmp,*) icount_type(i,j)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//') :: int1=reshape([&'
+             write(iunit,*) trim(adjustl(line))
+             line=''
+             do ii=1,icount_type(i,j)
+                do jj=0,i
+                   write(tmp,*) curs(jj,ii)
+                   if (ii.eq.1.and.jj.eq.0) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(jj+1+(ii-1)*(i+1),12).eq.0 .and. .not.(ii.eq.icount_type(i,j) .and. jj.eq.i)) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+             enddo
+             write(tmp,*) i+1
+             line=trim(adjustl(line))//'], shape=['//trim(adjustl(tmp))//','
+             write(tmp,*) icount_type(i,j)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
+             write(iunit,*) trim(adjustl(line))
+
+             if (j.ne.6 .and. j.ne.7) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,*) pp(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,12).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,*) trim(adjustl(line))//']'
+             endif
+
+             if (j.ge.2 .and. j.le.5) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: m=[&'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,'(D24.16)') m(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,*) trim(adjustl(line))//']'
+                write(tmp,*) icount_type(i,j)
+                write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: w=[&'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,'(D24.16)') w(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      line=trim(adjustl(line))//' &'
+                      write(iunit,*) trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,*) trim(adjustl(line))//']'
+             endif
+
+             write(tmp,*) icount_type(i,j)
+             write(iunit,*) 'do i=1,'//trim(adjustl(tmp))
+             write(tmp,*) i
+             if (j.eq.6) then
+                write(iunit,*) 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             elseif (j.eq.5 .or. j.eq.7) then
+                write(iunit,*) 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             else
+                write(iunit,*) 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             endif
+             if (j.eq.1 .and. isize.ne.n-1) then
+                write(iunit,*) 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+             elseif(j.eq.2 .and. isize.ne.n-1) then
+                write(iunit,*) 'call QuarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+             elseif(j.eq.3 .and. isize.ne.n-1) then
+                write(iunit,*) 'call AquarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+             elseif(j.eq.4 .and. isize.ne.n-1) then
+                write(iunit,*) 'call GluonPropagator_mass(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+             elseif(j.eq.5 .and. isize.ne.n-1) then
+                write(iunit,*) 'call ScalarPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+             endif
+             write(iunit,*) 'enddo'
+             write(tmp,*) isize
+             line='end subroutine combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(iunit,*) trim(adjustl(line))
+             deallocate(curs)
+             deallocate(pp)
+             deallocate(m)
+             deallocate(w)
+          enddo
+       enddo
+    enddo
+
+    write(iunit,*) 'subroutine compute_amps(amps,val_c)'
+    write(iunit,*) 'implicit none'
+    write(tmp,*) this%n_amps
+    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(tmp,*) this%n_cur
+    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+    
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          if (.not.this%same_flav(iproc)) then
+             write(tmp,*) iamp
+             line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+             write(tmp,*) this%curr2amp(1,iamp)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
+             write(tmp,*) this%curr2amp(2,iamp)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+          else
+             ! same-flavour amps are build from two different-flavour amps
+             write(tmp,*) iamp
+             line='amps('//trim(adjustl(tmp))//')='
+             do idau=1,2
+                if (this%same_flavour_sum(iamp,idau).gt.0) then
+                   write(tmp,*) this%same_flavour_sum(iamp,idau)
+                   if (this%same_flavour_sum_operation(iamp,idau) .eq. 0) then
+                      line=trim(adjustl(line))//'+amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
+                      line=trim(adjustl(line))//'-conjg(amps('//trim(adjustl(tmp))//'))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
+                      line=trim(adjustl(line))//'conjg(amps('//trim(adjustl(tmp))//'))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
+                      line=trim(adjustl(line))//'-amps('//trim(adjustl(tmp))//')'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
+                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                           ')),dble(amps('//trim(adjustl(tmp))//')))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
+                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                           ')),dble(amps('//trim(adjustl(tmp))//')))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
+                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                           ')),-dble(amps('//trim(adjustl(tmp))//')))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
+                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                           ')),-dble(amps('//trim(adjustl(tmp))//')))'
+                   else
+                      write (*,*) 'ERROR: unknown operation in creating library', &
+                           this%same_flavour_sum_operation(iamp,idau)
+                      stop 1
+                   endif
+                endif
+             enddo
+          endif
+          write(iunit,*) trim(adjustl(line))
+       enddo
+    enddo
+    write(iunit,*) 'end subroutine compute_amps'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,*) 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    close(iunit)
+  end subroutine create_library
+
+
+
   subroutine filter_helicity(this,n,nhel,include_hel)
     implicit none
     class(amplitude_qcd) :: this
@@ -2922,13 +3525,24 @@ contains
           else
              ! same-flavour amplitude.
              if (all(include_hel(this%same_flavour_sum(iamp,1:2)).eq.0)) then
-                write (*,*) 'inconsistency in helicity filter for same-flavour process'
+                write (*,*) 'inconsistency in helicity filter for same-flavour process #1'
+                write (*,*) iamp,this%same_flavour_sum(iamp,1:2)
                 stop 1
              endif
-             if (include_hel(this%same_flavour_sum(iamp,1)).lt.0) &
-                  this%same_flavour_sum(iamp,1)=-include_hel(this%same_flavour_sum(iamp,1))
-             if (include_hel(this%same_flavour_sum(iamp,2)).lt.0) &
-                  this%same_flavour_sum(iamp,2)=-include_hel(this%same_flavour_sum(iamp,2))
+             if (include_hel(this%same_flavour_sum(iamp,1)).lt.0) then
+                this%same_flavour_sum(iamp,1)=-include_hel(this%same_flavour_sum(iamp,1))
+                if (.not. this%include_amp(this%same_flavour_sum(iamp,1))) then
+                   write (*,*) 'inconsistency in helicity filter for same-flavour process #2'
+                   stop 1
+                endif
+             endif
+             if (include_hel(this%same_flavour_sum(iamp,2)).lt.0) then
+                this%same_flavour_sum(iamp,2)=-include_hel(this%same_flavour_sum(iamp,2))
+                if (.not. this%include_amp(this%same_flavour_sum(iamp,2))) then
+                   write (*,*) 'inconsistency in helicity filter for same-flavour process #3'
+                   stop 1
+                endif
+             endif
           endif
           nspin=nspin+1
           tmp_spin(1:n,1,nspin)=this%spins(1:n,1,iamp)
@@ -2950,7 +3564,7 @@ contains
     call this%filter_dead_trees(n,include_current)
     
     nhel=this%n_amps
-    write (*,*) 'Total number of currents and vertices after filtering helicities',this%n_cur,this%n_vert,this%n_amps
+    write (99,*) 'Total number of currents, vertices and amplitudes after filtering helicities',this%n_cur,this%n_vert,this%n_amps
     deallocate(this%include_amp)
 
   end subroutine filter_helicity
@@ -2970,7 +3584,7 @@ contains
     logical,dimension(:),allocatable :: is_needed_cur,is_needed_ver
     integer,dimension(:),allocatable :: where_to_cur,where_to_ver,where_to_amp
     logical,dimension(*),optional :: include_current
-    integer :: to_skip,isize,nc,iv,n,iamp,i,iproc
+    integer :: to_skip,isize,nc,iv,n,iamp,iproc,i
     allocate(is_needed_cur(this%n_cur))
     allocate(is_needed_ver(this%n_vert))
     allocate(where_to_cur(this%n_cur))
@@ -3058,13 +3672,17 @@ contains
     ! do the actual shifting of the amplitudes in the list
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
-       if (this%same_flavour_sum(iamp,1).le.0) then
-          this%curr2amp(1,where_to_amp(iamp))=where_to_cur(this%curr2amp(1,iamp))
-          this%curr2amp(2,where_to_amp(iamp))=where_to_cur(this%curr2amp(2,iamp))
-       else
-          this%same_flavour_sum(where_to_amp(iamp),1)=where_to_amp(this%same_flavour_sum(iamp,1))
-          this%same_flavour_sum(where_to_amp(iamp),2)=where_to_amp(this%same_flavour_sum(iamp,2))
-       endif
+       do i=1,2
+          if (this%same_flavour_sum(iamp,i).lt.0) then
+             this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
+          elseif (this%same_flavour_sum(iamp,i).eq.0) then
+             this%same_flavour_sum(where_to_amp(iamp),i)=0
+             this%same_flavour_sum_operation(where_to_amp(iamp),i)=0
+          else
+             this%same_flavour_sum(where_to_amp(iamp),i)=where_to_amp(this%same_flavour_sum(iamp,i))
+             this%same_flavour_sum_operation(where_to_amp(iamp),i)=this%same_flavour_sum_operation(iamp,i)
+          endif
+       enddo
     enddo
     
     ! and also the shifting of the auxiliary arrays and variables
@@ -3122,7 +3740,11 @@ contains
           exit
        endif
     enddo
-    this%iproc_start(this%nprocs+1)=this%n_amps+1
+    do iproc=this%nprocs+1,2,-1
+       if (this%iproc_start(iproc).gt.this%n_amps+1) then
+          this%iproc_start(iproc)=this%n_amps+1
+       endif
+    enddo
     deallocate(is_needed_ver)
     deallocate(is_needed_cur)
     deallocate(where_to_ver)
@@ -3131,13 +3753,14 @@ contains
 
   subroutine assign_interaction(lhs,rhs)
     ! sets non-custom 'lhs' = 'rhs' for interactions
+    use particles
     implicit none
     type(interaction),intent(inout) :: lhs
     type(interaction),intent(in) :: rhs
     integer :: val_size
     lhs%type=rhs%type
     lhs%currents(1:2)=rhs%currents(1:2)
-    lhs%coupl=rhs%coupl
+    lhs%coupl(1:2)=rhs%coupl(1:2)
     if (allocated(rhs%singlet_mv)) then
        if (rhs%singlet_mv(0).gt.0) then
           if (.not.allocated(lhs%singlet_mv)) allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))
@@ -3148,21 +3771,13 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(lhs%type.eq.-21) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_c)
        allocate(lhs%val_c(1:val_size))
        lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(lhs%type.eq.-21) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_r)
        allocate(lhs%val_r(1:val_size))
        lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
     endif
@@ -3170,6 +3785,7 @@ contains
   
   subroutine assign_current(lhs,rhs)
     ! sets non-custom 'lhs' = 'rhs' for currents
+    use particles
     implicit none
     type(current),intent(inout) :: lhs
     type(current),intent(in) :: rhs
@@ -3178,9 +3794,14 @@ contains
     lhs%bin=rhs%bin
     isize=popcnt(lhs%bin)
     lhs%n_vert=rhs%n_vert
-    lhs%iproc=rhs%iproc
+    if (allocated(lhs%iproc%bits)) deallocate(lhs%iproc%bits)
+    if (allocated(rhs%iproc%bits)) then
+       call lhs%iproc%init(rhs%iproc%n_bits)
+       lhs%iproc%bits=rhs%iproc%bits
+    endif
     lhs%mass=rhs%mass
     lhs%width=rhs%width
+    lhs%ext_cur=rhs%ext_cur
     if (allocated(rhs%vertices) .and. rhs%n_vert.gt.0) then
        if (.not.allocated(lhs%vertices)) allocate(lhs%vertices(1:lhs%n_vert))
        lhs%vertices(1:lhs%n_vert)=rhs%vertices(1:lhs%n_vert)
@@ -3206,21 +3827,13 @@ contains
     endif
     if (allocated(lhs%val_c)) deallocate(lhs%val_c)
     if (allocated(rhs%val_c)) then
-       if(lhs%type.eq.-21) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_c)
        allocate(lhs%val_c(1:val_size))
        lhs%val_c(1:val_size)=rhs%val_c(1:val_size)
     endif
     if (allocated(lhs%val_r)) deallocate(lhs%val_r)
     if (allocated(rhs%val_r)) then
-       if(lhs%type.eq.-21) then
-          val_size=6
-       else
-          val_size=4
-       endif
+       val_size=size(rhs%val_r)
        allocate(lhs%val_r(1:val_size))
        lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
     endif
@@ -3259,8 +3872,8 @@ contains
     if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
     if (allocated(amp%processes)) deallocate(amp%processes)
-    if (allocated(amp%same_flavour_proc_map)) deallocate(amp%same_flavour_proc_map)
     if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)
+    if (allocated(amp%same_flavour_sum_operation)) deallocate(amp%same_flavour_sum_operation)
     if (allocated(amp%spins)) deallocate(amp%spins)
     if (allocated(amp%row_index)) deallocate(amp%row_index)
     if (allocated(amp%include_amp)) deallocate(amp%include_amp)
@@ -3274,6 +3887,7 @@ contains
   end subroutine finalize_interaction
   subroutine finalize_current(cur)
     type(current),intent(inout) :: cur
+    if (allocated(cur%iproc%bits)) deallocate(cur%iproc%bits)
     if (allocated(cur%vertices)) deallocate(cur%vertices)
     if (allocated(cur%order)) deallocate(cur%order)
     if (allocated(cur%spin)) deallocate(cur%spin)
@@ -3282,4 +3896,5 @@ contains
     if (allocated(cur%val_c)) deallocate(cur%val_c)
     if (allocated(cur%val_r)) deallocate(cur%val_r)
   end subroutine finalize_current
+
 end module amplitude_QCD_mod

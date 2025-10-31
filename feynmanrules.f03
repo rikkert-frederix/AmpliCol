@@ -8,95 +8,124 @@ contains
     complex(kind=8),dimension(4) :: wf0,wf1
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8),parameter :: sqh=sqrt(0.5d0)
-    call ext_gluon_cmplx(p,1,ifinal,wf1)
-    call ext_gluon_cmplx(p,0,ifinal,wf0)
+    call ext_gluon_cmplx(p, 1,ifinal,wf1)
+    call ext_gluon_cmplx(p,-1,ifinal,wf0)
     if (ihel.eq.1) then
        wf(1:4)=dble(cImag*(wf1(1:4)+wf0(1:4)))*sqh
-    elseif (ihel.eq.0) then
+    elseif (ihel.eq.-1) then
        wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
     endif
   end subroutine ext_gluon_real
-  subroutine ext_gluon_cmplx(p,ihel,ifinal,wf)
+  subroutine ext_gluon_cmplx(p,ihel,idum,wf)
     ! External gluon wavefunction. From HELAS.
     implicit none
-    integer :: ihel,ifinal
+    integer :: ihel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     real(kind=8),parameter :: rZero=0d0,sqh=sqrt(0.5d0)
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: hel,pp,pt,pzpt
-!!$    hel = dble(2*ihel-1)
-!!$    pp = p(0)
-!!$    pt = sqrt(p(1)**2+p(2)**2)
-!!$    wf(1) = cZero
-!!$    wf(4) = dcmplx( hel*pt/pp*sqh )
-!!$    if ( pt.ne.rZero ) then
-!!$       pzpt = p(3)/(pp*pt)*sqh*hel
-!!$       wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-!!$       wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
-!!$    else
-!!$       wf(2) = dcmplx( -hel*sqh )
-!!$       wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
-!!$    endif
     if (p(0).eq.0d0) then
        write (*,*) 'Cannot generate external gluon with zero energy'
        write (*,*) p
        stop 1
     elseif (p(0).gt.0d0) then
-       hel = dble(2*ihel-1)
+       hel = dble(ihel)
        pp = p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
        wf(4) = dcmplx( hel*pt/pp*sqh )
        if ( pt.ne.rZero ) then
           pzpt = p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( -p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-          wf(3) = dcmplx( -p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
+          wf(2) = dcmplx( -p(1)*pzpt , -p(2)/pt*sqh )
+          wf(3) = dcmplx( -p(2)*pzpt ,  p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , sign(sqh,p(3)) )
        endif
     else
-!!$       hel = -dble(2*ihel-1)
-       hel = dble(2*ihel-1)
+       hel = dble(-ihel)
        pp = -p(0)
        pt = sqrt(p(1)**2+p(2)**2)
        wf(1) = cZero
        wf(4) = dcmplx( hel*pt/pp*sqh )
-!!$       if ( pt.ne.rZero ) then
-!!$          pzpt = -p(3)/(pp*pt)*sqh*hel
-!!$          wf(2) = dcmplx( p(1)*pzpt , -ifinal*p(2)/pt*sqh )
-!!$          wf(3) = dcmplx( p(2)*pzpt ,  ifinal*p(1)/pt*sqh )
-!!$       else
-!!$          wf(2) = dcmplx( -hel*sqh )
-!!$          wf(3) = dcmplx( rZero , ifinal*sign(sqh,p(3)) )
-!!$       endif
        if ( pt.ne.rZero ) then
           pzpt = -p(3)/(pp*pt)*sqh*hel
-          wf(2) = dcmplx( p(1)*pzpt ,  ifinal*p(2)/pt*sqh )
-          wf(3) = dcmplx( p(2)*pzpt , -ifinal*p(1)/pt*sqh )
+          wf(2) = dcmplx( p(1)*pzpt ,  p(2)/pt*sqh )
+          wf(3) = dcmplx( p(2)*pzpt , -p(1)/pt*sqh )
        else
           wf(2) = dcmplx( -hel*sqh )
-          wf(3) = dcmplx( rZero , -ifinal*sign(sqh,p(3)) )
+          wf(3) = dcmplx( rZero , -sign(sqh,p(3)) )
        endif
     endif
-  
   end subroutine ext_gluon_cmplx
 
 
-
-  subroutine ext_quark(p,ihel,ifinal,wf,fmass)
-  ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
-  ! state anti-quark (p(0)<0)
+  subroutine ext_gluon_mass(p,nhel,nsv,wf,vmass)
     implicit none
-    integer :: ihel,ifinal
+    double complex wf(4)
+    double precision p(0:3),vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
+    integer nhel,nsv,nsvahl
+    double precision rZero, rHalf, rOne, rTwo
+    parameter( rZero = 0.0d0, rHalf = 0.5d0 )
+    parameter( rOne = 1.0d0, rTwo = 2.0d0 )
+
+    sqh = dsqrt(rHalf)
+    hel = dble(nhel)
+    nsvahl = nsv*abs(nhel)
+    pt2 = p(1)**2+p(2)**2
+    pp = min(p(0),dsqrt(pt2+p(3)**2))
+    pt = min(pp,dsqrt(pt2))
+
+    if ( vmass.ne.rZero ) then
+       hel0 = rOne-dabs(hel)
+       if ( pp.eq.rZero ) then
+          wf(1) = dcmplx( rZero )
+          wf(2) = dcmplx(-hel*sqh )
+          wf(3) = dcmplx( rZero , nsvahl*sqh )
+          wf(4) = dcmplx( hel0 )
+       else
+          emp = p(0)/(vmass*pp)
+          wf(1) = dcmplx( hel0*pp/vmass )
+          wf(4) = dcmplx( hel0*p(3)*emp+hel*pt/pp*sqh )
+          if ( pt.ne.rZero ) then
+             pzpt = p(3)/(pp*pt)*sqh*hel
+             wf(2) = dcmplx( hel0*p(1)*emp-p(1)*pzpt , -nsvahl*p(2)/pt*sqh       )
+             wf(3) = dcmplx( hel0*p(2)*emp-p(2)*pzpt ,  nsvahl*p(1)/pt*sqh       )
+          else
+             wf(2) = dcmplx( -hel*sqh )
+             wf(3) = dcmplx( rZero , nsvahl*sign(sqh,p(3)) )
+          endif
+       endif
+    else
+       pp = p(0)
+       pt = sqrt(p(1)**2+p(2)**2)
+       wf(1) = dcmplx( rZero )
+       wf(4) = dcmplx( hel*pt/pp*sqh )
+       if ( pt.ne.rZero ) then
+          pzpt = p(3)/(pp*pt)*sqh*hel
+          wf(2) = dcmplx( -p(1)*pzpt , -nsv*p(2)/pt*sqh )
+          wf(3) = dcmplx( -p(2)*pzpt ,  nsv*p(1)/pt*sqh )
+       else
+          wf(2) = dcmplx( -hel*sqh )
+          wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
+       endif
+    endif
+
+
+  end subroutine ext_gluon_mass
+
+  subroutine ext_quark(p,nhel,idum,wf,fmass)
+    ! flowing-out fermion number, i.e., final state quark (p(0)>0) or initial
+    ! state anti-quark (p(0)<0)
+    implicit none
+    integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     complex(kind=8), dimension(2) :: chi
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    integer :: nhel
     real(kind=8), parameter :: tiny=1d-8
     real(kind=8) :: fmass, pp,pp3,lim
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
@@ -106,242 +135,233 @@ contains
 
     if (p(0).gt.0d0) then
        ! outgoing final state momenta
-       nhel = 2*ihel-1
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
-         else
-            chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
-         endif
-         if ( nhel.eq.1 ) then
-            ! oxxx, nsf=+1, nhel=+1
-            wf(1) = chi(1)
-            wf(2) = chi(2)
-            wf(3) = cZero
-            wf(4) = cZero
-         else
-            ! oxxx, nsf=+1, nhel=-1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(2)
-            wf(4) = chi(1)
-         endif
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
+          else
+             chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
+          endif
+          if ( nhel.eq.1 ) then
+             wf(1) = chi(1)
+             wf(2) = chi(2)
+             wf(3) = cZero
+             wf(4) = cZero
+          else
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(2)
+             wf(4) = chi(1)
+          endif
        else
-         nsf=+1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(p(0)+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+p(3),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-              chi(2) = dcmplx(-nh )
-         else
-              chi(2) = dcmplx( nh*p(1) , -p(2) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(2)*chi(im)
-         wf(2) = sfomeg(2)*chi(ip)
-         wf(3) = sfomeg(1)*chi(im)
-         wf(4) = sfomeg(1)*chi(ip)
-        endif
-
+          nsf=+1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(p(0)+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+p(3),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*p(1) , -p(2) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(2)*chi(im)
+          wf(2) = sfomeg(2)*chi(ip)
+          wf(3) = sfomeg(1)*chi(im)
+          wf(4) = sfomeg(1)*chi(ip)
+       endif
     else
        ! "outgoing" initial state momenta
-       nhel = (2*ihel-1)
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx(-nhel )*dsqrt(rTwo*abs(p(0)))
-         else
-            chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
-         endif
-         if ( -nhel.eq.1 ) then
-            ! oxxx, nsf=-1, nhel=+1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(2)
-            wf(4) = chi(1)
-         else
-            ! oxxx, nsf=-1, nhel=-1
-            wf(1) = chi(1)
-            wf(2) = chi(2)
-            wf(3) = cZero
-            wf(4) = cZero
-         endif
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx(-nhel )*dsqrt(rTwo*abs(p(0)))
+          else
+             chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
+          endif
+          if ( -nhel.eq.1 ) then
+             wf(1) = chi(1)
+             wf(2) = chi(2)
+             wf(3) = cZero
+             wf(4) = cZero
+          else
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(2)
+             wf(4) = chi(1)
+          endif
        else
-         nsf=-1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(abs(p(0))+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+(-p(3)),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-              chi(2) = dcmplx(-nh )
-         else
-              chi(2) = dcmplx( nh*(-p(1)) , -(-p(2)) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(2)*chi(im)
-         wf(2) = sfomeg(2)*chi(ip)
-         wf(3) = sfomeg(1)*chi(im)
-         wf(4) = sfomeg(1)*chi(ip)
+          nsf=-1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(abs(p(0))+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+(-p(3)),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*(-p(1)) , -(-p(2)) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(2)*chi(im)
+          wf(2) = sfomeg(2)*chi(ip)
+          wf(3) = sfomeg(1)*chi(im)
+          wf(4) = sfomeg(1)*chi(ip)
        endif
     endif
   end subroutine ext_quark
 
 
-  subroutine ext_antiquark(p,ihel,ifinal,wf,fmass)
-  ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
-  ! initial state quark (p(0)<0)
+  subroutine ext_antiquark(p,nhel,idum,wf,fmass)
+    ! flowing-in fermion number, i.e., final state anti-quark (p(0)>0), or
+    ! initial state quark (p(0)<0)
     implicit none
-    integer :: ihel,ifinal
+    integer :: nhel,idum
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(4) :: wf
     complex(kind=8), dimension(2) :: chi
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     complex(kind=8),parameter :: cZero=(0d0,0d0)
     real(kind=8) :: sqp0p3
-    integer :: nhel
     real(kind=8), parameter :: tiny=1d-8
     real(kind=8) :: fmass, pp,pp3,lim
     real(kind=8) :: omega(2),sfomeg(2),sf(2)
     integer :: im,ip,nsf,nh
-    
+
     lim=tiny
 
     if(p(0).gt.0d0) then
-! outgoing final state momenta
-       nhel = (2*ihel-1)
+       ! outgoing final state momenta
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
-         else
-            chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
-         endif
-         if ( -nhel.eq.1 ) then
-            ! ixxx, nsf=-1, nhel=-1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(1)
-            wf(4) = chi(2)
-         else
-            ! ixxx, nsf=-1, nhel=+1
-            wf(1) = chi(2)
-            wf(2) = chi(1)
-            wf(3) = cZero
-            wf(4) = cZero
-         endif
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
+          else
+             chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
+          endif
+          if ( -nhel.eq.1 ) then
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(1)
+             wf(4) = chi(2)
+          else
+             wf(1) = chi(2)
+             wf(2) = chi(1)
+             wf(3) = cZero
+             wf(4) = cZero
+          endif
        else
-         nsf=-1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(p(0)+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+p(3),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-            chi(2) = dcmplx(-nh )
-         else
-            chi(2) = dcmplx( nh*p(1) , p(2) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(1)*chi(im)
-         wf(2) = sfomeg(1)*chi(ip)
-         wf(3) = sfomeg(2)*chi(im)
-         wf(4) = sfomeg(2)*chi(ip)
-
+          nsf=-1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(p(0)+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+p(3),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*p(1) , p(2) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(1)*chi(im)
+          wf(2) = sfomeg(1)*chi(ip)
+          wf(3) = sfomeg(2)*chi(im)
+          wf(4) = sfomeg(2)*chi(ip)
        endif
-
     else
-! "outgoing" initial state momenta
-       nhel = 2*ihel-1
+       ! "outgoing" initial state momenta
        if (abs(fmass).lt.lim) then
-         if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
-            sqp0p3 = 0d0
-         else
-            sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
-         end if
-         chi(1) = dcmplx( sqp0p3 )
-         if ( sqp0p3.eq.rZero ) then
-            chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
-         else
-            chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
-         endif
-         if ( -nhel.eq.1 ) then
-            ! ixxx, nsf=+1, nhel=-1
-            wf(1) = chi(2)
-            wf(2) = chi(1)
-            wf(3) = cZero
-            wf(4) = cZero
-         else
-            ! ixxx, nsf=+1, nhel=+1
-            wf(1) = cZero
-            wf(2) = cZero
-            wf(3) = chi(1)
-            wf(4) = chi(2)
-         endif
-
+          if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+             sqp0p3 = 0d0
+          else
+             sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
+          end if
+          chi(1) = dcmplx( sqp0p3 )
+          if ( sqp0p3.eq.rZero ) then
+             chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
+          else
+             chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
+          endif
+          if ( nhel.eq.1 ) then
+             wf(1) = cZero
+             wf(2) = cZero
+             wf(3) = chi(1)
+             wf(4) = chi(2)
+          else
+             wf(1) = chi(2)
+             wf(2) = chi(1)
+             wf(3) = cZero
+             wf(4) = cZero
+          endif
        else
-         nsf=+1
-         nh=nsf*nhel
-         pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
-         sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
-         sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
-         omega(1) = dsqrt(abs(p(0))+pp)
-         omega(2) = fmass/omega(1)
-         ip = (3+nh)/2
-         im = (3-nh)/2
-         sfomeg(1) = sf(1)*omega(ip)
-         sfomeg(2) = sf(2)*omega(im)
-         pp3 = max(pp+(-p(3)),rZero)
-         chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
-         if ( pp3.eq.rZero ) then
-            chi(2) = dcmplx(-nh )
-         else
-            chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
-         endif
-         wf(1) = sfomeg(1)*chi(im)
-         wf(2) = sfomeg(1)*chi(ip)
-         wf(3) = sfomeg(2)*chi(im)
-         wf(4) = sfomeg(2)*chi(ip)
+          nsf=+1
+          nh=nsf*nhel
+          pp = abs(dsqrt(p(1)**2+p(2)**2+p(3)**2))
+          sf(1) = dble(1+nsf+(1-nsf)*nh)*0.5d0
+          sf(2) = dble(1+nsf-(1-nsf)*nh)*0.5d0
+          omega(1) = dsqrt(abs(p(0))+pp)
+          omega(2) = fmass/omega(1)
+          ip = (3+nh)/2
+          im = (3-nh)/2
+          sfomeg(1) = sf(1)*omega(ip)
+          sfomeg(2) = sf(2)*omega(im)
+          pp3 = max(pp+(-p(3)),rZero)
+          chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
+          if ( pp3.eq.rZero ) then
+             chi(2) = dcmplx(-nh )
+          else
+             chi(2) = dcmplx( nh*(-p(1)) , (-p(2)) )/dsqrt(rTwo*pp*pp3)
+          endif
+          wf(1) = sfomeg(1)*chi(im)
+          wf(2) = sfomeg(1)*chi(ip)
+          wf(3) = sfomeg(2)*chi(im)
+          wf(4) = sfomeg(2)*chi(ip)
        endif
     endif
   end subroutine ext_antiquark
 
+  subroutine ext_scalar(p,idum,wf)
+    implicit none
+    integer :: idum
+    real(kind=8), dimension(0:3) :: p
+    complex(kind=8), dimension(1) :: wf
+    real(kind=8),parameter :: rOne=1d0
+    wf(1)=(rOne,0d0)
+  end subroutine ext_scalar
 
 
 
@@ -395,9 +415,6 @@ contains
     wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))! * prefact
     wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))! * prefact
     wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))! * prefact
-!!$    do i=1,4
-!!$       wfT(1:4,i)=(wfg1(1:4)*wfg2(i)-wfg2(1:4)*wfg1(i))
-!!$    enddo
   end subroutine TwoGluontoTensor
   subroutine TwoGluontoTensor_real(wfg1,wfg2,wfT)
     ! This vertex includes the all factors such that the tensor "propagator"
@@ -416,16 +433,11 @@ contains
     implicit none
     complex(kind=8),dimension(4) :: wfg2,wfg
     complex(kind=8),dimension(6) :: wfT1
-!!$    complex(kind=8),parameter :: prefact=(-0.5d0,0d0)
     complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact
     wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact
     wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact
     wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact
-!!$    do i=1,4
-!!$       wfg(i)=((wfT1(1,i)*wfg2(1)-wfT1(2,i)*wfg2(2)-wfT1(3,i)*wfg2(3)-wfT1(4,i)*wfg2(4))- &
-!!$               (wfT1(i,1)*wfg2(1)-wfT1(i,2)*wfg2(2)-wfT1(i,3)*wfg2(3)-wfT1(i,4)*wfg2(4)))*0.25d0
-!!$    enddo
   end subroutine TensorGluontoGluon
   subroutine TensorGluontoGluon_real(wfT1,wfg2,wfg)
     implicit none
@@ -441,16 +453,11 @@ contains
     implicit none 
     complex(kind=8),dimension(4) :: wfg1,wfg
     complex(kind=8),dimension(6) :: wfT2
-!!$    complex(kind=8),parameter :: prefact=(-0.5d0,0d0)
     complex(kind=8),parameter :: prefact=(0d0,0.5d0)
     wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact
     wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact
     wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
-!!$    do i=1,4
-!!$       wfg(i)=-((wfg1(1)*wfT2(1,i)-wfg1(2)*wfT2(2,i)-wfg1(3)*wfT2(3,i)-wfg1(4)*wfT2(4,i))- &
-!!$               (wfg1(1)*wfT2(i,1)-wfg1(2)*wfT2(i,2)-wfg1(3)*wfT2(i,3)-wfg1(4)*wfT2(i,4)))*0.25d0
-!!$    enddo
   end subroutine GluonTensortoGluon
   subroutine GluonTensortoGluon_real(wfg1,wfT2,wfg)
     implicit none 
@@ -469,7 +476,7 @@ contains
 
 
 
-  subroutine QuarkGluontoQuark(wfq1,wfg2,wfq) ! from fvoxxx.f
+  subroutine QuarkGluontoQuark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -501,7 +508,7 @@ contains
     wfq(4)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1)) !sr2
   end subroutine QuarkGluontoQuark_real
 
-  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) ! from fvoxxx.f
+  subroutine GluonQuarktoQuark(wfg1,wfq2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -516,7 +523,7 @@ contains
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
   end subroutine GluonQuarktoQuark
 
-  subroutine GluonQuarktoQuark_real(wfg1,wfq2,wfq) ! from fvoxxx.f
+  subroutine GluonQuarktoQuark_real(wfg1,wfq2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq2,wfq
     real(kind=8),dimension(4) :: wfg1
@@ -533,7 +540,7 @@ contains
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
   end subroutine GluonQuarktoQuark_real
 
-  subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) ! TV from fvixxx.f
+  subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -548,7 +555,7 @@ contains
     wfq(4)=prefact*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
   end subroutine AquarkGluontoAquark
 
-  subroutine GluonAquarktoAquark(wfg1,wfq2,wfq) ! TV from fvixxx.f
+  subroutine GluonAquarktoAquark(wfg1,wfq2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -557,31 +564,28 @@ contains
     TMP2=wfg1(1)-wfg1(4)
     TMP3=wfg1(2)+cImag*wfg1(3)
     TMP4=wfg1(2)-cImag*wfg1(3)
-    wfq(1)=prefact*(TMP2*wfq2(3)-TMP4*wfq2(4)) !sr1 ! minus sign!
+    wfq(1)=prefact*(TMP2*wfq2(3)-TMP4*wfq2(4)) !sr1 
     wfq(2)=prefact*(TMP1*wfq2(4)-TMP3*wfq2(3)) !sr2
     wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
   end subroutine GluonAquarktoAquark
 
-  subroutine QuarKAquarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
+  subroutine QuarkAquarktoGluon(wfq1,wfq2,wfg,coupl) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
     TMP1=wfq1(3)*wfq2(1)+wfq1(2)*wfq2(4)
     TMP2=wfq1(4)*wfq2(2)+wfq1(1)*wfq2(3)
     TMP3=wfq1(2)*wfq2(3)-wfq1(4)*wfq2(1)
     TMP4=wfq1(1)*wfq2(4)-wfq1(3)*wfq2(2)
-    wfg(1)=( TMP1 + TMP2 )*prefact
-    wfg(2)=( TMP4 + TMP3 )*prefact
-    wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
-    wfg(4)=(-TMP1 + TMP2 )*prefact
-!    wfg(1)=( wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) + wfq1(2)*wfq2(4))*prefact
-!    wfg(2)=(-wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) + wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*prefact
-!    wfg(3)=( wfq1(3)*wfq2(2) - wfq1(4)*wfq2(1) - wfq1(1)*wfq2(4) + wfq1(2)*wfq2(3))*cImag*prefact
-!    wfg(4)=(-wfq1(3)*wfq2(1) + wfq1(4)*wfq2(2) + wfq1(1)*wfq2(3) - wfq1(2)*wfq2(4))*prefact
+    wfg(1)=( TMP1 + TMP2 )*prefact*coupl(1)
+    wfg(2)=( TMP4 + TMP3 )*prefact*coupl(1)
+    wfg(3)=(-TMP4 + TMP3 )*cImag*prefact*coupl(1)
+    wfg(4)=(-TMP1 + TMP2 )*prefact*coupl(1)
   end subroutine QuarkAquarktoGluon
-  subroutine AquarKQuarktoGluon(wfq1,wfq2,wfg) ! TV from jioxxx.f
+  subroutine AquarkQuarktoGluon(wfq1,wfq2,wfg) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
@@ -594,154 +598,152 @@ contains
     wfg(2)=( TMP4 + TMP3 )*prefact
     wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
     wfg(4)=(-TMP1 + TMP2 )*prefact
-!    wfg(1)=( wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) + wfq2(2)*wfq1(4))*prefact
-!    wfg(2)=(-wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) + wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*prefact
-!    wfg(3)=( wfq2(3)*wfq1(2) - wfq2(4)*wfq1(1) - wfq2(1)*wfq1(4) + wfq2(2)*wfq1(3))*cImag*prefact
-!    wfg(4)=(-wfq2(3)*wfq1(1) + wfq2(4)*wfq1(2) + wfq2(1)*wfq1(3) - wfq2(2)*wfq1(4))*prefact
   end subroutine AquarkQuarktoGluon
 
 
-
-
-
+  subroutine ThreeGluon_coupl(wf1,pwf1,wf2,pwf2,wf,coupl)
+    ! Colour-ordered three-gluon interaction
+    implicit none
+    complex(kind=8),dimension(4) :: wf1,wf2,wf
+    real(kind=8),dimension(0:3) :: pwf1,pwf2
+    complex(kind=8),parameter :: prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    TMP1 = wf1(1)*wf2(1)-wf1(2)*wf2(2)-wf1(3)*wf2(3)-wf1(4)*wf2(4)
+    TMP2 = wf1(1)*(2d0*pwf2(0)+pwf1(0))-wf1(2)*(2d0*pwf2(1)+pwf1(1))-wf1(3)*(2d0*pwf2(2)+pwf1(2))-wf1(4)*(2d0*pwf2(3)+pwf1(3))
+    TMP3 = wf2(1)*(-2d0*pwf1(0)-pwf2(0))-wf2(2)*(-2d0*pwf1(1)-pwf2(1))-wf2(3)*(-2d0*pwf1(2)-pwf2(2))-wf2(4)*(-2d0*pwf1(3)-pwf2(3))
+    TMP4 = prefact*coupl(1)
+    wf(1:4) = TMP4*(TMP1*(pwf1(0:3)-pwf2(0:3))+TMP2*wf2(1:4)+TMP3*wf1(1:4))
+  end subroutine ThreeGluon_Coupl
 
 
   subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl) ! from fvoxxx.f
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    real(kind=8) :: coupl
+    real(kind=8),dimension(2) :: coupl
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
     TMP4=wfg2(2)-cImag*wfg2(3)
-    TMP5=prefact*coupl
-    wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4)) 
-    wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3)) 
-    wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))  
-    wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))  
-  end subroutine QuarkGluontoQuark_Coupl
+    TMP5=prefact*coupl(1) ! L
+    wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4))
+    wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3))
+    TMP5=prefact*coupl(2) ! R
+    wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
+    wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
+  end subroutine QuarkGluontoQuark_coupl
 
-  subroutine QuarkGluontoQuark_coupl_real(wfq1,wfg2,wfq,coupl)
-    implicit none
-    complex(kind=8),dimension(4) :: wfq1,wfq
-    real(kind=8),dimension(4) :: wfg2
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    real(kind=8) :: TMP1,TMP2,coupl
-    complex(kind=8) :: TMP3,TMP4,TMP5
-    TMP1=wfg2(1)+wfg2(4)
-    TMP2=wfg2(1)-wfg2(4)
-    TMP3=dcmplx(wfg2(2),wfg2(3))
-    TMP4=dcmplx(wfg2(2),-wfg2(3))
-    TMP5=prefact*coupl
-    wfq(1)=TMP5*(TMP1*wfq1(3)+TMP3*wfq1(4)) !sl1
-    wfq(2)=TMP5*(TMP2*wfq1(4)+TMP4*wfq1(3)) !sl2
-    wfq(3)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2)) !sr1
-    wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1)) !sr2
-  end subroutine QuarkGluontoQuark_coupl_real
-
-  subroutine GluonQuarktoQuark_coupl(wfg1,wfq2,wfq,coupl) ! from fvoxxx.f
-    implicit none
-    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
-    real(kind=8) :: coupl
-    TMP1=wfg1(1)+wfg1(4)
-    TMP2=wfg1(1)-wfg1(4)
-    TMP3=wfg1(2)+cImag*wfg1(3)
-    TMP4=wfg1(2)-cImag*wfg1(3)
-    TMP5=prefact*coupl
-    wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4)) ! sl1 ! minus sign
-    wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
-    wfq(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
-    wfq(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
-  end subroutine GluonQuarktoQuark_Coupl
-
-  subroutine GluonQuarktoQuark_coupl_real(wfg1,wfq2,wfq,coupl) ! from fvoxxx.f
-    implicit none
-    complex(kind=8),dimension(4) :: wfq2,wfq
-    real(kind=8),dimension(4) :: wfg1
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    real(kind=8) :: TMP1,TMP2,coupl
-    complex(kind=8) :: TMP3,TMP4,TMP5
-    TMP1=wfg1(1)+wfg1(4)
-    TMP2=wfg1(1)-wfg1(4)
-    TMP3=dcmplx(wfg1(2),wfg1(3))
-    TMP4=dcmplx(wfg1(2),-wfg1(3))
-    TMP5=prefact*coupl
-    wfq(1)=TMP5*(TMP1*wfq2(3)+TMP3*wfq2(4)) ! sl1 ! minus sign
-    wfq(2)=TMP5*(TMP2*wfq2(4)+TMP4*wfq2(3)) ! sl2
-    wfq(3)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2)) ! sr1
-    wfq(4)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
-  end subroutine GluonQuarktoQuark_coupl_real
-
-  subroutine AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl) ! TV from fvixxx.f
+  subroutine AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
     complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
-    real(kind=8) :: coupl
+    real(kind=8),dimension(2) :: coupl
     TMP1=wfg2(1)+wfg2(4)
     TMP2=wfg2(1)-wfg2(4)
     TMP3=wfg2(2)+cImag*wfg2(3)
     TMP4=wfg2(2)-cImag*wfg2(3)
-    TMP5=prefact*coupl
+    TMP5=prefact*coupl(2)
     wfq(1)=TMP5*(TMP2*wfq1(3)-TMP4*wfq1(4)) !sr1
     wfq(2)=TMP5*(TMP1*wfq1(4)-TMP3*wfq1(3)) !sr2
+    TMP5=prefact*coupl(1)
     wfq(3)=TMP5*(TMP1*wfq1(1)+TMP4*wfq1(2)) !sl1
     wfq(4)=TMP5*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
-  end subroutine AquarkGluontoAquark_Coupl
+  end subroutine AquarkGluontoAquark_coupl
 
-  subroutine GluonAquarktoAquark_coupl(wfg1,wfq2,wfq,coupl) ! TV from fvixxx.f
+  subroutine TwoGluontoTensor_coupl(wfg1,wfg2,wfT,coupl)
+    ! This vertex includes the all factors such that the tensor "propagator"
+    ! is simply the identity
     implicit none
-    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
-    real(kind=8) :: coupl
-    TMP1=wfg1(1)+wfg1(4)
-    TMP2=wfg1(1)-wfg1(4)
-    TMP3=wfg1(2)+cImag*wfg1(3)
-    TMP4=wfg1(2)-cImag*wfg1(3)
-    TMP5=prefact*coupl
-    wfq(1)=TMP5*(TMP2*wfq2(3)-TMP4*wfq2(4)) !sr1 ! minus sign!
-    wfq(2)=TMP5*(TMP1*wfq2(4)-TMP3*wfq2(3)) !sr2
-    wfq(3)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2)) !sl1
-    wfq(4)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1)) !sl2
-  end subroutine GluonAquarktoAquark_Coupl
+    complex(kind=8),dimension(4) :: wfg1,wfg2
+    complex(kind=8),dimension(6) :: wfT
+    real(kind=8),dimension(2) :: coupl
+    ! Since it is an anti-symmetric 4x4 tensor, take only the upper-right triangle.
+    wfT(1)=(wfg1(1)*wfg2(2)-wfg1(2)*wfg2(1))*coupl(1)
+    wfT(2)=(wfg1(1)*wfg2(3)-wfg1(3)*wfg2(1))*coupl(1)
+    wfT(3)=(wfg1(1)*wfg2(4)-wfg1(4)*wfg2(1))*coupl(1)
+    wfT(4)=(wfg1(2)*wfg2(3)-wfg1(3)*wfg2(2))*coupl(1)
+    wfT(5)=(wfg1(2)*wfg2(4)-wfg1(4)*wfg2(2))*coupl(1)
+    wfT(6)=(wfg1(3)*wfg2(4)-wfg1(4)*wfg2(3))*coupl(1)
+  end subroutine TwoGluontoTensor_coupl
 
-  subroutine QuarKAquarktoGluon_coupl(wfq1,wfq2,wfg,coupl) ! TV from jioxxx.f
+  subroutine TensorGluontoGluon_coupl(wfT1,wfg2,wfg,coupl)
     implicit none
-    complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
-    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
-    real(kind=8) :: coupl
-    TMP1=wfq1(3)*wfq2(1)+wfq1(2)*wfq2(4)
-    TMP2=wfq1(4)*wfq2(2)+wfq1(1)*wfq2(3)
-    TMP3=wfq1(2)*wfq2(3)-wfq1(4)*wfq2(1)
-    TMP4=wfq1(1)*wfq2(4)-wfq1(3)*wfq2(2)
-    TMP5=prefact*coupl
-    wfg(1)=( TMP1 + TMP2 )*TMP5
-    wfg(2)=( TMP4 + TMP3 )*TMP5
-    wfg(3)=(-TMP4 + TMP3 )*cImag*TMP5
-    wfg(4)=(-TMP1 + TMP2 )*TMP5
-  end subroutine QuarKAquarktoGluon_Coupl
-  subroutine AquarKQuarktoGluon_coupl(wfq1,wfq2,wfg,coupl) ! TV from jioxxx.f
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(6) :: wfT1
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    real(kind=8),dimension(2) :: coupl
+    wfg(1)=(wfT1(1)*wfg2(2)+wfT1(2)*wfg2(3)+wfT1(3)*wfg2(4))*prefact*coupl(1)
+    wfg(2)=(wfT1(1)*wfg2(1)+wfT1(4)*wfg2(3)+wfT1(5)*wfg2(4))*prefact*coupl(1)
+    wfg(3)=(wfT1(2)*wfg2(1)-wfT1(4)*wfg2(2)+wfT1(6)*wfg2(4))*prefact*coupl(1)
+    wfg(4)=(wfT1(3)*wfg2(1)-wfT1(5)*wfg2(2)-wfT1(6)*wfg2(3))*prefact*coupl(1)
+  end subroutine TensorGluontoGluon_coupl
+
+  subroutine GluonTensortoGluon_coupl(wfg1,wfT2,wfg,coupl)
+    implicit none 
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(6) :: wfT2
+    complex(kind=8),parameter :: prefact=(0d0,0.5d0)
+    real(kind=8),dimension(2) :: coupl
+    wfg(1)=(-wfg1(2)*wfT2(1)-wfg1(3)*wfT2(2)-wfg1(4)*wfT2(3))*prefact*coupl(1)
+    wfg(2)=(-wfg1(1)*wfT2(1)-wfg1(3)*wfT2(4)-wfg1(4)*wfT2(5))*prefact*coupl(1)
+    wfg(3)=(-wfg1(1)*wfT2(2)+wfg1(2)*wfT2(4)-wfg1(4)*wfT2(6))*prefact*coupl(1)
+    wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact*coupl(1)
+  end subroutine GluonTensortoGluon_coupl
+
+
+  subroutine QuarkScalartoQuark(wfq1,wfs2,wfq,coupl)
     implicit none
-    complex(kind=8),dimension(4) :: wfq1,wfq2,wfg
+    complex(kind=8),dimension(4) :: wfq1,wfq
+    complex(kind=8),dimension(1) :: wfs2
     complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
-    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
-    real(kind=8) :: coupl
-    TMP1=wfq2(3)*wfq1(1)+wfq2(2)*wfq1(4)
-    TMP2=wfq2(4)*wfq1(2)+wfq2(1)*wfq1(3)
-    TMP3=wfq2(2)*wfq1(3)-wfq2(4)*wfq1(1)
-    TMP4=wfq2(1)*wfq1(4)-wfq2(3)*wfq1(2)
-    TMP5=prefact*coupl
-    wfg(1)=( TMP1 + TMP2 )*TMP5
-    wfg(2)=( TMP4 + TMP3 )*TMP5
-    wfg(3)=(-TMP4 + TMP3 )*cImag*TMP5
-    wfg(4)=(-TMP1 + TMP2 )*TMP5
-  end subroutine AquarKQuarktoGluon_Coupl
+    real(kind=8),dimension(2) :: coupl
+    wfq(1:4)=-prefact*coupl(1)*wfs2(1)*wfq1(1:4)
+  end subroutine QuarkScalartoQuark
+
+  subroutine GluonGluontoScalar(wfg1,wfg2,wfs,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg2
+    complex(kind=8),dimension(1) :: wfs
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8) :: TMP
+    TMP = wfg1(1)*wfg2(1)-wfg1(2)*wfg2(2)-wfg1(3)*wfg2(3)-wfg1(4)*wfg2(4)
+    wfs(1)= prefact*coupl(1)*TMP
+  end subroutine GluonGluontoScalar
+
+  subroutine ScalarGluontoGluon(wfs1,wfg2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg2,wfg
+    complex(kind=8),dimension(1) :: wfs1
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    wfg(1:4)= prefact*coupl(1)*wfs1(1)*(wfg2(1:4))
+  end subroutine ScalarGluontoGluon
+
+  subroutine GluonScalartoGluon(wfg1,wfs2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfg
+    complex(kind=8),dimension(1) :: wfs2
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))
+  end subroutine GluonScalartoGluon
+
+
+  subroutine ScalarScalartoScalar(wfs1,wfs2,wfs,coupl)
+    implicit none
+    complex(kind=8),dimension(1) :: wfs1,wfs2,wfs
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8) :: TMP
+    TMP=(1d0,0d0)
+    if (coupl(2).eq.-10d0) TMP=(0d0,1d0)
+    wfs(1)= prefact*TMP*coupl(1)*wfs1(1)*wfs2(1)
+  end subroutine ScalarScalartoScalar
+
 
 
 
@@ -766,6 +768,22 @@ contains
     propagator=1d0/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     wfg(1:4)=wfg(1:4)*propagator
   end subroutine GluonPropagator_Real
+
+  subroutine GluonPropagator_mass(wfg,p,vm,vw)
+    implicit none
+    complex(kind=8),dimension(1:4),intent(inout) :: wfg
+    real(kind=8),dimension(0:3),intent(in) :: p
+    complex(kind=8) :: propagator
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    real(kind=8) :: vm,vw
+    complex(kind=8) :: TMP
+    propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-vm**2+cImag*vm*vw)
+    TMP=(p(0)*wfg(1)-p(1)*wfg(2)-p(2)*wfg(3)-p(3)*wfg(4))/vm**2
+    wfg(1)=(wfg(1)-p(0)*TMP)*propagator
+    wfg(2)=(wfg(2)-p(1)*TMP)*propagator
+    wfg(3)=(wfg(3)-p(2)*TMP)*propagator
+    wfg(4)=(wfg(4)-p(3)*TMP)*propagator
+  end subroutine GluonPropagator_mass
 
   subroutine QuarkPropagator(wfq,p,fm,fw)
     implicit none
@@ -806,4 +824,15 @@ contains
     wfq(3)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3))*prefact
     wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine AquarkPropagator
+
+  subroutine ScalarPropagator(wfs,p,sm,sw)
+    implicit none
+    complex(kind=8),dimension(1),intent(inout) :: wfs
+    real(kind=8),dimension(0:3),intent(in) :: p
+    complex(kind=8) :: propagator
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    real(kind=8) :: sm,sw
+    propagator=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-sm**2+cImag*sm*sw)
+    wfs(1)=wfs(1)*propagator
+  end subroutine ScalarPropagator
 end module FeynmanRules

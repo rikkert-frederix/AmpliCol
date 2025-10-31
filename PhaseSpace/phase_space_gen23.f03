@@ -1,5 +1,5 @@
 module phase_space_gen23_mod
-!  use common
+  !  use common
   use phase_space_base
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
@@ -13,17 +13,17 @@ module phase_space_gen23_mod
   logical :: includePDF
   ! TECHNIAL PARAMETERS
   ! vebose:
-  logical,parameter :: verbose=.false.
+  logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),parameter :: ip=-1d0,ip_shat=-1.2d0
+  real(kind=8) :: ip,ip_shat
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
 
 contains
-  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf)
+  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -52,15 +52,15 @@ contains
     logical,intent(in) :: t_chan
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
-    integer(kind=4) :: i,j,ns,nns
-    real(kind=8) :: ptcut
+    logical,intent(in),optional :: flat
+    integer(kind=4) :: i,j
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     this%t_channel=t_chan
     if (verbose) then
-       write (*,*) 'Setting up',n,'particle phase-space'
-       write (*,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
-       write (*,*) 'Use the simple t-channel?',this%t_channel
+       write (99,*) 'Setting up',n,'particle phase-space'
+       write (99,*) 'Total available energy, sqrt(s-hat) =',this%sqrtshat
+       write (99,*) 'Use the simple t-channel?',this%t_channel
     endif
     includePDF=include_pdf
     call gen23_cleanup(this)
@@ -91,7 +91,7 @@ contains
        this%invm(ibset(0,i-1))=m(i)**2
        this%invm(ibclr(maskr(this%next),i-1))=m(i)**2
     enddo
-    if (verbose) write (*,*) 'masses:',m(1:n)
+    if (verbose) write (99,*) 'masses:',m(1:n)
     this%drcut=0d0
     this%ptcut=0d0
     this%sqrt_s_min=0d0
@@ -138,11 +138,23 @@ contains
        this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
     enddo
     if (verbose) then
-       write (*,*) "set 1:",this%sets(:,1)
-       write (*,*) "set 2:",this%sets(:,2)
+       write (99,*) "set 1:",this%sets(:,1)
+       write (99,*) "set 2:",this%sets(:,2)
+    endif
+    if (present(flat)) then
+       if (flat) then
+          ip=0d0
+          ip_shat=0d0
+       else
+          ip=-1d0
+          ip_shat=-1.2d0
+       endif
+    else
+       ip=-1d0
+       ip_shat=-1.2d0
     endif
     if (verbose) then
-       write (*,*) "Power in importance sampling:",ip
+       write (99,*) "Power in importance sampling:",ip
     endif
   contains
     subroutine setup_PS_cuts()
@@ -214,7 +226,7 @@ contains
     end subroutine setup_ETmin
 
   end subroutine gen23_init
-  
+
   subroutine gen23_cleanup(this)
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -404,7 +416,7 @@ contains
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
             write (*,*) 3-i,':',this%sets(:,3-i)
-            stop 
+            stop 1
          endif
          ! We need to get the momentum of the final particle of the set.
          this%pp(0:3,set(i))=this%pp(0:3,set(i)+inext+(3-i))+this%pp(0:3,(3-i))-this%pp(0:3,inext)
@@ -693,7 +705,7 @@ contains
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
-         write (*,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
+         write (99,*) 'error, gram4 greater than or equal to zero',gram4,i,ir
          this%jac=-5d0
          return
       endif
@@ -962,9 +974,9 @@ contains
          varmin=-var_max
          varmax=-var_min
       elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (*,*) 'ERROR: in random_to_var one of the two limits '/&
+         write (99,*) 'ERROR: in random_to_var one of the two limits '/&
               &/'is negative',var_min,var_max,power_in,jac,x
-         write (*,*) 'using flat transformation'
+         write (99,*) 'using flat transformation'
          power=0d0
          varmin=var_min
          varmax=var_max
@@ -1145,7 +1157,7 @@ contains
       this%jac=this%jac/((2d0*pi)**(3*(this%next-2)-4))
       ! Add flux factor
       this%jac=this%jac/(2d0*this%sqrtshat**2)
-      
+
     end subroutine compute_x_final_state
     subroutine gent_one_step_inverse(i,ir,ib)
       implicit none
@@ -1202,7 +1214,7 @@ contains
       root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
            (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
       if (root.lt.0d0) then
-          write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
+         write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
          stop 1
       endif
       tmin=max(tmin,this%invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
@@ -1457,7 +1469,7 @@ contains
            &,this%invm(ir+i),this%invm(i+im1),this%invm(ir+ib+i+im1),this%invm(ir),this%invm(i)&
            &,this%invm(im1))
       if (gram4.ge.0d0) then 
-         write (*,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
+         write (99,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
          this%jac=-5d0
          return
       endif
@@ -1492,11 +1504,11 @@ contains
       integer(kind=4) :: ip
       real(kind=8) :: varmin,varmax,power,var
       if (variable.lt.var_min) then
-         write (*,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
          jac=-1d0
          return
       elseif (variable.gt.var_max) then
-         write (*,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
          jac=-1d0
          return
       endif
@@ -1506,9 +1518,9 @@ contains
          varmax=-var_min
          var=-variable
       elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (*,*) 'ERROR: in var_to_random one of the two limits '/&
+         write (99,*) 'ERROR: in var_to_random one of the two limits '/&
               &/'is negative',var_min,var_max,power_in,jac,x
-         write (*,*) 'using flat transformation'
+         write (99,*) 'using flat transformation'
          power=0d0
          varmin=var_min
          varmax=var_max
@@ -1557,7 +1569,7 @@ contains
       ix=ix+1
       call var_to_random(this%invm(i),-0.5d0,shatmin,shatmax,this%x(ix),this%jac)
     end subroutine generate_mass_inverse
-    
+
   end subroutine gen23_compute_x_from_momenta
   real(kind=8) function dot(p1,p2)
     ! Inner product between two 4-vectors
@@ -1671,7 +1683,7 @@ contains
     real(kind=8) ::  t1,t2,yr
     yr = lambda(x,u,v)*lambda(x,w,z)
     if (yr.le.0d0) then
-       write (*,*) 'No allowed range for t: tmin=tmax',yr
+       write (99,*) 'No allowed range for t: tmin=tmax',yr
 !!$       stop 1
        yr=0d0
     endif
@@ -1742,166 +1754,170 @@ contains
     smin=min(s1,s2)
     smax=max(s1,s2)
   end subroutine sminmax
-    subroutine rotxxx(p,q,prot)
-      ! This subroutine performs the spacial rotation of a four-momentum.
-      ! the momentum p is assumed to be given in the frame where the spacial
-      ! component of q points the positive z-axis.  prot is the momentum p
-      ! rotated to the frame where q is given.
-      ! input:
-      !       real    p(0:3)         : four-momentum p in q(1)=q(2)=0 frame
-      !!       real    q(0:3)         : four-momentum q in the rotated frame
-      ! output:
-      !       real    prot(0:3)      : four-momentum p in the rotated frame
-      implicit none
-      real(kind=8),dimension(0:3) :: p,q
-      real(kind=8),dimension(0:3) :: prot
-      real(kind=8) :: qt2,qt,psgn,qq
-      real(kind=8),parameter :: rZero=0d0,rOne=1d0
-      prot(0) = p(0)
-      qt2 = q(1)**2 + q(2)**2
-      if ( qt2.eq.rZero ) then
-         if ( q(3).eq.rZero ) then
-            prot(1:3) = p(1:3)
-         else
-            psgn = sign(rOne,q(3))
-            prot(1:3) = p(1:3)*psgn
-         endif
-      else
-         qq = sqrt(qt2+q(3)**2)
-         qt = sqrt(qt2)
-         prot(1) = q(1)*q(3)/qq/qt*p(1) -q(2)/qt*p(2) +q(1)/qq*p(3)
-         prot(2) = q(2)*q(3)/qq/qt*p(1) +q(1)/qt*p(2) +q(2)/qq*p(3)
-         prot(3) =          -qt/qq*p(1)               +q(3)/qq*p(3)
-      endif
-    end subroutine rotxxx
-    subroutine rotxxx_inv(p,q,prot)
-      ! Same as rotxxx, but inverse. That is, first doing
-      ! rotxxx(p,q,prot) and then rotxxx_inv(prot,q,p) should give you
-      ! back the original p.
-      implicit none
-      real(kind=8),dimension(0:3),intent(in) :: p,q
-      real(kind=8),dimension(0:3),intent(out) :: prot
-      real(kind=8) :: qt2,qt,psgn,qq
-      prot(0) = p(0)
-      qt2 = q(1)**2 + q(2)**2
-      if ( qt2.lt.vtiny ) then
-         if ( q(3).eq.0d0 ) then
-            prot(1:3)=p(1:3)
-         else
-            psgn = sign(1d0,q(3))
-            prot(1:3)=p(1:3)*psgn
-         endif
-      else
-         qq = sqrt(qt2+q(3)**2)
-         qt = sqrt(qt2)
-         prot(1) = q(1)*q(3)/qq/qt*p(1) +q(2)*q(3)/qq/qt*p(2) -  qt/qq*p(3)
-         prot(2) =        -q(2)/qt*p(1) +        q(1)/qt*p(2)
-         prot(3) =   qt*q(1)/qq/qt*p(1) +        q(2)/qq*p(2) +q(3)/qq*p(3)
-      endif
-    end subroutine rotxxx_inv
-    subroutine rotz(p,phi,prot)
-      implicit none
-      real(kind=8),dimension(0:3) :: p,prot
-      real(kind=8) :: phi
-      prot(0)=p(0)
-      prot(1)=p(1)*cos(phi)-p(2)*sin(phi)
-      prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
-      prot(3)=p(3)
-    end subroutine rotz
-    subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr)
-      ! Generates 4 momentum for particle p1, and remainder pr given the
-      ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
-      ! particles with momenta pa, pb and outgoing particles with mass
-      ! m1,m2; t=(pb-p1)^2=(pa-pr)^2. Assumes that pa is a massless
-      ! momentum; phi is the azimuthal angle between pr and pc in the pa+pb
-      ! rest frame, with pa aligned with the positive z-axis.
-      implicit none
-      real(kind=8),intent(in) :: t,phi,m1,m2
-      real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
-      real(kind=8),intent(out),dimension(0:3) :: p1,pr
-      real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,phi_off
-      real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
-      real(kind=8),parameter :: tiny=1d-8
-      ptot(0:3)=pa(0:3)+pb(0:3)
-      ptotm(0)=ptot(0)
-      ptotm(1:3)=-ptot(1:3)
-      ! determine magnitude of Pii in cms frame (from dhelas routine mom2cx)
-      ESUM2 = dot(ptot,ptot)
-      if (esum2 .le. 0d0) then
-         write (*,*) "error :: must be time-like momentum in gentcms2",esum2
-         stop 1
-      endif
-      esum=sqrt(esum2)
-      MD2=(M2-M1)*(M1+M2)
-      ED=MD2/ESUM
-      IF (M1*M2.EQ.0.d0) THEN
-         PP2=0.25d0*(ESUM-ABS(ED))**2
-      ELSE
-         PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
-         if(pp2.lt.0d0) then
-            write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
-                 &/'3-momentum smaller than 0',pp2
-            stop 1
-         endif
-      ENDIF
-      call boostm(pa,ptotm,esum,pa_cms)
-      E_acms = pa_cms(0)
-      p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
+  subroutine rotxxx(p,q,prot)
+    ! This subroutine performs the spacial rotation of a four-momentum.
+    ! the momentum p is assumed to be given in the frame where the spacial
+    ! component of q points the positive z-axis.  prot is the momentum p
+    ! rotated to the frame where q is given.
+    ! input:
+    !       real    p(0:3)         : four-momentum p in q(1)=q(2)=0 frame
+    !!       real    q(0:3)         : four-momentum q in the rotated frame
+    ! output:
+    !       real    prot(0:3)      : four-momentum p in the rotated frame
+    implicit none
+    real(kind=8),dimension(0:3) :: p,q
+    real(kind=8),dimension(0:3) :: prot
+    real(kind=8) :: qt2,qt,psgn,qq
+    real(kind=8),parameter :: rZero=0d0,rOne=1d0
+    prot(0) = p(0)
+    qt2 = q(1)**2 + q(2)**2
+    if ( qt2.eq.rZero ) then
+       if ( q(3).eq.rZero ) then
+          prot(1:3) = p(1:3)
+       else
+          psgn = sign(rOne,q(3))
+          prot(1:3) = p(1:3)*psgn
+       endif
+    else
+       qq = sqrt(qt2+q(3)**2)
+       qt = sqrt(qt2)
+       prot(1) = q(1)*q(3)/qq/qt*p(1) -q(2)/qt*p(2) +q(1)/qq*p(3)
+       prot(2) = q(2)*q(3)/qq/qt*p(1) +q(1)/qt*p(2) +q(2)/qq*p(3)
+       prot(3) =          -qt/qq*p(1)               +q(3)/qq*p(3)
+    endif
+  end subroutine rotxxx
+  subroutine rotxxx_inv(p,q,prot)
+    ! Same as rotxxx, but inverse. That is, first doing
+    ! rotxxx(p,q,prot) and then rotxxx_inv(prot,q,p) should give you
+    ! back the original p.
+    implicit none
+    real(kind=8),dimension(0:3),intent(in) :: p,q
+    real(kind=8),dimension(0:3),intent(out) :: prot
+    real(kind=8) :: qt2,qt,psgn,qq
+    prot(0) = p(0)
+    qt2 = q(1)**2 + q(2)**2
+    if ( qt2.lt.vtiny ) then
+       if ( q(3).eq.0d0 ) then
+          prot(1:3)=p(1:3)
+       else
+          psgn = sign(1d0,q(3))
+          prot(1:3)=p(1:3)*psgn
+       endif
+    else
+       qq = sqrt(qt2+q(3)**2)
+       qt = sqrt(qt2)
+       prot(1) = q(1)*q(3)/qq/qt*p(1) +q(2)*q(3)/qq/qt*p(2) -  qt/qq*p(3)
+       prot(2) =        -q(2)/qt*p(1) +        q(1)/qt*p(2)
+       prot(3) =   qt*q(1)/qq/qt*p(1) +        q(2)/qq*p(2) +q(3)/qq*p(3)
+    endif
+  end subroutine rotxxx_inv
+  subroutine rotz(p,phi,prot)
+    implicit none
+    real(kind=8),dimension(0:3) :: p,prot
+    real(kind=8) :: phi
+    prot(0)=p(0)
+    prot(1)=p(1)*cos(phi)-p(2)*sin(phi)
+    prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
+    prot(3)=p(3)
+  end subroutine rotz
+  subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr)
+    ! Generates 4 momentum for particle p1, and remainder pr given the
+    ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
+    ! particles with momenta pa, pb and outgoing particles with mass
+    ! m1,m2; t=(pb-p1)^2=(pa-pr)^2. Assumes that pa is a massless
+    ! momentum; phi is the azimuthal angle between pr and pc in the pa+pb
+    ! rest frame, with pa aligned with the positive z-axis.
+    implicit none
+    real(kind=8),intent(in) :: t,phi,m1,m2
+    real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
+    real(kind=8),intent(out),dimension(0:3) :: p1,pr
+    real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,phi_off
+    real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
+    real(kind=8),parameter :: tiny=1d-8
+    ptot(0:3)=pa(0:3)+pb(0:3)
+    ptotm(0)=ptot(0)
+    ptotm(1:3)=-ptot(1:3)
+    ! determine magnitude of Pii in cms frame (from dhelas routine mom2cx)
+    ESUM2 = dot(ptot,ptot)
+    if (esum2 .le. 0d0) then
+       write (*,*) "error :: must be time-like momentum in gentcms2",esum2
+       stop 1
+    endif
+    esum=sqrt(esum2)
+    MD2=(M2-M1)*(M1+M2)
+    ED=MD2/ESUM
+    IF (M1*M2.EQ.0.d0) THEN
+       PP2=0.25d0*(ESUM-ABS(ED))**2
+    ELSE
+       PP2=0.25d0*((MD2/ESUM)**2-2d0*(M1**2+M2**2)+ESUM**2)
+       if(pp2.lt.0d0) then
+          write(*,*) 'Error #12 in genps_fks.f: magnitude^2 of '/&
+               &/'3-momentum smaller than 0',pp2
+          stop 1
+       endif
+    ENDIF
+    call boostm(pa,ptotm,esum,pa_cms)
+    E_acms = pa_cms(0)
+    p_acms = sqrt(pa_cms(1)**2+pa_cms(2)**2+pa_cms(3)**2)
 
-      ! determine the offset in phi; the frame in which phi is defined
-      ! is in the ptot rest-frame, with pa_cms aligned with the z-axis,
-      ! and pc having zero phi angle.
-      call boostm(pc,ptotm,esum,pc_cms)
-      call rotxxx_inv(pc_cms,pa_cms,pc_rot)
-      if (pc_rot(1).ne.0d0) then
-         phi_off=atan(pc_rot(2)/pc_rot(1))
-      else
-         phi_off=0d0
-      endif
-      if (pc_rot(1).lt.0d0) then
-         phi_off=phi_off+pi
-      endif
+    ! determine the offset in phi; the frame in which phi is defined
+    ! is in the ptot rest-frame, with pa_cms aligned with the z-axis,
+    ! and pc having zero phi angle.
+    call boostm(pc,ptotm,esum,pc_cms)
+    call rotxxx_inv(pc_cms,pa_cms,pc_rot)
+    if (pc_rot(1).ne.0d0) then
+       phi_off=atan(pc_rot(2)/pc_rot(1))
+    else
+       phi_off=0d0
+    endif
+    if (pc_rot(1).lt.0d0) then
+       phi_off=phi_off+pi
+    endif
 
-      ! define Pii in the frame where pa_cms is aligned with the positive z axis
-      Pii(0) = MAX((ESUM+ED)*0.5d0,0.d0)
-      if (esum+ed.le.0d0) then
-         write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
-         stop 1
-      endif
-      Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
-      pt2=pp2-Pii(3)**2
-      if (pt2/esum2.lt.-tiny) then
-         write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
-         stop 1
-      elseif (pt2.lt.0d0) then
-         pt2=0d0
-      endif
-      pt = sqrt(pt2)
-      Pii(1) = pt*cos(phi+phi_off)
-      Pii(2) = pt*sin(phi+phi_off)
-      call rotxxx(Pii,pa_cms,Pii_rot)       !Rotate Pii to the pa_cms frame
-      call boostm(Pii_rot,ptot,esum,Pii)    !boost back to lab fram
-      p1(0:3)=ptot(0:3)-pii(0:3)
-      pr(0:3)=pb(0:3)-p1(0:3)         !Return remainder of momentum
-    end subroutine gentcms2
-    real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran)
-      ! Given s_i (invariant mass of p_i and p_i+1, it transforms it
-      ! into phi_i. Note that there are two possibilities for phi: need
-      ! to pick one at random.
-      ! Based on eq.(11) of E.~Byckling and K.~Kajantie, ``Reductions of
-      ! the phase-space integral in terms of simpler processes,''
-      ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
-      implicit none
-      real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
-      real(kind=8) :: cosphi,x
-      cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
-      x=ran
-      if (x.gt.0.5d0) then
-         getphifroms=acos(cosphi)
-      else
-         getphifroms=-acos(cosphi)+2d0*pi
-      endif
-    end function getphifroms
-
+    ! define Pii in the frame where pa_cms is aligned with the positive z axis
+    Pii(0) = MAX((ESUM+ED)*0.5d0,0.d0)
+    if (esum+ed.le.0d0) then
+       write (*,*) 'Error #15 in genps_fks.f: negative energy',esum,ed
+       stop 1
+    endif
+    Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
+    pt2=pp2-Pii(3)**2
+    if (pt2/esum2.lt.-tiny) then
+       write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
+       stop 1
+    elseif (pt2.lt.0d0) then
+       pt2=0d0
+    endif
+    pt = sqrt(pt2)
+    Pii(1) = pt*cos(phi+phi_off)
+    Pii(2) = pt*sin(phi+phi_off)
+    call rotxxx(Pii,pa_cms,Pii_rot)       !Rotate Pii to the pa_cms frame
+    call boostm(Pii_rot,ptot,esum,Pii)    !boost back to lab fram
+    p1(0:3)=ptot(0:3)-pii(0:3)
+    pr(0:3)=pb(0:3)-p1(0:3)         !Return remainder of momentum
+  end subroutine gentcms2
+  real(kind=8) function getphifroms(si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran)
+    ! Given s_i (invariant mass of p_i and p_i+1, it transforms it
+    ! into phi_i. Note that there are two possibilities for phi: need
+    ! to pick one at random.
+    ! Based on eq.(11) of E.~Byckling and K.~Kajantie, ``Reductions of
+    ! the phase-space integral in terms of simpler processes,''
+    ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
+    implicit none
+    real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
+    real(kind=8) :: cosphi,x
+    cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
+    if (cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
+       write (99,*) 'WARNING cosphi does not have a reasonable value',cosphi
+       getphifroms=0d0
+       return
+    endif
+    x=ran
+    if (x.gt.0.5d0) then
+       getphifroms=acos(cosphi)
+    else
+       getphifroms=-acos(cosphi)+2d0*pi
+    endif
+  end function getphifroms
 
 end module phase_space_gen23_mod
