@@ -123,6 +123,7 @@ contains
        read(10,*)
        read(10,*)
     enddo
+    close(10)
   end subroutine read_processes_from_file
 
 

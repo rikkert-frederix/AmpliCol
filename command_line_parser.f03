@@ -1,12 +1,12 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library)
+  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
     logical :: verbose, show_help
-    character(len=80) :: filename,library
+    character(len=80) :: filename,library,tag
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
 
@@ -18,6 +18,7 @@ contains
     seed=0
     itmax=48
     library='none'
+    tag=''
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -40,6 +41,8 @@ contains
           read(tmp,*) itmax
        elseif (index(arg, "--library=").eq.1 .or. index(arg, "-l=").eq.1) then
           library = arg(index(arg, "=")+1:)
+       elseif (index(arg, "--tag=").eq.1 .or. index(arg, "-t=").eq.1) then
+          tag = trim(arg(index(arg, "=")+1:))//'_'
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -57,6 +60,7 @@ contains
        write (*,'(a)') "  --seed=[X],       -x=[X]  : The random number seed to use (default is read from randinit file)"
        write (*,'(a)') "  --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 48)"
        write (*,'(a)') "  --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, compile code with 'make matrix_integrate_library' after a library has been created). Default is 'none'."
+       write (*,'(a)') "  --tag=[X],        -t=[X]  : event file (and log file) names will be prepended with with 'tag_'."
        write (*,'(a)') ""
        stop
     end if

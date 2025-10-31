@@ -21,7 +21,7 @@ program matrix_integrate_QCD
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
-  character(len=80) :: filename,logfile="Outputs/log_file.txt"
+  character(len=80) :: filename,logfile,tag
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
@@ -38,21 +38,26 @@ program matrix_integrate_QCD
   logical :: create_amplitude_library,use_amplitude_library
   call cpu_time(tTot_B)
 
-  open(unit=99,file=logfile,status='unknown')
-
+  call get_run_arguments()
+  
   ! setting energy
   sqrts=14000.d0
 
   if (include_pdf) call PDF_initialise
-
+  
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
                            80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
-!!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
   call phys_model%init_vert()
 
   call cpu_time(tBefore)
-  call get_run_arguments()
-  if (use_amplitude_library) call read_amplitude_lib()
+  if (use_amplitude_library) then
+     call read_amplitude_lib()
+  else
+     call read_processes_from_file(filename)
+     do i=1,ngroups
+       call setup_optimised_multichannel_weight_computation(pgl(i))
+    enddo
+ endif
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
   
@@ -164,7 +169,7 @@ program matrix_integrate_QCD
 
   if (use_amplitude_library) call test_lib
   
-  filename='Outputs/events_tmp.lhe'
+  filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
   call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
   
@@ -202,7 +207,7 @@ program matrix_integrate_QCD
   call flush(11)
   call simple_integrator%assign_evnt_wgts(wgts)
   rewind(11)
-  filename='Outputs/events.lhe'
+  filename='Outputs/'//trim(adjustl(tag))//'events.lhe'
   open(unit=12,file=filename,action='write',status='unknown')
   write (*,*) 'Updating event weights...'
   write (99,*) 'Updating event weights...'
@@ -518,7 +523,8 @@ contains
     character(len=80) :: library
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library)
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag)
+
     if (library.eq.'none') then
        create_amplitude_library=.false.
        use_amplitude_library=.false.
@@ -530,23 +536,13 @@ contains
        use_amplitude_library=.true.
        return
     endif
-    call read_processes_from_file(filename)
-    close(10)
+    logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
+    open(unit=99,file=logfile,status='unknown')
 
-    do i=1,ngroups
-       call setup_optimised_multichannel_weight_computation(pgl(i))
-    enddo
-    
-    ! basic checks:
-    if (next.lt.4) then
-       write (*,*) 'Not enough external particles',next
-       stop 1
-    endif
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice
-       stop
+       stop 1
     endif
   end subroutine get_run_arguments
-
   
 end program matrix_integrate_QCD
