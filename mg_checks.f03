@@ -1,10 +1,10 @@
 module mg_checks
   use common
-  use handling_events
   integer :: k,nord
   real(kind=4),dimension(:),allocatable :: mg_check
-  real(kind=4),dimension(pgl(ichan)%nproc) :: me_code
+  real(kind=4),dimension(100) :: me_code
   logical :: match
+  real(kind=8),dimension(:,:),allocatable :: p_read
 
 contains
 
@@ -30,24 +30,21 @@ contains
    close(20)
   end subroutine get_madgraph_results
 
-  subroutine read_in_momenta(n,igroup,iamp)
+  subroutine read_in_momenta(n,igroup,iamp,p_in)
    implicit none
    integer :: i,k,n
    integer,intent(in) :: iamp,igroup
-   real(kind=8),dimension(0:3) :: p_in
+   real(kind=8),dimension(n,0:3),intent(out) :: p_in
    character(len=50) :: filename
    write(filename, '("momenta_", I0, "_",I0,".txt")') igroup,iamp
    open(40,file=trim(filename),status="old")
    do i=1,n
-        read(40,*) p_in
-        do k=0,3
-                pgl(igroup)%phase_space%p(k,i)=p_in(k)
-        enddo
+        read(40,*) p_in(i,:)
    enddo
    close(40)
   end subroutine read_in_momenta
 
-    subroutine run_madgraph_check(n,igroup,iamp,list)
+  subroutine run_madgraph_check(n,igroup,iamp,list)
    implicit none
    integer,intent(in) :: iamp
    integer,intent(in) :: n,igroup

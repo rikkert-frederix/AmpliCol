@@ -91,4 +91,4 @@ cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
 simple_integrator.o : helper_modules.o
 amplitude_library.o : handling_processes.o read_process_file.o
-mg_checks.o : handling_processes.o
+mg_checks.o : common.o

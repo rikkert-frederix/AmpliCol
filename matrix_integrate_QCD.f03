@@ -130,7 +130,13 @@ program matrix_integrate_QCD
            if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
-           if (read_momenta) call read_in_momenta(pgl(igroup)%next,igroup,iamp)
+           if (read_momenta) then
+                   if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
+                   call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
+                   do i=1,pgl(igroup)%next
+                         pgl(igroup)%phase_space%p(k,:)=p_read(i,:)
+                   enddo
+           endif
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
