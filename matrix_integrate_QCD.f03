@@ -134,7 +134,7 @@ program matrix_integrate_QCD
                    if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
                    call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
                    do i=1,pgl(igroup)%next
-                         pgl(igroup)%phase_space%p(k,:)=p_read(i,:)
+                         pgl(igroup)%phase_space%p(:,i)=p_read(i,:)
                    enddo
            endif
         enddo
@@ -293,11 +293,13 @@ contains
        t_PS= t_PS +tAfter-tBefore
        return
     endif
+    if (.not.read_momenta) then
     if (.not.pass_cuts(pgl(ichan))) then
        val=0d0
        call cpu_time(tAfter)
        t_PS= t_PS +tAfter-tBefore
        return
+    endif
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
@@ -318,7 +320,7 @@ contains
 
     if (read_momenta) then
         if (.not.allocated(mg_check)) allocate(mg_check(1000))
-        me_code = pgl(ichan)%amp2(:)*(4*pi*alphas)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
+        me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
                *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
         call get_madgraph_results(pgl(ichan)%next,ichan,iint,mg_check,nord)
         match=.false.
@@ -329,9 +331,11 @@ contains
         enddo
         if (.not.match) then
                 write(*,*) 'ERROR: no agreement found!'
-                write(*,*) me_code
+                write(*,*) me_code(1)
                 write(*,*) mg_check
                 stop 4
+        else
+                write(*,*) 'CHECK is fine!'
         endif
     endif
     

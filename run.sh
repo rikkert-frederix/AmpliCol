@@ -19,6 +19,10 @@ for i in "${second_last[@]}"; do
         -5)  process+="b~ " ;;
         -6)  process+="t~ " ;;
 	22) process+="a " ;;
+	23) process+="z " ;;
+	24) process+="w+ " ;;
+	-24) process+="w- " ;;
+	25) process+="h " ;;
     esac
 done
 

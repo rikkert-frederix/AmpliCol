@@ -5,6 +5,7 @@ module mg_checks
   real(kind=4),dimension(100) :: me_code
   logical :: match
   real(kind=8),dimension(:,:),allocatable :: p_read
+  real(kind=8),parameter  :: alpha_check=0.118d0
 
 contains
 
