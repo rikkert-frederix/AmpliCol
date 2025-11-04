@@ -16,6 +16,7 @@ program matrix_integrate_QCD
   use handling_processes
   use multichannel
   use amplitude_library
+  use mg_checks
   implicit none
   integer :: iproc
   real(kind=8) :: weight
@@ -126,8 +127,10 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
+           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
+           if (read_momenta) call read_in_momenta(pgl(igroup)%next,igroup,iamp)
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
@@ -270,7 +273,10 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
+    if (.not.read_momenta) then
     call pgl(ichan)%phase_space%generate_momenta(x)
+    endif
+
     if (debug ) then
        write (*,*) pgl(ichan)%phase_space%jac
        stop 1
@@ -302,6 +308,25 @@ contains
          .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
        call optimise_the_amplitudes(iint,ichan,done)
        if (done) return
+    endif
+
+    if (read_momenta) then
+        if (.not.allocated(mg_check)) allocate(mg_check(1000))
+        me_code = pgl(ichan)%amp2(:)*(4*pi*alphas)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
+               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+        call get_madgraph_results(pgl(ichan)%next,ichan,iint,mg_check,nord)
+        match=.false.
+        do i=1,nord
+        if (abs((mg_check(i)-me_code(1))/me_code(1)).lt.1d-4) then
+            match=.true.
+        endif
+        enddo
+        if (.not.match) then
+                write(*,*) 'ERROR: no agreement found!'
+                write(*,*) me_code
+                write(*,*) mg_check
+                stop 4
+        endif
     endif
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
