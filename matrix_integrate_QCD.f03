@@ -321,7 +321,7 @@ contains
     if (read_momenta) then
         if (.not.allocated(mg_check)) allocate(mg_check(1000))
         me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
-               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(iint))
         call get_madgraph_results(pgl(ichan)%next,ichan,iint,mg_check,nord)
         match=.false.
         do i=1,nord
