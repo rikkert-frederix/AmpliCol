@@ -338,6 +338,11 @@ contains
                 write(*,*) 'CHECK is fine!'
         endif
     endif
+
+    if (pgl(ichan)%passed(iint).gt.me_points) then
+            write(*,*) 'Passed all the', me_points,'  point tests. Stop the ME evaluation test.'
+            stop
+    endif
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%phase_space%jac*conv
