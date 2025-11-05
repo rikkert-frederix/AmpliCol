@@ -15,9 +15,9 @@ cp $path_mg/madgraph/core/color_algebra.py $path_mg/madgraph/core/color_algebra_
 
 # Copy the modified files depending on version of MG
 if [[ "$version" == "3.6.1" ]]; then
-    cp matrix_standalone_v4_v361.inc $path_mg/madgraph/iolibs/template_files/
+    cp matrix_standalone_v4_v361.inc $path_mg/madgraph/iolibs/template_files/matrix_standalone_v4.inc
 elif [[ "$version" == "3.6.6" ]]; then
-    cp matrix_standalone_v4_v366.inc $path_mg/madgraph/iolibs/template_files/
+    cp matrix_standalone_v4_v366.inc $path_mg/madgraph/iolibs/template_files/matrix_standalone_v4.inc
 else
     echo "Unknown version: $version"
 fi
