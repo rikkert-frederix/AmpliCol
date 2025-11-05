@@ -53,14 +53,17 @@ contains
        write (*,'(a)') ""
        write (*,'(a)') "Usage: 'matrix_integrate_QCD <arguments>'. Possible arguments are"
        write (*,'(a)') ""
-       write (*,'(a)') "  --help,           -h      : This message."
-       write (*,'(a)') "  --process=[X],    -p=[X]  : process specified in file [X] (default is './processes.txt')."
-       write (*,'(a)') "  --nevents=[X],    -n=[X]  : number of unweighted events to generate (default is 10000)."
-       write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use -- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel."
-       write (*,'(a)') "  --seed=[X],       -x=[X]  : The random number seed to use (default is read from randinit file)."
+       write (*,'(a)') "  --help,           -h      : Show this message."
+       write (*,'(a)') "  --process=[X],    -p=[X]  : Process specified in file [X] (default is './processes.txt')."
+       write (*,'(a)') "  --nevents=[X],    -n=[X]  : Number of unweighted events to generate (default is 10000)."
+       write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use "// &
+            "-- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel."
+       write (*,'(a)') "  --seed=[X],       -s=[X]  : The random number seed to use (default is read from randinit file)."
        write (*,'(a)') "  --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 48)."
-       write (*,'(a)') "  --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, compile code with 'make matrix_integrate_library' after a library has been created). Default is 'none'."
-       write (*,'(a)') "  --tag=[X],        -t=[X]  : event file (and log file) names will be prepended with with 'tag_'."
+       write (*,'(a)') "  --library=[X],    -l=[X]  : To create or use a library for the amplitudes, "// &
+            "set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make "// &
+            "matrix_integrate_library' after a library has been created). Default is 'none'."
+       write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
        write (*,'(a)') ""
        stop
     end if
