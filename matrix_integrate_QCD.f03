@@ -60,7 +60,6 @@ program matrix_integrate_QCD
  endif
   call cpu_time(tAfter)
   t_Proc_init=t_Proc_init+tAfter-tBefore
-  
   call date_and_time(date, time, zone)
   write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
        date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
@@ -102,6 +101,10 @@ program matrix_integrate_QCD
         call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
              pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      endif
+     pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
+     allocate(pgl(igroup)%ps(1))
+     allocate(pgl(igroup)%ps(1)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
+     allocate(pgl(igroup)%ps(1)%p(0:3,1:pgl(igroup)%next))
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
      deallocate(mass)
@@ -179,7 +182,7 @@ program matrix_integrate_QCD
   else
      nintegrals(1:ngroups)=1
   endif
-  call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,nintegrals,abs(ncalls0),abs(itmax))
+  call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax))
   call date_and_time(date, time, zone)
   write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
        date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
@@ -241,7 +244,7 @@ contains
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
-    real(kind=8), dimension(pgl(ichan)%ndim),intent(in) :: x
+    real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
@@ -270,7 +273,7 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    pgl(ichan)%ps(1)%x(1:pgl(ichan)%ndim)=x(1:pgl(ichan)%ndim)
+    pgl(ichan)%ps(1)%x=x
     call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     if (debug ) then
        write (*,*) pgl(ichan)%ps(1)%jac

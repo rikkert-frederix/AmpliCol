@@ -16,7 +16,7 @@ module simple_integrator_mod
   private
   type :: channel
      integer :: ndim,nintegral,current_integral,current_iter&
-          &,number,max_iters,nevts_unw_req
+          &,number,max_iters,nevts_unw_req,ndim_extra
      integer(kind=8) :: npoints,npoints_iter
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
      real(kind=8) :: overweight
@@ -115,11 +115,11 @@ module simple_integrator_mod
   integer,parameter :: final_n_iters_for_evnt_gen=8
 contains
 
-  subroutine init(this,nchannel,ndim,nintegral,nevts_unw_req,niters)
+  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: nchannel,nevts_unw_req,niters
-    integer,dimension(nchannel),intent(in) :: ndim,nintegral
+    integer,dimension(nchannel),intent(in) :: ndim,nintegral,ndim_extra
     integer :: i
     this%nchannel=nchannel
     this%nevts_unw_req=nevts_unw_req
@@ -136,20 +136,21 @@ contains
          min_points_per_integral*maxval(nintegral)*this%nchannel)
     allocate(this%channels(this%nchannel))
     do i=1,this%nchannel
-       call this%channels(i)%init(ndim(i),nintegral(i),this%npoints_requested/nchannel,niters,i)
+       call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i)
     enddo
     this%current_channel=0
     this%npoints_gen=0
     this%res=0d0
   end subroutine init
 
-  subroutine channel_init(this,ndim,nintegral,npoints,niters,ichan)
+  subroutine channel_init(this,ndim,ndim_extra,nintegral,npoints,niters,ichan)
     implicit none
     class(channel),intent(inout) :: this
-    integer,intent(in) :: ndim,nintegral,niters,ichan
+    integer,intent(in) :: ndim,nintegral,niters,ichan,ndim_extra
     integer(kind=8) :: npoints
     integer :: i
     this%ndim=ndim
+    this%ndim_extra=ndim_extra
     this%max_iters=niters
     this%nintegral=nintegral
     this%number=ichan
@@ -281,13 +282,14 @@ contains
     class(integrator),intent(inout) :: this
     integer,intent(in) :: npoints
     integer,intent(out) :: ichan,iint
-    integer :: i
+    integer :: i,ntot
     real(kind=8) :: wgt_chan
     
     call this%get_channel_and_integral(ichan,iint,wgt_chan)
     this%current_channel=ichan
-    
-    allocate(this%x(1:this%channels(this%current_channel)%ndim,1:npoints))
+
+    ntot=this%channels(this%current_channel)%ndim+this%channels(this%current_channel)%ndim_extra
+    allocate(this%x(1:ntot,1:npoints))
     allocate(this%wgt(1:npoints))
 
     do i=1,npoints
@@ -1125,12 +1127,15 @@ contains
   subroutine channel_get_point(this,x,wgt)
     implicit none
     class(channel),intent(inout) :: this
-    real(kind=8),dimension(this%ndim),intent(out) :: x
+    real(kind=8),dimension(this%ndim+this%ndim_extra),intent(out) :: x
     real(kind=8),intent(out) :: wgt
     integer :: i
     wgt=1d0
     do i=1,this%ndim
        call this%grids(i,this%current_iter)%get_x(x(i),wgt)
+    enddo
+    do i=this%ndim+1,this%ndim+this%ndim_extra
+       x(i)=ran2()
     enddo
   end subroutine channel_get_point
 

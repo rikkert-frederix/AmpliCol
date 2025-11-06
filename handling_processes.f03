@@ -22,7 +22,7 @@ module handling_processes
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
-     integer(kind=4) :: next,ndim
+     integer(kind=4) :: next,ndim,ndim_extra
      integer,dimension(:),allocatable :: col_fac
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
      integer(kind=4),dimension(:),allocatable :: hel,passed

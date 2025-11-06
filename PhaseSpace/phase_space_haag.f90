@@ -158,8 +158,8 @@ contains
     if (verbose) then
        write (*,*) "Power in importance sampling:",ip
     endif
+    this%ndim_extra=0
   contains
-
 
     subroutine get_approx_s0
       implicit none

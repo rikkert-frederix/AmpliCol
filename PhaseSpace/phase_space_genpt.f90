@@ -98,6 +98,7 @@ contains
        stop 1
     endif
     allocate(this%p(0:3,this%next))
+    this%ndim_extra=0
   end subroutine genpt_init
 
   subroutine genpt_generate_momenta(this,ps)

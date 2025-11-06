@@ -104,9 +104,6 @@ contains
        pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
        pgl(igroup)%passed=0
-       allocate(pgl(igroup)%ps(1))
-       allocate(pgl(igroup)%ps(1)%x(1:ndim))
-       allocate(pgl(igroup)%ps(1)%p(0:3,1:next))
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
@@ -150,8 +147,6 @@ contains
     allocate(pgl_unique%amps(1))
     allocate(mass(next))
     allocate(width(next))
-    allocate(ps%x(1:pgl_unique%ndim))
-    allocate(ps%p(0:3,1:pgl_unique%next))
     pgl_unique%nproc=nproc_unique
     pgl_unique%processes(1:next,1:nproc_unique)=unique_procs(1:next,1:nproc_unique)
     do i=1,pgl_unique%next
@@ -176,20 +171,21 @@ contains
     call setup_cuts_for_each_particle(pgl_unique,0)
     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
          pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf,.true.)
-
+    allocate(ps%x(1:pgl_unique%ndim+pgl_unique%phase_space%ndim_extra))
+    allocate(ps%p(0:3,1:pgl_unique%next))
+    
     call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
          pgl_unique%spin,pgl_unique%color_orders,phys_model)
-
+        
     allocate(amp2(nevent,pgl_unique%nproc))
     allocate(amp(nevent,pgl_unique%amps(1)%n_amps))
     allocate(pgl_unique%passed(1))
 
     pgl_unique%passed=0
     do while (pgl_unique%passed(1).lt.nevent)
-       do i=1,pgl_unique%ndim
-          x(i)=ran2()
+       do i=1,pgl_unique%ndim+pgl_unique%phase_space%ndim_extra
+          ps%x(i)=ran2()
        enddo
-       ps%x(1:pgl_unique%ndim)=x(1:pgl_unique%ndim)
        call pgl_unique%phase_space%generate_momenta(ps)
        if (ps%jac.lt.0d0) cycle
        pgl_unique%passed(1)=pgl_unique%passed(1)+1
