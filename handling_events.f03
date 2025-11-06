@@ -29,17 +29,17 @@ contains
        ! do not flip
        do i=1,pgl%next
           write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
-               pgl%phase_space%p(1:3,i),pgl%phase_space%p(0,i)
+               pgl%ps(1)%p(1:3,i),pgl%ps(1)%p(0,i)
        enddo
     else
        ! do flip
        do i=1,pgl%next
           if (i.le.2) then
              write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  pgl%phase_space%p(1:2,3-i),-pgl%phase_space%p(3,3-i),pgl%phase_space%p(0,3-i)
+                  pgl%ps(1)%p(1:2,3-i),-pgl%ps(1)%p(3,3-i),pgl%ps(1)%p(0,3-i)
           else
              write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  pgl%phase_space%p(1:2,i),-pgl%phase_space%p(3,i),pgl%phase_space%p(0,i)
+                  pgl%ps(1)%p(1:2,i),-pgl%ps(1)%p(3,i),pgl%ps(1)%p(0,i)
           endif
        enddo
     endif

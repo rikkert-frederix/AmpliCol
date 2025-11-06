@@ -13,6 +13,7 @@ module handling_processes
      type(amplitude_QCD),dimension(:),allocatable :: amps
      class(phase_space_type),allocatable :: phase_space
      type(multichan_info) :: multichan
+     type(psv),dimension(:),allocatable :: ps
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
@@ -670,6 +671,13 @@ contains
     if(allocated(pgl%phase_space)) then
        call pgl%phase_space%cleanup()
        deallocate(pgl%phase_space)
+    endif
+    if (allocated(pgl%ps)) then
+       do i=1,size(pgl%ps)
+          if (allocated(pgl%ps(i)%p)) deallocate(pgl%ps(i)%p)
+          if (allocated(pgl%ps(i)%x)) deallocate(pgl%ps(i)%x)
+       enddo
+       deallocate(pgl%ps)
     endif
     call finalize_multichan_info(pgl%multichan)
     if (allocated(pgl%processes)) deallocate(pgl%processes)

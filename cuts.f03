@@ -13,13 +13,13 @@ contains
     pass_cuts=.true.
     do i=1,pgl%next
        if (pgl%pT_min(i).gt.0d0) then
-          if (pt(pgl%phase_space%p(0,i)).lt.pgl%pT_min(i)) then
+          if (pt(pgl%ps(1)%p(0,i)).lt.pgl%pT_min(i)) then
              pass_cuts=.false.
              return
           endif
        endif
        if (pgl%eta_max(i).gt.0d0) then
-          if (abs(eta(pgl%phase_space%p(0,i))).gt.pgl%eta_max(i)) then
+          if (abs(eta(pgl%ps(1)%p(0,i))).gt.pgl%eta_max(i)) then
              pass_cuts=.false.
              return
           endif
@@ -29,13 +29,13 @@ contains
     do i=1,pgl%next-1
        do j=i+1,pgl%next
           if (pgl%sqrt_s_min(i,j).gt.0d0) then
-             if (abs(sumdot(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%sqrt_s_min(i,j)**2) then
+             if (abs(sumdot(pgl%ps(1)%p(0,i),pgl%ps(1)%p(0,j))).lt.pgl%sqrt_s_min(i,j)**2) then
                 pass_cuts=.false.
                 return
              endif
           endif
           if (pgl%DR_min(i,j).gt.0d0) then
-             if (abs(deltaR(pgl%phase_space%p(0,i),pgl%phase_space%p(0,j))).lt.pgl%DR_min(i,j)) then
+             if (abs(deltaR(pgl%ps(1)%p(0,i),pgl%ps(1)%p(0,j))).lt.pgl%DR_min(i,j)) then
                 pass_cuts=.false.
                 return
              endif

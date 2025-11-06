@@ -111,74 +111,74 @@ contains
     real(kind=8),dimension(0:3) :: ptot,pb
     real(kind=8),external :: ran2
     ix=0
-    this%jac=1d0
+    ps%jac=1d0
     do i=3,this%next-1
        ! generate pT^2
        pt2min=this%ptcut(i)**2
        pt2max=this%sqrts**2/4d0
        ix=ix+1
-       call random_to_var(ps%x(ix),-1.5d0,pt2min,pt2max,pt2,this%jac)
+       call random_to_var(ps%x(ix),-1.5d0,pt2min,pt2max,pt2,ps%jac)
        ! generate phi
        phimin=-pi
        phimax=pi
        ix=ix+1
-       call random_to_var(ps%x(ix),0d0,phimin,phimax,phi,this%jac)
+       call random_to_var(ps%x(ix),0d0,phimin,phimax,phi,ps%jac)
        if (use_mode.eq.1 .or.i.eq.3) then
           ! generate rapidity
           ymin=-this%ycut(i)
           ymax=+this%ycut(i)
           ix=ix+1
-          call random_to_var(ps%x(ix),0d0,ymin,ymax,y,this%jac)
+          call random_to_var(ps%x(ix),0d0,ymin,ymax,y,ps%jac)
           ! fill momentum
-          call fill_momentum_pt2yphi(pt2,y,phi,this%p(0,i))
+          call fill_momentum_pt2yphi(pt2,y,phi,ps%p(0,i))
 
        elseif (use_mode.eq.2) then
           ! generate deltaR w.r.t. previously generated particle
-          y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
+          y=log((ps%p(0,i-1)+ps%p(3,i-1))/(ps%p(0,i-1)-ps%p(3,i-1)))/2d0
           drmin=max(this%DRcut(this%next*(i-1)+i-1),abs(phi))
           drmax=sqrt((this%ycut(i)+abs(y))**2+phi**2)
           ix=ix+1
-          call random_to_var(ps%x(ix),0d0,drmin,drmax,dr,this%jac)
+          call random_to_var(ps%x(ix),0d0,drmin,drmax,dr,ps%jac)
           ! fill momentum, assuming that previous particle is along the x-axis.
-          call fill_momentum_pt2drphi(pt2,dr,phi,this%p(0,i),this%jac)
+          call fill_momentum_pt2drphi(pt2,dr,phi,ps%p(0,i),ps%jac)
           ! boost along the z-axis
-          call boostz(this%p(0,i),-y,pb)
+          call boostz(ps%p(0,i),-y,pb)
           ! rotate about the z-axis
-          phi=atan(this%p(2,i-1)/this%p(1,i-1))
-          if(this%p(1,i-1).lt.0d0) phi=phi+pi
-          call rotz(pb,phi,this%p(0,i))
+          phi=atan(ps%p(2,i-1)/ps%p(1,i-1))
+          if(ps%p(1,i-1).lt.0d0) phi=phi+pi
+          call rotz(pb,phi,ps%p(0,i))
 
        elseif (use_mode.eq.3) then
           ! get the energy in the frame where p(:,i-1) has p_z=0.
-          y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
-          call boostz(this%p(0,i-1),y,pb)
+          y=log((ps%p(0,i-1)+ps%p(3,i-1))/(ps%p(0,i-1)-ps%p(3,i-1)))/2d0
+          call boostz(ps%p(0,i-1),y,pb)
           invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next*(i-1)+i-1),abs(phi))))
           invmmax=this%sqrts**2
           ix=ix+1
-          call random_to_var(ps%x(ix),-1d0,invmmin,invmmax,invm,this%jac)
+          call random_to_var(ps%x(ix),-1d0,invmmin,invmmax,invm,ps%jac)
           ! fill momentum, assuming that previous particle is along the x-axis.
-          call fill_momentum_pt2invmphi(pt2,invm,phi,pb(0),this%p(0,i),this%jac)
-          if (this%jac.lt.0d0) return
+          call fill_momentum_pt2invmphi(pt2,invm,phi,pb(0),ps%p(0,i),ps%jac)
+          if (ps%jac.lt.0d0) return
           ! boost along the z-axis
-          call boostz(this%p(0,i),-y,pb)
+          call boostz(ps%p(0,i),-y,pb)
           ! rotate about the z-axis
-          phi=atan(this%p(2,i-1)/this%p(1,i-1))
-          if(this%p(1,i-1).lt.0d0) phi=phi+pi
-          call rotz(pb,phi,this%p(0,i))
+          phi=atan(ps%p(2,i-1)/ps%p(1,i-1))
+          if(ps%p(1,i-1).lt.0d0) phi=phi+pi
+          call rotz(pb,phi,ps%p(0,i))
 
        elseif (use_mode.eq.4) then
-          y=log((this%p(0,i-1)+this%p(3,i-1))/(this%p(0,i-1)-this%p(3,i-1)))/2d0
+          y=log((ps%p(0,i-1)+ps%p(3,i-1))/(ps%p(0,i-1)-ps%p(3,i-1)))/2d0
           costhetamin=-1d0 
           costhetamax=cos(this%DRcut(this%next*(i-1)+i-1))
           ix=ix+1
-          call random_to_var(ps%x(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
-          call fill_momentum_pt2cosphi(pt2,costheta,phi,this%p(0,i),this%jac)
-          if (this%jac.lt.0d0) return
-          call boostz(this%p(0,i),-y,pb)
+          call random_to_var(ps%x(ix),0d0,costhetamin,costhetamax,costheta,ps%jac)
+          call fill_momentum_pt2cosphi(pt2,costheta,phi,ps%p(0,i),ps%jac)
+          if (ps%jac.lt.0d0) return
+          call boostz(ps%p(0,i),-y,pb)
           ! rotate about the z-axis
-          phi=atan(this%p(2,i-1)/this%p(1,i-1))
-          if(this%p(1,i-1).lt.0d0) phi=phi+pi
-          call rotz(pb,phi,this%p(0,i))
+          phi=atan(ps%p(2,i-1)/ps%p(1,i-1))
+          if(ps%p(1,i-1).lt.0d0) phi=phi+pi
+          call rotz(pb,phi,ps%p(0,i))
 
        endif
     enddo
@@ -190,158 +190,158 @@ contains
        ymin=-this%ycut(this%next)
        ymax=+this%ycut(this%next)
        ix=ix+1
-       call random_to_var(ps%x(ix),0d0,ymin,ymax,y,this%jac)
+       call random_to_var(ps%x(ix),0d0,ymin,ymax,y,ps%jac)
        ! final particle: fill momentum
-       this%p(1,this%next)=-sum(this%p(1,3:this%next-1))
-       this%p(2,this%next)=-sum(this%p(2,3:this%next-1))
-       pt2=this%p(1,this%next)**2+this%p(2,this%next)**2
-       this%p(3,this%next)=sqrt(pt2)*sinh(y)
-       this%p(0,this%next)=sqrt(pt2)*cosh(y)
+       ps%p(1,this%next)=-sum(ps%p(1,3:this%next-1))
+       ps%p(2,this%next)=-sum(ps%p(2,3:this%next-1))
+       pt2=ps%p(1,this%next)**2+ps%p(2,this%next)**2
+       ps%p(3,this%next)=sqrt(pt2)*sinh(y)
+       ps%p(0,this%next)=sqrt(pt2)*cosh(y)
 
     elseif(use_mode.eq.2) then
-       this%p(1,this%next)=-sum(this%p(1,3:this%next-1))
-       this%p(2,this%next)=-sum(this%p(2,3:this%next-1))
-       pt2=this%p(1,this%next)**2+this%p(2,this%next)**2
-       phi=atan(this%p(2,this%next-1)/this%p(1,this%next-1))
-       if(this%p(1,this%next-1).lt.0d0) phi=phi+pi
+       ps%p(1,this%next)=-sum(ps%p(1,3:this%next-1))
+       ps%p(2,this%next)=-sum(ps%p(2,3:this%next-1))
+       pt2=ps%p(1,this%next)**2+ps%p(2,this%next)**2
+       phi=atan(ps%p(2,this%next-1)/ps%p(1,this%next-1))
+       if(ps%p(1,this%next-1).lt.0d0) phi=phi+pi
        if (phi.gt.pi) phi=phi-2d0*pi
-       phi2=atan(this%p(2,this%next)/this%p(1,this%next))
-       if(this%p(1,this%next).lt.0d0) phi2=phi2+pi
+       phi2=atan(ps%p(2,this%next)/ps%p(1,this%next))
+       if(ps%p(1,this%next).lt.0d0) phi2=phi2+pi
        if (phi2.gt.pi) phi2=phi2-2d0*pi
        phi=phi2-phi ! aximuthal separation particle 'next' and 'next-1'
        ! generate deltaR w.r.t. previously generated particle
-       y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
+       y=log((ps%p(0,this%next-1)+ps%p(3,this%next-1))/(ps%p(0,this%next-1)-ps%p(3,this%next-1)))/2d0
        drmin=max(this%DRcut(this%next*(this%next-1)+this%next-1),abs(phi))
        drmax=sqrt((this%ycut(this%next)+abs(y))**2+phi**2)
        ix=ix+1
-       call random_to_var(ps%x(ix),0d0,drmin,drmax,dr,this%jac)
+       call random_to_var(ps%x(ix),0d0,drmin,drmax,dr,ps%jac)
        y=sqrt(dr**2-phi**2)
        if (ran2().gt.0.5d0) y=-y
-       this%jac=this%jac*2d0
-       this%p(3,this%next)=sqrt(pt2)*sinh(y)
-       this%p(0,this%next)=sqrt(pt2)*cosh(y)
-       this%jac=this%jac*abs(dr/y)
+       ps%jac=ps%jac*2d0
+       ps%p(3,this%next)=sqrt(pt2)*sinh(y)
+       ps%p(0,this%next)=sqrt(pt2)*cosh(y)
+       ps%jac=ps%jac*abs(dr/y)
        ! boost along the z-axis
-       y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
-       call boostz(this%p(0,this%next),-y,pb)
-       this%p(0:3,this%next)=pb(0:3)
+       y=log((ps%p(0,this%next-1)+ps%p(3,this%next-1))/(ps%p(0,this%next-1)-ps%p(3,this%next-1)))/2d0
+       call boostz(ps%p(0,this%next),-y,pb)
+       ps%p(0:3,this%next)=pb(0:3)
 
     elseif(use_mode.eq.3) then
-       this%p(1,this%next)=-sum(this%p(1,3:this%next-1))
-       this%p(2,this%next)=-sum(this%p(2,3:this%next-1))
-       pt2=this%p(1,this%next)**2+this%p(2,this%next)**2
-       y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
-       call boostz(this%p(0,this%next-1),y,pb)
-       phi=delta_phi(this%p(0,this%next),this%p(0,this%next-1))
+       ps%p(1,this%next)=-sum(ps%p(1,3:this%next-1))
+       ps%p(2,this%next)=-sum(ps%p(2,3:this%next-1))
+       pt2=ps%p(1,this%next)**2+ps%p(2,this%next)**2
+       y=log((ps%p(0,this%next-1)+ps%p(3,this%next-1))/(ps%p(0,this%next-1)-ps%p(3,this%next-1)))/2d0
+       call boostz(ps%p(0,this%next-1),y,pb)
+       phi=delta_phi(ps%p(0,this%next),ps%p(0,this%next-1))
        invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next*(this%next-1)+this%next-1),phi)))
        invmmax=this%sqrts**2
        if(invmmin.ge.invmmax) then
-          this%jac=-1d0
+          ps%jac=-1d0
           return
        endif
        ix=ix+1
-       call random_to_var(ps%x(ix),-1d0,invmmin,invmmax,invm,this%jac)
-       this%p(0,this%next)=(invm/2d0+pb(1)*this%p(1,this%next)+pb(2)*this%p(2,this%next))/pb(0)
+       call random_to_var(ps%x(ix),-1d0,invmmin,invmmax,invm,ps%jac)
+       ps%p(0,this%next)=(invm/2d0+pb(1)*ps%p(1,this%next)+pb(2)*ps%p(2,this%next))/pb(0)
        ! There are two values of the pz that correspond to a single
        ! invm. Take one of the two at random.
-!!$       if (this%p(0,this%next)**2.lt.pt2) then
-!!$          this%jac=-1d0
+!!$       if (ps%p(0,this%next)**2.lt.pt2) then
+!!$          ps%jac=-1d0
 !!$          return
 !!$       endif
-       this%p(3,this%next)=sqrt(this%p(0,this%next)**2-pt2)
-       if (ran2().gt.0.5d0) this%p(3,this%next)=-this%p(3,this%next)
-       this%jac=this%jac*2d0
-       this%jac=this%jac/abs(2d0*pb(0)*this%p(3,this%next))
+       ps%p(3,this%next)=sqrt(ps%p(0,this%next)**2-pt2)
+       if (ran2().gt.0.5d0) ps%p(3,this%next)=-ps%p(3,this%next)
+       ps%jac=ps%jac*2d0
+       ps%jac=ps%jac/abs(2d0*pb(0)*ps%p(3,this%next))
        ! boost along the z-axis
-       call boostz(this%p(0,this%next),-y,pb)
-       this%p(0:3,this%next)=pb(0:3)
+       call boostz(ps%p(0,this%next),-y,pb)
+       ps%p(0:3,this%next)=pb(0:3)
 
     elseif (use_mode.eq.4) then
-       this%p(1,this%next)=-sum(this%p(1,3:this%next-1))
-       this%p(2,this%next)=-sum(this%p(2,3:this%next-1))
-       this%p(0,this%next)=1d0 ! dummy value
-       this%p(3,this%next)=1d0 ! dummy value
+       ps%p(1,this%next)=-sum(ps%p(1,3:this%next-1))
+       ps%p(2,this%next)=-sum(ps%p(2,3:this%next-1))
+       ps%p(0,this%next)=1d0 ! dummy value
+       ps%p(3,this%next)=1d0 ! dummy value
 
-       phi =atan(this%p(2,this%next-1)/this%p(1,this%next-1))
-       if(this%p(1,this%next-1).lt.0d0) phi=phi+pi
-       phi2 =atan(this%p(2,this%next)/this%p(1,this%next))
-       if(this%p(1,this%next).lt.0d0) phi2=phi2+pi
+       phi =atan(ps%p(2,this%next-1)/ps%p(1,this%next-1))
+       if(ps%p(1,this%next-1).lt.0d0) phi=phi+pi
+       phi2 =atan(ps%p(2,this%next)/ps%p(1,this%next))
+       if(ps%p(1,this%next).lt.0d0) phi2=phi2+pi
 
-       call rotz(this%p(0,this%next),-phi,pb)
-       this%p(:,this%next)=pb
+       call rotz(ps%p(0,this%next),-phi,pb)
+       ps%p(:,this%next)=pb
 
-       phi =atan(this%p(2,this%next-1)/this%p(1,this%next-1))
-       if(this%p(1,this%next-1).lt.0d0) phi=phi+pi
-       phi2 =atan(this%p(2,this%next)/this%p(1,this%next))
-       if(this%p(1,this%next).lt.0d0) phi2=phi2+pi
+       phi =atan(ps%p(2,this%next-1)/ps%p(1,this%next-1))
+       if(ps%p(1,this%next-1).lt.0d0) phi=phi+pi
+       phi2 =atan(ps%p(2,this%next)/ps%p(1,this%next))
+       if(ps%p(1,this%next).lt.0d0) phi2=phi2+pi
 
-       pt2=this%p(1,this%next)**2+this%p(2,this%next)**2
-       y=log((this%p(0,this%next-1)+this%p(3,this%next-1))/(this%p(0,this%next-1)-this%p(3,this%next-1)))/2d0
+       pt2=ps%p(1,this%next)**2+ps%p(2,this%next)**2
+       y=log((ps%p(0,this%next-1)+ps%p(3,this%next-1))/(ps%p(0,this%next-1)-ps%p(3,this%next-1)))/2d0
        ymax=this%ycut(this%next)+abs(y)
        pzmax = sqrt(pt2)/tan(2d0*atan(exp(-ymax)))
 
-       costhetamin= abs(this%p(1,this%next))/(dsqrt(pt2+pzmax**2))
+       costhetamin= abs(ps%p(1,this%next))/(dsqrt(pt2+pzmax**2))
        costhetamax= cos(max(abs(phi2),this%DRcut(this%next*(this%next-1)+this%next-1)))
 
        if (abs(phi2).ge.pi/2d0) then
           costhetamin= cos(max(abs(phi2),this%DRcut(this%next*(this%next-1)+this%next-1)))
-          costhetamax = cos(pi-acos(abs(this%p(1,this%next))/(dsqrt(pt2+pzmax**2))))
+          costhetamax = cos(pi-acos(abs(ps%p(1,this%next))/(dsqrt(pt2+pzmax**2))))
        endif
        if (costhetamin.gt.costhetamax) return
 
        ix=ix+1
-       call random_to_var(ps%x(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
+       call random_to_var(ps%x(ix),0d0,costhetamin,costhetamax,costheta,ps%jac)
 
-       this%p(0,this%next) = abs(this%p(1,this%next)/costheta)
+       ps%p(0,this%next) = abs(ps%p(1,this%next)/costheta)
        if (costheta.lt.0d0) then
           theta=acos(costheta)
           theta = pi-theta
-          phi = acos(this%p(2,this%next)/(this%p(0,this%next)*dsqrt(1d0-cos(theta)**2)))
-          this%p(3,this%next) = dsqrt((this%p(1,this%next)**2/costheta**2)-pt2)
+          phi = acos(ps%p(2,this%next)/(ps%p(0,this%next)*dsqrt(1d0-cos(theta)**2)))
+          ps%p(3,this%next) = dsqrt((ps%p(1,this%next)**2/costheta**2)-pt2)
        else
           theta=acos(costheta)
-          phi = acos(this%p(2,this%next)/(this%p(0,this%next)*dsqrt(1d0-costheta**2)))
-          this%p(3,this%next) = dsqrt((this%p(1,this%next)**2/costheta**2)-pt2)
+          phi = acos(ps%p(2,this%next)/(ps%p(0,this%next)*dsqrt(1d0-costheta**2)))
+          ps%p(3,this%next) = dsqrt((ps%p(1,this%next)**2/costheta**2)-pt2)
        endif
-       if (ran2().gt.0.5d0) this%p(3,this%next)=-this%p(3,this%next)
-       this%jac=this%jac*2d0
-       this%jac = this%jac/(1+costheta**2-(costheta**2-1d0)*cos(2d0*phi))
-       !this%jac = this%jac*this%p(1,this%next)/sqrt(pt2)*0.5d0/(sin(2d0*atan(exp(-ymax)))**2)/((1d0+tan)**1.5d0)
-       !this%jac = this%jac*cosh(y)
-       call boostz(this%p(0,this%next),-y,pb)
-       phi=atan(this%p(2,this%next-1)/this%p(1,this%next-1))
-       if(this%p(1,this%next-1).lt.0d0) phi=phi+pi
-       call  rotz(pb,phi,this%p(0,this%next))
+       if (ran2().gt.0.5d0) ps%p(3,this%next)=-ps%p(3,this%next)
+       ps%jac=ps%jac*2d0
+       ps%jac = ps%jac/(1+costheta**2-(costheta**2-1d0)*cos(2d0*phi))
+       !ps%jac = ps%jac*ps%p(1,this%next)/sqrt(pt2)*0.5d0/(sin(2d0*atan(exp(-ymax)))**2)/((1d0+tan)**1.5d0)
+       !ps%jac = ps%jac*cosh(y)
+       call boostz(ps%p(0,this%next),-y,pb)
+       phi=atan(ps%p(2,this%next-1)/ps%p(1,this%next-1))
+       if(ps%p(1,this%next-1).lt.0d0) phi=phi+pi
+       call  rotz(pb,phi,ps%p(0,this%next))
 
     endif
 
     ! initial states
-    ptot(0:3)=sum(this%p(0:3,3:this%next),dim=2)
+    ptot(0:3)=sum(ps%p(0:3,3:this%next),dim=2)
     tau=dot(ptot,ptot)/this%sqrts**2
     ycm=log((ptot(0)+ptot(3))/(ptot(0)-ptot(3)))/2d0
-    this%xbjrk(1)=sqrt(tau)*exp(ycm)
-    this%xbjrk(2)=sqrt(tau)*exp(-ycm)
-    if (this%xbjrk(1).ge.1d0 .or. this%xbjrk(2).ge.1d0) then
-       this%jac=-1d0
+    ps%xbjrk(1)=sqrt(tau)*exp(ycm)
+    ps%xbjrk(2)=sqrt(tau)*exp(-ycm)
+    if (ps%xbjrk(1).ge.1d0 .or. ps%xbjrk(2).ge.1d0) then
+       ps%jac=-1d0
        return
     endif
-    this%p(0,1)=this%xbjrk(1)*this%sqrts/2d0
-    this%p(1,1)=0d0
-    this%p(2,1)=0d0
-    this%p(3,1)=+this%xbjrk(1)*this%sqrts/2d0
-    this%p(0,2)=this%xbjrk(2)*this%sqrts/2d0
-    this%p(1,2)=0d0
-    this%p(2,2)=0d0
-    this%p(3,2)=-this%xbjrk(2)*this%sqrts/2d0
+    ps%p(0,1)=ps%xbjrk(1)*this%sqrts/2d0
+    ps%p(1,1)=0d0
+    ps%p(2,1)=0d0
+    ps%p(3,1)=+ps%xbjrk(1)*this%sqrts/2d0
+    ps%p(0,2)=ps%xbjrk(2)*this%sqrts/2d0
+    ps%p(1,2)=0d0
+    ps%p(2,2)=0d0
+    ps%p(3,2)=-ps%xbjrk(2)*this%sqrts/2d0
 
-    ! This%Jacobian factor (corresponds to the full this%jacobian for
+    ! Ps%Jacobian factor (corresponds to the full ps%jacobian for
     ! use_mode=1. The other use_modes already have a partially computed
-    ! this%jacobian above)
-    this%jac=this%jac/(this%sqrts**2*dble(4**(this%next-3)))
+    ! ps%jacobian above)
+    ps%jac=ps%jac/(this%sqrts**2*dble(4**(this%next-3)))
     ! Add factors of 2*pi
-    this%jac=this%jac/((2d0*pi)**(3*(this%next-2)-4))
+    ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
     ! Add flux factor
-    this%jac=this%jac/(2d0*tau*this%sqrts**2)
+    ps%jac=ps%jac/(2d0*tau*this%sqrts**2)
   contains
     subroutine fill_momentum_pt2cosphi(pt2,costheta,phi,p,jac)
       implicit none

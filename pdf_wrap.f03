@@ -34,8 +34,8 @@ contains
     if (include_pdf) then
        ! Include the PDFs
        xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,pgl%ipdgs(-6,1),pgl%phase_space%xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,pgl%ipdgs(-6,2),pgl%phase_space%xbjrk(2),xmu_fac,PDF(-6,2))
+       call PDF_eval(1,pgl%ipdgs(-6,1),pgl%ps(1)%xbjrk(1),xmu_fac,PDF(-6,1))
+       call PDF_eval(1,pgl%ipdgs(-6,2),pgl%ps(1)%xbjrk(2),xmu_fac,PDF(-6,2))
     endif
     if (iint.gt.0) then
        ip_start=iint

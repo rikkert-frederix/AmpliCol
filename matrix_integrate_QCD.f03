@@ -250,9 +250,6 @@ contains
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
     logical :: done
-    type(psv) :: ps
-    allocate(ps%xx(1:pgl(ichan)%ndim))
-    allocate(ps%p(0:3,1:pgl(ichan)%next))
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
@@ -273,13 +270,13 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    ps%xx(1:pgl(ichan)%ndim)=x(1:pgl(ichan)%ndim)
-    call pgl(ichan)%phase_space%generate_momenta(ps)
+    pgl(ichan)%ps(1)%x(1:pgl(ichan)%ndim)=x(1:pgl(ichan)%ndim)
+    call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     if (debug ) then
-       write (*,*) pgl(ichan)%phase_space%jac
+       write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
     endif
-    if (pgl(ichan)%phase_space%jac.lt.0d0) then
+    if (pgl(ichan)%ps(1)%jac.lt.0d0) then
        val=0d0
        call cpu_time(tAfter)
        t_PS= t_PS +tAfter-tBefore
@@ -292,8 +289,7 @@ contains
        return
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
-    call compute_multichannel_weight(ichan,ps,pgl(ichan)%phase_space%p, &
-         pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
+    call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore
     tBefore=tAfter
@@ -309,7 +305,7 @@ contains
     endif
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
-    weight=vol*pgl(ichan)%phase_space%jac*conv
+    weight=vol*pgl(ichan)%ps(1)%jac*conv
 
     ! multiply by the strong coupling
     if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
@@ -370,7 +366,7 @@ contains
        deallocate(amp2_save)
        if (create_amplitude_library) then
           call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,&
-               ichan,iint,phys_model,pgl(ichan)%phase_space%p)
+               ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
@@ -382,10 +378,10 @@ contains
     implicit none
     integer,intent(in) :: iint,ichan
     if (.not. use_amplitude_library) then
-       call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%phase_space%p,&
+       call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
             pgl(ichan)%hel,read_proc_from_file,phys_model)
     else
-       call evaluate_amp(ichan,iint,pgl(ichan)%phase_space%p,pgl(ichan)%amps(iint)%amps)
+       call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
     endif
   end subroutine compute_the_amps
     

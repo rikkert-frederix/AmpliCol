@@ -104,6 +104,9 @@ contains
        pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
        pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
        pgl(igroup)%passed=0
+       allocate(pgl(igroup)%ps(1))
+       allocate(pgl(igroup)%ps(1)%x(1:ndim))
+       allocate(pgl(igroup)%ps(1)%p(0:3,1:next))
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
@@ -147,7 +150,7 @@ contains
     allocate(pgl_unique%amps(1))
     allocate(mass(next))
     allocate(width(next))
-    allocate(ps%xx(1:pgl_unique%ndim))
+    allocate(ps%x(1:pgl_unique%ndim))
     allocate(ps%p(0:3,1:pgl_unique%next))
     pgl_unique%nproc=nproc_unique
     pgl_unique%processes(1:next,1:nproc_unique)=unique_procs(1:next,1:nproc_unique)
@@ -186,11 +189,11 @@ contains
        do i=1,pgl_unique%ndim
           x(i)=ran2()
        enddo
-       ps%xx(1:pgl_unique%ndim)=x(1:pgl_unique%ndim)
+       ps%x(1:pgl_unique%ndim)=x(1:pgl_unique%ndim)
        call pgl_unique%phase_space%generate_momenta(ps)
-       if (pgl_unique%phase_space%jac.lt.0d0) cycle
+       if (ps%jac.lt.0d0) cycle
        pgl_unique%passed(1)=pgl_unique%passed(1)+1
-       call pgl_unique%amps(1)%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model)
+       call pgl_unique%amps(1)%evaluate(next,ps%p,pgl_unique%hel,read_proc_from_file,phys_model)
        iproc=0
        amp2(pgl_unique%passed(1),:)=0d0
        if (use_real_gluons .and. all(pgl_unique%amps(1)%n_qqbar(1:pgl_unique%amps(1)%nprocs).eq.0)) then
@@ -219,6 +222,8 @@ contains
     enddo
     deallocate(pgl_unique%spin)
     deallocate(pgl_unique%phase_space)
+    deallocate(ps%p)
+    deallocate(ps%x)
     deallocate(amp2)
     deallocate(amp)
   end subroutine check_unique_processes

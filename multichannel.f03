@@ -3,7 +3,7 @@ module multichannel
   use simple_integrator_mod
 !  use mint_module
 contains
-  subroutine compute_multichannel_weight(ichan,ps,p,jac,weight)
+  subroutine compute_multichannel_weight(ichan,ps,weight)
     ! Computes the multichannel weight 'weight' when there are
     ! 'chans(0)' channels (that are listed in the array 'chans(1:)') and
     ! the current channel is 'ichan'. The momenta 'p' have been
@@ -16,9 +16,8 @@ contains
     ! phase-space.
     implicit none
     integer,intent(in) :: ichan
-    real(kind=8),dimension(0:3,next),intent(in) :: p
-    type(psv),intent(inout) :: ps
-    real(kind=8),intent(in) :: jac
+    type(psv),intent(in) :: ps
+    type(psv) :: ps_local
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
     real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
@@ -28,29 +27,29 @@ contains
        weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
        return
     endif
-    call simple_integrator%compute_wgt_from_x(ichan,ps%xx,vol_ichan)
+    ps_local=ps
+    call simple_integrator%compute_wgt_from_x(ichan,ps_local%x,vol_ichan)
     do j=1,pgl(ichan)%multichan%n_unique_channels
        i=pgl(ichan)%multichan%unique_channel_list(j)
        if (i.eq.ichan) then
           ii=j
           cycle
        endif
-       ps%p(0:3,1:pgl(ichan)%next)=p(0:3,1:pgl(ichan)%next)
-       call pgl(i)%phase_space%compute_x_from_momenta(ps)
-       if (pgl(i)%phase_space%jac.lt.0d0) then
+       call pgl(i)%phase_space%compute_x_from_momenta(ps_local)
+       if (ps_local%jac.lt.0d0) then
           ! The x's could not be correctly computed from the momenta
           write (99,*) 'WARNING: multi-channel weight not included'
           weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
           return
        endif
-       call simple_integrator%compute_wgt_from_x(i,pgl(i)%phase_space%x,vol)
-       factors(j)=pgl(i)%phase_space%jac*vol
+       call simple_integrator%compute_wgt_from_x(i,ps_local%x,vol)
+       factors(j)=ps_local%jac*vol
     enddo
     do i=1,pgl(ichan)%multichan%n_unique_channelgroups
        weight_factors(i)=1d0
        do j=1,pgl(ichan)%multichan%unique_channelgroup_list(0,i)
           if (pgl(ichan)%multichan%unique_channelgroup_list(j,i).eq.ii) cycle
-          weight_factors(i)=weight_factors(i)+jac*vol_ichan/factors(pgl(ichan)%multichan%unique_channelgroup_list(j,i))
+          weight_factors(i)=weight_factors(i)+ps%jac*vol_ichan/factors(pgl(ichan)%multichan%unique_channelgroup_list(j,i))
        enddo
     enddo
     weight(1:pgl(ichan)%nproc)=1d0/weight_factors(pgl(ichan)%multichan%map_proc_to_channelgroup(1:pgl(ichan)%nproc))

@@ -245,7 +245,7 @@ contains
     real(kind=8) :: mass_sum,soft,tau,ycm
     integer(kind=4) :: i,ix,mm
     this%x(1:this%ndim)=ps%x(1:this%ndim)
-    this%jac=1d0
+    ps%jac=1d0
     ix=0
     if (includePDF) call generate_initial_state
     call generate_momenta
@@ -253,9 +253,9 @@ contains
        if (includePDF) then
           ! Note: 'ycm' is the rapidity needed to go from lab to CM
           ! frame. Hence, here we boost from CM to lab frame with '-ycm'
-          call boostz(this%pp(0:3,i),-ycm,this%p(0:3,i))
+          call boostz(this%pp(0:3,i),-ycm,ps%p(0:3,i))
        else
-          this%p(0:3,i)=this%pp(0:3,i)
+          ps%p(0:3,i)=this%pp(0:3,i)
        endif
     enddo
   contains
@@ -321,12 +321,12 @@ contains
          if (mm .gt. 2) then
             call basic_antenna(q(0:3,subperm1(mm)),this%masses(subperm1(mm)),qk(0:3,mm-1),-1d0,&
                  Qm,this%pp(:,ibset(0,1)),this%pp(:,ibset(0,0)),0,.false.,mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm1(mm))
          else
             call basic_antenna(q(0:3,subperm1(2)),this%masses(subperm1(2)),qk(0:3,1),&
                  this%masses(subperm1(1)),Qm,this%pp(:,ibset(0,1)),this%pp(:,ibset(0,0)),0,.false.,mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm1(2))
             mass_sum=mass_sum+this%masses(subperm1(1))
          endif
@@ -334,14 +334,14 @@ contains
          do i=1,mm-3
             call basic_antenna(q(0:3,subperm1(mm-i)),this%masses(subperm1(mm-i)),qk(0:3,mm-i-1),-1d0,&
                  qk(0:3,mm-i),q(0:3,subperm1(mm-i+1)),this%pp(:,ibset(0,0)),i,.false.,mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm1(mm-i))
          enddo
 
          if (mm .gt. 2) then
             call basic_antenna(q(0:3,subperm1(2)),this%masses(subperm1(2)),qk(0:3,1),this%masses(subperm1(1)),&
                  qk(0:3,2),q(0:3,subperm1(3)),this%pp(:,ibset(0,0)),mm-2,.false.,mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm1(2))
             mass_sum=mass_sum+this%masses(subperm1(1))
          endif
@@ -351,12 +351,12 @@ contains
          if (this%next-2-mm .gt. 2) then
             call basic_antenna(q(0:3,subperm2(this%next-2-mm)),this%masses(subperm2(this%next-2-mm)),qk(0:3,this%next-2-1),&
                  -1d0,Qnm,this%pp(:,ibset(0,0)),this%pp(:,ibset(0,1)),0,.false.,this%next-2-mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm2(this%next-2-mm))
          else
             call basic_antenna(q(0:3,subperm2(2)),this%masses(subperm2(2)),qk(0:3,this%next-2-1),&
                  this%masses(subperm2(1)),Qnm,this%pp(:,ibset(0,0)),this%pp(:,ibset(0,1)),0,.false.,this%next-2-mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm2(1))
             mass_sum=mass_sum+this%masses(subperm2(2))
          endif
@@ -365,14 +365,14 @@ contains
             call basic_antenna(q(0:3,subperm2(this%next-2-mm-i)),this%masses(subperm2(this%next-2-mm-i)),qk(0:3,this%next-2-1-i),&
                  -1d0,qk(0:3,this%next-2-i),q(0:3,subperm2(this%next-2-mm-i+1)),this%pp(:,ibset(0,1)),i,.false.,&
                  this%next-2-mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm2(this%next-2-mm-i))
          enddo
 
          if (this%next-2-mm .gt. 2) then
             call basic_antenna(q(0:3,subperm2(2)),this%masses(subperm2(2)),qk(0:3,mm+1),this%masses(subperm2(1)),&
                  qk(0:3,mm+2),q(0:3,subperm2(3)),this%pp(:,ibset(0,1)),this%next-2-mm-2,.false.,this%next-2-mm,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm2(2))
             mass_sum=mass_sum+this%masses(subperm2(1))
          endif
@@ -411,38 +411,38 @@ contains
          if (this%next-2 .gt. 2) then
             call basic_antenna(q(0:3,subperm(1)),this%masses(subperm(1)),qk(0:3,this%next-2-1),-1d0,&
                  qk(0:3,this%next-2),q1_ref,q2_ref,0,m1,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm(1))
          else
             call basic_antenna(q(0:3,subperm(1)),this%masses(subperm(1)),qk(0:3,this%next-2-1),&
                  this%masses(subperm_rest(1)),qk(0:3,this%next-2),q1_ref,q2_ref,0,m1,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm(1))
             mass_sum=mass_sum+this%masses(subperm_rest(1))
          endif
          if (this%next-2 .gt. 3) then
             call basic_antenna(q(0:3,subperm_rest(this%next-2-1)),this%masses(subperm_rest(this%next-2-1)),&
                  qk(0:3,this%next-2-1-1),-1d0,qk(0:3,this%next-2-1),q2_ref,q1_ref,1,m1,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm_rest(this%next-2-1))
          elseif (this%next-2 .eq. 3) then 
             call basic_antenna(q(0:3,subperm_rest(2)),this%masses(subperm_rest(2)),qk(0:3,this%next-2-2),&
                  this%masses(subperm_rest(1)),qk(0:3,this%next-2-1),q2_ref,q1_ref,1,.false.,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm_rest(2))
             mass_sum=mass_sum+this%masses(subperm_rest(1))
          endif
          do i=2,this%next-2-3
             call basic_antenna(q(0:3,subperm_rest(this%next-2-i)),this%masses(subperm_rest(this%next-2-i)),qk(0:3,this%next-2-i-1),&
                  -1d0,qk(0:3,this%next-2-i),q(0:3,subperm_rest(this%next-2-i+1)),q1_ref,i,.false.,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm_rest(this%next-2-i))
          enddo
          if (this%next-2 .gt. 3) then
             call basic_antenna(q(0:3,subperm_rest(2)),this%masses(subperm_rest(2)),qk(0:3,1),&
                  this%masses(subperm_rest(1)),qk(0:3,2),&
                  q(0:3,subperm_rest(3)),q1_ref,this%next-2-2,.false.,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(subperm_rest(2))
             mass_sum=mass_sum+this%masses(subperm_rest(1))
          endif
@@ -472,27 +472,27 @@ contains
          if (this%next-2 .gt. 2) then
             call basic_antenna(q(0:3,perm_final(this%next-2)),this%masses(perm_final(this%next-2)),&
                  qk(0:3,this%next-2-1),mass_in,qk(0:3,this%next-2),q1_ref,q2_ref,0,m1,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(perm_final(this%next-2))**2
             parts = parts - ibset(0,perm_final(this%next-2)-1)
          else
             call basic_antenna(q(0:3,perm_final(this%next-2)),this%masses(perm_final(this%next-2)),qk(0:3,this%next-2-1),&
                  this%masses(perm_final(1)),qk(0:3,this%next-2),q1_ref,q2_ref,0,m1,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(perm_final(this%next-2))**2
             parts = parts - ibset(0,perm_final(this%next-2)-1)
          endif
          do i=1,this%next-2-3
             call basic_antenna(q(0:3,perm_final(this%next-2-i)),this%masses(perm_final(this%next-2-i)),qk(0:3,this%next-2-i-1),&
                  mass_in,qk(0:3,this%next-2-i),q(0:3,perm_final(this%next-2-i+1)),q2_ref,i,.false.,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(perm_final(this%next-2-i))**2
             parts = parts - ibset(0,perm_final(this%next-2-i)-1)
          enddo
          if (this%next-2 .gt. 2) then
             call basic_antenna(q(0:3,perm_final(2)),this%masses(perm_final(2)),qk(0:3,1),&
                  this%masses(perm_final(1)),qk(0:3,2),q(0:3,perm_final(3)),q2_ref,this%next-2-2,.false.,this%next-2,parts)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
             mass_sum=mass_sum+this%masses(perm_final(2))**2
             parts = parts - ibset(0,perm_final(2)-1)
          endif
@@ -506,10 +506,10 @@ contains
 
       ! Compute the weight (i.e. jacobian)
       ! The usual 2*pi factors for the phase-space
-      this%jac=this%jac*soft/((2d0*pi)**(3*(this%next-2)-4)) !wgt
-      this%jac=this%jac/(2d0*this%sqrtshat**2)
+      ps%jac=ps%jac*soft/((2d0*pi)**(3*(this%next-2)-4)) !wgt
+      ps%jac=ps%jac/(2d0*this%sqrtshat**2)
 
-      !write(*,*) 'jac',this%jac
+      !write(*,*) 'jac',ps%jac
 
     end subroutine generate_momenta
 
@@ -518,8 +518,8 @@ contains
       call generate_tau
       call generate_y
       this%sqrtshat=sqrt(tau)*this%sqrts
-      this%xbjrk(1)=sqrt(tau)*exp(ycm)
-      this%xbjrk(2)=sqrt(tau)*exp(-ycm)
+      ps%xbjrk(1)=sqrt(tau)*exp(ycm)
+      ps%xbjrk(2)=sqrt(tau)*exp(-ycm)
     end subroutine generate_initial_state
 
     subroutine generate_tau
@@ -528,9 +528,9 @@ contains
       smin=(this%next-2)*(this%next-3)*this%s0
       smax=this%sqrts**2
       ix=ix+1
-      call random_to_var(this%x(ix),ip_shat,smin,smax,shat,this%jac)
+      call random_to_var(this%x(ix),ip_shat,smin,smax,shat,ps%jac)
       tau=shat/smax
-      this%jac=this%jac/smax
+      ps%jac=ps%jac/smax
     end subroutine generate_tau
 
     subroutine generate_y
@@ -539,7 +539,7 @@ contains
       ymin= log(tau)/2d0
       ymax=-log(tau)/2d0
       ix=ix+1
-      call random_to_var(this%x(ix),0d0,ymin,ymax,ycm,this%jac)
+      call random_to_var(this%x(ix),0d0,ymin,ymax,ycm,ps%jac)
     end subroutine generate_y
 
     subroutine basic_antenna(p1,mass1,p2,mass2,P,q1,q2,i,m1,maxn,parts)
@@ -573,7 +573,7 @@ contains
 
       ! boost qi to CMF (P rest frame)
       if (dot(P,P).le.0d0) then
-         this%jac=-1d0
+         ps%jac=-1d0
          return
       endif
       esum=dsqrt(dot(P,P))
@@ -592,7 +592,7 @@ contains
       endif
 
       if (threedot(q1_cmf(1:3),q1_cmf(1:3))*threedot(q2_cmf(1:3),q2_cmf(1:3)).eq.0d0) then
-         this%jac=-2d0
+         ps%jac=-2d0
          return
       endif
       ! angles between q1,q2 in CMF_k frame
@@ -609,11 +609,11 @@ contains
       else
          if (k .ge. 3) then
             call generate_s2(k,s,s1,s2,q1_cmf,P_cmf)
-            if (this%jac.lt.0d0) return
+            if (ps%jac.lt.0d0) return
          else
             s2 = mass2**2
             gs = 1d0
-            this%jac = this%jac/gs
+            ps%jac = ps%jac/gs
          endif
       endif
 
@@ -779,7 +779,7 @@ contains
          call random_to_var(this%x(ix),-1d0,c2**2,(m-dsqrt(s1))**2,s2,dum)
          soft = soft*(log((m-sqrt(s1))**2)-log(c2**2))
          soft = soft*log((m-c2)**2/(c1**2))
-         this%jac = this%jac*s1*s2
+         ps%jac = ps%jac*s1*s2
       endif
 
       if (flat_split) then
@@ -796,7 +796,7 @@ contains
          E2 = dsqrt(s) - E1
 
          ix = ix + 1
-         call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
+         call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,ps%jac)
          !soft = soft*2d0*pi
 
          ! multichanneling for Qz sampling
@@ -831,17 +831,17 @@ contains
 
          if (.not. flat_split) then
             ix = ix + 1
-            call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+            call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
             RHS = ((E1+g2(pick)*min)/(E2+g3(pick)*min))&
                  *exp(R*w(pick)*4d0*E1*E2*(E2+g1(pick)*E1)/g2(pick))
             Qz = (E1-E2*RHS)/(g3(pick)*RHS-g2(pick))
             soft = soft*sum_w
-            this%jac = this%jac*(E1**2-Qz**2)*(E2**2-Qz**2)
+            ps%jac = ps%jac*(E1**2-Qz**2)*(E2**2-Qz**2)
          endif
 
          if (flat_split) then
             ix = ix + 1
-            call random_to_var(this%x(ix),0d0,min,max,Qz,this%jac)
+            call random_to_var(this%x(ix),0d0,min,max,Qz,ps%jac)
             !soft = soft*(max-min)
          endif
 
@@ -860,8 +860,8 @@ contains
          a1cut = 1d0-0.5d0*this%s0*(this%next-2-mn)/(s/2d0)
          if ((a1cut.gt.a1min).and.(a1cut.lt.a1max)) a1max=a1cut
          ix = ix + 1
-         call random_to_var(this%x(ix),-1d0,a1min,a1max,a1,this%jac)
-         this%jac = this%jac*a1
+         call random_to_var(this%x(ix),-1d0,a1min,a1max,a1,ps%jac)
+         ps%jac = ps%jac*a1
          !soft = soft*log(a1max/a1min)
 
          dummy=(/0d0,0d0,0d0,0d0/)
@@ -902,30 +902,30 @@ contains
       if (k.gt.2) then
          if (.not. flat) then
             ix = ix +1
-            call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+            call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
             C = ((smax-A)/(smin-A))**R
             s2 = (smin-A)*C + A
             soft = soft*(log(smax-A)-log(smin-A))
             if (smax-A.le.0d0) then
-               this%jac=-5d0
+               ps%jac=-5d0
                return 
             endif
             if (smin-A.le.0d0) then
-               this%jac=-6d0
+               ps%jac=-6d0
                return
             endif
             gs = 1d0/(s2-Sigma)
-            this%jac = this%jac/gs
+            ps%jac = ps%jac/gs
             a1 = a1_m1(s,s1,s2,q1_cmf,P_cmf,k)
             mu = (s2-s1)/s
             a2 = a1 + mu
-            this%jac = this%jac*a1*(1d0-a1)*(1d0-a2)*a2
+            ps%jac = ps%jac*a1*(1d0-a1)*(1d0-a2)*a2
          elseif (flat) then
             ix = ix +1
-            call random_to_var(this%x(ix),0d0,smax,smin,s2,this%jac)
+            call random_to_var(this%x(ix),0d0,smax,smin,s2,ps%jac)
             !soft = soft*(smax-smin)
             gs = 1d0
-            this%jac = this%jac/gs
+            ps%jac = ps%jac/gs
             a1max = 0.5d0*(1d0+(s1-s2)/(s)+dsqrt(kallen(1d0,s1/s,s2/s)))
             a1max = a1max-0.00001d0
             a1min = 0.5d0*(1d0+(s1-s2)/(s)-dsqrt(kallen(1d0,s1/s,s2/s)))
@@ -934,13 +934,13 @@ contains
                a1min = (this%s0/2d0)/(dot(q1_cmf,P_cmf))
             endif
             ix = ix +1
-            call random_to_var(this%x(ix),0d0,a1min,a1max,a1,this%jac)
+            call random_to_var(this%x(ix),0d0,a1min,a1max,a1,ps%jac)
             !soft = soft*(a1max-a1min)
          endif
 
       elseif (k.eq.2) then
          a1 = a1_m1(s,s1,s2,q1_cmf,P_cmf,k)
-         this%jac = this%jac*a1 *(1d0-a1)
+         ps%jac = ps%jac*a1 *(1d0-a1)
       endif
 
     end subroutine generate_first_single
@@ -980,41 +980,41 @@ contains
       ! S limits exactly same as in COMIX! 
 
       if (smin.gt.smax) then
-         this%jac=-3d0
+         ps%jac=-3d0
          return
       endif
 
       if ((.not.open) .and. (.not. flat)) then
          ix = ix +1
-         call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+         call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
          C = ((smax - A)*(B-smin)/((B-smax) * (smin - A)))**R
          s2 = (A*(B - smin) + B*(smin - A)*C)/(B - smin + (smin-A)*C)
          soft = soft*(log((smax-Sigma)/(s-sigmak-smax))-&
               log((smin-Sigma)/(s-sigmak-smin)))
          if ((smax-Sigma)/(s-sigmak-smax).le.0d0) then
-            this%jac=-8d0
+            ps%jac=-8d0
             return
          endif
          if ((smin-Sigma)/(s-sigmak-smin).le.0d0) then
-            this%jac=-8d0
+            ps%jac=-8d0
             return
          endif
          gs = (s-Sigmaold)/((s-sigmak-s2)*(s2-Sigma))
-         this%jac = this%jac/gs
+         ps%jac = ps%jac/gs
       endif
 
       if (flat) then
          ix = ix +1
-         call random_to_var(this%x(ix),0d0,smin,smax,s2,this%jac)
+         call random_to_var(this%x(ix),0d0,smin,smax,s2,ps%jac)
          !soft = soft*(smax-smin)
          gs = 1d0
-         this%jac = this%jac/gs
+         ps%jac = ps%jac/gs
       endif
       if (open) then
          ix = ix +1
-         call random_to_var(this%x(ix),-1d0,smin,smax,s2,this%jac)
+         call random_to_var(this%x(ix),-1d0,smin,smax,s2,ps%jac)
          !soft = soft*log(smax/smin)
-         this%jac = this%jac*s2
+         ps%jac = ps%jac*s2
       endif
     end subroutine generate_s2
 
@@ -1062,7 +1062,7 @@ contains
          if (( ((i .ne. 0) .and. (.not. m1)) .or. (maxn .ne. this%next-2))) then
             ! Sample with Pi^{-1/2} factor
             ix = ix + 1
-            call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+            call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
             buff = f_func_term1(a1,cos,s,s1,s2,h)
             v = buff(1)/2d0
             buff = f_func_term1(0d0,cos,s,s1,s2,h)
@@ -1082,35 +1082,35 @@ contains
             if ((a1-a1max)/a1max.le.1d-6.and.a1-a1max.gt.0d0) a1=a1max
             soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
             if (Amax.le.0d0) then
-               this%jac=-9d0
+               ps%jac=-9d0
                return
             endif
             if (Amin.le.0d0) then
-               this%jac=-9d0
+               ps%jac=-9d0
                return
             endif
-            this%jac = this%jac*a1
-            this%jac = this%jac*beta
+            ps%jac = ps%jac*a1
+            ps%jac = ps%jac*beta
          elseif (((i .eq. 0) .or. (m1 .and. (i .le. 1)))) then
             ! Sample with 1/x 
             ix = ix + 1
-            call random_to_var(this%x(ix),-1d0,a1min,a1max,a1,this%jac)
+            call random_to_var(this%x(ix),-1d0,a1min,a1max,a1,ps%jac)
             !soft = soft*log(a1max/a1min)
-            !this%jac = this%jac*a1 
+            !ps%jac = ps%jac*a1 
 
          endif
       endif
 
       if ((flat)) then
          ix = ix +1
-         call random_to_var(this%x(ix),0d0,a1min,a1max,a1,this%jac)
+         call random_to_var(this%x(ix),0d0,a1min,a1max,a1,ps%jac)
          !soft = soft*(a1max-a1min)
       endif
       if (open) then
          ix = ix + 1
-         call random_to_var(this%x(ix),-1d0,a1min,a1max,a1,this%jac)
+         call random_to_var(this%x(ix),-1d0,a1min,a1max,a1,ps%jac)
          !soft = soft*log(a1max/a1min)
-         !this%jac = this%jac*a1
+         !ps%jac = ps%jac*a1
       endif
     end subroutine generate_a1_term1
 
@@ -1135,12 +1135,12 @@ contains
 
       ! Now generate a1
       ix= ix + 1
-      call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+      call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
       xy = tan(-pi/2d0 * R)**2
       a1 = a1maxbar*a1minbar*(1d0+xy)/(a1minbar + xy*a1maxbar) - h
       if ((a1min-a1)/a1min.le.1d-8.and.a1min-a1.gt.0d0) a1=a1min
       if ((a1-a1max)/a1max.le.1d-8.and.a1-a1max.gt.0d0) a1=a1max
-      this%jac = this%jac*a1
+      ps%jac = ps%jac*a1
     end subroutine generate_a1_term2
 
     subroutine generate_a2_term1(i,m1,maxn,a1,s,s1,s2,cos,a2cut,h_in,a2)
@@ -1189,7 +1189,7 @@ contains
               ((.not. m1) .and. (maxn .eq. this%next-2) .and. (i .ge. 1))&
               .or. (maxn .ne. this%next-2))  then
             ix = ix + 1
-            call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+            call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
             xy = tan(-pi/2d0 * R)**2
             a2 = a2maxbar*a2minbar*(1d0+xy)/(a2minbar + xy*a2maxbar) - h
             if (a2min-a2.gt.0d0) then
@@ -1208,7 +1208,7 @@ contains
                   a1=a2max
                endif
             endif
-            this%jac = this%jac*a2
+            ps%jac = ps%jac*a2
             soft = soft*(pi/2d0)
          elseif( ((i .eq. 0) .and. (maxn .eq. this%next-2)) .or. ((m1 .and. (i .le. 1)))) then
             ! Do phi-integration instead of a2
@@ -1221,9 +1221,9 @@ contains
               ((.not. m1) .and. (maxn .eq. this%next-2) .and. (i .ge. 1))&
               .or. (maxn .ne. this%next))  then
             ix = ix +1
-            call random_to_var(this%x(ix),0d0,a2min,a2max,a2,this%jac)
+            call random_to_var(this%x(ix),0d0,a2min,a2max,a2,ps%jac)
             !soft = soft*(a2max-a2min)
-            this%jac = this%jac/dsqrt(4d0*(a2max-a2)*(a2-a2min))
+            ps%jac = ps%jac/dsqrt(4d0*(a2max-a2)*(a2-a2min))
          elseif( ((i .eq. 0) .and. (maxn .eq. this%next-2)) .or. ((m1 .and. (i .le. 1)))) then
             ! Do phi-integration instead of a2
             a2 = 300d0          ! dummy value to do phi-integration
@@ -1264,7 +1264,7 @@ contains
 
       ! Sample with Pi^{-1/2} factor
       ix = ix + 1
-      call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+      call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
       buff = f_func_term2(0d0,cos,s,s1,s2)
       wsq = buff(3)  ! w^2
       if (Amin .le. 0d0) then
@@ -1277,8 +1277,8 @@ contains
       if ((a2min-a2)/a2min.le.1d-8.and.a2min-a2.gt.0d0) a2=a2min
       if ((a2-a2max)/a2max.le.1d-8.and.a2-a2max.gt.0d0) a2=a2max
       soft = soft*(1d0/f_h1)*(log(Amax)-log(Amin))
-      this%jac = this%jac*a2
-      this%jac = this%jac*beta
+      ps%jac = ps%jac*a2
+      ps%jac = ps%jac*beta
     end subroutine generate_a2_term2
 
     function f_func_term1(a1,cos,s,s1,s2,h)
@@ -1362,7 +1362,7 @@ contains
       if (a2 .gt. 100d0) then
          z = E - dsqrt(s)*a1
          ix = ix + 1
-         call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,this%jac)
+         call random_to_var(this%x(ix),0d0,0d0,2d0*pi,phi,ps%jac)
          soft = soft*(1d0/4d0)
          xxx =  dsqrt(E**2 - s1 - z**2)*cos(phi)
          y = dsqrt(E**2 - s1 - z**2)*sin(phi)
@@ -1505,7 +1505,7 @@ contains
             pick = 4
          endif
          ix = ix +1
-         call random_to_var(this%x(ix),0d0,0d0,1d0,R,this%jac)
+         call random_to_var(this%x(ix),0d0,0d0,1d0,R,ps%jac)
          sgn = 1d0
          if ((pick .eq. 2) .or. (pick .eq. 3)) then
             sgn = -1d0
