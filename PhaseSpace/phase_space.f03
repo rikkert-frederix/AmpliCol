@@ -1,5 +1,10 @@
 module phase_space_base
   implicit none
+  type :: psv
+     real(kind=8),dimension(:,:),allocatable,public :: p
+     real(kind=8),dimension(:),allocatable,public :: x
+     real(kind=8),public :: jac,xbjrk(2)
+  end type psv
   type,abstract :: phase_space_type
      ! If adding variables here, make sure to also update the
      ! 'cleanup' subroutines for all phase-space parametrisation
@@ -35,15 +40,15 @@ module phase_space_base
        logical,intent(in) :: include_pdf
        logical,intent(in),optional :: flat
      end subroutine phase_space_interface_init
-     subroutine phase_space_interface_generate_momenta(this,xx)
-       import :: phase_space_type
+     subroutine phase_space_interface_generate_momenta(this,ps)
+       import :: phase_space_type,psv
        class(phase_space_type),intent(inout) :: this
-       real(kind=8),dimension(99),intent(in) :: xx
+       type(psv),intent(inout) :: ps
      end subroutine phase_space_interface_generate_momenta
-     subroutine phase_space_interface_compute_x_from_momenta(this,p)
-       import :: phase_space_type
+     subroutine phase_space_interface_compute_x_from_momenta(this,ps)
+       import :: phase_space_type,psv
        class(phase_space_type),intent(inout) :: this
-       real(kind=8),dimension(0:3,this%next),intent(in) :: p
+       type(psv),intent(inout) :: ps
      end subroutine phase_space_interface_compute_x_from_momenta
      subroutine phase_space_interface_cleanup(this)
        import :: phase_space_type

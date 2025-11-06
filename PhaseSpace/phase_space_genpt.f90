@@ -17,10 +17,10 @@ module phase_space_genpt_mod
                                   ! 3 = uses invariant mass with previous particle
                                   ! 4 = uses cos(theta) with previous particle
 contains
-  subroutine genpt_compute_x_from_momenta(this,p)
+  subroutine genpt_compute_x_from_momenta(this,ps)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
-    real(kind=8),dimension(0:3,this%next),intent(in) :: p
+    type(psv),intent(inout) :: ps
     write (*,*) 'Cannot invert phase-space for pT-based parametrisation'
     stop 1
   end subroutine genpt_compute_x_from_momenta
@@ -100,10 +100,10 @@ contains
     allocate(this%p(0:3,this%next))
   end subroutine genpt_init
 
-  subroutine genpt_generate_momenta(this,xx)
+  subroutine genpt_generate_momenta(this,ps)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
-    real(kind=8),dimension(99),intent(in) :: xx
+    type(psv),intent(inout) :: ps
     real(kind=8) :: pt2min,pt2max,pt2,ymin,ymax,y,phimin,phimax,phi&
          &,ycm,drmin,drmax,dr,phi2,invmmin,invmmax,invm,tau
     real(kind=8) :: costheta,costhetamin,costhetamax,theta,pzmax
@@ -117,18 +117,18 @@ contains
        pt2min=this%ptcut(i)**2
        pt2max=this%sqrts**2/4d0
        ix=ix+1
-       call random_to_var(xx(ix),-1.5d0,pt2min,pt2max,pt2,this%jac)
+       call random_to_var(ps%x(ix),-1.5d0,pt2min,pt2max,pt2,this%jac)
        ! generate phi
        phimin=-pi
        phimax=pi
        ix=ix+1
-       call random_to_var(xx(ix),0d0,phimin,phimax,phi,this%jac)
+       call random_to_var(ps%x(ix),0d0,phimin,phimax,phi,this%jac)
        if (use_mode.eq.1 .or.i.eq.3) then
           ! generate rapidity
           ymin=-this%ycut(i)
           ymax=+this%ycut(i)
           ix=ix+1
-          call random_to_var(xx(ix),0d0,ymin,ymax,y,this%jac)
+          call random_to_var(ps%x(ix),0d0,ymin,ymax,y,this%jac)
           ! fill momentum
           call fill_momentum_pt2yphi(pt2,y,phi,this%p(0,i))
 
@@ -138,7 +138,7 @@ contains
           drmin=max(this%DRcut(this%next*(i-1)+i-1),abs(phi))
           drmax=sqrt((this%ycut(i)+abs(y))**2+phi**2)
           ix=ix+1
-          call random_to_var(xx(ix),0d0,drmin,drmax,dr,this%jac)
+          call random_to_var(ps%x(ix),0d0,drmin,drmax,dr,this%jac)
           ! fill momentum, assuming that previous particle is along the x-axis.
           call fill_momentum_pt2drphi(pt2,dr,phi,this%p(0,i),this%jac)
           ! boost along the z-axis
@@ -155,7 +155,7 @@ contains
           invmmin=2d0*sqrt(pt2)*pb(0)*(1d0-cos(max(this%DRcut(this%next*(i-1)+i-1),abs(phi))))
           invmmax=this%sqrts**2
           ix=ix+1
-          call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,this%jac)
+          call random_to_var(ps%x(ix),-1d0,invmmin,invmmax,invm,this%jac)
           ! fill momentum, assuming that previous particle is along the x-axis.
           call fill_momentum_pt2invmphi(pt2,invm,phi,pb(0),this%p(0,i),this%jac)
           if (this%jac.lt.0d0) return
@@ -171,7 +171,7 @@ contains
           costhetamin=-1d0 
           costhetamax=cos(this%DRcut(this%next*(i-1)+i-1))
           ix=ix+1
-          call random_to_var(xx(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
+          call random_to_var(ps%x(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
           call fill_momentum_pt2cosphi(pt2,costheta,phi,this%p(0,i),this%jac)
           if (this%jac.lt.0d0) return
           call boostz(this%p(0,i),-y,pb)
@@ -190,7 +190,7 @@ contains
        ymin=-this%ycut(this%next)
        ymax=+this%ycut(this%next)
        ix=ix+1
-       call random_to_var(xx(ix),0d0,ymin,ymax,y,this%jac)
+       call random_to_var(ps%x(ix),0d0,ymin,ymax,y,this%jac)
        ! final particle: fill momentum
        this%p(1,this%next)=-sum(this%p(1,3:this%next-1))
        this%p(2,this%next)=-sum(this%p(2,3:this%next-1))
@@ -214,7 +214,7 @@ contains
        drmin=max(this%DRcut(this%next*(this%next-1)+this%next-1),abs(phi))
        drmax=sqrt((this%ycut(this%next)+abs(y))**2+phi**2)
        ix=ix+1
-       call random_to_var(xx(ix),0d0,drmin,drmax,dr,this%jac)
+       call random_to_var(ps%x(ix),0d0,drmin,drmax,dr,this%jac)
        y=sqrt(dr**2-phi**2)
        if (ran2().gt.0.5d0) y=-y
        this%jac=this%jac*2d0
@@ -240,7 +240,7 @@ contains
           return
        endif
        ix=ix+1
-       call random_to_var(xx(ix),-1d0,invmmin,invmmax,invm,this%jac)
+       call random_to_var(ps%x(ix),-1d0,invmmin,invmmax,invm,this%jac)
        this%p(0,this%next)=(invm/2d0+pb(1)*this%p(1,this%next)+pb(2)*this%p(2,this%next))/pb(0)
        ! There are two values of the pz that correspond to a single
        ! invm. Take one of the two at random.
@@ -290,7 +290,7 @@ contains
        if (costhetamin.gt.costhetamax) return
 
        ix=ix+1
-       call random_to_var(xx(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
+       call random_to_var(ps%x(ix),0d0,costhetamin,costhetamax,costheta,this%jac)
 
        this%p(0,this%next) = abs(this%p(1,this%next)/costheta)
        if (costheta.lt.0d0) then

@@ -23,10 +23,10 @@ module phase_space_haag_mod
   real(kind=8),parameter :: vtiny=1d-12
 
 contains
-  subroutine haag_compute_x_from_momenta(this,p)
+  subroutine haag_compute_x_from_momenta(this,ps)
     implicit none
     class(phase_space_haag),intent(inout) :: this
-    real(kind=8),dimension(0:3,this%next),intent(in) :: p
+    type(psv),intent(inout) :: ps
     write (*,*) 'Cannot invert phase-space for haag parametrisation'
     stop 1
   end subroutine haag_compute_x_from_momenta
@@ -237,14 +237,14 @@ contains
     end subroutine haag_deallocate
   end subroutine haag_init
 
-  subroutine haag_generate_momenta(this,xx)
+  subroutine haag_generate_momenta(this,ps)
     ! Wrapper for the routine that generates the momenta.
     implicit none
     class(phase_space_haag),intent(inout) :: this
-    real(kind=8),dimension(99),intent(in) :: xx
+    type(psv),intent(inout) :: ps
     real(kind=8) :: mass_sum,soft,tau,ycm
     integer(kind=4) :: i,ix,mm
-    this%x(1:this%ndim)=xx(1:this%ndim)
+    this%x(1:this%ndim)=ps%x(1:this%ndim)
     this%jac=1d0
     ix=0
     if (includePDF) call generate_initial_state

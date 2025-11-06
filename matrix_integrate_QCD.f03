@@ -250,6 +250,9 @@ contains
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
     logical :: done
+    type(psv) :: ps
+    allocate(ps%xx(1:pgl(ichan)%ndim))
+    allocate(ps%p(0:3,1:pgl(ichan)%next))
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
@@ -270,7 +273,8 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    call pgl(ichan)%phase_space%generate_momenta(x)
+    ps%xx(1:pgl(ichan)%ndim)=x(1:pgl(ichan)%ndim)
+    call pgl(ichan)%phase_space%generate_momenta(ps)
     if (debug ) then
        write (*,*) pgl(ichan)%phase_space%jac
        stop 1
@@ -288,7 +292,7 @@ contains
        return
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
-    call compute_multichannel_weight(ichan,pgl(ichan)%phase_space%x,pgl(ichan)%phase_space%p, &
+    call compute_multichannel_weight(ichan,ps,pgl(ichan)%phase_space%p, &
          pgl(ichan)%phase_space%jac,colour_singlet_multichannel_weight)
     call cpu_time(tAfter)
     t_PS= t_PS +tAfter-tBefore

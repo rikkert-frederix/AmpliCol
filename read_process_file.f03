@@ -139,6 +139,7 @@ contains
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
+    type(psv) :: ps
     allocate(phase_space_gen23 :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
     allocate(pgl_unique%color_orders(next,nproc_unique))
@@ -146,6 +147,8 @@ contains
     allocate(pgl_unique%amps(1))
     allocate(mass(next))
     allocate(width(next))
+    allocate(ps%xx(1:pgl_unique%ndim))
+    allocate(ps%p(0:3,1:pgl_unique%next))
     pgl_unique%nproc=nproc_unique
     pgl_unique%processes(1:next,1:nproc_unique)=unique_procs(1:next,1:nproc_unique)
     do i=1,pgl_unique%next
@@ -183,7 +186,8 @@ contains
        do i=1,pgl_unique%ndim
           x(i)=ran2()
        enddo
-       call pgl_unique%phase_space%generate_momenta(x)
+       ps%xx(1:pgl_unique%ndim)=x(1:pgl_unique%ndim)
+       call pgl_unique%phase_space%generate_momenta(ps)
        if (pgl_unique%phase_space%jac.lt.0d0) cycle
        pgl_unique%passed(1)=pgl_unique%passed(1)+1
        call pgl_unique%amps(1)%evaluate(next,pgl_unique%phase_space%p,pgl_unique%hel,read_proc_from_file,phys_model)

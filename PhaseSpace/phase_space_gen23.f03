@@ -246,14 +246,14 @@ contains
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
   end subroutine gen23_cleanup
 
-  subroutine gen23_generate_momenta(this,xx)
+  subroutine gen23_generate_momenta(this,ps)
     ! Wrapper for the routine that generates the momenta.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
-    real(kind=8),dimension(99),intent(in) :: xx
+    type(psv),intent(inout) :: ps
     integer(kind=4) :: i,ix
     real(kind=8) :: ycm
-    this%x(1:this%ndim)=xx(1:this%ndim)
+    this%x(1:this%ndim)=ps%x(1:this%ndim)
     this%jac=1d0
     ix=0
     if (includePDF) call generate_initial_state
@@ -1015,10 +1015,10 @@ contains
     end subroutine random_to_var
   end subroutine gen23_generate_momenta
 
-  subroutine gen23_compute_x_from_momenta(this,p)
+  subroutine gen23_compute_x_from_momenta(this,ps)
     implicit none
     class(phase_space_gen23),intent(inout) :: this
-    real(kind=8),dimension(0:3,this%next),intent(in) :: p
+    type(psv),intent(inout) :: ps
     real(kind=8) :: ycm
     integer :: ix
     if (debug) write (*,*) 'computing x from momenta'
@@ -1479,15 +1479,15 @@ contains
       implicit none
       integer :: i,j
       real(kind=8),dimension(0:3) :: pp
-      ycm=log((p(0,1)+p(0,2)+p(3,1)+p(3,2))/(p(0,1)+p(0,2)-p(3,1)-p(3,2)))/2d0
+      ycm=log((ps%p(0,1)+ps%p(0,2)+ps%p(3,1)+ps%p(3,2))/(ps%p(0,1)+ps%p(0,2)-ps%p(3,1)-ps%p(3,2)))/2d0
       do i=1,maskr(this%next)
          pp(0:3)=0d0
          do j=0,this%next-1
             if (btest(i,j)) then
                if (j.le.1 .and. popcnt(i).ne.1) then
-                  pp(0:3)=pp(0:3)-p(0:3,j+1)
+                  pp(0:3)=pp(0:3)-ps%p(0:3,j+1)
                else
-                  pp(0:3)=pp(0:3)+p(0:3,j+1)
+                  pp(0:3)=pp(0:3)+ps%p(0:3,j+1)
                endif
             endif
          enddo
