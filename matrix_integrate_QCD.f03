@@ -528,6 +528,9 @@ contains
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag)
 
+    logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
+    open(unit=99,file=logfile,status='unknown')
+
     if (library.eq.'none') then
        create_amplitude_library=.false.
        use_amplitude_library=.false.
@@ -539,8 +542,6 @@ contains
        use_amplitude_library=.true.
        return
     endif
-    logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
-    open(unit=99,file=logfile,status='unknown')
 
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice
