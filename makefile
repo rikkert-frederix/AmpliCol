@@ -19,8 +19,9 @@ FILES_M_COMBINE_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o 
 amplitude_QCD.o matrix_combine_QCD.o
 
 FC=gfortran
-FFLAGS=-ffast-math -O3
-#FFLAGS=-fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
+#FFLAGS=-ffast-math -O3
+FFLAGS=-ffast-math -O3 -fopenmp
+#FFLAGS=-fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal -fopenmp
 
 # Files for all executables
 
@@ -31,6 +32,8 @@ FFLAGS=-ffast-math -O3
 %.o: %.f
 	$(FC) $(FFLAGS) -c -I. $<
 %.o: PDF/%.f
+	$(FC) $(FFLAGS) -c -I. -IPDF $<
+%.o: PDF/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 %.o: SimpleMint/%.f
 	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
