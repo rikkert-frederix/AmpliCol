@@ -325,7 +325,7 @@ contains
           if (done) return
        endif
     enddo
-    
+
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     !$omp parallel do
     do ivec=1,vector_size
@@ -336,7 +336,7 @@ contains
        if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
           weight(ivec)=weight(ivec)*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
        endif
-    
+
        ! multiply by the EW coupling
        if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
           weight(ivec)=weight(ivec)*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
@@ -344,13 +344,17 @@ contains
        if (keep_processes_separate) then
           val(1,ivec)=pgl(ichan)%amp2(1,ivec)*weight(ivec)/dble(pgl(ichan)%iden(iint))
           val(1,ivec)=val(1,ivec)*colour_singlet_multichannel_weight(iint,ivec)
-          call include_PDF_and_identical_procs(val(:,ivec),val_abs(:,ivec),pgl(ichan),pgl(ichan)%ps(ivec),iint,ivec)
+          call include_PDF_and_identical_procs(val(:,ivec),val_abs(:,ivec), &
+               pgl(ichan),pgl(ichan)%ps(ivec),iint,ivec)
           f_abs(ivec)=sum(val_abs(1:1,ivec),dim=1)
           f(ivec)=sum(val(1:1,ivec),dim=1)
        else
-          val(1:pgl(ichan)%nproc,ivec)=pgl(ichan)%amp2(1:pgl(ichan)%nproc,ivec)*weight(ivec)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-          val(1:pgl(ichan)%nproc,ivec)=val(1:pgl(ichan)%nproc,ivec)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc,ivec)
-          call include_PDF_and_identical_procs(val(:,ivec),val_abs(:,ivec),pgl(ichan),pgl(ichan)%ps(ivec),-1,ivec)
+          val(1:pgl(ichan)%nproc,ivec)=pgl(ichan)%amp2(1:pgl(ichan)%nproc,ivec)* &
+               weight(ivec)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+          val(1:pgl(ichan)%nproc,ivec)=val(1:pgl(ichan)%nproc,ivec)* &
+               colour_singlet_multichannel_weight(1:pgl(ichan)%nproc,ivec)
+          call include_PDF_and_identical_procs(val(:,ivec),val_abs(:,ivec), &
+               pgl(ichan),pgl(ichan)%ps(ivec),-1,ivec)
           f_abs(ivec)=sum(val_abs(1:pgl(ichan)%nproc,ivec),dim=1)
           f(ivec)=sum(val(1:pgl(ichan)%nproc,ivec),dim=1)
        endif
