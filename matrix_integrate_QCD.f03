@@ -17,18 +17,19 @@ program matrix_integrate_QCD
   use multichannel
   use amplitude_library
   implicit none
+  integer :: ivec
+  integer,parameter :: vector_size=128
   integer :: iproc
-  real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
   character(len=80) :: filename,logfile,tag
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
-  logical,dimension(1) :: to_write
+  logical,dimension(vector_size) :: to_write
   integer,dimension(:),allocatable :: nintegrals
   integer :: ichan,iint,itmax,ncalls0,iamp
-  real(kind=8),dimension(1) :: f,f_abs
+  real(kind=8),dimension(vector_size) :: f,f_abs
   logical :: done
   real(kind=8),dimension(:,:),allocatable :: wgts
   character(len=8) :: date
@@ -51,9 +52,9 @@ program matrix_integrate_QCD
 
   call cpu_time(tBefore)
   if (use_amplitude_library) then
-     call read_amplitude_lib()
+     call read_amplitude_lib(vector_size)
   else
-     call read_processes_from_file(filename)
+     call read_processes_from_file(filename,vector_size)
      do i=1,ngroups
        call setup_optimised_multichannel_weight_computation(pgl(i))
     enddo
@@ -102,9 +103,11 @@ program matrix_integrate_QCD
              pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      endif
      pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
-     allocate(pgl(igroup)%ps(1))
-     allocate(pgl(igroup)%ps(1)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
-     allocate(pgl(igroup)%ps(1)%p(0:3,1:pgl(igroup)%next))
+     allocate(pgl(igroup)%ps(vector_size))
+     do ivec=1,vector_size
+        allocate(pgl(igroup)%ps(ivec)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
+        allocate(pgl(igroup)%ps(ivec)%p(0:3,1:pgl(igroup)%next))
+     enddo
      call cpu_time(tAfter)
      t_PS_init=t_PS_init+tAfter-tBefore
      deallocate(mass)
@@ -153,13 +156,13 @@ program matrix_integrate_QCD
      call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
 
      if (keep_processes_separate) then
-        allocate(pgl(igroup)%amp2(1))
+        allocate(pgl(igroup)%amp2(1,vector_size))
      else
-        allocate(pgl(igroup)%amp2(1:pgl(igroup)%nproc))
+        allocate(pgl(igroup)%amp2(1:pgl(igroup)%nproc,vector_size))
      endif
 
      ! number of helicities to sum over
-     allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
+     allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel),vector_size))
      allocate(pgl(igroup)%hel(1:pgl(igroup)%next))
      if (keep_processes_separate) then
         allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
@@ -190,9 +193,9 @@ program matrix_integrate_QCD
   write (99,*) 'Start phase-space integration '//trim(formatted)
   call flush(99)
   do
-     call simple_integrator%get_points(1,ichan,iint)
-     call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
-     call simple_integrator%fill_points(1,f_abs,f,to_write,done)
+     call simple_integrator%get_points(vector_size,ichan,iint)
+     call integrand(ichan,iint,simple_integrator%x,simple_integrator%wgt,f,f_abs)
+     call simple_integrator%fill_points(vector_size,f_abs,f,to_write,done)
      if (create_amplitude_library) then
         done=.true.
         do igroup=1,ngroups
@@ -200,11 +203,13 @@ program matrix_integrate_QCD
         enddo
         if (done) call create_amplitude_lib()
      endif
-     if (to_write(1)) then
-        call unwgt_process(pgl(ichan),iint) ! pick a random process
-        call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
-        call write_event(11,pgl(ichan),1d0)
-     endif
+     do ivec=1,vector_size
+        if (to_write(ivec)) then
+           call unwgt_process(pgl(ichan),iint,ivec) ! pick a random process
+           call unwgt_helicity(pgl(ichan),ivec)     ! pick a random helicity for the process picked
+           call write_event(11,pgl(ichan),ivec,1d0)
+        endif
+     enddo
      if (done) exit
   enddo
   call flush(11)
@@ -244,212 +249,226 @@ contains
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
-    real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
-    real(kind=8),intent(in) :: vol
-    real(kind=8),intent(out) :: f,f_abs
-    real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
-    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
+    real(kind=8),dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra,vector_size),intent(in) :: x
+    real(kind=8),dimension(vector_size),intent(in) :: vol
+    real(kind=8),dimension(vector_size),intent(out) :: f,f_abs
+    real(kind=8),dimension(vector_size) :: weight
+    real(kind=8),dimension(:,:),allocatable,save :: val,val_abs,vol_ichan
+    real(kind=8),dimension(pgl(ichan)%nproc,vector_size) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=4) :: tBefore,tAfter
+    complex(kind=8),dimension(pgl(ichan)%amps(iint)%n_amps,vector_size) :: amps
     logical :: done
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
     if (.not.allocated(val)) then
        if (keep_processes_separate) then
-          allocate(val(1))
-          allocate(val_abs(1))
+          allocate(val(1,vector_size))
+          allocate(val_abs(1,vector_size))
        else
-          allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
-          allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
+          allocate(val(1:maxval(pgl(1:ngroups)%nproc),vector_size))
+          allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc),vector_size))
        endif
-       allocate(vol_ichan(1:ngroups))
+       allocate(vol_ichan(1:ngroups,vector_size))
     endif
     ! some point-by-point initialisation
     f=0d0
     f_abs=0d0
+    val=0d0
     val_abs=0d0
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    pgl(ichan)%ps(1)%x=x
-    call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
-    if (debug ) then
-       write (*,*) pgl(ichan)%ps(1)%jac
-       stop 1
-    endif
-    if (pgl(ichan)%ps(1)%jac.lt.0d0) then
-       val=0d0
-       call cpu_time(tAfter)
-       t_PS= t_PS +tAfter-tBefore
-       return
-    endif
-    if (.not.pass_cuts(pgl(ichan))) then
-       val=0d0
-       call cpu_time(tAfter)
-       t_PS= t_PS +tAfter-tBefore
-       return
-    endif
-    pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
-    call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
-    call cpu_time(tAfter)
-    t_PS= t_PS +tAfter-tBefore
-    tBefore=tAfter
-    call compute_the_amps(iint,ichan)
+    !$omp parallel do
+    do ivec=1,vector_size
+       pgl(ichan)%ps(ivec)%x(:)=x(:,ivec)
+       call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(ivec))
+!!$    enddo
+!!$    if (debug) then
+!!$       write (*,*) pgl(ichan)%ps(1:vector_size)%jac
+!!$       stop 1
+!!$    endif
+!!$    do ivec=1,vector_size
+       if (pgl(ichan)%ps(ivec)%jac.lt.0d0) then
+          val(:,ivec)=-1d0
+          cycle
+       endif
+       if (.not.pass_cuts(pgl(ichan),pgl(ichan)%ps(ivec))) then
+          val(:,ivec)=-1d0
+       endif
+!!$    enddo
+!!$    !$omp parallel do
+!!$    do ivec=1,vector_size
+       if (val(1,ivec).eq.-1d0) cycle
+       call compute_multichannel_weight(ichan,pgl(ichan)%ps(ivec),colour_singlet_multichannel_weight(1,ivec))
+!!$    enddo
+!!$    call cpu_time(tAfter)
+!!$    t_PS= t_PS +tAfter-tBefore
+!!$    tBefore=tAfter
+!!$    !$omp parallel do
+!!$    do ivec=1,vector_size
+       if (val(1,ivec).eq.-1d0) cycle
+       call compute_the_amps(iint,ichan,ivec,amps(:,ivec))
+    enddo
     call cpu_time(tAfter)
     t_amp=t_amp+tAfter-tBefore
     tBefore=tAfter
-    call square_the_amps(iint,ichan)
-    if ((.not. use_amplitude_library) &
-         .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
-       call optimise_the_amplitudes(iint,ichan,done)
-       if (done) return
-    endif
+    do ivec=1,vector_size
+       if (val(1,ivec).eq.-1d0) cycle
+       call square_the_amps(iint,ichan,ivec,amps(:,ivec))
+       if (.not. use_amplitude_library) pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
+       if ((.not. use_amplitude_library) &
+            .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
+          call optimise_the_amplitudes(iint,ichan,ivec,amps(1,ivec),done)
+          if (done) return
+       endif
+    enddo
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
-    weight=vol*pgl(ichan)%ps(1)%jac*conv
+    !$omp parallel do
+    do ivec=1,vector_size
+       if (val(1,ivec).eq.-1d0) cycle
+       weight(ivec)=vol(ivec)*pgl(ichan)%ps(ivec)%jac*conv
 
-    ! multiply by the strong coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
-       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
-    endif
+       ! multiply by the strong coupling
+       if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
+          weight(ivec)=weight(ivec)*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
+       endif
     
-    ! multiply by the EW coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
-    endif
-
-    if (keep_processes_separate) then
-       val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
-       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
-       f_abs=sum(val_abs(1:1))
-       f=sum(val(1:1))
-    else
-       val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
-       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
-       f=sum(val(1:pgl(ichan)%nproc))
-    endif
+       ! multiply by the EW coupling
+       if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
+          weight(ivec)=weight(ivec)*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
+       endif
+       if (keep_processes_separate) then
+          val(1,ivec)=pgl(ichan)%amp2(1,ivec)*weight(ivec)/dble(pgl(ichan)%iden(iint))
+          val(1,ivec)=val(1,ivec)*colour_singlet_multichannel_weight(iint,ivec)
+          call include_PDF_and_identical_procs(val(:,ivec),val_abs(:,ivec),pgl(ichan),pgl(ichan)%ps(ivec),iint,ivec)
+          f_abs(ivec)=sum(val_abs(1:1,ivec),dim=1)
+          f(ivec)=sum(val(1:1,ivec),dim=1)
+       else
+          val(1:pgl(ichan)%nproc,ivec)=pgl(ichan)%amp2(1:pgl(ichan)%nproc,ivec)*weight(ivec)/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+          val(1:pgl(ichan)%nproc,ivec)=val(1:pgl(ichan)%nproc,ivec)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc,ivec)
+          call include_PDF_and_identical_procs(val(:,ivec),val_abs(:,ivec),pgl(ichan),pgl(ichan)%ps(ivec),-1,ivec)
+          f_abs(ivec)=sum(val_abs(1:pgl(ichan)%nproc,ivec),dim=1)
+          f(ivec)=sum(val(1:pgl(ichan)%nproc,ivec),dim=1)
+       endif
+    enddo
     call cpu_time(tAfter)
     t_mat=t_mat+tAfter-tBefore
   end subroutine integrand
 
-  subroutine optimise_the_amplitudes(iint,ichan,done)
+  subroutine optimise_the_amplitudes(iint,ichan,ivec,amps,done)
     implicit none
-    integer,intent(in) :: iint,ichan
+    integer,intent(in) :: iint,ichan,ivec
     logical,intent(out) :: done
     real(kind=8), dimension(:),allocatable :: amp2_save
+    complex(kind=8),dimension(pgl(ichan)%amps(iint)%n_amps),intent(inout) :: amps
     done=.false.
-    call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
-    call setup_helicity_filter(pgl(ichan),iint)
+    call find_same_flavour(pgl(ichan),nevent_hel_filter,amps)
+    call setup_helicity_filter(pgl(ichan),iint,ivec)
     if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
        ! recompute the amplitudes (to make sure that helicities are
        ! all filled correctly). We can also check that they are
        ! consistent with the non-optimised ones.
        allocate(amp2_save(1:pgl(ichan)%nproc))
-       amp2_save=pgl(ichan)%amp2
-       call compute_the_amps(iint,ichan)
-       call square_the_amps(iint,ichan)
+       amp2_save=pgl(ichan)%amp2(:,ivec)
+       call compute_the_amps(iint,ichan,ivec,amps)
+       call square_the_amps(iint,ichan,ivec,amps)
        if (use_cross_process_optimisation_of_currents) then
           call pgl(ichan)%amps(iint)%optimise_evaluation(pgl(ichan)%next)
-          call compute_the_amps(iint,ichan)
-          call square_the_amps(iint,ichan)
+          call compute_the_amps(iint,ichan,ivec,amps)
+          call square_the_amps(iint,ichan,ivec,amps)
        endif
-       if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-8)) then
+       if (any(abs(amp2_save-pgl(ichan)%amp2(:,ivec))/(amp2_save+pgl(ichan)%amp2(:,ivec)).gt.1d-8)) then
           write (*,*) 'Find same flavour and helicity filter give different matrix elements'
           write (*,*) amp2_save
-          write (*,*) pgl(ichan)%amp2
+          write (*,*) pgl(ichan)%amp2(:,ivec)
           write (*,*) ''
-          write (*,*) abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2)
+          write (*,*) abs(amp2_save-pgl(ichan)%amp2(:,ivec))/(amp2_save+pgl(ichan)%amp2(:,ivec))
           stop 1
        endif
        deallocate(amp2_save)
        if (create_amplitude_library) then
           call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,&
-               ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
+               ichan,iint,phys_model,pgl(ichan)%ps(ivec)%p)
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
     endif
   end subroutine optimise_the_amplitudes
 
-  subroutine compute_the_amps(iint,ichan)
+  subroutine compute_the_amps(iint,ichan,ivec,amps)
     use amp_lib 
     implicit none
-    integer,intent(in) :: iint,ichan
+    integer,intent(in) :: iint,ichan,ivec
+    complex(kind=8),dimension(pgl(ichan)%amps(iint)%n_amps),intent(out) :: amps
     if (.not. use_amplitude_library) then
-       call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+       call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(ivec)%p,&
             pgl(ichan)%hel,read_proc_from_file,phys_model)
+       amps=pgl(ichan)%amps(iint)%amps
     else
-       call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
+       call evaluate_amp(ichan,iint,pgl(ichan)%ps(ivec)%p,amps)
     endif
   end subroutine compute_the_amps
     
-  subroutine square_the_amps(iint,ichan)
+  subroutine square_the_amps(iint,ichan,ivec,amps)
     implicit none
-    integer,intent(in) :: iint,ichan
+    integer,intent(in) :: iint,ichan,ivec
+    complex(kind=8),dimension(pgl(ichan)%amps(iint)%n_amps),intent(in) :: amps
     integer :: iproc,ih
     iproc=0
-    pgl(ichan)%amp2=0d0
+    pgl(ichan)%amp2(:,ivec)=0d0
     if (keep_processes_separate) then
-       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
-                  pgl(ichan)%col_fac(iint)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
+       if (use_real_gluons) then
+          write (*,*) 'Code no longer compatible with using real gluons'
+          stop 1
        else
           do ih=1,pgl(ichan)%amps(iint)%n_amps
              do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
-                  pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+             pgl(ichan)%amp2_hel(ih,ivec)=dble(amps(ih)*&
+                  pgl(ichan)%col_fac(iint)*dconjg(amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc,ivec)=pgl(ichan)%amp2(iproc,ivec)+pgl(ichan)%amp2_hel(ih,ivec)
           enddo
        endif
     else
-       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
-          do ih=1,pgl(ichan)%amps(iint)%n_amps
-             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
-                  pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
-          enddo
+       if (use_real_gluons) then
+          write (*,*) 'Code no longer compatible with using real gluons'
+          stop 1
        else
           do ih=1,pgl(ichan)%amps(iint)%n_amps
              do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
-                  pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
-             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+             pgl(ichan)%amp2_hel(ih,ivec)=dble(amps(ih)*&
+                  pgl(ichan)%col_fac(iproc)*dconjg(amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc,ivec)=pgl(ichan)%amp2(iproc,ivec)+pgl(ichan)%amp2_hel(ih,ivec)
           enddo
        endif
     endif
   end subroutine square_the_amps
   
-  subroutine setup_helicity_filter(pgl,iint)
+  subroutine setup_helicity_filter(pgl,iint,ivec)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
+    integer,intent(in) :: iint,ivec
     real(kind=8) :: max_value
-    integer :: ih1,ih2,iproc1,iproc2,iint
+    integer :: ih1,ih2,iproc1,iproc2
     if (.not.allocated(pgl%include_hel)) then
        allocate(pgl%include_hel(maxval(pgl%nhel),pgl%nproc))
        pgl%include_hel=0
     endif
     ! filter zero helicities and helicities that are identical
-    max_value=maxval(pgl%amp2_hel(1:pgl%nhel(iint)))
+    max_value=maxval(pgl%amp2_hel(1:pgl%nhel(iint),ivec))
     do ih1=1,pgl%nhel(iint)
        if (pgl%include_hel(ih1,iint).ne.0) cycle
-       if (pgl%amp2_hel(ih1)/max_value.gt.1d-12) then
+       if (pgl%amp2_hel(ih1,ivec)/max_value.gt.1d-12) then
           ! non-zero
           pgl%include_hel(ih1,iint)=1
        else
           cycle
        endif
        do ih2=ih1+1,pgl%nhel(iint)
-          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-12) then
+          if (abs(pgl%amp2_hel(ih1,ivec)-pgl%amp2_hel(ih2,ivec))/abs(pgl%amp2_hel(ih1,ivec)+pgl%amp2_hel(ih2,ivec)).lt.1d-12) then
              ! identical value. Now check that they belong to the same process
              iproc1=1
              do while (iproc1.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc1+1)-ih1).le.0)
@@ -487,10 +506,7 @@ contains
     enddo
 
     call pgl%amps(iint)%filter_helicity(pgl%next,pgl%nhel(iint),pgl%include_hel(1,iint)) ! this updates 'nhel' and 'include_hel'
-!!$    deallocate(pgl%hel_fac)
-!!$    allocate(pgl%hel_fac(pgl%nhel))
     pgl%hel_fac(1:pgl%nhel(iint),iint)=pgl%include_hel(1:pgl%nhel(iint),iint)
-!!$    deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
   integer function find_operation(pgl,iint,iamp,idau)
@@ -528,6 +544,9 @@ contains
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag)
 
+    logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
+    open(unit=99,file=logfile,status='unknown')
+
     if (library.eq.'none') then
        create_amplitude_library=.false.
        use_amplitude_library=.false.
@@ -539,8 +558,6 @@ contains
        use_amplitude_library=.true.
        return
     endif
-    logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
-    open(unit=99,file=logfile,status='unknown')
 
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice

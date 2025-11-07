@@ -9,9 +9,10 @@ module read_process_file
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
-  subroutine read_processes_from_file(filename)
+  subroutine read_processes_from_file(filename,vector_size)
     implicit none
-    character(len=80) :: filename
+    character(len=80),intent(in) :: filename
+    integer,intent(in) :: vector_size
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
@@ -90,7 +91,7 @@ contains
        allocate(pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
+       allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc,vector_size))
        allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
        pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
@@ -192,12 +193,9 @@ contains
        call pgl_unique%amps(1)%evaluate(next,ps%p,pgl_unique%hel,read_proc_from_file,phys_model)
        iproc=0
        amp2(pgl_unique%passed(1),:)=0d0
-       if (use_real_gluons .and. all(pgl_unique%amps(1)%n_qqbar(1:pgl_unique%amps(1)%nprocs).eq.0)) then
-          do ih=1,pgl_unique%amps(1)%n_amps
-             do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
-             amp2(pgl_unique%passed(1),iproc)=amp2(pgl_unique%passed(1),iproc)+&
-                  pgl_unique%amps(1)%amps_r(ih)*pgl_unique%amps(1)%amps_r(ih)
-          enddo
+       if (use_real_gluons) then
+          write (*,*) 'code no longer compatible with using real gluons'
+          stop 1
        else
           do ih=1,pgl_unique%amps(1)%n_amps
              do while (pgl_unique%amps(1)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
@@ -206,7 +204,7 @@ contains
           enddo
           amp(pgl_unique%passed(1),1:pgl_unique%amps(1)%n_amps)=pgl_unique%amps(1)%amps(1:pgl_unique%amps(1)%n_amps)
        endif
-       call find_same_flavour(pgl_unique,nevent,amp2(1,:))
+       call find_same_flavour(pgl_unique,nevent,pgl_unique%amps(1)%amps)
     enddo
     allocate(unique_map(1:pgl_unique%nproc))
     allocate(unique_map_value(1:pgl_unique%nproc))

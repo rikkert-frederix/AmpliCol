@@ -17,14 +17,15 @@ module handling_processes
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
-     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
+     real(kind=8),dimension(:,:,:),allocatable :: val_procs
+     real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
      integer(kind=4) :: next,ndim,ndim_extra
      integer,dimension(:),allocatable :: col_fac
-     real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
+     real(kind=8),dimension(:,:),allocatable :: amp2,amp2_hel
      integer(kind=4),dimension(:),allocatable :: hel,passed
      integer,dimension(:,:),allocatable :: include_hel
      ! cuts
@@ -81,11 +82,12 @@ contains
     enddo
   end subroutine determine_phase_space_orders
 
-  subroutine find_same_flavour(pgl,nevent,amp2)
+  subroutine find_same_flavour(pgl,nevent,amps)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    real(kind=8),dimension(pgl%nproc),intent(in) :: amp2
-    integer :: i,j,k,ii,jj,kk,nevent
+    complex(kind=8),dimension(pgl%amps(1)%n_amps),intent(in) :: amps
+    integer,intent(in) :: nevent
+    integer :: i,j,k,ii,jj,kk
     real(kind=8),parameter :: tiny=1d-8
     if (keep_processes_separate) return
     if (.not.decompose_same_flavour_into_two_diff_flavour) return
@@ -102,16 +104,16 @@ contains
              if (k.eq.i) cycle
              if (pgl%amps(1)%n_qqbar(k).ne.pgl%amps(1)%n_qqbar(i)) cycle
              do ii=pgl%amps(1)%iproc_start(i),pgl%amps(1)%iproc_start(i+1)-1
-                if (pgl%amps(1)%amps(ii).eq.(0d0,0d0)) cycle
+                if (amps(ii).eq.(0d0,0d0)) cycle
                 do jj=pgl%amps(1)%iproc_start(j),pgl%amps(1)%iproc_start(j+1)-1
                    if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,jj))) exit
                 enddo
                 do kk=pgl%amps(1)%iproc_start(k),pgl%amps(1)%iproc_start(k+1)-1
                    if (all(pgl%amps(1)%spins(:,1,ii).eq.pgl%amps(1)%spins(:,1,kk))) exit
                 enddo
-                if (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk)).eq.0d0) cycle
-                if (abs(pgl%amps(1)%amps(ii)-(pgl%amps(1)%amps(jj)+pgl%amps(1)%amps(kk)))/&
-                     (abs(pgl%amps(1)%amps(ii))+abs(pgl%amps(1)%amps(jj))+abs(pgl%amps(1)%amps(kk))).gt.tiny) then
+                if (abs(amps(ii))+abs(amps(jj))+abs(amps(kk)).eq.0d0) cycle
+                if (abs(amps(ii)-(amps(jj)+amps(kk)))/&
+                     (abs(amps(ii))+abs(amps(jj))+abs(amps(kk))).gt.tiny) then
                    exit
                 endif
              enddo
@@ -345,44 +347,6 @@ contains
        pgl%col_fac(iproc)=3**ifac
     enddo
   end subroutine compute_LC_colour_factor
-
-  subroutine define_identical_procs(pgl)
-    implicit none
-    type(phase_space_order_group),intent(inout) :: pgl
-    integer :: iproc,ip,n
-    ! first fill the number of identical processes per iproc (so that we can
-    ! allocate the array with the right size)
-    allocate(pgl%iden_iproc(1:pgl%nproc))
-    do iproc=1,pgl%nproc
-       pgl%iden_iproc(iproc)=1
-       if (any(abs(pgl%processes(1:next,iproc)).eq.1)) then
-          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*5
-       endif
-       if (any(abs(pgl%processes(1:next,iproc)).eq.2)) then
-          pgl%iden_iproc(iproc)=pgl%iden_iproc(iproc)*4
-       endif
-    enddo
-    allocate(pgl%val_procs(1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
-    allocate(pgl%iden_processes(1:next,1:maxval(pgl%iden_iproc(1:pgl%nproc)),1:pgl%nproc))
-    ! Loop again and actually fill the iden_processes()
-    do iproc=1,pgl%nproc
-       do ip=0,pgl%iden_iproc(iproc)-1
-          do n=1,next
-             if (abs(pgl%processes(n,iproc)).eq.1) then
-                pgl%iden_processes(n,ip+1,iproc)=sign(mod(ip,5)+1,pgl%processes(n,iproc))
-             elseif (abs(pgl%processes(n,iproc)).eq.2) then
-                if (mod(ip,5)+1.eq.ip/5+2) then
-                   pgl%iden_processes(n,ip+1,iproc)=sign(1,pgl%processes(n,iproc))
-                else
-                   pgl%iden_processes(n,ip+1,iproc)=sign(ip/5+2,pgl%processes(n,iproc))
-                endif
-             else
-                pgl%iden_processes(n,ip+1,iproc)=pgl%processes(n,iproc)
-             endif
-          enddo
-       enddo
-    enddo
-  end subroutine define_identical_procs
 
   subroutine compute_multichannel_symmetry_factor(sym_fac)
     use math_functions

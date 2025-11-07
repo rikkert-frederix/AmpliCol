@@ -95,7 +95,6 @@ contains
        write(14) size(pgl(igroup)%phase_space_orders),pgl(igroup)%phase_space_orders
        write(14) size(pgl(igroup)%nhel),pgl(igroup)%nhel
        write(14) pgl(igroup)%nproc
-       write(14) shape(pgl(igroup)%val_procs),pgl(igroup)%val_procs
        write(14) shape(pgl(igroup)%idenCOandMAPfactor),pgl(igroup)%idenCOandMAPfactor
        write(14) shape(pgl(igroup)%iden_processes),pgl(igroup)%iden_processes
        write(14) shape(pgl(igroup)%spin),pgl(igroup)%spin
@@ -104,16 +103,17 @@ contains
        write(14) pgl(igroup)%ipdgs
        write(14) pgl(igroup)%next,pgl(igroup)%ndim
        write(14) size(pgl(igroup)%col_fac),pgl(igroup)%col_fac
-       write(14) size(pgl(igroup)%amp2)
-       write(14) size(pgl(igroup)%amp2_hel)
+       write(14) size(pgl(igroup)%amp2,dim=1)
+       write(14) size(pgl(igroup)%amp2_hel,dim=1)
        write(14) size(pgl(igroup)%passed),pgl(igroup)%passed
        write(14) shape(pgl(igroup)%color_orders),pgl(igroup)%color_orders
     enddo
     close(14)
   end subroutine create_amplitude_lib
 
-  subroutine read_amplitude_lib()
+  subroutine read_amplitude_lib(vector_size)
     implicit none
+    integer,intent(in) :: vector_size
     character(len=170) :: filename
     integer :: dim1,dim2,dim3,iamp,igroup
     filename='library/amplitudes.bin'
@@ -178,13 +178,11 @@ contains
        read(14) pgl(igroup)%nhel
        read(14) pgl(igroup)%nproc
        read(14) dim1,dim2
-       allocate(pgl(igroup)%val_procs(dim1,dim2))
-       read(14) pgl(igroup)%val_procs
-       read(14) dim1,dim2
        allocate(pgl(igroup)%idenCOandMAPfactor(dim1,dim2))
        read(14) pgl(igroup)%idenCOandMAPfactor
        read(14) dim1,dim2,dim3
        allocate(pgl(igroup)%iden_processes(dim1,dim2,dim3))
+       allocate(pgl(igroup)%val_procs(dim2,dim3,vector_size))
        read(14) pgl(igroup)%iden_processes
        read(14) dim1,dim2
        allocate(pgl(igroup)%spin(dim1,dim2))
@@ -202,9 +200,9 @@ contains
        allocate(pgl(igroup)%col_fac(dim1))
        read(14) pgl(igroup)%col_fac
        read(14) dim1
-       allocate(pgl(igroup)%amp2(dim1))
+       allocate(pgl(igroup)%amp2(dim1,vector_size))
        read(14) dim1
-       allocate(pgl(igroup)%amp2_hel(dim1))
+       allocate(pgl(igroup)%amp2_hel(dim1,vector_size))
        read(14) dim1
        allocate(pgl(igroup)%passed(dim1))
        read(14) pgl(igroup)%passed

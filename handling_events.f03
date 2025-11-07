@@ -5,11 +5,12 @@ module handling_events
   integer,dimension(2) :: hel_picked
   real(kind=8) :: evt_sign
 contains
-  subroutine write_event(iunit,pgl,wgt)
+  subroutine write_event(iunit,pgl,ivec,wgt)
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
-    integer :: i,iunit
-    real(kind=8) :: wgt
+    integer,intent(in) :: ivec,iunit
+    real(kind=8),intent(in) :: wgt
+    integer :: i
     real(kind=8),external :: ran2
     write (iunit,*) '<event>'
     write (iunit,'(i4,e18.10)') pgl%next,sign(wgt,evt_sign)
@@ -29,17 +30,17 @@ contains
        ! do not flip
        do i=1,pgl%next
           write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
-               pgl%ps(1)%p(1:3,i),pgl%ps(1)%p(0,i)
+               pgl%ps(ivec)%p(1:3,i),pgl%ps(ivec)%p(0,i)
        enddo
     else
        ! do flip
        do i=1,pgl%next
           if (i.le.2) then
              write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  pgl%ps(1)%p(1:2,3-i),-pgl%ps(1)%p(3,3-i),pgl%ps(1)%p(0,3-i)
+                  pgl%ps(ivec)%p(1:2,3-i),-pgl%ps(ivec)%p(3,3-i),pgl%ps(ivec)%p(0,3-i)
           else
              write (iunit,*) pgl%iden_processes(i,iproc_iden_picked,iproc_picked),&
-                  pgl%ps(1)%p(1:2,i),-pgl%ps(1)%p(3,i),pgl%ps(1)%p(0,i)
+                  pgl%ps(ivec)%p(1:2,i),-pgl%ps(ivec)%p(3,i),pgl%ps(ivec)%p(0,i)
           endif
        enddo
     endif
@@ -75,10 +76,10 @@ contains
     enddo
   end subroutine event_update_wgt
   
-  subroutine unwgt_process(pgl,iint)
+  subroutine unwgt_process(pgl,iint,ivec)
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
-    integer,intent(in) :: iint
+    integer,intent(in) :: iint,ivec
     integer :: i,iproc
     real(kind=8) :: random,accum,target
     real(kind=8),external :: ran2
@@ -86,7 +87,7 @@ contains
     do iproc=1,pgl%nproc
        if (keep_processes_separate .and. iproc.ne.iint) cycle
        do i=1,pgl%iden_iproc(iproc)
-          target=target+abs(pgl%val_procs(i,iproc))
+          target=target+abs(pgl%val_procs(i,iproc,ivec))
        enddo
     enddo
     random=ran2()*target
@@ -96,7 +97,7 @@ contains
        iproc=1
     endif
     i=1
-    accum=abs(pgl%val_procs(i,iproc))
+    accum=abs(pgl%val_procs(i,iproc,ivec))
     do
        if (accum.gt.random) then
           exit
@@ -106,7 +107,7 @@ contains
              i=1
              iproc=iproc+1
           endif
-          accum=accum+abs(pgl%val_procs(i,iproc))
+          accum=accum+abs(pgl%val_procs(i,iproc,ivec))
        endif
     enddo
     iproc_picked=iproc
@@ -115,7 +116,7 @@ contains
        write (*,*) "Could not unweight process",iproc,iproc_iden_picked,pgl%iden_iproc(iproc)
        stop 1
     endif
-    if (pgl%val_procs(iproc_iden_picked,iproc_picked).lt.0d0) then
+    if (pgl%val_procs(iproc_iden_picked,iproc_picked,ivec).lt.0d0) then
        evt_sign=-1d0
     else
        evt_sign=+1d0
@@ -126,25 +127,26 @@ contains
     endif
   end subroutine unwgt_process
 
-  subroutine unwgt_helicity(pgl)
+  subroutine unwgt_helicity(pgl,ivec)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
+    integer,intent(in) :: ivec
     integer :: i
     real(kind=8) :: random
     real(kind=8),external :: ran2
     if (keep_processes_separate) then
-       random=ran2()*pgl%amp2(1)
+       random=ran2()*pgl%amp2(1,ivec)
        i=pgl%amps(iproc_picked)%iproc_start(1)
     else
-       random=ran2()*pgl%amp2(iproc_picked)
+       random=ran2()*pgl%amp2(iproc_picked,ivec)
        i=pgl%amps(1)%iproc_start(iproc_picked)
     endif
     do
-       if (pgl%amp2_hel(i).gt.random) then
+       if (pgl%amp2_hel(i,ivec).gt.random) then
           exit
        else
           i=i+1
-          pgl%amp2_hel(i)=pgl%amp2_hel(i)+pgl%amp2_hel(i-1)
+          pgl%amp2_hel(i,ivec)=pgl%amp2_hel(i,ivec)+pgl%amp2_hel(i-1,ivec)
        endif
     enddo
     hel_picked(2)=i
