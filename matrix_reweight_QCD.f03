@@ -77,7 +77,7 @@ program matrix_reweight
 
      call cpu_time(tBefore)
      
-     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file,phys_model,.false.)
+     call amps(iproc)%evaluate(next,p,hel,read_proc_from_file,phys_model)
 
      call cpu_time(tAfter)
      t_amp=t_amp+tAfter-tBefore
