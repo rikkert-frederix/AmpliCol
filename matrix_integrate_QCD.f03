@@ -16,6 +16,7 @@ program matrix_integrate_QCD
   use handling_processes
   use multichannel
   use amplitude_library
+  use mg_checks
   implicit none
   integer :: iproc
   real(kind=8) :: weight
@@ -35,7 +36,7 @@ program matrix_integrate_QCD
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta
   call cpu_time(tTot_B)
 
   call get_run_arguments()
@@ -129,8 +130,16 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
+           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
+           if (read_momenta) then
+                   if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
+                   call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
+                   do i=1,pgl(igroup)%next
+                         pgl(igroup)%phase_space%p(:,i)=p_read(i,:)
+                   enddo
+           endif
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
@@ -273,8 +282,10 @@ contains
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     call cpu_time(tBefore)
-    pgl(ichan)%ps(1)%x=x
-    call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
+    if (.not.read_momenta) then
+       pgl(ichan)%ps(1)%x=x
+       call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
+    endif
     if (debug ) then
        write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
@@ -285,11 +296,13 @@ contains
        t_PS= t_PS +tAfter-tBefore
        return
     endif
+    if (.not.read_momenta) then
     if (.not.pass_cuts(pgl(ichan))) then
        val=0d0
        call cpu_time(tAfter)
        t_PS= t_PS +tAfter-tBefore
        return
+    endif
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
@@ -306,7 +319,12 @@ contains
        call optimise_the_amplitudes(iint,ichan,done)
        if (done) return
     endif
-    
+
+    if (read_momenta) then
+        call perform_check(iint,ichan)
+        if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
+    endif
+
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%ps(1)%jac*conv
 
@@ -526,7 +544,7 @@ contains
     character(len=80) :: library
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag)
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
