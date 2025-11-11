@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# CHANGE paths of MG folder and code 
+# CHANGE paths of MG folder
 path_mg="/home/timea/Documents/MUNKAHELY_LUND/MG5/newest/mg5amcnlo/"
-#path_mg="/home/timea/Documents/MUNKAHELY_LUND/MG5/LC_MG_v3_6_1"
-path_code="/home/timea/Documents/Uppsala_MUNKAHELY/Projects/Colour_implement/new_integrator/IntegrateGluons/"
+
+path_code=$(pwd)
 
 version=$(awk '/version/ {print $3}' $path_mg/VERSION)
 
