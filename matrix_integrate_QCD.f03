@@ -137,7 +137,7 @@ program matrix_integrate_QCD
                    if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
                    call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
                    do i=1,pgl(igroup)%next
-                         pgl(igroup)%phase_space%p(:,i)=p_read(i,:)
+                         pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
                    enddo
            endif
         enddo
