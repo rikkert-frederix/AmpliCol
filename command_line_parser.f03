@@ -1,7 +1,7 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag)
+  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -9,6 +9,8 @@ contains
     character(len=80) :: filename,library,tag
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
+    logical :: read_momenta 
+    integer :: me_points
 
     ! Default values:
     show_help=.false.
@@ -19,6 +21,7 @@ contains
     itmax=48
     library='none'
     tag=''
+    read_momenta=.false.
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -43,6 +46,10 @@ contains
           library = arg(index(arg, "=")+1:)
        elseif (index(arg, "--tag=").eq.1 .or. index(arg, "-t=").eq.1) then
           tag = trim(arg(index(arg, "=")+1:))//'_'
+       elseif (index(arg, "--me_test=").eq.1 .or. index(arg, "-mt=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) me_points
+          read_momenta=.true.
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -61,6 +68,7 @@ contains
        write (*,'(a)') "  --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 48)."
        write (*,'(a)') "  --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, compile code with 'make matrix_integrate_library' after a library has been created). Default is 'none'."
        write (*,'(a)') "  --tag=[X],        -t=[X]  : event file (and log file) names will be prepended with with 'tag_'."
+       write (*,'(a)') "  --me_test=[X],        -mt=[X]  : Perform ME level test against MG with [X] points tested (single PS kinematics)"
        write (*,'(a)') ""
        stop
     end if

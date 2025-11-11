@@ -36,7 +36,7 @@ program matrix_integrate_QCD
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta
   call cpu_time(tTot_B)
 
   call get_run_arguments()
@@ -319,31 +319,10 @@ contains
     endif
 
     if (read_momenta) then
-        if (.not.allocated(mg_check)) allocate(mg_check(1000))
-        me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
-               *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(iint))
-        call get_madgraph_results(pgl(ichan)%next,ichan,iint,mg_check,nord)
-        match=.false.
-        do i=1,nord
-        if (abs((mg_check(i)-me_code(1))/me_code(1)).lt.1d-4) then
-            match=.true.
-        endif
-        enddo
-        if (.not.match) then
-                write(*,*) 'ERROR: no agreement found!'
-                write(*,*) me_code(1)
-                write(*,*) mg_check
-                stop 4
-        else
-                write(*,*) 'CHECK is fine!'
-        endif
+        call perform_check(iint,ichan)
+        if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
-    if (pgl(ichan)%passed(iint).gt.me_points) then
-            write(*,*) 'Passed all the', me_points,'  point tests. Stop the ME evaluation test.'
-            stop
-    endif
-    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%phase_space%jac*conv
 
@@ -563,7 +542,7 @@ contains
     character(len=80) :: library
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag)
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points)
 
     if (library.eq.'none') then
        create_amplitude_library=.false.

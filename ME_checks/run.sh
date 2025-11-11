@@ -71,8 +71,7 @@ awk '/ANSWER for/ { print $5 }' output.txt  >> $filename
 
 echo "...done for this mg folder"
 
-#mv $filename /home/timea/Documents/Uppsala_MUNKAHELY/Projects/Colour_implement/new_integrator/IntegrateGluons/
-mv $filename $1
+mv $filename $1/ME_checks
 
 
 
