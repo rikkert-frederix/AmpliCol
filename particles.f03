@@ -17,7 +17,7 @@ module particles
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
-          &,is_antiquark,is_lepton,is_antilepton,&
+          &,is_antiquark,is_lepton,is_antilepton,is_lepton_any,&
           &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
           &,is_higgs,is_jet,is_higgsor
@@ -1118,6 +1118,16 @@ contains
        is_antilepton=.false.
     endif
   end function is_antilepton
+  logical function is_lepton_any(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    if (abs(iPDG).ge.11 .and. abs(iPDG).le.16) then
+       is_lepton_any=.true.
+    else
+       is_lepton_any=.false.
+    endif
+  end function is_lepton_any
   logical function is_gluon(this,iPDG)
     implicit none
     class(physics_model) :: this
@@ -1235,8 +1245,7 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG).or.this%is_lepton(iPDG)&
-            .or.this%is_antilepton(iPDG)) .and. &
+    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG)) .and. &
          this%get_mass(iPDG).eq.0d0) then
        is_jet=.true.
     else
