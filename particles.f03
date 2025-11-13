@@ -17,7 +17,8 @@ module particles
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
-          &,is_antiquark,is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
+          &,is_antiquark,is_lepton,is_antilepton,&
+          &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
           &,is_higgs,is_jet,is_higgsor
   end type physics_model
@@ -32,7 +33,7 @@ contains
     real(kind=8) :: hmass,hwidth
     
     l=0
-    this%npart=18! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
+    this%npart=24! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.,6 leptons
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -161,6 +162,28 @@ contains
     this%particle_list(l)%anti_type=-26
     this%particle_list(l)%dim=6
 
+    ! charged leptons
+    do i=1,3
+       l=l+1
+       this%particle_list(l)%type=11+(2*i-2)
+       this%particle_list(l)%mass=0d0
+       this%particle_list(l)%width=0d0
+       this%particle_list(l)%spin=2 ! two spin states
+       this%particle_list(l)%anti_type=-(11+(2*i-2))
+       this%particle_list(l)%dim=4
+    enddo
+
+    ! neutral leptons
+    do i=1,3
+       l=l+1
+       this%particle_list(l)%type=12+(2*i-2)
+       this%particle_list(l)%mass=0d0
+       this%particle_list(l)%width=0d0
+       this%particle_list(l)%spin=2 ! two spin states
+       this%particle_list(l)%anti_type=-(12+(2*i-2))
+       this%particle_list(l)%dim=4
+    enddo
+
     write (99,*) l,'particles loaded'
 
   end subroutine init_part
@@ -171,7 +194,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 179 ! number of vertices
+    this%nint = 198 ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -898,6 +921,75 @@ contains
     this%vertex_list(l)%particles(3)=-24
     this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
 
+    ! lepton-alepton to photon
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=21
+    this%vertex_list(l)%particles(1)=11+(2*i-2)
+    this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(3)=22
+    this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! alepton-lepton to photon
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=22
+    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=11+(2*i-2)
+    this%vertex_list(l)%particles(3)=22
+    this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! lepton-alepton to Zboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=21
+    this%vertex_list(l)%particles(1)=(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(3)=23
+    gw=1d0/sw
+    fact=1d0/(2d0*sqrt(1d0-sw**2))
+    Vf=-0.5d0+2d0*sw**2
+    Af=-0.5d0
+    this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! alepton-lepton to Zboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=22
+    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=(11+(2*i-2))
+    this%vertex_list(l)%particles(3)=23
+    gw=1d0/sw
+    fact=1d0/(2d0*sqrt(1d0-sw**2))
+    Vf=-0.5d0+2d0*sw**2
+    Af=-0.5d0
+    this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+
+    ! charged lepton-lepton to Wboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=21
+    this%vertex_list(l)%particles(1)=11+(2*i-2)
+    this%vertex_list(l)%particles(2)=-(12+(2*i-2))
+    this%vertex_list(l)%particles(3)=-24
+    gw=1d0/sw
+    fact=1d0/(sqrt(2d0))
+    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    enddo
+    ! charged lepton-lepton to Wboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=22
+    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=(12+(2*i-2))
+    this%vertex_list(l)%particles(3)=24
+    gw=1d0/sw
+    fact=1d0/(sqrt(2d0))
+    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    enddo
+
+
     write (99,*) l,'interactions loaded'
   end subroutine init_vert
 
@@ -1006,6 +1098,26 @@ contains
        is_antiquark=.false.
     endif
   end function is_antiquark
+  logical function is_lepton(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    if (iPDG.ge.11 .and. iPDG.le.16) then
+       is_lepton=.true.
+    else
+       is_lepton=.false.
+    endif
+  end function is_lepton
+  logical function is_antilepton(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    if (iPDG.le.-11 .and. iPDG.ge.-16) then
+       is_antilepton=.true.
+    else
+       is_antilepton=.false.
+    endif
+  end function is_antilepton
   logical function is_gluon(this,iPDG)
     implicit none
     class(physics_model) :: this
@@ -1123,7 +1235,8 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG)) .and. &
+    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG).or.this%is_lepton(iPDG)&
+            .or.this%is_antilepton(iPDG)) .and. &
          this%get_mass(iPDG).eq.0d0) then
        is_jet=.true.
     else

@@ -1678,6 +1678,12 @@ contains
              elseif (pm%is_antiquark(this%current_list(ic)%type)) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+             elseif (pm%is_lepton(this%current_list(ic)%type)) then
+                call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+             elseif (pm%is_antilepton(this%current_list(ic)%type)) then
+                call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
                 call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
@@ -1862,7 +1868,17 @@ contains
                                        this%interaction_list(iv)%coupl(1:2))
 
 
+          elseif(this%interaction_list(iv)%type.eq.21) then
+             call LeptonAleptontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                       this%interaction_list(iv)%val_c(1:4),&
+                                       this%interaction_list(iv)%coupl(1:2))
 
+          elseif(this%interaction_list(iv)%type.eq.22) then
+             call  AleptonLeptontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                       this%interaction_list(iv)%val_c(1:4),&
+                                       this%interaction_list(iv)%coupl(1:2))
 
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type

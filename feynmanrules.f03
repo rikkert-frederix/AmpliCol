@@ -744,13 +744,49 @@ contains
     wfs(1)= prefact*TMP*coupl(1)*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar
 
+  subroutine LeptonAleptontoGluon(wfq1,wfq2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq2,wfg,wfg_temp
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    ! L
+    wfg_temp(1)=( wfq1(3)*wfq2(1)+wfq1(4)*wfq2(2) )*prefact*coupl(1)
+    wfg_temp(2)=(-wfq1(4)*wfq2(1)-wfq1(3)*wfq2(2) )*prefact*coupl(1)
+    wfg_temp(3)=(-wfq1(4)*wfq2(1)+wfq1(3)*wfq2(2) )*cImag*prefact*coupl(1)
+    wfg_temp(4)=(-wfq1(3)*wfq2(1)+wfq1(4)*wfq2(2) )*prefact*coupl(1)
+    ! R
+    wfg(1)=( wfq1(1)*wfq2(3)+wfq1(2)*wfq2(4) )*prefact*coupl(2)
+    wfg(2)=( wfq1(1)*wfq2(4)+wfq1(2)*wfq2(3) )*prefact*coupl(2)
+    wfg(3)=(-wfq1(1)*wfq2(4)+wfq1(2)*wfq2(3) )*cImag*prefact*coupl(2)
+    wfg(4)=( wfq1(1)*wfq2(3)-wfq1(2)*wfq2(4) )*prefact*coupl(2)
+    ! add
+    wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
+  end subroutine LeptonAleptontoGluon
+
+  subroutine AleptonLeptontoGluon(wfq1,wfq2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq2,wfg,wfg_temp
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    ! L
+    wfg_temp(1)=( wfq2(3)*wfq1(1)+wfq2(4)*wfq1(2) )*prefact*coupl(1)
+    wfg_temp(2)=(-wfq2(4)*wfq1(1)-wfq2(3)*wfq1(2) )*prefact*coupl(1)
+    wfg_temp(3)=(-wfq2(4)*wfq1(1)+wfq2(3)*wfq1(2) )*cImag*prefact*coupl(1)
+    wfg_temp(4)=(-wfq2(3)*wfq1(1)+wfq2(4)*wfq1(2) )*prefact*coupl(1)
+    ! R
+    wfg(1)=( wfq2(1)*wfq1(3)+wfq2(2)*wfq1(4) )*prefact*coupl(2)
+    wfg(2)=( wfq2(1)*wfq1(4)+wfq2(2)*wfq1(3) )*prefact*coupl(2)
+    wfg(3)=(-wfq2(1)*wfq1(4)+wfq2(2)*wfq1(3) )*cImag*prefact*coupl(2)
+    wfg(4)=( wfq2(1)*wfq1(3)-wfq2(2)*wfq1(4) )*prefact*coupl(2)
+    ! add
+    wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
+  end subroutine AleptonLeptontoGluon
 
 
 
-
-
-
-  subroutine GluonPropagator(wfg,p)
+subroutine GluonPropagator(wfg,p)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
