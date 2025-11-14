@@ -194,7 +194,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 198 ! number of vertices
+    this%nint = 222 ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -988,6 +988,98 @@ contains
     fact=1d0/(sqrt(2d0))
     this%vertex_list(l)%coupl=[gw*fact,0d0]
     enddo
+
+    ! lepton-photon to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=10
+       this%vertex_list(l)%particles(1)=(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=22
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! antilepton-photon to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=11
+       this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=22
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+
+    ! photon-lepton to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=23
+       this%vertex_list(l)%particles(1)=22
+       this%vertex_list(l)%particles(2)=(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! photon-antilepton to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=24
+       this%vertex_list(l)%particles(1)=22
+       this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+
+    ! lepton-Zboson to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=10
+       this%vertex_list(l)%particles(1)=(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=23
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! antilepton-Zboson to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=11
+       this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=23
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+   ! Zboson-lepton to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=23
+       this%vertex_list(l)%particles(1)=23
+       this%vertex_list(l)%particles(2)=(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! Zboson-antilepton to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=24
+       this%vertex_list(l)%particles(1)=23
+       this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+
 
 
     write (99,*) l,'interactions loaded'

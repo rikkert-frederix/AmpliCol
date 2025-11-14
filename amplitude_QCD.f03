@@ -1880,6 +1880,17 @@ contains
                                        this%interaction_list(iv)%val_c(1:4),&
                                        this%interaction_list(iv)%coupl(1:2))
 
+          elseif(this%interaction_list(iv)%type.eq.23) then
+             call  GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                       this%interaction_list(iv)%val_c(1:4),&
+                                       this%interaction_list(iv)%coupl(1:2))
+          elseif(this%interaction_list(iv)%type.eq.24) then
+             call  GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                       this%interaction_list(iv)%val_c(1:4),&
+                                       this%interaction_list(iv)%coupl(1:2))
+
           else
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
@@ -1894,7 +1905,7 @@ contains
              if (isize.ne.n-1)  then
                 call include_gluon_propagator()
              endif
-          elseif (pm%is_quark(this%current_list(ic)%type)) then
+          elseif (pm%is_quark(this%current_list(ic)%type).or.pm%is_lepton(this%current_list(ic)%type)) then
              ! a quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
@@ -1903,7 +1914,7 @@ contains
           elseif (pm%is_tensor6(this%current_list(ic)%type)) then
              ! the non-propagating tensor current
              call combine_interactions(6)
-          elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+          elseif (pm%is_antiquark(this%current_list(ic)%type).or.pm%is_antilepton(this%current_list(ic)%type)) then
              ! an anti-quark current
              call combine_interactions(4)
              if (isize.ne.n-1)  then
