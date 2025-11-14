@@ -255,10 +255,11 @@ def ValidProc(proc):
     # check charge conservation:
     if sum([charges3[x] for x in proc]) != 0 : return False
     # remove flavour changing currents:
-    if sum([family[x] for x in proc]) != 0 : return False
-    if 'w+' not in proc and 'w-' not in proc:
-        for q in quarks:
-            if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
+    if (not options["include_cc_processes"]) :
+        if sum([family[x] for x in proc]) != 0 : return False
+        if 'w+' not in proc and 'w-' not in proc:
+            for q in quarks:
+                if count_matching_elements(proc,[q]) != count_matching_elements(proc,[q+'~']) : return False
     # need at least one quark line if there are colour singlets:
     if nq == 0 and count_matching_elements(proc,singlets) > 0 : return False
     return True
@@ -390,6 +391,7 @@ def ParseArgument():
                         help="Switch to N-flavor scheme (NFS), where N is 1-5 (default=5)")
     parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
     parser.add_argument("-s", "--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
+    parser.add_argument("-cc", "--include_cc", action='store_true', help="Include flavour-changing processes")
     args=parser.parse_args()
     if (args.flavour_scheme):
         SwitchFlavourScheme(args.flavour_scheme)
@@ -397,6 +399,10 @@ def ParseArgument():
         options["include_3qqbar_processes"] = True
     else:
         options["include_3qqbar_processes"] = False
+    if args.include_cc:
+        options["include_cc_processes"] = True
+    else:
+        options["include_cc_processes"] = False
     if args.serial:
         options["serial"] = True
     else:
