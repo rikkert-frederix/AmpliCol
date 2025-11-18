@@ -3444,20 +3444,20 @@ contains
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
                       line=trim(adjustl(line))//'-conjg(amps('//trim(adjustl(tmp))//'))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
-                      line=trim(adjustl(line))//'conjg(amps('//trim(adjustl(tmp))//'))'
+                      line=trim(adjustl(line))//'+conjg(amps('//trim(adjustl(tmp))//'))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
                       line=trim(adjustl(line))//'-amps('//trim(adjustl(tmp))//')'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
-                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(aimag(amps('//trim(adjustl(tmp))// &
                            ')),dble(amps('//trim(adjustl(tmp))//')))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
-                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(-aimag(amps('//trim(adjustl(tmp))// &
                            ')),dble(amps('//trim(adjustl(tmp))//')))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
-                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(aimag(amps('//trim(adjustl(tmp))// &
                            ')),-dble(amps('//trim(adjustl(tmp))//')))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
-                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(-aimag(amps('//trim(adjustl(tmp))// &
                            ')),-dble(amps('//trim(adjustl(tmp))//')))'
                    else
                       write (*,*) 'ERROR: unknown operation in creating library', &
