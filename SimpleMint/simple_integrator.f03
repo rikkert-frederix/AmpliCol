@@ -14,6 +14,45 @@
 module simple_integrator_mod
   implicit none
   private
+  type :: grid
+     integer :: size,size_fill
+     real(kind=8),allocatable,dimension(:) :: current,accum,current_for_fillcell
+     integer,allocatable,dimension(:) :: nhits
+   contains
+     procedure,private :: init => grid_init
+     procedure,private :: add_point => grid_add_point
+     procedure,private :: get_x,get_wgt,massage_accum,find_cell&
+          &,interpolate_current,find_cell_to_fill
+     procedure,private :: update => grid_update
+  end type grid
+  type :: evnt
+     real(kind=8),allocatable,dimension(:) :: x,f_abs
+     real(kind=8) :: wgt,rnd,overwgt
+     integer :: iter,label
+     logical :: unwgt
+  end type evnt
+  type :: integral
+     real(kind=8) :: max_value,overweight
+     real(kind=8),dimension(:),allocatable :: f_max
+     real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,accum&
+          &,accum2,unc_iter
+     integer :: ichan,nevts_unw_gen,evnt,nevnt_in_list,ndim &
+          &,current_iter,max_iters,nevts_unw_req
+     integer(kind=8) :: npoints_iter,npoints,npoints_requested&
+          &,npoints_nonzero,npoints_nonzero_total
+     logical :: done,evgen_done
+     type(evnt),dimension(:),allocatable :: evnt_list
+   contains
+     procedure,private :: init => integral_init
+     procedure,private :: add_point => integral_add_point
+     procedure,private :: update_result_iter => integral_update_result_iter
+     procedure,private :: combine_iters => integral_combine_iters
+     procedure,private :: init_next_iter => integral_init_next_iter
+     procedure,private :: compute_fmax => integral_compute_fmax
+     procedure,private :: compute_fmax_next_iter => integral_compute_fmax_next_iter
+     procedure,private :: unwgt => integral_unwgt
+     procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list,compute_wgts,check_overweight
+  end type integral
   type :: channel
      integer :: ndim,nintegral,current_integral,current_iter&
           &,number,max_iters,nevts_unw_req,ndim_extra
@@ -37,45 +76,6 @@ module simple_integrator_mod
      procedure,private :: update_nevts_unw_req => channel_update_nevts_unw_req
      procedure,private :: recompute_wgt_from_x
   end type channel
-  type :: integral
-     real(kind=8) :: max_value,overweight
-     real(kind=8),dimension(:),allocatable :: f_max
-     real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,accum&
-          &,accum2,unc_iter
-     integer :: ichan,nevts_unw_gen,evnt,nevnt_in_list,ndim &
-          &,current_iter,max_iters,nevts_unw_req
-     integer(kind=8) :: npoints_iter,npoints,npoints_requested&
-          &,npoints_nonzero,npoints_nonzero_total
-     logical :: done,evgen_done
-     type(evnt),dimension(:),allocatable :: evnt_list
-   contains
-     procedure,private :: init => integral_init
-     procedure,private :: add_point => integral_add_point
-     procedure,private :: update_result_iter => integral_update_result_iter
-     procedure,private :: combine_iters => integral_combine_iters
-     procedure,private :: init_next_iter => integral_init_next_iter
-     procedure,private :: compute_fmax => integral_compute_fmax
-     procedure,private :: compute_fmax_next_iter => integral_compute_fmax_next_iter
-     procedure,private :: unwgt => integral_unwgt
-     procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list,compute_wgts,check_overweight
-  end type integral
-  type :: grid
-     integer :: size,size_fill
-     real(kind=8),allocatable,dimension(:) :: current,accum,current_for_fillcell
-     integer,allocatable,dimension(:) :: nhits
-   contains
-     procedure,private :: init => grid_init
-     procedure,private :: add_point => grid_add_point
-     procedure,private :: get_x,get_wgt,massage_accum,find_cell&
-          &,interpolate_current,find_cell_to_fill
-     procedure,private :: update => grid_update
-  end type grid
-  type :: evnt
-     real(kind=8),allocatable,dimension(:) :: x,f_abs
-     real(kind=8) :: wgt,rnd,overwgt
-     integer :: iter,label
-     logical :: unwgt
-  end type evnt
   type,public :: integrator
      integer :: nchannel,current_channel,nevts_unw_req,npoints_gen
      integer(kind=8) :: npoints_requested
