@@ -2824,13 +2824,6 @@ contains
     write(iunit) p
     write(iunit) this%amps
     close(iunit)
-
-    write(tmp,*) this%max_pp
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
-    write(tmp,*) this%n_cur
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
-    write(tmp,*) this%n_vert
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
     
     write(tmp,*) igroup
     write(line,*) iint

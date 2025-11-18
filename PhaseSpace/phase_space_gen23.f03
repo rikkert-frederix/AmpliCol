@@ -269,6 +269,7 @@ contains
     real(kind=8),dimension(maskr(this%next)) :: invm
     pp=0d0
     ps%jac=1d0
+    invm=this%invm
     ix=0
     ix_e=this%ndim
     if (includePDF) then
