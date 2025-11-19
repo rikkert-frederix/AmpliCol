@@ -503,7 +503,7 @@ def MultiChannelPartners(proc, perm, k, l):
                                 order.extend(perm[p] for p in ((anti_quark_indices[1],) + s[j1:j1+j2]))
                             elif i == anti_quark_indices[2]:
                                 # Add rest of singlets after third anti-quark:
-                                order.extend(perm[p] for p in ((anti_quark_indices[1],) + s[j1+j2:]))
+                                order.extend(perm[p] for p in ((anti_quark_indices[2],) + s[j1+j2:]))
                             elif i not in singlet_indices:
                                 # Add the QCD particles one at the time
                                 order.append(perm[i])
