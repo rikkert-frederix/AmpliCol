@@ -16,6 +16,7 @@ contains
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
+    integer :: i,j,nl,nal
     open(unit=10,file=filename,status='old')
     read (10,*) next,nproc_unique
     ndim=3*(next-2)-4
@@ -94,6 +95,30 @@ contains
        allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
        pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
+       ! fill the lepton_list
+       nl=0
+       do j=1,pgl(igroup)%nproc
+          do i=1,next
+             if (phys_model%is_lepton(pgl(igroup)%processes(i,j))) then
+                    nl=nl+1 
+             endif
+          enddo
+       enddo
+       allocate(pgl(igroup)%lepton_list(1+2*nl))
+       pgl(igroup)%lepton_list(1)=nl
+       nl=2
+       nal=3
+       do j=1,pgl(igroup)%nproc
+          do i=1,next
+             if (phys_model%is_lepton(pgl(igroup)%processes(i,j))) then
+                    pgl(igroup)%lepton_list(nl)=i
+                    nl=nl+2
+            elseif (phys_model%is_antilepton(pgl(igroup)%processes(i,j))) then
+                    pgl(igroup)%lepton_list(nal)=i
+                    nal=nal+2
+             endif
+          enddo
+       enddo
        pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
        pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
        pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
@@ -139,6 +164,8 @@ contains
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
+    integer,parameter :: dum=0
+    integer,dimension(1),parameter :: duml=(/0/)
     type(psv) :: ps
     allocate(phase_space_gen23 :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
@@ -175,7 +202,8 @@ contains
     allocate(ps%p(0:3,1:pgl_unique%next))
     
     call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
-         pgl_unique%spin,pgl_unique%color_orders,phys_model)
+         pgl_unique%spin,pgl_unique%color_orders,phys_model,&
+         dum,duml)
         
     allocate(amp2(nevent,pgl_unique%nproc))
     allocate(amp(nevent,pgl_unique%amps(1)%n_amps))

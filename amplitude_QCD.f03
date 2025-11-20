@@ -57,7 +57,7 @@ module amplitude_QCD_mod
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm,nl,lepton_list)
     use math_functions
     use particles
     implicit none
@@ -72,6 +72,9 @@ contains
     integer :: isize,nc,isplit,n1,n2,ic1,ic2,max_cur,max_vert,max_key,ispin,iproc
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
+    integer,intent(in) :: nl
+    integer,dimension(1+2*nl) :: lepton_list
+
     if (imode.eq.1) then
        write (99,*) 'Initialising amplitude for:'
        write (99,*) '   - all polarisation/helicity configurations'
@@ -730,19 +733,76 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       integer :: i
+      real(kind=4) :: sgn
+
       if (.not.valid_current_combination())  then
          return
       endif
+
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
-            call add_vertex(pm%vertex_list(i)%type, &
+              if (pm%vertex_list(i)%type.eq.21.or.pm%vertex_list(i)%type.eq.22) then
+                call fermion_sign(sgn)
+              else
+                sgn=1d0
+              endif
+              call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
-                            pm%vertex_list(i)%coupl)
+                            sgn*pm%vertex_list(i)%coupl)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
 
+    subroutine fermion_sign(sgn)
+      implicit none
+      integer :: i,j,lep1,lep2
+      real(kind=4),intent(out) :: sgn
+      do j=1,this%n_cur_end(1)
+         if (btest(current_list_local(ic1)%ext_cur,j-1)) then
+            if (pm%is_lepton(current_list_local(j)%type)) then
+                lep1=ext_from_cur(j)
+            elseif (pm%is_antilepton(current_list_local(j)%type)) then
+                lep2 =ext_from_cur(j)
+            endif
+         endif
+      enddo
+      do j=1,this%n_cur_end(1)
+         if (btest(current_list_local(ic2)%ext_cur,j-1)) then
+            if (pm%is_lepton(current_list_local(j)%type)) then
+                lep1=ext_from_cur(j)
+            elseif (pm%is_antilepton(current_list_local(j)%type)) then
+                lep2 =ext_from_cur(j)
+            endif
+         endif
+      enddo
+      ! valid only if there are at most 2 fermion lines
+      if (lepton_list(1).gt.1)
+      if (lep1.eq.lepton_list(2).and.lep2.eq.lepton_list(3)) then
+         sgn=-1d0
+         return
+      endif
+      endif
+      sgn=1d0
+    end subroutine
+
+    integer function ext_from_cur(ic)
+      implicit none
+      integer :: ic,ncur,nc,irproc,ispin
+      ncur=0
+      do nc=n,1,-1
+         do iproc=1,this%nprocs
+            if (this%same_flav(iproc)) cycle
+            do ispin=1, spin(0,order(nc,1,iproc))
+               ncur=ncur+1
+               if (ncur.eq.ic) then
+                       goto 13
+               endif
+            enddo
+         enddo
+      enddo
+13   ext_from_cur=order(nc,1,iproc)
+    end function ext_from_cur
     
     logical function valid_current_combination()
       ! Checks to see if the combination of currents ic1 and ic2 could be a
@@ -946,6 +1006,7 @@ contains
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
       combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
+
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
       allocate(ord1(n1))
