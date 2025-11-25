@@ -15,6 +15,7 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
      real(kind=8) :: mass,width
+     integer,dimension(:),allocatable :: fermi_list
    contains
      final :: finalize_current ! custom deallocation of current
   end type current
@@ -73,7 +74,7 @@ contains
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
     integer,intent(in) :: nl
-    integer,dimension(1+2*nl) :: lepton_list
+    integer,dimension(1+nl) :: lepton_list
 
     if (imode.eq.1) then
        write (99,*) 'Initialising amplitude for:'
@@ -123,7 +124,7 @@ contains
    
     this%n_cur=0
     this%n_vert=0
-    
+
     do isize=1,n-1
        this%n_cur_start(isize)=this%n_cur+1
        if (isize.ge.2) this%n_vert_start(isize)=this%n_vert+1
@@ -180,6 +181,7 @@ contains
       implicit none
       integer,intent(in) :: ispin,ipart,iorder,iproc
       integer :: ic
+
       do ic=1,this%n_cur
          if (current_list_local(ic)%order(1).ne.iorder) cycle
          if (iorder.le.2 .and. abs(ipart).le.6) then
@@ -212,7 +214,17 @@ contains
       current_list_local(this%n_cur)%n_vert=0
       call current_list_local(this%n_cur)%iproc%init(this%nprocs)
       call current_list_local(this%n_cur)%iproc%set_bit(iproc)
-      current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)
+      current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)      
+      ! create the lepton-related properties
+      allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+      current_list_local(this%n_cur)%fermi_list=0
+      if (pm%is_lepton(current_list_local(this%n_cur)%type)) then
+           current_list_local(this%n_cur)%fermi_list(1)=1
+           current_list_local(this%n_cur)%fermi_list(2)=ext_from_cur(this%n_cur)
+      elseif (pm%is_antilepton(current_list_local(this%n_cur)%type)) then
+           current_list_local(this%n_cur)%fermi_list(1)=1
+           current_list_local(this%n_cur)%fermi_list(3)=-ext_from_cur(this%n_cur)
+      endif
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -742,49 +754,12 @@ contains
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
-              if (pm%vertex_list(i)%type.eq.21.or.pm%vertex_list(i)%type.eq.22) then
-                call fermion_sign(sgn)
-              else
-                sgn=1d0
-              endif
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
-                            sgn*pm%vertex_list(i)%coupl)
+                            pm%vertex_list(i)%coupl)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
-
-    subroutine fermion_sign(sgn)
-      implicit none
-      integer :: i,j,lep1,lep2
-      real(kind=4),intent(out) :: sgn
-      do j=1,this%n_cur_end(1)
-         if (btest(current_list_local(ic1)%ext_cur,j-1)) then
-            if (pm%is_lepton(current_list_local(j)%type)) then
-                lep1=ext_from_cur(j)
-            elseif (pm%is_antilepton(current_list_local(j)%type)) then
-                lep2 =ext_from_cur(j)
-            endif
-         endif
-      enddo
-      do j=1,this%n_cur_end(1)
-         if (btest(current_list_local(ic2)%ext_cur,j-1)) then
-            if (pm%is_lepton(current_list_local(j)%type)) then
-                lep1=ext_from_cur(j)
-            elseif (pm%is_antilepton(current_list_local(j)%type)) then
-                lep2 =ext_from_cur(j)
-            endif
-         endif
-      enddo
-      ! valid only if there are at most 2 fermion lines
-      if (lepton_list(1).gt.1)
-      if (lep1.eq.lepton_list(2).and.lep2.eq.lepton_list(3)) then
-         sgn=-1d0
-         return
-      endif
-      endif
-      sgn=1d0
-    end subroutine
 
     integer function ext_from_cur(ic)
       implicit none
@@ -986,7 +961,7 @@ contains
       enddo
     end function combine_lists
 
-    type(current) function combine_currents(ic1,ic2,ctype,singlet_mv,invert)
+    type(current) function combine_currents(ic1,ic2,ctype,singlet_mv,invert,new_fermi_list)
       ! combine the currents corresponding to ic1 and ic2 into a new current
       ! of type 'ctype'. This also sets up 'singlet_mv' that determines how to
       ! move the colour singlets to the correct position. If the first (or
@@ -999,6 +974,7 @@ contains
       integer :: i,n1,n2,ipos,mv12,nc1,nc2,ns1,ns2,n_mv12_1
       integer,dimension(isize) :: ord
       integer,dimension(:),allocatable :: ord1,spin1,et1,ord2,spin2,et2
+      integer,dimension(nl+1),intent(out) :: new_fermi_list
       allocate(combine_currents%order(1:isize))
       allocate(combine_currents%spin(1:isize))
       allocate(combine_currents%ext_type(1:isize))
@@ -1006,6 +982,8 @@ contains
       combine_currents%bin=current_list_local(ic1)%bin+current_list_local(ic2)%bin
       combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
+
+      call combine_lepton_list(new_fermi_list)
 
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
@@ -1110,6 +1088,48 @@ contains
       combine_currents%spin(1:isize)=combine_lists([spin1(1:n1),spin2(1:n2)],singlet_mv)
       combine_currents%ext_type(1:isize)=combine_lists([et1(1:n1),et2(1:n2)],singlet_mv)
     end function combine_currents
+
+    subroutine combine_lepton_list(list)
+      implicit none
+      integer,dimension(nl+1),intent(out) :: list
+      integer :: i,j
+
+      list=0
+      ! lepton-anti-lepton external currents combined
+      if (count(current_list_local(ic1)%fermi_list(2:).ne.0).eq.1.and.&
+          current_list_local(ic2)%fermi_list(2).eq.0) then
+           list=current_list_local(ic1)%fermi_list(:)+&
+               current_list_local(ic2)%fermi_list(:)
+      elseif (count(current_list_local(ic2)%fermi_list(2:).ne.0).eq.1.and.&
+              current_list_local(ic1)%fermi_list(2).eq.0) then
+           list=current_list_local(ic1)%fermi_list(:)+&
+               current_list_local(ic2)%fermi_list(:)
+      elseif (count(current_list_local(ic1)%fermi_list(2:).ne.0).eq.1.and.&
+          current_list_local(ic2)%fermi_list(3).eq.0) then
+           list=current_list_local(ic1)%fermi_list(:)+&
+               current_list_local(ic2)%fermi_list(:)
+      elseif (count(current_list_local(ic2)%fermi_list(2:).ne.0).eq.1.and.&
+              current_list_local(ic1)%fermi_list(3).eq.0) then
+           list=current_list_local(ic1)%fermi_list(:)+&
+               current_list_local(ic2)%fermi_list(:)
+      elseif (current_list_local(ic1)%fermi_list(1).eq.0) then
+          list=current_list_local(ic2)%fermi_list(:)
+      elseif (current_list_local(ic2)%fermi_list(1).eq.0) then
+          list=current_list_local(ic1)%fermi_list(:)
+      else
+          do i=nl+1,1,-1
+              if (current_list_local(ic1)%fermi_list(i).ne.0) exit
+          enddo
+          do j=nl+1,1,-1
+              if (current_list_local(ic2)%fermi_list(j).ne.0) exit
+          enddo
+          if (i.eq.2.and.current_list_local(ic1)%fermi_list(1).eq.1) i=i+1
+          if (j.eq.2.and.current_list_local(ic2)%fermi_list(1).eq.1) j=j+1
+          list(1)=current_list_local(ic1)%fermi_list(1)+current_list_local(ic2)%fermi_list(1)
+          list(2:i)=current_list_local(ic1)%fermi_list(2:i)
+          list(i+1:nl+1)=current_list_local(ic2)%fermi_list(2:j)
+       endif
+    end subroutine combine_lepton_list
     
     subroutine add_all_currents(ctype)
       ! combine currents ic1 and ic2 and add them to the list of currents to
@@ -1121,16 +1141,17 @@ contains
       integer :: i,ctype,nperm
       integer,dimension(0:isize) :: singlet_mv
       type(current),dimension(8) :: new_currents
+      integer,dimension(nl+1) :: new_fermi_list
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
-         new_currents(1)=combine_currents(ic1,ic2,ctype,singlet_mv,0)
+         new_currents(1)=combine_currents(ic1,ic2,ctype,singlet_mv,0,new_fermi_list)
          interaction_list_local(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
-         call add_current(.false.,new_currents(1))
+         call add_current(.false.,new_currents(1),new_fermi_list)
          return
       endif
       ! Need to consider all the possible permutations
       call check_all_permutations(ctype,nperm,new_currents,vertex_sign)
       do i=1,nperm
-         call add_current(vertex_sign(i),new_currents(i))
+         call add_current(vertex_sign(i),new_currents(i),new_fermi_list)
       enddo
     end subroutine add_all_currents
 
@@ -1148,6 +1169,7 @@ contains
       integer,dimension(3) :: switch
       integer :: i,j,k,invert
       integer,dimension(0:isize,8) :: singlet_mv
+      integer,dimension(nl+1) :: new_fermi_list
       switch(1:3)=1
       ag1=all_gluon_current(current_list_local(ic1),n1)
       ag2=all_gluon_current(current_list_local(ic2),n2)
@@ -1163,9 +1185,9 @@ contains
                if ((i.eq.2 .and. k.eq.2) .or. (j.eq.2 .and. k.eq.1)) invert=ibset(invert,1)
                nperm=nperm+1
                if (k.eq.1) then
-                  new_currents(nperm)=combine_currents(ic1,ic2,ctype,singlet_mv(0,nperm),invert)
+                  new_currents(nperm)=combine_currents(ic1,ic2,ctype,singlet_mv(0,nperm),invert,new_fermi_list)
                else
-                  new_currents(nperm)=combine_currents(ic2,ic1,ctype,singlet_mv(0,nperm),invert)
+                  new_currents(nperm)=combine_currents(ic2,ic1,ctype,singlet_mv(0,nperm),invert,new_fermi_list)
                endif
                vertex_sign(nperm)=(k.eq.2 .xor. (j.eq.2 .and. mod(n2,2).eq.0) .xor. (i.eq.2 .and. mod(n1,2).eq.0))
                if (.not.valid_current_order_excl_symmetry(new_currents(nperm))) nperm=nperm-1
@@ -1230,7 +1252,7 @@ contains
     end function valid_current_order_excl_symmetry
 
 
-    subroutine add_current(vertex_sign,new_current)
+    subroutine add_current(vertex_sign,new_current,new_fermi_list)
       ! Adds the 'new_current' to the list of currents to consider. If this
       ! current has the same order (and type etc.) of an existing current, we
       ! can add this current to that existing one. If not, add it to the end
@@ -1238,8 +1260,11 @@ contains
       implicit none
       type(current),intent(in) :: new_current
       logical,intent(in) :: vertex_sign
+      logical :: sgn
       integer :: ic,key
       integer(kind=8) :: val
+      integer,dimension(nl+1) :: new_fermi_list
+      integer :: lep1,lep2
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! Check if this interaction can be added to an existing current
          do ic=1,this%n_cur
@@ -1248,6 +1273,11 @@ contains
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
+            if (all(new_fermi_list.ne.0)) then
+               call get_lepton_sign(new_fermi_list,sgn)
+               current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=sgn
+               return
+            endif
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
             return
          enddo
@@ -1257,6 +1287,14 @@ contains
          current_list_local(this%n_cur)=new_current
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
+
+         ! lepton-related 
+         allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+         current_list_local(this%n_cur)%fermi_list=0
+         if (any(new_fermi_list.ne.0)) then
+             current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
+         endif
+
          if (pm%is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
@@ -1312,6 +1350,51 @@ contains
          current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
       endif
     end subroutine add_current
+
+    subroutine get_lepton_sign(list,sgn)
+      implicit none
+      logical, intent(out) :: sgn
+      integer,dimension(nl+1) :: list
+      integer :: pos(nl), p(nl)
+      integer,dimension(nl) :: cl1,cl2
+      logical :: visited(n)
+      integer :: i, j, k, cycle_len
+      logical :: found
+
+      cl1(1:nl)=list(2:nl+1)
+      cl2(1:nl)=lepton_list(2:nl+1)
+
+      do i = 1, nl
+        found = .false.
+        do j = 1, nl
+            if (cl1(i) .eq. cl2(j)) then
+                p(i) = j
+                found = .true.
+                exit
+            end if
+        end do
+        if (.not. found) then
+            write(*,*) 'Lists do not contain same leptons'
+            stop 15
+        end if
+       end do
+
+       visited = .false.
+       sgn = .false.  
+       do i = 1, nl
+        if (.not. visited(i)) then
+            k = i
+            cycle_len = 0
+            do
+                visited(k) = .true.
+                cycle_len = cycle_len + 1
+                k = p(k)
+                if (visited(k)) exit
+            end do
+            if (mod(cycle_len, 2) == 0) sgn = .not.sgn
+         end if
+       end do
+    end subroutine get_lepton_sign
        
     subroutine create_current_dict()
       ! Create a dictionary that uniquely gives every current a label. This

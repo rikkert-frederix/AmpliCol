@@ -130,7 +130,7 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
-           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
+           !if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model,&
                 pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)

@@ -105,7 +105,7 @@ contains
           enddo
        enddo
        allocate(pgl(igroup)%lepton_list(1+2*nl))
-       pgl(igroup)%lepton_list(1)=nl
+       pgl(igroup)%lepton_list(1)=2*nl
        nl=2
        nal=3
        do j=1,pgl(igroup)%nproc
@@ -114,7 +114,7 @@ contains
                     pgl(igroup)%lepton_list(nl)=i
                     nl=nl+2
             elseif (phys_model%is_antilepton(pgl(igroup)%processes(i,j))) then
-                    pgl(igroup)%lepton_list(nal)=i
+                    pgl(igroup)%lepton_list(nal)=-i
                     nal=nal+2
              endif
           enddo
@@ -157,15 +157,14 @@ contains
     use phase_space_gen23_mod
     use cuts
     implicit none
-    integer :: i,iproc,ih
+    integer :: i,j,iproc,ih
     integer,parameter :: nevent=10
     real(kind=8),dimension(:,:),allocatable :: amp2
     complex(kind=8),dimension(:,:),allocatable :: amp
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
-    integer,parameter :: dum=0
-    integer,dimension(1),parameter :: duml=(/0/)
+    integer :: nl,nal
     type(psv) :: ps
     allocate(phase_space_gen23 :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
@@ -201,9 +200,34 @@ contains
     allocate(ps%x(1:pgl_unique%ndim+pgl_unique%phase_space%ndim_extra))
     allocate(ps%p(0:3,1:pgl_unique%next))
     
+    ! Fill lepton list
+    nl=0
+       do j=1,pgl_unique%nproc
+          do i=1,next
+             if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
+                    nl=nl+1
+             endif
+          enddo
+       enddo
+       allocate(pgl_unique%lepton_list(1+2*nl))
+       pgl_unique%lepton_list(1)=2*nl
+       nl=2
+       nal=3
+       do j=1,pgl_unique%nproc
+          do i=1,next
+             if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
+                    pgl_unique%lepton_list(nl)=i
+                    nl=nl+2
+            elseif (phys_model%is_antilepton(pgl_unique%processes(i,j))) then
+                    pgl_unique%lepton_list(nal)=-i
+                    nal=nal+2
+             endif
+          enddo
+       enddo
+
     call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
          pgl_unique%spin,pgl_unique%color_orders,phys_model,&
-         dum,duml)
+         pgl_unique%lepton_list(1),pgl_unique%lepton_list(:))
         
     allocate(amp2(nevent,pgl_unique%nproc))
     allocate(amp(nevent,pgl_unique%amps(1)%n_amps))
