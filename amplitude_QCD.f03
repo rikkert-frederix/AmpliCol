@@ -745,7 +745,9 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       integer :: i
-      real(kind=4) :: sgn
+      logical :: sgn
+      integer,dimension(nl+1) :: new_fermi_list
+      real(kind=4) :: siign
 
       if (.not.valid_current_combination())  then
          return
@@ -754,9 +756,17 @@ contains
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
+              call combine_lepton_list(new_fermi_list)
+              siign=1d0
+              ! UNCOMMENT TO NOT SUM
+              if (new_fermi_list(1).eq.nl) then
+                call get_lepton_sign(new_fermi_list,sgn)
+                if (sgn) siign=-1d0
+              endif
+              !
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
-                            pm%vertex_list(i)%coupl)
+                            siign*pm%vertex_list(i)%coupl)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
@@ -1093,42 +1103,38 @@ contains
       implicit none
       integer,dimension(nl+1),intent(out) :: list
       integer :: i,j
+      integer,dimension(2) :: rest1,rest2
+      integer :: last_index
+      integer :: n1,n2
 
       list=0
-      ! lepton-anti-lepton external currents combined
-      if (count(current_list_local(ic1)%fermi_list(2:).ne.0).eq.1.and.&
-          current_list_local(ic2)%fermi_list(2).eq.0) then
-           list=current_list_local(ic1)%fermi_list(:)+&
-               current_list_local(ic2)%fermi_list(:)
-      elseif (count(current_list_local(ic2)%fermi_list(2:).ne.0).eq.1.and.&
-              current_list_local(ic1)%fermi_list(2).eq.0) then
-           list=current_list_local(ic1)%fermi_list(:)+&
-               current_list_local(ic2)%fermi_list(:)
-      elseif (count(current_list_local(ic1)%fermi_list(2:).ne.0).eq.1.and.&
-          current_list_local(ic2)%fermi_list(3).eq.0) then
-           list=current_list_local(ic1)%fermi_list(:)+&
-               current_list_local(ic2)%fermi_list(:)
-      elseif (count(current_list_local(ic2)%fermi_list(2:).ne.0).eq.1.and.&
-              current_list_local(ic1)%fermi_list(3).eq.0) then
-           list=current_list_local(ic1)%fermi_list(:)+&
-               current_list_local(ic2)%fermi_list(:)
-      elseif (current_list_local(ic1)%fermi_list(1).eq.0) then
-          list=current_list_local(ic2)%fermi_list(:)
-      elseif (current_list_local(ic2)%fermi_list(1).eq.0) then
-          list=current_list_local(ic1)%fermi_list(:)
-      else
-          do i=nl+1,1,-1
-              if (current_list_local(ic1)%fermi_list(i).ne.0) exit
-          enddo
-          do j=nl+1,1,-1
-              if (current_list_local(ic2)%fermi_list(j).ne.0) exit
-          enddo
-          if (i.eq.2.and.current_list_local(ic1)%fermi_list(1).eq.1) i=i+1
-          if (j.eq.2.and.current_list_local(ic2)%fermi_list(1).eq.1) j=j+1
-          list(1)=current_list_local(ic1)%fermi_list(1)+current_list_local(ic2)%fermi_list(1)
-          list(2:i)=current_list_local(ic1)%fermi_list(2:i)
-          list(i+1:nl+1)=current_list_local(ic2)%fermi_list(2:j)
-       endif
+      n1 = current_list_local(ic1)%fermi_list(1)
+      n2 = current_list_local(ic2)%fermi_list(1)
+      rest1=0
+      rest2=0
+
+      if (mod(n1,2).eq.0) then
+           list(2:1+n1)=current_list_local(ic1)%fermi_list(2:1+n1)
+           last_index = 1+n1
+      else 
+           list(2:1+n1-1)=current_list_local(ic1)%fermi_list(2:1+n1-1)
+           rest1(1:2)=current_list_local(ic1)%fermi_list(1+n1:1+n1+1)
+           last_index = 1+n1-1
+      endif
+
+      if (mod(n2,2).eq.0) then
+           list(last_index+1:last_index+n2)=current_list_local(ic2)%fermi_list(2:1+n2)
+           last_index=last_index+n2
+      else 
+           list(last_index+1:last_index+n2-1)=current_list_local(ic2)%fermi_list(2:1+n2-1)
+           rest2(1:2)=current_list_local(ic2)%fermi_list(1+n2:1+n2+1)
+           last_index=last_index+n2-1
+      endif
+      if (any(rest1.ne.0).or.any(rest2.ne.0)) then
+        rest1=rest1+rest2
+        list(last_index+1:last_index+2)=rest1(1:2)
+      endif
+      list(1)=count(list(2:).ne.0)
     end subroutine combine_lepton_list
     
     subroutine add_all_currents(ctype)
@@ -1271,13 +1277,18 @@ contains
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
+            ! UNCOMMENT TO NOT SUM CURRENT
+            if (all(new_fermi_list.ne.current_list_local(ic)%fermi_list)) cycle
+            !
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
-            if (all(new_fermi_list.ne.0)) then
-               call get_lepton_sign(new_fermi_list,sgn)
-               current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=sgn
-               return
-            endif
+            ! COMMENT TO NOT SUM CURRENT
+            !if (all(new_fermi_list.ne.0)) then
+            !   call get_lepton_sign(new_fermi_list,sgn)
+            !   current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=sgn
+            !   return
+            !endif
+            !
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
             return
          enddo
@@ -1307,12 +1318,14 @@ contains
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
+         ! COMMENT TO NOT SUM
          !if (all(new_fermi_list.ne.0)) then
          !      call get_lepton_sign(new_fermi_list,sgn)
          !      current_list_local(ic)%vertex_sign(1)=sgn
          !      current_list_local(this%n_cur)%n_vert=1
          !      return
          !endif
+         !
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
       elseif (this%imode.eq.2) then

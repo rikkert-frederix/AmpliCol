@@ -953,7 +953,7 @@ contains
     Vf=-0.5d0+2d0*sw**2
     Af=-0.5d0
     this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
-    this%vertex_list(l)%coupl=[0d0,0d0]
+    !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! alepton-lepton to Zboson
     do i=1,3
@@ -967,7 +967,7 @@ contains
     Vf=-0.5d0+2d0*sw**2
     Af=-0.5d0
     this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
-    this%vertex_list(l)%coupl=[0d0,0d0]
+    !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
 
     ! charged lepton-lepton to Wboson
