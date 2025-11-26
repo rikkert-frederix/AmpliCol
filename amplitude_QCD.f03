@@ -1291,9 +1291,7 @@ contains
          ! lepton-related 
          allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
          current_list_local(this%n_cur)%fermi_list=0
-         if (any(new_fermi_list.ne.0)) then
-             current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
-         endif
+         current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
 
          if (pm%is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
@@ -1309,6 +1307,12 @@ contains
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
+         !if (all(new_fermi_list.ne.0)) then
+         !      call get_lepton_sign(new_fermi_list,sgn)
+         !      current_list_local(ic)%vertex_sign(1)=sgn
+         !      current_list_local(this%n_cur)%n_vert=1
+         !      return
+         !endif
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
       elseif (this%imode.eq.2) then

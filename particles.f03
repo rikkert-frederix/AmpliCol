@@ -929,6 +929,7 @@ contains
     this%vertex_list(l)%particles(2)=-(11+(2*i-2))
     this%vertex_list(l)%particles(3)=22
     this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! alepton-lepton to photon
     do i=1,3
@@ -938,6 +939,7 @@ contains
     this%vertex_list(l)%particles(2)=11+(2*i-2)
     this%vertex_list(l)%particles(3)=22
     this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! lepton-alepton to Zboson
     do i=1,3
@@ -951,6 +953,7 @@ contains
     Vf=-0.5d0+2d0*sw**2
     Af=-0.5d0
     this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! alepton-lepton to Zboson
     do i=1,3
@@ -964,6 +967,7 @@ contains
     Vf=-0.5d0+2d0*sw**2
     Af=-0.5d0
     this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
 
     ! charged lepton-lepton to Wboson
@@ -997,6 +1001,7 @@ contains
        this%vertex_list(l)%particles(2)=22
        this%vertex_list(l)%particles(3)=(11+(2*i-2))
        this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! antilepton-photon to antilepton vertices
     do i=1,3
@@ -1006,6 +1011,7 @@ contains
        this%vertex_list(l)%particles(2)=22
        this%vertex_list(l)%particles(3)=-(11+(2*i-2))
        this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
 
     ! photon-lepton to lepton vertices
@@ -1016,6 +1022,7 @@ contains
        this%vertex_list(l)%particles(2)=(11+(2*i-2))
        this%vertex_list(l)%particles(3)=(11+(2*i-2))
        this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! photon-antilepton to antilepton vertices
     do i=1,3
@@ -1025,6 +1032,7 @@ contains
        this%vertex_list(l)%particles(2)=-(11+(2*i-2))
        this%vertex_list(l)%particles(3)=-(11+(2*i-2))
        this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
 
     ! lepton-Zboson to lepton vertices
@@ -1039,6 +1047,7 @@ contains
        Vf=-0.5d0+2d0*sw**2
        Af=-0.5d0
        this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! antilepton-Zboson to antilepton vertices
     do i=1,3
@@ -1052,6 +1061,7 @@ contains
        Vf=-0.5d0+2d0*sw**2
        Af=-0.5d0
        this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
    ! Zboson-lepton to lepton vertices
     do i=1,3
@@ -1065,6 +1075,7 @@ contains
        Vf=-0.5d0+2d0*sw**2
        Af=-0.5d0
        this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
     ! Zboson-antilepton to antilepton vertices
     do i=1,3
@@ -1078,6 +1089,7 @@ contains
        Vf=-0.5d0+2d0*sw**2
        Af=-0.5d0
        this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       !this%vertex_list(l)%coupl=[0d0,0d0]
     enddo
 
 
