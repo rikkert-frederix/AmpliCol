@@ -744,7 +744,7 @@ contains
       ! check if we should consider the current combination, and if
       ! so, and the corresponding vertices to the list.
       implicit none
-      integer :: i
+      integer :: i,j
       logical :: sgn
       integer,dimension(nl+1) :: new_fermi_list
       real(kind=4) :: siign
@@ -752,18 +752,29 @@ contains
       if (.not.valid_current_combination())  then
          return
       endif
-
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
               call combine_lepton_list(new_fermi_list)
               siign=1d0
-              ! UNCOMMENT TO NOT SUM
+              ! add sign after all leptons
               if (new_fermi_list(1).eq.nl) then
                 call get_lepton_sign(new_fermi_list,sgn)
                 if (sgn) siign=-1d0
               endif
-              !
+              ! and add sign after each fermion line
+              if (new_fermi_list(1).eq.2) then
+                 siign=-1d0
+                 do j=1,nl
+                    if (new_fermi_list(2).eq.lepton_list(j)) then
+                        if (new_fermi_list(3).eq.lepton_list(j+1)) then
+                                siign=1d0
+                        endif
+                    endif
+                 enddo
+              else
+                 siign=1d0
+              endif
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
                             siign*pm%vertex_list(i)%coupl)
@@ -1277,18 +1288,9 @@ contains
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
-            ! UNCOMMENT TO NOT SUM CURRENT
             if (all(new_fermi_list.ne.current_list_local(ic)%fermi_list)) cycle
-            !
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
-            ! COMMENT TO NOT SUM CURRENT
-            !if (all(new_fermi_list.ne.0)) then
-            !   call get_lepton_sign(new_fermi_list,sgn)
-            !   current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=sgn
-            !   return
-            !endif
-            !
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
             return
          enddo
@@ -1318,14 +1320,6 @@ contains
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
-         ! COMMENT TO NOT SUM
-         !if (all(new_fermi_list.ne.0)) then
-         !      call get_lepton_sign(new_fermi_list,sgn)
-         !      current_list_local(ic)%vertex_sign(1)=sgn
-         !      current_list_local(this%n_cur)%n_vert=1
-         !      return
-         !endif
-         !
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
          current_list_local(this%n_cur)%n_vert=1
       elseif (this%imode.eq.2) then
