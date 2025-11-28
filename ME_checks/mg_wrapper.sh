@@ -18,12 +18,14 @@ if [[ "$version" == "3.6.1" ]]; then
     cp ME_checks/matrix_standalone_v4_v361.inc $path_mg/madgraph/iolibs/template_files/matrix_standalone_v4.inc
 elif [[ "$version" == "3.6.6" ]]; then
     cp ME_checks/matrix_standalone_v4_v366.inc $path_mg/madgraph/iolibs/template_files/matrix_standalone_v4.inc
+
 else
     echo "Unknown version: $version"
 fi
 
 # This is same for the versions
 cp color_algebra.py $path_mg/madgraph/core/
+cp ME_checks/check_sa.f $path_mg/madgraph/iolibs/template_files/check_sa.f
 
 # Execute code
 cd $path_mg/bin
