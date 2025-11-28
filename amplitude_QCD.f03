@@ -745,9 +745,8 @@ contains
       ! so, and the corresponding vertices to the list.
       implicit none
       integer :: i,j
-      logical :: sgn
       integer,dimension(nl+1) :: new_fermi_list
-      real(kind=4) :: siign
+      real(kind=4) :: sgn
 
       if (.not.valid_current_combination())  then
          return
@@ -755,29 +754,19 @@ contains
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
+              ! add possible lepton-interchange sign
               call combine_lepton_list(new_fermi_list)
-              siign=1d0
-              ! add sign after all leptons
-              if (new_fermi_list(1).eq.nl) then
-                call get_lepton_sign(new_fermi_list,sgn)
-                if (sgn) siign=-1d0
-              endif
-              ! and add sign after each fermion line
+              sgn=1d0
               if (new_fermi_list(1).eq.2) then
-                 siign=-1d0
-                 do j=1,nl
-                    if (new_fermi_list(2).eq.lepton_list(j)) then
-                        if (new_fermi_list(3).eq.lepton_list(j+1)) then
-                                siign=1d0
-                        endif
-                    endif
+                 sgn=-1d0
+                 do j=2,nl
+                    if (new_fermi_list(2).eq.lepton_list(j).and.&
+                        new_fermi_list(3).eq.lepton_list(j+1)) sgn=1d0
                  enddo
-              else
-                 siign=1d0
               endif
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
-                            siign*pm%vertex_list(i)%coupl)
+                            sgn*pm%vertex_list(i)%coupl)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
@@ -1301,7 +1290,7 @@ contains
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
 
-         ! lepton-related 
+         ! lepton-ordering
          allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
          current_list_local(this%n_cur)%fermi_list=0
          current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
@@ -1362,51 +1351,6 @@ contains
       endif
     end subroutine add_current
 
-    subroutine get_lepton_sign(list,sgn)
-      implicit none
-      logical, intent(out) :: sgn
-      integer,dimension(nl+1) :: list
-      integer :: pos(nl), p(nl)
-      integer,dimension(nl) :: cl1,cl2
-      logical :: visited(n)
-      integer :: i, j, k, cycle_len
-      logical :: found
-
-      cl1(1:nl)=list(2:nl+1)
-      cl2(1:nl)=lepton_list(2:nl+1)
-
-      do i = 1, nl
-        found = .false.
-        do j = 1, nl
-            if (cl1(i) .eq. cl2(j)) then
-                p(i) = j
-                found = .true.
-                exit
-            end if
-        end do
-        if (.not. found) then
-            write(*,*) 'Lists do not contain same leptons'
-            stop 15
-        end if
-       end do
-
-       visited = .false.
-       sgn = .false.  
-       do i = 1, nl
-        if (.not. visited(i)) then
-            k = i
-            cycle_len = 0
-            do
-                visited(k) = .true.
-                cycle_len = cycle_len + 1
-                k = p(k)
-                if (visited(k)) exit
-            end do
-            if (mod(cycle_len, 2) == 0) sgn = .not.sgn
-         end if
-       end do
-    end subroutine get_lepton_sign
-       
     subroutine create_current_dict()
       ! Create a dictionary that uniquely gives every current a label. This
       ! can be used to quickly find, (O(logN)), a current in the list of
