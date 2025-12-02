@@ -2824,13 +2824,6 @@ contains
     write(iunit) p
     write(iunit) this%amps
     close(iunit)
-
-    write(tmp,*) this%max_pp
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
-    write(tmp,*) this%n_cur
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
-    write(tmp,*) this%n_vert
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
     
     write(tmp,*) igroup
     write(line,*) iint
@@ -3451,20 +3444,20 @@ contains
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
                       line=trim(adjustl(line))//'-conjg(amps('//trim(adjustl(tmp))//'))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
-                      line=trim(adjustl(line))//'conjg(amps('//trim(adjustl(tmp))//'))'
+                      line=trim(adjustl(line))//'+conjg(amps('//trim(adjustl(tmp))//'))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
                       line=trim(adjustl(line))//'-amps('//trim(adjustl(tmp))//')'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
-                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(aimag(amps('//trim(adjustl(tmp))// &
                            ')),dble(amps('//trim(adjustl(tmp))//')))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
-                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(-aimag(amps('//trim(adjustl(tmp))// &
                            ')),dble(amps('//trim(adjustl(tmp))//')))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
-                      line=trim(adjustl(line))//'cmplx(aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(aimag(amps('//trim(adjustl(tmp))// &
                            ')),-dble(amps('//trim(adjustl(tmp))//')))'
                    elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
-                      line=trim(adjustl(line))//'cmplx(-aimag(amps('//trim(adjustl(tmp))// &
+                      line=trim(adjustl(line))//'+cmplx(-aimag(amps('//trim(adjustl(tmp))// &
                            ')),-dble(amps('//trim(adjustl(tmp))//')))'
                    else
                       write (*,*) 'ERROR: unknown operation in creating library', &

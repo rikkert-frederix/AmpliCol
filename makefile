@@ -18,6 +18,9 @@ amplitude_QCD.o matrix_unweight_QCD.o
 FILES_M_COMBINE_QCD=color_algebra.o math_functions.o feynmanrules.o particles.o    \
 amplitude_QCD.o matrix_combine_QCD.o
 
+AMPSRC := $(shell find library/ -name 'amp*_lib.f03')
+AMPOBJ := $(notdir $(AMPSRC:.f03=.o)) amplib.o
+
 FC=gfortran
 FFLAGS=-ffast-math -O3 -ffree-line-length-0
 #FFLAGS=-fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -42,16 +45,15 @@ FFLAGS=-ffast-math -O3 -ffree-line-length-0
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 %.o: PhaseSpace/%.f03
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
+%.o: library/%.f03
+	$(FC) $(FFLAGS) -c -I. -Ilibrary $<
 
-#.PHONY: $(AMPLIB)
-$(AMPLIB):
-	@rm -f $(AMPLIB)
-	@for src in $(shell find library/ -name 'amp*_lib.f03'); do $(FC) $(FFLAGS) -c $$src ; done
-	$(FC) $(FFLAGS) -c library/amplib.f03
-	ar rcs $(AMPLIB) amp*_lib.o amplib.o
 
-matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) $(AMPLIB)
-	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) $(AMPLIB) `lhapdf-config --ldflags` -lstdc++
+$(AMPLIB): $(AMPOBJ)
+	ar rcs $@ $^
+
+matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) dummy.o
+	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++
 	@rm -f $(AMPLIB)
 
 matrix_integrate_QCD_library: $(FILES_M_INT_QCD) $(AMPLIB)
@@ -92,3 +94,4 @@ pdf_wrap.o : handling_processes.o
 simple_integrator.o : helper_modules.o
 amplitude_library.o : handling_processes.o read_process_file.o
 mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.o
+amplib.o : $(notdir $(AMPSRC:.f03=.o))
