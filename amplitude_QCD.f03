@@ -1309,8 +1309,8 @@ contains
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
             allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
          else
-            allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
-            allocate(current_list_local(this%n_cur)%vertex_sign(5*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertices(8*(isize-1)))
+            allocate(current_list_local(this%n_cur)%vertex_sign(8*(isize-1)))
          endif
          current_list_local(this%n_cur)%vertices(1)=this%n_vert
          current_list_local(this%n_cur)%vertex_sign(1)=vertex_sign
@@ -1331,7 +1331,7 @@ contains
 
             ! lepton-ordering
             allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-            !current_list_local(this%n_cur)%fermi_list=0
+            current_list_local(this%n_cur)%fermi_list=0
             current_list_local(this%n_cur)%fermi_list=new_fermi_list
 
             if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
@@ -3975,7 +3975,7 @@ contains
     endif
     if (allocated(lhs%fermi_list)) deallocate(lhs%fermi_list)
     if (allocated(rhs%fermi_list)) then
-       lsize=1+rhs%fermi_list(1)
+       lsize=size(rhs%fermi_list)
        allocate(lhs%fermi_list(1:lsize))
        lhs%fermi_list(1:lsize)=rhs%fermi_list(1:lsize)
     endif
