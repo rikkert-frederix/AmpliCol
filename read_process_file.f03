@@ -106,15 +106,15 @@ contains
        enddo
        allocate(pgl(igroup)%lepton_list(1+2*nl))
        pgl(igroup)%lepton_list(1)=2*nl
-       nl=2
-       nal=3
+       nl=0
+       nal=1
        do j=1,pgl(igroup)%nproc
           do i=1,next
              if (phys_model%is_lepton(pgl(igroup)%processes(i,j))) then
-                    pgl(igroup)%lepton_list(nl)=i
+                    pgl(igroup)%lepton_list(nl+2)=i
                     nl=nl+2
             elseif (phys_model%is_antilepton(pgl(igroup)%processes(i,j))) then
-                    pgl(igroup)%lepton_list(nal)=-i
+                    pgl(igroup)%lepton_list(nal+2)=-i
                     nal=nal+2
              endif
           enddo
@@ -202,28 +202,28 @@ contains
     
     ! Fill lepton list
     nl=0
-       do j=1,pgl_unique%nproc
-          do i=1,next
-             if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
-                    nl=nl+1
-             endif
-          enddo
+    do j=1,pgl_unique%nproc
+       do i=1,next
+          if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
+             nl=nl+1
+          endif
        enddo
-       allocate(pgl_unique%lepton_list(1+2*nl))
-       pgl_unique%lepton_list(1)=2*nl
-       nl=2
-       nal=3
-       do j=1,pgl_unique%nproc
-          do i=1,next
-             if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
-                    pgl_unique%lepton_list(nl)=i
-                    nl=nl+2
-            elseif (phys_model%is_antilepton(pgl_unique%processes(i,j))) then
-                    pgl_unique%lepton_list(nal)=-i
-                    nal=nal+2
-             endif
-          enddo
+    enddo
+    allocate(pgl_unique%lepton_list(1+2*nl))
+    pgl_unique%lepton_list(1)=2*nl
+    nl=0
+    nal=1
+    do j=1,pgl_unique%nproc
+       do i=1,next
+          if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
+              pgl_unique%lepton_list(nl+2)=i
+              nl=nl+2
+          elseif (phys_model%is_antilepton(pgl_unique%processes(i,j))) then
+              pgl_unique%lepton_list(nal+2)=-i
+              nal=nal+2
+          endif
        enddo
+    enddo
 
     call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
          pgl_unique%spin,pgl_unique%color_orders,phys_model,&

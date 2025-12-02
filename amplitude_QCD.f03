@@ -1108,6 +1108,9 @@ contains
       integer :: n1,n2
 
       list=0
+
+      if (current_list_local(ic1)%fermi_list(1).eq.0 .and.&
+          current_list_local(ic2)%fermi_list(1).eq.0) return
       n1 = current_list_local(ic1)%fermi_list(1)
       n2 = current_list_local(ic2)%fermi_list(1)
       rest1=0
@@ -1155,13 +1158,13 @@ contains
          return
       endif
       ! Need to consider all the possible permutations
-      call check_all_permutations(ctype,nperm,new_currents,vertex_sign)
+      call check_all_permutations(ctype,nperm,new_currents,vertex_sign,new_fermi_list)
       do i=1,nperm
          call add_current(vertex_sign(i),new_currents(i),new_fermi_list)
       enddo
     end subroutine add_all_currents
 
-    subroutine check_all_permutations(ctype,nperm,new_currents,vertex_sign)
+    subroutine check_all_permutations(ctype,nperm,new_currents,vertex_sign,new_fermi_list)
       ! If a current only contains (external) gluons, we can use symmetry to
       ! relate them to eachother. This subroutine checks all permutations,
       ! and, if they give a valid current order, adds that current to the list
@@ -1183,6 +1186,7 @@ contains
       if (n2.ge.2 .and. ag2) switch(2)=2
       if (ag1 .and. ag2) switch(3)=2
       nperm=0
+      new_fermi_list=0
       do i=1,switch(1)
          do j=1,switch(2)
             do k=1,switch(3)
@@ -1289,7 +1293,7 @@ contains
          current_list_local(this%n_cur)=new_current
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
-
+         
          ! lepton-ordering
          allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
          current_list_local(this%n_cur)%fermi_list=0
@@ -1324,6 +1328,12 @@ contains
             current_list_local(ic)=new_current
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
             current_list_local(ic)%width=pm%get_width(new_current%type)
+
+            ! lepton-ordering
+            allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+            !current_list_local(this%n_cur)%fermi_list=0
+            current_list_local(this%n_cur)%fermi_list=new_fermi_list
+
             if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
                write (*,*) 'trying to combine currents with different spin: not possible',&
                     current_list_local(ic)%spin(1:isize)
@@ -3915,7 +3925,7 @@ contains
     implicit none
     type(current),intent(inout) :: lhs
     type(current),intent(in) :: rhs
-    integer :: isize,val_size
+    integer :: isize,val_size, lsize
     lhs%type=rhs%type
     lhs%bin=rhs%bin
     isize=popcnt(lhs%bin)
@@ -3962,6 +3972,12 @@ contains
        val_size=size(rhs%val_r)
        allocate(lhs%val_r(1:val_size))
        lhs%val_r(1:val_size)=rhs%val_r(1:val_size)
+    endif
+    if (allocated(lhs%fermi_list)) deallocate(lhs%fermi_list)
+    if (allocated(rhs%fermi_list)) then
+       lsize=1+rhs%fermi_list(1)
+       allocate(lhs%fermi_list(1:lsize))
+       lhs%fermi_list(1:lsize)=rhs%fermi_list(1:lsize)
     endif
   end subroutine assign_current
   subroutine finalize_amplitude_QCD(amp)
@@ -4021,6 +4037,7 @@ contains
     if (allocated(cur%vertex_sign)) deallocate(cur%vertex_sign)
     if (allocated(cur%val_c)) deallocate(cur%val_c)
     if (allocated(cur%val_r)) deallocate(cur%val_r)
+    if (allocated(cur%fermi_list)) deallocate(cur%fermi_list)
   end subroutine finalize_current
 
 end module amplitude_QCD_mod
