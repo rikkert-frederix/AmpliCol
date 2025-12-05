@@ -216,7 +216,6 @@ program matrix_integrate_QCD
      endif
      if (done) exit
   enddo
-  deallocate(pgl_unique)
   call flush(11)
   call simple_integrator%assign_evnt_wgts(wgts)
   rewind(11)
