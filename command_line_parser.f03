@@ -1,14 +1,16 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag)
+  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,vector_size,ncores)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
     logical :: verbose, show_help
     character(len=80) :: filename,library,tag
-    integer :: ncalls0,itmax,PS_choice
+    integer :: ncalls0,itmax,PS_choice,vector_size,ncores
     integer(kind=8) :: seed
+    logical :: read_momenta 
+    integer :: me_points
 
     ! Default values:
     show_help=.false.
@@ -19,6 +21,9 @@ contains
     itmax=48
     library='none'
     tag=''
+    ncores=1
+    vector_size=1
+    read_momenta=.false.
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -43,6 +48,15 @@ contains
           library = arg(index(arg, "=")+1:)
        elseif (index(arg, "--tag=").eq.1 .or. index(arg, "-t=").eq.1) then
           tag = trim(arg(index(arg, "=")+1:))//'_'
+       elseif (index(arg, "--me_test=").eq.1 .or. index(arg, "-mt=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) me_points
+          read_momenta=.true.
+       elseif (index(arg, "--multicore=").eq.1 .or. index(arg,"-mc=").eq.1) then
+          tmp=arg(index(arg, "=")+1:index(arg, ",")-1)
+          read(tmp,*) ncores
+          tmp=arg(index(arg, ",")+1:)
+          read(tmp,*) vector_size
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -64,6 +78,10 @@ contains
             "set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make "// &
             "matrix_integrate_library' after a library has been created). Default is 'none'."
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
+       write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG with [X] "// &
+            "points tested (single PS kinematics)"
+       write (*,'(a)') "  --multicore=x,y   -mc=x,y : Use OpenMP with x threads and vector size y;"// &
+            " make sure that y >> x. Only compatible with --library=use."
        write (*,'(a)') ""
        stop
     end if

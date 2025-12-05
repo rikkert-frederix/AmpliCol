@@ -161,8 +161,13 @@ contains
     this%particle_list(l)%anti_type=-26
     this%particle_list(l)%dim=6
 
+    if (l.gt.this%npart) then
+       write (*,*) 'ERROR: more particles than allocated',l,this%npart
+       stop 1
+    else
+       this%npart=l
+    endif
     write (99,*) l,'particles loaded'
-
   end subroutine init_part
 
   subroutine init_vert(this)
@@ -709,6 +714,7 @@ contains
 
     ! quark-Higgs to quark vertices
     do i=1,6
+       if (this%get_mass(i).eq.0d0) cycle
        l=l+1
        this%vertex_list(l)%type=16
        this%vertex_list(l)%particles(1)=i
@@ -718,6 +724,7 @@ contains
     enddo
     ! antiquark-Higgs to antiquark vertices
     do i=1,6
+       if (this%get_mass(i).eq.0d0) cycle
        l=l+1
        this%vertex_list(l)%type=16
        this%vertex_list(l)%particles(1)=-i
@@ -898,6 +905,12 @@ contains
     this%vertex_list(l)%particles(3)=-24
     this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
 
+    if (l.gt.this%nint) then
+       write (*,*) 'ERROR: more vertices than allocated',l,this%nint
+       stop 1
+    else
+       this%nint=l
+    endif
     write (99,*) l,'interactions loaded'
   end subroutine init_vert
 

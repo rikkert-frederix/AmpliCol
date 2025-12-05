@@ -16,9 +16,10 @@ program matrix_integrate_QCD
   use handling_processes
   use multichannel
   use amplitude_library
+  use mg_checks
   implicit none
   integer :: ivec
-  integer,parameter :: vector_size=128
+  integer :: vector_size
   integer :: iproc
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
@@ -26,20 +27,23 @@ program matrix_integrate_QCD
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
-  logical,dimension(vector_size) :: to_write
+  logical,dimension(:),allocatable :: to_write
   integer,dimension(:),allocatable :: nintegrals
   integer :: ichan,iint,itmax,ncalls0,iamp
-  real(kind=8),dimension(vector_size) :: f,f_abs
+  real(kind=8),dimension(:),allocatable :: f,f_abs
   logical :: done
   real(kind=8),dimension(:,:),allocatable :: wgts
   character(len=8) :: date
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta
   call cpu_time(tTot_B)
 
   call get_run_arguments()
+  allocate(to_write(vector_size))
+  allocate(f(vector_size))
+  allocate(f_abs(vector_size))
   
   ! setting energy
   sqrts=14000.d0
@@ -132,8 +136,16 @@ program matrix_integrate_QCD
      call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
+           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
+           if (read_momenta) then
+                   if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
+                   call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
+                   do i=1,pgl(igroup)%next
+                         pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
+                   enddo
+           endif
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
@@ -283,32 +295,19 @@ contains
     call cpu_time(tBefore)
     !$omp parallel do
     do ivec=1,vector_size
-       pgl(ichan)%ps(ivec)%x(:)=x(:,ivec)
-       call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(ivec))
-!!$    enddo
-!!$    if (debug) then
-!!$       write (*,*) pgl(ichan)%ps(1:vector_size)%jac
-!!$       stop 1
-!!$    endif
-!!$    do ivec=1,vector_size
-       if (pgl(ichan)%ps(ivec)%jac.lt.0d0) then
-          val(:,ivec)=-1d0
-          cycle
+       if (.not. read_momenta) then
+          pgl(ichan)%ps(ivec)%x(:)=x(:,ivec)
+          call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(ivec))
+          if (pgl(ichan)%ps(ivec)%jac.lt.0d0) then
+             val(:,ivec)=-1d0
+             cycle
+          endif
+          if (.not.pass_cuts(pgl(ichan),pgl(ichan)%ps(ivec))) then
+             val(:,ivec)=-1d0
+          endif
        endif
-       if (.not.pass_cuts(pgl(ichan),pgl(ichan)%ps(ivec))) then
-          val(:,ivec)=-1d0
-       endif
-!!$    enddo
-!!$    !$omp parallel do
-!!$    do ivec=1,vector_size
        if (val(1,ivec).eq.-1d0) cycle
        call compute_multichannel_weight(ichan,pgl(ichan)%ps(ivec),colour_singlet_multichannel_weight(1,ivec))
-!!$    enddo
-!!$    call cpu_time(tAfter)
-!!$    t_PS= t_PS +tAfter-tBefore
-!!$    tBefore=tAfter
-!!$    !$omp parallel do
-!!$    do ivec=1,vector_size
        if (val(1,ivec).eq.-1d0) cycle
        call compute_the_amps(iint,ichan,ivec,amps(:,ivec))
     enddo
@@ -325,6 +324,11 @@ contains
           if (done) return
        endif
     enddo
+
+    if (read_momenta) then
+        call perform_check(iint,ichan)
+        if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
+    endif
 
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     !$omp parallel do
@@ -541,12 +545,12 @@ contains
     use argument_parser
     implicit none
     integer :: argc
-    integer :: i
+    integer :: i,ncores
     character(len=256) :: argv
     character(len=80) :: library
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag)
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,vector_size,ncores)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -554,14 +558,18 @@ contains
     if (library.eq.'none') then
        create_amplitude_library=.false.
        use_amplitude_library=.false.
+       vector_size=1
+       ncores=1
     elseif (library.eq.'create') then
        create_amplitude_library=.true.
        use_amplitude_library=.false.
+       vector_size=1
+       ncores=1
     elseif (library.eq.'use') then
        create_amplitude_library=.false.
        use_amplitude_library=.true.
-       return
     endif
+    call OMP_SET_NUM_THREADS(ncores)
 
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then
        write (*,*) 'PS_Choice modes only 1, 2, 3 or 4',PS_choice
