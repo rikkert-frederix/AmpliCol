@@ -7,6 +7,8 @@ module handling_processes
      integer,dimension(:,:),allocatable :: channels,unique_channelgroup_list
      integer,dimension(:),allocatable :: unique_channel_list,map_proc_to_channelgroup,number_of_channels
      integer :: max_channels,n_unique_channels,n_unique_channelgroups
+   contains
+     final :: finalize_multichan_info
   end type multichan_info
   type phase_space_order_group
      ! if adding variables here, also update the finalize_phase_space_order_group subroutine
@@ -30,6 +32,8 @@ module handling_processes
      ! cuts
      double precision,dimension(:),allocatable :: pT_min,eta_max
      double precision,dimension(:,:),allocatable :: DR_min,sqrt_s_min
+   contains
+     final :: finalize_phase_space_order_group
   end type phase_space_order_group
   integer :: next,nproc_unique,ngroups,nprocs,c_o,nquarks
   type(phase_space_order_group),dimension(:),allocatable :: pgl

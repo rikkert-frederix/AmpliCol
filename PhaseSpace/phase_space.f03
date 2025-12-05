@@ -4,6 +4,8 @@ module phase_space_base
      real(kind=8),dimension(:,:),allocatable,public :: p
      real(kind=8),dimension(:),allocatable,public :: x
      real(kind=8),public :: jac,xbjrk(2)
+   contains
+     final :: finalize_psv
   end type psv
   type,abstract :: phase_space_type
      ! If adding variables here, make sure to also update the
@@ -55,4 +57,10 @@ module phase_space_base
        class(phase_space_type),intent(inout) :: this
      end subroutine phase_space_interface_cleanup
   end interface
+contains
+  subroutine finalize_psv(this)
+    type(psv),intent(inout) :: this
+    if (allocated(this%p)) deallocate(this%p)
+    if (allocated(this%x)) deallocate(this%x)
+  end subroutine finalize_psv
 end module phase_space_base
