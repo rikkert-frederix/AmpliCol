@@ -217,6 +217,7 @@ def OrderProcPerm(proc,perm):
 def ParseCollision(input_string):
     # Parse the process string, and cross the initial state particles.
     input_string=input_string.replace('bar','~')
+    input_string=input_string.replace(' j',' 1j')
     parts=input_string.split(">")
     if len(parts) != 2:
         raise ValueError("Invalid collision format. Expected 'p p > ...'.")
