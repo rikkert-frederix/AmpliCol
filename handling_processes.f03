@@ -671,7 +671,7 @@ contains
     do i=1,size(pgl%amps)
        call finalize_amplitude_QCD(pgl%amps(i))
     enddo
-    deallocate(pgl%amps)
+    if (allocated(pgl%amps)) deallocate(pgl%amps)
     if(allocated(pgl%phase_space)) then
        call pgl%phase_space%cleanup()
        deallocate(pgl%phase_space)
