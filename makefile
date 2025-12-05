@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := matrix_integrate_QCD
 
-AMPLIB = libamp.a
+AMPLIB = libamp.so
 
 FILES_M_INT_QCD=bitset.o pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o	\
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o	\
@@ -22,7 +22,7 @@ AMPSRC := $(shell find library/ -name 'amp*_lib.f03')
 AMPOBJ := $(notdir $(AMPSRC:.f03=.o)) amplib.o
 
 FC=gfortran
-FFLAGS=-ffast-math -O3 -ffree-line-length-0
+FFLAGS=-ffast-math -O3
 #FFLAGS=-fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 
 # Files for all executables
@@ -35,6 +35,8 @@ FFLAGS=-ffast-math -O3 -ffree-line-length-0
 	$(FC) $(FFLAGS) -c -I. $<
 %.o: PDF/%.f
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
+%.o: PDF/%.f90
+	$(FC) $(FFLAGS) -c -I. -IPDF $<
 %.o: SimpleMint/%.f
 	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
 %.o: SimpleMint/%.f90
@@ -46,19 +48,18 @@ FFLAGS=-ffast-math -O3 -ffree-line-length-0
 %.o: PhaseSpace/%.f03
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 %.o: library/%.f03
-	$(FC) $(FFLAGS) -c -I. -Ilibrary $<
+	$(FC) $(FFLAGS) -fPIC -c -I. -Ilibrary $<
 
 
 $(AMPLIB): $(AMPOBJ)
-	ar rcs $@ $^
+	$(FC) -shared -o $@ $(notdir $(AMPSRC:.f03=.o)) amplib.o
 
 matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) dummy.o
 	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++
 	@rm -f $(AMPLIB)
 
 matrix_integrate_QCD_library: $(FILES_M_INT_QCD) $(AMPLIB)
-	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) $(AMPLIB) `lhapdf-config --ldflags` -lstdc++
-	@rm -f $(AMPLIB)
+	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) $(AMPLIB) `lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
 
 matrix_reweight_QCD: $(FILES_M_RWGT_QCD) 
 	$(FC) $(FFLAGS) -o matrix_reweight_QCD $(FILES_M_RWGT_QCD)
@@ -73,7 +74,7 @@ clean:
 	rm -f *.o *.mod library/amp*.f03 library/amp*.data library/amplitudes.bin
 
 cleanlib:
-	rm -f amp*lib.o amp*lib.mod library/amp*lib*
+	rm -f amp*lib.o amp*lib.mod library/amp*lib* $(AMPLIB)
 	$(FC) $(FFLAGS) -c library/dummy.f03
 	ar rcs $(AMPLIB) dummy.o
 
