@@ -184,7 +184,6 @@ program matrix_integrate_QCD
   filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
   call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
-  deallocate(pgl_unique)
   
   allocate(nintegrals(ngroups))
   if (keep_processes_separate) then
@@ -217,6 +216,7 @@ program matrix_integrate_QCD
      endif
      if (done) exit
   enddo
+  deallocate(pgl_unique)
   call flush(11)
   call simple_integrator%assign_evnt_wgts(wgts)
   rewind(11)
