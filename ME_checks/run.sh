@@ -23,6 +23,18 @@ for i in "${second_last[@]}"; do
 	24) process+="w+ " ;;
 	-24) process+="w- " ;;
 	25) process+="h " ;;
+	11) process+="e- " ;;
+	12) process+="ve " ;;
+	13) process+="mu- " ;;
+	14) process+="vm " ;;
+	15) process+="ta- " ;;
+	16) process+="vt " ;;
+	-11) process+="e+ " ;;
+        -12) process+="ve~ " ;;
+        -13) process+="mu+ " ;;
+        -14) process+="vm~ " ;;
+        -15) process+="ta+ " ;;
+        -16) process+="vt~ " ;;
     esac
 done
 

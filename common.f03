@@ -32,9 +32,23 @@ module common
   real(kind=8),parameter :: etaa_max     = 6d0
   real(kind=8),parameter :: sqrt_saa_min = -1d0
 
+  ! leptons:
+  real(kind=8),parameter :: pTl_min      = 30d0
+  real(kind=8),parameter :: DRll_min     = 0.4d0  ! max allowed value: Draa_min=1d0
+  real(kind=8),parameter :: etal_max     = 6d0
+  real(kind=8),parameter :: sqrt_sll_min = -1d0
+
   ! jets+photons:
   real(kind=8),parameter :: DRja_min     = 0.4d0  ! max allowed value: Drja_min=1d0
   real(kind=8),parameter :: sqrt_sja_min = -1d0
+
+  ! jets+leptons:
+  real(kind=8),parameter :: DRjl_min     = 0.4d0  ! max allowed value: Drjl_min=1d0
+  real(kind=8),parameter :: sqrt_sjl_min = -1d0
+
+  ! leptonss+photons:
+  real(kind=8),parameter :: DRla_min     = 0.4d0  ! max allowed value: Drla_min=1d0
+  real(kind=8),parameter :: sqrt_sla_min = -1d0
 
   ! integrator
   type(integrator) :: simple_integrator

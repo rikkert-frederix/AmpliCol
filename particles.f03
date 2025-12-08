@@ -17,7 +17,8 @@ module particles
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
-          &,is_antiquark,is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
+          &,is_antiquark,is_lepton,is_antilepton,is_lepton_any,&
+          &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
           &,is_higgs,is_jet,is_higgsor
   end type physics_model
@@ -32,7 +33,7 @@ contains
     real(kind=8) :: hmass,hwidth
     
     l=0
-    this%npart=18! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.
+    this%npart=24! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.,6 leptons
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -176,7 +177,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 179 ! number of vertices
+    this%nint = 222 ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -1019,6 +1020,36 @@ contains
        is_antiquark=.false.
     endif
   end function is_antiquark
+  logical function is_lepton(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    if (iPDG.ge.11 .and. iPDG.le.16) then
+       is_lepton=.true.
+    else
+       is_lepton=.false.
+    endif
+  end function is_lepton
+  logical function is_antilepton(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    if (iPDG.le.-11 .and. iPDG.ge.-16) then
+       is_antilepton=.true.
+    else
+       is_antilepton=.false.
+    endif
+  end function is_antilepton
+  logical function is_lepton_any(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    if (abs(iPDG).ge.11 .and. abs(iPDG).le.16) then
+       is_lepton_any=.true.
+    else
+       is_lepton_any=.false.
+    endif
+  end function is_lepton_any
   logical function is_gluon(this,iPDG)
     implicit none
     class(physics_model) :: this

@@ -163,6 +163,12 @@ contains
        pgl%pT_min(i)=pta_min
        pgl%eta_max(i)=etaa_max
     enddo
+    ! cuts on single leptons
+    do i=3,pgl%next
+       if (.not. phys_model%is_lepton_any(pgl%processes(i,1))) cycle
+       pgl%pT_min(i)=ptl_min
+       pgl%eta_max(i)=etal_max
+    enddo
     ! cuts on pair of jets
     do i=1,pgl%next
        if (.not. phys_model%is_jet(pgl%processes(i,1))) cycle
@@ -196,6 +202,30 @@ contains
           pgl%sqrt_s_min(i,j)=sqrt_sja_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRja_min
+          endif
+       enddo
+    enddo
+    ! cuts on jet-lepton pair
+    do i=1,pgl%next
+       do j=1,pgl%next
+          if (i.eq.j) cycle
+          if (.not.((phys_model%is_jet(pgl%processes(i,1)) .and. phys_model%is_lepton_any(pgl%processes(j,1))) .or. &
+                    (phys_model%is_lepton_any(pgl%processes(i,1)) .and. phys_model%is_jet(pgl%processes(j,1))))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sjl_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRjl_min
+          endif
+       enddo
+    enddo
+    ! cuts on lepton-photon pair
+    do i=1,pgl%next
+       do j=1,pgl%next
+          if (i.eq.j) cycle
+          if (.not.((phys_model%is_lepton_any(pgl%processes(i,1)) .and. phys_model%is_photon(pgl%processes(j,1))) .or. &
+                    (phys_model%is_photon(pgl%processes(i,1)) .and. phys_model%is_lepton_any(pgl%processes(j,1))))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sla_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRla_min
           endif
        enddo
     enddo

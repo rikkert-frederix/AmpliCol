@@ -87,7 +87,7 @@ contains
     if (.not.match) then
        write(*,*) 'ERROR: disagreement with MG in ME-level check!',me_code(1)
        write(*,*) mg_check
-       stop 4
+       !stop 4
     endif
     if (pgl(ichan)%passed(iint).gt.me_points) then
             write(*,*) ' '

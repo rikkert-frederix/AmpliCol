@@ -540,6 +540,43 @@ contains
     wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1)) ! sr2
   end subroutine GluonQuarktoQuark_real
 
+  subroutine GluonQuarktoQuark_coupl(wfg1,wfq2,wfq,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    ! L
+    wfq(1)=prefact*(TMP1*wfq2(3)+TMP3*wfq2(4))*coupl(1) ! sl1 ! minus sign
+    wfq(2)=prefact*(TMP2*wfq2(4)+TMP4*wfq2(3))*coupl(1) ! sl2
+    ! R
+    wfq(3)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2))*coupl(2) ! sr1
+    wfq(4)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1))*coupl(2) ! sr2
+  end subroutine GluonQuarktoQuark_coupl
+
+  subroutine GluonAquarktoAquark_coupl(wfg1,wfq2,wfq,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfg1,wfq2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    ! L
+    wfq(1)=prefact*(TMP2*wfq2(3)-TMP4*wfq2(4))*coupl(2) !sr1
+    wfq(2)=prefact*(TMP1*wfq2(4)-TMP3*wfq2(3))*coupl(2) !sr2
+    ! R
+    wfq(3)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2))*coupl(1) !sl1
+    wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1))*coupl(1) !sl2
+  end subroutine GluonAquarktoAquark_coupl
+
+
   subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
@@ -744,13 +781,48 @@ contains
     wfs(1)= prefact*TMP*coupl(1)*wfs1(1)*wfs2(1)
   end subroutine ScalarScalartoScalar
 
+  subroutine LeptonAleptontoGluon(wfq1,wfq2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq2,wfg,wfg_temp
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    ! L
+    wfg_temp(1)=( wfq1(3)*wfq2(1)+wfq1(4)*wfq2(2) )*prefact*coupl(1)
+    wfg_temp(2)=(-wfq1(4)*wfq2(1)-wfq1(3)*wfq2(2) )*prefact*coupl(1)
+    wfg_temp(3)=(-wfq1(4)*wfq2(1)+wfq1(3)*wfq2(2) )*cImag*prefact*coupl(1)
+    wfg_temp(4)=(-wfq1(3)*wfq2(1)+wfq1(4)*wfq2(2) )*prefact*coupl(1)
+    ! R
+    wfg(1)=( wfq1(1)*wfq2(3)+wfq1(2)*wfq2(4) )*prefact*coupl(2)
+    wfg(2)=( wfq1(1)*wfq2(4)+wfq1(2)*wfq2(3) )*prefact*coupl(2)
+    wfg(3)=(-wfq1(1)*wfq2(4)+wfq1(2)*wfq2(3) )*cImag*prefact*coupl(2)
+    wfg(4)=( wfq1(1)*wfq2(3)-wfq1(2)*wfq2(4) )*prefact*coupl(2)
+    ! add
+    wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
+  end subroutine LeptonAleptontoGluon
+
+  subroutine AleptonLeptontoGluon(wfq1,wfq2,wfg,coupl)
+    implicit none
+    complex(kind=8),dimension(4) :: wfq1,wfq2,wfg,wfg_temp
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    real(kind=8),dimension(2) :: coupl
+    ! L
+    wfg_temp(1)=( wfq2(3)*wfq1(1)+wfq2(4)*wfq1(2) )*prefact*coupl(1)
+    wfg_temp(2)=(-wfq2(4)*wfq1(1)-wfq2(3)*wfq1(2) )*prefact*coupl(1)
+    wfg_temp(3)=(-wfq2(4)*wfq1(1)+wfq2(3)*wfq1(2) )*cImag*prefact*coupl(1)
+    wfg_temp(4)=(-wfq2(3)*wfq1(1)+wfq2(4)*wfq1(2) )*prefact*coupl(1)
+    ! R
+    wfg(1)=( wfq2(1)*wfq1(3)+wfq2(2)*wfq1(4) )*prefact*coupl(2)
+    wfg(2)=( wfq2(1)*wfq1(4)+wfq2(2)*wfq1(3) )*prefact*coupl(2)
+    wfg(3)=(-wfq2(1)*wfq1(4)+wfq2(2)*wfq1(3) )*cImag*prefact*coupl(2)
+    wfg(4)=( wfq2(1)*wfq1(3)-wfq2(2)*wfq1(4) )*prefact*coupl(2)
+    ! add
+    wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
+  end subroutine AleptonLeptontoGluon
 
 
-
-
-
-
-  subroutine GluonPropagator(wfg,p)
+subroutine GluonPropagator(wfg,p)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
