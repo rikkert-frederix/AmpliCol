@@ -8,6 +8,7 @@ module phase_space_gen23_mod
      procedure :: generate_momenta => gen23_generate_momenta
      procedure :: compute_x_from_momenta => gen23_compute_x_from_momenta
      procedure :: cleanup => gen23_cleanup
+     final :: gen23_finalize
   end type phase_space_gen23
   private
   logical :: includePDF
@@ -64,7 +65,6 @@ contains
        write (99,*) 'Use the simple t-channel?',this%t_channel
     endif
     includePDF=include_pdf
-    call gen23_cleanup(this)
     this%next=n
     this%ndim=3*(this%next-2)-4
     if (includePDF) this%ndim=this%ndim+2 ! the two Bjorken x's
@@ -82,6 +82,7 @@ contains
     allocate(this%drcut(maskr(this%next)))
     allocate(this%sqrt_s_min(1:this%next,1:this%next))
     ! masses of external particles
+    this%invm=0d0
     do i=1,n
        if ((i.eq.1 .or. i.eq.2) .and. m(i).ne.0d0) then
           write (*,*) 'ERROR in gen23_init() -- ', &
@@ -92,6 +93,7 @@ contains
        this%invm(ibset(0,i-1))=m(i)**2
        this%invm(ibclr(maskr(this%next),i-1))=m(i)**2
     enddo
+    
     if (verbose) write (99,*) 'masses:',m(1:n)
     this%drcut=0d0
     this%ptcut=0d0
@@ -238,6 +240,11 @@ contains
     end subroutine setup_ETmin
 
   end subroutine gen23_init
+
+  subroutine gen23_finalize(this)
+    type(phase_space_gen23) :: this
+    call gen23_cleanup(this)
+  end subroutine gen23_finalize
 
   subroutine gen23_cleanup(this)
     implicit none
@@ -1045,6 +1052,7 @@ contains
     real(kind=8),dimension(maskr(this%next)) :: invm
     if (debug) write (*,*) 'computing x from momenta'
     ps%jac=1d0
+    invm=this%invm
     ix=0
     ! Fill the full momentum array, including all possible
     ! intermediate states:
@@ -1768,7 +1776,7 @@ contains
     real(kind=8) :: GG,s1,s2
     V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
     GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
-         & *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
+        *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
     if (GG.le.0d0 .or. V.eq.-99d99) then
 !!$       write (*,*) 'No allowed range for s: smin=smax',GG,V
 !!$       stop 1
