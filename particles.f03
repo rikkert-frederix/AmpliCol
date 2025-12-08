@@ -162,6 +162,28 @@ contains
     this%particle_list(l)%anti_type=-26
     this%particle_list(l)%dim=6
 
+    ! charged leptons
+    do i=1,3
+       l=l+1
+       this%particle_list(l)%type=11+(2*i-2)
+       this%particle_list(l)%mass=0d0
+       this%particle_list(l)%width=0d0
+       this%particle_list(l)%spin=2 ! two spin states
+       this%particle_list(l)%anti_type=-(11+(2*i-2))
+       this%particle_list(l)%dim=4
+    enddo
+
+    ! neutral leptons
+    do i=1,3
+       l=l+1
+       this%particle_list(l)%type=12+(2*i-2)
+       this%particle_list(l)%mass=0d0
+       this%particle_list(l)%width=0d0
+       this%particle_list(l)%spin=2 ! two spin states
+       this%particle_list(l)%anti_type=-(12+(2*i-2))
+       this%particle_list(l)%dim=4
+    enddo
+
     if (l.gt.this%npart) then
        write (*,*) 'ERROR: more particles than allocated',l,this%npart
        stop 1
@@ -905,6 +927,161 @@ contains
     this%vertex_list(l)%particles(2)=126
     this%vertex_list(l)%particles(3)=-24
     this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
+
+    ! lepton-alepton to photon
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=21
+    this%vertex_list(l)%particles(1)=11+(2*i-2)
+    this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(3)=22
+    this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! alepton-lepton to photon
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=22
+    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=11+(2*i-2)
+    this%vertex_list(l)%particles(3)=22
+    this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! lepton-alepton to Zboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=21
+    this%vertex_list(l)%particles(1)=(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(3)=23
+    gw=1d0/sw
+    fact=1d0/(2d0*sqrt(1d0-sw**2))
+    Vf=-0.5d0+2d0*sw**2
+    Af=-0.5d0
+    this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! alepton-lepton to Zboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=22
+    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=(11+(2*i-2))
+    this%vertex_list(l)%particles(3)=23
+    gw=1d0/sw
+    fact=1d0/(2d0*sqrt(1d0-sw**2))
+    Vf=-0.5d0+2d0*sw**2
+    Af=-0.5d0
+    this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! charged lepton-lepton to Wboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=21
+    this%vertex_list(l)%particles(1)=11+(2*i-2)
+    this%vertex_list(l)%particles(2)=-(12+(2*i-2))
+    this%vertex_list(l)%particles(3)=-24
+    gw=1d0/sw
+    fact=1d0/(sqrt(2d0))
+    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    enddo
+    ! charged lepton-lepton to Wboson
+    do i=1,3
+    l=l+1
+    this%vertex_list(l)%type=22
+    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+    this%vertex_list(l)%particles(2)=(12+(2*i-2))
+    this%vertex_list(l)%particles(3)=24
+    gw=1d0/sw
+    fact=1d0/(sqrt(2d0))
+    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    enddo
+    ! lepton-photon to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=10
+       this%vertex_list(l)%particles(1)=(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=22
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! antilepton-photon to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=11
+       this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=22
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! photon-lepton to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=23
+       this%vertex_list(l)%particles(1)=22
+       this%vertex_list(l)%particles(2)=(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! photon-antilepton to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=24
+       this%vertex_list(l)%particles(1)=22
+       this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    enddo
+    ! lepton-Zboson to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=10
+       this%vertex_list(l)%particles(1)=(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=23
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! antilepton-Zboson to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=11
+       this%vertex_list(l)%particles(1)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(2)=23
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+   ! Zboson-lepton to lepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=23
+       this%vertex_list(l)%particles(1)=23
+       this%vertex_list(l)%particles(2)=(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
+    ! Zboson-antilepton to antilepton vertices
+    do i=1,3
+       l=l+1
+       this%vertex_list(l)%type=24
+       this%vertex_list(l)%particles(1)=23
+       this%vertex_list(l)%particles(2)=-(11+(2*i-2))
+       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
+       gw=1d0/sw
+       fact=1d0/(2d0*sqrt(1d0-sw**2))
+       Vf=-0.5d0+2d0*sw**2
+       Af=-0.5d0
+       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    enddo
 
     if (l.gt.this%nint) then
        write (*,*) 'ERROR: more vertices than allocated',l,this%nint
