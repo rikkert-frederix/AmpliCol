@@ -80,8 +80,9 @@ cleanlib:
 
 matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o particles.o 
 ranmar.o : mint_module.o
-phase_space_gen23.o : phase_space.o LUPdecompose.o
-phase_space_genpt.o : phase_space.o
+phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
+phase_space_genpt.o : phase_space.o particles.o
+phase_space.o : particles.o
 haag.o : phase_space.o
 amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o particles.o
 matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o command_line_parser.o mg_checks.o

@@ -196,7 +196,8 @@ contains
 
     call setup_cuts_for_each_particle(pgl_unique,0)
     call pgl_unique%phase_space%init(sqrts,next,mass,pgl_unique%phase_space_orders,&
-         pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf,.true.)
+         pgl_unique%pt_min,pgl_unique%eta_max,pgl_unique%DR_min,pgl_unique%sqrt_s_min,.false.,include_pdf,&
+         phys_model,pgl_unique%processes(:,1),.true.)
     allocate(ps%x(1:pgl_unique%ndim+pgl_unique%phase_space%ndim_extra))
     allocate(ps%p(0:3,1:pgl_unique%next))
     
@@ -461,6 +462,7 @@ contains
     integer,dimension(0:6) :: quarks
     integer :: i
     quarks(0)=0
+    quarks=0
     do i=1,next
        if (phys_model%is_quark(process(order(i))) .or. phys_model%is_antiquark(process(order(i)))) then
           quarks(0)=quarks(0)+1

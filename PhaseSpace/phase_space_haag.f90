@@ -1,6 +1,7 @@
 module phase_space_haag_mod
   !  use common
   use phase_space_base
+  use particles
   implicit none
   type,extends(phase_space_type),public :: phase_space_haag
    contains
@@ -47,8 +48,9 @@ contains
     if (allocated(this%ycut)) deallocate(this%ycut)
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
+    if (allocated(this%bw)) deallocate(this%bw)
   end subroutine haag_cleanup
-  subroutine haag_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
+  subroutine haag_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,pm,proc,flat)
     implicit none
     class(phase_space_haag),intent(inout) :: this
     real(kind=8),intent(in) :: sqrts
@@ -67,6 +69,8 @@ contains
     real(kind=8) :: drjj_min,pt_min,sqrt_smin
     integer(kind=4),dimension(n) :: order
     real(kind=8),dimension(:),allocatable :: invm,invm_min,invm_max,sigma_ij
+    type(physics_model),intent(in) :: pm
+    integer,dimension(n),intent(in) :: proc
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     drjj_min=99d99

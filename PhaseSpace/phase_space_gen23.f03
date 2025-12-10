@@ -1,6 +1,7 @@
 module phase_space_gen23_mod
   !  use common
   use phase_space_base
+  use particles
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
    contains
@@ -24,7 +25,7 @@ module phase_space_gen23_mod
   logical,parameter :: use_t_channel_at_start=.true.
 
 contains
-  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
+  subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,pm,proc,flat)
     ! Phase-space initialisation routines.
     implicit none
     class(phase_space_gen23),intent(inout) :: this
@@ -56,6 +57,8 @@ contains
     logical,intent(in),optional :: flat
     integer(kind=4) :: i,j,ndim_extra
     integer(kind=4),dimension(2) :: iset
+    type(physics_model),intent(in) :: pm
+    integer,dimension(n),intent(in) :: proc
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     this%t_channel=t_chan
@@ -73,6 +76,7 @@ contains
     allocate(this%invm_min(maskr(this%next)))
     allocate(this%ETmin(maskr(this%next)))
     allocate(this%invm_max(maskr(this%next)))
+    allocate(this%bw(maskr(this%next)))
     allocate(this%pp(0:3,0:maskr(this%next)))
     this%pp(0:3,0:maskr(this%next))=0d0
     allocate(this%p(0:3,this%next))
@@ -180,10 +184,33 @@ contains
       real(kind=8) :: s_cut(2)
       real(kind=8) :: mass,cut
       integer(kind=4) :: i,j,k,npart
+      integer :: lep,alep
+      logical :: other
       this%invm_min=0d0
       this%invm_max=0d0
       do k=1,maskr(this%next)
          npart=popcnt(k)
+         ! fill the information about the BW properties
+         lep=0
+         alep=0
+         other=.false.
+         this%bw(k)=.false.
+         do i=0,this%next-1
+             if (btest(k,i)) then
+                if (pm%is_lepton(proc(i+1))) then
+                        lep=i
+                endif
+                if (pm%is_antilepton(proc(i+1))) then
+                        alep=i
+                endif
+                if (.not.pm%is_lepton(proc(i+1)) .and. .not.pm%is_antilepton(proc(i+1))) then
+                        other=.true.
+                endif
+             endif
+         enddo
+         if (alep.ne.0 .and. lep.ne.0 .and. .not. other) then
+         !        this%bw(k)=.true.
+         endif
          if (btest(k,0).and.btest(k,1)) then ! both initial state particles are part of 'k'
             this%invm_min(k)=0d0 ! no cuts
          elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
@@ -263,6 +290,7 @@ contains
     if (allocated(this%ycut)) deallocate(this%ycut)
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
+    if (allocated(this%bw)) deallocate(this%bw)
   end subroutine gen23_cleanup
 
   subroutine gen23_generate_momenta(this,ps)
@@ -381,6 +409,7 @@ contains
          pp(0:3,set(2)+2)=pp(0:3,1)-pp(0:3,set(1))
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       endif
+
       do i=1,2
          if (popcnt(set(i)).le.1) cycle ! at least 2 particles in a set
          inext=ibset(0,this%sets(1,i)-1)
@@ -584,20 +613,30 @@ contains
       real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
            etminir,etmini
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      real(kind=8) :: jac
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
-         call generate_mass(i,shatmin,shatmax)
+         if (this%bw(i)) then
+             call generate_mass_bw(i,shatmin,shatmax)
+         else
+             call generate_mass(i,shatmin,shatmax)
+         endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
-         call generate_mass(ir,shatmin,shatmax)
+         if (this%bw(ir)) then
+             call generate_mass_bw(ir,shatmin,shatmax)
+         else
+             call generate_mass(ir,shatmin,shatmax)
+         endif
       endif
       if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) '23- i    ',i,invm(i)
          write (*,*) '23- ir   ',ir,invm(ir)
       endif
+
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
@@ -682,13 +721,17 @@ contains
       ! with a flat prior.
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,1d0)
+      jac=0d0
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+           &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1,jac)
+      if (jac.lt.0d0) return
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,0d0)
+      jac=0d0
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+           &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2,jac)
+      if (jac.lt.0d0) return
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
       if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
            pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
@@ -764,7 +807,11 @@ contains
                shatmax=min(shatmax,Eimax**2)
             endif
          endif
-         call generate_mass(i,shatmin,shatmax)
+         if (this%bw(i)) then
+             call generate_mass_bw(i,shatmin,shatmax)
+         else
+             call generate_mass(i,shatmin,shatmax)
+         endif
          if (debug) then
             write (*,*) 't - i    ',i,invm(i),shatmin,shatmax
          endif
@@ -778,12 +825,17 @@ contains
             shatmin=max(shatmin,invm(i)+sqrtshat*(2d0*this%ETmin(ir)-sqrtshat))
             shatmax=min(shatmax,invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i))))
          endif
-         call generate_mass(ir,shatmin,shatmax)
+         if (this%bw(ir)) then
+             call generate_mass_bw(ir,shatmin,shatmax)
+         else
+             call generate_mass(ir,shatmin,shatmax)
+         endif
          if (debug) then
             write (*,*) 't - ir   ',ir,invm(ir),shatmin,shatmax
          endif
       endif
       if (ps%jac.le.0d0) return
+
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
       if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
@@ -846,11 +898,19 @@ contains
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
-         call generate_mass(i,shatmin,shatmax)
+         if (this%bw(i)) then
+             call generate_mass_bw(i,shatmin,shatmax)
+         else
+             call generate_mass(i,shatmin,shatmax)
+         endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
-         call generate_mass(ir,shatmin,shatmax)
+         if (this%bw(ir)) then
+             call generate_mass_bw(ir,shatmin,shatmax)
+         else
+             call generate_mass(ir,shatmin,shatmax)
+         endif
       endif
       if (ps%jac.le.0d0) return
       esum=sqrt(invm(i+ir))
@@ -887,6 +947,28 @@ contains
       ix=ix+1
       call random_to_var(ps%x(ix),-0.5d0,shatmin,shatmax,invm(i),ps%jac)
     end subroutine generate_mass
+
+    subroutine generate_mass_bw(i,shatmin,shatmax)
+      implicit none
+      integer :: i
+      real(kind=8) :: shatmin,shatmax
+      real(kind=8) :: ymin,ymax,y,dum,r
+
+      if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
+      if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
+      ymin = atan((shatmin-91.188d0**2)/(2.441404d0*91.188d0))
+      ymax = atan((shatmax-91.188d0**2)/(2.441404d0*91.188d0))
+      if (ymin.ge.ymax) then
+         ps%jac=-13d0
+         if (debug) write (*,*) 'ymin.ge.ymax',i,ymin,ymax
+         return
+      endif
+      ix=ix+1
+      call random_to_var(ps%x(ix),0d0,0d0,1d0,r,dum)
+      y = ymin+r*(ymin-ymax)
+      invm(i)= 91.188d0**2+91.188d0*2.441404d0*tan(y)
+      ps%jac=ps%jac*(ymax-ymin)*91.188d0*2.441404d0/(cos(y)**2)
+    end subroutine generate_mass_bw
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
       ! This subroutine sets up two four-momenta in the two particle rest
@@ -1211,7 +1293,11 @@ contains
             endif
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 1',i,ir
-         call generate_mass_inverse(i,shatmin,shatmax)
+         if (this%bw(i)) then
+              call generate_mass_bw_inverse(i,shatmin,shatmax)
+         else
+              call generate_mass_inverse(i,shatmin,shatmax)
+         endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
@@ -1220,7 +1306,11 @@ contains
             shatmax=min(shatmax,invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i))))
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
-         call generate_mass_inverse(ir,shatmin,shatmax)
+         if (this%bw(ir)) then
+              call generate_mass_bw_inverse(ir,shatmin,shatmax)
+         else
+              call generate_mass_inverse(ir,shatmin,shatmax)
+         endif
       endif
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1289,12 +1379,20 @@ contains
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gens 1',i
-         call generate_mass_inverse(i,shatmin,shatmax)
+         if (this%bw(i)) then
+              call generate_mass_bw_inverse(i,shatmin,shatmax)
+         else
+              call generate_mass_inverse(i,shatmin,shatmax)
+         endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
-         call generate_mass_inverse(ir,shatmin,shatmax)
+         if (this%bw(ir)) then
+              call generate_mass_bw_inverse(ir,shatmin,shatmax)
+         else
+              call generate_mass_inverse(ir,shatmin,shatmax)
+         endif
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
       esum=sqrt(invm(i+ir))
@@ -1394,16 +1492,25 @@ contains
       real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
            etminir,etmini
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
+      real(kind=8) :: jac
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 1',i
-         call generate_mass_inverse(i,shatmin,shatmax)
+         if (this%bw(i)) then
+              call generate_mass_bw_inverse(i,shatmin,shatmax)
+         else
+              call generate_mass_inverse(i,shatmin,shatmax)
+         endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 2',ir
-         call generate_mass_inverse(ir,shatmin,shatmax)
+         if (this%bw(ir)) then
+              call generate_mass_bw_inverse(ir,shatmin,shatmax)
+         else
+              call generate_mass_inverse(ir,shatmin,shatmax)
+         endif
       endif
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1482,13 +1589,17 @@ contains
       ! with a flat prior.
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,1d0)
+      jac=0d0
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+           &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1,jac)
+      if (jac.lt.0d0) return
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,0d0)
+      jac=0d0
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+           &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2,jac)
+      if (jac.lt.0d0) return
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
       if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
            pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
@@ -1603,6 +1714,23 @@ contains
       ix=ix+1
       call var_to_random(invm(i),-0.5d0,shatmin,shatmax,ps%x(ix),ps%jac)
     end subroutine generate_mass_inverse
+
+    subroutine generate_mass_bw_inverse(i,shatmin,shatmax)
+      implicit none
+      integer :: i
+      real(kind=8) :: shatmin,shatmax
+      real(kind=8) :: ymin,ymax,y,dum,r
+
+      if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
+      if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
+      ymin = atan((shatmin-91.188d0**2)/(2.441404d0*91.188d0))
+      ymax = atan((shatmax-91.188d0**2)/(2.441404d0*91.188d0))
+      y = atan((invm(i)-91.188d0**2)/(2.441404d0*91.188d0))
+      ix = ix +1
+      ps%x(ix) = (y-ymin)/(ymax-ymin)
+    end subroutine generate_mass_bw_inverse
+
+
 
   end subroutine gen23_compute_x_from_momenta
   real(kind=8) function dot(p1,p2)
@@ -1855,7 +1983,7 @@ contains
     prot(2)=p(1)*sin(phi)+p(2)*cos(phi)
     prot(3)=p(3)
   end subroutine rotz
-  subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr)
+  subroutine gentcms2(pa,pb,pc,t,phi,m1,m2,p1,pr,jac)
     ! Generates 4 momentum for particle p1, and remainder pr given the
     ! values t, and phi in the process pa+pb -> pr+p1.  Assumes incoming
     ! particles with momenta pa, pb and outgoing particles with mass
@@ -1869,6 +1997,7 @@ contains
     real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,phi_off
     real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
     real(kind=8),parameter :: tiny=1d-8
+    real(kind=8),intent(out) :: jac
     ptot(0:3)=pa(0:3)+pb(0:3)
     ptotm(0)=ptot(0)
     ptotm(1:3)=-ptot(1:3)
@@ -1876,7 +2005,8 @@ contains
     ESUM2 = dot(ptot,ptot)
     if (esum2 .le. 0d0) then
        write (*,*) "error :: must be time-like momentum in gentcms2",esum2
-       stop 1
+       jac=-10d0
+       return
     endif
     esum=sqrt(esum2)
     MD2=(M2-M1)*(M1+M2)
