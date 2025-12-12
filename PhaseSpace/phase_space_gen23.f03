@@ -209,8 +209,9 @@ contains
              endif
          enddo
          if (alep.ne.0 .and. lep.ne.0 .and. .not. other) then
-         !        this%bw(k)=.true.
+                 this%bw(k)=.true.
          endif
+         !
          if (btest(k,0).and.btest(k,1)) then ! both initial state particles are part of 'k'
             this%invm_min(k)=0d0 ! no cuts
          elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
@@ -965,8 +966,16 @@ contains
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),0d0,0d0,1d0,r,dum)
-      y = ymin+r*(ymin-ymax)
+      y = ymin+r*(ymax-ymin)
       invm(i)= 91.188d0**2+91.188d0*2.441404d0*tan(y)
+      if (invm(i).lt.shatmin) then
+              write(*,*) 'error in BW mapping',ymin,ymax
+              stop 12
+      endif
+      if (invm(i).gt.shatmax) then
+              write(*,*) 'error in BW mapping',ymin,ymax
+              stop 13
+      endif
       ps%jac=ps%jac*(ymax-ymin)*91.188d0*2.441404d0/(cos(y)**2)
     end subroutine generate_mass_bw
 
@@ -1293,11 +1302,11 @@ contains
             endif
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 1',i,ir
-         if (this%bw(i)) then
-              call generate_mass_bw_inverse(i,shatmin,shatmax)
-         else
+         !if (this%bw(i)) then
+         !     call generate_mass_bw_inverse(i,shatmin,shatmax)
+         !else
               call generate_mass_inverse(i,shatmin,shatmax)
-         endif
+         !endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
@@ -1306,11 +1315,11 @@ contains
             shatmax=min(shatmax,invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i))))
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
-         if (this%bw(ir)) then
-              call generate_mass_bw_inverse(ir,shatmin,shatmax)
-         else
+         !if (this%bw(ir)) then
+         !     call generate_mass_bw_inverse(ir,shatmin,shatmax)
+         !else
               call generate_mass_inverse(ir,shatmin,shatmax)
-         endif
+         !endif
       endif
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1379,20 +1388,20 @@ contains
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gens 1',i
-         if (this%bw(i)) then
-              call generate_mass_bw_inverse(i,shatmin,shatmax)
-         else
+         !if (this%bw(i)) then
+         !     call generate_mass_bw_inverse(i,shatmin,shatmax)
+         !else
               call generate_mass_inverse(i,shatmin,shatmax)
-         endif
+         !endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
-         if (this%bw(ir)) then
-              call generate_mass_bw_inverse(ir,shatmin,shatmax)
-         else
+         !if (this%bw(ir)) then
+         !     call generate_mass_bw_inverse(ir,shatmin,shatmax)
+         !else
               call generate_mass_inverse(ir,shatmin,shatmax)
-         endif
+         !endif
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
       esum=sqrt(invm(i+ir))
@@ -1497,20 +1506,20 @@ contains
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 1',i
-         if (this%bw(i)) then
-              call generate_mass_bw_inverse(i,shatmin,shatmax)
-         else
+         !if (this%bw(i)) then
+         !     call generate_mass_bw_inverse(i,shatmin,shatmax)
+         !else
               call generate_mass_inverse(i,shatmin,shatmax)
-         endif
+         !endif
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 2',ir
-         if (this%bw(ir)) then
-              call generate_mass_bw_inverse(ir,shatmin,shatmax)
-         else
+         !if (this%bw(ir)) then
+         !     call generate_mass_bw_inverse(ir,shatmin,shatmax)
+         !else
               call generate_mass_inverse(ir,shatmin,shatmax)
-         endif
+         !endif
       endif
       call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1575,7 +1584,7 @@ contains
       endif
       if (smin.ge.smax) then
          write (*,*) 'smin.ge.smax in gen23_one_stop_inverse',smin,smax
-         stop 1
+         !stop 1
       endif
       invm(i+im1)=dot(pp(0:3,i+im1),pp(0:3,i+im1))
       if (debug) then
@@ -1725,6 +1734,7 @@ contains
       if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
       ymin = atan((shatmin-91.188d0**2)/(2.441404d0*91.188d0))
       ymax = atan((shatmax-91.188d0**2)/(2.441404d0*91.188d0))
+      invm(i)=dot(pp(0:3,i),pp(0:3,i))
       y = atan((invm(i)-91.188d0**2)/(2.441404d0*91.188d0))
       ix = ix +1
       ps%x(ix) = (y-ymin)/(ymax-ymin)

@@ -193,6 +193,18 @@ contains
           endif
        enddo
     enddo
+    ! cuts on pair of leptons
+    do i=1,pgl%next
+       if (.not. phys_model%is_lepton_any(pgl%processes(i,1))) cycle
+          do j=1,pgl%next
+          if (i.eq.j) cycle
+          if (.not. phys_model%is_lepton_any(pgl%processes(j,1))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sll_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRll_min
+          endif
+       enddo
+    enddo
     ! cuts on jet-photon pair
     do i=1,pgl%next
        do j=1,pgl%next

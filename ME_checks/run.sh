@@ -45,6 +45,7 @@ next=${#arr[@]}
 next=$((next - 1)) 
 
 cat > "script.txt" << EOF
+import model sm-no_b_mass
 generate ${arr[@]}
 output standalone temp_dir
 launch temp_dir
