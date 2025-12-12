@@ -154,6 +154,7 @@ contains
     this%max_iters=niters
     this%nintegral=nintegral
     this%number=ichan
+    this%nevts_unw_req=0
     allocate(this%grids(1:this%ndim,1:this%max_iters+1))
     allocate(this%integrals(1:this%nintegral))
     do i=1,this%ndim
@@ -267,6 +268,7 @@ contains
     this%npoints=0_8
     this%npoints_requested=npoints
     this%max_iters=niters
+    this%nevts_unw_req=0
     allocate(this%f_max(this%max_iters))
     this%f_max=-1d0
     allocate(this%evnt_list(npoints))
