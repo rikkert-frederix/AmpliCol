@@ -542,7 +542,7 @@ contains
   subroutine channel_check_gen_evnts(this)
     implicit none
     class(channel),intent(inout) :: this
-    integer :: i
+    integer :: i,j
     logical :: done
     do i=1,this%nintegral
        call this%integrals(i)%compute_fmax(this)
@@ -550,6 +550,9 @@ contains
           this%integrals(i)%evgen_done=.true.
           this%integrals(i)%nevts_unw_gen=0
           this%integrals(i)%overweight=0d0
+          do j=1,this%integrals(i)%nevnt_in_list
+             this%integrals(i)%evnt_list(j)%unwgt=.false.
+          enddo
           cycle
        endif
        call this%integrals(i)%unwgt()
