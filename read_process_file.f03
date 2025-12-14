@@ -461,7 +461,6 @@ contains
     integer,dimension(next) :: process,order
     integer,dimension(0:6) :: quarks
     integer :: i
-    quarks(0)=0
     quarks=0
     do i=1,next
        if (phys_model%is_quark(process(order(i))) .or. phys_model%is_antiquark(process(order(i)))) then

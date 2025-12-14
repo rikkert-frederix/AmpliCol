@@ -216,15 +216,15 @@ contains
       call current_list_local(this%n_cur)%iproc%set_bit(iproc)
       current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)      
       ! create the lepton-related properties
-      allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-      current_list_local(this%n_cur)%fermi_list=0
-      if (pm%is_lepton(current_list_local(this%n_cur)%type)) then
-           current_list_local(this%n_cur)%fermi_list(1)=1
-           current_list_local(this%n_cur)%fermi_list(2)=ext_from_cur(this%n_cur)
-      elseif (pm%is_antilepton(current_list_local(this%n_cur)%type)) then
-           current_list_local(this%n_cur)%fermi_list(1)=1
-           current_list_local(this%n_cur)%fermi_list(3)=-ext_from_cur(this%n_cur)
-      endif
+!!$      allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+!!$      current_list_local(this%n_cur)%fermi_list=0
+!!$      if (pm%is_lepton(current_list_local(this%n_cur)%type)) then
+!!$           current_list_local(this%n_cur)%fermi_list(1)=1
+!!$           current_list_local(this%n_cur)%fermi_list(2)=ext_from_cur(this%n_cur)
+!!$      elseif (pm%is_antilepton(current_list_local(this%n_cur)%type)) then
+!!$           current_list_local(this%n_cur)%fermi_list(1)=1
+!!$           current_list_local(this%n_cur)%fermi_list(3)=-ext_from_cur(this%n_cur)
+!!$      endif
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -747,23 +747,23 @@ contains
       integer :: i,j
       integer,dimension(nl+1) :: new_fermi_list
       real(kind=4) :: sgn
-
       if (.not.valid_current_combination())  then
          return
       endif
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
-              ! add possible lepton-interchange sign
-              call combine_lepton_list(new_fermi_list)
-              sgn=1d0
-              if (new_fermi_list(1).eq.2) then
-                 sgn=-1d0
-                 do j=2,nl
-                    if (new_fermi_list(2).eq.lepton_list(j).and.&
-                        new_fermi_list(3).eq.lepton_list(j+1)) sgn=1d0
-                 enddo
-              endif
+!!$              ! add possible lepton-interchange sign
+!!$              call combine_lepton_list(new_fermi_list)
+!!$              sgn=1d0
+!!$              if (new_fermi_list(1).eq.2) then
+!!$                 sgn=-1d0
+!!$                 do j=2,nl
+!!$                    if (new_fermi_list(2).eq.lepton_list(j).and.&
+!!$                        new_fermi_list(3).eq.lepton_list(j+1)) sgn=1d0
+!!$                 enddo
+!!$              endif
+            sgn=1d0
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
                             sgn*pm%vertex_list(i)%coupl)
@@ -848,7 +848,6 @@ contains
             return ! no need to check further: below are only checks about the colours
          endif
       endif
-      
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order. First, find where the singlets are, since they do not matter
@@ -993,7 +992,7 @@ contains
       combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
 
-      call combine_lepton_list(new_fermi_list)
+!!$      call combine_lepton_list(new_fermi_list)
 
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
@@ -1281,7 +1280,7 @@ contains
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
-            if (all(new_fermi_list.ne.current_list_local(ic)%fermi_list)) cycle
+!!$            if (all(new_fermi_list.ne.current_list_local(ic)%fermi_list)) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
@@ -1294,10 +1293,10 @@ contains
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
          
-         ! lepton-ordering
-         allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-         current_list_local(this%n_cur)%fermi_list=0
-         current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
+!!$         ! lepton-ordering
+!!$         allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+!!$         current_list_local(this%n_cur)%fermi_list=0
+!!$         current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
 
          if (pm%is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
@@ -1329,10 +1328,10 @@ contains
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
             current_list_local(ic)%width=pm%get_width(new_current%type)
 
-            ! lepton-ordering
-            allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-            current_list_local(this%n_cur)%fermi_list=0
-            current_list_local(this%n_cur)%fermi_list=new_fermi_list
+!!$            ! lepton-ordering
+!!$            allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+!!$            current_list_local(this%n_cur)%fermi_list=0
+!!$            current_list_local(this%n_cur)%fermi_list=new_fermi_list
 
             if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
                write (*,*) 'trying to combine currents with different spin: not possible',&
@@ -1823,7 +1822,6 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4))
              endif
-
           elseif(this%interaction_list(iv)%type.eq.1) then
              if (use_real_gluons) then
                 call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
@@ -2004,6 +2002,7 @@ contains
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
           endif
+          
        enddo
 
        ! compute the currents by combining the interactions
