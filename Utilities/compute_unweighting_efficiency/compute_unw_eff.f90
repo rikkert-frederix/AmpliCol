@@ -11,7 +11,7 @@ program plot_events
   character*50 weights_info(10)
   double precision dummy
   real(kind=8),dimension(:,:),allocatable :: p
-  real(kind=8) :: evt_wgt,rwgt_NLC,rwgt_full,rwgt_factor,unw_eff(3),max_wgt(3)
+  real(kind=8) :: evt_wgt,rwgt_NLC,rwgt_full,rwgt_factor,unw_eff(3),max_wgt(3),ess(2,2)
   integer :: next
   integer :: argc
   character(len=456) :: argv
@@ -54,6 +54,7 @@ program plot_events
 
   unw_eff=0d0
   nPSpoints=0
+  ess=0
   do 
      call read_event(ifile,done)
      if (done) exit
@@ -61,12 +62,18 @@ program plot_events
      unw_eff(1)=unw_eff(1)+rwgt_full/max_wgt(1)
      unw_eff(2)=unw_eff(2)+rwgt_NLC/max_wgt(2)
      unw_eff(3)=unw_eff(3)+(rwgt_full/rwgt_NLC)/max_wgt(3)
+     ess(1,1)=ess(1,1)+rwgt_full
+     ess(1,2)=ess(1,2)+rwgt_NLC
+     ess(2,1)=ess(2,1)+rwgt_full**2
+     ess(2,2)=ess(2,2)+rwgt_NLC**2
   enddo
-
+  ess(1,:)=ess(1,:)**2/ess(2,:)
+  
   if (nPSpoints.gt.0) then
      write(20,*) 'unweighting efficiency LC->full  ',unw_eff(1)/dble(nPSpoints), max_wgt(1)
      write(20,*) 'unweighting efficiency LC->NLC   ',unw_eff(2)/dble(nPSpoints), max_wgt(2)
      write(20,*) 'unweighting efficiency NLC->full ',unw_eff(3)/dble(nPSpoints), max_wgt(3)
+     write(20,*) 'Effective sample size (ESS) full and NLC',ess(1,1),ess(1,2)
   else
      write(20,*) 'unweighting efficiency LC->full  ',1d0,0d0
      write(20,*) 'unweighting efficiency LC->NLC   ',1d0,0d0
