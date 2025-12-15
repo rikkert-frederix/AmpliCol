@@ -154,6 +154,7 @@ contains
     this%max_iters=niters
     this%nintegral=nintegral
     this%number=ichan
+    this%nevts_unw_req=0
     allocate(this%grids(1:this%ndim,1:this%max_iters+1))
     allocate(this%integrals(1:this%nintegral))
     do i=1,this%ndim
@@ -267,6 +268,7 @@ contains
     this%npoints=0_8
     this%npoints_requested=npoints
     this%max_iters=niters
+    this%nevts_unw_req=0
     allocate(this%f_max(this%max_iters))
     this%f_max=-1d0
     allocate(this%evnt_list(npoints))
@@ -540,7 +542,7 @@ contains
   subroutine channel_check_gen_evnts(this)
     implicit none
     class(channel),intent(inout) :: this
-    integer :: i
+    integer :: i,j
     logical :: done
     do i=1,this%nintegral
        call this%integrals(i)%compute_fmax(this)
@@ -548,6 +550,9 @@ contains
           this%integrals(i)%evgen_done=.true.
           this%integrals(i)%nevts_unw_gen=0
           this%integrals(i)%overweight=0d0
+          do j=1,this%integrals(i)%nevnt_in_list
+             this%integrals(i)%evnt_list(j)%unwgt=.false.
+          enddo
           cycle
        endif
        call this%integrals(i)%unwgt()

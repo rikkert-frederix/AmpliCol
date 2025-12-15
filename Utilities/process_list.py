@@ -229,7 +229,18 @@ def ParseCollision(input_string):
     jet_match=re.match(r"(\d+)j",final_state[-1]) if final_state else None
     jet_count=int(jet_match.group(1)) if jet_match else 0
     rest=final_state[:-1] if jet_match else final_state
-    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest}
+    lep=[]
+    if (options['include_resonance']):
+        i=0
+        for k in rest:
+            if (abs(int(pdgs[k])) >= 11 and abs(int(pdgs[k])) <= 16): 
+                lep.append(k)
+        for l in lep:
+            rest.remove(l)
+        if (sum(charges3[l] for l in lep) == 0): rest.append('z')
+        if (sum(charges3[l] for l in lep) < 0): rest.append('w-')
+        if (sum(charges3[l] for l in lep) > 0): rest.append('w+')
+    return {"initial_state":initial_state,"jet_count":jet_count,"rest":rest,"lep":lep}
 
 def count_matching_elements(main_list,check_list):
     # Counts how many elements of main_list are there in check_list
@@ -393,6 +404,7 @@ def ParseArgument():
     parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
     parser.add_argument("-s", "--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
     parser.add_argument("-cc", "--include_cc", action='store_true', help="Include flavour-changing processes")
+    parser.add_argument("-res", "--resonance", action='store_true', help="Treat the lepton pair as a resonance")
     args=parser.parse_args()
     if (args.flavour_scheme):
         SwitchFlavourScheme(args.flavour_scheme)
@@ -404,6 +416,10 @@ def ParseArgument():
         options["include_cc_processes"] = True
     else:
         options["include_cc_processes"] = False
+    if args.resonance:
+        options["include_resonance"] = True
+    else:
+        options["include_resonance"] = False
     if args.serial:
         options["serial"] = True
     else:
@@ -581,18 +597,42 @@ def sort_by_pdg_codes2(proc):
     process=proc[0]
     return sort_by_pdg_codes(process)
 
-def WriteAllProcsIntoList():
+def WriteAllProcsIntoList(lep):
     # Convert all the information stored in the phase_space_orders
     # (or, actually, all_keys_sorted) into strings that can be
     # directly written in the processes.txt file.
     towrite=[]
     towrite.append(str(len(all_keys_sorted))) # number of phase-space orderings to consider
     towrite.append('')
-    for i,key in enumerate(all_keys_sorted):
-        towrite.append(str(i+1)+'   '+str(len(phase_space_orders[key]))+'   '+str(max(len(proc[2]) for proc in phase_space_orders[key]))+'   '+' '.join([str(k+1) for k in key]))
+    all_keys_sorted_new=copy.copy(all_keys_sorted)
+    phase_space_orders_new={}
+    # re-shuffle the phase space orders if there is a resonance
+    if (options['include_resonance']):
+        for i,key in enumerate(all_keys_sorted):
+            first = phase_space_orders[key][0]
+            if 'z' in first[0]:
+                j = key.index(first[0].index("z"))
+                new = tuple([first[0].index("z"),first[0].index("z")+1])
+                t = key[0:j] + new + key[j+1:]
+                all_keys_sorted_new[i]=t
+                phase_space_orders_new[t]=phase_space_orders[key]
+    else:
+        phase_space_orders_new=copy.copy(phase_space_orders)
+
+    for i,key in enumerate(all_keys_sorted_new):
+        towrite.append(str(i+1)+'   '+str(len(phase_space_orders_new[key]))+'   '+str(max(len(proc[2]) for proc in phase_space_orders_new[key]))+'   '+' '.join([str(k+1) for k in key]))
         # order the processes in the process_list, so that we get a neat processes.txt file:
-        process_list=sorted(phase_space_orders[key],key=sort_by_pdg_codes2)
+        process_list=sorted(phase_space_orders_new[key],key=sort_by_pdg_codes2)
         for proc in process_list:
+            if (options['include_resonance']):
+                if 'z' in proc[0]:
+                    ib = proc[0].index("z")
+                    t = proc[0][:ib] + tuple(lep) + proc[0][ib+1:]
+                    proc = (t,) + proc[1:]
+                    j = proc[1].index(ib)
+                    new = tuple([ib,ib+1])
+                    t = proc[1][0:j] + new + proc[1][j+1:]
+                    proc = (proc[0],) + (t,) + proc[2:]
             process_line=ConvertProcToString(proc)
             towrite.append(process_line)
         towrite.append('')
@@ -618,9 +658,13 @@ def Addqq_dfProcesses(sorted_procs):
         i+=1
     return sorted_procs
 
-def WriteUniqueProcsIntoList(procs):
+def WriteUniqueProcsIntoList(procs,lep):
     # Sort the unique processes to make them ready to be written to the file
     sorted_procs=sorted([sorted(proc,key=lambda x: sort_particles[x]) for proc in procs],key=sort_by_pdg_codes)
+    if (options['include_resonance']):
+        for proc in sorted_procs:
+            if 'z' in proc:
+                proc[proc.index("z"):proc.index("z")+1] = lep
     # in case of different flavour multiple-quark line processes, add all the possible orders:
     sorted_procs=Addqq_dfProcesses(sorted_procs)
     try:
@@ -678,6 +722,7 @@ if __name__ == "__main__":
     # are treated as anti-quarks when considering
     # e.g. colour-ordering)
     process=ParseArgument()
+    lep = process["lep"]
     all_unique_procs=GenerateAllUniqueProcs(process)
     all_procs=GenerateAllProcs(all_unique_procs,process)
     # At this stage, we have two sets:
@@ -707,8 +752,8 @@ if __name__ == "__main__":
     # Check the consistency of the generated processes
     CheckConsistency()
     # write to disk
-    towriteunique=WriteUniqueProcsIntoList(all_unique_procs)
-    towriteallprocs=WriteAllProcsIntoList() # puts the phase_space_orders dictionary in a writable list
+    towriteunique=WriteUniqueProcsIntoList(all_unique_procs,lep)
+    towriteallprocs=WriteAllProcsIntoList(lep) # puts the phase_space_orders dictionary in a writable list
     
     with open('processes.txt','w') as f:
         f.write('\n'.join(towriteunique))

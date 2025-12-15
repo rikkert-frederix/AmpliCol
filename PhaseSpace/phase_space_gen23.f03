@@ -54,7 +54,7 @@ contains
     ! Should we include a PDF set? Currently, only the NNPDF2.3 NLO QED is available.
     logical,intent(in) :: include_pdf
     logical,intent(in),optional :: flat
-    integer(kind=4) :: i,j,ndim_extra
+    integer(kind=4) :: i,j,ndim_extra,cnt1,cnt2
     integer(kind=4),dimension(2) :: iset
     this%sqrtshat=sqrts
     this%sqrts=sqrts
@@ -111,7 +111,7 @@ contains
           endif
        enddo
     enddo
-    call setup_PS_cuts()
+    call setup_PS_cuts(this)
 
     ! Bring the colour order to a canonical order (first in the list
     ! should be particle 1, i.e., the first incoming particle).
@@ -124,22 +124,52 @@ contains
        endif
     enddo
 
+!!$    ! Put in the two sets the particles that are between the two
+!!$    ! initial state ones, assuming cyclic permutation freedom
+!!$    ! (set(:,1) contains the ones between 1 and 2; set(:,2) contains
+!!$    ! the ones between 2 and 1)
+!!$    this%sets=0
+!!$    do i=2,this%next
+!!$       if (this%order(i).eq.2) then
+!!$          do j=i+1,this%next
+!!$             this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
+!!$          enddo
+!!$          this%sets(1:i-2,1)=this%order(2:i-1)
+!!$          this%sets(1:this%next-i,2)=this%order(i+1:this%next)
+!!$          exit
+!!$       endif
+!!$       this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
+!!$    enddo
+
+
     ! Put in the two sets the particles that are between the two
     ! initial state ones, assuming cyclic permutation freedom
     ! (set(:,1) contains the ones between 1 and 2; set(:,2) contains
     ! the ones between 2 and 1)
-    this%sets=0
+
+    this%sets = 0
     do i=2,this%next
        if (this%order(i).eq.2) then
-          do j=i+1,this%next
+          do j=i+1, this%next
+             if (this%order(j).eq.this%next) cycle
              this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
           enddo
-          this%sets(1:i-2,1)=this%order(2:i-1)
-          this%sets(1:this%next-i,2)=this%order(i+1:this%next)
+          cnt1 = count(this%order(2:i-1).ne.this%next)
+          if (cnt1.gt.0) then
+             this%sets(1:cnt1,1) = pack(this%order(2:i-1),this%order(2:i-1).ne.this%next)
+          endif
+          cnt2 = count(this%order(i+1:this%next).ne.this%next)
+          if (cnt2.gt.0) then
+             this%sets(1:cnt2,2) = pack(this%order(i+1:this%next), this%order(i+1:this%next).ne.this%next)
+          endif
+          if (ubound(this%sets,1).gt.cnt2) this%sets(cnt2+1:ubound(this%sets,1),2)=0
           exit
        endif
-       this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
+       if (this%order(i).ne.this%next) then
+          this%sets(0,1) = ibset(this%sets(0,1),this%order(i)-1)
+       endif
     enddo
+    
     if (verbose) then
        write (99,*) "set 1:",this%sets(:,1)
        write (99,*) "set 2:",this%sets(:,2)
@@ -170,77 +200,82 @@ contains
     if (verbose) then
        write (99,*) "Power in importance sampling:",ip
     endif
-  contains
-    subroutine setup_PS_cuts()
-      ! Given the input cuts, fills the minimum (s-channel) and/or
-      ! maximum (t-channel) values the invariants can be in the
-      ! phase-space generation. Does not apply these cuts on
-      ! invariants not used in the phase-space generation.
-      implicit none
-      real(kind=8) :: s_cut(2)
-      real(kind=8) :: mass,cut
-      integer(kind=4) :: i,j,k,npart
-      this%invm_min=0d0
-      this%invm_max=0d0
-      do k=1,maskr(this%next)
-         npart=popcnt(k)
-         if (btest(k,0).and.btest(k,1)) then ! both initial state particles are part of 'k'
-            this%invm_min(k)=0d0 ! no cuts
-         elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
-            if (npart.eq.2) then ! exaclty two particles in 'k'
-               do i=1,this%next
-                  if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
-                  do j=1,this%next
-                     if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
-                     this%invm_max(k)=-max(this%sqrt_s_min(i,j)**2,this%ptcut(i)**2,this%ptcut(j)**2)
-                     this%invm_max(maskr(this%next)-k)=this%invm_max(k) ! all but the two particles
-                  enddo
-               enddo
-            endif
-         else ! only final state particles in the combined particle 'k'
-            ! total mass of external particles in 'k'
-            mass=0d0
-            do i=0,this%next-1
-               if (.not.btest(k,i)) cycle ! particle 'i' is not in combined particle 'k'
-               mass=mass+sqrt(this%invm(ibset(0,i)))
-            enddo
-            ! total from the cuts
-            cut=0d0
-            do i=1,this%next-1
-               if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
-               do j=i+1,this%next
-                  if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
-                  cut=cut+max(this%sqrt_s_min(i,j)**2,2d0*this%ptcut(i)*this%ptcut(j)* &
-                       (1d0-cos(this%drcut(ibset(ibset(0,i-1),j-1)))))
-               enddo
-            enddo
-            if (npart.eq.this%next-2) then ! all final state particles are in 'k'
-               this%invm_min(k)=max(cut*dble(npart)/dble(npart-1),mass**2)
-            else
-               this%invm_min(k)=max(cut/2d0,mass**2)
-            endif
-         endif
-      enddo
-      call setup_ETmin
-    end subroutine setup_PS_cuts
-
-    subroutine setup_ETmin
-      ! Setup the minimum required (transverse) energy for each (combination of)
-      ! final state particle(s) in the collision c.o.m. frame. Based on the
-      ! masses and the ptcut (i.e., assumes that all pz=0 and pT=pTcut)
-      integer :: i,j
-      this%ETmin(1:maskr(this%next))=0d0
-      do i=1,maskr(this%next)
-         if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
-         do j=0,this%next-1
-            if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+this%ptcut(j+1)**2)
-         enddo
-         this%ETmin(i)=max(this%ETmin(i),sqrt(this%invm_min(i)))
-      enddo
-    end subroutine setup_ETmin
-
   end subroutine gen23_init
 
+
+  subroutine setup_PS_cuts(this)
+    ! Given the input cuts, fills the minimum (s-channel) and/or
+    ! maximum (t-channel) values the invariants can be in the
+    ! phase-space generation. Does not apply these cuts on
+    ! invariants not used in the phase-space generation.
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    real(kind=8) :: s_cut(2)
+    real(kind=8) :: mass,cut
+    integer(kind=4) :: i,j,k,npart
+    this%invm_min=0d0
+    this%invm_max=0d0
+    do k=1,maskr(this%next)
+       npart=popcnt(k)
+       if (btest(k,0).and.btest(k,1)) then ! both initial state particles are part of 'k'
+          this%invm_min(k)=0d0 ! no cuts
+       elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
+          if (npart.eq.2) then ! exaclty two particles in 'k'
+             do i=1,this%next
+                if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
+                do j=1,this%next
+                   if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
+                   this%invm_max(k)=-max(this%sqrt_s_min(i,j)**2,this%ptcut(i)**2,this%ptcut(j)**2)
+                   this%invm_max(maskr(this%next)-k)=this%invm_max(k) ! all but the two particles
+                enddo
+             enddo
+          endif
+       else ! only final state particles in the combined particle 'k'
+          ! total mass of external particles in 'k'
+          mass=0d0
+          do i=0,this%next-1
+             if (.not.btest(k,i)) cycle ! particle 'i' is not in combined particle 'k'
+             mass=mass+sqrt(this%invm(ibset(0,i)))
+          enddo
+          ! total from the cuts
+          cut=0d0
+          do i=1,this%next-1
+             if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
+             do j=i+1,this%next
+                if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
+                cut=cut+max(this%sqrt_s_min(i,j)**2,2d0*this%ptcut(i)*this%ptcut(j)* &
+                     (1d0-cos(this%drcut(ibset(ibset(0,i-1),j-1)))))
+             enddo
+          enddo
+          if (npart.eq.this%next-2) then ! all final state particles are in 'k'
+             this%invm_min(k)=max(cut*dble(npart)/dble(npart-1),mass**2)
+          else
+             this%invm_min(k)=max(cut/2d0,mass**2)
+          endif
+       endif
+    enddo
+    call setup_ETmin(this)
+  end subroutine setup_PS_cuts
+
+  subroutine setup_ETmin(this)
+    implicit none
+    ! Setup the minimum required (transverse) energy for each (combination of)
+    ! final state particle(s) in the collision c.o.m. frame. Based on the
+    ! masses and the ptcut (i.e., assumes that all pz=0 and pT=pTcut)
+    class(phase_space_gen23),intent(inout) :: this
+    integer :: i,j
+    this%ETmin(1:maskr(this%next))=0d0
+    do i=1,maskr(this%next)
+       if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
+       do j=0,this%next-1
+          if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+this%ptcut(j+1)**2)
+       enddo
+       this%ETmin(i)=max(this%ETmin(i),sqrt(this%invm_min(i)))
+    enddo
+  end subroutine setup_ETmin
+
+
+  
   subroutine gen23_finalize(this)
     type(phase_space_gen23) :: this
     call gen23_cleanup(this)
@@ -276,15 +311,28 @@ contains
     real(kind=8),dimension(maskr(this%next)) :: invm
     pp=0d0
     ps%jac=1d0
-    invm=this%invm
     ix=0
     ix_e=this%ndim
+
+       call generate_bw_mass(this%next-1)
+       this%next=this%next-1
+       call setup_PS_cuts(this)
+
+    invm=this%invm
     if (includePDF) then
        call generate_initial_state
     else
        sqrtshat=this%sqrts
     endif
     call generate_momenta
+       this%next=this%next+1
+    if (ps%jac.lt.0d0) return
+
+       call decay_bw(this%next-1,this%next-1,this%next)
+       ! Add factors of 2*pi (since this%next was reduced by 1)
+       ps%jac=ps%jac/((2d0*pi)**3)
+       if (debug) call test_momenta
+
     do i=1,this%next
        if (includePDF) then
           ! Note: 'ycm' is the rapidity needed to go from lab to CM
@@ -295,6 +343,52 @@ contains
        endif
     enddo
   contains
+    subroutine generate_bw_mass(ires)
+      implicit none
+      integer,intent(in) :: ires
+      real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
+      smin=50d0**2
+      smax=this%sqrts**2
+      qmass=91.188d0
+      qwidth=2.441404d0
+      A=atan((qmass-smin/qmass)/qwidth)
+      B=atan((qmass-smax/qmass)/qwidth)
+      ix=ix+1
+      call random_to_var(ps%x(ix),0d0,B,A,y,ps%jac)
+      this%invm(ibset(0,ires-1))=qmass*(qmass-qwidth*tan(y))
+      ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
+    end subroutine generate_bw_mass
+    subroutine decay_bw(ires,id1,id2)
+      ! decay the BW
+      implicit none
+      integer,intent(in) :: ires,id1,id2
+      integer :: i,j,k
+      real(kind=8),dimension(0:3,this%next) :: pp_tmp
+      if (ires.gt.id1 .or. ires.gt.id2) then
+         write (*,*) 'ERROR in decay_BW',ires,id1,id2
+      endif
+      ! shift the already generated momenta to make place for the
+      ! daughters of the resonance
+      j=0
+      k=0
+      do i=1,this%next-2
+         j=j+1
+         k=k+1
+         if (k.eq.id1) k=k+1
+         if (k.eq.id2) k=k+1
+         if (i.eq.ires) j=j+1 ! skip ires
+         pp_tmp(0:3,k)=pp(0:3,ibset(0,j-1))
+      enddo
+      pp(0:3,ibset(0,id1-1)+ibset(0,id2-1))=pp(0:3,ibset(0,ires-1))
+      invm(ibset(0,id1-1)+ibset(0,id2-1))=invm(ibset(0,ires-1))
+      do i=1,this%next
+         pp(0:3,ibset(0,i-1))=pp_tmp(0:3,i)
+      enddo
+      ! Set the decay products of the BW as massless particles
+      invm(ibset(0,id1-1))=0d0
+      invm(ibset(0,id2-1))=0d0
+      call gens_one_step(ibset(0,id1-1),ibset(0,id2-1))
+    end subroutine decay_bw
     subroutine generate_initial_state
       implicit none
       real(kind=8) :: tau
@@ -448,7 +542,6 @@ contains
          ! We need to get the momentum of the final particle of the set.
          pp(0:3,set(i))=pp(0:3,set(i)+inext+(3-i))+pp(0:3,(3-i))-pp(0:3,inext)
       enddo
-      if (debug) call test_momenta
       ! Add factors of 2*pi
       ps%jac=ps%jac/((2d0*pi)**(3*(this%next-2)-4))
       ! Add flux factor
@@ -1050,10 +1143,20 @@ contains
     integer :: ix
     real(kind=8),dimension(0:3,0:maskr(this%next)) :: pp
     real(kind=8),dimension(maskr(this%next)) :: invm
+    real(kind=8),dimension(0:3,2) :: p_tmp
     if (debug) write (*,*) 'computing x from momenta'
     ps%jac=1d0
-    invm=this%invm
     ix=0
+    
+       p_tmp(0:3,1)=ps%p(0:3,this%next-1)
+       p_tmp(0:3,2)=ps%p(0:3,this%next)
+       ps%p(0:3,this%next-1)=p_tmp(0:3,1)+p_tmp(0:3,2)
+       call generate_bw_mass_inverse(this%next-1)
+       this%next=this%next-1
+       call setup_PS_cuts(this)
+       
+       invm=this%invm
+
     ! Fill the full momentum array, including all possible
     ! intermediate states:
     call fill_momentum_array
@@ -1065,7 +1168,48 @@ contains
     endif
     ! The final-state momenta configuration gives all the other random numbers
     call compute_x_final_state
+
+       this%next=this%next+1
+       pp(0:3,ibset(0,this%next-2))=p_tmp(0:3,1)
+       pp(0:3,ibset(0,this%next-1))=p_tmp(0:3,2)
+       pp(0:3,ibset(0,this%next-1)+ibset(0,this%next-2))=p_tmp(0:3,1)+p_tmp(0:3,2)
+       invm(ibset(0,this%next-1)+ibset(0,this%next-2))=invm(ibset(0,this%next-2))
+       invm(ibset(0,this%next-2))=0d0
+       invm(ibset(0,this%next-1))=0d0
+       call decay_bw_inverse(this%next-1,this%next-1,this%next)
+       ! Add factors of 2*pi (since this%next was reduced by 1)
+       ps%jac=ps%jac/((2d0*pi)**3)
+       ps%p(0:3,this%next-1)=p_tmp(0:3,1)
+       ps%p(0:3,this%next)=p_tmp(0:3,2)
+    
   contains
+    subroutine generate_bw_mass_inverse(ires)
+      implicit none
+      integer,intent(in) :: ires
+      real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
+      smin=50d0**2
+      smax=this%sqrts**2
+      qmass=91.188d0
+      qwidth=2.441404d0
+      A=atan((qmass-smin/qmass)/qwidth)
+      B=atan((qmass-smax/qmass)/qwidth)
+      ix=ix+1
+      this%invm(ibset(0,ires-1))=dot(ps%p(0:3,ires),ps%p(0:3,ires))
+      y=atan((qmass-this%invm(ibset(0,ires-1))/qmass)/qwidth)
+      call var_to_random(y,0d0,B,A,ps%x(ix),ps%jac)
+      ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
+    end subroutine generate_bw_mass_inverse
+    subroutine decay_bw_inverse(ires,id1,id2)
+      implicit none
+      integer,intent(in) :: ires,id1,id2
+      integer :: i,j,k
+      real(kind=8),dimension(0:3,this%next) :: pp_tmp
+      if (ires.gt.id1 .or. ires.gt.id2) then
+         write (*,*) 'ERROR in decay_BW',ires,id1,id2
+      endif
+      call gens_one_step_inverse(ibset(0,id1-1),ibset(0,id2-1))
+    end subroutine decay_bw_inverse
+       
     subroutine compute_x_initial_state
       implicit none
       real(kind=8) :: tau
@@ -1319,10 +1463,10 @@ contains
       ! update the Jacobian
       ps%jac=ps%jac*sqrt(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
       ! compute some t-channel invariants just to make sure they are filled. 
-      invm(i+1)=dot(pp(0:3,i+1),pp(0:3,i+1))
-      invm(i+2)=dot(pp(0:3,i+2),pp(0:3,i+2))
-      invm(ir+1)=dot(pp(0:3,ir+1),pp(0:3,ir+1))
-      invm(ir+2)=dot(pp(0:3,ir+2),pp(0:3,ir+2))
+!!$      invm(i+1)=dot(pp(0:3,i+1),pp(0:3,i+1))
+!!$      invm(i+2)=dot(pp(0:3,i+2),pp(0:3,i+2))
+!!$      invm(ir+1)=dot(pp(0:3,ir+1),pp(0:3,ir+1))
+!!$      invm(ir+2)=dot(pp(0:3,ir+2),pp(0:3,ir+2))
     end subroutine gens_one_step_inverse
     subroutine double_t_inverse(i,ir,ia,ib)
       implicit none
@@ -1467,7 +1611,8 @@ contains
          endif
       endif
       if (smin.ge.smax) then
-         write (*,*) 'smin.ge.smax in gen23_one_stop_inverse',smin,smax
+         write (*,*) 'smin.ge.smax in gen23_one_step_inverse',smin,smax
+         write (*,*) ir,ib,i,im1,this%invm_min(i+im1)
          stop 1
       endif
       invm(i+im1)=dot(pp(0:3,i+im1),pp(0:3,i+im1))

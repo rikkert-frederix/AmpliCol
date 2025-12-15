@@ -42,6 +42,10 @@ contains
           endif
        enddo
     enddo
+    if (abs(sumdot(pgl%ps(1)%p(0,pgl%next-1),pgl%ps(1)%p(0,pgl%next))).lt.50d0**2) then
+       pass_cuts=.false.
+       return
+    endif
   end function pass_cuts
   
   real(kind=8) function pt(p)
@@ -190,6 +194,18 @@ contains
           pgl%sqrt_s_min(i,j)=sqrt_saa_min
           if (i.ge.3 .and. j.ge.3) then
              pgl%DR_min(i,j)=DRaa_min
+          endif
+       enddo
+    enddo
+    ! cuts on pair of leptons
+    do i=1,pgl%next
+       if (.not. phys_model%is_lepton_any(pgl%processes(i,1))) cycle
+          do j=1,pgl%next
+          if (i.eq.j) cycle
+          if (.not. phys_model%is_lepton_any(pgl%processes(j,1))) cycle
+          pgl%sqrt_s_min(i,j)=sqrt_sll_min
+          if (i.ge.3 .and. j.ge.3) then
+             pgl%DR_min(i,j)=DRll_min
           endif
        enddo
     enddo

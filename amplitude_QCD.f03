@@ -216,15 +216,15 @@ contains
       call current_list_local(this%n_cur)%iproc%set_bit(iproc)
       current_list_local(this%n_cur)%ext_cur=ibset(int(0,kind=16),this%n_cur-1)      
       ! create the lepton-related properties
-      allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-      current_list_local(this%n_cur)%fermi_list=0
-      if (pm%is_lepton(current_list_local(this%n_cur)%type)) then
-           current_list_local(this%n_cur)%fermi_list(1)=1
-           current_list_local(this%n_cur)%fermi_list(2)=ext_from_cur(this%n_cur)
-      elseif (pm%is_antilepton(current_list_local(this%n_cur)%type)) then
-           current_list_local(this%n_cur)%fermi_list(1)=1
-           current_list_local(this%n_cur)%fermi_list(3)=-ext_from_cur(this%n_cur)
-      endif
+!!$      allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+!!$      current_list_local(this%n_cur)%fermi_list=0
+!!$      if (pm%is_lepton(current_list_local(this%n_cur)%type)) then
+!!$           current_list_local(this%n_cur)%fermi_list(1)=1
+!!$           current_list_local(this%n_cur)%fermi_list(2)=ext_from_cur(this%n_cur)
+!!$      elseif (pm%is_antilepton(current_list_local(this%n_cur)%type)) then
+!!$           current_list_local(this%n_cur)%fermi_list(1)=1
+!!$           current_list_local(this%n_cur)%fermi_list(3)=-ext_from_cur(this%n_cur)
+!!$      endif
     end subroutine create_external_current
     
     subroutine allocate_and_fill_currents_to_amps_map()
@@ -747,23 +747,23 @@ contains
       integer :: i,j
       integer,dimension(nl+1) :: new_fermi_list
       real(kind=4) :: sgn
-
       if (.not.valid_current_combination())  then
          return
       endif
       do i=1,pm%nint
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
-              ! add possible lepton-interchange sign
-              call combine_lepton_list(new_fermi_list)
-              sgn=1d0
-              if (new_fermi_list(1).eq.2) then
-                 sgn=-1d0
-                 do j=2,nl
-                    if (new_fermi_list(2).eq.lepton_list(j).and.&
-                        new_fermi_list(3).eq.lepton_list(j+1)) sgn=1d0
-                 enddo
-              endif
+!!$              ! add possible lepton-interchange sign
+!!$              call combine_lepton_list(new_fermi_list)
+!!$              sgn=1d0
+!!$              if (new_fermi_list(1).eq.2) then
+!!$                 sgn=-1d0
+!!$                 do j=2,nl
+!!$                    if (new_fermi_list(2).eq.lepton_list(j).and.&
+!!$                        new_fermi_list(3).eq.lepton_list(j+1)) sgn=1d0
+!!$                 enddo
+!!$              endif
+            sgn=1d0
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
                             sgn*pm%vertex_list(i)%coupl)
@@ -848,7 +848,6 @@ contains
             return ! no need to check further: below are only checks about the colours
          endif
       endif
-      
       if (this%imode.eq.1 .or. this%imode.eq.3) then
          ! check that current combination is compatible with the input colour
          ! order. First, find where the singlets are, since they do not matter
@@ -993,7 +992,7 @@ contains
       combine_currents%iproc=current_list_local(ic1)%iproc.and.current_list_local(ic2)%iproc
       combine_currents%ext_cur=current_list_local(ic1)%ext_cur+current_list_local(ic2)%ext_cur
 
-      call combine_lepton_list(new_fermi_list)
+!!$      call combine_lepton_list(new_fermi_list)
 
       n1=popcnt(current_list_local(ic1)%bin)
       n2=popcnt(current_list_local(ic2)%bin)
@@ -1281,7 +1280,7 @@ contains
             if (new_current%type.ne.current_list_local(ic)%type) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
-            if (all(new_fermi_list.ne.current_list_local(ic)%fermi_list)) cycle
+!!$            if (all(new_fermi_list.ne.current_list_local(ic)%fermi_list)) cycle
             current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
             current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
             current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
@@ -1294,10 +1293,10 @@ contains
          current_list_local(this%n_cur)%mass=pm%get_mass(new_current%type)
          current_list_local(this%n_cur)%width=pm%get_width(new_current%type)
          
-         ! lepton-ordering
-         allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-         current_list_local(this%n_cur)%fermi_list=0
-         current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
+!!$         ! lepton-ordering
+!!$         allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+!!$         current_list_local(this%n_cur)%fermi_list=0
+!!$         current_list_local(this%n_cur)%fermi_list(:)=new_fermi_list(:)
 
          if (pm%is_gluon(new_current%type)) then
             allocate(current_list_local(this%n_cur)%vertices(5*(isize-1)))
@@ -1329,10 +1328,10 @@ contains
             current_list_local(ic)%mass=pm%get_mass(new_current%type)
             current_list_local(ic)%width=pm%get_width(new_current%type)
 
-            ! lepton-ordering
-            allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
-            current_list_local(this%n_cur)%fermi_list=0
-            current_list_local(this%n_cur)%fermi_list=new_fermi_list
+!!$            ! lepton-ordering
+!!$            allocate(current_list_local(this%n_cur)%fermi_list(1+nl))
+!!$            current_list_local(this%n_cur)%fermi_list=0
+!!$            current_list_local(this%n_cur)%fermi_list=new_fermi_list
 
             if (any(current_list_local(ic)%spin(1:isize).ne.-9)) then
                write (*,*) 'trying to combine currents with different spin: not possible',&
@@ -1781,16 +1780,12 @@ contains
                    call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
-             elseif (pm%is_quark(this%current_list(ic)%type)) then
+             elseif (pm%is_quark(this%current_list(ic)%type) .or. &
+                  pm%is_lepton(this%current_list(ic)%type)) then
                 call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (pm%is_antiquark(this%current_list(ic)%type)) then
-                call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (pm%is_lepton(this%current_list(ic)%type)) then
-                call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
-             elseif (pm%is_antilepton(this%current_list(ic)%type)) then
+             elseif (pm%is_antiquark(this%current_list(ic)%type) .or. &
+                  pm%is_antilepton(this%current_list(ic)%type)) then
                 call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
@@ -1823,7 +1818,6 @@ contains
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_c(1:4))
              endif
-
           elseif(this%interaction_list(iv)%type.eq.1) then
              if (use_real_gluons) then
                 call TwoGluonToTensor_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
@@ -2004,6 +1998,7 @@ contains
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
           endif
+          
        enddo
 
        ! compute the currents by combining the interactions
@@ -2946,13 +2941,13 @@ contains
     integer,dimension(n),intent(in)::hel
     character(len=170) :: line,tmp
     integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau
-    integer,dimension(0:20) :: icount
+    integer,dimension(0:24) :: icount
     integer,dimension(150,7) :: icount_type
     integer,dimension(:,:),allocatable :: curs
     integer,dimension(:),allocatable :: pp
     real(kind=8),dimension(:),allocatable :: m,w
-    integer,dimension(this%n_vert,0:20) :: cur1,cur2,int1,pp1,pp2
-    real(kind=8),dimension(2,this%n_vert,0:20) :: coupl
+    integer,dimension(this%n_vert,0:24) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:24) :: coupl
     write(tmp,*) igroup
     write(line,*) iint
     line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
@@ -3035,15 +3030,16 @@ contains
                 ih_in=this%current_list(ic)%spin(1)
              endif
              if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
-                   write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                   line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
-                   write(tmp,*) ih_in
-                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
-                   write(tmp,*) ifinal
-                   line=trim(adjustl(line))//trim(adjustl(tmp))//','
-                   write(tmp,*) ic
-                   line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
-             elseif (pm%is_quark(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
+                line='call ext_gluon_cmplx(pp(0,'//trim(adjustl(tmp))//'),'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'))'
+             elseif (pm%is_quark(this%current_list(ic)%type).or. &
+                  pm%is_lepton(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 line='call ext_quark(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
@@ -3054,7 +3050,8 @@ contains
                 line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
                 write(tmp,'(d20.12)') this%current_list(ic)%mass
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
-             elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+             elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+                  pm%is_antilepton(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
                 line='call ext_antiquark(pp(0,'//trim(adjustl(tmp))//'),'
                 write(tmp,*) ih_in
@@ -3111,8 +3108,8 @@ contains
        write(tmp,*) this%n_vert
        write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
 
-       icount(0:20)=0
-       do itype=0,20 ! vertex type
+       icount(0:24)=0
+       do itype=0,24 ! vertex type
           do iv=this%n_vert_start(isize),this%n_vert_end(isize)
              if (this%interaction_list(iv)%type.eq.itype) then
                 icount(itype)=icount(itype)+1
@@ -3125,7 +3122,7 @@ contains
              endif
           enddo
        enddo
-       do itype=0,20
+       do itype=0,24
           if (icount(itype).eq.0) cycle
           write(tmp,*) isize
           line='call vertex_type'//trim(adjustl(tmp))//'_'
@@ -3136,7 +3133,7 @@ contains
        write(tmp,*) isize
        write(iunit,*) 'end subroutine compute_vertices'//trim(adjustl(tmp))
 
-       do itype=0,20
+       do itype=0,24
           if (icount(itype).eq.0) cycle
           write(tmp,*) isize
           line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
@@ -3319,6 +3316,18 @@ contains
           elseif(itype.eq.20) then
              line='call ScalarScalartoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.21) then
+             line='call LeptonAleptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.22) then
+             line='call AleptonLeptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.23) then
+             line='call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
+          elseif(itype.eq.24) then
+             line='call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                  '[coupl(2*i-1),coupl(2*i)])'
           endif
           write(iunit,*)trim(adjustl(line))
           write(iunit,*)'enddo'
@@ -3343,11 +3352,14 @@ contains
 
        icount_type=0
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-          if (pm%is_gluon(this%current_list(ic)%type)) then
+          if (pm%is_gluon(this%current_list(ic)%type).or. &
+               pm%is_photon(this%current_list(ic)%type)) then
              itype=1
-          elseif (pm%is_quark(this%current_list(ic)%type)) then
+          elseif (pm%is_quark(this%current_list(ic)%type).or. &
+               pm%is_lepton(this%current_list(ic)%type)) then
              itype=2
-          elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+          elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+               pm%is_antilepton(this%current_list(ic)%type)) then
              itype=3
           elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
              itype=4
@@ -3357,6 +3369,9 @@ contains
              itype=6
           elseif (pm%is_higgsor(this%current_list(ic)%type)) then
              itype=7
+          else
+             write (*,*) 'not found:',this%current_list(ic)%type
+             stop 1
           endif
           if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
              write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
@@ -3392,11 +3407,14 @@ contains
              curs=0
              ii=0
              do ic=this%n_cur_start(isize),this%n_cur_end(isize)
-                if (pm%is_gluon(this%current_list(ic)%type)) then
+                if (pm%is_gluon(this%current_list(ic)%type).or. &
+                     pm%is_photon(this%current_list(ic)%type)) then
                    itype=1
-                elseif (pm%is_quark(this%current_list(ic)%type)) then
+                elseif (pm%is_quark(this%current_list(ic)%type).or.&
+                     pm%is_lepton(this%current_list(ic)%type)) then
                    itype=2
-                elseif (pm%is_antiquark(this%current_list(ic)%type)) then
+                elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+                     pm%is_antilepton(this%current_list(ic)%type)) then
                    itype=3
                 elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
                    itype=4
@@ -3406,6 +3424,9 @@ contains
                    itype=6
                 elseif (pm%is_higgsor(this%current_list(ic)%type)) then
                    itype=7
+                else
+                   write (*,*) 'not found',this%current_list(ic)%type
+                   stop 1
                 endif
                 if (itype.ne.j) cycle
                 if (this%current_list(ic)%n_vert.ne.i) cycle
