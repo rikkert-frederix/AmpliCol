@@ -42,6 +42,10 @@ contains
           endif
        enddo
     enddo
+    if (abs(sumdot(pgl%ps(1)%p(0,pgl%next-1),pgl%ps(1)%p(0,pgl%next))).lt.50d0**2) then
+       pass_cuts=.false.
+       return
+    endif
   end function pass_cuts
   
   real(kind=8) function pt(p)

@@ -259,6 +259,10 @@ contains
           enddo
           amp(pgl_unique%passed(1),1:pgl_unique%amps(1)%n_amps)=pgl_unique%amps(1)%amps(1:pgl_unique%amps(1)%n_amps)
        endif
+!!$       write (*,*) "AAAAAAAAAAAAAAAAAAAA"
+!!$       write (*,*) ps%p
+!!$       write (*,*) amp2(pgl_unique%passed(1),:)
+!!$       stop 1
        call find_same_flavour(pgl_unique,nevent,amp2(1,:))
     enddo
     allocate(unique_map(1:pgl_unique%nproc))
