@@ -128,51 +128,51 @@ contains
        endif
     enddo
 
-!!$    ! Put in the two sets the particles that are between the two
-!!$    ! initial state ones, assuming cyclic permutation freedom
-!!$    ! (set(:,1) contains the ones between 1 and 2; set(:,2) contains
-!!$    ! the ones between 2 and 1)
-!!$    this%sets=0
-!!$    do i=2,this%next
-!!$       if (this%order(i).eq.2) then
-!!$          do j=i+1,this%next
-!!$             this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
-!!$          enddo
-!!$          this%sets(1:i-2,1)=this%order(2:i-1)
-!!$          this%sets(1:this%next-i,2)=this%order(i+1:this%next)
-!!$          exit
-!!$       endif
-!!$       this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
-!!$    enddo
-
-
     ! Put in the two sets the particles that are between the two
     ! initial state ones, assuming cyclic permutation freedom
     ! (set(:,1) contains the ones between 1 and 2; set(:,2) contains
     ! the ones between 2 and 1)
-
-    this%sets = 0
+    this%sets=0
     do i=2,this%next
        if (this%order(i).eq.2) then
-          do j=i+1, this%next
-             if (this%order(j).eq.this%next) cycle
+          do j=i+1,this%next
              this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
           enddo
-          cnt1 = count(this%order(2:i-1).ne.this%next)
-          if (cnt1.gt.0) then
-             this%sets(1:cnt1,1) = pack(this%order(2:i-1),this%order(2:i-1).ne.this%next)
-          endif
-          cnt2 = count(this%order(i+1:this%next).ne.this%next)
-          if (cnt2.gt.0) then
-             this%sets(1:cnt2,2) = pack(this%order(i+1:this%next), this%order(i+1:this%next).ne.this%next)
-          endif
-          if (ubound(this%sets,1).gt.cnt2) this%sets(cnt2+1:ubound(this%sets,1),2)=0
+          this%sets(1:i-2,1)=this%order(2:i-1)
+          this%sets(1:this%next-i,2)=this%order(i+1:this%next)
           exit
        endif
-       if (this%order(i).ne.this%next) then
-          this%sets(0,1) = ibset(this%sets(0,1),this%order(i)-1)
-       endif
+       this%sets(0,1)=ibset(this%sets(0,1),this%order(i)-1)
     enddo
+
+
+!!$    ! Put in the two sets the particles that are between the two
+!!$    ! initial state ones, assuming cyclic permutation freedom
+!!$    ! (set(:,1) contains the ones between 1 and 2; set(:,2) contains
+!!$    ! the ones between 2 and 1)
+!!$
+!!$    this%sets = 0
+!!$    do i=2,this%next
+!!$       if (this%order(i).eq.2) then
+!!$          do j=i+1, this%next
+!!$             if (this%order(j).eq.this%next) cycle
+!!$             this%sets(0,2)=ibset(this%sets(0,2),this%order(j)-1)
+!!$          enddo
+!!$          cnt1 = count(this%order(2:i-1).ne.this%next)
+!!$          if (cnt1.gt.0) then
+!!$             this%sets(1:cnt1,1) = pack(this%order(2:i-1),this%order(2:i-1).ne.this%next)
+!!$          endif
+!!$          cnt2 = count(this%order(i+1:this%next).ne.this%next)
+!!$          if (cnt2.gt.0) then
+!!$             this%sets(1:cnt2,2) = pack(this%order(i+1:this%next), this%order(i+1:this%next).ne.this%next)
+!!$          endif
+!!$          if (ubound(this%sets,1).gt.cnt2) this%sets(cnt2+1:ubound(this%sets,1),2)=0
+!!$          exit
+!!$       endif
+!!$       if (this%order(i).ne.this%next) then
+!!$          this%sets(0,1) = ibset(this%sets(0,1),this%order(i)-1)
+!!$       endif
+!!$    enddo
     
     if (verbose) then
        write (99,*) "set 1:",this%sets(:,1)
@@ -319,9 +319,9 @@ contains
     ix=0
     ix_e=this%ndim
 
-       call generate_bw_mass(this%next-1)
-       this%next=this%next-1
-       call setup_PS_cuts(this)
+!!$       call generate_bw_mass(this%next-1)
+!!$       this%next=this%next-1
+!!$       call setup_PS_cuts(this)
 
     invm=this%invm
     if (includePDF) then
@@ -330,12 +330,12 @@ contains
        sqrtshat=this%sqrts
     endif
     call generate_momenta
-       this%next=this%next+1
-    if (ps%jac.lt.0d0) return
-
-       call decay_bw(this%next-1,this%next-1,this%next)
-       ! Add factors of 2*pi (since this%next was reduced by 1)
-       ps%jac=ps%jac/((2d0*pi)**3)
+!!$       this%next=this%next+1
+!!$    if (ps%jac.lt.0d0) return
+!!$
+!!$       call decay_bw(this%next-1,this%next-1,this%next)
+!!$       ! Add factors of 2*pi (since this%next was reduced by 1)
+!!$       ps%jac=ps%jac/((2d0*pi)**3)
        if (debug) call test_momenta
 
     do i=1,this%next
@@ -1215,11 +1215,11 @@ contains
     ps%jac=1d0
     ix=0
     
-       p_tmp(0:3,1)=ps%p(0:3,this%next-1)
-       p_tmp(0:3,2)=ps%p(0:3,this%next)
-       ps%p(0:3,this%next-1)=p_tmp(0:3,1)+p_tmp(0:3,2)
-       call generate_bw_mass_inverse(this%next-1)
-       this%next=this%next-1
+!!$       p_tmp(0:3,1)=ps%p(0:3,this%next-1)
+!!$       p_tmp(0:3,2)=ps%p(0:3,this%next)
+!!$       ps%p(0:3,this%next-1)=p_tmp(0:3,1)+p_tmp(0:3,2)
+!!$       call generate_bw_mass_inverse(this%next-1)
+!!$       this%next=this%next-1
        call setup_PS_cuts(this)
        
        invm=this%invm
@@ -1236,18 +1236,18 @@ contains
     ! The final-state momenta configuration gives all the other random numbers
     call compute_x_final_state
 
-       this%next=this%next+1
-       pp(0:3,ibset(0,this%next-2))=p_tmp(0:3,1)
-       pp(0:3,ibset(0,this%next-1))=p_tmp(0:3,2)
-       pp(0:3,ibset(0,this%next-1)+ibset(0,this%next-2))=p_tmp(0:3,1)+p_tmp(0:3,2)
-       invm(ibset(0,this%next-1)+ibset(0,this%next-2))=invm(ibset(0,this%next-2))
-       invm(ibset(0,this%next-2))=0d0
-       invm(ibset(0,this%next-1))=0d0
-       call decay_bw_inverse(this%next-1,this%next-1,this%next)
-       ! Add factors of 2*pi (since this%next was reduced by 1)
-       ps%jac=ps%jac/((2d0*pi)**3)
-       ps%p(0:3,this%next-1)=p_tmp(0:3,1)
-       ps%p(0:3,this%next)=p_tmp(0:3,2)
+!!$       this%next=this%next+1
+!!$       pp(0:3,ibset(0,this%next-2))=p_tmp(0:3,1)
+!!$       pp(0:3,ibset(0,this%next-1))=p_tmp(0:3,2)
+!!$       pp(0:3,ibset(0,this%next-1)+ibset(0,this%next-2))=p_tmp(0:3,1)+p_tmp(0:3,2)
+!!$       invm(ibset(0,this%next-1)+ibset(0,this%next-2))=invm(ibset(0,this%next-2))
+!!$       invm(ibset(0,this%next-2))=0d0
+!!$       invm(ibset(0,this%next-1))=0d0
+!!$       call decay_bw_inverse(this%next-1,this%next-1,this%next)
+!!$       ! Add factors of 2*pi (since this%next was reduced by 1)
+!!$       ps%jac=ps%jac/((2d0*pi)**3)
+!!$       ps%p(0:3,this%next-1)=p_tmp(0:3,1)
+!!$       ps%p(0:3,this%next)=p_tmp(0:3,2)
     
   contains
     subroutine generate_bw_mass_inverse(ires)
@@ -1546,10 +1546,10 @@ contains
       ! update the Jacobian
       ps%jac=ps%jac*sqrt(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
       ! compute some t-channel invariants just to make sure they are filled. 
-!!$      invm(i+1)=dot(pp(0:3,i+1),pp(0:3,i+1))
-!!$      invm(i+2)=dot(pp(0:3,i+2),pp(0:3,i+2))
-!!$      invm(ir+1)=dot(pp(0:3,ir+1),pp(0:3,ir+1))
-!!$      invm(ir+2)=dot(pp(0:3,ir+2),pp(0:3,ir+2))
+      invm(i+1)=dot(pp(0:3,i+1),pp(0:3,i+1))
+      invm(i+2)=dot(pp(0:3,i+2),pp(0:3,i+2))
+      invm(ir+1)=dot(pp(0:3,ir+1),pp(0:3,ir+1))
+      invm(ir+2)=dot(pp(0:3,ir+2),pp(0:3,ir+2))
     end subroutine gens_one_step_inverse
     subroutine double_t_inverse(i,ir,ia,ib)
       implicit none
