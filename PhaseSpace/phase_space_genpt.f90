@@ -1,7 +1,6 @@
 module phase_space_genpt_mod
 !  use common
   use phase_space_base
-  use particles
   implicit none
   type,extends(phase_space_type),public :: phase_space_genpt
    contains
@@ -42,9 +41,8 @@ contains
     if (allocated(this%ycut)) deallocate(this%ycut)
     if (allocated(this%drcut)) deallocate(this%drcut)
     if (allocated(this%sqrt_s_min)) deallocate(this%sqrt_s_min)
-    if (allocated(this%bw)) deallocate(this%bw)
   end subroutine genpt_cleanup
-  subroutine genpt_init(this,sqrts,n,m,o,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf,pm,proc,flat)
+  subroutine genpt_init(this,sqrts,n,m,o,pt_cut,rap_cut,DR_cut,sqrt_s_min,t_chan,include_pdf,flat)
     implicit none
     class(phase_space_genpt),intent(inout) :: this
     ! INPUT
@@ -62,8 +60,6 @@ contains
     logical,intent(in) :: include_pdf,t_chan
     logical,intent(in),optional :: flat
     integer :: i,j
-    type(physics_model),intent(in) :: pm
-    integer,dimension(n),intent(in) :: proc
     allocate(this%ptcut(1:n))
     this%ptcut=pt_cut
     allocate(this%ycut(1:n))

@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := matrix_integrate_QCD
 
 FC = gfortran
+#FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 FFLAGS = -ffast-math -O3 -mcmodel=large
 
 # ----------------------------------------------------------------------

@@ -21,7 +21,6 @@ module phase_space_base
      real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
      logical :: t_channel
-     logical,dimension(:),allocatable :: bw
    contains
      procedure(phase_space_interface_init),deferred :: init
      procedure(phase_space_interface_generate_momenta),deferred :: generate_momenta
@@ -31,8 +30,7 @@ module phase_space_base
   
   ! Declare the abstract interface for the procedures
   abstract interface
-     subroutine phase_space_interface_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,pm,proc,flat)
-       use particles
+     subroutine phase_space_interface_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
        import :: phase_space_type
        class(phase_space_type),intent(inout) :: this
        real(kind=8),intent(in) :: sqrts
@@ -43,8 +41,6 @@ module phase_space_base
        logical,intent(in) :: t_chan
        logical,intent(in) :: include_pdf
        logical,intent(in),optional :: flat
-       type(physics_model),intent(in) :: pm
-       integer,dimension(n),intent(in) :: proc
      end subroutine phase_space_interface_init
      subroutine phase_space_interface_generate_momenta(this,ps)
        import :: phase_space_type,psv
