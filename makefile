@@ -2,7 +2,8 @@
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
-FFLAGS = -ffast-math -O3 -mcmodel=large
+#FFLAGS = -ffast-math -O3 -mcmodel=large
+FFLAGS = -ffast-math -O3
 
 # ----------------------------------------------------------------------
 # 1. Detect amplitude sources and group them
@@ -84,7 +85,7 @@ read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
 helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_reweight_QCD.o
+amplitude_QCD.o matrix_reweight_QCD.o ranmar.o
 
 FILES_M_UNWGT_QCD = color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o matrix_unweight_QCD.o

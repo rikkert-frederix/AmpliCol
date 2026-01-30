@@ -21,6 +21,7 @@ module rw_events
   integer :: IDBMUP(2),PDFGUP(2),PDFSUP(2),IDWTUP,NPRUP,LPRUP
   real(kind=8) :: EBMUP(2),XSECUP,XERRUP,XMAXUP
   character(len=1024) :: generator_string
+  logical :: unwgt,keep_comments
 end module rw_events
 module timings
   implicit none
@@ -28,7 +29,7 @@ module timings
        t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
 end module timings
 module overall
-  real(kind=8) :: xsec,max_wgt
+  real(kind=8) :: xsec,xsec_abs,max_wgt
   integer :: nevt
 end module overall
 module arguments
@@ -77,6 +78,7 @@ program matrix_reweight
   call read_init_and_allocate_events(11)
 
   xsec=0d0
+  xsec_abs=0d0
   max_wgt=0d0
   do nevt=1,nevents
      call read_event(11,events(nevt))
@@ -144,8 +146,10 @@ program matrix_reweight
      enddo
      max_wgt=max(max_wgt,events(nevt)%matrix2(3)/events(nevt)%matrix2(1))
      xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
+     xsec_abs=xsec_abs+abs(events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP)
   enddo
   xsec=xsec/dble(nevt)
+  xsec_abs=xsec_abs/dble(nevt)
   close(11)
 
   ! write event file
@@ -174,6 +178,7 @@ contains
     implicit none
     integer :: argc,i,k
     character(len=256) :: argv,filename
+    logical :: show_help
     ! integration steps:
     ! imode=0  (Setting up grids)
     ! imode=-1 (same as imode=0, but starting from existing grids)
@@ -181,17 +186,47 @@ contains
     ! imode=2  (event generation)
     argc = COMMAND_ARGUMENT_COUNT()
 
-    if (argc.eq.1) then
-       call get_command_argument(1,argv)
-       read(argv,'(a)') filename
-       open(unit=11,file=filename,status='old')
-       call read_unique_in_file()
-       call allocate_process_info()
-       open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
+    show_help=.false.
+    unwgt=.false.
+    keep_comments=.true.
+    
+    if (argc.lt.1) then
+       show_help=.true.
     else
-       write (*,*) 'Event file to reweight not given as argument'
-       stop 1
+       call get_command_argument(1,argv)
+       do i=1,argc
+          call get_command_argument(i, argv)
+          argv = trim(argv)
+          if (index(argv,"--help").eq.1 .or. index(argv,"-h").eq.1) then
+             show_help = .true.
+          elseif (index(argv, "--unwgt").eq.1) then
+             unwgt=.true.
+          elseif (index(argv, "--remove_comments").eq.1) then
+             keep_comments=.false.
+          else
+             read(argv,'(a)') filename
+          endif
+       enddo
     endif
+
+    if (show_help) then
+       write (*,'(a)') ""
+       write (*,'(a)') "Usage: 'matrix_reweight_QCD <event_file> <arguments>', where <event_file is the leading colour event file to reweight to full colour."
+       write (*,'(a)') "The code creates a LHEF, '<event_file>.rwgt' containing the full colour events."
+       write (*,'(a)') "Possible arguments are"
+       write (*,'(a)') ""
+       write (*,'(a)') "  --help,   -h      : Show this message."
+       write (*,'(a)') "  --unwgt           : Unweight the reweight events."
+       write (*,'(a)') "  --remove_comments : Remove comment lines in the final LHEF."
+       write (*,'(a)') ""
+       stop
+    endif
+
+    open(unit=11,file=filename,status='old')
+    call read_unique_in_file()
+    call allocate_process_info()
+    open(unit=12,file=trim(adjustl(filename))//'.rwgt',status='unknown')
+
   end subroutine get_run_arguments
 
   subroutine allocate_process_info()
@@ -374,46 +409,38 @@ contains
     implicit none
     type(lhef_event),intent(in) :: event
     integer :: iunit
-    real(kind=8) :: rwgt_NLC,rwgt_full
+    real(kind=8) :: rwgt_NLC,rwgt_full,XWGTUP_new
+    real(kind=8),external :: ran2
     rwgt_NLC=event%matrix2(2)/event%matrix2(1)
     rwgt_full=event%matrix2(3)/event%matrix2(1)
+    if (unwgt) then
+       if (rwgt_full.gt.max_wgt*ran2()) then
+          XWGTUP_new=xsec_abs
+       else
+          return
+       endif
+    else
+       XWGTUP_new=event%XWGTUP*rwgt_full
+    endif
     write (iunit,'(a)') '<event>'
-    write(iunit,503)event%NUP,event%IDPRUP,event%XWGTUP*rwgt_full,event%SCALUP,event%AQEDUP,event%AQCDUP
+    write(iunit,503)event%NUP,event%IDPRUP,XWGTUP_new,event%SCALUP,event%AQEDUP,event%AQCDUP
     do i=1,event%NUP
        write(iunit,504)event%IDUP(I),event%ISTUP(I),event%MOTHUP(1,I),event%MOTHUP(2,I), &
             event%ICOLUP(1,I),event%ICOLUP(2,I),&
             event%PUP(1,I),event%PUP(2,I),event%PUP(3,I),event%PUP(4,I),event%PUP(5,I),&
             event%VTIMUP(I),event%SPINUP(I)
     enddo
-    write (iunit,506) '#color',event%col_order(1:event%NUP)
-    write (iunit,505) '#overwgt',event%overwgt(1:3)
-    write (iunit,505) '#color_exp',event%XWGTUP,event%XWGTUP*rwgt_NLC,event%XWGTUP*rwgt_full
+    if (keep_comments) then
+       write (iunit,506) '#color',event%col_order(1:event%NUP)
+       write (iunit,505) '#overwgt',event%overwgt(1:3)
+       write (iunit,505) '#color_expansion',event%XWGTUP,event%XWGTUP*rwgt_NLC,event%XWGTUP*rwgt_full
+    endif
     write (iunit,'(a)') '</event>'
 503 format(1x,i2,1x,i6,4(1x,e14.8))
 504 format(1x,i8,1x,i2,4(1x,i4),5(1x,e24.17),2(1x,e10.4))
 505 format(1x,a,3(1x,e14.8))
 506 format(1x,a,100i3)
   end subroutine write_event
-  
-!!$  subroutine write_event(iunit)
-!!$    use overall
-!!$    implicit none
-!!$    integer :: i,iunit
-!!$    rwgt_NLC=matrix2(2)/matrix2(1)
-!!$    rwgt_full=matrix2(3)/matrix2(1)
-!!$    write (iunit,*) '<event>'
-!!$    write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
-!!$    xsec=xsec+evt_wgt*rwgt_full
-!!$    nevt=nevt+1
-!!$    write (iunit,'(100i3)') helicity(1:next)
-!!$    write (iunit,'(100i3)') col_order(1:next)
-!!$    write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)
-!!$    write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
-!!$    do i=1,next
-!!$       write (iunit,*) iPDG(i),momenta(1:3,i),momenta(0,i)
-!!$    enddo
-!!$    write (iunit,*) '</event>'
-!!$  end subroutine write_event
 
   subroutine get_lepton_info()
     implicit none
@@ -452,7 +479,11 @@ contains
     write(ounit,'(a)') '<init>'
     write(ounit,501)IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1)&
          &,PDFGUP(2),PDFSUP(1),PDFSUP(2),IDWTUP,NPRUP
-    write(ounit,502)xsec,XERRUP*rwgt_LCtoFC,XMAXUP*max_wgt,LPRUP
+    if (unwgt) then
+       write(ounit,502)xsec,XERRUP*rwgt_LCtoFC,xsec_abs,-3
+    else
+       write(ounit,502)xsec,XERRUP*rwgt_LCtoFC,XMAXUP*max_wgt,-4
+    endif
     write(ounit,'(a)') trim(generator_string)
     write(ounit,'(a)') '</init>'
 501 format(2(1x,i6),2(1x,e14.8),2(1x,i2),2(1x,i8),1x,i2,1x,i3)
@@ -463,10 +494,14 @@ contains
     implicit none
     integer,intent(in) :: iunit
     character(len=1024) :: string
+    integer(kind=8) iseed
+    common /to_seed/iseed
     do
        read(iunit,'(a)') string
        if (index(string,"<nevents>").ne.0) then
           read(string(10:),*) nevents
+       elseif (index(string,"<seed>").ne.0) then
+          read(string(10:),*) iseed
        endif
        if (index(string,"<init>").ne.0) then
           read(iunit,*) IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1) &

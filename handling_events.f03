@@ -222,11 +222,13 @@ contains
     integer :: iproc,nevents
     integer :: IDBMUP(2),PDFGUP(2),PDFSUP(2),IDWTUP,NPRUP,LPRUP
     real(kind=8) :: EBMUP(2),XSECUP,XERRUP,XMAXUP
+    integer(kind=8) iseed
+    common /to_seed/iseed
     IDBMUP(1:2)=2212     ! two protons
     EBMUP(1:2)=sqrts/2d0 ! half of collision energy
     PDFGUP(1:2)=-1
     PDFSUP(1:2)=244800   ! NNPDF23_nlo_as_0119_qed
-    IDWTUP=-4
+    IDWTUP=-3
     NPRUP=1
     XSECUP=0d0
     XERRUP=0d0
@@ -239,6 +241,7 @@ contains
        write(11,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
     enddo
     write(11,'(a,1x,i12,1x,a)') '<nevents>',nevents,'</nevents>'
+    write(11,'(a,1x,i12,1x,a)') '<seed>   ',iseed,  '</seed>'
     write(11,'(a)') '</header>'
     write(11,'(a)') '<init>'
     write(11,501)IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1)&
