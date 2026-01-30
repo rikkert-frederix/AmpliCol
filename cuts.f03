@@ -4,8 +4,7 @@ module cuts
   use handling_processes
 contains
   logical function pass_cuts(pgl)
-    ! Cuts on the phase-space point. Note that these cuts need to be symmetric
-    ! under pz -> -pz.
+    ! Cuts on the phase-space point. 
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
     integer :: i,j

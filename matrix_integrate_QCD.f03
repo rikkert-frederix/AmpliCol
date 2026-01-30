@@ -41,7 +41,14 @@ program matrix_integrate_QCD
 
   call get_run_arguments()
   
-  if (include_pdf) call PDF_initialise
+  if (include_pdf) then
+     if (use_lhapdf) then
+        call InitPDFsetbyname(trim(adjustl(lhapdfset)))
+        call initPDF(0)
+     else
+        call PDF_initialise
+     endif
+  endif
   
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
                            80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
@@ -250,6 +257,7 @@ program matrix_integrate_QCD
 contains
 
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
+    use scales
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
@@ -260,8 +268,8 @@ contains
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real(kind=4) :: tBefore,tAfter
     logical :: done
+    real(kind=8),external :: alphaspdf
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
@@ -325,6 +333,16 @@ contains
         if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
+    ! set scales and update alphaS
+    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1),scale_ren)
+    scale_fac=scale_ren
+    scale_shower=scale_ren
+    if (use_lhapdf) then
+       alphas=alphaspdf(scale_ren)
+    else
+       alphas=alphas_Q(scale_ren,2,alphas_MZ)
+    endif
+    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%ps(1)%jac*conv
 

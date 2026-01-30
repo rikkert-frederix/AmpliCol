@@ -29,13 +29,18 @@ contains
     real(kind=8),intent(inout),dimension(*) :: val,val_abs
     integer,intent(in) :: iint
     integer :: iproc,ip,iip,ip_start,ip_end
-    real(kind=8) :: xmu_fac
     real(kind=8), dimension(-6:7,2) :: PDF
     if (include_pdf) then
        ! Include the PDFs
-       xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,pgl%ipdgs(-6,1),pgl%ps(1)%xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,pgl%ipdgs(-6,2),pgl%ps(1)%xbjrk(2),xmu_fac,PDF(-6,2))
+       if (use_lhapdf) then
+          call evolvePDF(pgl%ps(1)%xbjrk(1),scale_fac,PDF(-6,1))
+          call evolvePDF(pgl%ps(1)%xbjrk(2),scale_fac,PDF(-6,2))
+          PDF(:,1)=PDF(:,1)/pgl%ps(1)%xbjrk(1)
+          PDF(:,2)=PDF(:,2)/pgl%ps(1)%xbjrk(2)
+       else
+          call PDF_eval(1,pgl%ipdgs(-6,1),pgl%ps(1)%xbjrk(1),scale_fac,PDF(-6,1))
+          call PDF_eval(1,pgl%ipdgs(-6,2),pgl%ps(1)%xbjrk(2),scale_fac,PDF(-6,2))
+       endif
     endif
     if (iint.gt.0) then
        ip_start=iint
