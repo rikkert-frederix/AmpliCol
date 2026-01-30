@@ -41,9 +41,6 @@ program matrix_integrate_QCD
 
   call get_run_arguments()
   
-  ! setting energy
-  sqrts=14000.d0
-
   if (include_pdf) call PDF_initialise
   
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
@@ -185,7 +182,7 @@ program matrix_integrate_QCD
   
   filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
-  call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
+  call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
   
   allocate(nintegrals(ngroups))
   if (keep_processes_separate) then
@@ -229,6 +226,7 @@ program matrix_integrate_QCD
      call event_update_wgt(11,12,wgts(1,i))
   enddo
   close(11,status='DELETE')
+  write(12,'(a)') '</LesHouchesEvents>'
   close(12)
      
   call cpu_time(tTot_a)

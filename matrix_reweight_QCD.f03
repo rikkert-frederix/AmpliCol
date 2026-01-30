@@ -2,9 +2,25 @@
 
 module rw_events
   implicit none
-  real(kind=8) :: wgt,evt_wgt,weight,amp2,rwgt_NLC,rwgt_full
-  integer,dimension(:),allocatable :: helicity,col_order,iPDG
-  real(kind=8),dimension(:,:),allocatable :: momenta
+  type :: lhef_event
+!!$     real(kind=8) :: wgt,evt_wgt,weight,rwgt_NLC,rwgt_full
+!!$     integer,dimension(:),allocatable :: helicity,col_order,iPDG
+!!$     real(kind=8),dimension(:,:),allocatable :: momenta
+     integer :: NUP,IDPRUP
+     integer,dimension(:),allocatable :: IDUP,ISTUP
+     integer,dimension(:,:),allocatable :: MOTHUP,ICOLUP
+     real(kind=8) :: XWGTUP,SCALUP,AQEDUP,AQCDUP
+     real(kind=8),dimension(:,:),allocatable :: PUP
+     real(kind=8),dimension(:),allocatable :: VTIMUP,SPINUP
+     real(kind=8),dimension(3) :: overwgt
+     integer,dimension(:),allocatable :: col_order
+     real(kind=8),dimension(3) :: matrix2
+  end type lhef_event
+  type(lhef_event),dimension(:),allocatable :: events
+  integer :: nevents
+  integer :: IDBMUP(2),PDFGUP(2),PDFSUP(2),IDWTUP,NPRUP,LPRUP
+  real(kind=8) :: EBMUP(2),XSECUP,XERRUP,XMAXUP
+  character(len=1024) :: generator_string
 end module rw_events
 module timings
   implicit none
@@ -12,7 +28,7 @@ module timings
        t_mat_LC=0.,t_mat_NLC=0.,t_mat_full=0.,t_all=0.,t_ran=0.
 end module timings
 module overall
-  real(kind=8) :: xsec
+  real(kind=8) :: xsec,max_wgt
   integer :: nevt
 end module overall
 module arguments
@@ -21,6 +37,7 @@ module arguments
 end module arguments
 
 program matrix_reweight
+  use rw_events
   use math_functions
   use amplitude_QCD_mod
   use timings
@@ -37,7 +54,6 @@ program matrix_reweight
   integer,dimension(:),allocatable :: hel,unique_map
   integer,dimension(:,:),allocatable :: spin,o,part,processes,unique_processes
   real(kind=8) :: amp2,amp_col,process_map_value
-  real(kind=8),dimension(3) :: matrix2
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
@@ -58,11 +74,12 @@ program matrix_reweight
   call setup_spin()
   col_acc=20
 
-  nevt=0
+  call read_init_and_allocate_events(11)
+
   xsec=0d0
-  do
-     call read_event(11,done)
-     if (done) exit
+  max_wgt=0d0
+  do nevt=1,nevents
+     call read_event(11,events(nevt))
      do iproc=1,nprocs
         if (all(part(1:next,1).eq.processes(1:next,iproc)))exit
      enddo
@@ -76,7 +93,7 @@ program matrix_reweight
         call cpu_time(tAfter)
         t_amp_init=t_amp_init+tAfter-tBefore
      endif
-     matrix2(1:3)=0d0
+     events(nevt)%matrix2(1:3)=0d0
 
      call cpu_time(tBefore)
     
@@ -101,7 +118,7 @@ program matrix_reweight
                  enddo
                  amp_col=amp_col+amp2*amps(iproc)%diff_col_vals(i,iacc)
               enddo
-              matrix2(iacc)=matrix2(iacc)+amp_col*amps(iproc)%amps_r(ioff+irow)
+              events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+amp_col*amps(iproc)%amps_r(ioff+irow)
            enddo
         else
            do irow=1,amps(iproc)%nColOrd
@@ -114,21 +131,30 @@ program matrix_reweight
                  enddo
                  amp_col_c=amp_col_c+amp2_c*amps(iproc)%diff_col_vals(i,iacc)
               enddo
-              matrix2(iacc)=matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
+              events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)+dble(amp_col_c*conjg(amps(iproc)%amps(ioff+irow)))
            enddo
         endif
         ! The following line can be removed since 'process_map_value'
         ! will drop out when taking the ratio w.r.t. LC.
-!        matrix2(iacc)=matrix2(iacc)*process_map_value
+!        events(nevt)%matrix2(iacc)=events(nevt)%matrix2(iacc)*process_map_value
         call cpu_time(tAfter)
         if (iacc.eq.1) t_mat_LC=t_mat_LC+tAfter-tBefore
         if (iacc.eq.2) t_mat_NLC=t_mat_NLC+tAfter-tBefore
         if (iacc.eq.3) t_mat_full=t_mat_full+tAfter-tBefore
      enddo
-     call write_event(12)
+     max_wgt=max(max_wgt,events(nevt)%matrix2(3)/events(nevt)%matrix2(1))
+     xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
   enddo
-  
+  xsec=xsec/dble(nevt)
   close(11)
+
+  ! write event file
+  call write_init(12)
+  do nevt=1,nevents
+     call write_event(12,events(nevt))
+  enddo
+  write(12,'(a)') '</LesHouchesEvents>'
+  
   close(12)
   call cpu_time(tTot_a)
   t_all=tTot_a-tTot_b
@@ -140,7 +166,7 @@ program matrix_reweight
   write(*,*) 'Time spent in squaring amplitudes (full)',t_mat_full
   write(*,*) 'Time spent in picking random colors',t_ran
   write(*,*) 'Total time:',t_all
-  write(*,*) 'Total FC cross section:',xsec/nevt
+  write(*,*) 'Total FC cross section:',xsec
 contains  
 
   subroutine get_run_arguments()
@@ -169,13 +195,12 @@ contains
   end subroutine get_run_arguments
 
   subroutine allocate_process_info()
-    use rw_events
     implicit none
     if (.not. allocated(hel)) then
-       allocate(momenta(0:3,1:next))
-       allocate(helicity(1:next))
-       allocate(col_order(1:next))
-       allocate(iPDG(1:next))
+!!$       allocate(momenta(0:3,1:next))
+!!$       allocate(helicity(1:next))
+!!$       allocate(col_order(1:next))
+!!$       allocate(iPDG(1:next))
        if (.not.allocated(o)) allocate(o(next,1))
        if (.not.allocated(part)) allocate(part(next,1))
        if (.not.allocated(processes)) allocate(processes(next,max_proc))
@@ -187,6 +212,9 @@ contains
   subroutine read_unique_in_file()
     implicit none
     integer :: iproc
+    character :: dummy
+    read(11,*) dummy ! <LesHouchesEvents>-tag
+    read(11,*) dummy ! <header>-tag
     read(11,*) next,unique_nproc
     allocate(unique_map(unique_nproc))
     allocate(unique_map_value(unique_nproc))
@@ -205,25 +233,36 @@ contains
     enddo
   end subroutine setup_spin
 
-  subroutine read_event(iunit,done)
-    use rw_events
+  subroutine read_event(iunit,event)
     implicit none
+    type(lhef_event) :: event
     integer :: i,iunit
-    logical :: done
-    character :: dummy
+    character(len=1024) :: string
     real(kind=8) :: dum
-    done=.false.
-    read (iunit,*,err=99,end=99) dummy
-    read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
-    read (iunit,*,err=99,end=99) helicity(1:next)
-    read (iunit,*,err=99,end=99) col_order(1:next)
-    do i=1,next
-       read (iunit,*,err=99,end=99) iPDG(i),momenta(1:3,i),momenta(0,i)
+    read (iunit,'(a)') string ! <event>-tag
+    read(iunit,*) event%NUP,event%IDPRUP,event%XWGTUP,event%SCALUP,event%AQEDUP,event%AQCDUP
+    allocate(event%IDUP(event%NUP),event%ISTUP(event%NUP),event%MOTHUP(2,event%NUP)&
+         &,event%ICOLUP(2,event%NUP),event%PUP(5,event%NUP),event%VTIMUP(event%NUP)&
+         &,event%SPINUP(event%NUP),event%col_order(event%NUP))
+    do i=1,event%NUP
+       read(iunit,*) event%IDUP(I),event%ISTUP(I),event%MOTHUP(1,I),event%MOTHUP(2,I), &
+            event%ICOLUP(1,I),event%ICOLUP(2,I),&
+            event%PUP(1,I),event%PUP(2,I),event%PUP(3,I),event%PUP(4,I),event%PUP(5,I),&
+            event%VTIMUP(I),event%SPINUP(I)
     enddo
-    call map_to_canonical_form()
-    read (iunit,*,err=99,end=99) dummy
-    return
-99  done=.true.
+    read(iunit,'(a)') string
+    read(string(7:),*) event%col_order(1:event%NUP)
+    read(iunit,'(a)') string
+    read(string(9:),*) event%overwgt(1:3)
+
+!!$    read (iunit,*,err=99,end=99) next,evt_wgt!,wgt,amp2,weight
+!!$    read (iunit,*,err=99,end=99) helicity(1:next)
+!!$    read (iunit,*,err=99,end=99) col_order(1:next)
+!!$    do i=1,next
+!!$       read (iunit,*,err=99,end=99) iPDG(i),momenta(1:3,i),momenta(0,i)
+!!$    enddo
+    call map_to_canonical_form(event)
+    read (iunit,'(a)') string  ! </event>-tag
   end subroutine read_event
 
 
@@ -269,29 +308,33 @@ contains
   end subroutine sort_with_mapping
 
   
-  subroutine map_to_canonical_form()
+  subroutine map_to_canonical_form(event)
     ! cross the two initial state particle PDGs, order according to
     ! the PDG value, (and reflip the two initial states again)
-    use rw_events
     implicit none
+    type(lhef_event) :: event
     integer,dimension(next) :: mapping
     real(kind=8),dimension(0:3,next) :: p_cross
     integer :: i,iproc
-    part(1:next,1)=iPDG(1:next)
+    next=event%NUP
+    part(1:next,1)=event%IDUP(1:next)
     if (.not.use_only_canonical_form) then
        ! do no use the mapping to canonical form, but reweight the
        ! events as they are.
-       hel(1:next)=helicity(1:next)
-       o(1:next,1)=col_order(1:next)
-       p(0:3,1:next)=momenta(0:3,1:next)
+       hel(1:next)=nint(event%SPINUP(1:next))
+       o(1:next,1)=event%col_order(1:next)
+       p(1:3,1:next)=event%PUP(1:3,1:next)
+       p(0,1:next)=event%PUP(4,1:next)
     else
        ! Map to canonical from to reduce the number of matrix elements
        ! to initialise.
        ! cross the initial state
        part(1,1)=phys_model%get_antipart(part(1,1))
        part(2,1)=phys_model%get_antipart(part(2,1))
-       p_cross(0:3,1:2)=-momenta(0:3,1:2)
-       p_cross(0:3,3:next)=momenta(0:3,3:next)
+       p_cross(1:3,1:2)=-event%PUP(1:3,1:2)
+       p_cross(0,1:2)=-event%PUP(4,1:2)
+       p_cross(1:3,3:next)=event%PUP(1:3,3:next)
+       p_cross(0,3:next)=event%PUP(4,3:next)
        ! determing the mapping
        call sort_with_mapping(next,part(1,1),mapping)
        ! cross the initial state
@@ -304,8 +347,8 @@ contains
           else
              p(0:3,i)=p_cross(0:3,mapping(i))
           endif
-          hel(i)=helicity(mapping(i))
-          o(i,1)=col_order(mapping(i)) ! this is not correct, but isn't used
+          hel(i)=nint(event%SPINUP(mapping(i)))
+          o(i,1)=event%col_order(mapping(i)) ! this is not correct, but isn't used
        enddo
        ! Convert to 'unique flavour configuration' (if available)
        if (unique_nproc.eq.0) return
@@ -326,26 +369,51 @@ contains
     endif
   end subroutine map_to_canonical_form
 
-  subroutine write_event(iunit)
-    use rw_events
+  subroutine write_event(iunit,event)
     use overall
     implicit none
-    integer :: i,iunit
-    rwgt_NLC=matrix2(2)/matrix2(1)
-    rwgt_full=matrix2(3)/matrix2(1)
-    write (iunit,*) '<event>'
-    write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
-    xsec=xsec+evt_wgt*rwgt_full
-    nevt=nevt+1
-    write (iunit,'(100i3)') helicity(1:next)
-    write (iunit,'(100i3)') col_order(1:next)
-    write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)
-    write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
-    do i=1,next
-       write (iunit,*) iPDG(i),momenta(1:3,i),momenta(0,i)
+    type(lhef_event),intent(in) :: event
+    integer :: iunit
+    real(kind=8) :: rwgt_NLC,rwgt_full
+    rwgt_NLC=event%matrix2(2)/event%matrix2(1)
+    rwgt_full=event%matrix2(3)/event%matrix2(1)
+    write (iunit,'(a)') '<event>'
+    write(iunit,503)event%NUP,event%IDPRUP,event%XWGTUP*rwgt_full,event%SCALUP,event%AQEDUP,event%AQCDUP
+    do i=1,event%NUP
+       write(iunit,504)event%IDUP(I),event%ISTUP(I),event%MOTHUP(1,I),event%MOTHUP(2,I), &
+            event%ICOLUP(1,I),event%ICOLUP(2,I),&
+            event%PUP(1,I),event%PUP(2,I),event%PUP(3,I),event%PUP(4,I),event%PUP(5,I),&
+            event%VTIMUP(I),event%SPINUP(I)
     enddo
-    write (iunit,*) '</event>'
+    write (iunit,506) '#color',event%col_order(1:event%NUP)
+    write (iunit,505) '#overwgt',event%overwgt(1:3)
+    write (iunit,505) '#color_exp',event%XWGTUP,event%XWGTUP*rwgt_NLC,event%XWGTUP*rwgt_full
+    write (iunit,'(a)') '</event>'
+503 format(1x,i2,1x,i6,4(1x,e14.8))
+504 format(1x,i8,1x,i2,4(1x,i4),5(1x,e24.17),2(1x,e10.4))
+505 format(1x,a,3(1x,e14.8))
+506 format(1x,a,100i3)
   end subroutine write_event
+  
+!!$  subroutine write_event(iunit)
+!!$    use overall
+!!$    implicit none
+!!$    integer :: i,iunit
+!!$    rwgt_NLC=matrix2(2)/matrix2(1)
+!!$    rwgt_full=matrix2(3)/matrix2(1)
+!!$    write (iunit,*) '<event>'
+!!$    write (iunit,*) next,evt_wgt*rwgt_full!,wgt,matrix2,weight
+!!$    xsec=xsec+evt_wgt*rwgt_full
+!!$    nevt=nevt+1
+!!$    write (iunit,'(100i3)') helicity(1:next)
+!!$    write (iunit,'(100i3)') col_order(1:next)
+!!$    write (iunit,*) rwgt_full,rwgt_NLC!,matrix2(1),matrix2(2),matrix2(3)
+!!$    write (iunit,*) evt_wgt,evt_wgt*rwgt_NLC,evt_wgt*rwgt_full
+!!$    do i=1,next
+!!$       write (iunit,*) iPDG(i),momenta(1:3,i),momenta(0,i)
+!!$    enddo
+!!$    write (iunit,*) '</event>'
+!!$  end subroutine write_event
 
   subroutine get_lepton_info()
     implicit none
@@ -374,5 +442,42 @@ contains
     enddo
   end subroutine get_lepton_info
 
+  subroutine write_init(ounit)
+    use overall
+    implicit none
+    integer,intent(in) :: ounit
+    real(kind=8) :: rwgt_LCtoFC
+    rwgt_LCtoFC=xsec/XSECUP
+    write(ounit,'(a)') '<LesHouchesEvents version="3.0">'
+    write(ounit,'(a)') '<init>'
+    write(ounit,501)IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1)&
+         &,PDFGUP(2),PDFSUP(1),PDFSUP(2),IDWTUP,NPRUP
+    write(ounit,502)xsec,XERRUP*rwgt_LCtoFC,XMAXUP*max_wgt,LPRUP
+    write(ounit,'(a)') trim(generator_string)
+    write(ounit,'(a)') '</init>'
+501 format(2(1x,i6),2(1x,e14.8),2(1x,i2),2(1x,i8),1x,i2,1x,i3)
+502 format(3(1x,e14.8),1x,i6)
+  end subroutine write_init
+
+  subroutine read_init_and_allocate_events(iunit)
+    implicit none
+    integer,intent(in) :: iunit
+    character(len=1024) :: string
+    do
+       read(iunit,'(a)') string
+       if (index(string,"<nevents>").ne.0) then
+          read(string(10:),*) nevents
+       endif
+       if (index(string,"<init>").ne.0) then
+          read(iunit,*) IDBMUP(1),IDBMUP(2),EBMUP(1),EBMUP(2),PDFGUP(1) &
+               &,PDFGUP(2),PDFSUP(1),PDFSUP(2),IDWTUP,NPRUP
+          read(iunit,*) XSECUP,XERRUP,XMAXUP,LPRUP
+          read(iunit,'(a)') generator_string
+       endif
+       if (index(string,"</init>").ne.0) exit
+    enddo
+    allocate(events(nevents))
+  end subroutine read_init_and_allocate_events
+  
 
 end program matrix_reweight

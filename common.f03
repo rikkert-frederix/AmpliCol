@@ -4,8 +4,8 @@ module common
   implicit none
   ! Model and process parameters
   type(physics_model) :: phys_model
-  real(kind=8),parameter  :: alphaS=0.119d0,alphaEW=0.007546771114d0
-  real(kind=8) :: sqrts
+  real(kind=8),parameter :: alphaS=0.119d0,alphaEW=0.007546771114d0
+  real(kind=8),parameter :: sqrts=14000.d0
 
   ! timing
   real(kind=4) :: tBefore,tAfter,tTot_A,tTot_B
