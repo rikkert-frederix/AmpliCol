@@ -438,8 +438,8 @@ contains
     write (iunit,'(a)') '</event>'
 503 format(1x,i2,1x,i6,4(1x,e14.8))
 504 format(1x,i8,1x,i2,4(1x,i4),5(1x,e24.17),2(1x,e10.4))
-505 format(1x,a,3(1x,e14.8))
-506 format(1x,a,100i3)
+505 format(a,3(1x,e14.8))
+506 format(a,100i3)
   end subroutine write_event
 
   subroutine get_lepton_info()

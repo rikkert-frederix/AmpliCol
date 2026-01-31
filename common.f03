@@ -14,7 +14,7 @@ module common
   ! 3: ren/fac scale = min(jet-pT)
   ! 4: ren/fac scale = M(non-jet system)
   integer,parameter :: scale_choice=2
-  logical,parameter :: use_lhapdf=.true. ! (if false, use NNPDF_2.3_nlo_qed)
+  logical,parameter :: use_lhapdf=.true. ! (if false, use internal NNPDF_2.3_nlo_qed)
 !!$  character(len=128),parameter :: lhapdfset='NNPDF31_lo_as_0130'
   character(len=128),parameter :: lhapdfset='NNPDF23_nlo_as_0119_qed'
 

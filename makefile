@@ -41,6 +41,9 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: PDF/%.f
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
+%.o: PDF/%.cc
+	$(CXX) $(CXXFLAGS) -c -I. -IPDF $< -std=c++11 -stdlib=libc++
+
 %.o: PDF/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
@@ -82,7 +85,8 @@ LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
-helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o 
+helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
+pdf_lhapdf62.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o matrix_reweight_QCD.o ranmar.o
@@ -98,7 +102,7 @@ amplitude_QCD.o matrix_combine_QCD.o
 # ----------------------------------------------------------------------
 
 matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++ -lc++
 
 matrix_integrate_QCD_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \

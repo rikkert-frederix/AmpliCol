@@ -45,6 +45,7 @@ program matrix_integrate_QCD
      if (use_lhapdf) then
         call InitPDFsetbyname(trim(adjustl(lhapdfset)))
         call initPDF(0)
+        call setlhaparm('SILENT')
      else
         call PDF_initialise
      endif
