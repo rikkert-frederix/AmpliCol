@@ -21,7 +21,7 @@ contains
     NUP=pgl%next
     IDPRUP=1
     XWGTUP=sign(wgt,evt_sign)
-    SCALUP=91.188d0
+    SCALUP=scale_shower
     AQEDUP=alphaEW
     AQCDUP=alphaS
     do i=1,pgl%next
