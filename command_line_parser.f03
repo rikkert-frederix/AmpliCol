@@ -18,7 +18,7 @@ contains
     ncalls0=10000
     PS_choice=1
     seed=0
-    itmax=48
+    itmax=128
     library='none'
     tag=''
     read_momenta=.false.
@@ -66,7 +66,7 @@ contains
        write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use "// &
             "-- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel."
        write (*,'(a)') "  --seed=[X],       -s=[X]  : The random number seed to use (default is read from randinit file)."
-       write (*,'(a)') "  --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 48)."
+       write (*,'(a)') "  --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 128)."
        write (*,'(a)') "  --library=[X],    -l=[X]  : To create or use a library for the amplitudes, "// &
             "set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make "// &
             "matrix_integrate_library' after a library has been created). Default is 'none'."
