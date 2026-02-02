@@ -80,7 +80,7 @@ $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
 # 4. Main program object lists
 # ----------------------------------------------------------------------
 
-FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o \
+FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
 feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
@@ -111,31 +111,24 @@ matrix_integrate_QCD_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 matrix_reweight_QCD: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
 
-matrix_unweight_QCD: $(FILES_M_UNWGT_QCD)
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_UNWGT_QCD) `lhapdf-config --ldflags` -lstdc++
-
-matrix_combine_QCD: $(FILES_M_COMBINE_QCD)
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_COMBINE_QCD)
-
 # ----------------------------------------------------------------------
 # 6. Manual dependency rules
 # ----------------------------------------------------------------------
 
 matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o particles.o
-ranmar.o : mint_module.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
 haag.o : phase_space.o
 amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o \
+matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o mg_checks.o scales.o
 common.o : particles.o simple_integrator.o
-handling_events.o : common.o mint_module.o handling_processes.o simple_integrator.o
-read_process_file.o : mint_module.o phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
-multichannel.o : handling_processes.o mint_module.o math_functions.o simple_integrator.o
+handling_events.o : common.o handling_processes.o simple_integrator.o
+read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
+multichannel.o : handling_processes.o math_functions.o simple_integrator.o
 handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
