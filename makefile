@@ -47,14 +47,14 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: PDF/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
-%.o: SimpleMint/%.f
-	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: PDF/%.f03
+	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
-%.o: SimpleMint/%.f90
-	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: SimpleIntegrator/%.f
+	$(FC) $(FFLAGS) -c -I. -ISimpleIntegrator $<
 
-%.o: SimpleMint/%.f03
-	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: SimpleIntegrator/%.f03
+	$(FC) $(FFLAGS) -c -I. -ISimpleIntegrator $<
 
 %.o: PhaseSpace/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
