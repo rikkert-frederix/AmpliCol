@@ -10,14 +10,14 @@ FFLAGS = -ffast-math -O3
 # ----------------------------------------------------------------------
 
 # All amplitude source files: amp<GROUP>_<ID>_lib.f03
-AMPSRC := $(shell find library/ -name 'amp*_lib.f03')
+AMPSRC := $(shell find Library/ -name 'amp*_lib.f03')
 
 # All amplitude object files
 AMPOBJ := $(notdir $(AMPSRC:.f03=.o))
 
 # Explicit rule so Make knows how to build amplitude objects
-$(AMPOBJ): %.o : library/%.f03
-	$(FC) $(FFLAGS) -fPIC -c -I. -Ilibrary $<
+$(AMPOBJ): %.o : Library/%.f03
+	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
 # Extract GROUP names (amp32, amp81, amp252, ...)
 AMPGROUPS := $(sort $(foreach f,$(AMPOBJ),$(word 1,$(subst _, ,$(notdir $(basename $f))))))
@@ -62,8 +62,8 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: PhaseSpace/%.f03
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 
-%.o: library/%.f03
-	$(FC) $(FFLAGS) -fPIC -c -I. -Ilibrary $<
+%.o: Library/%.f03
+	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
 # ----------------------------------------------------------------------
 # 3. Build one shared library per amplitude group
@@ -71,7 +71,7 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 
 define one_lib_template
 lib$(1).so: $(filter $(1)_%_lib.o,$(AMPOBJ))
-	$$(FC) -shared -o $$@ $$^
+	$$(FC) feynmanrules.o -shared -o $$@ $$^
 endef
 
 $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
@@ -91,12 +91,6 @@ pdf_lhapdf62.o
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o matrix_reweight_QCD.o ranmar.o
 
-FILES_M_UNWGT_QCD = color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_unweight_QCD.o
-
-FILES_M_COMBINE_QCD = color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_combine_QCD.o
-
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -106,7 +100,7 @@ matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) dummy.o
 
 matrix_integrate_QCD_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
-	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
+	`lhapdf-config --ldflags` -lstdc++ -lc++ -Wl,-rpath,$(PWD)
 
 matrix_reweight_QCD: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
@@ -143,8 +137,8 @@ amplib.o: $(notdir $(AMPSRC:.f03=.o))
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod library/amp*.f03 library/amp*.data library/amplitudes.bin lib*.so
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes.bin lib*.so
 
 cleanlib:
 	rm -f libamp*.so amp*lib.o amp*lib.mod
-	$(FC) $(FFLAGS) -c library/dummy.f03
+	$(FC) $(FFLAGS) -c Library/dummy.f03
