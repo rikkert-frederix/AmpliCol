@@ -1,4 +1,4 @@
-.DEFAULT_GOAL := matrix_integrate_QCD
+.DEFAULT_GOAL := amplicol_generate
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -82,40 +82,40 @@ $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
 
 FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
-feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o \
+feynmanrules.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
 helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
 pdf_lhapdf62.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_reweight_QCD.o ranmar.o
+amplitude_QCD.o amplicol_reweight.o ranmar.o
 
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
 
-matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) dummy.o
+amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++ -lc++
 
-matrix_integrate_QCD_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
-	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
+amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
+	$(FC) $(FFLAGS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
 	`lhapdf-config --ldflags` -lstdc++ -lc++ -Wl,-rpath,$(PWD)
 
-matrix_reweight_QCD: $(FILES_M_RWGT_QCD)
+amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
 
 # ----------------------------------------------------------------------
 # 6. Manual dependency rules
 # ----------------------------------------------------------------------
 
-matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o particles.o
+amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
 haag.o : phase_space.o
 amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
+amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o mg_checks.o scales.o
