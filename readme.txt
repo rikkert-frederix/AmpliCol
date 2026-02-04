@@ -5,13 +5,15 @@
 * Please cite arXiv:2601.19483 *
 ********************************
 
-There are three steps in running the code: process generation, event
-generation and reweighting.
+There are three steps in running the code: 
+1. process generation, 
+2. event generation,
+3. reweighting.
 
 
 1. Process generation
 
-The goal is to create a list of subprocess, integration channels, and
+The goal is to create a list of subprocesses, integration channels, and
 multiplication factors that the integrator code can use to generate
 events. The code is a python script, 'process_list.py', that takes a
 process as an argument, and creates a 'processes.txt' file with the
@@ -82,15 +84,15 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --seed=[X],       -s=[X]  : The random number seed to use (default is read from randinit file).
   --itmax=[X],      -i=[X]  : The maximum number of iterations to use (detault is 128).
   --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make amplicol_generate_library' after a library has been created). Default is 'none'.
-  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'.
-  --me_test=[X],    -mt=[X] : Perform ME level test against MG with [X] points tested (single PS kinematics)
+  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
+  --me_test=[X],    -mt=[X] : Perform ME-level test against MG with [X] points tested (single PS kinematics)
 *****************************
 
 Most important are the '--nevents=X' to set the number of events to
 generate, '--seed=X' to set the random seed.
 
 For the number of events, it is best to require somewhere between
-100000-1000000 events per run. Requiring to few, and then combining
+100000-1000000 events per run. Requiring too few, and then combining
 many separate runs together might undersample some phase-space regions
 (there is no 'grid-pack' mode), while requesting too many events in
 one go might require too much memory, since a large fraction of the
@@ -105,7 +107,7 @@ extensive logfile is provided in the same location. Using the
 with the tag 'X_'.
 
 Finally, it might be useful to use the '--library=X' option. This can
-speed-up the event generation at the cost of a longer compilation
+speed up the event generation at the cost of a longer compilation
 time. Running the amplicol_generate code with '--library=create' will
 not generate events, but rather the code will create a bunch of
 fortran source files (in the ./Library/ directory) with all the matrix
@@ -113,7 +115,7 @@ elements relevant for this processes written to disk. These can then
 be compiled (with optimisation flags) into a set of process libraries
 that can be linked to the amplicol_generate code, using 'make
 amplicol_generate_library'; you might want to use '-jX', with X the
-number of CPU cores available to speed-up the compilation. The
+number of CPU cores available to speed up the compilation. The
 resulting code can be significantly faster, but compilation time is
 non-negligible, so only relevant when generating many events. The
 usage in this case would be:
@@ -174,7 +176,7 @@ sample size ratio is typically well over 98%), except when
 post-processing (parton showering, dectector simulation, etc.) is
 extremely time-consuming.
 
-By default, the produced LHEF also contains some lines starting the
+By default, the produced LHEF also contains some lines starting with
 '#' that contain some information for debugging. The writing of these
 lines is skipped by adding the '--remove_comments' option to the
 execution of the amplicol_reweight code.
