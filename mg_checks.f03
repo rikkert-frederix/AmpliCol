@@ -22,7 +22,7 @@ contains
    real(kind=8),dimension(0:3) :: dum
    character(len=50) :: filename
    integer :: nlines
-   write(filename, '("ME_checks/momenta_", I0, "_",I0,".txt")') ichan,iint
+   write(filename, '("Utilities/ME_checks/momenta_", I0, "_",I0,".txt")') ichan,iint
    open(20,file=trim(filename),status="old")
    do i=1,n
         read(20,*) dum
@@ -42,7 +42,7 @@ contains
    integer,intent(in) :: iamp,igroup
    real(kind=8),dimension(n,0:3),intent(out) :: p_in
    character(len=50) :: filename
-   write(filename, '("ME_checks/momenta_", I0, "_",I0,".txt")') igroup,iamp
+   write(filename, '("Utilities/ME_checks/momenta_", I0, "_",I0,".txt")') igroup,iamp
    open(40,file=trim(filename),status="old")
    do i=1,n
         read(40,*) p_in(i,:)
@@ -58,7 +58,7 @@ contains
    integer :: status
    character(len=100) :: command
    integer :: i
-   write(command, '(A,I0)') "./ME_checks/mg_wrapper.sh ", igroup
+   write(command, '(A,I0)') "./Utilities/ME_checks/mg_wrapper.sh ", igroup
    write(command(len_trim(command)+1:), '(1X,I0)') iamp
    do i = 1, n
         write(command(len_trim(command)+1:), '(1X,I0)') list(i)
