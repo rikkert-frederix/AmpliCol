@@ -5,6 +5,19 @@ FC = gfortran
 #FFLAGS = -ffast-math -O3 -mcmodel=large
 FFLAGS = -ffast-math -O3
 
+CXX ?= g++
+
+ifeq ($(shell $(CXX) --version | grep -c clang),1)
+  STDLIB_FLAG = -stdlib=libc++
+  STDLIB_LDLIBS   = -lc++
+else
+  STDLIB_FLAG =
+  STDLIB_LDLIBS   =
+endif
+
+LHAPDF_CFLAGS  := $(shell lhapdf-config --cflags)
+
+
 # ----------------------------------------------------------------------
 # 1. Detect amplitude sources and group them
 # ----------------------------------------------------------------------
@@ -42,7 +55,7 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
 %.o: PDF/%.cc
-	$(CXX) $(CXXFLAGS) -c -I. -IPDF $< -std=c++11 -stdlib=libc++
+	$(CXX) $(CXXFLAGS) $(STDLIB_FLAG) $(LHAPDF_CFLAGS)  -c -I. -IPDF $< -std=c++11
 
 %.o: PDF/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
@@ -96,11 +109,11 @@ amplitude_QCD.o amplicol_reweight.o ranmar.o
 # ----------------------------------------------------------------------
 
 amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++ -lc++
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o `lhapdf-config --ldflags` -lstdc++ 
 
 amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
-	$(FC) $(FFLAGS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
-	`lhapdf-config --ldflags` -lstdc++ -lc++ -Wl,-rpath,$(PWD)
+	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
+	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
