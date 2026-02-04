@@ -28,14 +28,29 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     real(kind=8),intent(inout),dimension(*) :: val,val_abs
     integer,intent(in) :: iint
-    integer :: iproc,ip,iip,ip_start,ip_end
-    real(kind=8) :: xmu_fac
+    integer :: iproc,ip,iip,ip_start,ip_end,iset,i
     real(kind=8), dimension(-6:7,2) :: PDF
     if (include_pdf) then
        ! Include the PDFs
-       xmu_fac=91.188d0 ! factorisation scale
-       call PDF_eval(1,pgl%ipdgs(-6,1),pgl%ps(1)%xbjrk(1),xmu_fac,PDF(-6,1))
-       call PDF_eval(1,pgl%ipdgs(-6,2),pgl%ps(1)%xbjrk(2),xmu_fac,PDF(-6,2))
+       if (use_lhapdf) then
+! The following commented-out section would evolve only the necessary partons
+!!$          call getnset(iset)
+!!$          do i=-6,7
+!!$             if (.not.pgl%ipdgs(i,1)) cycle
+!!$             call evolvepartm(iset,i,pgl%ps(1)%xbjrk(1),scale_fac,PDF(i,1))
+!!$          enddo
+!!$          do i=-6,7
+!!$             if (.not.pgl%ipdgs(i,2)) cycle
+!!$             call evolvepartm(iset,i,pgl%ps(1)%xbjrk(2),scale_fac,PDF(i,2))
+!!$          enddo
+          call evolvePDF(pgl%ps(1)%xbjrk(1),scale_fac,PDF(-6,1))
+          call evolvePDF(pgl%ps(1)%xbjrk(2),scale_fac,PDF(-6,2))
+          PDF(:,1)=PDF(:,1)/pgl%ps(1)%xbjrk(1)
+          PDF(:,2)=PDF(:,2)/pgl%ps(1)%xbjrk(2)
+       else
+          call PDF_eval(1,pgl%ipdgs(-6,1),pgl%ps(1)%xbjrk(1),scale_fac,PDF(-6,1))
+          call PDF_eval(1,pgl%ipdgs(-6,2),pgl%ps(1)%xbjrk(2),scale_fac,PDF(-6,2))
+       endif
     endif
     if (iint.gt.0) then
        ip_start=iint

@@ -398,10 +398,10 @@ def CombineResults(results):
                 
 def ParseArgument():
     parser = argparse.ArgumentParser(description="Generate the full list of processes, ordered by phase-space order")
-    parser.add_argument("process_string", type=str, help="Process to consider (e.g., 'p p > w+ z 4j')")
+    parser.add_argument("process_string", type=str, help="Process to consider (e.g., 'p p > w+ z 4j', (including quotation marks))")
     parser.add_argument("-FS", "--flavour_scheme", type=int, choices=range(1, 6), metavar="[1-5]",
                         help="Switch to N-flavor scheme (NFS), where N is 1-5 (default=5)")
-    parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to 3 quark lines")
+    parser.add_argument("-3", "--include_3qqbar", action='store_true', help="Include processes with up to three quark lines (instead of just two).")
     parser.add_argument("-s", "--serial", action='store_true', help="Do not use multi-processes (parallel execution). Useful for debugging.")
     parser.add_argument("-cc", "--include_cc", action='store_true', help="Include flavour-changing processes")
     parser.add_argument("-res", "--resonance", action='store_true', help="Treat the lepton pair as a resonance")

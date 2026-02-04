@@ -2950,7 +2950,7 @@ contains
     real(kind=8),dimension(2,this%n_vert,0:24) :: coupl
     write(tmp,*) igroup
     write(line,*) iint
-    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
+    line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
     open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
     write(iunit) p
     write(iunit) this%amps
@@ -2958,7 +2958,7 @@ contains
     
     write(tmp,*) igroup
     write(line,*) iint
-    line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
+    line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
     open(file=line,unit=iunit,status='unknown')
     write(line,*) iint
     write(iunit,*) 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'

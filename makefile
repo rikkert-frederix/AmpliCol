@@ -1,22 +1,36 @@
-.DEFAULT_GOAL := matrix_integrate_QCD
+.DEFAULT_GOAL := amplicol_generate
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
-FFLAGS = -ffast-math -O3 -mcmodel=large
+#FFLAGS = -ffast-math -O3 -mcmodel=large
+FFLAGS = -ffast-math -O3
+
+CXX ?= g++
+
+ifeq ($(shell $(CXX) --version | grep -c clang),1)
+  STDLIB_FLAG = -stdlib=libc++
+  STDLIB_LDLIBS   = -lc++
+else
+  STDLIB_FLAG =
+  STDLIB_LDLIBS   =
+endif
+
+LHAPDF_CFLAGS  := $(shell lhapdf-config --cflags)
+
 
 # ----------------------------------------------------------------------
 # 1. Detect amplitude sources and group them
 # ----------------------------------------------------------------------
 
 # All amplitude source files: amp<GROUP>_<ID>_lib.f03
-AMPSRC := $(shell find library/ -name 'amp*_lib.f03')
+AMPSRC := $(shell find Library/ -name 'amp*_lib.f03')
 
 # All amplitude object files
 AMPOBJ := $(notdir $(AMPSRC:.f03=.o))
 
 # Explicit rule so Make knows how to build amplitude objects
-$(AMPOBJ): %.o : library/%.f03
-	$(FC) $(FFLAGS) -fPIC -c -I. -Ilibrary $<
+$(AMPOBJ): %.o : Library/%.f03
+	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
 # Extract GROUP names (amp32, amp81, amp252, ...)
 AMPGROUPS := $(sort $(foreach f,$(AMPOBJ),$(word 1,$(subst _, ,$(notdir $(basename $f))))))
@@ -40,17 +54,20 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: PDF/%.f
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
+%.o: PDF/%.cc
+	$(CXX) $(CXXFLAGS) $(STDLIB_FLAG) $(LHAPDF_CFLAGS)  -c -I. -IPDF $< -std=c++11
+
 %.o: PDF/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
-%.o: SimpleMint/%.f
-	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: PDF/%.f03
+	$(FC) $(FFLAGS) -c -I. -IPDF $<
 
-%.o: SimpleMint/%.f90
-	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: SimpleIntegrator/%.f
+	$(FC) $(FFLAGS) -c -I. -ISimpleIntegrator $<
 
-%.o: SimpleMint/%.f03
-	$(FC) $(FFLAGS) -c -I. -ISimpleMint $<
+%.o: SimpleIntegrator/%.f03
+	$(FC) $(FFLAGS) -c -I. -ISimpleIntegrator $<
 
 %.o: PhaseSpace/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
@@ -58,8 +75,8 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: PhaseSpace/%.f03
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 
-%.o: library/%.f03
-	$(FC) $(FFLAGS) -fPIC -c -I. -Ilibrary $<
+%.o: Library/%.f03
+	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
 # ----------------------------------------------------------------------
 # 3. Build one shared library per amplitude group
@@ -67,7 +84,7 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 
 define one_lib_template
 lib$(1).so: $(filter $(1)_%_lib.o,$(AMPOBJ))
-	$$(FC) -shared -o $$@ $$^
+	$$(FC) feynmanrules.o -shared -o $$@ $$^
 endef
 
 $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
@@ -76,67 +93,56 @@ $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
 # 4. Main program object lists
 # ----------------------------------------------------------------------
 
-FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o mint_module.o ranmar.o HwU.o phase_space.o \
+FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
-feynmanrules.o particles.o amplitude_QCD.o matrix_integrate_QCD.o common.o \
+feynmanrules.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
-helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o
+helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
+pdf_lhapdf62.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_reweight_QCD.o
-
-FILES_M_UNWGT_QCD = color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_unweight_QCD.o
-
-FILES_M_COMBINE_QCD = color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_combine_QCD.o
+amplitude_QCD.o amplicol_reweight.o ranmar.o
 
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
 
-matrix_integrate_QCD: cleanlib $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` -lstdc++
+amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o `lhapdf-config --ldflags` -lstdc++ 
 
-matrix_integrate_QCD_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
-	$(FC) $(FFLAGS) -o matrix_integrate_QCD $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
+amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
+	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
 	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
 
-matrix_reweight_QCD: $(FILES_M_RWGT_QCD)
+amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
-
-matrix_unweight_QCD: $(FILES_M_UNWGT_QCD)
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_UNWGT_QCD) `lhapdf-config --ldflags` -lstdc++
-
-matrix_combine_QCD: $(FILES_M_COMBINE_QCD)
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_COMBINE_QCD)
 
 # ----------------------------------------------------------------------
 # 6. Manual dependency rules
 # ----------------------------------------------------------------------
 
-matrix_reweight_QCD.o : amplitude_QCD.o math_functions.o particles.o
-ranmar.o : mint_module.o
+amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
 haag.o : phase_space.o
 amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o particles.o
-matrix_integrate_QCD.o : amplitude_QCD.o phase_space_gen23.o mint_module.o common.o math_functions.o \
+amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
-	command_line_parser.o mg_checks.o
+	command_line_parser.o mg_checks.o scales.o
 common.o : particles.o simple_integrator.o
-handling_events.o : common.o mint_module.o handling_processes.o simple_integrator.o
-read_process_file.o : mint_module.o phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
-multichannel.o : handling_processes.o mint_module.o math_functions.o simple_integrator.o
+handling_events.o : common.o handling_processes.o simple_integrator.o
+read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
+multichannel.o : handling_processes.o math_functions.o simple_integrator.o
 handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
 simple_integrator.o : helper_modules.o
 amplitude_library.o : handling_processes.o read_process_file.o
 mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.o
+scales.o : common.o particles.o cuts.o
 amplib.o: $(notdir $(AMPSRC:.f03=.o))
 
 # ----------------------------------------------------------------------
@@ -144,8 +150,8 @@ amplib.o: $(notdir $(AMPSRC:.f03=.o))
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod library/amp*.f03 library/amp*.data library/amplitudes.bin lib*.so
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes.bin lib*.so
 
 cleanlib:
 	rm -f libamp*.so amp*lib.o amp*lib.mod
-	$(FC) $(FFLAGS) -c library/dummy.f03
+	$(FC) $(FFLAGS) -c Library/dummy.f03

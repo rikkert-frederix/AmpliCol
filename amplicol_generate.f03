@@ -1,5 +1,5 @@
 
-program matrix_integrate_QCD
+program amplicol_generate
   use common
 !  use mint_module
   use phase_space_base
@@ -41,10 +41,15 @@ program matrix_integrate_QCD
 
   call get_run_arguments()
   
-  ! setting energy
-  sqrts=14000.d0
-
-  if (include_pdf) call PDF_initialise
+  if (include_pdf) then
+     if (use_lhapdf) then
+        call InitPDFsetbyname(trim(adjustl(lhapdfset)))
+        call initPDF(0)
+        call setlhaparm('SILENT')
+     else
+        call PDF_initialise
+     endif
+  endif
   
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
                            80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
@@ -185,7 +190,7 @@ program matrix_integrate_QCD
   
   filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
-  call write_unique_in_file(pgl_unique,unique_map,unique_map_value)
+  call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
   
   allocate(nintegrals(ngroups))
   if (keep_processes_separate) then
@@ -229,6 +234,7 @@ program matrix_integrate_QCD
      call event_update_wgt(11,12,wgts(1,i))
   enddo
   close(11,status='DELETE')
+  write(12,'(a)') '</LesHouchesEvents>'
   close(12)
      
   call cpu_time(tTot_a)
@@ -252,6 +258,7 @@ program matrix_integrate_QCD
 contains
 
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
+    use scales
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
@@ -262,8 +269,8 @@ contains
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real(kind=4) :: tBefore,tAfter
     logical :: done
+    real(kind=8),external :: alphaspdf
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
@@ -327,6 +334,16 @@ contains
         if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
+    ! set scales and update alphaS
+    call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1),scale_ren)
+    scale_fac=scale_ren
+    scale_shower=scale_ren
+    if (use_lhapdf) then
+       alphas=alphaspdf(scale_ren)
+    else
+       alphas=alphas_Q(scale_ren,2,alphas_MZ)
+    endif
+    
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%ps(1)%jac*conv
 
@@ -569,4 +586,4 @@ contains
     endif
   end subroutine get_run_arguments
   
-end program matrix_integrate_QCD
+end program amplicol_generate
