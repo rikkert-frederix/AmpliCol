@@ -219,7 +219,8 @@ contains
 
     if (show_help) then
        write (*,'(a)') ""
-       write (*,'(a)') "Usage: 'amplicol_reweight <event_file> <arguments>', where <event_file> is the leading colour event file to reweight to full colour."
+       write (*,'(a)') "Usage: 'amplicol_reweight <event_file> <arguments>', where"//&
+              " <event_file> is the leading colour event file to reweight to full colour."
        write (*,'(a)') "The code creates an LHEF, '<event_file>.rwgt' containing the full colour events."
        write (*,'(a)') "Possible arguments are"
        write (*,'(a)') ""
