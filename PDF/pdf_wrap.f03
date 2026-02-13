@@ -29,7 +29,7 @@ contains
     real(kind=8),intent(inout),dimension(*) :: val,val_abs
     integer,intent(in) :: iint
     integer :: iproc,ip,iip,ip_start,ip_end,iset,i
-    real(kind=8), dimension(-6:7,2) :: PDF
+    real(kind=8), dimension(-6:7,2) :: PDF=0
     if (include_pdf) then
        ! Include the PDFs
        if (use_lhapdf) then

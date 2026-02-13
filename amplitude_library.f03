@@ -3,9 +3,11 @@ module amplitude_library
   use read_process_file
 contains
   subroutine create_amplitude_lib()
+    use handling_events
     implicit none
     character(len=170) :: tmp,line,filename
-    integer :: igroup,j,iamp
+    integer :: igroup,j,iamp,iproc,ihel,ihel1,iden_iproc
+    integer,dimension(2,pgl(1)%next) :: ICOLUP
     filename='library/amplib.f03'
     open(unit=14,file=filename,status='unknown')
     write(14,*) 'module amp_lib'
@@ -108,6 +110,50 @@ contains
        write(14) size(pgl(igroup)%amp2_hel)
        write(14) size(pgl(igroup)%passed),pgl(igroup)%passed
        write(14) shape(pgl(igroup)%color_orders),pgl(igroup)%color_orders
+    enddo
+    close(14)
+
+    filename='madspace.info'
+    open(unit=14,file=filename,status='unknown')
+    write(14,*) ngroups,'   # number of channels'
+    do igroup=1,ngroups
+       write(14,*) ''
+       write(14,*) '   ',igroup,'   # channel'
+       write(14,*) '   ',pgl(igroup)%phase_space_orders,'   # phase-space order'
+       write(14,*) '   ',pgl(igroup)%nproc,'   # number processes'
+       do iproc=1,pgl(igroup)%nproc
+          write(14,*) '      ',iproc,'   # process'
+          write(14,*) '      ',pgl(igroup)%color_orders(1:pgl(igroup)%next,iproc),'   # colour order'
+          iproc_picked=iproc
+          iproc_iden_picked=1
+          call get_col_info(pgl(igroup),ICOLUP)
+          write(14,*) '      ',ICOLUP(1,:),'   # colour info 1'
+          write(14,*) '      ',ICOLUP(2,:),'   # colour info 2'
+          write(14,*) '      ',pgl(igroup)%multichan%number_of_channels(iproc), &
+               pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc),&
+               '   # number of multi-channels, and the multi-channels'
+          write(14,*) '      ',pgl(igroup)%iden_iproc(iproc),'   # number of identical MEs (up to constant)'
+          do iden_iproc=1,pgl(igroup)%iden_iproc(iproc)
+             write(14,*) '         ',iden_iproc,pgl(igroup)%idenCOandMAPfactor(iden_iproc,iproc),pgl(igroup)%iden_processes(1:pgl(igroup)%next,iden_iproc,iproc),'   # label, multiplicative constant and PDGs for ME'
+          enddo
+          if (keep_processes_separate) then
+             write(14,*) '      ',pgl(igroup)%amps(iproc)%iproc_start(2)-pgl(igroup)%amps(iproc)%iproc_start(1),'   # number of independent helicities'
+             do ihel=pgl(igroup)%amps(iproc)%iproc_start(1),pgl(igroup)%amps(iproc)%iproc_start(2)-1
+                write(14,*) '         ',pgl(igroup)%hel_fac(ihel,iproc),'   # number of identical helicities'
+                do ihel1=1,pgl(igroup)%hel_fac(ihel,iproc)
+                   write(14,*) '            ',pgl(igroup)%amps(iproc)%spins(1:pgl(igroup)%next,ihel1,ihel)
+                enddo
+             enddo
+          else
+             write(14,*) '      ',pgl(igroup)%amps(1)%iproc_start(iproc+1)-pgl(igroup)%amps(1)%iproc_start(iproc),'   # number of independent helicities'
+             do ihel=pgl(igroup)%amps(1)%iproc_start(iproc),pgl(igroup)%amps(1)%iproc_start(iproc+1)-1
+                write(14,*) '         ',pgl(igroup)%hel_fac(ihel,1),'   # number of identical helicities'
+                do ihel1=1,pgl(igroup)%hel_fac(ihel,1)
+                   write(14,*) '            ',pgl(igroup)%amps(1)%spins(1:pgl(igroup)%next,ihel1,ihel)
+                enddo
+             enddo
+          endif
+       enddo
     enddo
     close(14)
   end subroutine create_amplitude_lib

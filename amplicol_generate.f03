@@ -39,154 +39,7 @@ program amplicol_generate
   logical :: create_amplitude_library,use_amplitude_library,read_momenta
   call cpu_time(tTot_B)
 
-  call get_run_arguments()
-  
-  if (include_pdf) then
-     if (use_lhapdf) then
-        call InitPDFsetbyname(trim(adjustl(lhapdfset)))
-        call initPDF(0)
-        call setlhaparm('SILENT')
-     else
-        call PDF_initialise
-     endif
-  endif
-  
-  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
-  call phys_model%init_vert()
-
-  call cpu_time(tBefore)
-  if (use_amplitude_library) then
-     call read_amplitude_lib()
-  else
-     call read_processes_from_file(filename)
-     do i=1,ngroups
-       call setup_optimised_multichannel_weight_computation(pgl(i))
-    enddo
- endif
-  call cpu_time(tAfter)
-  t_Proc_init=t_Proc_init+tAfter-tBefore
-  call date_and_time(date, time, zone)
-  write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
-       date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
-  write (*,*)  'Initialise phase-space groups and amplitudes '//trim(formatted)
-  write (99,*) 'Initialise phase-space groups and amplitudes '//trim(formatted)
-  do igroup=1,ngroups
-     if (pgl(igroup)%nproc.eq.0) cycle
-     ! allocate the amplitudes and the phase-space for each of the integration channels
-     if (PS_choice.eq.1) then
-        allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
-     elseif  (PS_choice.eq.2) then
-        allocate(phase_space_haag :: pgl(igroup)%phase_space)
-     elseif (PS_choice.eq.3) then
-        allocate(phase_space_genpt :: pgl(igroup)%phase_space)
-     elseif (PS_choice.eq.4) then
-        allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
-     endif
-
-     allocate(mass(pgl(igroup)%next))
-     allocate(width(pgl(igroup)%next))
-     do i=1,pgl(igroup)%next
-        mass(i)=phys_model%get_mass(pgl(igroup)%processes(i,1))
-        width(i)=phys_model%get_width(pgl(igroup)%processes(i,1))
-        do iproc=2,pgl(igroup)%nproc
-           if (mass(i).ne.phys_model%get_mass(pgl(igroup)%processes(i,iproc)) .or. &
-                width(i).ne.phys_model%get_width(pgl(igroup)%processes(i,iproc))) then
-              write (*,*) 'masses and widths not compatible among processes'
-              stop 1
-           endif
-        enddo
-     enddo
-     ! Initialise the phase-space parametrisation
-     call cpu_time(tBefore)
-     call setup_cuts_for_each_particle(pgl(igroup),igroup)
-     if (PS_choice.ge.1 .and. PS_choice.le.3) then
-        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
-     elseif (PS_choice.eq.4) then
-        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
-     endif
-     pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
-     allocate(pgl(igroup)%ps(1))
-     allocate(pgl(igroup)%ps(1)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
-     allocate(pgl(igroup)%ps(1)%p(0:3,1:pgl(igroup)%next))
-     call cpu_time(tAfter)
-     t_PS_init=t_PS_init+tAfter-tBefore
-     deallocate(mass)
-     deallocate(width)
-
-     if (use_amplitude_library) cycle
-     
-     call setup_spin(pgl(igroup))
-
-     allocate(pgl(igroup)%iden(pgl(igroup)%nproc))
-     pgl(igroup)%iden(1:pgl(igroup)%nproc)=1
-     call set_final_state_identical_particle_factor(pgl(igroup)) ! updates 'iden()'
-     call set_initial_state_average_factor(pgl(igroup))          ! updates 'iden()'
-
-     if (include_pdf) then
-        call set_ipdgs_for_PDF(pgl(igroup))
-     endif
-
-     ! initialize the amplitudes. This creates the whole tree-structure from
-     ! which the amps%evaluation() can compute the amplitudes for given
-     ! phase-space points.
-     call cpu_time(tBefore)
-     if (keep_processes_separate) then
-        do iamp=1,pgl(igroup)%nproc
-           if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
-           call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
-                pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model,&
-                pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
-           if (read_momenta) then
-                   if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
-                   call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
-                   do i=1,pgl(igroup)%next
-                         pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
-                   enddo
-           endif
-        enddo
-     else
-        call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
-             pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model,&
-             pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
-     endif
-
-     call cpu_time(tAfter)
-     t_amp_init=t_amp_init+tAfter-tBefore
-
-     ! Total number of amplitudes is stored in 'nhel'
-     if (keep_processes_separate) then
-        do iamp=1,pgl(igroup)%nproc
-           pgl(igroup)%nhel(iamp)=pgl(igroup)%amps(iamp)%n_amps
-        enddo
-     else
-        pgl(igroup)%nhel=pgl(igroup)%amps(1)%n_amps
-     endif
-     allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
-
-     call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
-
-     if (keep_processes_separate) then
-        allocate(pgl(igroup)%amp2(1))
-     else
-        allocate(pgl(igroup)%amp2(1:pgl(igroup)%nproc))
-     endif
-
-     ! number of helicities to sum over
-     allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
-     allocate(pgl(igroup)%hel(1:pgl(igroup)%next))
-     if (keep_processes_separate) then
-        allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
-     else
-        allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),1))
-     endif
-     pgl(igroup)%hel_fac=1
-
-  enddo ! loop over phase-space-order groups
-
-  if (use_amplitude_library) call test_lib
+  call amplicol_init()
   
   filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
@@ -257,17 +110,173 @@ program amplicol_generate
   
 contains
 
+  subroutine amplicol_init()
+    implicit none
+    
+    call get_run_arguments()
+
+    if (include_pdf) then
+       if (use_lhapdf) then
+          call InitPDFsetbyname(trim(adjustl(lhapdfset)))
+          call initPDF(0)
+          call setlhaparm('SILENT')
+       else
+          call PDF_initialise
+       endif
+    endif
+
+    call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
+         80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+    call phys_model%init_vert()
+
+    call cpu_time(tBefore)
+    if (use_amplitude_library) then
+       call read_amplitude_lib()
+    else
+       call read_processes_from_file(filename)
+       do i=1,ngroups
+          call setup_optimised_multichannel_weight_computation(pgl(i))
+       enddo
+    endif
+    call cpu_time(tAfter)
+    t_Proc_init=t_Proc_init+tAfter-tBefore
+    call date_and_time(date, time, zone)
+    write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
+         date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
+    write (*,*)  'Initialise phase-space groups and amplitudes '//trim(formatted)
+    write (99,*) 'Initialise phase-space groups and amplitudes '//trim(formatted)
+    do igroup=1,ngroups
+       if (pgl(igroup)%nproc.eq.0) cycle
+       ! allocate the amplitudes and the phase-space for each of the integration channels
+       if (PS_choice.eq.1) then
+          allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
+       elseif  (PS_choice.eq.2) then
+          allocate(phase_space_haag :: pgl(igroup)%phase_space)
+       elseif (PS_choice.eq.3) then
+          allocate(phase_space_genpt :: pgl(igroup)%phase_space)
+       elseif (PS_choice.eq.4) then
+          allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
+       endif
+
+       allocate(mass(pgl(igroup)%next))
+       allocate(width(pgl(igroup)%next))
+       do i=1,pgl(igroup)%next
+          mass(i)=phys_model%get_mass(pgl(igroup)%processes(i,1))
+          width(i)=phys_model%get_width(pgl(igroup)%processes(i,1))
+          do iproc=2,pgl(igroup)%nproc
+             if (mass(i).ne.phys_model%get_mass(pgl(igroup)%processes(i,iproc)) .or. &
+                  width(i).ne.phys_model%get_width(pgl(igroup)%processes(i,iproc))) then
+                write (*,*) 'masses and widths not compatible among processes'
+                stop 1
+             endif
+          enddo
+       enddo
+       ! Initialise the phase-space parametrisation
+       call cpu_time(tBefore)
+       call setup_cuts_for_each_particle(pgl(igroup),igroup)
+       if (PS_choice.ge.1 .and. PS_choice.le.3) then
+          call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
+               pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
+       elseif (PS_choice.eq.4) then
+          call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
+               pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
+       endif
+       pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
+       allocate(pgl(igroup)%ps(1))
+       allocate(pgl(igroup)%ps(1)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
+       allocate(pgl(igroup)%ps(1)%p(0:3,1:pgl(igroup)%next))
+       call cpu_time(tAfter)
+       t_PS_init=t_PS_init+tAfter-tBefore
+       deallocate(mass)
+       deallocate(width)
+
+       if (use_amplitude_library) cycle
+
+       call setup_spin(pgl(igroup))
+
+       allocate(pgl(igroup)%iden(pgl(igroup)%nproc))
+       pgl(igroup)%iden(1:pgl(igroup)%nproc)=1
+       call set_final_state_identical_particle_factor(pgl(igroup)) ! updates 'iden()'
+       call set_initial_state_average_factor(pgl(igroup))          ! updates 'iden()'
+
+       if (include_pdf) then
+          call set_ipdgs_for_PDF(pgl(igroup))
+       endif
+
+       ! initialize the amplitudes. This creates the whole tree-structure from
+       ! which the amps%evaluation() can compute the amplitudes for given
+       ! phase-space points.
+       call cpu_time(tBefore)
+       if (keep_processes_separate) then
+          do iamp=1,pgl(igroup)%nproc
+             if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
+             call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
+                  pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model,&
+                  pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
+             if (read_momenta) then
+                if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
+                call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
+                do i=1,pgl(igroup)%next
+                   pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
+                enddo
+             endif
+          enddo
+       else
+          call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
+               pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model,&
+               pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
+       endif
+
+       call cpu_time(tAfter)
+       t_amp_init=t_amp_init+tAfter-tBefore
+
+       ! Total number of amplitudes is stored in 'nhel'
+       if (keep_processes_separate) then
+          do iamp=1,pgl(igroup)%nproc
+             pgl(igroup)%nhel(iamp)=pgl(igroup)%amps(iamp)%n_amps
+          enddo
+       else
+          pgl(igroup)%nhel=pgl(igroup)%amps(1)%n_amps
+       endif
+       allocate(pgl(igroup)%col_fac(pgl(igroup)%nproc))
+
+       call compute_LC_colour_factor(pgl(igroup))  ! updates 'col_fac()'
+
+       if (keep_processes_separate) then
+          allocate(pgl(igroup)%amp2(1))
+       else
+          allocate(pgl(igroup)%amp2(1:pgl(igroup)%nproc))
+       endif
+
+       ! number of helicities to sum over
+       allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
+       allocate(pgl(igroup)%hel(1:pgl(igroup)%next))
+       if (keep_processes_separate) then
+          allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
+       else
+          allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),1))
+       endif
+       pgl(igroup)%hel_fac=1
+
+    enddo ! loop over phase-space-order groups
+
+    if (use_amplitude_library) call test_lib
+
+  end subroutine amplicol_init
+
+    
+  
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
-    use scales
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
     real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
-    real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
-    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc
+    real(kind=8),dimension(:),allocatable :: val,val_abs
+    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight,wgt
+    integer :: ih
+    integer,dimension(pgl(ichan)%nproc) :: idums
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     logical :: done
     real(kind=8),external :: alphaspdf
@@ -282,11 +291,10 @@ contains
           allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
           allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
        endif
-       allocate(vol_ichan(1:ngroups))
     endif
-    ! some point-by-point initialisation
     f=0d0
     f_abs=0d0
+    val=0d0
     val_abs=0d0
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
@@ -299,29 +307,49 @@ contains
        write (*,*) pgl(ichan)%ps(1)%jac
        stop 1
     endif
-    if (pgl(ichan)%ps(1)%jac.lt.0d0) then
-       val=0d0
-       call cpu_time(tAfter)
-       t_PS= t_PS +tAfter-tBefore
+    if (pgl(ichan)%ps(1)%jac.le.0d0) then
        return
     endif
     if (.not.read_momenta) then
-    if (.not.pass_cuts(pgl(ichan))) then
-       val=0d0
-       call cpu_time(tAfter)
-       t_PS= t_PS +tAfter-tBefore
-       return
+       if (.not.pass_cuts(pgl(ichan))) then
+          return
+       endif
     endif
-    endif
-    pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
-    call cpu_time(tAfter)
-    t_PS= t_PS +tAfter-tBefore
-    tBefore=tAfter
+    wgt(1:pgl(ichan)%nproc)=pgl(ichan)%ps(1)%jac*vol*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
+    call compute_matrix_elements(ichan,iint,pgl(ichan)%ps(1)%p,wgt,val,idums)
+    if (keep_processes_separate) then
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
+       f_abs=sum(val_abs(1:1))
+       f=sum(val(1:1))
+    else
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
+       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
+       f=sum(val(1:pgl(ichan)%nproc))
+    endif
+  end subroutine integrand
+
+  subroutine compute_matrix_elements(ichan,iint,p,wgt,val,hels_picked)
+    use scales
+    use amp_lib
+    use handling_events
+    integer,intent(in) :: ichan,iint
+    integer,dimension(pgl(ichan)%nproc),intent(out) :: hels_picked
+    real(kind=8),dimension(*) :: val
+    real(kind=8),dimension(pgl(ichan)%nproc) :: wgt
+    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p
+    integer :: ih
+    real(kind=8) :: evnt_sign
+    real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
+    logical :: done
+    real(kind=8),external :: alphaspdf
+    pgl(ichan)%ps(1)%p=p
+    ! some point-by-point initialisation
+    f=0d0
+    f_abs=0d0
+    pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
+
     call compute_the_amps(iint,ichan)
-    call cpu_time(tAfter)
-    t_amp=t_amp+tAfter-tBefore
-    tBefore=tAfter
     call square_the_amps(iint,ichan)
     if ((.not. use_amplitude_library) &
          .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
@@ -344,8 +372,8 @@ contains
        alphas=alphas_Q(scale_ren,2,alphas_MZ)
     endif
     
-    ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
-    weight=vol*pgl(ichan)%ps(1)%jac*conv
+    ! GeV -> pb conversion factor
+    weight=conv
 
     ! multiply by the strong coupling
     if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
@@ -359,21 +387,15 @@ contains
 
     if (keep_processes_separate) then
        val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
-       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
-       f_abs=sum(val_abs(1:1))
-       f=sum(val(1:1))
+       val(1)=val(1)*wgt(iint)
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
-       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
-       f=sum(val(1:pgl(ichan)%nproc))
+       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*wgt(1:pgl(ichan)%nproc)
     endif
-    call cpu_time(tAfter)
-    t_mat=t_mat+tAfter-tBefore
-  end subroutine integrand
+    if (.not.create_amplitude_library) call unwgt_helicities(pgl(ichan),hels_picked)
+  end subroutine compute_matrix_elements
 
+  
   subroutine optimise_the_amplitudes(iint,ichan,done)
     implicit none
     integer,intent(in) :: iint,ichan

@@ -104,7 +104,7 @@ contains
          all_unique_channelgroups(0:pgl%multichan%max_channels,1:nchans_group)
     allocate(pgl%multichan%map_proc_to_channelgroup(pgl%nproc))
     pgl%multichan%map_proc_to_channelgroup(1:pgl%nproc)=map_proc_to_group(1:pgl%nproc)
-    deallocate(pgl%multichan%channels)
+!    deallocate(pgl%multichan%channels)
   end subroutine setup_optimised_multichannel_weight_computation
 
   subroutine determine_multi_channel_size(part,n_ps)
