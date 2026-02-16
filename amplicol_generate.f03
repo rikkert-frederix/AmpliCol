@@ -391,7 +391,7 @@ contains
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
     endif
-    if (.not.create_amplitude_library) call unwgt_helicities(pgl(ichan),hels_picked)
+    if (use_amplitude_library) call unwgt_helicities(pgl(ichan),hels_picked)
   end subroutine compute_matrix_elements
 
   
@@ -584,7 +584,8 @@ contains
     character(len=80) :: library
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points)
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag, &
+         read_momenta,me_points,keep_processes_separate)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')

@@ -55,7 +55,7 @@ module common
   logical,parameter :: reduce_to_unique_matrix_elements=.true.
   logical,parameter :: decompose_same_flavour_into_two_diff_flavour=.true.
   logical,parameter :: use_cross_process_optimisation_of_currents=.true.
-  logical,parameter :: keep_processes_separate=.true.
+  logical :: keep_processes_separate
   real(kind=4) :: tBefore,tAfter,tTot_A,tTot_B
   real(kind=4) :: t_PS_init=0.,t_Amp_init=0.,t_PS=0.,t_Amp=0.,t_all=0.,t_mat=0.,t_Proc_init=0.
   type(integrator) :: simple_integrator

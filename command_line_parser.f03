@@ -1,7 +1,8 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points)
+  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,&
+       read_momenta,me_points,keep_processes_separate)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -9,7 +10,7 @@ contains
     character(len=80) :: filename,library,tag
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta 
+    logical :: read_momenta,keep_processes_separate
     integer :: me_points
 
     ! Default values:
@@ -22,6 +23,7 @@ contains
     library='none'
     tag=''
     read_momenta=.false.
+    keep_processes_separate=.true.
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -50,12 +52,14 @@ contains
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) me_points
           read_momenta=.true.
+       elseif (index(arg, "--sum_processes").eq.1 .or. index(arg, "-sp").eq.1) then
+          keep_processes_separate=.false.
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
        endif
     end do
-
+    
     if (show_help) then
        write (*,'(a)') ""
        write (*,'(a)') "Usage: 'amplicol_generate <arguments>'. Possible arguments are"
@@ -73,8 +77,19 @@ contains
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
        write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
             "with [X] points tested (single PS kinematics)"
+       write (*,'(a)') "  --sum_processes,  -sp     : For each integration channel, perform " //&
+            "explicit sum over all contributing matrix elements (instead of the default sum by Monte-Carlo means)"
        write (*,'(a)') ""
        stop
     end if
+
+    if (library.eq.'use' .and. .not.keep_processes_separate) then
+       write (*,'(a)') "WARNING: using existing library, so --sum_processes argument ignored."//&
+            " Will use what is in the library."
+    endif
+    if (library.eq.'use' .and. filename.ne.'processes.txt') then
+       write (*,'(a)') "WARNING: using existing library, so --processes=XXX argument ignored."//&
+            " Will use what is in the library."
+    endif
   end subroutine parse_argument
 end module argument_parser

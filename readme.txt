@@ -86,6 +86,7 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make amplicol_generate_library' after a library has been created). Default is 'none'.
   --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
   --me_test=[X],    -mt=[X] : Perform ME-level test against MG with [X] points tested (single PS kinematics)
+  --sum_processes,  -sp     : For each integration channel, perform explicit sum over all contributing matrix elements (instead of the default sum by Monte-Carlo means)
 *****************************
 
 Most important are the '--nevents=X' to set the number of events to
