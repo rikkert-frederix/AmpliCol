@@ -134,10 +134,13 @@ contains
                '   # number of multi-channels, and the multi-channels'
           write(14,*) '      ',pgl(igroup)%iden_iproc(iproc),'   # number of identical MEs (up to constant)'
           do iden_iproc=1,pgl(igroup)%iden_iproc(iproc)
-             write(14,*) '         ',iden_iproc,pgl(igroup)%idenCOandMAPfactor(iden_iproc,iproc),pgl(igroup)%iden_processes(1:pgl(igroup)%next,iden_iproc,iproc),'   # label, multiplicative constant and PDGs for ME'
+             write(14,*) '         ',iden_iproc,pgl(igroup)%idenCOandMAPfactor(iden_iproc,iproc),&
+                  pgl(igroup)%iden_processes(1:pgl(igroup)%next,iden_iproc,iproc), &
+                  '   # label, multiplicative constant and PDGs for ME'
           enddo
           if (keep_processes_separate) then
-             write(14,*) '      ',pgl(igroup)%amps(iproc)%iproc_start(2)-pgl(igroup)%amps(iproc)%iproc_start(1),'   # number of independent helicities'
+             write(14,*) '      ',pgl(igroup)%amps(iproc)%iproc_start(2)-pgl(igroup)%amps(iproc)%iproc_start(1), &
+                  '   # number of independent helicities'
              do ihel=pgl(igroup)%amps(iproc)%iproc_start(1),pgl(igroup)%amps(iproc)%iproc_start(2)-1
                 write(14,*) '         ',pgl(igroup)%hel_fac(ihel,iproc),'   # number of identical helicities'
                 do ihel1=1,pgl(igroup)%hel_fac(ihel,iproc)
@@ -145,7 +148,8 @@ contains
                 enddo
              enddo
           else
-             write(14,*) '      ',pgl(igroup)%amps(1)%iproc_start(iproc+1)-pgl(igroup)%amps(1)%iproc_start(iproc),'   # number of independent helicities'
+             write(14,*) '      ',pgl(igroup)%amps(1)%iproc_start(iproc+1)-pgl(igroup)%amps(1)%iproc_start(iproc), &
+                  '   # number of independent helicities'
              do ihel=pgl(igroup)%amps(1)%iproc_start(iproc),pgl(igroup)%amps(1)%iproc_start(iproc+1)-1
                 write(14,*) '         ',pgl(igroup)%hel_fac(ihel,1),'   # number of identical helicities'
                 do ihel1=1,pgl(igroup)%hel_fac(ihel,1)
