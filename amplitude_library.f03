@@ -8,7 +8,7 @@ contains
     character(len=170) :: tmp,line,filename
     integer :: igroup,j,iamp,iproc,ihel,ihel1,iden_iproc
     integer,dimension(2,pgl(1)%next) :: ICOLUP
-    filename='library/amplib.f03'
+    filename='Library/amplib.f03'
     open(unit=14,file=filename,status='unknown')
     write(14,*) 'module amp_lib'
     do igroup=1,ngroups
@@ -64,7 +64,7 @@ contains
     write(14,*) 'end subroutine evaluate_amp'
     write(14,*) 'end module amp_lib'
     close(14)
-    filename='library/amplitudes.bin'
+    filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
     write(14) pgl_unique%next,pgl_unique%nproc
     write(14) unique_map
@@ -166,7 +166,7 @@ contains
     implicit none
     character(len=170) :: filename
     integer :: dim1,dim2,dim3,iamp,igroup
-    filename='library/amplitudes.bin'
+    filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
     allocate(pgl_unique)
     read(14) pgl_unique%next,pgl_unique%nproc
@@ -279,7 +279,7 @@ contains
           allocate(amps_save(size(pgl(igroup)%amps(iint)%amps)))
           write(tmp,*) igroup
           write(line,*) iint
-          line='library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
+          line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
           open(file=line,unit=14,form='unformatted',access='stream',status='old')
           read(14) p
           read(14) amps_save
