@@ -317,26 +317,27 @@ contains
     endif
     call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
     wgt(1:pgl(ichan)%nproc)=pgl(ichan)%ps(1)%jac*vol*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-    call compute_matrix_elements(ichan,iint,pgl(ichan)%ps(1)%p,wgt,val,idums)
+    call compute_matrix_elements(ichan,iint,pgl(ichan)%ps(1)%p,val,idums)
     if (keep_processes_separate) then
+       val(1)=val(1)*wgt(iint)
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
        f_abs=sum(val_abs(1:1))
        f=sum(val(1:1))
     else
+       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*wgt(1:pgl(ichan)%nproc)
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
        f_abs=sum(val_abs(1:pgl(ichan)%nproc))
        f=sum(val(1:pgl(ichan)%nproc))
     endif
   end subroutine integrand
 
-  subroutine compute_matrix_elements(ichan,iint,p,wgt,val,hels_picked)
+  subroutine compute_matrix_elements(ichan,iint,p,val,hels_picked)
     use scales
     use amp_lib
     use handling_events
     integer,intent(in) :: ichan,iint
     integer,dimension(pgl(ichan)%nproc),intent(out) :: hels_picked
     real(kind=8),dimension(*) :: val
-    real(kind=8),dimension(pgl(ichan)%nproc) :: wgt
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p
     integer :: ih
     real(kind=8) :: evnt_sign
@@ -387,10 +388,8 @@ contains
 
     if (keep_processes_separate) then
        val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
-       val(1)=val(1)*wgt(iint)
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
-       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*wgt(1:pgl(ichan)%nproc)
     endif
     if (.not.create_amplitude_library) call unwgt_helicities(pgl(ichan),hels_picked)
   end subroutine compute_matrix_elements
