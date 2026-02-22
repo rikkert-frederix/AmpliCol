@@ -83,6 +83,11 @@ contains
        stop
     end if
 
+    if (library.ne.'use' .and. library.ne.'create' .and. library.ne.'none') then
+       write (*,'(a)') "ERROR: unknown option for 'library'"
+       stop 1
+    endif
+
     if (library.eq.'use' .and. .not.keep_processes_separate) then
        write (*,'(a)') "WARNING: using existing library, so --sum_processes argument ignored."//&
             " Will use what is in the library."
