@@ -38,6 +38,11 @@ AMPGROUPS := $(sort $(foreach f,$(AMPOBJ),$(word 1,$(subst _, ,$(notdir $(basena
 # One shared library per group
 AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 
+# For MadSpace interface
+AMPSPACELIB := libamplicolmadspace.so
+$(AMPSPACELIB) : amplib.o umami.o $(AMPLIBS)
+	$(FC) $(FFLAGS) -fPIC -shared -o $@ amplib.o umami.o $(AMPLIBS)
+
 # ----------------------------------------------------------------------
 # 2. Generic compilation rules
 # ----------------------------------------------------------------------
@@ -111,9 +116,13 @@ amplitude_QCD.o amplicol_reweight.o ranmar.o
 amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o `lhapdf-config --ldflags` -lstdc++ 
 
-amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
+amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) $(AMPSPACELIB)
 	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
 	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
+
+#amplicol_generate_library: $(FILES_M_INT_QCD) $(AMPSPACELIB)
+#	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) $(AMPSPACELIB) \
+#	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
@@ -140,18 +149,19 @@ handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
 simple_integrator.o : helper_modules.o
-amplitude_library.o : handling_processes.o read_process_file.o
+amplitude_library.o : handling_processes.o read_process_file.o common.o
 mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.o
 scales.o : common.o particles.o cuts.o
 amplib.o: $(notdir $(AMPSRC:.f03=.o))
+umami.o : amplib.o
 
 # ----------------------------------------------------------------------
 # 7. Cleanup
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes.bin lib*.so
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so
 
 cleanlib:
-	rm -f libamp*.so amp*lib.o amp*lib.mod
+	rm -f libamp*.so amp*lib.o amp*lib.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin
 	$(FC) $(FFLAGS) -c Library/dummy.f03

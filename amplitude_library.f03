@@ -4,6 +4,7 @@ module amplitude_library
 contains
   subroutine create_amplitude_lib()
     use handling_events
+    use common
     implicit none
     character(len=170) :: tmp,line,filename
     integer :: igroup,j,iamp,iproc,ihel,ihel1,iden_iproc
@@ -110,6 +111,35 @@ contains
        write(14) size(pgl(igroup)%amp2_hel)
        write(14) size(pgl(igroup)%passed),pgl(igroup)%passed
        write(14) shape(pgl(igroup)%color_orders),pgl(igroup)%color_orders
+    enddo
+    close(14)
+    filename='Library/amplitudes_light.bin'
+    open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
+!!$    open(unit=14,file=filename,status='unknown')
+    write(14) keep_processes_separate
+    write(14) ngroups
+    write(14) alphaEW
+    do igroup=1,ngroups
+       write(14) pgl(igroup)%next
+       write(14) size(pgl(igroup)%amp2)
+       write(14) pgl(igroup)%amps(1)%n_sing(1)
+       write(14) pgl(igroup)%nproc
+       if (keep_processes_separate) then
+          write(14) size(pgl(igroup)%hel_fac(:,1))
+       else
+          write(14) pgl(igroup)%nhel(1)
+       endif
+       write(14) pgl(igroup)%amps(1:size(pgl(igroup)%amps))%n_amps
+       if (.not.keep_processes_separate) then
+          write(14) size(pgl(igroup)%amps(1)%iproc_start),pgl(igroup)%amps(1)%iproc_start
+       endif
+       write(14) size(pgl(igroup)%col_fac),dble(pgl(igroup)%col_fac)
+       write(14) size(pgl(igroup)%iden),dble(pgl(igroup)%iden)
+       if (keep_processes_separate) then
+          write(14) size(pgl(igroup)%hel_fac),dble(pgl(igroup)%hel_fac)
+       else
+          write(14) pgl(igroup)%nhel(1),dble(pgl(igroup)%hel_fac(1:pgl(igroup)%nhel(1),1))
+       endif
     enddo
     close(14)
 
