@@ -32,7 +32,7 @@ contains
     if (allocated(chans)) deallocate(chans)
   end subroutine umami_free
   
-  subroutine umami_matrix_element(ichan,iint,p,alphas,rnd,amp2,hels)
+  subroutine umami_matrix_element(ichan,iint,p,alphas,rnd,amp2,helicities)
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
@@ -40,7 +40,7 @@ contains
     real(kind=8),intent(in) :: alphas
     real(kind=8),dimension(chans(ichan)%nvals),intent(in) :: rnd
     real(kind=8),dimension(chans(ichan)%nvals),intent(out) :: amp2
-    integer,dimension(chans(ichan)%nvals),intent(out) :: hels
+    integer,dimension(chans(ichan)%nvals),intent(out) :: helicities
 
     integer :: iproc,ih
     complex(kind=8),dimension(chans(ichan)%namps(iint)) :: amps
@@ -66,7 +66,7 @@ contains
     endif
     
     ! Pick a random helicity for each process
-    call unwgt_helicities(ichan,iint,amp2_hel,rnd,hels)
+    call unwgt_helicities(ichan,iint,amp2_hel,rnd,helicities)
 
     coupling=1d0
     ! The strong coupling
