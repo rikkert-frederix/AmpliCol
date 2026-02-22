@@ -259,6 +259,7 @@ contains
     character :: dummy
     read(11,*) dummy ! <LesHouchesEvents>-tag
     read(11,*) dummy ! <header>-tag
+    read(11,*) dummy ! <unique_me>-tag
     read(11,*) next,unique_nproc
     allocate(unique_map(unique_nproc))
     allocate(unique_map_value(unique_nproc))

@@ -237,6 +237,17 @@ contains
        endif
     enddo
     write(14,*) ']'
+    write(14,*) ''
+    write(14,'(a)') '<header>'
+    write(14,'(a)') '   <unique_me>'
+    write(14,*) pgl_unique%next,pgl_unique%nproc
+    do iproc=1,pgl_unique%nproc
+       write(14,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
+    enddo
+    write(14,'(a)') '   </unique_me>'
+    write(14,'(a)') '   <nevents> ... </nevents>'
+    write(14,'(a)') '   <seed>    ... </seed>'
+    write(14,'(a)') '</header>'
     close(14)
   end subroutine create_amplitude_lib
 
