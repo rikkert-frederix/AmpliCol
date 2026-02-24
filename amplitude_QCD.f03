@@ -247,6 +247,7 @@ contains
          enddo
       enddo
       allocate(curr2amp(1:2,1:(this%n_cur_end(n-1)-this%n_cur_start(n-1)+1)*(this%n_cur_end(n)-this%n_cur_start(n)+1)))
+      curr2amp=0
       allocate(this%iproc_start(1:this%nprocs+1))
       this%n_amps=0
       do iproc=1,this%nprocs
@@ -1998,7 +1999,6 @@ contains
              write (*,*) 'Unknown vertex type: not yet implemented',iv,this%interaction_list(iv)%type
              stop 1
           endif
-          
        enddo
 
        ! compute the currents by combining the interactions
@@ -2076,41 +2076,27 @@ contains
                                      this%current_list(this%curr2amp(2,iamp))%val_r(1:4))
             enddo
          else
-            if (.not.read_file) then
-               do iproc=1,this%nprocs
-                  do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                     if (.not.this%same_flav(iproc)) then
-                        this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                     else
-                        ! same-flavour amps are build from two different-flavour amps
-                        this%amps(iamp)=(0d0,0d0)
-                        do idau=1,2
-                           if (this%same_flavour_sum(iamp,idau).gt.0) then
-                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
-                           endif
-                        enddo
-                     endif
-                  enddo
+            do iproc=1,this%nprocs
+               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                  if (.not.this%same_flav(iproc)) then
+                     this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
+                          this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
+                  endif
                enddo
-            else   
-               do iproc=1,this%nprocs
-                  do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
-                     if (.not.this%same_flav(iproc)) then
-                        this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
-                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                     else
-                        ! same-flavour amps are build from two different-flavour amps
-                        this%amps(iamp)=(0d0,0d0)
-                        do idau=1,2
-                           if (this%same_flavour_sum(iamp,idau).gt.0) then
-                              this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
-                           endif
-                        enddo
-                     endif
-                  enddo
+            enddo
+            do iproc=1,this%nprocs
+               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                  if (this%same_flav(iproc)) then
+                     ! same-flavour amps are build from two different-flavour amps
+                     this%amps(iamp)=(0d0,0d0)
+                     do idau=1,2
+                        if (this%same_flavour_sum(iamp,idau).gt.0) then
+                           this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
+                        endif
+                     enddo
+                  endif
                enddo
-            endif
+            enddo
          endif
       elseif(this%imode.eq.2) then
          if (use_real_gluons .and. this%n_qqbar(1).eq.0) then
@@ -2137,13 +2123,21 @@ contains
                      if (.not.this%same_flav(iproc)) then
                         this%amps(iamp)=sum(this%current_list(this%curr2amp(1,iamp))%val_c(1:4)* &
                                             this%current_list(this%curr2amp(2,iamp))%val_c(1:4))
-                     else
+                     endif
+                  endif
+               enddo
+            enddo
+            do iproc=1,this%nprocs
+               do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                  if (use_symmetry .and. this%n_qqbar(1).eq.0 .and. iamp.gt.this%n_amps/2 .and. mod(n,2).eq.1) then
+                     cycle
+                  else
+                     if (this%same_flav(iproc)) then
                         ! same-flavour amps are build from two different-flavour amps
                         this%amps(iamp)=(0d0,0d0)
                         do idau=1,2
                            if (this%same_flavour_sum(iamp,idau).gt.0) then
                               this%amps(iamp)=this%amps(iamp)+apply_operation(iamp,idau)
-!!$                              this%amps(iamp)=this%amps(iamp)+this%amps(this%same_flavour_sum(iamp,idau))
                            endif
                         enddo
                      endif
@@ -3581,6 +3575,7 @@ contains
     write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
     
     do iproc=1,this%nprocs
+       write(iunit,*) ''
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (.not.this%same_flav(iproc)) then
              write(tmp,*) iamp
@@ -3589,7 +3584,16 @@ contains
              line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
              write(tmp,*) this%curr2amp(2,iamp)
              line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-          else
+          endif
+          write(iunit,*) trim(adjustl(line))
+       enddo
+    enddo
+    ! Sometimes daughters come after parent in the list of
+    ! amplitudes. In that case adjust order in which they are
+    ! computed.
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          if (this%same_flav(iproc)) then
              ! same-flavour amps are build from two different-flavour amps
              write(tmp,*) iamp
              line='amps('//trim(adjustl(tmp))//')='
@@ -3777,6 +3781,7 @@ contains
        endif
        where_to_cur(nc)=nc-to_skip
     enddo
+
     to_skip=0
     do iv=1,this%n_vert
        if (.not. is_needed_ver(iv)) then
@@ -3793,6 +3798,7 @@ contains
        endif
        where_to_amp(iamp)=iamp-to_skip
     enddo
+
     ! do the actual shifting of the currents in the list
     do nc=1,this%n_cur
        if (.not.is_needed_cur(nc)) cycle
@@ -3823,18 +3829,23 @@ contains
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
        do i=1,2
-          if (this%same_flavour_sum(iamp,i).lt.0) then
+          if (this%curr2amp(i,iamp).ne.0) then
              this%curr2amp(i,where_to_amp(iamp))=where_to_cur(this%curr2amp(i,iamp))
-          elseif (this%same_flavour_sum(iamp,i).eq.0) then
+          endif
+       enddo
+    enddo
+    do iamp=1,this%n_amps
+       if (.not.this%include_amp(iamp)) cycle
+       do i=1,2
+          if (this%same_flavour_sum(iamp,i).eq.0) then
              this%same_flavour_sum(where_to_amp(iamp),i)=0
              this%same_flavour_sum_operation(where_to_amp(iamp),i)=0
-          else
+          elseif (this%same_flavour_sum(iamp,i).gt.0) then
              this%same_flavour_sum(where_to_amp(iamp),i)=where_to_amp(this%same_flavour_sum(iamp,i))
              this%same_flavour_sum_operation(where_to_amp(iamp),i)=this%same_flavour_sum_operation(iamp,i)
           endif
        enddo
     enddo
-    
     ! and also the shifting of the auxiliary arrays and variables
     do isize=1,n
        do nc=this%n_cur_start(isize),this%n_cur
@@ -3889,6 +3900,13 @@ contains
           this%n_amps=where_to_amp(iamp)
           exit
        endif
+    enddo
+    do iamp=1,this%n_amps
+       do i=1,2
+          if (this%same_flavour_sum(iamp,i).gt.this%n_amps) then
+             this%same_flavour_sum(iamp,i)=0
+          endif
+       enddo
     enddo
     do iproc=this%nprocs+1,2,-1
        if (this%iproc_start(iproc).gt.this%n_amps+1) then

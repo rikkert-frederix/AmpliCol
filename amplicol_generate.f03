@@ -396,7 +396,7 @@ contains
           call square_the_amps(iint,ichan)
        endif
        if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-8)) then
-          write (*,*) 'Find same flavour and helicity filter give different matrix elements'
+          write (*,*) 'Find same flavour and helicity filter give different matrix elements',ichan,iint
           write (*,*) amp2_save
           write (*,*) pgl(ichan)%amp2
           write (*,*) ''
@@ -410,6 +410,7 @@ contains
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
+       call flush(99)
     endif
   end subroutine optimise_the_amplitudes
 
