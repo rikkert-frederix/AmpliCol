@@ -267,16 +267,16 @@ contains
     
   
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
+    use scales
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
     real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
-    real(kind=8),dimension(:),allocatable :: val,val_abs
-    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight,wgt
-    integer :: ih
-    integer,dimension(pgl(ichan)%nproc) :: idums
+    real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
+    real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
+    integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     logical :: done
     real(kind=8),external :: alphaspdf
@@ -291,7 +291,9 @@ contains
           allocate(val(1:maxval(pgl(1:ngroups)%nproc)))
           allocate(val_abs(1:maxval(pgl(1:ngroups)%nproc)))
        endif
+       allocate(vol_ichan(1:ngroups))
     endif
+    ! some point-by-point initialisation
     f=0d0
     f_abs=0d0
     val=0d0
@@ -311,46 +313,22 @@ contains
        return
     endif
     if (.not.read_momenta) then
-       if (.not.pass_cuts(pgl(ichan))) then
-          return
-       endif
+    if (.not.pass_cuts(pgl(ichan))) then
+       val=0d0
+       call cpu_time(tAfter)
+       t_PS= t_PS +tAfter-tBefore
+       return
     endif
-    call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
-    wgt(1:pgl(ichan)%nproc)=pgl(ichan)%ps(1)%jac*vol*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
-    call compute_matrix_elements(ichan,iint,pgl(ichan)%ps(1)%p,val,idums)
-    if (keep_processes_separate) then
-       val(1)=val(1)*wgt(iint)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
-       f_abs=sum(val_abs(1:1))
-       f=sum(val(1:1))
-    else
-       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*wgt(1:pgl(ichan)%nproc)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
-       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
-       f=sum(val(1:pgl(ichan)%nproc))
     endif
-  end subroutine integrand
-
-  subroutine compute_matrix_elements(ichan,iint,p,val,hels_picked)
-    use scales
-    use amp_lib
-    use handling_events
-    integer,intent(in) :: ichan,iint
-    integer,dimension(pgl(ichan)%nproc),intent(out) :: hels_picked
-    real(kind=8),dimension(*) :: val
-    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p
-    integer :: ih
-    real(kind=8) :: evnt_sign
-    real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    logical :: done
-    real(kind=8),external :: alphaspdf
-    pgl(ichan)%ps(1)%p=p
-    ! some point-by-point initialisation
-    f=0d0
-    f_abs=0d0
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
-
+    call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
+    call cpu_time(tAfter)
+    t_PS= t_PS +tAfter-tBefore
+    tBefore=tAfter
     call compute_the_amps(iint,ichan)
+    call cpu_time(tAfter)
+    t_amp=t_amp+tAfter-tBefore
+    tBefore=tAfter
     call square_the_amps(iint,ichan)
     if ((.not. use_amplitude_library) &
          .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
@@ -373,8 +351,8 @@ contains
        alphas=alphas_Q(scale_ren,2,alphas_MZ)
     endif
     
-    ! GeV -> pb conversion factor
-    weight=conv
+    ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
+    weight=vol*pgl(ichan)%ps(1)%jac*conv
 
     ! multiply by the strong coupling
     if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
@@ -388,13 +366,21 @@ contains
 
     if (keep_processes_separate) then
        val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
+       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
+       f_abs=sum(val_abs(1:1))
+       f=sum(val(1:1))
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
+       val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),-1)
+       f_abs=sum(val_abs(1:pgl(ichan)%nproc))
+       f=sum(val(1:pgl(ichan)%nproc))
     endif
-    if (use_amplitude_library) call unwgt_helicities(pgl(ichan),hels_picked)
-  end subroutine compute_matrix_elements
+    call cpu_time(tAfter)
+    t_mat=t_mat+tAfter-tBefore
+  end subroutine integrand
 
-  
   subroutine optimise_the_amplitudes(iint,ichan,done)
     implicit none
     integer,intent(in) :: iint,ichan
@@ -417,7 +403,7 @@ contains
           call square_the_amps(iint,ichan)
        endif
        if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-8)) then
-          write (*,*) 'Find same flavour and helicity filter give different matrix elements'
+          write (*,*) 'Find same flavour and helicity filter give different matrix elements',ichan,iint
           write (*,*) amp2_save
           write (*,*) pgl(ichan)%amp2
           write (*,*) ''
@@ -431,6 +417,7 @@ contains
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
+       call flush(99)
     endif
   end subroutine optimise_the_amplitudes
 

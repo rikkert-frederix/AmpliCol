@@ -214,22 +214,6 @@ contains
     endif
   end subroutine unwgt_helicity
 
-  subroutine unwgt_helicities(pgl,hels_picked)
-    implicit none
-    type(phase_space_order_group),intent(inout) :: pgl
-    integer,dimension(pgl%nproc),intent(out) :: hels_picked
-    hels_picked=0
-    do iproc_picked=1,pgl%nproc
-       if (keep_processes_separate .and. iproc_picked.gt.1) exit
-       call unwgt_helicity(pgl)
-       if (keep_processes_separate) then
-          hels_picked(iproc_picked)=hel_picked(2) ! pick among unique ones
-       else
-          hels_picked(iproc_picked)=hel_picked(2)-pgl%amps(1)%iproc_start(iproc_picked)+1 ! pick among unique ones
-       endif
-    enddo
-  end subroutine unwgt_helicities
-
   subroutine write_unique_in_file(pgl_unique,unique_map,unique_map_value,nevents)
     implicit none
     type(phase_space_order_group),allocatable :: pgl_unique
