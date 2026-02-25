@@ -150,8 +150,8 @@ amplib.o: $(notdir $(AMPSRC:.f03=.o))
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes.bin lib*.so
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so
 
 cleanlib:
-	rm -f libamp*.so amp*lib.o amp*lib.mod
+	rm -f libamp*.so amp*lib.o amp*lib.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin
 	$(FC) $(FFLAGS) -c Library/dummy.f03
