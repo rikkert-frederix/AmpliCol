@@ -169,7 +169,8 @@ contains
           write(14,'("           ",*(I0,:,","))') ICOLUP(2,:)
           write(14,*) '        ],'
           write(14,*) '        "multichannels": ['
-          write(14,'("           ",*(I0,:,","))') pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
+          write(14,'("           ",*(I0,:,","))') &
+               pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
           write(14,*) '        ],'
           write(14,*) '        "matrix_elements": ['
           do iden_iproc=1,pgl(igroup)%iden_iproc(iproc)
