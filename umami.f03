@@ -17,6 +17,7 @@ contains
   subroutine umami_initialize()
     implicit none
     call read_amplitude_lib_light()
+    call test_library()
   end subroutine umami_initialize
 
   subroutine umami_free()
@@ -190,5 +191,49 @@ contains
     enddo
     close(14)
   end subroutine read_amplitude_lib_light
+
+
+  subroutine test_library()
+    use amp_lib
+    implicit none
+    integer :: ichan,iint,i,max_iint
+    real(kind=8),dimension(:,:),allocatable :: p
+    complex(kind=8),dimension(:),allocatable :: amps_save,amps
+    character(len=170) :: line,tmp
+    do ichan=1,nchans
+       if (keep_processes_separate) then
+          max_iint=chans(ichan)%nvals
+       else
+          max_iint=1
+       endif
+       do iint=1,max_iint
+          allocate(p(0:3,chans(ichan)%n))
+          allocate(amps(chans(ichan)%namps(iint)))
+          allocate(amps_save(chans(ichan)%namps(iint)))
+          write(tmp,*) ichan
+          write(line,*) iint
+          line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
+          open(file=line,unit=14,form='unformatted',access='stream',status='old')
+          read(14) p
+          read(14) amps_save
+          close(14)
+          call evaluate_amp(ichan,iint,p,amps)
+          if (any(abs(amps_save-amps)/(abs(amps_save)+abs(amps)).gt.1d-6)) then
+             write (*,*) 'Process library not compatible with saved amplitudes',ichan,iint
+             do i=1,size(amps)
+                if (abs(amps_save(i)-amps(i))/(abs(amps_save(i))+abs(amps(i))).gt.1d-6) then
+                   write (*,*) i,amps_save(i)
+                   write (*,*) i,amps(i)
+                endif
+             enddo
+             stop 1
+          endif
+          deallocate(p)
+          deallocate(amps)
+          deallocate(amps_save)
+       enddo
+    enddo
+  end subroutine test_library
+
 
 end module umami
