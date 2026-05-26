@@ -63,20 +63,17 @@ contains
 
   subroutine ext_gluon_mass(p,nhel,nsv,wf,vmass)
     implicit none
-    double complex wf(4)
-    double precision p(0:3),vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
+    real(kind=8),dimension(0:3) :: p(0:3)
+    complex(kind=8),dimension(4) :: wf
+    real(kind=8) :: vmass,hel,hel0,pt,pt2,pp,pzpt,emp,sqh
     integer nhel,nsv,nsvahl
-    double precision rZero, rHalf, rOne, rTwo
-    parameter( rZero = 0.0d0, rHalf = 0.5d0 )
-    parameter( rOne = 1.0d0, rTwo = 2.0d0 )
-
+    real(kind=8),parameter :: rZero=0d0, rHalf=0.5d0, rOne=1d0, rTwo=2d0
     sqh = dsqrt(rHalf)
     hel = dble(nhel)
     nsvahl = nsv*abs(nhel)
     pt2 = p(1)**2+p(2)**2
     pp = min(p(0),dsqrt(pt2+p(3)**2))
     pt = min(pp,dsqrt(pt2))
-
     if ( vmass.ne.rZero ) then
        hel0 = rOne-dabs(hel)
        if ( pp.eq.rZero ) then
@@ -111,8 +108,6 @@ contains
           wf(3) = dcmplx( rZero , nsv*sign(sqh,p(3)) )
        endif
     endif
-
-
   end subroutine ext_gluon_mass
 
   subroutine ext_quark(p,nhel,idum,wf,fmass)
@@ -363,9 +358,6 @@ contains
     wf(1)=(rOne,0d0)
   end subroutine ext_scalar
 
-
-
-
   subroutine ThreeGluon(wf1,pwf1,wf2,pwf2,wf)
     ! Colour-ordered three-gluon interaction
     implicit none
@@ -470,12 +462,6 @@ contains
     wfg(4)=(-wfg1(1)*wfT2(3)+wfg1(2)*wfT2(5)+wfg1(3)*wfT2(6))*prefact
   end subroutine GluonTensortoGluon_Real
 
-
-
-
-
-
-
   subroutine QuarkGluontoQuark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
@@ -576,7 +562,6 @@ contains
     wfq(4)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1))*coupl(1) !sl2
   end subroutine GluonAquarktoAquark_coupl
 
-
   subroutine AquarkGluontoAquark(wfq1,wfg2,wfq) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
@@ -637,7 +622,6 @@ contains
     wfg(4)=(-TMP1 + TMP2 )*prefact
   end subroutine AquarkQuarktoGluon
 
-
   subroutine ThreeGluon_coupl(wf1,pwf1,wf2,pwf2,wf,coupl)
     ! Colour-ordered three-gluon interaction
     implicit none
@@ -652,7 +636,6 @@ contains
     TMP4 = prefact*coupl(1)
     wf(1:4) = TMP4*(TMP1*(pwf1(0:3)-pwf2(0:3))+TMP2*wf2(1:4)+TMP3*wf1(1:4))
   end subroutine ThreeGluon_Coupl
-
 
   subroutine QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl) ! from fvoxxx.f
     implicit none
@@ -769,7 +752,6 @@ contains
     wfg(1:4)= prefact*coupl(1)*wfs2(1)*(wfg1(1:4))
   end subroutine GluonScalartoGluon
 
-
   subroutine ScalarScalartoScalar(wfs1,wfs2,wfs,coupl)
     implicit none
     complex(kind=8),dimension(1) :: wfs1,wfs2,wfs
@@ -820,9 +802,8 @@ contains
     ! add
     wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
   end subroutine AleptonLeptontoGluon
-
-
-subroutine GluonPropagator(wfg,p)
+  
+  subroutine GluonPropagator(wfg,p)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
