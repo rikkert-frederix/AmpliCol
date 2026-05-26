@@ -145,110 +145,115 @@ contains
 
     filename='madspace.json'
     open(unit=14,file=filename,status='unknown')
-    write(14,*) '['
+    write(14,*) '{'
+    write(14,*) '  "channels": ['
     do igroup=1,ngroups
-       write(14,*) '  {'
-       write(14,*) '    "channel": ',igroup,','
-       write(14,*) '    "phasespace_order": ['
-       write(14,'("       ",*(I0,:,","))') pgl(igroup)%phase_space_orders
-       write(14,*) '    ],'
-       write(14,*) '    "processes": ['
+       write(14,*) '    {'
+       write(14,*) '      "channel": ',igroup,','
+       write(14,*) '      "phasespace_order": ['
+       write(14,'("         ",*(I0,:,","))') pgl(igroup)%phase_space_orders
+       write(14,*) '      ],'
+       write(14,*) '      "processes": ['
        do iproc=1,pgl(igroup)%nproc
-          write(14,*) '      {'
-          write(14,*) '        "process":',iproc,','
-          write(14,*) '        "color_order": ['
-          write(14,'("           ",*(I0,:,","))') pgl(igroup)%color_orders(1:pgl(igroup)%next,iproc)
-          write(14,*) '        ],'
+          write(14,*) '        {'
+          write(14,*) '          "process":',iproc,','
+          write(14,*) '          "color_order": ['
+          write(14,'("             ",*(I0,:,","))') pgl(igroup)%color_orders(1:pgl(igroup)%next,iproc)
+          write(14,*) '          ],'
           iproc_picked=iproc
           iproc_iden_picked=1
           call get_col_info(pgl(igroup),ICOLUP)
-          write(14,*) '        "color_flows1": ['
-          write(14,'("           ",*(I0,:,","))') ICOLUP(1,:)
-          write(14,*) '        ],'
-          write(14,*) '        "color_flows2": ['
-          write(14,'("           ",*(I0,:,","))') ICOLUP(2,:)
-          write(14,*) '        ],'
-          write(14,*) '        "multichannels": ['
-          write(14,'("           ",*(I0,:,","))') &
+          write(14,*) '          "color_flows1": ['
+          write(14,'("             ",*(I0,:,","))') ICOLUP(1,:)
+          write(14,*) '          ],'
+          write(14,*) '          "color_flows2": ['
+          write(14,'("             ",*(I0,:,","))') ICOLUP(2,:)
+          write(14,*) '          ],'
+          write(14,*) '          "multichannels": ['
+          write(14,'("             ",*(I0,:,","))') &
                pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
-          write(14,*) '        ],'
-          write(14,*) '        "matrix_elements": ['
+          write(14,*) '          ],'
+          write(14,*) '          "matrix_elements": ['
           do iden_iproc=1,pgl(igroup)%iden_iproc(iproc)
-             write(14,*) '          {'
-             write(14,*) '            "label": ', iden_iproc, ','
-             write(14,*) '            "factor": ', pgl(igroup)%idenCOandMAPfactor(iden_iproc,iproc), ','
-             write(14,*) '            "pdg_ids": ['
-             write(14,'("               ",*(I0,:,","))') pgl(igroup)%iden_processes(1:pgl(igroup)%next,iden_iproc,iproc)
-             write(14,*) '            ]'
+             write(14,*) '            {'
+             write(14,*) '              "label": ', iden_iproc, ','
+             write(14,*) '              "factor": ', pgl(igroup)%idenCOandMAPfactor(iden_iproc,iproc), ','
+             write(14,*) '              "pdg_ids": ['
+             write(14,'("                 ",*(I0,:,","))') pgl(igroup)%iden_processes(1:pgl(igroup)%next,iden_iproc,iproc)
+             write(14,*) '              ]'
              if (iden_iproc.eq.pgl(igroup)%iden_iproc(iproc)) then
-                write(14,*) '          }'
+                write(14,*) '            }'
              else
-                write(14,*) '          },'
+                write(14,*) '            },'
              endif
           enddo
-          write(14,*) '        ],'
-          write(14,*) '        "helicities": ['
+          write(14,*) '          ],'
+          write(14,*) '          "helicities": ['
           if (keep_processes_separate) then
              do ihel=pgl(igroup)%amps(iproc)%iproc_start(1),pgl(igroup)%amps(iproc)%iproc_start(2)-1
-                write(14,*) '          ['
+                write(14,*) '            ['
                 do ihel1=1,pgl(igroup)%hel_fac(ihel,iproc)
-                   write(14,*) '            ['
-                   write(14,'("               ",*(I0,:,","))') pgl(igroup)%amps(iproc)%spins(1:pgl(igroup)%next,ihel1,ihel)
+                   write(14,*) '              ['
+                   write(14,'("                 ",*(I0,:,","))') pgl(igroup)%amps(iproc)%spins(1:pgl(igroup)%next,ihel1,ihel)
                    if (ihel1.eq.pgl(igroup)%hel_fac(ihel,iproc)) then
-                      write(14,*) '            ]'
+                      write(14,*) '              ]'
                    else
-                      write(14,*) '            ],'
+                      write(14,*) '              ],'
                    endif
                 enddo
                 if (ihel.eq.pgl(igroup)%amps(iproc)%iproc_start(2)-1) then
-                   write(14,*) '          ]'
+                   write(14,*) '            ]'
                 else
-                   write(14,*) '          ],'
+                   write(14,*) '            ],'
                 endif
              enddo
           else
              do ihel=pgl(igroup)%amps(1)%iproc_start(iproc),pgl(igroup)%amps(1)%iproc_start(iproc+1)-1
                 do ihel1=1,pgl(igroup)%hel_fac(ihel,1)
-                   write(14,'("               ",*(I0,:,","))') pgl(igroup)%amps(1)%spins(1:pgl(igroup)%next,ihel1,ihel)
+                   write(14,'("                 ",*(I0,:,","))') pgl(igroup)%amps(1)%spins(1:pgl(igroup)%next,ihel1,ihel)
                    if (ihel1.eq.pgl(igroup)%hel_fac(ihel,1)) then
-                      write(14,*) '            ]'
+                      write(14,*) '              ]'
                    else
-                      write(14,*) '            ],'
+                      write(14,*) '              ],'
                    endif
                 enddo
                 if (ihel.eq.pgl(igroup)%amps(1)%iproc_start(iproc+1)-1) then
-                   write(14,*) '          ]'
+                   write(14,*) '            ]'
                 else
-                   write(14,*) '          ],'
+                   write(14,*) '            ],'
                 endif
              enddo
           endif
-          write(14,*) '        ]'
+          write(14,*) '          ]'
           if (iproc.eq.pgl(igroup)%nproc) then
-             write(14,*) '      }'
+             write(14,*) '        }'
           else
-             write(14,*) '      },'
+             write(14,*) '        },'
           endif
        enddo
-       write(14,*) '    ]'
+       write(14,*) '      ]'
        if (igroup.eq.ngroups) then
-          write(14,*) '  }'
+          write(14,*) '    }'
        else
-          write(14,*) '  },'
+          write(14,*) '    },'
        endif
     enddo
-    write(14,*) ']'
-    write(14,*) ''
-    write(14,'(a)') '<header>'
-    write(14,'(a)') '   <unique_me>'
-    write(14,*) pgl_unique%next,pgl_unique%nproc
+    write(14,*) '  ],'
+    write(14,'(a)', advance="no") '  "xml_header": "'
+    write(14,'(a)', advance="no") '<header>\n'
+    write(14,'(a)', advance="no") '   <unique_me>\n'
+    write(14,'(I0, 1X, I0, A)', advance="no") pgl_unique%next,pgl_unique%nproc,"\n"
     do iproc=1,pgl_unique%nproc
-       write(14,*) unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
+       write(14,'(I0, 1X, F0.16, *(1X, I0))', advance="no") &
+           unique_map(iproc),unique_map_value(iproc),pgl_unique%processes(1:pgl_unique%next,iproc)
+       write(14,'(a)', advance="no") '\n'
     enddo
-    write(14,'(a)') '   </unique_me>'
-    write(14,'(a)') '   <nevents> ... </nevents>'
-    write(14,'(a)') '   <seed>    ... </seed>'
-    write(14,'(a)') '</header>'
+    write(14,'(a)', advance="no") '   </unique_me>\n'
+    write(14,'(a)', advance="no") '   <nevents> ... </nevents>\n'
+    write(14,'(a)', advance="no") '   <seed>    ... </seed>\n'
+    write(14,'(a)', advance="no") '</header>\n'
+    write(14,*) '"'
+    write(14,*) '}'
     close(14)
   end subroutine create_amplitude_lib
 
