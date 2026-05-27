@@ -1,4 +1,4 @@
-module umami
+module umami_impl
   implicit none
   private
   type channel_group
@@ -11,16 +11,21 @@ module umami
   type(channel_group),dimension(:),allocatable :: chans
   logical :: keep_processes_separate
   real(kind=8) :: alphaEW
-  public :: umami_initialize,umami_matrix_element,umami_free
+  public :: umami_initialize_impl,umami_matrix_element_impl, &
+      umami_free_impl, get_particle_count
 contains
 
-  subroutine umami_initialize()
+  subroutine umami_initialize_impl() bind(C, name='umami_initialize_impl')
     implicit none
     call read_amplitude_lib_light()
+    if (.not. keep_processes_separate) then
+       write (*,*) 'summing over processes currently not supported'
+       stop 1
+    endif
     call test_library()
-  end subroutine umami_initialize
+  end subroutine umami_initialize_impl
 
-  subroutine umami_free()
+  subroutine umami_free_impl() bind(C, name='umami_free_impl')
     implicit none
     integer :: ichan
     do ichan=1,nchans
@@ -31,9 +36,15 @@ contains
        if (allocated(chans(ichan)%hel_fac)) deallocate(chans(ichan)%hel_fac)
     enddo
     if (allocated(chans)) deallocate(chans)
-  end subroutine umami_free
+  end subroutine umami_free_impl
+
+  subroutine get_particle_count(count) bind(C, name='get_particle_count')
+    implicit none
+    integer, intent(out) :: count
+    count = chans(1)%n
+  end subroutine get_particle_count
   
-  subroutine umami_matrix_element(ichan,iint,p,alphas,rnd,amp2,helicities)
+  subroutine umami_matrix_element_impl(ichan,iint,p,alphas,rnd,amp2,helicities) bind(C, name='umami_matrix_element_impl')
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
@@ -89,7 +100,7 @@ contains
        amp2(1:chans(ichan)%nvals)=amp2(1:chans(ichan)%nvals)/chans(ichan)%iden(1:chans(ichan)%nvals)
     endif
     
-  end subroutine umami_matrix_element
+  end subroutine umami_matrix_element_impl
 
   subroutine unwgt_helicities(ichan,iint,amp2_hel,rnd,hels)
     implicit none
@@ -236,4 +247,4 @@ contains
   end subroutine test_library
 
 
-end module umami
+end module umami_impl

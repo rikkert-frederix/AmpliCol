@@ -4,6 +4,7 @@ FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 #FFLAGS = -ffast-math -O3 -mcmodel=large
 FFLAGS = -ffast-math -O3
+CFLAGS = -ffast-math -O3
 
 CXX ?= g++
 
@@ -40,8 +41,8 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 
 # For MadSpace interface
 AMPSPACELIB := libamplicolmadspace.so
-$(AMPSPACELIB) : amplib.o umami.o $(AMPLIBS)
-	$(FC) $(FFLAGS) -fPIC -shared -o $@ amplib.o umami.o $(AMPLIBS)
+$(AMPSPACELIB) : amplib.o umami_impl.o umami.o $(AMPLIBS)
+	$(FC) $(FFLAGS) -fPIC -shared -o $@ amplib.o umami_impl.o umami.o $(AMPLIBS)
 
 # ----------------------------------------------------------------------
 # 2. Generic compilation rules
@@ -82,6 +83,9 @@ $(AMPSPACELIB) : amplib.o umami.o $(AMPLIBS)
 
 %.o: Library/%.f03
 	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
+
+%.o: %.c
+	$(CC) $(CFLAGS) -fPIC -c $<
 
 # ----------------------------------------------------------------------
 # 3. Build one shared library per amplitude group
