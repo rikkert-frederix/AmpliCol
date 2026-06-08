@@ -53,8 +53,6 @@ UmamiStatus umami_initialize(UmamiHandle* handle, char const* param_card_path) {
     InterfaceInstance* inst = malloc(sizeof(InterfaceInstance));
     *handle = inst;
     get_particle_count(&inst->particle_count);
-    //TODO: there is a memory bug somewhere which is apparently prevented by making this
-    //buffer a factor 10 larger than necessary. need to find the actual problem
     inst->momentum_buffer = malloc(sizeof(double) * 4 * inst->particle_count);
 
     return UMAMI_SUCCESS;
