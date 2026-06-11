@@ -40,7 +40,7 @@ out_dict = {
     "channels": data["channels"],
     "color_flows": list(color_flows.keys()),
     "color_orders": list(color_orders.keys()),
-    "pdg_ids": list(color_flows.keys()),
+    "pdg_ids": list(pdg_ids.keys()),
     "helicities": list(helicities.keys()),
     "xml_header": data["xml_header"], 
 }
