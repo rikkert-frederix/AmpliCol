@@ -3573,9 +3573,9 @@ contains
     write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
     write(tmp,*) this%n_cur
     write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
-    
+
+    ! first the 'non-same-flavour' ones
     do iproc=1,this%nprocs
-       write(iunit,*) ''
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (.not.this%same_flav(iproc)) then
              write(tmp,*) iamp
@@ -3584,13 +3584,11 @@ contains
              line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
              write(tmp,*) this%curr2amp(2,iamp)
              line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+             write(iunit,*) trim(adjustl(line))
           endif
-          write(iunit,*) trim(adjustl(line))
        enddo
     enddo
-    ! Sometimes daughters come after parent in the list of
-    ! amplitudes. In that case adjust order in which they are
-    ! computed.
+    ! now the same-flavour ones. They are the "sum" of two non-same-flavour ones.
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (this%same_flav(iproc)) then
@@ -3627,8 +3625,8 @@ contains
                    endif
                 endif
              enddo
+             write(iunit,*) trim(adjustl(line))
           endif
-          write(iunit,*) trim(adjustl(line))
        enddo
     enddo
     write(iunit,*) 'end subroutine compute_amps'
