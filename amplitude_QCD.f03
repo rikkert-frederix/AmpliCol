@@ -2813,6 +2813,9 @@ contains
 
   subroutine optimise_evaluation(this,n)
     !
+    ! Checks all computed currents and checks if some are equal. If
+    ! equal, do not recompute, rather re-use already computed values
+    !
     ! POTENTIAL OTHER OPTIMISATIONS:
     !
     ! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
