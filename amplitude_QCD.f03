@@ -2813,6 +2813,9 @@ contains
 
   subroutine optimise_evaluation(this,n)
     !
+    ! Checks all computed currents and checks if some are equal. If
+    ! equal, do not recompute, rather re-use already computed values
+    !
     ! POTENTIAL OTHER OPTIMISATIONS:
     !
     ! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
@@ -2955,43 +2958,44 @@ contains
     line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
     open(file=line,unit=iunit,status='unknown')
     write(line,*) iint
-    write(iunit,*) 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
-    write(iunit,*) 'use FeynmanRules'
-    write(iunit,*) 'implicit none'
-    write(iunit,*) 'private'
+    write(iunit,'(a)') 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    write(iunit,'(2x,a)') 'use FeynmanRules'
+    write(iunit,'(2x,a)') 'implicit none'
+    write(iunit,'(2x,a)') 'private'
     write(tmp,*) igroup
     write(line,*) iint
-    write(iunit,*) 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
-    write(iunit,*) 'contains'
-    write(iunit,*) 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
-    write(iunit,*) 'implicit none'
+    write(iunit,'(2x,a)') 'public :: evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(2x,a)') 'contains'
+    write(iunit,'(2x,a)') 'subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'(p,amps)'
+    write(iunit,'(4x,a)') 'implicit none'
     write(tmp,*) n
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
     write(tmp,*) this%n_amps
-    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
     write(tmp,*) this%max_pp
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
+    write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//') :: pp'
     write(tmp,*) this%n_cur
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
     write(tmp,*) this%n_vert
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
-    write(iunit,*) 'call fill_momentum_array(p,pp)'
-    write(iunit,*) 'call compute_external_currents(pp,val_c)'
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    write(iunit,'(4x,a)') 'call fill_momentum_array(p,pp)'
+    write(iunit,'(4x,a)') 'call compute_external_currents(pp,val_c)'
     do isize=2,n-1
        write(tmp,*) isize
-       write(iunit,*) 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-       write(iunit,*) 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,'(4x,a)') 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
     enddo
-    write(iunit,*) 'call compute_amps(amps,val_c)'
+    write(iunit,'(4x,a)') 'call compute_amps(amps,val_c)'
     write(tmp,*) igroup
     write(line,*) iint
-    write(iunit,*) 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
-    write(iunit,*) 'subroutine fill_momentum_array(p,pp)'
-    write(iunit,*) 'implicit none'
+    write(iunit,'(2x,a)') 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(a)') ''
+    write(iunit,'(2x,a)') 'subroutine fill_momentum_array(p,pp)'
+    write(iunit,'(4x,a)') 'implicit none'
     write(tmp,*) n
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
+    write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: p'
     write(tmp,*) this%max_pp
-    write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(out) :: pp'
+    write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(out) :: pp'
     ! fill_momentum_array
     do ip=1,this%max_pp
        ibin=this%pp_i_to_bin(ip)
@@ -3004,17 +3008,18 @@ contains
           if (btest(ibin,i-1) .and. i.ge.3) &
                line=trim(adjustl(line))//'+p(0:3,'//trim(adjustl(tmp))//')'
        enddo
-       write (iunit,*) trim(adjustl(line))
+       write (iunit,'(4x,a)') trim(adjustl(line))
     enddo
-    write(iunit,*) 'end subroutine fill_momentum_array'
+    write(iunit,'(2x,a)') 'end subroutine fill_momentum_array'
+    write(iunit,'(a)') ''
     do isize=1,n-1
        if (isize.eq.1) then
-          write(iunit,*) 'subroutine compute_external_currents(pp,val_c)'
-          write(iunit,*) 'implicit none'
+          write(iunit,'(2x,a)') 'subroutine compute_external_currents(pp,val_c)'
+          write(iunit,'(4x,a)') 'implicit none'
           write(tmp,*) this%max_pp
-          write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+          write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
           write(tmp,*) this%n_cur
-          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(out) :: val_c'
+          write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(out) :: val_c'
           ! external wave-functions
           do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
              ifinal=1
@@ -3078,9 +3083,10 @@ contains
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
                 stop 1
              endif
-             write(iunit,*) trim(adjustl(line))
+             write(iunit,'(4x,a)') trim(adjustl(line))
           enddo
-          write(iunit,*) 'end subroutine compute_external_currents'
+          write(iunit,'(2x,a)') 'end subroutine compute_external_currents'
+          write(iunit,'(a)') ''
           cycle
        endif
 
@@ -3093,14 +3099,14 @@ contains
        ! loop over the vertices required to create all the currents with isize
        ! number of external particles combined
        write(tmp,*) isize
-       write(iunit,*) 'subroutine compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-       write(iunit,*) 'implicit none'
+       write(iunit,'(2x,a)') 'subroutine compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,'(4x,a)') 'implicit none'
        write(tmp,*) this%max_pp
-       write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+       write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
        write(tmp,*) this%n_cur
-       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+       write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
        write(tmp,*) this%n_vert
-       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
+       write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
 
        icount(0:24)=0
        do itype=0,24 ! vertex type
@@ -3122,10 +3128,11 @@ contains
           line='call vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
           line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-          write(iunit,*) trim(adjustl(line))
+          write(iunit,'(4x,a)') trim(adjustl(line))
        enddo
        write(tmp,*) isize
-       write(iunit,*) 'end subroutine compute_vertices'//trim(adjustl(tmp))
+       write(iunit,'(2x,a)') 'end subroutine compute_vertices'//trim(adjustl(tmp))
+       write(iunit,'(a)') ''
 
        do itype=0,24
           if (icount(itype).eq.0) cycle
@@ -3133,17 +3140,17 @@ contains
           line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
           line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-          write(iunit,*) trim(adjustl(line))
-          write(iunit,*) 'implicit none'
+          write(iunit,'(2x,a)') trim(adjustl(line))
+          write(iunit,'(4x,a)') 'implicit none'
           write(tmp,*) this%max_pp
-          write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+          write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
           write(tmp,*) this%n_cur
-          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+          write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
           write(tmp,*) this%n_vert
-          write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
-          write(iunit,*) 'integer :: i'
+          write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
+          write(iunit,'(4x,a)') 'integer :: i'
           write(tmp,*) icount(itype)
-          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[&'
+          write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[ &'
           line=''
           do i=1,icount(itype)
              write(tmp,*) cur1(i,itype)
@@ -3154,13 +3161,13 @@ contains
              endif
              if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
                 line=trim(adjustl(line))//' &'
-                write(iunit,*) trim(adjustl(line))
+                write(iunit,'(6x,a)') trim(adjustl(line))
                 line=''
              endif
           enddo
-          write(iunit,*) trim(adjustl(line))//']'
+          write(iunit,'(6x,a)') trim(adjustl(line))//']'
           write(tmp,*) icount(itype)
-          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur2=[&'
+          write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur2=[ &'
           line=''
           do i=1,icount(itype)
              write(tmp,*) cur2(i,itype)
@@ -3171,13 +3178,13 @@ contains
              endif
              if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
                 line=trim(adjustl(line))//' &'
-                write(iunit,*) trim(adjustl(line))
+                write(iunit,'(6x,a)') trim(adjustl(line))
                 line=''
              endif
           enddo
-          write(iunit,*) trim(adjustl(line))//']'
+          write(iunit,'(6x,a)') trim(adjustl(line))//']'
           write(tmp,*) icount(itype)
-          write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: int1=[&'
+          write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: int1=[ &'
           line=''
           do i=1,icount(itype)
              write(tmp,*) int1(i,itype)
@@ -3188,14 +3195,14 @@ contains
              endif
              if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
                 line=trim(adjustl(line))//' &'
-                write(iunit,*) trim(adjustl(line))
+                write(iunit,'(6x,a)') trim(adjustl(line))
                 line=''
              endif
           enddo
-          write(iunit,*) trim(adjustl(line))//']'
+          write(iunit,'(6x,a)') trim(adjustl(line))//']'
           if (itype.eq.0 .or. itype.eq.12) then
              write(tmp,*) icount(itype)
-             write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
+             write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[ &'
              line=''
              do i=1,icount(itype)
                 write(tmp,*) pp1(i,itype)
@@ -3206,13 +3213,13 @@ contains
                 endif
                 if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
                    line=trim(adjustl(line))//' &'
-                   write(iunit,*) trim(adjustl(line))
+                   write(iunit,'(6x,a)') trim(adjustl(line))
                    line=''
                 endif
              enddo
-             write(iunit,*) trim(adjustl(line))//']'
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
              write(tmp,*) icount(itype)
-             write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp2=[&'
+             write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp2=[ &'
              line=''
              do i=1,icount(itype)
                 write(tmp,*) pp2(i,itype)
@@ -3223,15 +3230,15 @@ contains
                 endif
                 if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
                    line=trim(adjustl(line))//' &'
-                   write(iunit,*) trim(adjustl(line))
+                   write(iunit,'(6x,a)') trim(adjustl(line))
                    line=''
                 endif
              enddo
-             write(iunit,*) trim(adjustl(line))//']'
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
           endif
           if (itype.eq.8 .or. itype.ge.10) then
              write(tmp,*) icount(itype)*2
-             write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[&'
+             write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[ &'
              line=''
              do i=1,icount(itype)
                 write(tmp,'(D24.16)') coupl(1,i,itype)
@@ -3246,16 +3253,16 @@ contains
                 endif
                 if (mod(i,2).eq.0 .and. i.ne.icount(itype)) then
                    line=trim(adjustl(line))//' &'
-                   write(iunit,*) trim(adjustl(line))
+                   write(iunit,'(6x,a)') trim(adjustl(line))
                    line=''
                 endif
              enddo
-             write(iunit,*) trim(adjustl(line))//']'
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
           endif
 
        
           write(tmp,*) icount(itype)
-          write(iunit,*)'do i=1,'//trim(adjustl(tmp))
+          write(iunit,'(4x,a)')'do i=1,'//trim(adjustl(tmp))
           if (itype.eq.0) then
              line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.1) then
@@ -3323,26 +3330,27 @@ contains
              line='call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           endif
-          write(iunit,*)trim(adjustl(line))
-          write(iunit,*)'enddo'
+          write(iunit,'(6x,a)')trim(adjustl(line))
+          write(iunit,'(4x,a)')'enddo'
 
           write(tmp,*) isize
           line='end subroutine vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
           line=trim(adjustl(line))//trim(adjustl(tmp))
-          write(iunit,*) trim(adjustl(line))
+          write(iunit,'(2x,a)') trim(adjustl(line))
+          write(iunit,'(a)') ''
 
        enddo
 
        write(tmp,*) isize
-       write(iunit,*) 'subroutine compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-       write(iunit,*) 'implicit none'
+       write(iunit,'(2x,a)') 'subroutine compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+       write(iunit,'(4x,a)') 'implicit none'
        write(tmp,*) this%max_pp
-       write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+       write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
        write(tmp,*) this%n_cur
-       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
+       write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
        write(tmp,*) this%n_vert
-       write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
+       write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
 
        icount_type=0
        do ic=this%n_cur_start(isize),this%n_cur_end(isize)
@@ -3383,11 +3391,12 @@ contains
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
              write(tmp,*) j
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-             write(iunit,*) trim(adjustl(line))
+             write(iunit,'(4x,a)') trim(adjustl(line))
           enddo
        enddo
        write(tmp,*) isize
-       write(iunit,*) 'end subroutine compute_currents'//trim(adjustl(tmp))
+       write(iunit,'(2x,a)') 'end subroutine compute_currents'//trim(adjustl(tmp))
+       write(iunit,'(a)') ''
 
        
        do i=1,150
@@ -3437,20 +3446,20 @@ contains
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
              write(tmp,*) j
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-             write(iunit,*) trim(adjustl(line))
-             write(iunit,*) 'implicit none'
+             write(iunit,'(2x,a)') trim(adjustl(line))
+             write(iunit,'(4x,a)') 'implicit none'
              write(tmp,*) this%max_pp
-             write(iunit,*) 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+             write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
              write(tmp,*) this%n_cur
-             write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
+             write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: val_c'
              write(tmp,*) this%n_vert
-             write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
-             write(iunit,*) 'integer :: i'
+             write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: int_c'
+             write(iunit,'(4x,a)') 'integer :: i'
              write(tmp,*) i
              line='integer,parameter,dimension(0:'//trim(adjustl(tmp))//','
              write(tmp,*) icount_type(i,j)
-             line=trim(adjustl(line))//trim(adjustl(tmp))//') :: int1=reshape([&'
-             write(iunit,*) trim(adjustl(line))
+             line=trim(adjustl(line))//trim(adjustl(tmp))//') :: int1=reshape([ &'
+             write(iunit,'(4x,a)') trim(adjustl(line))
              line=''
              do ii=1,icount_type(i,j)
                 do jj=0,i
@@ -3462,7 +3471,7 @@ contains
                    endif
                    if (mod(jj+1+(ii-1)*(i+1),12).eq.0 .and. .not.(ii.eq.icount_type(i,j) .and. jj.eq.i)) then
                       line=trim(adjustl(line))//' &'
-                      write(iunit,*) trim(adjustl(line))
+                      write(iunit,'(6x,a)') trim(adjustl(line))
                       line=''
                    endif
                 enddo
@@ -3471,11 +3480,11 @@ contains
              line=trim(adjustl(line))//'], shape=['//trim(adjustl(tmp))//','
              write(tmp,*) icount_type(i,j)
              line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
-             write(iunit,*) trim(adjustl(line))
+             write(iunit,'(6x,a)') trim(adjustl(line))
 
              if (j.ne.6 .and. j.ne.7) then
                 write(tmp,*) icount_type(i,j)
-                write(iunit,*) 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[&'
+                write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[ &'
                 line=''
                 do ii=1,icount_type(i,j)
                    write(tmp,*) pp(ii)
@@ -3486,16 +3495,16 @@ contains
                    endif
                    if (mod(ii,12).eq.0 .and. ii.ne.icount_type(i,j)) then
                       line=trim(adjustl(line))//' &'
-                      write(iunit,*) trim(adjustl(line))
+                      write(iunit,'(6x,a)') trim(adjustl(line))
                       line=''
                    endif
                 enddo
-                write(iunit,*) trim(adjustl(line))//']'
+                write(iunit,'(6x,a)') trim(adjustl(line))//']'
              endif
 
              if (j.ge.2 .and. j.le.5) then
                 write(tmp,*) icount_type(i,j)
-                write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: m=[&'
+                write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: m=[ &'
                 line=''
                 do ii=1,icount_type(i,j)
                    write(tmp,'(D24.16)') m(ii)
@@ -3506,13 +3515,13 @@ contains
                    endif
                    if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
                       line=trim(adjustl(line))//' &'
-                      write(iunit,*) trim(adjustl(line))
+                      write(iunit,'(6x,a)') trim(adjustl(line))
                       line=''
                    endif
                 enddo
-                write(iunit,*) trim(adjustl(line))//']'
+                write(iunit,'(6x,a)') trim(adjustl(line))//']'
                 write(tmp,*) icount_type(i,j)
-                write(iunit,*) 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: w=[&'
+                write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: w=[ &'
                 line=''
                 do ii=1,icount_type(i,j)
                    write(tmp,'(D24.16)') w(ii)
@@ -3523,42 +3532,43 @@ contains
                    endif
                    if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
                       line=trim(adjustl(line))//' &'
-                      write(iunit,*) trim(adjustl(line))
+                      write(iunit,'(6x,a)') trim(adjustl(line))
                       line=''
                    endif
                 enddo
-                write(iunit,*) trim(adjustl(line))//']'
+                write(iunit,'(6x,a)') trim(adjustl(line))//']'
              endif
 
              write(tmp,*) icount_type(i,j)
-             write(iunit,*) 'do i=1,'//trim(adjustl(tmp))
+             write(iunit,'(4x,a)') 'do i=1,'//trim(adjustl(tmp))
              write(tmp,*) i
              if (j.eq.6) then
-                write(iunit,*) 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              elseif (j.eq.5 .or. j.eq.7) then
-                write(iunit,*) 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              else
-                write(iunit,*) 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              endif
              if (j.eq.1 .and. isize.ne.n-1) then
-                write(iunit,*) 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+                write(iunit,'(6x,a)') 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
              elseif(j.eq.2 .and. isize.ne.n-1) then
-                write(iunit,*) 'call QuarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call QuarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.3 .and. isize.ne.n-1) then
-                write(iunit,*) 'call AquarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call AquarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.4 .and. isize.ne.n-1) then
-                write(iunit,*) 'call GluonPropagator_mass(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call GluonPropagator_mass(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.5 .and. isize.ne.n-1) then
-                write(iunit,*) 'call ScalarPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                write(iunit,'(6x,a)') 'call ScalarPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              endif
-             write(iunit,*) 'enddo'
+             write(iunit,'(4x,a)') 'enddo'
              write(tmp,*) isize
              line='end subroutine combine_currents_'//trim(adjustl(tmp))
              write(tmp,*) i
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
              write(tmp,*) j
              line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
-             write(iunit,*) trim(adjustl(line))
+             write(iunit,'(2x,a)') trim(adjustl(line))
+             write(iunit,'(a)') ''
              deallocate(curs)
              deallocate(pp)
              deallocate(m)
@@ -3567,15 +3577,15 @@ contains
        enddo
     enddo
 
-    write(iunit,*) 'subroutine compute_amps(amps,val_c)'
-    write(iunit,*) 'implicit none'
+    write(iunit,'(2x,a)') 'subroutine compute_amps(amps,val_c)'
+    write(iunit,'(4x,a)') 'implicit none'
     write(tmp,*) this%n_amps
-    write(iunit,*) 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
     write(tmp,*) this%n_cur
-    write(iunit,*) 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
-    
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+
+    ! first the 'non-same-flavour' ones
     do iproc=1,this%nprocs
-       write(iunit,*) ''
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (.not.this%same_flav(iproc)) then
              write(tmp,*) iamp
@@ -3584,13 +3594,11 @@ contains
              line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
              write(tmp,*) this%curr2amp(2,iamp)
              line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+             write(iunit,'(4x,a)') trim(adjustl(line))
           endif
-          write(iunit,*) trim(adjustl(line))
        enddo
     enddo
-    ! Sometimes daughters come after parent in the list of
-    ! amplitudes. In that case adjust order in which they are
-    ! computed.
+    ! now the same-flavour ones. They are the "sum" of two non-same-flavour ones.
     do iproc=1,this%nprocs
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (this%same_flav(iproc)) then
@@ -3627,14 +3635,14 @@ contains
                    endif
                 endif
              enddo
+             write(iunit,'(4x,a)') trim(adjustl(line))
           endif
-          write(iunit,*) trim(adjustl(line))
        enddo
     enddo
-    write(iunit,*) 'end subroutine compute_amps'
+    write(iunit,'(2x,a)') 'end subroutine compute_amps'
     write(tmp,*) igroup
     write(line,*) iint
-    write(iunit,*) 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
+    write(iunit,'(a)') 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
     close(iunit)
   end subroutine create_library
 
