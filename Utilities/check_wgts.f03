@@ -48,7 +48,7 @@ contains
     implicit none
     integer :: i,iunit,next
     logical :: done
-    character(len=100) :: dummy
+    character(len=100) :: dummy,string
     character(len=15) :: dummy2
     real(kind=8) :: dum,wgt,amp2,weight
     done=.false.
@@ -56,12 +56,15 @@ contains
        read(iunit,'(a)',end=99,err=99) dummy
        if (index(dummy,"<event>").ne.0) exit
     enddo
-    read (iunit,*,err=99,end=99) next,evt_wgt,evt_overwgt,evt_ex!,wgt,amp2,weight
-    read (iunit,*) dum ! helicity
-    read (iunit,*) dum ! color
+    read (iunit,*,err=99,end=99) next!,evt_wgt,evt_overwgt,evt_ex!,wgt,amp2,weight
+!    read (iunit,*) dum ! helicity
+!    read (iunit,*) dum ! color
     do i=1,next
        read (iunit,*,err=99,end=99) dum
     enddo
+    read(iunit,'(a)') dummy
+    read(iunit,'(a)') string
+    read(string(9:),*) evt_wgt,evt_overwgt,evt_ex
     read (iunit,*,err=99,end=99) dummy
     return
 99  done=.true.
