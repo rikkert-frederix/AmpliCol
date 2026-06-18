@@ -1,6 +1,9 @@
 module particles
   implicit none
   real(kind=8),parameter :: sw = 0.47143025548407230d0 
+  integer,parameter :: model_particle_capacity = 24
+  integer,parameter :: model_vertex_capacity = 222
+  private :: append_particle, find_particle_index, model_particle_capacity, model_vertex_capacity
   type particle
      integer :: type,anti_type,spin,dim
      real(kind=8) :: mass,width
@@ -23,6 +26,37 @@ module particles
           &,is_higgs,is_jet,is_higgsor
   end type physics_model
 contains
+  subroutine append_particle(this,l,ipdg,mass,width,spin,anti_type,dim)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(inout) :: l
+    integer,intent(in) :: ipdg,spin,anti_type,dim
+    real(kind=8),intent(in) :: mass,width
+
+    l=l+1
+    this%particle_list(l)%type=ipdg
+    this%particle_list(l)%mass=mass
+    this%particle_list(l)%width=width
+    this%particle_list(l)%spin=spin
+    this%particle_list(l)%anti_type=anti_type
+    this%particle_list(l)%dim=dim
+  end subroutine append_particle
+
+  integer function find_particle_index(this,ipdg)
+    implicit none
+    class(physics_model),intent(in) :: this
+    integer,intent(in) :: ipdg
+    integer :: i
+
+    do i=1,this%npart
+       if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
+          find_particle_index=i
+          return
+       endif
+    enddo
+    find_particle_index=0
+  end function find_particle_index
+
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
     class(physics_model) :: this
@@ -33,155 +67,59 @@ contains
     real(kind=8) :: hmass,hwidth
     
     l=0
-    this%npart=24! gluon, 6 quarks, tensor, photon, Z-boson and W-boson, H-boson,etc.,6 leptons
+    this%npart=model_particle_capacity ! gluon, quarks, tensors, bosons, Higgs and leptons
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
     do i=1,5
-       l=l+1
-       this%particle_list(l)%type=i
-       this%particle_list(l)%mass=0d0
-       this%particle_list(l)%width=0d0
-       this%particle_list(l)%spin=2 ! two spin states
-       this%particle_list(l)%anti_type=-i
-       this%particle_list(l)%dim=4
+       call append_particle(this,l,i,0d0,0d0,2,-i,4)
     enddo
 
     ! top quark
-    l=l+1
-    this%particle_list(l)%type=6
-    this%particle_list(l)%mass=tmass
-    this%particle_list(l)%width=twidth
-    this%particle_list(l)%spin=2 ! two spin states
-    this%particle_list(l)%anti_type=-6
-    this%particle_list(l)%dim=4
+    call append_particle(this,l,6,tmass,twidth,2,-6,4)
 
     ! gluon
-    l=l+1
-    this%particle_list(l)%type=21
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=2 ! two spin states
-    this%particle_list(l)%anti_type=21
-    this%particle_list(l)%dim=4
+    call append_particle(this,l,21,0d0,0d0,2,21,4)
 
     ! gluon-U1
-    l=l+1
-    this%particle_list(l)%type=99
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=99
-    this%particle_list(l)%dim=4
+    call append_particle(this,l,99,0d0,0d0,-1,99,4)
 
     ! tensor (non-propagator auxiliary particle to decompose 4-gluon interaction)
-    l=l+1
-    this%particle_list(l)%type=-21
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=-21
-    this%particle_list(l)%dim=6
+    call append_particle(this,l,-21,0d0,0d0,-1,-21,6)
 
     ! photon
-    l=l+1
-    this%particle_list(l)%type=22
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=2 ! two spin states
-    this%particle_list(l)%anti_type=22
-    this%particle_list(l)%dim=4
+    call append_particle(this,l,22,0d0,0d0,2,22,4)
 
     ! Z-boson
-    l=l+1
-    this%particle_list(l)%type=23
-    this%particle_list(l)%mass=zmass
-    this%particle_list(l)%width=zwidth
-    this%particle_list(l)%spin=3 ! three spin states
-    this%particle_list(l)%anti_type=23
-    this%particle_list(l)%dim=4
+    call append_particle(this,l,23,zmass,zwidth,3,23,4)
 
     ! Ztensor (non-propagator auxiliary particle to decompose 4-Wboson interaction)
-    l=l+1
-    this%particle_list(l)%type=-23
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill defined
-    this%particle_list(l)%anti_type=-23
-    this%particle_list(l)%dim=6
+    call append_particle(this,l,-23,0d0,0d0,-1,-23,6)
 
     ! W-boson
-    l=l+1
-    this%particle_list(l)%type=24
-    this%particle_list(l)%mass=wmass
-    this%particle_list(l)%width=wwidth
-    this%particle_list(l)%spin=3 ! three spin states
-    this%particle_list(l)%anti_type=-24
-    this%particle_list(l)%dim=4
+    call append_particle(this,l,24,wmass,wwidth,3,-24,4)
 
     ! Higgs-boson
-    l=l+1
-    this%particle_list(l)%type=25
-    this%particle_list(l)%mass=hmass
-    this%particle_list(l)%width=hwidth
-    this%particle_list(l)%spin=1 ! one spin states
-    this%particle_list(l)%anti_type=25
-    this%particle_list(l)%dim=1
+    call append_particle(this,l,25,hmass,hwidth,1,25,1)
 
     ! Higgs"or"A (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
-    l=l+1
-    this%particle_list(l)%type=125
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=125
-    this%particle_list(l)%dim=1
+    call append_particle(this,l,125,0d0,0d0,-1,125,1)
     ! Higgs"or"B (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
-    l=l+1
-    this%particle_list(l)%type=126
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=126
-    this%particle_list(l)%dim=1
+    call append_particle(this,l,126,0d0,0d0,-1,126,1)
     ! Higgs"or"C (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
-    l=l+1
-    this%particle_list(l)%type=127
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=127
-    this%particle_list(l)%dim=1
+    call append_particle(this,l,127,0d0,0d0,-1,127,1)
 
     ! Wtensor (non-propagator auxiliary particle to decompose 4-boson interactions)
-    l=l+1
-    this%particle_list(l)%type=26
-    this%particle_list(l)%mass=0d0
-    this%particle_list(l)%width=0d0
-    this%particle_list(l)%spin=-1 ! ill-defined
-    this%particle_list(l)%anti_type=-26
-    this%particle_list(l)%dim=6
+    call append_particle(this,l,26,0d0,0d0,-1,-26,6)
 
     ! charged leptons
     do i=1,3
-       l=l+1
-       this%particle_list(l)%type=11+(2*i-2)
-       this%particle_list(l)%mass=0d0
-       this%particle_list(l)%width=0d0
-       this%particle_list(l)%spin=2 ! two spin states
-       this%particle_list(l)%anti_type=-(11+(2*i-2))
-       this%particle_list(l)%dim=4
+       call append_particle(this,l,11+(2*i-2),0d0,0d0,2,-(11+(2*i-2)),4)
     enddo
 
     ! neutral leptons
     do i=1,3
-       l=l+1
-       this%particle_list(l)%type=12+(2*i-2)
-       this%particle_list(l)%mass=0d0
-       this%particle_list(l)%width=0d0
-       this%particle_list(l)%spin=2 ! two spin states
-       this%particle_list(l)%anti_type=-(12+(2*i-2))
-       this%particle_list(l)%dim=4
+       call append_particle(this,l,12+(2*i-2),0d0,0d0,2,-(12+(2*i-2)),4)
     enddo
 
     if (l.gt.this%npart) then
@@ -199,7 +137,7 @@ contains
     integer :: i,l
     real(kind=8) :: fact,gw,Vf,Af
     l=0
-    this%nint = 222 ! number of vertices
+    this%nint = model_vertex_capacity ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     l=l+1
@@ -1096,15 +1034,14 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg
-    do i=1,this%npart
-       if (this%particle_list(i)%type.eq.ipdg) then
-          get_antipart=this%particle_list(i)%anti_type
-          return
-       elseif (this%particle_list(i)%anti_type.eq.ipdg) then
-          get_antipart=this%particle_list(i)%type
-          return
-       endif
-    enddo
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0 .and. this%particle_list(i)%type.eq.ipdg) then
+       get_antipart=this%particle_list(i)%anti_type
+       return
+    elseif (i.gt.0) then
+       get_antipart=this%particle_list(i)%type
+       return
+    endif
     write (*,*) 'Particle not in model (mass)',ipdg
     stop 1
   end function get_antipart
@@ -1112,12 +1049,11 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg
-    do i=1,this%npart
-       if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
-          get_mass=this%particle_list(i)%mass
-          return
-       endif
-    enddo
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       get_mass=this%particle_list(i)%mass
+       return
+    endif
     write (*,*) 'Particle not in model (mass)',ipdg
     stop 1
   end function get_mass
@@ -1125,12 +1061,11 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg
-    do i=1,this%npart
-       if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
-          get_width=this%particle_list(i)%width
-          return
-       endif
-    enddo
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       get_width=this%particle_list(i)%width
+       return
+    endif
     write (*,*) 'Particle not in model (width)',ipdg
     stop 1
   end function get_width
@@ -1138,16 +1073,15 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg
-    do i=1,this%npart
-       if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
-          get_spin=this%particle_list(i)%spin
-          if (get_spin.lt.0) then
-             write (*,*) 'Spin ill-defined for particle',ipdg
-             stop 1
-          endif
-          return
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       get_spin=this%particle_list(i)%spin
+       if (get_spin.lt.0) then
+          write (*,*) 'Spin ill-defined for particle',ipdg
+          stop 1
        endif
-    enddo
+       return
+    endif
     write (*,*) 'Particle not in model (spin)',ipdg
     stop 1
   end function get_spin
@@ -1155,12 +1089,11 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg
-    do i=1,this%npart
-       if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
-          get_dim=this%particle_list(i)%dim
-          return
-       endif
-    enddo
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       get_dim=this%particle_list(i)%dim
+       return
+    endif
     write (*,*) 'Particle not in model (dim)',ipdg
     stop 1
   end function get_dim
@@ -1181,102 +1114,62 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.ge.1 .and. iPDG.le.6) then
-       is_quark=.true.
-    else
-       is_quark=.false.
-    endif
+    is_quark=iPDG.ge.1 .and. iPDG.le.6
   end function is_quark
   logical function is_antiquark(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.le.-1 .and. iPDG.ge.-6) then
-       is_antiquark=.true.
-    else
-       is_antiquark=.false.
-    endif
+    is_antiquark=iPDG.le.-1 .and. iPDG.ge.-6
   end function is_antiquark
   logical function is_lepton(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.ge.11 .and. iPDG.le.16) then
-       is_lepton=.true.
-    else
-       is_lepton=.false.
-    endif
+    is_lepton=iPDG.ge.11 .and. iPDG.le.16
   end function is_lepton
   logical function is_antilepton(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.le.-11 .and. iPDG.ge.-16) then
-       is_antilepton=.true.
-    else
-       is_antilepton=.false.
-    endif
+    is_antilepton=iPDG.le.-11 .and. iPDG.ge.-16
   end function is_antilepton
   logical function is_lepton_any(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (abs(iPDG).ge.11 .and. abs(iPDG).le.16) then
-       is_lepton_any=.true.
-    else
-       is_lepton_any=.false.
-    endif
+    is_lepton_any=abs(iPDG).ge.11 .and. abs(iPDG).le.16
   end function is_lepton_any
   logical function is_gluon(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.21 .or. iPDG.eq.99) then
-       is_gluon=.true.
-    else
-       is_gluon=.false.
-    endif
+    is_gluon=iPDG.eq.21 .or. iPDG.eq.99
   end function is_gluon
 
   logical function is_scalar(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126.or.abs(iPDG).eq.127) then
-       is_scalar=.true.
-    else
-       is_scalar=.false.
-    endif
+    is_scalar=abs(iPDG).eq.25.or.abs(iPDG).eq.125.or.abs(iPDG).eq.126.or.abs(iPDG).eq.127
   end function is_scalar
   logical function is_tensor_g(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.-21) then
-       is_tensor_g=.true.
-    else
-       is_tensor_g=.false.
-    endif
+    is_tensor_g=iPDG.eq.-21
   end function is_tensor_g
   logical function is_tensor_z(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.-23) then
-       is_tensor_z=.true.
-    else
-       is_tensor_z=.false.
-    endif
+    is_tensor_z=iPDG.eq.-23
   end function is_tensor_z
   logical function is_tensor_w(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (abs(iPDG).eq.26) then
-       is_tensor_w=.true.
-    else
-       is_tensor_w=.false.
-    endif
+    is_tensor_w=abs(iPDG).eq.26
   end function is_tensor_w
   logical function is_tensor6(this,iPDG)
     implicit none
@@ -1294,51 +1187,31 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (abs(iPDG).le.6 .or. iPDG.eq.21) then
-       is_singlet=.false.
-    else
-       is_singlet=.true.
-    endif
+    is_singlet=.not.(abs(iPDG).le.6 .or. iPDG.eq.21)
   end function is_singlet
   logical function is_photon(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.22) then
-       is_photon=.true.
-    else
-       is_photon=.false.
-    endif
+    is_photon=iPDG.eq.22
   end function is_photon
   logical function is_massiveboson(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.23 .or. abs(iPDG).eq.24) then
-       is_massiveboson=.true.
-    else
-       is_massiveboson=.false.
-    endif
+    is_massiveboson=iPDG.eq.23 .or. abs(iPDG).eq.24
   end function is_massiveboson
   logical function is_higgs(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.25) then
-       is_higgs=.true.
-    else
-       is_higgs=.false.
-    endif
+    is_higgs=iPDG.eq.25
   end function is_higgs
   logical function is_higgsor(this,iPDG)
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if (iPDG.eq.125.or.iPDG.eq.126.or.iPDG.eq.127) then
-       is_higgsor=.true.
-    else
-       is_higgsor=.false.
-    endif
+    is_higgsor=iPDG.eq.125.or.iPDG.eq.126.or.iPDG.eq.127
   end function is_higgsor
   logical function is_jet(this,iPDG)
     implicit none
