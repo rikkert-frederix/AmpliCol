@@ -3,10 +3,13 @@ module particles
   real(kind=8),parameter :: sw = 0.47143025548407230d0 
   integer,parameter :: model_particle_capacity = 24
   integer,parameter :: model_vertex_capacity = 222
-  private :: append_particle, find_particle_index, model_particle_capacity, model_vertex_capacity
+  private :: append_particle, find_particle_index, particle_property_sign&
+       &, model_particle_capacity, model_vertex_capacity
   type particle
-     integer :: type,anti_type,spin,dim
-     real(kind=8) :: mass,width
+     ! weak_isospin and weak_hypercharge use index 1=left, 2=right with Q = T3 + Y/2.
+     integer :: type,anti_type,spin,dim,color_rep
+     real(kind=8) :: mass,width,charge
+     real(kind=8),dimension(2) :: weak_isospin,weak_hypercharge
   end type particle
   type vertex
      integer :: type
@@ -20,18 +23,24 @@ module particles
    contains
      procedure,public :: init_part,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
+          &,get_charge,get_isospin_l,get_isospin_r,get_hypercharge_l&
+          &,get_hypercharge_r,get_color_rep,get_color_dim&
           &,is_antiquark,is_lepton,is_antilepton,is_lepton_any,&
           &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
           &,is_higgs,is_jet,is_higgsor
+     procedure,public :: get_colour_rep => get_color_rep
+     procedure,public :: get_colour_dim => get_color_dim
   end type physics_model
 contains
-  subroutine append_particle(this,l,ipdg,mass,width,spin,anti_type,dim)
+  subroutine append_particle(this,l,ipdg,mass,width,spin,anti_type,dim,charge,&
+       &weak_isospin,weak_hypercharge,color_rep)
     implicit none
     class(physics_model),intent(inout) :: this
     integer,intent(inout) :: l
-    integer,intent(in) :: ipdg,spin,anti_type,dim
-    real(kind=8),intent(in) :: mass,width
+    integer,intent(in) :: ipdg,spin,anti_type,dim,color_rep
+    real(kind=8),intent(in) :: mass,width,charge
+    real(kind=8),dimension(2),intent(in) :: weak_isospin,weak_hypercharge
 
     l=l+1
     this%particle_list(l)%type=ipdg
@@ -40,6 +49,10 @@ contains
     this%particle_list(l)%spin=spin
     this%particle_list(l)%anti_type=anti_type
     this%particle_list(l)%dim=dim
+    this%particle_list(l)%charge=charge
+    this%particle_list(l)%weak_isospin=weak_isospin
+    this%particle_list(l)%weak_hypercharge=weak_hypercharge
+    this%particle_list(l)%color_rep=color_rep
   end subroutine append_particle
 
   integer function find_particle_index(this,ipdg)
@@ -57,6 +70,24 @@ contains
     find_particle_index=0
   end function find_particle_index
 
+  integer function particle_property_sign(this,ipdg)
+    implicit none
+    class(physics_model),intent(in) :: this
+    integer,intent(in) :: ipdg
+    integer :: i
+
+    do i=1,this%npart
+       if (this%particle_list(i)%type.eq.ipdg) then
+          particle_property_sign=1
+          return
+       elseif (this%particle_list(i)%anti_type.eq.ipdg) then
+          particle_property_sign=-1
+          return
+       endif
+    enddo
+    particle_property_sign=0
+  end function particle_property_sign
+
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
     class(physics_model) :: this
@@ -72,54 +103,64 @@ contains
 
     ! 5 massless quarks
     do i=1,5
-       call append_particle(this,l,i,0d0,0d0,2,-i,4)
+       if (mod(i,2).eq.0) then
+          call append_particle(this,l,i,0d0,0d0,2,-i,4,2d0/3d0,&
+               &[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
+       else
+          call append_particle(this,l,i,0d0,0d0,2,-i,4,-1d0/3d0,&
+               &[-0.5d0,0d0],[1d0/3d0,-2d0/3d0],3)
+       endif
     enddo
 
     ! top quark
-    call append_particle(this,l,6,tmass,twidth,2,-6,4)
+    call append_particle(this,l,6,tmass,twidth,2,-6,4,2d0/3d0,&
+         &[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
 
     ! gluon
-    call append_particle(this,l,21,0d0,0d0,2,21,4)
+    call append_particle(this,l,21,0d0,0d0,2,21,4,0d0,[0d0,0d0],[0d0,0d0],8)
 
     ! gluon-U1
-    call append_particle(this,l,99,0d0,0d0,-1,99,4)
+    call append_particle(this,l,99,0d0,0d0,-1,99,4,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! tensor (non-propagator auxiliary particle to decompose 4-gluon interaction)
-    call append_particle(this,l,-21,0d0,0d0,-1,-21,6)
+    call append_particle(this,l,-21,0d0,0d0,-1,-21,6,0d0,[0d0,0d0],[0d0,0d0],8)
 
     ! photon
-    call append_particle(this,l,22,0d0,0d0,2,22,4)
+    call append_particle(this,l,22,0d0,0d0,2,22,4,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! Z-boson
-    call append_particle(this,l,23,zmass,zwidth,3,23,4)
+    call append_particle(this,l,23,zmass,zwidth,3,23,4,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! Ztensor (non-propagator auxiliary particle to decompose 4-Wboson interaction)
-    call append_particle(this,l,-23,0d0,0d0,-1,-23,6)
+    call append_particle(this,l,-23,0d0,0d0,-1,-23,6,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! W-boson
-    call append_particle(this,l,24,wmass,wwidth,3,-24,4)
+    call append_particle(this,l,24,wmass,wwidth,3,-24,4,1d0,[1d0,1d0],[0d0,0d0],1)
 
     ! Higgs-boson
-    call append_particle(this,l,25,hmass,hwidth,1,25,1)
+    call append_particle(this,l,25,hmass,hwidth,1,25,1,0d0,[-0.5d0,-0.5d0],&
+         &[1d0,1d0],1)
 
     ! Higgs"or"A (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
-    call append_particle(this,l,125,0d0,0d0,-1,125,1)
+    call append_particle(this,l,125,0d0,0d0,-1,125,1,0d0,[0d0,0d0],[0d0,0d0],1)
     ! Higgs"or"B (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
-    call append_particle(this,l,126,0d0,0d0,-1,126,1)
+    call append_particle(this,l,126,0d0,0d0,-1,126,1,0d0,[0d0,0d0],[0d0,0d0],1)
     ! Higgs"or"C (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
-    call append_particle(this,l,127,0d0,0d0,-1,127,1)
+    call append_particle(this,l,127,0d0,0d0,-1,127,1,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! Wtensor (non-propagator auxiliary particle to decompose 4-boson interactions)
-    call append_particle(this,l,26,0d0,0d0,-1,-26,6)
+    call append_particle(this,l,26,0d0,0d0,-1,-26,6,1d0,[1d0,1d0],[0d0,0d0],1)
 
     ! charged leptons
     do i=1,3
-       call append_particle(this,l,11+(2*i-2),0d0,0d0,2,-(11+(2*i-2)),4)
+       call append_particle(this,l,11+(2*i-2),0d0,0d0,2,-(11+(2*i-2)),4,-1d0,&
+            &[-0.5d0,0d0],[-1d0,-2d0],1)
     enddo
 
     ! neutral leptons
     do i=1,3
-       call append_particle(this,l,12+(2*i-2),0d0,0d0,2,-(12+(2*i-2)),4)
+       call append_particle(this,l,12+(2*i-2),0d0,0d0,2,-(12+(2*i-2)),4,0d0,&
+            &[0.5d0,0d0],[-1d0,0d0],1)
     enddo
 
     if (l.gt.this%npart) then
@@ -1097,6 +1138,98 @@ contains
     write (*,*) 'Particle not in model (dim)',ipdg
     stop 1
   end function get_dim
+  real(kind=8) function get_charge(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg,sgn
+
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       sgn=particle_property_sign(this,ipdg)
+       get_charge=dble(sgn)*this%particle_list(i)%charge
+       return
+    endif
+    write (*,*) 'Particle not in model (charge)',ipdg
+    stop 1
+  end function get_charge
+  real(kind=8) function get_isospin_l(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg,sgn
+
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       sgn=particle_property_sign(this,ipdg)
+       get_isospin_l=dble(sgn)*this%particle_list(i)%weak_isospin(1)
+       return
+    endif
+    write (*,*) 'Particle not in model (left isospin)',ipdg
+    stop 1
+  end function get_isospin_l
+  real(kind=8) function get_isospin_r(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg,sgn
+
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       sgn=particle_property_sign(this,ipdg)
+       get_isospin_r=dble(sgn)*this%particle_list(i)%weak_isospin(2)
+       return
+    endif
+    write (*,*) 'Particle not in model (right isospin)',ipdg
+    stop 1
+  end function get_isospin_r
+  real(kind=8) function get_hypercharge_l(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg,sgn
+
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       sgn=particle_property_sign(this,ipdg)
+       get_hypercharge_l=dble(sgn)*this%particle_list(i)%weak_hypercharge(1)
+       return
+    endif
+    write (*,*) 'Particle not in model (left hypercharge)',ipdg
+    stop 1
+  end function get_hypercharge_l
+  real(kind=8) function get_hypercharge_r(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg,sgn
+
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       sgn=particle_property_sign(this,ipdg)
+       get_hypercharge_r=dble(sgn)*this%particle_list(i)%weak_hypercharge(2)
+       return
+    endif
+    write (*,*) 'Particle not in model (right hypercharge)',ipdg
+    stop 1
+  end function get_hypercharge_r
+  integer function get_color_rep(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: i,ipdg,sgn
+
+    i=find_particle_index(this,ipdg)
+    if (i.gt.0) then
+       sgn=particle_property_sign(this,ipdg)
+       get_color_rep=this%particle_list(i)%color_rep
+       if (sgn.lt.0 .and. abs(get_color_rep).eq.3) get_color_rep=-get_color_rep
+       return
+    endif
+    write (*,*) 'Particle not in model (color representation)',ipdg
+    stop 1
+  end function get_color_rep
+  integer function get_color_dim(this,ipdg)
+    implicit none
+    class(physics_model) :: this
+    integer :: ipdg
+
+    get_color_dim=abs(this%get_color_rep(ipdg))
+  end function get_color_dim
   integer function get_inter_dim(this,itype)
     implicit none
     class(physics_model) :: this
