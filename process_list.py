@@ -479,6 +479,7 @@ def MultiChannelPartners(proc, perm, k, l):
     all_possible_perms = []
     singlet_indices = [perm.index(i) for i, p in enumerate(proc) if p in singlets]
     anti_quark_indices = tuple([perm.index(i) for i, p in enumerate(proc) if p in antiquarks])
+    nsinglets = len(singlet_indices)
     # Precompute singlet permutations
     if len(singlet_indices) > 1:
         singlet_perms = tuple(itertools.permutations(singlet_indices))
@@ -520,7 +521,7 @@ def MultiChannelPartners(proc, perm, k, l):
             # permutations of the colour singlets AND how they are
             # distributed between the two quark-antiquark colour
             # groupings.
-            for j in range(len(singlet_perms) + 1): # 'j' is the number of singlets attached to the 1st quark line
+            for j in range(nsinglets + 1): # 'j' is the number of singlets attached to the 1st quark line
                 for s in singlet_perms:
                     order = []
                     for i in range(len(perm)):
@@ -535,8 +536,8 @@ def MultiChannelPartners(proc, perm, k, l):
                             order.append(perm[i])
                     all_possible_perms.append((tuple(order),tuple(proc)))
         elif len(anti_quark_indices) == 3:
-            for j1 in range(len(singlet_perms) + 1): # 'j1' is the number of singlets attached to the 1st quark line
-                for j2 in range(len(singlet_perms)-j1 + 1): # 'j2' is the number of singlets attached to the 2nd quark line
+            for j1 in range(nsinglets + 1): # 'j1' is the number of singlets attached to the 1st quark line
+                for j2 in range(nsinglets-j1 + 1): # 'j2' is the number of singlets attached to the 2nd quark line
                     for s in singlet_perms:
                         order = []
                         for i in range(len(perm)):
