@@ -3,7 +3,12 @@ module particles
   real(kind=8),parameter :: sw = 0.47143025548407230d0 
   integer,parameter :: model_particle_capacity = 24
   integer,parameter :: model_vertex_capacity = 222
-  private :: append_particle, find_particle_index, particle_property_sign&
+  private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
+       &, weak_coupling, weak_cosine, neutral_gauge_coupling&
+       &, charged_current_coupling, fermion_charge_thirds&
+       &, photon_fermion_coupling, z_fermion_coupling&
+       &, weak_coupling_squared, weak_cosine_squared&
+       &, weak_coupling_over_cosine, higgs_self_coupling&
        &, model_particle_capacity, model_vertex_capacity
   type particle
      ! weak_isospin and weak_hypercharge use index 1=left, 2=right with Q = T3 + Y/2.
@@ -41,7 +46,6 @@ contains
     integer,intent(in) :: ipdg,spin,anti_type,dim,color_rep
     real(kind=8),intent(in) :: mass,width,charge
     real(kind=8),dimension(2),intent(in) :: weak_isospin,weak_hypercharge
-
     l=l+1
     this%particle_list(l)%type=ipdg
     this%particle_list(l)%mass=mass
@@ -55,12 +59,24 @@ contains
     this%particle_list(l)%color_rep=color_rep
   end subroutine append_particle
 
+  subroutine append_vertex(this,l,itype,ipdgs,coupl)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(inout) :: l
+    integer,intent(in) :: itype
+    integer,dimension(3),intent(in) :: ipdgs
+    real(kind=8),dimension(2),intent(in) :: coupl
+    l=l+1
+    this%vertex_list(l)%type=itype
+    this%vertex_list(l)%particles=ipdgs
+    this%vertex_list(l)%coupl=coupl
+  end subroutine append_vertex
+
   integer function find_particle_index(this,ipdg)
     implicit none
     class(physics_model),intent(in) :: this
     integer,intent(in) :: ipdg
     integer :: i
-
     do i=1,this%npart
        if (this%particle_list(i)%type.eq.ipdg .or. this%particle_list(i)%anti_type.eq.ipdg) then
           find_particle_index=i
@@ -75,7 +91,6 @@ contains
     class(physics_model),intent(in) :: this
     integer,intent(in) :: ipdg
     integer :: i
-
     do i=1,this%npart
        if (this%particle_list(i)%type.eq.ipdg) then
           particle_property_sign=1
@@ -88,6 +103,86 @@ contains
     particle_property_sign=0
   end function particle_property_sign
 
+  real(kind=8) function weak_coupling()
+    implicit none
+    weak_coupling=1d0/sw
+  end function weak_coupling
+
+  real(kind=8) function weak_cosine()
+    implicit none
+    weak_cosine=sqrt(1d0-sw**2)
+  end function weak_cosine
+
+  real(kind=8) function neutral_gauge_coupling()
+    implicit none
+    neutral_gauge_coupling=weak_coupling()*weak_cosine()
+  end function neutral_gauge_coupling
+
+  real(kind=8) function weak_coupling_squared()
+    implicit none
+    weak_coupling_squared=weak_coupling()**2
+  end function weak_coupling_squared
+
+  real(kind=8) function weak_cosine_squared()
+    implicit none
+    weak_cosine_squared=weak_cosine()**2
+  end function weak_cosine_squared
+
+  real(kind=8) function weak_coupling_over_cosine()
+    implicit none
+    weak_coupling_over_cosine=weak_coupling()/weak_cosine()
+  end function weak_coupling_over_cosine
+
+  real(kind=8) function charged_current_coupling()
+    implicit none
+    charged_current_coupling=weak_coupling()*(1d0/(sqrt(2d0)))
+  end function charged_current_coupling
+
+  function higgs_self_coupling(this) result(coupl)
+    implicit none
+    class(physics_model),intent(in) :: this
+    real(kind=8),dimension(2) :: coupl
+    coupl=[(-3d0/2d0)*weak_coupling()*(this%get_mass(25)**2/this%get_mass(24)),0d0]
+  end function higgs_self_coupling
+
+  integer function fermion_charge_thirds(this,ipdg)
+    implicit none
+    class(physics_model),intent(in) :: this
+    integer,intent(in) :: ipdg
+    integer :: ipdg_abs
+    ipdg_abs=abs(ipdg)
+    fermion_charge_thirds=nint(3d0*(this%get_isospin_l(ipdg_abs)+&
+         &0.5d0*this%get_hypercharge_l(ipdg_abs)))
+  end function fermion_charge_thirds
+
+  function photon_fermion_coupling(this,ipdg) result(coupl)
+    implicit none
+    class(physics_model),intent(in) :: this
+    integer,intent(in) :: ipdg
+    real(kind=8),dimension(2) :: coupl
+    real(kind=8) :: charge
+    charge=dble(fermion_charge_thirds(this,ipdg))/3d0
+    coupl=[charge,charge]
+  end function photon_fermion_coupling
+
+  function z_fermion_coupling(this,ipdg) result(coupl)
+    implicit none
+    class(physics_model),intent(in) :: this
+    integer,intent(in) :: ipdg
+    real(kind=8),dimension(2) :: coupl
+    integer :: charge_thirds,ipdg_abs
+    real(kind=8) :: charge_factor,fact,gw,Vf,Af
+    ipdg_abs=abs(ipdg)
+    charge_thirds=fermion_charge_thirds(this,ipdg_abs)
+    charge_factor=dble(charge_thirds)/3d0
+    Vf=this%get_isospin_l(ipdg_abs)+this%get_isospin_r(ipdg_abs)-&
+         &2d0*charge_factor*sw**2
+    Af=this%get_isospin_l(ipdg_abs)-this%get_isospin_r(ipdg_abs)
+    gw=weak_coupling()
+    fact=1d0/(2d0*weak_cosine())
+    coupl=[Vf+Af,Vf-Af]*gw*fact
+  end function z_fermion_coupling
+
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
     class(physics_model) :: this
@@ -96,7 +191,6 @@ contains
     real(kind=8) :: zmass,zwidth
     real(kind=8) :: wmass,wwidth
     real(kind=8) :: hmass,hwidth
-    
     l=0
     this%npart=model_particle_capacity ! gluon, quarks, tensors, bosons, Higgs and leptons
     allocate(this%particle_list(this%npart))
@@ -176,890 +270,377 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,l
-    real(kind=8) :: fact,gw,Vf,Af
     l=0
     this%nint = model_vertex_capacity ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
-    l=l+1
-    this%vertex_list(l)%type=0
-    this%vertex_list(l)%particles(1)=21
-    this%vertex_list(l)%particles(2)=21
-    this%vertex_list(l)%particles(3)=21
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,0,[21,21,21],&
+         &[1d0,0d0])
     ! gluon-gluon to tensor vertex
-    l=l+1
-    this%vertex_list(l)%type=1
-    this%vertex_list(l)%particles(1)=21
-    this%vertex_list(l)%particles(2)=21
-    this%vertex_list(l)%particles(3)=-21
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,1,[21,21,-21],&
+         &[1d0,0d0])
     ! tensor-gluon to gluon vertex
-    l=l+1
-    this%vertex_list(l)%type=2
-    this%vertex_list(l)%particles(1)=-21
-    this%vertex_list(l)%particles(2)=21
-    this%vertex_list(l)%particles(3)=21
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,2,[-21,21,21],&
+         &[1d0,0d0])
     ! gluon-tensor to gluon vertex
-    l=l+1
-    this%vertex_list(l)%type=3
-    this%vertex_list(l)%particles(1)=21
-    this%vertex_list(l)%particles(2)=-21
-    this%vertex_list(l)%particles(3)=21
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,3,[21,-21,21],&
+         &[1d0,0d0])
     ! gluon-quark to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=4
-       this%vertex_list(l)%particles(1)=21
-       this%vertex_list(l)%particles(2)=i
-       this%vertex_list(l)%particles(3)=i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,4,[21,i,i],&
+            &[1d0,0d0])
     enddo
     ! gluon-antiquark to antiquark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=5
-       this%vertex_list(l)%particles(1)=21
-       this%vertex_list(l)%particles(2)=-i
-       this%vertex_list(l)%particles(3)=-i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,5,[21,-i,-i],&
+            &[1d0,0d0])
     enddo
     ! quark-gluon to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=6
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=21
-       this%vertex_list(l)%particles(3)=i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,6,[i,21,i],&
+            &[1d0,0d0])
     enddo
     ! antiquark-gluon to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=7
-       this%vertex_list(l)%particles(1)=-i
-       this%vertex_list(l)%particles(2)=21
-       this%vertex_list(l)%particles(3)=-i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,7,[-i,21,-i],&
+            &[1d0,0d0])
     enddo
     ! antiquark-quark to gluon vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=9
-       this%vertex_list(l)%particles(1)=-i
-       this%vertex_list(l)%particles(2)=i
-       this%vertex_list(l)%particles(3)=21
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,9,[-i,i,21],&
+            &[1d0,0d0])
     enddo
     ! quark-antiquark to gluonU1 vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=8
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=-i
-       this%vertex_list(l)%particles(3)=99
-       this%vertex_list(l)%coupl=[1d0/3d0,0d0]
+       call append_vertex(this,l,8,[i,-i,99],&
+            &[1d0/3d0,0d0])
     enddo
     ! gluonU1-quark to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=4
-       this%vertex_list(l)%particles(1)=99
-       this%vertex_list(l)%particles(2)=i
-       this%vertex_list(l)%particles(3)=i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,4,[99,i,i],&
+            &[1d0,0d0])
     enddo
     ! gluonU1-antiquark to antiquark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=5
-       this%vertex_list(l)%particles(1)=99
-       this%vertex_list(l)%particles(2)=-i
-       this%vertex_list(l)%particles(3)=-i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,5,[99,-i,-i],&
+            &[1d0,0d0])
     enddo
     ! quark-gluonU1 to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=6
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=99
-       this%vertex_list(l)%particles(3)=i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,6,[i,99,i],&
+            &[1d0,0d0])
     enddo
     ! antiquark-gluonU1 to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=7
-       this%vertex_list(l)%particles(1)=-i
-       this%vertex_list(l)%particles(2)=99
-       this%vertex_list(l)%particles(3)=-i
-       this%vertex_list(l)%coupl=[1d0,0d0]
+       call append_vertex(this,l,7,[-i,99,-i],&
+            &[1d0,0d0])
     enddo
     ! quark-photon to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=10
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=22
-       this%vertex_list(l)%particles(3)=i
-       if (mod(i,2).eq.0) then
-          this%vertex_list(l)%coupl=[ 2d0/3d0, 2d0/3d0]
-       else
-          this%vertex_list(l)%coupl=[-1d0/3d0,-1d0/3d0]
-       endif
+       call append_vertex(this,l,10,[i,22,i],&
+            &photon_fermion_coupling(this,i))
     enddo
     ! antiquark-photon to antiquark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=11
-       this%vertex_list(l)%particles(1)=-i
-       this%vertex_list(l)%particles(2)=22
-       this%vertex_list(l)%particles(3)=-i
-       if (mod(i,2).eq.0) then
-          this%vertex_list(l)%coupl=[ 2d0/3d0, 2d0/3d0]
-       else
-          this%vertex_list(l)%coupl=[-1d0/3d0,-1d0/3d0]
-       endif
+       call append_vertex(this,l,11,[-i,22,-i],&
+            &photon_fermion_coupling(this,-i))
     enddo
     ! quark-Zboson to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=10
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=23
-       this%vertex_list(l)%particles(3)=i
-       gw=1d0/sw
-       fact=1d0/(2d0*sqrt(1d0-sw**2))
-       if (mod(i,2).eq.0) then
-          Vf=0.5d0-4d0*sw**2/3d0
-          Af=0.5d0
-       else
-          Vf=-0.5d0+2d0*sw**2/3d0
-          Af=-0.5d0
-       endif
-       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       call append_vertex(this,l,10,[i,23,i],&
+            &z_fermion_coupling(this,i))
     enddo
     ! antiquark-Zboson to antiquark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=11
-       this%vertex_list(l)%particles(1)=-i
-       this%vertex_list(l)%particles(2)=23
-       this%vertex_list(l)%particles(3)=-i
-       gw=1d0/sw
-       fact=1d0/(2d0*sqrt(1d0-sw**2))
-       if (mod(i,2).eq.0) then
-          Vf=0.5d0-4d0*sw**2/3d0
-          Af=0.5d0
-       else
-          Vf=-0.5d0+2d0*sw**2/3d0
-          Af=-0.5d0
-       endif
-       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       call append_vertex(this,l,11,[-i,23,-i],&
+            &z_fermion_coupling(this,-i))
     enddo
     ! quark-Wboson to quark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=10
-       this%vertex_list(l)%particles(1)=i
        if (mod(i,2).eq.0) then
-          this%vertex_list(l)%particles(2)=-24
-          this%vertex_list(l)%particles(3)=i-1
+          call append_vertex(this,l,10,[i,-24,i-1],&
+               &[charged_current_coupling(),0d0])
        else
-          this%vertex_list(l)%particles(2)=24
-          this%vertex_list(l)%particles(3)=i+1
+          call append_vertex(this,l,10,[i,24,i+1],&
+               &[charged_current_coupling(),0d0])
        endif
-       gw=1d0/sw
-       fact=1d0/(sqrt(2d0))
-       this%vertex_list(l)%coupl=[gw*fact,0d0]
     enddo
     ! antiquark-Wboson to antiquark vertices
     do i=1,6
-       l=l+1
-       this%vertex_list(l)%type=11
-       this%vertex_list(l)%particles(1)=-i
        if (mod(i,2).eq.0) then
-          this%vertex_list(l)%particles(2)=+24
-          this%vertex_list(l)%particles(3)=-i+1
+          call append_vertex(this,l,11,[-i,+24,-i+1],&
+               &[charged_current_coupling(),0d0])
        else
-          this%vertex_list(l)%particles(2)=-24
-          this%vertex_list(l)%particles(3)=-i-1
+          call append_vertex(this,l,11,[-i,-24,-i-1],&
+               &[charged_current_coupling(),0d0])
        endif
-       gw=1d0/sw
-       fact=1d0/(sqrt(2d0))
-       this%vertex_list(l)%coupl=[gw*fact,0d0]
     enddo
     ! Wboson-Wboson to Z-boson
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0]
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    call append_vertex(this,l,12,[24,-24,23],&
+         &[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[-24,24,23],&
+         &[neutral_gauge_coupling(),0d0])
     ! Wboson-Wboson to photon
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[-1d0,0d0]
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,12,[24,-24,22],&
+         &[-this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[-24,24,22],&
+         &[this%get_charge(24),0d0])
     ! Wboson-photon to Wboson
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=22
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[1d0,0d0]
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=22
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[-1d0,0d0]
+    call append_vertex(this,l,12,[24,22,24],&
+         &[this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[-24,22,-24],&
+         &[this%get_charge(-24),0d0])
     ! photon-Wboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=22
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[-1d0,0d0]
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=22
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,12,[22,24,24],&
+         &[-this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[22,-24,-24],&
+         &[-this%get_charge(-24),0d0])
     ! Wboson-Zboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0]
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0]
+    call append_vertex(this,l,12,[24,23,24],&
+         &[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[-24,23,-24],&
+         &[-neutral_gauge_coupling(),0d0])
     ! Zboson-Wboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0]
-    l=l+1
-    this%vertex_list(l)%type=12
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    call append_vertex(this,l,12,[23,24,24],&
+         &[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[23,-24,-24],&
+         &[neutral_gauge_coupling(),0d0])
 
 
     ! Wboson-Wboson to Ztensor
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-23
-    gw=1d0/sw
-    this%vertex_list(l)%coupl=[gw,0d0] !!
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=-23
-    gw=1d0/sw
-    this%vertex_list(l)%coupl=[-gw,0d0] !!
+    call append_vertex(this,l,13,[24,-24,-23],&
+         &[weak_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[-24,24,-23],&
+         &[-weak_coupling(),0d0]) !!
     ! Ztensor-Wboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=-23
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    this%vertex_list(l)%coupl=[gw,0d0] !!
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=-23
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    this%vertex_list(l)%coupl=[-gw,0d0] !!
+    call append_vertex(this,l,14,[-23,24,24],&
+         &[weak_coupling(),0d0]) !!
+    call append_vertex(this,l,14,[-23,-24,-24],&
+         &[-weak_coupling(),0d0]) !!
     ! Wboson-Ztensor to Wboson
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-23
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    this%vertex_list(l)%coupl=[-gw,0d0] !!
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=-23
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    this%vertex_list(l)%coupl=[gw,0d0] !!
+    call append_vertex(this,l,15,[24,-23,24],&
+         &[-weak_coupling(),0d0]) !!
+    call append_vertex(this,l,15,[-24,-23,-24],&
+         &[weak_coupling(),0d0]) !!
 
 
     ! Wboson-photon to Wtensor
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=22
-    this%vertex_list(l)%particles(3)=26
-    this%vertex_list(l)%coupl=[1d0,0d0]
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=22
-    this%vertex_list(l)%particles(3)=-26
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,13,[24,22,26],&
+         &[this%get_charge(24),0d0])
+    call append_vertex(this,l,13,[-24,22,-26],&
+         &[-this%get_charge(-24),0d0])
     ! photon-Wboson to Wtensor
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=22
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=26
-    this%vertex_list(l)%coupl=[-1d0,0d0]
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=22
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-26
-    this%vertex_list(l)%coupl=[-1d0,0d0]
+    call append_vertex(this,l,13,[22,24,26],&
+         &[-this%get_charge(24),0d0])
+    call append_vertex(this,l,13,[22,-24,-26],&
+         &[this%get_charge(-24),0d0])
     ! Wboson-Zboson to Wtensor
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=26
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0] !!
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=-26
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0] !!
+    call append_vertex(this,l,13,[24,23,26],&
+         &[neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[-24,23,-26],&
+         &[neutral_gauge_coupling(),0d0]) !!
     ! Zboson-Wboson to Wtensor
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=26
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0] !!
-    l=l+1
-    this%vertex_list(l)%type=13
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-26
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0] !!
+    call append_vertex(this,l,13,[23,24,26],&
+         &[-neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[23,-24,-26],&
+         &[-neutral_gauge_coupling(),0d0]) !!
 
 
     ! Wtensor-photon to Wboson
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=26
-    this%vertex_list(l)%particles(2)=22
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[1d0,0d0] 
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=-26
-    this%vertex_list(l)%particles(2)=22
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[1d0,0d0]
+    call append_vertex(this,l,14,[26,22,24],&
+         &[this%get_charge(26),0d0])
+    call append_vertex(this,l,14,[-26,22,-24],&
+         &[-this%get_charge(-26),0d0])
     ! Wtensor-Wboson to photon
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=26
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[-1d0,0d0] 
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=-26
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[-1d0,0d0]
+    call append_vertex(this,l,14,[26,-24,22],&
+         &[-this%get_charge(26),0d0])
+    call append_vertex(this,l,14,[-26,24,22],&
+         &[this%get_charge(-26),0d0])
     ! Wtensor-Zboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=26
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0] 
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=-26
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    call append_vertex(this,l,14,[26,23,24],&
+         &[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,14,[-26,23,-24],&
+         &[neutral_gauge_coupling(),0d0])
     ! Wtensor-Wboson to Zboson
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=26
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0] !!
-    l=l+1
-    this%vertex_list(l)%type=14
-    this%vertex_list(l)%particles(1)=-26
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0] !!
+    call append_vertex(this,l,14,[26,-24,23],&
+         &[-neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,14,[-26,24,23],&
+         &[-neutral_gauge_coupling(),0d0]) !!
     ! photon-Wtensor to Wboson
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=22
-    this%vertex_list(l)%particles(2)=26
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[-1d0,0d0] 
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=22
-    this%vertex_list(l)%particles(2)=-26
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[-1d0,0d0]
+    call append_vertex(this,l,15,[22,26,24],&
+         &[-this%get_charge(26),0d0])
+    call append_vertex(this,l,15,[22,-26,-24],&
+         &[this%get_charge(-26),0d0])
     ! Wboson-Wtensor to photon
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-26
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[+1d0,0d0] 
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=26
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[+1d0,0d0]
+    call append_vertex(this,l,15,[24,-26,22],&
+         &[this%get_charge(24),0d0])
+    call append_vertex(this,l,15,[-24,26,22],&
+         &[-this%get_charge(-24),0d0])
     ! Zboson-Wtensor to Wboson
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=26
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0] 
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=-26
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[-gw*fact,0d0]
+    call append_vertex(this,l,15,[23,26,24],&
+         &[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,15,[23,-26,-24],&
+         &[-neutral_gauge_coupling(),0d0])
     ! Wboson-Wtensor to Zboson
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-26
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=15
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=26
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=sqrt(1d0-sw**2)
-    this%vertex_list(l)%coupl=[gw*fact,0d0] !!
+    call append_vertex(this,l,15,[24,-26,23],&
+         &[neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,15,[-24,26,23],&
+         &[neutral_gauge_coupling(),0d0]) !!
 
     ! quark-Higgs to quark vertices
     do i=1,6
        if (this%get_mass(i).eq.0d0) cycle
-       l=l+1
-       this%vertex_list(l)%type=16
-       this%vertex_list(l)%particles(1)=i
-       this%vertex_list(l)%particles(2)=25
-       this%vertex_list(l)%particles(3)=i
-       this%vertex_list(l)%coupl=[this%get_mass(i)/(this%get_mass(24)*2d0*sw),0d0]
+       call append_vertex(this,l,16,[i,25,i],&
+            &[this%get_mass(i)*weak_coupling()/(this%get_mass(24)*2d0),0d0])
     enddo
     ! antiquark-Higgs to antiquark vertices
     do i=1,6
        if (this%get_mass(i).eq.0d0) cycle
-       l=l+1
-       this%vertex_list(l)%type=16
-       this%vertex_list(l)%particles(1)=-i
-       this%vertex_list(l)%particles(2)=25
-       this%vertex_list(l)%particles(3)=-i
-       this%vertex_list(l)%coupl=[this%get_mass(i)/(this%get_mass(24)*2d0*sw),0d0]
+       call append_vertex(this,l,16,[-i,25,-i],&
+            &[this%get_mass(i)*weak_coupling()/(this%get_mass(24)*2d0),0d0])
     enddo
     ! Wboson-Wboson to Higgs
-    l=l+1
-    this%vertex_list(l)%type=17
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=17
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    call append_vertex(this,l,17,[24,-24,25],&
+         &[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,17,[-24,24,25],&
+         &[this%get_mass(24)*weak_coupling(),0d0]) !!
     ! Higgs-Wboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=18
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=18
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    call append_vertex(this,l,18,[25,24,24],&
+         &[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,18,[25,-24,-24],&
+         &[this%get_mass(24)*weak_coupling(),0d0]) !!
     ! Wboson-Higgs to Wboson
-    l=l+1
-    this%vertex_list(l)%type=19
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=19
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[this%get_mass(24)/sw,0d0]  !!
+    call append_vertex(this,l,19,[24,25,24],&
+         &[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,19,[-24,25,-24],&
+         &[this%get_mass(24)*weak_coupling(),0d0]) !!
     ! Zboson-Zboson to Higgs
-    l=l+1
-    this%vertex_list(l)%type=17
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
+    call append_vertex(this,l,17,[23,23,25],&
+         &[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
     ! Higgs-Zboson to Zboson
-    l=l+1
-    this%vertex_list(l)%type=18
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=23
-    this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
+    call append_vertex(this,l,18,[25,23,23],&
+         &[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
     ! Zboson-Higgs to Zboson
-    l=l+1
-    this%vertex_list(l)%type=19
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=23
-    this%vertex_list(l)%coupl=[this%get_mass(23)/(sw*dsqrt(1d0-sw**2)),0d0]  !!
+    call append_vertex(this,l,19,[23,25,23],&
+         &[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
     ! Higgs-Higgs to Higgs
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[(-3d0/2d0)/sw*(this%get_mass(25)**2/this%get_mass(24)),0d0]  !!
+    call append_vertex(this,l,20,[25,25,25],&
+         &higgs_self_coupling(this)) !!
 
     ! Wboson-Wboson to HiggsorC
-    l=l+1
-    this%vertex_list(l)%type=17
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=127
-    this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=17
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=127
-    this%vertex_list(l)%coupl=[1d0/2d0/sw**2,0d0]  !!
+    call append_vertex(this,l,17,[24,-24,127],&
+         &[1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,17,[-24,24,127],&
+         &[1d0/2d0*weak_coupling_squared(),0d0]) !!
     !! Zboson-Zboson to HiggsorC
-    l=l+1
-    this%vertex_list(l)%type=17
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=127
-    this%vertex_list(l)%coupl=[1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
+    call append_vertex(this,l,17,[23,23,127],&
+         &[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
     ! HiggsorA-Higgs to Higgs
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=125
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    call append_vertex(this,l,20,[125,25,25],&
+         &[1d0,0d0]) !!
     ! Higgs-HiggsorA to Higgs
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=125
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    call append_vertex(this,l,20,[25,125,25],&
+         &[1d0,0d0]) !!
     ! Higgs-Higgs to HiggsorA
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=125
-    this%vertex_list(l)%coupl=[(-3d0/4d0)/sw**2*this%get_mass(25)**2/this%get_mass(24)**2,0d0]  !!
+    call append_vertex(this,l,20,[25,25,125],&
+         &[(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
     ! HiggsorC-Higgs to Higgs
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=127
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    call append_vertex(this,l,20,[127,25,25],&
+         &[1d0,0d0]) !!
     ! Higgs-HiggsorC to Higgs
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=127
-    this%vertex_list(l)%particles(3)=25
-    this%vertex_list(l)%coupl=[1d0,0d0]  !!
+    call append_vertex(this,l,20,[25,127,25],&
+         &[1d0,0d0]) !!
     ! Higgs-Higgs to HiggsorB
-    l=l+1
-    this%vertex_list(l)%type=20
-    this%vertex_list(l)%particles(1)=25
-    this%vertex_list(l)%particles(2)=25
-    this%vertex_list(l)%particles(3)=126
-    this%vertex_list(l)%coupl=[1d0,-10d0]  !!
+    call append_vertex(this,l,20,[25,25,126],&
+         &[1d0,-10d0]) !!
 
     ! HiggsorB-Zboson to Zboson
-    l=l+1
-    this%vertex_list(l)%type=18
-    this%vertex_list(l)%particles(1)=126
-    this%vertex_list(l)%particles(2)=23
-    this%vertex_list(l)%particles(3)=23
-    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
+    call append_vertex(this,l,18,[126,23,23],&
+         &[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
     ! Zboson-HiggsorB to Zboson
-    l=l+1
-    this%vertex_list(l)%type=19
-    this%vertex_list(l)%particles(1)=23
-    this%vertex_list(l)%particles(2)=126
-    this%vertex_list(l)%particles(3)=23
-    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2/(1d0-sw**2),0d0]  !!
+    call append_vertex(this,l,19,[23,126,23],&
+         &[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
 
     ! HiggsorB-Wboson to Wboson
-    l=l+1
-    this%vertex_list(l)%type=18
-    this%vertex_list(l)%particles(1)=126
-    this%vertex_list(l)%particles(2)=24
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=18
-    this%vertex_list(l)%particles(1)=126
-    this%vertex_list(l)%particles(2)=-24
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
+    call append_vertex(this,l,18,[126,24,24],&
+         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,18,[126,-24,-24],&
+         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
     ! Wboson-HiggsorB to Wboson
-    l=l+1
-    this%vertex_list(l)%type=19
-    this%vertex_list(l)%particles(1)=24
-    this%vertex_list(l)%particles(2)=126
-    this%vertex_list(l)%particles(3)=24
-    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
-    l=l+1
-    this%vertex_list(l)%type=19
-    this%vertex_list(l)%particles(1)=-24
-    this%vertex_list(l)%particles(2)=126
-    this%vertex_list(l)%particles(3)=-24
-    this%vertex_list(l)%coupl=[-1d0/2d0/sw**2,0d0]  !!
+    call append_vertex(this,l,19,[24,126,24],&
+         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,19,[-24,126,-24],&
+         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
 
     ! lepton-alepton to photon
     do i=1,3
-    l=l+1
-    this%vertex_list(l)%type=21
-    this%vertex_list(l)%particles(1)=11+(2*i-2)
-    this%vertex_list(l)%particles(2)=-(11+(2*i-2))
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    call append_vertex(this,l,21,[11+(2*i-2),-(11+(2*i-2)),22],&
+         &photon_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! alepton-lepton to photon
     do i=1,3
-    l=l+1
-    this%vertex_list(l)%type=22
-    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
-    this%vertex_list(l)%particles(2)=11+(2*i-2)
-    this%vertex_list(l)%particles(3)=22
-    this%vertex_list(l)%coupl=[ -1d0, -1d0]
+    call append_vertex(this,l,22,[-(11+(2*i-2)),11+(2*i-2),22],&
+         &photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! lepton-alepton to Zboson
     do i=1,3
-    l=l+1
-    this%vertex_list(l)%type=21
-    this%vertex_list(l)%particles(1)=(11+(2*i-2))
-    this%vertex_list(l)%particles(2)=-(11+(2*i-2))
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=1d0/(2d0*sqrt(1d0-sw**2))
-    Vf=-0.5d0+2d0*sw**2
-    Af=-0.5d0
-    this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    call append_vertex(this,l,21,[(11+(2*i-2)),-(11+(2*i-2)),23],&
+         &z_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! alepton-lepton to Zboson
     do i=1,3
-    l=l+1
-    this%vertex_list(l)%type=22
-    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
-    this%vertex_list(l)%particles(2)=(11+(2*i-2))
-    this%vertex_list(l)%particles(3)=23
-    gw=1d0/sw
-    fact=1d0/(2d0*sqrt(1d0-sw**2))
-    Vf=-0.5d0+2d0*sw**2
-    Af=-0.5d0
-    this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+    call append_vertex(this,l,22,[-(11+(2*i-2)),(11+(2*i-2)),23],&
+         &z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! charged lepton-lepton to Wboson
     do i=1,3
-    l=l+1
-    this%vertex_list(l)%type=21
-    this%vertex_list(l)%particles(1)=11+(2*i-2)
-    this%vertex_list(l)%particles(2)=-(12+(2*i-2))
-    this%vertex_list(l)%particles(3)=-24
-    gw=1d0/sw
-    fact=1d0/(sqrt(2d0))
-    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    call append_vertex(this,l,21,[11+(2*i-2),-(12+(2*i-2)),-24],&
+         &[charged_current_coupling(),0d0])
     enddo
     ! charged lepton-lepton to Wboson
     do i=1,3
-    l=l+1
-    this%vertex_list(l)%type=22
-    this%vertex_list(l)%particles(1)=-(11+(2*i-2))
-    this%vertex_list(l)%particles(2)=(12+(2*i-2))
-    this%vertex_list(l)%particles(3)=24
-    gw=1d0/sw
-    fact=1d0/(sqrt(2d0))
-    this%vertex_list(l)%coupl=[gw*fact,0d0]
+    call append_vertex(this,l,22,[-(11+(2*i-2)),(12+(2*i-2)),24],&
+         &[charged_current_coupling(),0d0])
     enddo
     ! lepton-photon to lepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=10
-       this%vertex_list(l)%particles(1)=(11+(2*i-2))
-       this%vertex_list(l)%particles(2)=22
-       this%vertex_list(l)%particles(3)=(11+(2*i-2))
-       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       call append_vertex(this,l,10,[(11+(2*i-2)),22,(11+(2*i-2))],&
+            &photon_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! antilepton-photon to antilepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=11
-       this%vertex_list(l)%particles(1)=-(11+(2*i-2))
-       this%vertex_list(l)%particles(2)=22
-       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
-       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       call append_vertex(this,l,11,[-(11+(2*i-2)),22,-(11+(2*i-2))],&
+            &photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! photon-lepton to lepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=23
-       this%vertex_list(l)%particles(1)=22
-       this%vertex_list(l)%particles(2)=(11+(2*i-2))
-       this%vertex_list(l)%particles(3)=(11+(2*i-2))
-       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       call append_vertex(this,l,23,[22,(11+(2*i-2)),(11+(2*i-2))],&
+            &photon_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! photon-antilepton to antilepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=24
-       this%vertex_list(l)%particles(1)=22
-       this%vertex_list(l)%particles(2)=-(11+(2*i-2))
-       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
-       this%vertex_list(l)%coupl=[ -1d0, -1d0]
+       call append_vertex(this,l,24,[22,-(11+(2*i-2)),-(11+(2*i-2))],&
+            &photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! lepton-Zboson to lepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=10
-       this%vertex_list(l)%particles(1)=(11+(2*i-2))
-       this%vertex_list(l)%particles(2)=23
-       this%vertex_list(l)%particles(3)=(11+(2*i-2))
-       gw=1d0/sw
-       fact=1d0/(2d0*sqrt(1d0-sw**2))
-       Vf=-0.5d0+2d0*sw**2
-       Af=-0.5d0
-       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       call append_vertex(this,l,10,[(11+(2*i-2)),23,(11+(2*i-2))],&
+            &z_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! antilepton-Zboson to antilepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=11
-       this%vertex_list(l)%particles(1)=-(11+(2*i-2))
-       this%vertex_list(l)%particles(2)=23
-       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
-       gw=1d0/sw
-       fact=1d0/(2d0*sqrt(1d0-sw**2))
-       Vf=-0.5d0+2d0*sw**2
-       Af=-0.5d0
-       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       call append_vertex(this,l,11,[-(11+(2*i-2)),23,-(11+(2*i-2))],&
+            &z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
    ! Zboson-lepton to lepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=23
-       this%vertex_list(l)%particles(1)=23
-       this%vertex_list(l)%particles(2)=(11+(2*i-2))
-       this%vertex_list(l)%particles(3)=(11+(2*i-2))
-       gw=1d0/sw
-       fact=1d0/(2d0*sqrt(1d0-sw**2))
-       Vf=-0.5d0+2d0*sw**2
-       Af=-0.5d0
-       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       call append_vertex(this,l,23,[23,(11+(2*i-2)),(11+(2*i-2))],&
+            &z_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! Zboson-antilepton to antilepton vertices
     do i=1,3
-       l=l+1
-       this%vertex_list(l)%type=24
-       this%vertex_list(l)%particles(1)=23
-       this%vertex_list(l)%particles(2)=-(11+(2*i-2))
-       this%vertex_list(l)%particles(3)=-(11+(2*i-2))
-       gw=1d0/sw
-       fact=1d0/(2d0*sqrt(1d0-sw**2))
-       Vf=-0.5d0+2d0*sw**2
-       Af=-0.5d0
-       this%vertex_list(l)%coupl=[Vf+Af,Vf-Af]*gw*fact
+       call append_vertex(this,l,24,[23,-(11+(2*i-2)),-(11+(2*i-2))],&
+            &z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
 
     if (l.gt.this%nint) then
@@ -1142,7 +723,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg,sgn
-
     i=find_particle_index(this,ipdg)
     if (i.gt.0) then
        sgn=particle_property_sign(this,ipdg)
@@ -1156,7 +736,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg,sgn
-
     i=find_particle_index(this,ipdg)
     if (i.gt.0) then
        sgn=particle_property_sign(this,ipdg)
@@ -1170,7 +749,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg,sgn
-
     i=find_particle_index(this,ipdg)
     if (i.gt.0) then
        sgn=particle_property_sign(this,ipdg)
@@ -1184,7 +762,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg,sgn
-
     i=find_particle_index(this,ipdg)
     if (i.gt.0) then
        sgn=particle_property_sign(this,ipdg)
@@ -1198,7 +775,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg,sgn
-
     i=find_particle_index(this,ipdg)
     if (i.gt.0) then
        sgn=particle_property_sign(this,ipdg)
@@ -1212,7 +788,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: i,ipdg,sgn
-
     i=find_particle_index(this,ipdg)
     if (i.gt.0) then
        sgn=particle_property_sign(this,ipdg)
@@ -1227,7 +802,6 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: ipdg
-
     get_color_dim=abs(this%get_color_rep(ipdg))
   end function get_color_dim
   integer function get_inter_dim(this,itype)
@@ -1279,7 +853,6 @@ contains
     integer :: iPDG
     is_gluon=iPDG.eq.21 .or. iPDG.eq.99
   end function is_gluon
-
   logical function is_scalar(this,iPDG)
     implicit none
     class(physics_model) :: this
