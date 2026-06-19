@@ -5,7 +5,7 @@ module particles
   integer,parameter :: model_vertex_capacity = 222
   private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
        &, weak_coupling, weak_cosine, neutral_gauge_coupling&
-       &, charged_current_coupling, fermion_charge_thirds&
+       &, charged_current_coupling, particle_species_index&
        &, photon_fermion_coupling, z_fermion_coupling&
        &, weak_coupling_squared, weak_cosine_squared&
        &, weak_coupling_over_cosine, higgs_self_coupling&
@@ -47,6 +47,10 @@ contains
     real(kind=8),intent(in) :: mass,width,charge
     real(kind=8),dimension(2),intent(in) :: weak_isospin,weak_hypercharge
     l=l+1
+    if (l.gt.this%npart) then
+       write (*,*) 'ERROR: more particles than allocated',l,this%npart
+       stop 1
+    endif
     this%particle_list(l)%type=ipdg
     this%particle_list(l)%mass=mass
     this%particle_list(l)%width=width
@@ -67,6 +71,10 @@ contains
     integer,dimension(3),intent(in) :: ipdgs
     real(kind=8),dimension(2),intent(in) :: coupl
     l=l+1
+    if (l.gt.this%nint) then
+       write (*,*) 'ERROR: more vertices than allocated',l,this%nint
+       stop 1
+    endif
     this%vertex_list(l)%type=itype
     this%vertex_list(l)%particles=ipdgs
     this%vertex_list(l)%coupl=coupl
@@ -145,15 +153,16 @@ contains
     coupl=[(-3d0/2d0)*weak_coupling()*(this%get_mass(25)**2/this%get_mass(24)),0d0]
   end function higgs_self_coupling
 
-  integer function fermion_charge_thirds(this,ipdg)
+  integer function particle_species_index(this,ipdg,property)
     implicit none
     class(physics_model),intent(in) :: this
     integer,intent(in) :: ipdg
-    integer :: ipdg_abs
-    ipdg_abs=abs(ipdg)
-    fermion_charge_thirds=nint(3d0*(this%get_isospin_l(ipdg_abs)+&
-         &0.5d0*this%get_hypercharge_l(ipdg_abs)))
-  end function fermion_charge_thirds
+    character(len=*),intent(in) :: property
+    particle_species_index=find_particle_index(this,ipdg)
+    if (particle_species_index.gt.0) return
+    write (*,*) 'Particle not in model ('//trim(property)//')',ipdg
+    stop 1
+  end function particle_species_index
 
   function photon_fermion_coupling(this,ipdg) result(coupl)
     implicit none
@@ -161,7 +170,9 @@ contains
     integer,intent(in) :: ipdg
     real(kind=8),dimension(2) :: coupl
     real(kind=8) :: charge
-    charge=dble(fermion_charge_thirds(this,ipdg))/3d0
+    integer :: i
+    i=particle_species_index(this,ipdg,'photon coupling')
+    charge=this%particle_list(i)%charge
     coupl=[charge,charge]
   end function photon_fermion_coupling
 
@@ -170,17 +181,14 @@ contains
     class(physics_model),intent(in) :: this
     integer,intent(in) :: ipdg
     real(kind=8),dimension(2) :: coupl
-    integer :: charge_thirds,ipdg_abs
-    real(kind=8) :: charge_factor,fact,gw,Vf,Af
-    ipdg_abs=abs(ipdg)
-    charge_thirds=fermion_charge_thirds(this,ipdg_abs)
-    charge_factor=dble(charge_thirds)/3d0
-    Vf=this%get_isospin_l(ipdg_abs)+this%get_isospin_r(ipdg_abs)-&
-         &2d0*charge_factor*sw**2
-    Af=this%get_isospin_l(ipdg_abs)-this%get_isospin_r(ipdg_abs)
-    gw=weak_coupling()
-    fact=1d0/(2d0*weak_cosine())
-    coupl=[Vf+Af,Vf-Af]*gw*fact
+    integer :: i
+    real(kind=8) :: charge,left_isospin,right_isospin
+    i=particle_species_index(this,ipdg,'Z coupling')
+    charge=this%particle_list(i)%charge
+    left_isospin=this%particle_list(i)%weak_isospin(1)
+    right_isospin=this%particle_list(i)%weak_isospin(2)
+    coupl=weak_coupling_over_cosine()*[left_isospin-charge*sw**2,&
+         &right_isospin-charge*sw**2]
   end function z_fermion_coupling
 
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
@@ -198,17 +206,14 @@ contains
     ! 5 massless quarks
     do i=1,5
        if (mod(i,2).eq.0) then
-          call append_particle(this,l,i,0d0,0d0,2,-i,4,2d0/3d0,&
-               &[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
+          call append_particle(this,l,i,0d0,0d0,2,-i,4,2d0/3d0,[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
        else
-          call append_particle(this,l,i,0d0,0d0,2,-i,4,-1d0/3d0,&
-               &[-0.5d0,0d0],[1d0/3d0,-2d0/3d0],3)
+          call append_particle(this,l,i,0d0,0d0,2,-i,4,-1d0/3d0,[-0.5d0,0d0],[1d0/3d0,-2d0/3d0],3)
        endif
     enddo
 
     ! top quark
-    call append_particle(this,l,6,tmass,twidth,2,-6,4,2d0/3d0,&
-         &[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
+    call append_particle(this,l,6,tmass,twidth,2,-6,4,2d0/3d0,[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
 
     ! gluon
     call append_particle(this,l,21,0d0,0d0,2,21,4,0d0,[0d0,0d0],[0d0,0d0],8)
@@ -232,8 +237,7 @@ contains
     call append_particle(this,l,24,wmass,wwidth,3,-24,4,1d0,[1d0,1d0],[0d0,0d0],1)
 
     ! Higgs-boson
-    call append_particle(this,l,25,hmass,hwidth,1,25,1,0d0,[-0.5d0,-0.5d0],&
-         &[1d0,1d0],1)
+    call append_particle(this,l,25,hmass,hwidth,1,25,1,0d0,[-0.5d0,-0.5d0],[1d0,1d0],1)
 
     ! Higgs"or"A (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
     call append_particle(this,l,125,0d0,0d0,-1,125,1,0d0,[0d0,0d0],[0d0,0d0],1)
@@ -247,22 +251,15 @@ contains
 
     ! charged leptons
     do i=1,3
-       call append_particle(this,l,11+(2*i-2),0d0,0d0,2,-(11+(2*i-2)),4,-1d0,&
-            &[-0.5d0,0d0],[-1d0,-2d0],1)
+       call append_particle(this,l,11+(2*i-2),0d0,0d0,2,-(11+(2*i-2)),4,-1d0,[-0.5d0,0d0],[-1d0,-2d0],1)
     enddo
 
-    ! neutral leptons
+    ! neutrinos
     do i=1,3
-       call append_particle(this,l,12+(2*i-2),0d0,0d0,2,-(12+(2*i-2)),4,0d0,&
-            &[0.5d0,0d0],[-1d0,0d0],1)
+       call append_particle(this,l,12+(2*i-2),0d0,0d0,2,-(12+(2*i-2)),4,0d0,[0.5d0,0d0],[-1d0,0d0],1)
     enddo
 
-    if (l.gt.this%npart) then
-       write (*,*) 'ERROR: more particles than allocated',l,this%npart
-       stop 1
-    else
-       this%npart=l
-    endif
+    this%npart=l
     write (99,*) l,'particles loaded'
   end subroutine init_part
 
@@ -274,381 +271,271 @@ contains
     this%nint = model_vertex_capacity ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
-    call append_vertex(this,l,0,[21,21,21],&
-         &[1d0,0d0])
+    call append_vertex(this,l,0,[21,21,21],[1d0,0d0])
     ! gluon-gluon to tensor vertex
-    call append_vertex(this,l,1,[21,21,-21],&
-         &[1d0,0d0])
+    call append_vertex(this,l,1,[21,21,-21],[1d0,0d0])
     ! tensor-gluon to gluon vertex
-    call append_vertex(this,l,2,[-21,21,21],&
-         &[1d0,0d0])
+    call append_vertex(this,l,2,[-21,21,21],[1d0,0d0])
     ! gluon-tensor to gluon vertex
-    call append_vertex(this,l,3,[21,-21,21],&
-         &[1d0,0d0])
+    call append_vertex(this,l,3,[21,-21,21],[1d0,0d0])
     ! gluon-quark to quark vertices
     do i=1,6
-       call append_vertex(this,l,4,[21,i,i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,4,[21,i,i],[1d0,0d0])
     enddo
     ! gluon-antiquark to antiquark vertices
     do i=1,6
-       call append_vertex(this,l,5,[21,-i,-i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,5,[21,-i,-i],[1d0,0d0])
     enddo
     ! quark-gluon to quark vertices
     do i=1,6
-       call append_vertex(this,l,6,[i,21,i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,6,[i,21,i],[1d0,0d0])
     enddo
     ! antiquark-gluon to quark vertices
     do i=1,6
-       call append_vertex(this,l,7,[-i,21,-i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,7,[-i,21,-i],[1d0,0d0])
     enddo
     ! antiquark-quark to gluon vertices
     do i=1,6
-       call append_vertex(this,l,9,[-i,i,21],&
-            &[1d0,0d0])
+       call append_vertex(this,l,9,[-i,i,21],[1d0,0d0])
     enddo
     ! quark-antiquark to gluonU1 vertices
     do i=1,6
-       call append_vertex(this,l,8,[i,-i,99],&
-            &[1d0/3d0,0d0])
+       call append_vertex(this,l,8,[i,-i,99],[1d0/3d0,0d0])  ! 1/N_C coupling
     enddo
     ! gluonU1-quark to quark vertices
     do i=1,6
-       call append_vertex(this,l,4,[99,i,i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,4,[99,i,i],[1d0,0d0])
     enddo
     ! gluonU1-antiquark to antiquark vertices
     do i=1,6
-       call append_vertex(this,l,5,[99,-i,-i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,5,[99,-i,-i],[1d0,0d0])
     enddo
     ! quark-gluonU1 to quark vertices
     do i=1,6
-       call append_vertex(this,l,6,[i,99,i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,6,[i,99,i],[1d0,0d0])
     enddo
     ! antiquark-gluonU1 to quark vertices
     do i=1,6
-       call append_vertex(this,l,7,[-i,99,-i],&
-            &[1d0,0d0])
+       call append_vertex(this,l,7,[-i,99,-i],[1d0,0d0])
     enddo
     ! quark-photon to quark vertices
     do i=1,6
-       call append_vertex(this,l,10,[i,22,i],&
-            &photon_fermion_coupling(this,i))
+       call append_vertex(this,l,10,[i,22,i],photon_fermion_coupling(this,i))
     enddo
     ! antiquark-photon to antiquark vertices
     do i=1,6
-       call append_vertex(this,l,11,[-i,22,-i],&
-            &photon_fermion_coupling(this,-i))
+       call append_vertex(this,l,11,[-i,22,-i],photon_fermion_coupling(this,-i))
     enddo
     ! quark-Zboson to quark vertices
     do i=1,6
-       call append_vertex(this,l,10,[i,23,i],&
-            &z_fermion_coupling(this,i))
+       call append_vertex(this,l,10,[i,23,i],z_fermion_coupling(this,i))
     enddo
     ! antiquark-Zboson to antiquark vertices
     do i=1,6
-       call append_vertex(this,l,11,[-i,23,-i],&
-            &z_fermion_coupling(this,-i))
+       call append_vertex(this,l,11,[-i,23,-i],z_fermion_coupling(this,-i))
     enddo
     ! quark-Wboson to quark vertices
     do i=1,6
        if (mod(i,2).eq.0) then
-          call append_vertex(this,l,10,[i,-24,i-1],&
-               &[charged_current_coupling(),0d0])
+          call append_vertex(this,l,10,[i,-24,i-1],[charged_current_coupling(),0d0])
        else
-          call append_vertex(this,l,10,[i,24,i+1],&
-               &[charged_current_coupling(),0d0])
+          call append_vertex(this,l,10,[i,24,i+1],[charged_current_coupling(),0d0])
        endif
     enddo
     ! antiquark-Wboson to antiquark vertices
     do i=1,6
        if (mod(i,2).eq.0) then
-          call append_vertex(this,l,11,[-i,+24,-i+1],&
-               &[charged_current_coupling(),0d0])
+          call append_vertex(this,l,11,[-i,+24,-i+1],[charged_current_coupling(),0d0])
        else
-          call append_vertex(this,l,11,[-i,-24,-i-1],&
-               &[charged_current_coupling(),0d0])
+          call append_vertex(this,l,11,[-i,-24,-i-1],[charged_current_coupling(),0d0])
        endif
     enddo
     ! Wboson-Wboson to Z-boson
-    call append_vertex(this,l,12,[24,-24,23],&
-         &[-neutral_gauge_coupling(),0d0])
-    call append_vertex(this,l,12,[-24,24,23],&
-         &[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[24,-24,23],[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[-24,24,23],[neutral_gauge_coupling(),0d0])
     ! Wboson-Wboson to photon
-    call append_vertex(this,l,12,[24,-24,22],&
-         &[-this%get_charge(24),0d0])
-    call append_vertex(this,l,12,[-24,24,22],&
-         &[this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[24,-24,22],[-this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[-24,24,22],[this%get_charge(24),0d0])
     ! Wboson-photon to Wboson
-    call append_vertex(this,l,12,[24,22,24],&
-         &[this%get_charge(24),0d0])
-    call append_vertex(this,l,12,[-24,22,-24],&
-         &[this%get_charge(-24),0d0])
+    call append_vertex(this,l,12,[24,22,24],[this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[-24,22,-24],[this%get_charge(-24),0d0])
     ! photon-Wboson to Wboson
-    call append_vertex(this,l,12,[22,24,24],&
-         &[-this%get_charge(24),0d0])
-    call append_vertex(this,l,12,[22,-24,-24],&
-         &[-this%get_charge(-24),0d0])
+    call append_vertex(this,l,12,[22,24,24],[-this%get_charge(24),0d0])
+    call append_vertex(this,l,12,[22,-24,-24],[-this%get_charge(-24),0d0])
     ! Wboson-Zboson to Wboson
-    call append_vertex(this,l,12,[24,23,24],&
-         &[neutral_gauge_coupling(),0d0])
-    call append_vertex(this,l,12,[-24,23,-24],&
-         &[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[24,23,24],[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[-24,23,-24],[-neutral_gauge_coupling(),0d0])
     ! Zboson-Wboson to Wboson
-    call append_vertex(this,l,12,[23,24,24],&
-         &[-neutral_gauge_coupling(),0d0])
-    call append_vertex(this,l,12,[23,-24,-24],&
-         &[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[23,24,24],[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,12,[23,-24,-24],[neutral_gauge_coupling(),0d0])
 
 
     ! Wboson-Wboson to Ztensor
-    call append_vertex(this,l,13,[24,-24,-23],&
-         &[weak_coupling(),0d0]) !!
-    call append_vertex(this,l,13,[-24,24,-23],&
-         &[-weak_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[24,-24,-23],[weak_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[-24,24,-23],[-weak_coupling(),0d0]) !!
     ! Ztensor-Wboson to Wboson
-    call append_vertex(this,l,14,[-23,24,24],&
-         &[weak_coupling(),0d0]) !!
-    call append_vertex(this,l,14,[-23,-24,-24],&
-         &[-weak_coupling(),0d0]) !!
+    call append_vertex(this,l,14,[-23,24,24],[weak_coupling(),0d0]) !!
+    call append_vertex(this,l,14,[-23,-24,-24],[-weak_coupling(),0d0]) !!
     ! Wboson-Ztensor to Wboson
-    call append_vertex(this,l,15,[24,-23,24],&
-         &[-weak_coupling(),0d0]) !!
-    call append_vertex(this,l,15,[-24,-23,-24],&
-         &[weak_coupling(),0d0]) !!
+    call append_vertex(this,l,15,[24,-23,24],[-weak_coupling(),0d0]) !!
+    call append_vertex(this,l,15,[-24,-23,-24],[weak_coupling(),0d0]) !!
 
 
     ! Wboson-photon to Wtensor
-    call append_vertex(this,l,13,[24,22,26],&
-         &[this%get_charge(24),0d0])
-    call append_vertex(this,l,13,[-24,22,-26],&
-         &[-this%get_charge(-24),0d0])
+    call append_vertex(this,l,13,[24,22,26],[this%get_charge(24),0d0])
+    call append_vertex(this,l,13,[-24,22,-26],[-this%get_charge(-24),0d0])
     ! photon-Wboson to Wtensor
-    call append_vertex(this,l,13,[22,24,26],&
-         &[-this%get_charge(24),0d0])
-    call append_vertex(this,l,13,[22,-24,-26],&
-         &[this%get_charge(-24),0d0])
+    call append_vertex(this,l,13,[22,24,26],[-this%get_charge(24),0d0])
+    call append_vertex(this,l,13,[22,-24,-26],[this%get_charge(-24),0d0])
     ! Wboson-Zboson to Wtensor
-    call append_vertex(this,l,13,[24,23,26],&
-         &[neutral_gauge_coupling(),0d0]) !!
-    call append_vertex(this,l,13,[-24,23,-26],&
-         &[neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[24,23,26],[neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[-24,23,-26],[neutral_gauge_coupling(),0d0]) !!
     ! Zboson-Wboson to Wtensor
-    call append_vertex(this,l,13,[23,24,26],&
-         &[-neutral_gauge_coupling(),0d0]) !!
-    call append_vertex(this,l,13,[23,-24,-26],&
-         &[-neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[23,24,26],[-neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,13,[23,-24,-26],[-neutral_gauge_coupling(),0d0]) !!
 
 
     ! Wtensor-photon to Wboson
-    call append_vertex(this,l,14,[26,22,24],&
-         &[this%get_charge(26),0d0])
-    call append_vertex(this,l,14,[-26,22,-24],&
-         &[-this%get_charge(-26),0d0])
+    call append_vertex(this,l,14,[26,22,24],[this%get_charge(26),0d0])
+    call append_vertex(this,l,14,[-26,22,-24],[-this%get_charge(-26),0d0])
     ! Wtensor-Wboson to photon
-    call append_vertex(this,l,14,[26,-24,22],&
-         &[-this%get_charge(26),0d0])
-    call append_vertex(this,l,14,[-26,24,22],&
-         &[this%get_charge(-26),0d0])
+    call append_vertex(this,l,14,[26,-24,22],[-this%get_charge(26),0d0])
+    call append_vertex(this,l,14,[-26,24,22],[this%get_charge(-26),0d0])
     ! Wtensor-Zboson to Wboson
-    call append_vertex(this,l,14,[26,23,24],&
-         &[neutral_gauge_coupling(),0d0])
-    call append_vertex(this,l,14,[-26,23,-24],&
-         &[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,14,[26,23,24],[neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,14,[-26,23,-24],[neutral_gauge_coupling(),0d0])
     ! Wtensor-Wboson to Zboson
-    call append_vertex(this,l,14,[26,-24,23],&
-         &[-neutral_gauge_coupling(),0d0]) !!
-    call append_vertex(this,l,14,[-26,24,23],&
-         &[-neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,14,[26,-24,23],[-neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,14,[-26,24,23],[-neutral_gauge_coupling(),0d0]) !!
     ! photon-Wtensor to Wboson
-    call append_vertex(this,l,15,[22,26,24],&
-         &[-this%get_charge(26),0d0])
-    call append_vertex(this,l,15,[22,-26,-24],&
-         &[this%get_charge(-26),0d0])
+    call append_vertex(this,l,15,[22,26,24],[-this%get_charge(26),0d0])
+    call append_vertex(this,l,15,[22,-26,-24],[this%get_charge(-26),0d0])
     ! Wboson-Wtensor to photon
-    call append_vertex(this,l,15,[24,-26,22],&
-         &[this%get_charge(24),0d0])
-    call append_vertex(this,l,15,[-24,26,22],&
-         &[-this%get_charge(-24),0d0])
+    call append_vertex(this,l,15,[24,-26,22],[this%get_charge(24),0d0])
+    call append_vertex(this,l,15,[-24,26,22],[-this%get_charge(-24),0d0])
     ! Zboson-Wtensor to Wboson
-    call append_vertex(this,l,15,[23,26,24],&
-         &[-neutral_gauge_coupling(),0d0])
-    call append_vertex(this,l,15,[23,-26,-24],&
-         &[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,15,[23,26,24],[-neutral_gauge_coupling(),0d0])
+    call append_vertex(this,l,15,[23,-26,-24],[-neutral_gauge_coupling(),0d0])
     ! Wboson-Wtensor to Zboson
-    call append_vertex(this,l,15,[24,-26,23],&
-         &[neutral_gauge_coupling(),0d0]) !!
-    call append_vertex(this,l,15,[-24,26,23],&
-         &[neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,15,[24,-26,23],[neutral_gauge_coupling(),0d0]) !!
+    call append_vertex(this,l,15,[-24,26,23],[neutral_gauge_coupling(),0d0]) !!
 
     ! quark-Higgs to quark vertices
     do i=1,6
        if (this%get_mass(i).eq.0d0) cycle
-       call append_vertex(this,l,16,[i,25,i],&
-            &[this%get_mass(i)*weak_coupling()/(this%get_mass(24)*2d0),0d0])
+       call append_vertex(this,l,16,[i,25,i],[this%get_mass(i)*weak_coupling()/(this%get_mass(24)*2d0),0d0])
     enddo
     ! antiquark-Higgs to antiquark vertices
     do i=1,6
        if (this%get_mass(i).eq.0d0) cycle
-       call append_vertex(this,l,16,[-i,25,-i],&
-            &[this%get_mass(i)*weak_coupling()/(this%get_mass(24)*2d0),0d0])
+       call append_vertex(this,l,16,[-i,25,-i],[this%get_mass(i)*weak_coupling()/(this%get_mass(24)*2d0),0d0])
     enddo
     ! Wboson-Wboson to Higgs
-    call append_vertex(this,l,17,[24,-24,25],&
-         &[this%get_mass(24)*weak_coupling(),0d0]) !!
-    call append_vertex(this,l,17,[-24,24,25],&
-         &[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,17,[24,-24,25],[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,17,[-24,24,25],[this%get_mass(24)*weak_coupling(),0d0]) !!
     ! Higgs-Wboson to Wboson
-    call append_vertex(this,l,18,[25,24,24],&
-         &[this%get_mass(24)*weak_coupling(),0d0]) !!
-    call append_vertex(this,l,18,[25,-24,-24],&
-         &[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,18,[25,24,24],[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,18,[25,-24,-24],[this%get_mass(24)*weak_coupling(),0d0]) !!
     ! Wboson-Higgs to Wboson
-    call append_vertex(this,l,19,[24,25,24],&
-         &[this%get_mass(24)*weak_coupling(),0d0]) !!
-    call append_vertex(this,l,19,[-24,25,-24],&
-         &[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,19,[24,25,24],[this%get_mass(24)*weak_coupling(),0d0]) !!
+    call append_vertex(this,l,19,[-24,25,-24],[this%get_mass(24)*weak_coupling(),0d0]) !!
     ! Zboson-Zboson to Higgs
-    call append_vertex(this,l,17,[23,23,25],&
-         &[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
+    call append_vertex(this,l,17,[23,23,25],[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
     ! Higgs-Zboson to Zboson
-    call append_vertex(this,l,18,[25,23,23],&
-         &[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
+    call append_vertex(this,l,18,[25,23,23],[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
     ! Zboson-Higgs to Zboson
-    call append_vertex(this,l,19,[23,25,23],&
-         &[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
+    call append_vertex(this,l,19,[23,25,23],[this%get_mass(23)*weak_coupling_over_cosine(),0d0]) !!
     ! Higgs-Higgs to Higgs
-    call append_vertex(this,l,20,[25,25,25],&
-         &higgs_self_coupling(this)) !!
+    call append_vertex(this,l,20,[25,25,25],higgs_self_coupling(this)) !!
 
     ! Wboson-Wboson to HiggsorC
-    call append_vertex(this,l,17,[24,-24,127],&
-         &[1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,17,[-24,24,127],&
-         &[1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,17,[24,-24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,17,[-24,24,127],[1d0/2d0*weak_coupling_squared(),0d0]) !!
     !! Zboson-Zboson to HiggsorC
-    call append_vertex(this,l,17,[23,23,127],&
-         &[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_vertex(this,l,17,[23,23,127],[1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
     ! HiggsorA-Higgs to Higgs
-    call append_vertex(this,l,20,[125,25,25],&
-         &[1d0,0d0]) !!
+    call append_vertex(this,l,20,[125,25,25],[1d0,0d0]) !!
     ! Higgs-HiggsorA to Higgs
-    call append_vertex(this,l,20,[25,125,25],&
-         &[1d0,0d0]) !!
+    call append_vertex(this,l,20,[25,125,25],[1d0,0d0]) !!
     ! Higgs-Higgs to HiggsorA
-    call append_vertex(this,l,20,[25,25,125],&
-         &[(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
+    call append_vertex(this,l,20,[25,25,125],[(-3d0/4d0)*weak_coupling_squared()*this%get_mass(25)**2/this%get_mass(24)**2,0d0]) !!
     ! HiggsorC-Higgs to Higgs
-    call append_vertex(this,l,20,[127,25,25],&
-         &[1d0,0d0]) !!
+    call append_vertex(this,l,20,[127,25,25],[1d0,0d0]) !!
     ! Higgs-HiggsorC to Higgs
-    call append_vertex(this,l,20,[25,127,25],&
-         &[1d0,0d0]) !!
+    call append_vertex(this,l,20,[25,127,25],[1d0,0d0]) !!
     ! Higgs-Higgs to HiggsorB
-    call append_vertex(this,l,20,[25,25,126],&
-         &[1d0,-10d0]) !!
+    call append_vertex(this,l,20,[25,25,126],[1d0,-10d0]) !!
 
     ! HiggsorB-Zboson to Zboson
-    call append_vertex(this,l,18,[126,23,23],&
-         &[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_vertex(this,l,18,[126,23,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
     ! Zboson-HiggsorB to Zboson
-    call append_vertex(this,l,19,[23,126,23],&
-         &[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
+    call append_vertex(this,l,19,[23,126,23],[-1d0/2d0*weak_coupling_squared()/weak_cosine_squared(),0d0]) !!
 
     ! HiggsorB-Wboson to Wboson
-    call append_vertex(this,l,18,[126,24,24],&
-         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,18,[126,-24,-24],&
-         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,18,[126,24,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,18,[126,-24,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
     ! Wboson-HiggsorB to Wboson
-    call append_vertex(this,l,19,[24,126,24],&
-         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
-    call append_vertex(this,l,19,[-24,126,-24],&
-         &[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,19,[24,126,24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
+    call append_vertex(this,l,19,[-24,126,-24],[-1d0/2d0*weak_coupling_squared(),0d0]) !!
 
     ! lepton-alepton to photon
     do i=1,3
-    call append_vertex(this,l,21,[11+(2*i-2),-(11+(2*i-2)),22],&
-         &photon_fermion_coupling(this,11+(2*i-2)))
+    call append_vertex(this,l,21,[11+(2*i-2),-(11+(2*i-2)),22],photon_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! alepton-lepton to photon
     do i=1,3
-    call append_vertex(this,l,22,[-(11+(2*i-2)),11+(2*i-2),22],&
-         &photon_fermion_coupling(this,-(11+(2*i-2))))
+    call append_vertex(this,l,22,[-(11+(2*i-2)),11+(2*i-2),22],photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! lepton-alepton to Zboson
     do i=1,3
-    call append_vertex(this,l,21,[(11+(2*i-2)),-(11+(2*i-2)),23],&
-         &z_fermion_coupling(this,11+(2*i-2)))
+    call append_vertex(this,l,21,[(11+(2*i-2)),-(11+(2*i-2)),23],z_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! alepton-lepton to Zboson
     do i=1,3
-    call append_vertex(this,l,22,[-(11+(2*i-2)),(11+(2*i-2)),23],&
-         &z_fermion_coupling(this,-(11+(2*i-2))))
+    call append_vertex(this,l,22,[-(11+(2*i-2)),(11+(2*i-2)),23],z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! charged lepton-lepton to Wboson
     do i=1,3
-    call append_vertex(this,l,21,[11+(2*i-2),-(12+(2*i-2)),-24],&
-         &[charged_current_coupling(),0d0])
+    call append_vertex(this,l,21,[11+(2*i-2),-(12+(2*i-2)),-24],[charged_current_coupling(),0d0])
     enddo
     ! charged lepton-lepton to Wboson
     do i=1,3
-    call append_vertex(this,l,22,[-(11+(2*i-2)),(12+(2*i-2)),24],&
-         &[charged_current_coupling(),0d0])
+    call append_vertex(this,l,22,[-(11+(2*i-2)),(12+(2*i-2)),24],[charged_current_coupling(),0d0])
     enddo
     ! lepton-photon to lepton vertices
     do i=1,3
-       call append_vertex(this,l,10,[(11+(2*i-2)),22,(11+(2*i-2))],&
-            &photon_fermion_coupling(this,11+(2*i-2)))
+       call append_vertex(this,l,10,[(11+(2*i-2)),22,(11+(2*i-2))],photon_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! antilepton-photon to antilepton vertices
     do i=1,3
-       call append_vertex(this,l,11,[-(11+(2*i-2)),22,-(11+(2*i-2))],&
-            &photon_fermion_coupling(this,-(11+(2*i-2))))
+       call append_vertex(this,l,11,[-(11+(2*i-2)),22,-(11+(2*i-2))],photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! photon-lepton to lepton vertices
     do i=1,3
-       call append_vertex(this,l,23,[22,(11+(2*i-2)),(11+(2*i-2))],&
-            &photon_fermion_coupling(this,11+(2*i-2)))
+       call append_vertex(this,l,23,[22,(11+(2*i-2)),(11+(2*i-2))],photon_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! photon-antilepton to antilepton vertices
     do i=1,3
-       call append_vertex(this,l,24,[22,-(11+(2*i-2)),-(11+(2*i-2))],&
-            &photon_fermion_coupling(this,-(11+(2*i-2))))
+       call append_vertex(this,l,24,[22,-(11+(2*i-2)),-(11+(2*i-2))],photon_fermion_coupling(this,-(11+(2*i-2))))
     enddo
     ! lepton-Zboson to lepton vertices
     do i=1,3
-       call append_vertex(this,l,10,[(11+(2*i-2)),23,(11+(2*i-2))],&
-            &z_fermion_coupling(this,11+(2*i-2)))
+       call append_vertex(this,l,10,[(11+(2*i-2)),23,(11+(2*i-2))],z_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! antilepton-Zboson to antilepton vertices
     do i=1,3
-       call append_vertex(this,l,11,[-(11+(2*i-2)),23,-(11+(2*i-2))],&
-            &z_fermion_coupling(this,-(11+(2*i-2))))
+       call append_vertex(this,l,11,[-(11+(2*i-2)),23,-(11+(2*i-2))],z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
    ! Zboson-lepton to lepton vertices
     do i=1,3
-       call append_vertex(this,l,23,[23,(11+(2*i-2)),(11+(2*i-2))],&
-            &z_fermion_coupling(this,11+(2*i-2)))
+       call append_vertex(this,l,23,[23,(11+(2*i-2)),(11+(2*i-2))],z_fermion_coupling(this,11+(2*i-2)))
     enddo
     ! Zboson-antilepton to antilepton vertices
     do i=1,3
-       call append_vertex(this,l,24,[23,-(11+(2*i-2)),-(11+(2*i-2))],&
-            &z_fermion_coupling(this,-(11+(2*i-2))))
+       call append_vertex(this,l,24,[23,-(11+(2*i-2)),-(11+(2*i-2))],z_fermion_coupling(this,-(11+(2*i-2))))
     enddo
 
-    if (l.gt.this%nint) then
-       write (*,*) 'ERROR: more vertices than allocated',l,this%nint
-       stop 1
-    else
-       this%nint=l
-    endif
+    this%nint=l
     write (99,*) l,'interactions loaded'
   end subroutine init_vert
 
