@@ -33,7 +33,8 @@ module particles
           &,is_antiquark,is_lepton,is_antilepton,is_lepton_any,&
           &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
-          &,is_higgs,is_jet,is_higgsor
+          &,is_higgs,is_jet,is_higgsor,is_fermion,is_massless_fermion&
+          &,is_chiral_eligible
      procedure,public :: get_colour_rep => get_color_rep
      procedure,public :: get_colour_dim => get_color_dim
   end type physics_model
@@ -728,6 +729,25 @@ contains
     integer :: iPDG
     is_antilepton=iPDG.le.-11 .and. iPDG.ge.-16
   end function is_antilepton
+  logical function is_fermion(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    is_fermion=this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.&
+         this%is_lepton(iPDG).or.this%is_antilepton(iPDG)
+  end function is_fermion
+  logical function is_massless_fermion(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    is_massless_fermion=this%is_fermion(iPDG).and.this%get_mass(iPDG).eq.0d0
+  end function is_massless_fermion
+  logical function is_chiral_eligible(this,iPDG)
+    implicit none
+    class(physics_model) :: this
+    integer :: iPDG
+    is_chiral_eligible=this%is_massless_fermion(iPDG)
+  end function is_chiral_eligible
   logical function is_lepton_any(this,iPDG)
     implicit none
     class(physics_model) :: this

@@ -349,6 +349,106 @@ contains
     endif
   end subroutine ext_antiquark
 
+  subroutine ext_quark_weyl(p,nhel,idum,wf,fmass,chirality)
+    implicit none
+    integer :: nhel,idum,chirality
+    real(kind=8), dimension(0:3) :: p
+    complex(kind=8), dimension(2) :: wf
+    complex(kind=8), dimension(2) :: chi
+    real(kind=8) :: fmass
+    real(kind=8),parameter :: rzero=0d0,rTwo=2d0
+    real(kind=8) :: sqp0p3
+
+    wf(1:2)=(0d0,0d0)
+    if (p(0).gt.0d0) then
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
+       else
+          chi(2) = dcmplx( nhel*p(1), -p(2) )/sqp0p3
+       endif
+       if (nhel.eq.1 .and. chirality.eq.1) then
+          wf(1:2)=chi(1:2)
+       elseif (nhel.eq.-1 .and. chirality.eq.-1) then
+          wf(1)=chi(2)
+          wf(2)=chi(1)
+       endif
+    else
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-nhel )*dsqrt(rTwo*abs(p(0)))
+       else
+          chi(2) = dcmplx( -nhel*(-p(1)), -(-p(2)) )/sqp0p3
+       endif
+       if (nhel.eq.-1 .and. chirality.eq.1) then
+          wf(1:2)=chi(1:2)
+       elseif (nhel.eq.1 .and. chirality.eq.-1) then
+          wf(1)=chi(2)
+          wf(2)=chi(1)
+       endif
+    endif
+  end subroutine ext_quark_weyl
+
+  subroutine ext_antiquark_weyl(p,nhel,idum,wf,fmass,chirality)
+    implicit none
+    integer :: nhel,idum,chirality
+    real(kind=8), dimension(0:3) :: p
+    complex(kind=8), dimension(2) :: wf
+    complex(kind=8), dimension(2) :: chi
+    real(kind=8) :: fmass
+    real(kind=8),parameter :: rzero=0d0,rTwo=2d0
+    real(kind=8) :: sqp0p3
+
+    wf(1:2)=(0d0,0d0)
+    if(p(0).gt.0d0) then
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx(-nhel )*dsqrt(rTwo*p(0))
+       else
+          chi(2) = dcmplx(-nhel*p(1), p(2) )/sqp0p3
+       endif
+       if (nhel.eq.1 .and. chirality.eq.1) then
+          wf(1)=chi(2)
+          wf(2)=chi(1)
+       elseif (nhel.eq.-1 .and. chirality.eq.-1) then
+          wf(1:2)=chi(1:2)
+       endif
+    else
+       if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
+          sqp0p3 = 0d0
+       else
+          sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
+       end if
+       chi(1) = dcmplx( sqp0p3 )
+       if ( sqp0p3.eq.rZero ) then
+          chi(2) = dcmplx( -nhel )*dsqrt(rTwo*abs(p(0)))
+       else
+          chi(2) = dcmplx( nhel*(-p(1)), (-p(2)) )/sqp0p3
+       endif
+       if (nhel.eq.-1 .and. chirality.eq.1) then
+          wf(1)=chi(2)
+          wf(2)=chi(1)
+       elseif (nhel.eq.1 .and. chirality.eq.-1) then
+          wf(1:2)=chi(1:2)
+       endif
+    endif
+  end subroutine ext_antiquark_weyl
+
   subroutine ext_scalar(p,idum,wf)
     implicit none
     integer :: idum
@@ -655,6 +755,100 @@ contains
     wfq(4)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
   end subroutine QuarkGluontoQuark_coupl
 
+  subroutine QuarkGluontoQuark_weyl(wfq1,wfg2,wfq,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*) :: wfq1,wfq
+    complex(kind=8),dimension(4) :: wfg2
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=wfg2(2)+cImag*wfg2(3)
+    TMP4=wfg2(2)-cImag*wfg2(3)
+    if (chirality.eq.1) then
+       wfq(1)=prefact*(TMP2*wfq1(1)-TMP3*wfq1(2))
+       wfq(2)=prefact*(TMP1*wfq1(2)-TMP4*wfq1(1))
+    elseif (chirality.eq.-1) then
+       wfq(1)=prefact*(TMP1*wfq1(1)+TMP3*wfq1(2))
+       wfq(2)=prefact*(TMP2*wfq1(2)+TMP4*wfq1(1))
+    else
+       call QuarkGluontoQuark(wfq1,wfg2,wfq)
+    endif
+  end subroutine QuarkGluontoQuark_weyl
+
+  subroutine GluonQuarktoQuark_weyl(wfg1,wfq2,wfq,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4) :: wfg1
+    complex(kind=8),dimension(*) :: wfq2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    if (chirality.eq.1) then
+       wfq(1)=prefact*(TMP2*wfq2(1)-TMP3*wfq2(2))
+       wfq(2)=prefact*(TMP1*wfq2(2)-TMP4*wfq2(1))
+    elseif (chirality.eq.-1) then
+       wfq(1)=prefact*(TMP1*wfq2(1)+TMP3*wfq2(2))
+       wfq(2)=prefact*(TMP2*wfq2(2)+TMP4*wfq2(1))
+    else
+       call GluonQuarktoQuark(wfg1,wfq2,wfq)
+    endif
+  end subroutine GluonQuarktoQuark_weyl
+
+  subroutine QuarkGluontoQuark_coupl_weyl(wfq1,wfg2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*) :: wfq1,wfq
+    complex(kind=8),dimension(4) :: wfg2
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=wfg2(2)+cImag*wfg2(3)
+    TMP4=wfg2(2)-cImag*wfg2(3)
+    if (chirality.eq.1) then
+       TMP5=prefact*coupl(2)
+       wfq(1)=TMP5*(TMP2*wfq1(1)-TMP3*wfq1(2))
+       wfq(2)=TMP5*(TMP1*wfq1(2)-TMP4*wfq1(1))
+    elseif (chirality.eq.-1) then
+       TMP5=prefact*coupl(1)
+       wfq(1)=TMP5*(TMP1*wfq1(1)+TMP3*wfq1(2))
+       wfq(2)=TMP5*(TMP2*wfq1(2)+TMP4*wfq1(1))
+    else
+       call QuarkGluontoQuark_coupl(wfq1,wfg2,wfq,coupl)
+    endif
+  end subroutine QuarkGluontoQuark_coupl_weyl
+
+  subroutine GluonQuarktoQuark_coupl_weyl(wfg1,wfq2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4) :: wfg1
+    complex(kind=8),dimension(*) :: wfq2,wfq
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    if (chirality.eq.1) then
+       TMP5=prefact*coupl(2)
+       wfq(1)=TMP5*(TMP2*wfq2(1)-TMP3*wfq2(2))
+       wfq(2)=TMP5*(TMP1*wfq2(2)-TMP4*wfq2(1))
+    elseif (chirality.eq.-1) then
+       TMP5=prefact*coupl(1)
+       wfq(1)=TMP5*(TMP1*wfq2(1)+TMP3*wfq2(2))
+       wfq(2)=TMP5*(TMP2*wfq2(2)+TMP4*wfq2(1))
+    else
+       call GluonQuarktoQuark_coupl(wfg1,wfq2,wfq,coupl)
+    endif
+  end subroutine GluonQuarktoQuark_coupl_weyl
+
   subroutine AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl) 
     implicit none
     complex(kind=8),dimension(4) :: wfq1,wfg2,wfq
@@ -672,6 +866,100 @@ contains
     wfq(3)=TMP5*(TMP1*wfq1(1)+TMP4*wfq1(2)) !sl1
     wfq(4)=TMP5*(TMP2*wfq1(2)+TMP3*wfq1(1)) !sl2
   end subroutine AquarkGluontoAquark_coupl
+
+  subroutine AquarkGluontoAquark_weyl(wfq1,wfg2,wfq,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*) :: wfq1,wfq
+    complex(kind=8),dimension(4) :: wfg2
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=wfg2(2)+cImag*wfg2(3)
+    TMP4=wfg2(2)-cImag*wfg2(3)
+    if (chirality.eq.1) then
+       wfq(1)=prefact*(TMP1*wfq1(1)+TMP4*wfq1(2))
+       wfq(2)=prefact*(TMP2*wfq1(2)+TMP3*wfq1(1))
+    elseif (chirality.eq.-1) then
+       wfq(1)=prefact*(TMP2*wfq1(1)-TMP4*wfq1(2))
+       wfq(2)=prefact*(TMP1*wfq1(2)-TMP3*wfq1(1))
+    else
+       call AquarkGluontoAquark(wfq1,wfg2,wfq)
+    endif
+  end subroutine AquarkGluontoAquark_weyl
+
+  subroutine GluonAquarktoAquark_weyl(wfg1,wfq2,wfq,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4) :: wfg1
+    complex(kind=8),dimension(*) :: wfq2,wfq
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    if (chirality.eq.1) then
+       wfq(1)=prefact*(TMP1*wfq2(1)+TMP4*wfq2(2))
+       wfq(2)=prefact*(TMP2*wfq2(2)+TMP3*wfq2(1))
+    elseif (chirality.eq.-1) then
+       wfq(1)=prefact*(TMP2*wfq2(1)-TMP4*wfq2(2))
+       wfq(2)=prefact*(TMP1*wfq2(2)-TMP3*wfq2(1))
+    else
+       call GluonAquarktoAquark(wfg1,wfq2,wfq)
+    endif
+  end subroutine GluonAquarktoAquark_weyl
+
+  subroutine AquarkGluontoAquark_coupl_weyl(wfq1,wfg2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*) :: wfq1,wfq
+    complex(kind=8),dimension(4) :: wfg2
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
+    TMP1=wfg2(1)+wfg2(4)
+    TMP2=wfg2(1)-wfg2(4)
+    TMP3=wfg2(2)+cImag*wfg2(3)
+    TMP4=wfg2(2)-cImag*wfg2(3)
+    if (chirality.eq.1) then
+       TMP5=prefact*coupl(1)
+       wfq(1)=TMP5*(TMP1*wfq1(1)+TMP4*wfq1(2))
+       wfq(2)=TMP5*(TMP2*wfq1(2)+TMP3*wfq1(1))
+    elseif (chirality.eq.-1) then
+       TMP5=prefact*coupl(2)
+       wfq(1)=TMP5*(TMP2*wfq1(1)-TMP4*wfq1(2))
+       wfq(2)=TMP5*(TMP1*wfq1(2)-TMP3*wfq1(1))
+    else
+       call AquarkGluontoAquark_coupl(wfq1,wfg2,wfq,coupl)
+    endif
+  end subroutine AquarkGluontoAquark_coupl_weyl
+
+  subroutine GluonAquarktoAquark_coupl_weyl(wfg1,wfq2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4) :: wfg1
+    complex(kind=8),dimension(*) :: wfq2,wfq
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: TMP1,TMP2,TMP3,TMP4,TMP5
+    TMP1=wfg1(1)+wfg1(4)
+    TMP2=wfg1(1)-wfg1(4)
+    TMP3=wfg1(2)+cImag*wfg1(3)
+    TMP4=wfg1(2)-cImag*wfg1(3)
+    if (chirality.eq.1) then
+       TMP5=prefact*coupl(1)
+       wfq(1)=TMP5*(TMP1*wfq2(1)+TMP4*wfq2(2))
+       wfq(2)=TMP5*(TMP2*wfq2(2)+TMP3*wfq2(1))
+    elseif (chirality.eq.-1) then
+       TMP5=prefact*coupl(2)
+       wfq(1)=TMP5*(TMP2*wfq2(1)-TMP4*wfq2(2))
+       wfq(2)=TMP5*(TMP1*wfq2(2)-TMP3*wfq2(1))
+    else
+       call GluonAquarktoAquark_coupl(wfg1,wfq2,wfq,coupl)
+    endif
+  end subroutine GluonAquarktoAquark_coupl_weyl
 
   subroutine TwoGluontoTensor_coupl(wfg1,wfg2,wfT,coupl)
     ! This vertex includes the all factors such that the tensor "propagator"
@@ -802,6 +1090,210 @@ contains
     ! add
     wfg(1:4)=wfg(1:4)+wfg_temp(1:4)
   end subroutine AleptonLeptontoGluon
+
+  subroutine QuarkAquarktoGluon_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
+    implicit none
+    integer,intent(in) :: chirality1,chirality2
+    complex(kind=8),dimension(*) :: wfq1,wfq2
+    complex(kind=8),dimension(4) :: wfg
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: q1,q2,q3,q4,a1,a2,a3,a4,TMP1,TMP2,TMP3,TMP4,TMP5
+    TMP5=prefact*coupl(1)
+    wfg(1:4)=(0d0,0d0)
+    if (chirality1.eq.-1 .and. chirality2.eq.1) then
+       wfg(1)=TMP5*(wfq1(1)*wfq2(1)+wfq1(2)*wfq2(2))
+       wfg(2)=-TMP5*(wfq1(1)*wfq2(2)+wfq1(2)*wfq2(1))
+       wfg(3)=cImag*TMP5*(wfq1(1)*wfq2(2)-wfq1(2)*wfq2(1))
+       wfg(4)=TMP5*(-wfq1(1)*wfq2(1)+wfq1(2)*wfq2(2))
+       return
+    elseif (chirality1.eq.1 .and. chirality2.eq.-1) then
+       wfg(1)=TMP5*(wfq1(2)*wfq2(2)+wfq1(1)*wfq2(1))
+       wfg(2)=TMP5*(wfq1(1)*wfq2(2)+wfq1(2)*wfq2(1))
+       wfg(3)=cImag*TMP5*(-wfq1(1)*wfq2(2)+wfq1(2)*wfq2(1))
+       wfg(4)=TMP5*(-wfq1(2)*wfq2(2)+wfq1(1)*wfq2(1))
+       return
+    elseif (chirality1.ne.0 .and. chirality2.ne.0) then
+       return
+    elseif (chirality1.eq.0 .and. chirality2.eq.0) then
+       call QuarkAquarktoGluon(wfq1,wfq2,wfg,coupl)
+       return
+    endif
+
+    if (chirality1.eq.0) then
+       q1=wfq1(1); q2=wfq1(2); q3=wfq1(3); q4=wfq1(4)
+    elseif (chirality1.eq.1) then
+       q1=wfq1(1); q2=wfq1(2); q3=(0d0,0d0); q4=(0d0,0d0)
+    else
+       q1=(0d0,0d0); q2=(0d0,0d0); q3=wfq1(1); q4=wfq1(2)
+    endif
+    if (chirality2.eq.0) then
+       a1=wfq2(1); a2=wfq2(2); a3=wfq2(3); a4=wfq2(4)
+    elseif (chirality2.eq.1) then
+       a1=wfq2(1); a2=wfq2(2); a3=(0d0,0d0); a4=(0d0,0d0)
+    else
+       a1=(0d0,0d0); a2=(0d0,0d0); a3=wfq2(1); a4=wfq2(2)
+    endif
+    TMP1=q3*a1+q2*a4
+    TMP2=q4*a2+q1*a3
+    TMP3=q2*a3-q4*a1
+    TMP4=q1*a4-q3*a2
+    wfg(1)=( TMP1 + TMP2 )*TMP5
+    wfg(2)=( TMP4 + TMP3 )*TMP5
+    wfg(3)=(-TMP4 + TMP3 )*cImag*TMP5
+    wfg(4)=(-TMP1 + TMP2 )*TMP5
+  end subroutine QuarkAquarktoGluon_weyl
+
+  subroutine AquarkQuarktoGluon_weyl(wfq1,wfq2,wfg,chirality1,chirality2)
+    implicit none
+    integer,intent(in) :: chirality1,chirality2
+    complex(kind=8),dimension(*) :: wfq1,wfq2
+    complex(kind=8),dimension(4) :: wfg
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: q1,q2,q3,q4,a1,a2,a3,a4,TMP1,TMP2,TMP3,TMP4
+    wfg(1:4)=(0d0,0d0)
+    if (chirality1.eq.1 .and. chirality2.eq.-1) then
+       wfg(1)=prefact*(wfq2(1)*wfq1(1)+wfq2(2)*wfq1(2))
+       wfg(2)=-prefact*(wfq2(1)*wfq1(2)+wfq2(2)*wfq1(1))
+       wfg(3)=cImag*prefact*(wfq2(1)*wfq1(2)-wfq2(2)*wfq1(1))
+       wfg(4)=prefact*(-wfq2(1)*wfq1(1)+wfq2(2)*wfq1(2))
+       return
+    elseif (chirality1.eq.-1 .and. chirality2.eq.1) then
+       wfg(1)=prefact*(wfq2(2)*wfq1(2)+wfq2(1)*wfq1(1))
+       wfg(2)=prefact*(wfq2(1)*wfq1(2)+wfq2(2)*wfq1(1))
+       wfg(3)=cImag*prefact*(-wfq2(1)*wfq1(2)+wfq2(2)*wfq1(1))
+       wfg(4)=prefact*(-wfq2(2)*wfq1(2)+wfq2(1)*wfq1(1))
+       return
+    elseif (chirality1.ne.0 .and. chirality2.ne.0) then
+       return
+    elseif (chirality1.eq.0 .and. chirality2.eq.0) then
+       call AquarkQuarktoGluon(wfq1,wfq2,wfg)
+       return
+    endif
+
+    if (chirality2.eq.0) then
+       q1=wfq2(1); q2=wfq2(2); q3=wfq2(3); q4=wfq2(4)
+    elseif (chirality2.eq.1) then
+       q1=wfq2(1); q2=wfq2(2); q3=(0d0,0d0); q4=(0d0,0d0)
+    else
+       q1=(0d0,0d0); q2=(0d0,0d0); q3=wfq2(1); q4=wfq2(2)
+    endif
+    if (chirality1.eq.0) then
+       a1=wfq1(1); a2=wfq1(2); a3=wfq1(3); a4=wfq1(4)
+    elseif (chirality1.eq.1) then
+       a1=wfq1(1); a2=wfq1(2); a3=(0d0,0d0); a4=(0d0,0d0)
+    else
+       a1=(0d0,0d0); a2=(0d0,0d0); a3=wfq1(1); a4=wfq1(2)
+    endif
+    TMP1=q3*a1+q2*a4
+    TMP2=q4*a2+q1*a3
+    TMP3=q2*a3-q4*a1
+    TMP4=q1*a4-q3*a2
+    wfg(1)=( TMP1 + TMP2 )*prefact
+    wfg(2)=( TMP4 + TMP3 )*prefact
+    wfg(3)=(-TMP4 + TMP3 )*cImag*prefact
+    wfg(4)=(-TMP1 + TMP2 )*prefact
+  end subroutine AquarkQuarktoGluon_weyl
+
+  subroutine LeptonAleptontoGluon_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
+    implicit none
+    integer,intent(in) :: chirality1,chirality2
+    complex(kind=8),dimension(*) :: wfq1,wfq2
+    complex(kind=8),dimension(4) :: wfg
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: l1,l2,l3,l4,a1,a2,a3,a4,TMP5
+    wfg(1:4)=(0d0,0d0)
+    if (chirality1.eq.-1 .and. chirality2.eq.1) then
+       TMP5=prefact*coupl(1)
+       wfg(1)=TMP5*(wfq1(1)*wfq2(1)+wfq1(2)*wfq2(2))
+       wfg(2)=-TMP5*(wfq1(2)*wfq2(1)+wfq1(1)*wfq2(2))
+       wfg(3)=cImag*TMP5*(-wfq1(2)*wfq2(1)+wfq1(1)*wfq2(2))
+       wfg(4)=TMP5*(-wfq1(1)*wfq2(1)+wfq1(2)*wfq2(2))
+       return
+    elseif (chirality1.eq.1 .and. chirality2.eq.-1) then
+       TMP5=prefact*coupl(2)
+       wfg(1)=TMP5*(wfq1(1)*wfq2(1)+wfq1(2)*wfq2(2))
+       wfg(2)=TMP5*(wfq1(1)*wfq2(2)+wfq1(2)*wfq2(1))
+       wfg(3)=cImag*TMP5*(-wfq1(1)*wfq2(2)+wfq1(2)*wfq2(1))
+       wfg(4)=TMP5*(wfq1(1)*wfq2(1)-wfq1(2)*wfq2(2))
+       return
+    elseif (chirality1.ne.0 .and. chirality2.ne.0) then
+       return
+    elseif (chirality1.eq.0 .and. chirality2.eq.0) then
+       call LeptonAleptontoGluon(wfq1,wfq2,wfg,coupl)
+       return
+    endif
+
+    if (chirality1.eq.0) then
+       l1=wfq1(1); l2=wfq1(2); l3=wfq1(3); l4=wfq1(4)
+    elseif (chirality1.eq.1) then
+       l1=wfq1(1); l2=wfq1(2); l3=(0d0,0d0); l4=(0d0,0d0)
+    else
+       l1=(0d0,0d0); l2=(0d0,0d0); l3=wfq1(1); l4=wfq1(2)
+    endif
+    if (chirality2.eq.0) then
+       a1=wfq2(1); a2=wfq2(2); a3=wfq2(3); a4=wfq2(4)
+    elseif (chirality2.eq.1) then
+       a1=wfq2(1); a2=wfq2(2); a3=(0d0,0d0); a4=(0d0,0d0)
+    else
+       a1=(0d0,0d0); a2=(0d0,0d0); a3=wfq2(1); a4=wfq2(2)
+    endif
+    wfg(1)=prefact*(coupl(1)*(l3*a1+l4*a2)+coupl(2)*(l1*a3+l2*a4))
+    wfg(2)=prefact*(coupl(1)*(-l4*a1-l3*a2)+coupl(2)*(l1*a4+l2*a3))
+    wfg(3)=cImag*prefact*(coupl(1)*(-l4*a1+l3*a2)+coupl(2)*(-l1*a4+l2*a3))
+    wfg(4)=prefact*(coupl(1)*(-l3*a1+l4*a2)+coupl(2)*(l1*a3-l2*a4))
+  end subroutine LeptonAleptontoGluon_weyl
+
+  subroutine AleptonLeptontoGluon_weyl(wfq1,wfq2,wfg,coupl,chirality1,chirality2)
+    implicit none
+    integer,intent(in) :: chirality1,chirality2
+    complex(kind=8),dimension(*) :: wfq1,wfq2
+    complex(kind=8),dimension(4) :: wfg
+    real(kind=8),dimension(2) :: coupl
+    complex(kind=8), parameter :: cImag=(0d0,1d0),prefact=(0d0,1d0)/sqrt(2d0)
+    complex(kind=8) :: l1,l2,l3,l4,a1,a2,a3,a4,TMP5
+    wfg(1:4)=(0d0,0d0)
+    if (chirality1.eq.1 .and. chirality2.eq.-1) then
+       TMP5=prefact*coupl(1)
+       wfg(1)=TMP5*(wfq2(1)*wfq1(1)+wfq2(2)*wfq1(2))
+       wfg(2)=-TMP5*(wfq2(2)*wfq1(1)+wfq2(1)*wfq1(2))
+       wfg(3)=cImag*TMP5*(-wfq2(2)*wfq1(1)+wfq2(1)*wfq1(2))
+       wfg(4)=TMP5*(-wfq2(1)*wfq1(1)+wfq2(2)*wfq1(2))
+       return
+    elseif (chirality1.eq.-1 .and. chirality2.eq.1) then
+       TMP5=prefact*coupl(2)
+       wfg(1)=TMP5*(wfq2(1)*wfq1(1)+wfq2(2)*wfq1(2))
+       wfg(2)=TMP5*(wfq2(1)*wfq1(2)+wfq2(2)*wfq1(1))
+       wfg(3)=cImag*TMP5*(-wfq2(1)*wfq1(2)+wfq2(2)*wfq1(1))
+       wfg(4)=TMP5*(wfq2(1)*wfq1(1)-wfq2(2)*wfq1(2))
+       return
+    elseif (chirality1.ne.0 .and. chirality2.ne.0) then
+       return
+    elseif (chirality1.eq.0 .and. chirality2.eq.0) then
+       call AleptonLeptontoGluon(wfq1,wfq2,wfg,coupl)
+       return
+    endif
+
+    if (chirality2.eq.0) then
+       l1=wfq2(1); l2=wfq2(2); l3=wfq2(3); l4=wfq2(4)
+    elseif (chirality2.eq.1) then
+       l1=wfq2(1); l2=wfq2(2); l3=(0d0,0d0); l4=(0d0,0d0)
+    else
+       l1=(0d0,0d0); l2=(0d0,0d0); l3=wfq2(1); l4=wfq2(2)
+    endif
+    if (chirality1.eq.0) then
+       a1=wfq1(1); a2=wfq1(2); a3=wfq1(3); a4=wfq1(4)
+    elseif (chirality1.eq.1) then
+       a1=wfq1(1); a2=wfq1(2); a3=(0d0,0d0); a4=(0d0,0d0)
+    else
+       a1=(0d0,0d0); a2=(0d0,0d0); a3=wfq1(1); a4=wfq1(2)
+    endif
+    wfg(1)=prefact*(coupl(1)*(l3*a1+l4*a2)+coupl(2)*(l1*a3+l2*a4))
+    wfg(2)=prefact*(coupl(1)*(-l4*a1-l3*a2)+coupl(2)*(l1*a4+l2*a3))
+    wfg(3)=cImag*prefact*(coupl(1)*(-l4*a1+l3*a2)+coupl(2)*(-l1*a4+l2*a3))
+    wfg(4)=prefact*(coupl(1)*(-l3*a1+l4*a2)+coupl(2)*(l1*a3-l2*a4))
+  end subroutine AleptonLeptontoGluon_weyl
   
   subroutine GluonPropagator(wfg,p)
     implicit none
@@ -858,6 +1350,32 @@ contains
     wfq(4)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine QuarkPropagator
 
+  subroutine QuarkPropagator_weyl(wfq,p,fm,fw,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*) :: wfq
+    real(kind=8),dimension(0:3),intent(in) :: p
+    real(kind=8) :: fm,fw
+    complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    tmp1=(p(0)+p(3))
+    tmp2=(p(0)-p(3))
+    tmp3=(p(1)+cImag*p(2))
+    tmp4=(p(1)-cImag*p(2))
+    val1=wfq(1)
+    val2=wfq(2)
+    if (chirality.eq.1) then
+       wfq(1)=(tmp1*val1+tmp3*val2)*prefact
+       wfq(2)=(tmp2*val2+tmp4*val1)*prefact
+    elseif (chirality.eq.-1) then
+       wfq(1)=(tmp2*val1-tmp3*val2)*prefact
+       wfq(2)=(tmp1*val2-tmp4*val1)*prefact
+    else
+       call QuarkPropagator(wfq,p,fm,fw)
+    endif
+  end subroutine QuarkPropagator_weyl
+
   subroutine AquarkPropagator(wfq,p,fm,fw)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfq
@@ -877,6 +1395,32 @@ contains
     wfq(3)=(tmp_p(1)*tmp_val(1)+tmp_p(4)*tmp_val(2)+fm*tmp_val(3))*prefact
     wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine AquarkPropagator
+
+  subroutine AquarkPropagator_weyl(wfq,p,fm,fw,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*) :: wfq
+    real(kind=8),dimension(0:3),intent(in) :: p
+    real(kind=8) :: fm,fw
+    complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
+    complex(kind=8),parameter :: cImag=(0d0,1d0)
+    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    tmp1=-(p(0)+p(3))
+    tmp2=-(p(0)-p(3))
+    tmp3=-(p(1)+cImag*p(2))
+    tmp4=-(p(1)-cImag*p(2))
+    val1=wfq(1)
+    val2=wfq(2)
+    if (chirality.eq.1) then
+       wfq(1)=(tmp2*val1-tmp4*val2)*prefact
+       wfq(2)=(tmp1*val2-tmp3*val1)*prefact
+    elseif (chirality.eq.-1) then
+       wfq(1)=(tmp1*val1+tmp4*val2)*prefact
+       wfq(2)=(tmp2*val2+tmp3*val1)*prefact
+    else
+       call AquarkPropagator(wfq,p,fm,fw)
+    endif
+  end subroutine AquarkPropagator_weyl
 
   subroutine ScalarPropagator(wfs,p,sm,sw)
     implicit none
