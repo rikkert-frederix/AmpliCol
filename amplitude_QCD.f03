@@ -1876,8 +1876,7 @@ contains
                   pm%is_lepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
                    call ext_quark_weyl(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%mass,&
-                        this%current_list(ic)%chirality)
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
                 else
                    call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
@@ -1886,8 +1885,7 @@ contains
                   pm%is_antilepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
                    call ext_antiquark_weyl(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                        ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%mass,&
-                        this%current_list(ic)%chirality)
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
                 else
                    call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
@@ -2471,8 +2469,6 @@ contains
       implicit none
       call QuarkPropagator_weyl(this%current_list(ic)%val_c, &
            this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-           this%current_list(ic)%mass,&
-           this%current_list(ic)%width,&
            this%current_list(ic)%chirality)
     end subroutine include_quark_propagator_weyl
 
@@ -2487,8 +2483,6 @@ contains
       implicit none
       call AquarkPropagator_weyl(this%current_list(ic)%val_c, &
            this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
-           this%current_list(ic)%mass,&
-           this%current_list(ic)%width,&
            this%current_list(ic)%chirality)
     end subroutine include_aquark_propagator_weyl
     subroutine include_scalar_propagator()
@@ -3210,14 +3204,15 @@ contains
     integer,parameter :: iunit=14
     integer,dimension(n),intent(in)::hel
     character(len=170) :: line,tmp
-    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau
-    integer,dimension(0:24) :: icount
-    integer,dimension(150,9) :: icount_type
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey
+    integer :: chir1,chir2,chiri
+    integer,dimension(0:24,0:8) :: icount
+    integer,dimension(150,11) :: icount_type
     integer,dimension(:,:),allocatable :: curs
-    integer,dimension(:),allocatable :: pp,chi
+    integer,dimension(:),allocatable :: pp
     real(kind=8),dimension(:),allocatable :: m,w
-    integer,dimension(this%n_vert,0:24) :: cur1,cur2,int1,pp1,pp2,chi1,chi2,chii
-    real(kind=8),dimension(2,this%n_vert,0:24) :: coupl
+    integer,dimension(this%n_vert,0:24,0:8) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:24,0:8) :: coupl
     write(tmp,*) igroup
     write(line,*) iint
     line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
@@ -3323,13 +3318,14 @@ contains
                 write(tmp,*) ifinal
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
                 write(tmp,*) ic
-                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
-                write(tmp,'(d20.12)') this%current_list(ic)%mass
-                line=trim(adjustl(line))//trim(adjustl(tmp))
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//')'
                 if (this%current_list(ic)%chirality.ne.0) then
                    write(tmp,*) this%current_list(ic)%chirality
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))//')'
                 else
+                   line=trim(adjustl(line))//','
+                   write(tmp,'(d20.12)') this%current_list(ic)%mass
+                   line=trim(adjustl(line))//trim(adjustl(tmp))
                    line=trim(adjustl(line))//')'
                 endif
              elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
@@ -3345,13 +3341,14 @@ contains
                 write(tmp,*) ifinal
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
                 write(tmp,*) ic
-                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
-                write(tmp,'(d20.12)') this%current_list(ic)%mass
-                line=trim(adjustl(line))//trim(adjustl(tmp))
+                line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//')'
                 if (this%current_list(ic)%chirality.ne.0) then
                    write(tmp,*) this%current_list(ic)%chirality
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))//')'
                 else
+                   line=trim(adjustl(line))//','
+                   write(tmp,'(d20.12)') this%current_list(ic)%mass
+                   line=trim(adjustl(line))//trim(adjustl(tmp))
                    line=trim(adjustl(line))//')'
                 endif
              elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
@@ -3401,41 +3398,61 @@ contains
        write(tmp,*) this%n_vert
        write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
 
-       icount(0:24)=0
+       icount(0:24,0:8)=0
        do itype=0,24 ! vertex type
           do iv=this%n_vert_start(isize),this%n_vert_end(isize)
              if (this%interaction_list(iv)%type.eq.itype) then
-                icount(itype)=icount(itype)+1
-                cur1(icount(itype),itype)=this%interaction_list(iv)%currents(1)
-                cur2(icount(itype),itype)=this%interaction_list(iv)%currents(2)
-                pp1(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
-                pp2(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
-                int1(icount(itype),itype)=iv
-                coupl(1:2,icount(itype),itype)=this%interaction_list(iv)%coupl(1:2)
-                chi1(icount(itype),itype)=this%current_list(this%interaction_list(iv)%currents(1))%chirality
-                chi2(icount(itype),itype)=this%current_list(this%interaction_list(iv)%currents(2))%chirality
-                chii(icount(itype),itype)=this%interaction_list(iv)%chirality
+                chir1=this%current_list(this%interaction_list(iv)%currents(1))%chirality
+                chir2=this%current_list(this%interaction_list(iv)%currents(2))%chirality
+                chiri=this%interaction_list(iv)%chirality
+                vkey=4
+                if (itype.eq.4 .or. itype.eq.5 .or. itype.eq.6 .or. itype.eq.7 .or. &
+                    itype.eq.10 .or. itype.eq.11 .or. itype.eq.23 .or. itype.eq.24) then
+                   vkey=chiri+4
+                elseif (itype.eq.8 .or. itype.eq.9 .or. itype.eq.21 .or. itype.eq.22) then
+                   vkey=(chir1+1)*3+(chir2+1)
+                endif
+                icount(itype,vkey)=icount(itype,vkey)+1
+                cur1(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%currents(1)
+                cur2(icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%currents(2)
+                pp1(icount(itype,vkey),itype,vkey)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+                pp2(icount(itype,vkey),itype,vkey)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                int1(icount(itype,vkey),itype,vkey)=iv
+                coupl(1:2,icount(itype,vkey),itype,vkey)=this%interaction_list(iv)%coupl(1:2)
              endif
           enddo
        enddo
        do itype=0,24
-          if (icount(itype).eq.0) cycle
-          write(tmp,*) isize
-          line='call vertex_type'//trim(adjustl(tmp))//'_'
-          write(tmp,*) itype
-          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
-          write(iunit,'(4x,a)') trim(adjustl(line))
+          do vkey=0,8
+             if (icount(itype,vkey).eq.0) cycle
+             write(tmp,*) isize
+             line='call vertex_type'//trim(adjustl(tmp))//'_'
+             write(tmp,*) itype
+             line=trim(adjustl(line))//trim(adjustl(tmp))
+             if (vkey.ne.4) then
+                write(tmp,*) vkey
+                line=trim(adjustl(line))//'_v'//trim(adjustl(tmp))
+             endif
+             line=trim(adjustl(line))//'(pp,val_c,int_c)'
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          enddo
        enddo
        write(tmp,*) isize
        write(iunit,'(2x,a)') 'end subroutine compute_vertices'//trim(adjustl(tmp))
        write(iunit,'(a)') ''
 
        do itype=0,24
-          if (icount(itype).eq.0) cycle
+          do vkey=0,8
+          if (icount(itype,vkey).eq.0) cycle
           write(tmp,*) isize
           line='subroutine vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
-          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c)'
+          line=trim(adjustl(line))//trim(adjustl(tmp))
+          if (vkey.ne.4) then
+             write(tmp,*) vkey
+             line=trim(adjustl(line))//'_v'//trim(adjustl(tmp))
+          endif
+          line=trim(adjustl(line))//'(pp,val_c,int_c)'
           write(iunit,'(2x,a)') trim(adjustl(line))
           write(iunit,'(4x,a)') 'implicit none'
           write(tmp,*) this%max_pp
@@ -3445,102 +3462,51 @@ contains
           write(tmp,*) this%n_vert
           write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
           write(iunit,'(4x,a)') 'integer :: i'
-          write(tmp,*) icount(itype)
+          write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[ &'
           line=''
-          do i=1,icount(itype)
-             write(tmp,*) cur1(i,itype)
+          do i=1,icount(itype,vkey)
+             write(tmp,*) cur1(i,itype,vkey)
              if (i.eq.1) then
                 line=trim(adjustl(tmp))
              else
                 line=trim(adjustl(line))//','//trim(adjustl(tmp))
              endif
-             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype,vkey)) then
                 line=trim(adjustl(line))//' &'
                 write(iunit,'(6x,a)') trim(adjustl(line))
                 line=''
              endif
           enddo
           write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          write(tmp,*) icount(itype)
+          write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur2=[ &'
           line=''
-          do i=1,icount(itype)
-             write(tmp,*) cur2(i,itype)
+          do i=1,icount(itype,vkey)
+             write(tmp,*) cur2(i,itype,vkey)
              if (i.eq.1) then
                 line=trim(adjustl(tmp))
              else
                 line=trim(adjustl(line))//','//trim(adjustl(tmp))
              endif
-             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype,vkey)) then
                 line=trim(adjustl(line))//' &'
                 write(iunit,'(6x,a)') trim(adjustl(line))
                 line=''
              endif
           enddo
           write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          write(tmp,*) icount(itype)
+          write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: int1=[ &'
           line=''
-          do i=1,icount(itype)
-             write(tmp,*) int1(i,itype)
+          do i=1,icount(itype,vkey)
+             write(tmp,*) int1(i,itype,vkey)
              if (i.eq.1) then
                 line=trim(adjustl(tmp))
              else
                 line=trim(adjustl(line))//','//trim(adjustl(tmp))
              endif
-             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
-                line=trim(adjustl(line))//' &'
-                write(iunit,'(6x,a)') trim(adjustl(line))
-                line=''
-             endif
-          enddo
-          write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          write(tmp,*) icount(itype)
-          write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: chi1=[ &'
-          line=''
-          do i=1,icount(itype)
-             write(tmp,*) chi1(i,itype)
-             if (i.eq.1) then
-                line=trim(adjustl(tmp))
-             else
-                line=trim(adjustl(line))//','//trim(adjustl(tmp))
-             endif
-             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
-                line=trim(adjustl(line))//' &'
-                write(iunit,'(6x,a)') trim(adjustl(line))
-                line=''
-             endif
-          enddo
-          write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          write(tmp,*) icount(itype)
-          write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: chi2=[ &'
-          line=''
-          do i=1,icount(itype)
-             write(tmp,*) chi2(i,itype)
-             if (i.eq.1) then
-                line=trim(adjustl(tmp))
-             else
-                line=trim(adjustl(line))//','//trim(adjustl(tmp))
-             endif
-             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
-                line=trim(adjustl(line))//' &'
-                write(iunit,'(6x,a)') trim(adjustl(line))
-                line=''
-             endif
-          enddo
-          write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          write(tmp,*) icount(itype)
-          write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: chii=[ &'
-          line=''
-          do i=1,icount(itype)
-             write(tmp,*) chii(i,itype)
-             if (i.eq.1) then
-                line=trim(adjustl(tmp))
-             else
-                line=trim(adjustl(line))//','//trim(adjustl(tmp))
-             endif
-             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype,vkey)) then
                 line=trim(adjustl(line))//' &'
                 write(iunit,'(6x,a)') trim(adjustl(line))
                 line=''
@@ -3548,34 +3514,34 @@ contains
           enddo
           write(iunit,'(6x,a)') trim(adjustl(line))//']'
           if (itype.eq.0 .or. itype.eq.12) then
-             write(tmp,*) icount(itype)
+             write(tmp,*) icount(itype,vkey)
              write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[ &'
              line=''
-             do i=1,icount(itype)
-                write(tmp,*) pp1(i,itype)
+             do i=1,icount(itype,vkey)
+                write(tmp,*) pp1(i,itype,vkey)
                 if (i.eq.1) then
                    line=trim(adjustl(tmp))
                 else
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))
                 endif
-                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype,vkey)) then
                    line=trim(adjustl(line))//' &'
                    write(iunit,'(6x,a)') trim(adjustl(line))
                    line=''
                 endif
              enddo
              write(iunit,'(6x,a)') trim(adjustl(line))//']'
-             write(tmp,*) icount(itype)
+             write(tmp,*) icount(itype,vkey)
              write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp2=[ &'
              line=''
-             do i=1,icount(itype)
-                write(tmp,*) pp2(i,itype)
+             do i=1,icount(itype,vkey)
+                write(tmp,*) pp2(i,itype,vkey)
                 if (i.eq.1) then
                    line=trim(adjustl(tmp))
                 else
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))
                 endif
-                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype,vkey)) then
                    line=trim(adjustl(line))//' &'
                    write(iunit,'(6x,a)') trim(adjustl(line))
                    line=''
@@ -3584,21 +3550,21 @@ contains
              write(iunit,'(6x,a)') trim(adjustl(line))//']'
           endif
           if (itype.eq.8 .or. itype.ge.10) then
-             write(tmp,*) icount(itype)*2
+             write(tmp,*) icount(itype,vkey)*2
              write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[ &'
              line=''
-             do i=1,icount(itype)
-                write(tmp,'(D24.16)') coupl(1,i,itype)
+             do i=1,icount(itype,vkey)
+                write(tmp,'(D24.16)') coupl(1,i,itype,vkey)
                 if (i.eq.1) then
                    line=trim(adjustl(tmp))
-                   write(tmp,'(D24.16)') coupl(2,i,itype)
+                   write(tmp,'(D24.16)') coupl(2,i,itype,vkey)
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))
                 else
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))
-                   write(tmp,'(D24.16)') coupl(2,i,itype)
+                   write(tmp,'(D24.16)') coupl(2,i,itype,vkey)
                    line=trim(adjustl(line))//','//trim(adjustl(tmp))
                 endif
-                if (mod(i,2).eq.0 .and. i.ne.icount(itype)) then
+                if (mod(i,2).eq.0 .and. i.ne.icount(itype,vkey)) then
                    line=trim(adjustl(line))//' &'
                    write(iunit,'(6x,a)') trim(adjustl(line))
                    line=''
@@ -3608,7 +3574,7 @@ contains
           endif
 
        
-          write(tmp,*) icount(itype)
+          write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)')'do i=1,'//trim(adjustl(tmp))
           if (itype.eq.0) then
              line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
@@ -3619,67 +3585,84 @@ contains
           elseif(itype.eq.3) then
              line='call GluonTensortoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.4) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call GluonQuarktoQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call GluonQuarktoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                line='call GluonQuarktoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             else
+                write(tmp,*) vkey-4
+                line='call GluonQuarktoQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                     trim(adjustl(tmp))//')'
+             endif
           elseif(itype.eq.5) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call GluonAQuarktoAQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call GluonAQuarktoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                line='call GluonAQuarktoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             else
+                write(tmp,*) vkey-4
+                line='call GluonAQuarktoAQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                     trim(adjustl(tmp))//')'
+             endif
           elseif(itype.eq.6) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call QuarkGluontoQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call QuarkGluontoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                line='call QuarkGluontoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             else
+                write(tmp,*) vkey-4
+                line='call QuarkGluontoQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                     trim(adjustl(tmp))//')'
+             endif
           elseif(itype.eq.7) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call AQuarkGluontoAQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call AQuarkGluontoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                line='call AQuarkGluontoAQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             else
+                write(tmp,*) vkey-4
+                line='call AQuarkGluontoAQuark_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'// &
+                     trim(adjustl(tmp))//')'
+             endif
           elseif(itype.eq.8) then
-             write(iunit,'(6x,a)') 'if (chi1(i).ne.0 .or. chi2(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call QuarkAquarktoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chi1(i),chi2(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call QuarkAquarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call QuarkAquarktoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/3-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
+                write(tmp,*) mod(vkey,3)-1
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           elseif(itype.eq.9) then
-             write(iunit,'(6x,a)') 'if (chi1(i).ne.0 .or. chi2(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call AquarkQuarktoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),chi1(i),chi2(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call AquarkQuarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                line='call AquarkQuarktoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
+             else
+                write(iunit,'(6x,a)') 'call AquarkQuarktoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/3-1
+                line=trim(adjustl(tmp))//','
+                write(tmp,*) mod(vkey,3)-1
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+                line=''
+             endif
           elseif(itype.eq.10) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey-4
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           elseif(itype.eq.11) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey-4
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           elseif(itype.eq.12) then
              line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
                   'pp(0,pp2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
@@ -3708,52 +3691,69 @@ contains
              line='call ScalarScalartoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.21) then
-             write(iunit,'(6x,a)') 'if (chi1(i).ne.0 .or. chi2(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call LeptonAleptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chi1(i),chi2(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call LeptonAleptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/3-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
+                write(tmp,*) mod(vkey,3)-1
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           elseif(itype.eq.22) then
-             write(iunit,'(6x,a)') 'if (chi1(i).ne.0 .or. chi2(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call AleptonLeptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chi1(i),chi2(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call AleptonLeptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/3-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
+                write(tmp,*) mod(vkey,3)-1
+                line=trim(adjustl(line))//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           elseif(itype.eq.23) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call GluonQuarktoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey-4
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           elseif(itype.eq.24) then
-             write(iunit,'(6x,a)') 'if (chii(i).ne.0) then'
-             write(iunit,'(8x,a)') 'call GluonAquarktoAquark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)],chii(i))'
-             write(iunit,'(6x,a)') 'else'
-             write(iunit,'(8x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-             write(iunit,'(10x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             write(iunit,'(6x,a)') 'endif'
-             line='continue'
+             if (vkey.eq.4) then
+                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+             else
+                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey-4
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             line=''
           endif
-          write(iunit,'(6x,a)')trim(adjustl(line))
+          if (len_trim(line).gt.0) write(iunit,'(6x,a)')trim(adjustl(line))
           write(iunit,'(4x,a)')'enddo'
 
           write(tmp,*) isize
           line='end subroutine vertex_type'//trim(adjustl(tmp))//'_'
           write(tmp,*) itype
           line=trim(adjustl(line))//trim(adjustl(tmp))
+          if (vkey.ne.4) then
+             write(tmp,*) vkey
+             line=trim(adjustl(line))//'_v'//trim(adjustl(tmp))
+          endif
           write(iunit,'(2x,a)') trim(adjustl(line))
           write(iunit,'(a)') ''
 
+          enddo
        enddo
 
        write(tmp,*) isize
@@ -3774,14 +3774,22 @@ contains
           elseif (pm%is_quark(this%current_list(ic)%type).or. &
                pm%is_lepton(this%current_list(ic)%type)) then
              if (this%current_list(ic)%chirality.ne.0) then
-                itype=8
+                if (this%current_list(ic)%chirality.eq.1) then
+                   itype=8
+                else
+                   itype=9
+                endif
              else
                 itype=2
              endif
           elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
                pm%is_antilepton(this%current_list(ic)%type)) then
              if (this%current_list(ic)%chirality.ne.0) then
-                itype=9
+                if (this%current_list(ic)%chirality.eq.1) then
+                   itype=10
+                else
+                   itype=11
+                endif
              else
                 itype=3
              endif
@@ -3805,7 +3813,7 @@ contains
        enddo
 
        do i=1,150
-          do j=1,9
+          do j=1,11
              if (icount_type(i,j).eq.0) cycle
              write(tmp,*) isize
              line='call combine_currents_'//trim(adjustl(tmp))
@@ -3822,12 +3830,11 @@ contains
 
        
        do i=1,150
-          do j=1,9
+          do j=1,11
              if (icount_type(i,j).eq.0) cycle
 
              allocate(curs(0:i,icount_type(i,j)))
              allocate(pp(icount_type(i,j)))
-             allocate(chi(icount_type(i,j)))
              allocate(m(icount_type(i,j)))
              allocate(w(icount_type(i,j)))
              curs=0
@@ -3839,14 +3846,22 @@ contains
                 elseif (pm%is_quark(this%current_list(ic)%type).or.&
                      pm%is_lepton(this%current_list(ic)%type)) then
                    if (this%current_list(ic)%chirality.ne.0) then
-                      itype=8
+                      if (this%current_list(ic)%chirality.eq.1) then
+                         itype=8
+                      else
+                         itype=9
+                      endif
                    else
                       itype=2
                    endif
                 elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
                      pm%is_antilepton(this%current_list(ic)%type)) then
                    if (this%current_list(ic)%chirality.ne.0) then
-                      itype=9
+                      if (this%current_list(ic)%chirality.eq.1) then
+                         itype=10
+                      else
+                         itype=11
+                      endif
                    else
                       itype=3
                    endif
@@ -3868,7 +3883,6 @@ contains
                 curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
                 curs(0,ii)=ic
                 pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
-                chi(ii)=this%current_list(ic)%chirality
                 m(ii)=this%current_list(ic)%mass
                 w(ii)=this%current_list(ic)%width
              enddo
@@ -3914,7 +3928,7 @@ contains
              line=trim(adjustl(line))//trim(adjustl(tmp))//'])'
              write(iunit,'(6x,a)') trim(adjustl(line))
 
-             if (j.ne.6 .and. j.ne.7) then
+             if (j.ne.6 .and. j.ne.7 .and. isize.ne.n-1) then
                 write(tmp,*) icount_type(i,j)
                 write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[ &'
                 line=''
@@ -3934,27 +3948,7 @@ contains
                 write(iunit,'(6x,a)') trim(adjustl(line))//']'
              endif
 
-             if (j.eq.8 .or. j.eq.9) then
-                write(tmp,*) icount_type(i,j)
-                write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: chi=[ &'
-                line=''
-                do ii=1,icount_type(i,j)
-                   write(tmp,*) chi(ii)
-                   if (ii.eq.1) then
-                      line=trim(adjustl(tmp))
-                   else
-                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
-                   endif
-                   if (mod(ii,12).eq.0 .and. ii.ne.icount_type(i,j)) then
-                      line=trim(adjustl(line))//' &'
-                      write(iunit,'(6x,a)') trim(adjustl(line))
-                      line=''
-                   endif
-                enddo
-                write(iunit,'(6x,a)') trim(adjustl(line))//']'
-             endif
-
-             if ((j.ge.2 .and. j.le.5) .or. j.eq.8 .or. j.eq.9) then
+             if (isize.ne.n-1 .and. (j.ge.2 .and. j.le.5)) then
                 write(tmp,*) icount_type(i,j)
                 write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: m=[ &'
                 line=''
@@ -3998,7 +3992,7 @@ contains
                 write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              elseif (j.eq.5 .or. j.eq.7) then
                 write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
-             elseif (j.eq.8 .or. j.eq.9) then
+             elseif (j.ge.8 .and. j.le.11) then
                 write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              else
                 write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
@@ -4014,9 +4008,13 @@ contains
              elseif(j.eq.5 .and. isize.ne.n-1) then
                 write(iunit,'(6x,a)') 'call ScalarPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.8 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call QuarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i),chi(i))'
+                write(iunit,'(6x,a)') 'call QuarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),1)'
              elseif(j.eq.9 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call AquarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i),chi(i))'
+                write(iunit,'(6x,a)') 'call QuarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),-1)'
+             elseif(j.eq.10 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'call AquarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),1)'
+             elseif(j.eq.11 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'call AquarkPropagator_weyl(val_c(1,int1(0,i)),pp(0,pp1(i)),-1)'
              endif
              write(iunit,'(4x,a)') 'enddo'
              write(tmp,*) isize
@@ -4029,7 +4027,6 @@ contains
              write(iunit,'(a)') ''
              deallocate(curs)
              deallocate(pp)
-             deallocate(chi)
              deallocate(m)
              deallocate(w)
           enddo

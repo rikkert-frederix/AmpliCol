@@ -349,13 +349,12 @@ contains
     endif
   end subroutine ext_antiquark
 
-  subroutine ext_quark_weyl(p,nhel,idum,wf,fmass,chirality)
+  subroutine ext_quark_weyl(p,nhel,idum,wf,chirality)
     implicit none
     integer :: nhel,idum,chirality
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(2) :: wf
     complex(kind=8), dimension(2) :: chi
-    real(kind=8) :: fmass
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     real(kind=8) :: sqp0p3
 
@@ -399,13 +398,12 @@ contains
     endif
   end subroutine ext_quark_weyl
 
-  subroutine ext_antiquark_weyl(p,nhel,idum,wf,fmass,chirality)
+  subroutine ext_antiquark_weyl(p,nhel,idum,wf,chirality)
     implicit none
     integer :: nhel,idum,chirality
     real(kind=8), dimension(0:3) :: p
     complex(kind=8), dimension(2) :: wf
     complex(kind=8), dimension(2) :: chi
-    real(kind=8) :: fmass
     real(kind=8),parameter :: rzero=0d0,rTwo=2d0
     real(kind=8) :: sqp0p3
 
@@ -1350,15 +1348,14 @@ contains
     wfq(4)=(tmp_p(1)*tmp_val(2)-tmp_p(4)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine QuarkPropagator
 
-  subroutine QuarkPropagator_weyl(wfq,p,fm,fw,chirality)
+  subroutine QuarkPropagator_weyl(wfq,p,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
-    real(kind=8) :: fm,fw
     complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     tmp1=(p(0)+p(3))
     tmp2=(p(0)-p(3))
     tmp3=(p(1)+cImag*p(2))
@@ -1372,7 +1369,8 @@ contains
        wfq(1)=(tmp2*val1-tmp3*val2)*prefact
        wfq(2)=(tmp1*val2-tmp4*val1)*prefact
     else
-       call QuarkPropagator(wfq,p,fm,fw)
+       write (*,*) 'QuarkPropagator_weyl called with zero chirality'
+       stop 1
     endif
   end subroutine QuarkPropagator_weyl
 
@@ -1396,15 +1394,14 @@ contains
     wfq(4)=(tmp_p(2)*tmp_val(2)+tmp_p(3)*tmp_val(1)+fm*tmp_val(4))*prefact
   end subroutine AquarkPropagator
 
-  subroutine AquarkPropagator_weyl(wfq,p,fm,fw,chirality)
+  subroutine AquarkPropagator_weyl(wfq,p,chirality)
     implicit none
     integer,intent(in) :: chirality
     complex(kind=8),dimension(*) :: wfq
     real(kind=8),dimension(0:3),intent(in) :: p
-    real(kind=8) :: fm,fw
     complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
     tmp1=-(p(0)+p(3))
     tmp2=-(p(0)-p(3))
     tmp3=-(p(1)+cImag*p(2))
@@ -1418,7 +1415,8 @@ contains
        wfq(1)=(tmp1*val1+tmp4*val2)*prefact
        wfq(2)=(tmp2*val2+tmp3*val1)*prefact
     else
-       call AquarkPropagator(wfq,p,fm,fw)
+       write (*,*) 'AquarkPropagator_weyl called with zero chirality'
+       stop 1
     endif
   end subroutine AquarkPropagator_weyl
 
