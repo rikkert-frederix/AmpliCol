@@ -1,19 +1,113 @@
-! 1. All variables should be allocatables
-! 2. Keep track of channels and integrals per channel
-! 3. Update grids based on maximum weight found
-! 4. First iteration should compute all channels and all integrals
-! 5. After iteration three (or based on uncertainty in the integral?), start event generation based on maximum weight found so far. Update number of points accordingly...
-! 6. After each iteration, re-unweight the events, and check if we have enough.
-! 7. Use a single maximum weight (not a grid) -- one per channel and integral. 
-! 8. For which channel and integral to throw the next point????
-! 9. Allow for multiple points "in parallel"
-! 10. Recycle events between iterations????
-! 11. Keep track of overweights (optionally pass them to event file)
-
-
+!===============================================================================
+! SimpleIntegrator
+!===============================================================================
+!
+! Purpose
+! -------
+! This module provides a compact adaptive Monte Carlo integrator with optional
+! unweighted event generation.  It is intended for matrix-element, phase-space,
+! or similar event-generation programs where the caller owns the physics
+! function and the integrator owns:
+!
+!   * adaptive one-dimensional grids for every integration variable,
+!   * distribution of requested points across channels and integrals,
+!   * accumulated signed and absolute integral estimates,
+!   * candidate-event storage and final unweighted-event weights.
+!
+! Public module and dependencies
+! ------------------------------
+! Use the public type through
+!
+!     use simple_integrator_mod
+!     type(integrator) :: integ
+!
+! The module expects the helper modules in helper_modules.f03 and the random
+! number function ran2() from ranmar.f (or a caller-provided compatible
+! function returning a double precision number in (0,1)).  Several progress
+! messages are written to stdout and to Fortran unit 99.  Standalone programs
+! should open unit 99 before using the integrator if they want to control the
+! log destination; otherwise many compilers create a default file for that unit.
+!
+! Concepts
+! --------
+! A "channel" is a separately adapted sampling map, usually a phase-space
+! channel.  Each channel can contain one or more "integrals", for example
+! subprocesses sharing the same channel.  The public channel and integral labels
+! returned by get_points are one-based indices.
+!
+! Each point has ndim adapted coordinates and ndim_extra flat random
+! coordinates.  Only the first ndim coordinates are included in adaptive grid
+! weights and in compute_wgt_from_x.  The caller may use ndim_extra for random
+! choices that should not affect grid adaptation.
+!
+! Public workflow
+! ---------------
+! 1. Initialise once:
+!
+!        call integ%init(nchannel, ndim, ndim_extra, nintegral, &
+!             nevts_unw_req, niters)
+!
+!    ndim, ndim_extra, and nintegral are arrays of length nchannel.
+!    nevts_unw_req is the requested number of unweighted events.  niters is the
+!    maximum number of adaptation/generation iterations.
+!
+! 2. Repeatedly request points, evaluate the caller's integrand, and return the
+!    values:
+!
+!        done = .false.
+!        do while (.not. done)
+!           call integ%get_points(npoints, ichan, iint)
+!           do ip = 1, npoints
+!              ! integ%x(:,ip) contains the random point.
+!              ! integ%wgt(ip) is the grid Jacobian/volume factor.
+!              ! Compute f_abs(ip) >= 0 and f(ip), including integ%wgt(ip).
+!           end do
+!           call integ%fill_points(npoints, f_abs, f, to_write, done)
+!           ! If to_write(ip) is true, write/store the corresponding event now.
+!        end do
+!
+!    fill_points may be called with fewer points than were returned by
+!    get_points; unused trailing points are discarded.  A new get_points call
+!    must not be made until the previous batch has been returned with
+!    fill_points.
+!
+! 3. After done is true, retrieve final event weights:
+!
+!        call integ%assign_evnt_wgts(wgts)
+!
+!    wgts has shape (3, number_of_written_candidate_events).  Column i contains
+!    the nominal event weight, the adjusted event weight including any
+!    overweight correction, and the overweight excess.  Events rejected by the
+!    final unweighting have zero weights.
+!
+! Integrand convention
+! --------------------
+! f_abs is the non-negative target used for grid adaptation, maximum-weight
+! estimates, and unweighting.  f is the signed contribution to the physical
+! integral.  In many event generators f_abs=abs(f), but callers may choose a
+! different positive envelope if needed.
+!
+! compute_wgt_from_x can be used when an external multichannel combination needs
+! the current adaptive-grid weight for a point already known in a specific
+! channel.
+!
+! Tunable internal parameters
+! ---------------------------
+! The parameters below the type declarations control minimum statistics, grid
+! sizes, event-generation startup, and allowed overweight fraction.  They are
+! compile-time parameters in this standalone version.
+!
+! Limitations
+! -----------
+! This implementation is serial and keeps candidate events in memory until final
+! weighting.  It does not currently read or write grids; read_all_grids and
+! write_all_grids are placeholders.
+!
 module simple_integrator_mod
   implicit none
   private
+  ! One adaptive sampling channel.  A channel owns one grid per adapted
+  ! dimension and one or more integral estimates sharing those grids.
   type :: channel
      integer :: ndim,nintegral,current_integral,current_iter&
           &,number,max_iters,nevts_unw_req,ndim_extra
@@ -37,6 +131,8 @@ module simple_integrator_mod
      procedure,private :: update_nevts_unw_req => channel_update_nevts_unw_req
      procedure,private :: recompute_wgt_from_x
   end type channel
+  ! One physical integral inside a channel.  It accumulates iteration estimates
+  ! and stores candidate events until the final unweighting decision.
   type :: integral
      real(kind=8) :: max_value,overweight
      real(kind=8),dimension(:),allocatable :: f_max
@@ -59,6 +155,8 @@ module simple_integrator_mod
      procedure,private :: unwgt => integral_unwgt
      procedure,private :: update_max_value,check_write_evnt,increase_size_evnt_list,compute_wgts,check_overweight
   end type integral
+  ! One monotone one-dimensional adaptive grid.  current maps uniform random
+  ! cells to physical integration coordinates; accum stores the adaptation data.
   type :: grid
      integer :: size,size_fill
      real(kind=8),allocatable,dimension(:) :: current,accum,current_for_fillcell
@@ -70,12 +168,15 @@ module simple_integrator_mod
           &,interpolate_current,find_cell_to_fill
      procedure,private :: update => grid_update
   end type grid
+  ! Candidate event metadata saved during event generation.
   type :: evnt
      real(kind=8),allocatable,dimension(:) :: x,f_abs
      real(kind=8) :: wgt,rnd,overwgt
      integer :: iter,label
      logical :: unwgt
   end type evnt
+  ! Public driver object.  Users call init, then alternate get_points and
+  ! fill_points until done, then call assign_evnt_wgts if events were written.
   type,public :: integrator
      integer :: nchannel,current_channel,nevts_unw_req,npoints_gen
      integer(kind=8) :: npoints_requested
@@ -83,7 +184,7 @@ module simple_integrator_mod
      real(kind=8),allocatable,dimension(:,:),public :: x
      real(kind=8),allocatable,dimension(:),public :: wgt
      type(channel),allocatable,dimension(:) :: channels
-     ! keep track of maximum weights of all evnts written---integral-by-integral---and approx how many more we should generate in that channel.
+     ! x and wgt are allocated by get_points and released by fill_points.
    contains
      procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts
      procedure,private :: read_all_grids,write_all_grids&
@@ -91,20 +192,12 @@ module simple_integrator_mod
           &,print_results,compute_total_rate,update_nevts_unw_req&
           &,count_unweighted_evnts,init_next_iter&
           &,get_npoints_nonzero_iter,finalise_iter,update_grids
-     ! fill_points should return 'done' when ready; also it should
-     ! keep track of number of points thrown and determine if it needs
-     ! re-gridding; furthermore, it should tell the main codes which
-     ! events should be kept on disk?  get_points should give a set of
-     ! points (determined by an argument)--all for the same channel
-     ! (and integral); fill_points should return at least a subset of
-     ! those --- it may be assumed that these are in the beginning of
-     ! the list. It can be assumed that the points that were not used
-     ! were 'lost' and should be treated as not-even-generated.
   end type integrator
   double precision, external :: ran2
   integer,save :: iters_without_evnts,evnt_label=0
   integer,parameter :: importance_sampling_strategy=3
-  real(kind=8),parameter :: write_evnt_fraction=0.05d0 ! neglect write_evnt_fraction of largest weights to determine fmax for writing
+  ! Fraction of largest candidate weights ignored when estimating f_max.
+  real(kind=8),parameter :: write_evnt_fraction=0.05d0
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
   logical,parameter :: turn_off_evnt_generation=.false.
@@ -115,12 +208,41 @@ module simple_integrator_mod
   integer,parameter :: final_n_iters_for_evnt_gen=8
 contains
 
+  ! Initialise the public integrator object and all channel/integral state.
   subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: nchannel,nevts_unw_req,niters
     integer,dimension(nchannel),intent(in) :: ndim,nintegral,ndim_extra
     integer :: i
+    if (nchannel.lt.1) then
+       write (*,*) 'ERROR: nchannel must be at least 1'
+       stop 1
+    endif
+    if (niters.lt.1) then
+       write (*,*) 'ERROR: niters must be at least 1'
+       stop 1
+    endif
+    if (nevts_unw_req.lt.1) then
+       write (*,*) 'ERROR: nevts_unw_req must be at least 1'
+       stop 1
+    endif
+    if (any(ndim.lt.1)) then
+       write (*,*) 'ERROR: all channels must have at least one adapted dimension'
+       stop 1
+    endif
+    if (any(ndim_extra.lt.0)) then
+       write (*,*) 'ERROR: ndim_extra cannot be negative'
+       stop 1
+    endif
+    if (any(nintegral.lt.1)) then
+       write (*,*) 'ERROR: all channels must have at least one integral'
+       stop 1
+    endif
+    if (allocated(this%channels)) deallocate(this%channels)
+    if (allocated(this%x)) deallocate(this%x)
+    if (allocated(this%wgt)) deallocate(this%wgt)
+    evnt_label=0
     this%nchannel=nchannel
     this%nevts_unw_req=nevts_unw_req
     ! if we assume 1% unweighting efficiency, we expect ~10% time
@@ -141,8 +263,10 @@ contains
     this%current_channel=0
     this%npoints_gen=0
     this%res=0d0
+    this%unc=0d0
   end subroutine init
 
+  ! Initialise one channel, including its first set of grids and integrals.
   subroutine channel_init(this,ndim,ndim_extra,nintegral,npoints,niters,ichan)
     implicit none
     class(channel),intent(inout) :: this
@@ -168,10 +292,12 @@ contains
     this%npoints=0_8
     this%res=0d0
     this%unc=0d0
+    this%overweight=0d0
     call this%init_next_iter()
     this%evgen_done=.false.
   end subroutine channel_init
 
+  ! Reset channel accumulators and advance to the next iteration.
   subroutine channel_init_next_iter(this)
     implicit none
     class(channel),intent(inout) :: this
@@ -193,6 +319,7 @@ contains
     this%current_iter=this%current_iter+1
   end subroutine channel_init_next_iter
   
+  ! Reset one integral for a new iteration and choose the active f_max estimate.
   subroutine integral_init_next_iter(this,thischan)
     implicit none
     class(integral),intent(inout) :: this
@@ -217,18 +344,19 @@ contains
     this%max_value=0d0
   end subroutine integral_init_next_iter
   
+  ! Initialise a grid either uniformly or by interpolating a previous grid.
   subroutine grid_init(this,npoints,current)
     implicit none
     class(grid),intent(inout) :: this
     integer(kind=8),intent(in) :: npoints
     real(kind=8),dimension(:),intent(in),optional :: current
     integer :: i,isize
-    isize=size(current)-1
     this%size=max_grid_size
     call determine_sizefill(npoints,this%size_fill)
     allocate(this%current(0:this%size))
     allocate(this%current_for_fillcell(0:this%size_fill))
     if (present(current)) then
+       isize=size(current)-1
        if (isize.ne.this%size_fill) then
           call this%interpolate_current(isize,this%size_fill,current,this%current_for_fillcell)
        else
@@ -249,6 +377,7 @@ contains
     this%nhits=0
   end subroutine grid_init
 
+  ! Choose the number of adaptation fill cells from the requested statistics.
   subroutine determine_sizefill(npoints,isize)
     implicit none
     integer(kind=8),intent(in) :: npoints
@@ -258,6 +387,7 @@ contains
     isize=min(isize,max_grid_size)
   end subroutine determine_sizefill
   
+  ! Initialise one integral estimate and its candidate-event buffer.
   subroutine integral_init(this,ndim,npoints,ichan,niters)
     implicit none
     class(integral),intent(inout) :: this
@@ -266,19 +396,33 @@ contains
     this%ndim=ndim
     this%ichan=ichan
     this%npoints=0_8
+    this%npoints_iter=0_8
+    this%npoints_nonzero=0_8
     this%npoints_requested=npoints
     this%max_iters=niters
     this%nevts_unw_req=0
+    this%nevts_unw_gen=0
+    this%evnt=0
     allocate(this%f_max(this%max_iters))
     this%f_max=-1d0
     allocate(this%evnt_list(npoints))
     this%nevnt_in_list=0
     this%evgen_done=.false.
+    this%done=.false.
     this%current_iter=0
     this%npoints_nonzero_total=0_8
     this%overweight=0d0
+    this%max_value=0d0
+    this%res=0d0
+    this%unc=0d0
+    this%res_iter=0d0
+    this%res2_iter=0d0
+    this%unc_iter=0d0
+    this%accum=0d0
+    this%accum2=0d0
   end subroutine integral_init
   
+  ! Select an active channel/integral and generate a batch of random points.
   subroutine get_points(this,npoints,ichan,iint)
     implicit none
     class(integrator),intent(inout) :: this
@@ -286,6 +430,18 @@ contains
     integer,intent(out) :: ichan,iint
     integer :: i,ntot
     real(kind=8) :: wgt_chan
+    if (npoints.lt.1) then
+       write (*,*) 'ERROR: get_points requires at least one point'
+       stop 1
+    endif
+    if (this%npoints_gen.ne.0) then
+       write (*,*) 'ERROR: previous points must be returned with fill_points before get_points is called again'
+       stop 1
+    endif
+    if (all(this%channels%done .or. this%channels%evgen_done)) then
+       write (*,*) 'ERROR: get_points called after integration is done'
+       stop 1
+    endif
     
     call this%get_channel_and_integral(ichan,iint,wgt_chan)
     this%current_channel=ichan
@@ -302,6 +458,8 @@ contains
 
   end subroutine get_points
   
+  ! Return evaluated values for the most recent batch and trigger iteration
+  ! finalisation when all active channels/integrals have enough statistics.
   subroutine fill_points(this,npoints,f_abs,f,to_write,done)
     implicit none
     class(integrator),intent(inout) :: this
@@ -311,6 +469,14 @@ contains
     logical,intent(out) :: done
     integer :: i
     done=.false.
+    if (this%npoints_gen.eq.0) then
+       write (*,*) 'ERROR: fill_points called before get_points'
+       stop 1
+    endif
+    if (npoints.lt.1) then
+       write (*,*) 'ERROR: fill_points requires at least one point'
+       stop 1
+    endif
     if (npoints.gt.this%npoints_gen) then
        write (*,*) 'ERROR: too many points returned'
        stop 1
@@ -326,6 +492,8 @@ contains
     deallocate(this%wgt)
   end subroutine fill_points
 
+  ! Finish one global iteration: combine rates, unweight candidates, update
+  ! grids, and decide whether the requested event sample is complete.
   subroutine finalise_iter(this,done)
     implicit none
     class(integrator),intent(inout) :: this
@@ -353,12 +521,13 @@ contains
     call this%update_grids()
     call this%init_next_iter()
     if (all(this%channels%evgen_done)) done=.true.
-    if (turn_off_evnt_generation .and. &
+    if (turn_off_evnt_generation .and. this%res(1).gt.0d0 .and. &
          this%unc(1)/this%res(1).lt.1d0/(sqrt(dble(this%nevts_unw_req))*required_accuracy_factor)) done=.true.
     if (all(this%channels%done)) done=.true.
     call flush(99)
   end subroutine finalise_iter
 
+  ! Update all active channel grids after an iteration has been finalised.
   subroutine update_grids(this)
     implicit none
     class(integrator),intent(inout) :: this
@@ -368,6 +537,7 @@ contains
     enddo
   end subroutine update_grids
   
+  ! Count non-zero points from the current iteration across all integrals.
   subroutine get_npoints_nonzero_iter(this,npoints_nonzero)
     implicit none
     class(integrator),intent(inout) :: this
@@ -379,6 +549,7 @@ contains
     enddo
   end subroutine get_npoints_nonzero_iter
   
+  ! Start the next iteration for channels that have not reached max_iters.
   subroutine init_next_iter(this)
     implicit none
     class(integrator),intent(inout) :: this
@@ -391,18 +562,20 @@ contains
     call this%update_points_requested()
   end subroutine init_next_iter
     
+  ! Distribute requested events, test stored candidates, and mark completed
+  ! channel/integral event-generation tasks.
   subroutine count_unweighted_evnts(this)
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
-    real(kind=8) :: nominal_evt_wgt
     call this%update_nevts_unw_req
-    nominal_evt_wgt=this%res(1)/dble(this%nevts_unw_req)
     do i=1,this%nchannel
        call this%channels(i)%check_gen_evnts()
     enddo
   end subroutine count_unweighted_evnts
 
+  ! Split the total requested event count over channels in proportion to their
+  ! current absolute integral estimates.
   subroutine update_nevts_unw_req(this)
     use sort_array_mod
     implicit none
@@ -415,6 +588,13 @@ contains
     call sort_indices_by_values(res,idx)
     nevts_to_distribute=this%nevts_unw_req
     total=this%res(1)
+    if (total.le.0d0) then
+       do i=1,this%nchannel
+          this%channels(i)%nevts_unw_req=0
+          call this%channels(i)%update_nevts_unw_req()
+       enddo
+       return
+    endif
     do i=1,this%nchannel-1
        this%channels(idx(i))%nevts_unw_req=int(nevts_to_distribute*this%channels(idx(i))%res(1)/total)
        if (ran2().lt.nevts_to_distribute*this%channels(idx(i))%res(1)/this%res(1)-&
@@ -430,6 +610,7 @@ contains
     enddo
   end subroutine update_nevts_unw_req
 
+  ! Split one channel's requested event count across its integrals.
   subroutine channel_update_nevts_unw_req(this)
     use sort_array_mod
     implicit none
@@ -442,6 +623,10 @@ contains
     call sort_indices_by_values(res,idx)
     nevts_to_distribute=this%nevts_unw_req
     total=this%res(1)
+    if (total.le.0d0) then
+       this%integrals%nevts_unw_req=0
+       return
+    endif
     do i=1,this%nintegral-1
        this%integrals(idx(i))%nevts_unw_req=int(nevts_to_distribute*this%integrals(idx(i))%res(1)/total)
        if (ran2().lt.nevts_to_distribute*this%integrals(idx(i))%res(1)/this%res(1)-&
@@ -454,6 +639,7 @@ contains
     this%integrals(idx(this%nintegral))%nevts_unw_req=nevts_to_distribute
   end subroutine channel_update_nevts_unw_req
   
+  ! Combine active channel estimates into the public total result.
   subroutine compute_total_rate(this)
     implicit none
     class(integrator),intent(inout) :: this
@@ -470,25 +656,33 @@ contains
     enddo
   end subroutine compute_total_rate
   
+  ! Print per-channel and total integration progress to stdout and unit 99.
   subroutine print_results(this)
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
+    real(kind=8) :: rel_unc
     do i=1,this%nchannel
        if (.not. this%channels(i)%evgen_done) call this%channels(i)%print_result_iter()
        call this%channels(i)%print_combined_result()
     enddo
+    if (this%res(1).gt.0d0) then
+       rel_unc=this%unc(1)/this%res(1)*100d0
+    else
+       rel_unc=0d0
+    endif
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
+         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
+         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
+         'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
+         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     call flush()
   end subroutine print_results
   
+  ! Choose how many non-zero points to request in the next iteration.
   subroutine update_points_requested(this)
     implicit none
     class(integrator),intent(inout) :: this
@@ -498,6 +692,18 @@ contains
     this%npoints_requested=this%npoints_requested*2
     npoints=0_8
     total=sum(this%channels%res(1),mask=.not.this%channels%evgen_done)
+    if (total.le.0d0) then
+       do i=1,this%nchannel
+          if (this%channels(i)%evgen_done) cycle
+          do j=1,this%channels(i)%nintegral
+             if (this%channels(i)%integrals(j)%evgen_done) cycle
+             this%channels(i)%integrals(j)%npoints_requested=min_points_per_integral
+             npoints=npoints+this%channels(i)%integrals(j)%npoints_requested
+          enddo
+       enddo
+       this%npoints_requested=npoints
+       return
+    endif
     do i=1,this%nchannel
        if (this%channels(i)%evgen_done) cycle
        npoints_channel=max(int(this%channels(i)%res(1)/total*dble(this%npoints_requested),kind=8),&
@@ -505,25 +711,34 @@ contains
        total_channel=sum(this%channels(i)%integrals%res(1),mask=.not.this%channels(i)%integrals%evgen_done)
        do j=1,this%channels(i)%nintegral
           if (this%channels(i)%integrals(j)%evgen_done) cycle
-          this%channels(i)%integrals(j)%npoints_requested=&
-               max(int(this%channels(i)%integrals(j)%res(1)/total_channel*dble(npoints_channel),kind=8),&
-               min_points_per_integral)
+          if (total_channel.gt.0d0) then
+             this%channels(i)%integrals(j)%npoints_requested=&
+                  max(int(this%channels(i)%integrals(j)%res(1)/total_channel*dble(npoints_channel),kind=8),&
+                  min_points_per_integral)
+          else
+             this%channels(i)%integrals(j)%npoints_requested=min_points_per_integral
+          endif
           npoints=npoints+this%channels(i)%integrals(j)%npoints_requested
        enddo
     enddo
     this%npoints_requested=npoints
   end subroutine update_points_requested
   
+  ! Build the next iteration's adaptive grids for one channel.
   subroutine channel_update_grids(this)
     implicit none
     class(channel),intent(inout) :: this
     type(grid) :: new_grid
     integer :: i
     logical update_grids
-    update_grids=(((.not.this%evgen_done) .and. &
-         this%unc(1)/this%res(1).gt.1d0/(sqrt(dble(max(this%nevts_unw_req,1)))*required_accuracy_factor)) .or. &
-         this%current_iter.le.iters_without_evnts) .and. &
-         this%npoints_iter.gt.int(this%npoints*0.2d0)
+    if (this%res(1).gt.0d0) then
+       update_grids=(((.not.this%evgen_done) .and. &
+            this%unc(1)/this%res(1).gt.1d0/(sqrt(dble(max(this%nevts_unw_req,1)))*required_accuracy_factor)) .or. &
+            this%current_iter.le.iters_without_evnts) .and. &
+            this%npoints_iter.gt.int(this%npoints*0.2d0)
+    else
+       update_grids=(this%current_iter.le.iters_without_evnts)
+    endif
     if (.not.update_grids) then
        write (99,*) 'keeping grids fixed for channel',this%number
     endif
@@ -539,6 +754,8 @@ contains
     enddo
   end subroutine channel_update_grids
 
+  ! Recompute f_max values, unweight stored candidates, and decide whether one
+  ! channel has produced enough acceptable events.
   subroutine channel_check_gen_evnts(this)
     implicit none
     class(channel),intent(inout) :: this
@@ -573,6 +790,7 @@ contains
   end subroutine channel_check_gen_evnts
 
   
+  ! Accept/reject the best candidate events and measure the overweight excess.
   subroutine check_overweight(this,done)
     use topk_heap_mod
     implicit none
@@ -635,6 +853,7 @@ contains
     endif
   end subroutine check_overweight
   
+  ! Count events that pass the current iteration-by-iteration f_max thresholds.
   subroutine integral_unwgt(this)
     implicit none
     class(integral),intent(inout) :: this
@@ -647,6 +866,7 @@ contains
     enddo
   end subroutine integral_unwgt
   
+  ! Recompute candidate-event envelopes for all active iterations and set f_max.
   subroutine integral_compute_fmax(this,thischan)
     use topk_heap_mod
     implicit none
@@ -684,6 +904,7 @@ contains
     deallocate(index_fmax_top)
   end subroutine integral_compute_fmax
 
+  ! Predict the next iteration's f_max from stored candidate events.
   subroutine integral_compute_fmax_next_iter(this,thischan)
     use topk_heap_mod
     implicit none
@@ -720,6 +941,8 @@ contains
     deallocate(index_fmax_top)
   end subroutine integral_compute_fmax_next_iter
   
+  ! Re-evaluate the adaptive-grid weight for an existing point in a given
+  ! channel iteration.
   subroutine recompute_wgt_from_x(this,iter,x,wgt)
     implicit none
     class(channel),intent(inout) :: this
@@ -733,6 +956,7 @@ contains
     enddo
   end subroutine recompute_wgt_from_x
 
+  ! Multiply wgt by the Jacobian contribution for x in this grid.
   subroutine get_wgt(this,x,wgt)
     implicit none
     class(grid),intent(inout) :: this
@@ -745,6 +969,7 @@ contains
     wgt=wgt*dx*this%size
   end subroutine get_wgt
 
+  ! Locate the interpolation cell containing x in the full grid.
   subroutine find_cell(this,x,cell)
     implicit none
     class(grid),intent(inout) :: this
@@ -762,9 +987,10 @@ contains
        end if
        if (lo.ge.hi) exit
     enddo
-    cell=lo
+    cell=min(max(lo,1),this%size)
   end subroutine find_cell
   
+  ! Locate the adaptation fill cell containing x.
   subroutine find_cell_to_fill(this,x,cell)
     implicit none
     class(grid),intent(inout) :: this
@@ -782,17 +1008,24 @@ contains
        end if
        if (lo.ge.hi) exit
     enddo
-    cell=lo
+    cell=min(max(lo,1),this%size_fill)
   end subroutine find_cell_to_fill
   
+  ! Print accumulated channel and integral results to the log unit.
   subroutine channel_print_combined_result(this)
     implicit none
     class(channel),intent(inout) :: this
     integer :: i
+    real(kind=8) :: rel_unc
+    if (this%res(1).gt.0d0) then
+       rel_unc=this%unc(1)/this%res(1)*100d0
+    else
+       rel_unc=0d0
+    endif
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel ABS (accum):',this%res(1),'+/-',this%unc(1),'(',this%unc(1)/this%res(1)*100d0,'%)'
+         this%number,'channel ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',this%unc(1)/this%res(1)*100d0,'%)'
+         this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
        if (this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
@@ -817,15 +1050,23 @@ contains
     enddo
   end subroutine channel_print_combined_result
     
+  ! Print the current iteration-only result for one active channel.
   subroutine channel_print_result_iter(this)
     implicit none
     class(channel),intent(inout) :: this
+    real(kind=8) :: rel_unc
+    if (this%res_iter(1).gt.0d0) then
+       rel_unc=this%unc_iter(1)/this%res_iter(1)*100d0
+    else
+       rel_unc=0d0
+    endif
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel ABS:',this%res_iter(1),'+/-',this%unc_iter(1),'(',this%unc_iter(1)/this%res_iter(1)*100d0,'%)'
+         this%number,'channel ABS:',this%res_iter(1),'+/-',this%unc_iter(1),'(',rel_unc,'%)'
     write(99,'(4x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,f7.3,1x,a)') &
-         this%number,'channel    :',this%res_iter(2),'+/-',this%unc_iter(2),'(',this%unc_iter(1)/this%res_iter(1)*100d0,'%)'
+         this%number,'channel    :',this%res_iter(2),'+/-',this%unc_iter(2),'(',rel_unc,'%)'
   end subroutine channel_print_result_iter
 
+  ! Combine all integral estimates inside one channel.
   subroutine channel_combine_iters(this)
     implicit none
     class(channel),intent(inout) :: this
@@ -845,6 +1086,7 @@ contains
     endif
   end subroutine channel_combine_iters
 
+  ! Combine a new iteration estimate into one integral's accumulated estimate.
   subroutine integral_combine_iters(this,iter)
     implicit none
     class(integral),intent(inout) :: this
@@ -862,6 +1104,7 @@ contains
     endif
   end subroutine integral_combine_iters
   
+  ! Combine two independent sample means and their standard errors.
   subroutine update_res_and_unc(res,unc,npoints,res_iter,unc_iter,npoints_iter)
     implicit none
     real(kind=8),intent(inout) :: res,unc
@@ -875,6 +1118,7 @@ contains
     res=(npoints*res+npoints_iter*res_iter)/dble(np)
   end subroutine update_res_and_unc
   
+  ! Compute the current iteration estimate for every integral in a channel.
   subroutine channel_update_result_iter(this)
     implicit none
     class(channel),intent(inout) :: this
@@ -888,6 +1132,7 @@ contains
     enddo
   end subroutine channel_update_result_iter
 
+  ! Compute the standard error of the mean from first and second moments.
   subroutine compute_uncertainty(acc,acc2,np,unc)
     implicit none
     real(kind=8),intent(in) :: acc,acc2
@@ -896,6 +1141,7 @@ contains
     unc=sqrt(abs(acc2-acc**2)/dble(np))
   end subroutine compute_uncertainty
   
+  ! Convert one integral's accumulated sums into an iteration estimate.
   subroutine integral_update_result_iter(this)
     implicit none
     class(integral),intent(inout) :: this
@@ -909,6 +1155,7 @@ contains
     endif
   end subroutine integral_update_result_iter
   
+  ! Add one evaluated point to a channel grid and to its active integral.
   subroutine channel_add_point(this,x,wgt,f_abs,f,to_write)
     implicit none
     class(channel),intent(inout) :: this
@@ -924,6 +1171,8 @@ contains
     if (all(this%integrals%done)) this%done=.true.
   end subroutine channel_add_point
 
+  ! Accumulate one point in an integral and optionally save it as a candidate
+  ! event for later final unweighting.
   subroutine integral_add_point(this,x,wgt,f_abs,f,to_write)
     implicit none
     class(integral),intent(inout) :: this
@@ -932,7 +1181,7 @@ contains
     logical,intent(out) :: to_write
     logical :: enough
     this%npoints_iter=this%npoints_iter+1
-    if (f_abs.ne.0d0) this%npoints_nonzero=this%npoints_nonzero+1
+    if (f_abs.gt.0d0) this%npoints_nonzero=this%npoints_nonzero+1
     this%accum(1)=this%accum(1)+f_abs
     this%accum(2)=this%accum(2)+f
     this%accum2(1)=this%accum2(1)+f_abs**2
@@ -942,6 +1191,7 @@ contains
     if (this%npoints_nonzero.ge.this%npoints_requested .or. enough) this%done=.true.
   end subroutine integral_add_point
 
+  ! Track the largest absolute integrand value seen before event generation.
   subroutine update_max_value(this,f_abs)
     implicit none
     class(integral),intent(inout) :: this
@@ -949,6 +1199,7 @@ contains
     this%max_value=max(this%max_value,f_abs)
   end subroutine update_max_value
   
+  ! Decide whether a point should be written as a candidate event.
   subroutine check_write_evnt(this,x,wgt,f_abs,to_write,enough)
     implicit none
     class(integral),intent(inout) :: this
@@ -981,6 +1232,8 @@ contains
     endif
   end subroutine check_write_evnt
 
+  ! Return final per-event weights for all candidate events written by the
+  ! caller during the get_points/fill_points loop.
   subroutine assign_evnt_wgts(this,wgts)
     implicit none
     class(integrator) :: this
@@ -996,6 +1249,7 @@ contains
     enddo
   end subroutine assign_evnt_wgts
 
+  ! Fill the final weight columns for candidate events belonging to one integral.
   subroutine compute_wgts(this,nominal_wgt,wgts)
     implicit none
     class(integral) :: this
@@ -1023,6 +1277,7 @@ contains
     enddo
   end subroutine compute_wgts
 
+  ! Double the candidate-event buffer while preserving existing events.
   subroutine increase_size_evnt_list(this)
     implicit none
     class(integral),intent(inout) :: this
@@ -1035,6 +1290,7 @@ contains
     this%evnt_list=tmp_list
   end subroutine increase_size_evnt_list
   
+  ! Accumulate one sampled point into the grid-adaptation histogram.
   subroutine grid_add_point(this,x,f_abs)
     class(grid),intent(inout) :: this
     real(kind=8),intent(in) :: x,f_abs
@@ -1049,7 +1305,7 @@ contains
           this%accum(cell)=this%accum(cell)+(f_abs-this%accum(cell))*0.1d0
        endif
     elseif (importance_sampling_strategy.eq.4) then
-       if (this%accum(cell).eq.0d0) then
+       if (this%accum(cell).le.0d0) then
           this%accum(cell)=f_abs*1d-4
        elseif (f_abs.gt.this%accum(cell)) then
           this%accum(cell)=this%accum(cell)*1.1d0
@@ -1058,6 +1314,7 @@ contains
     this%nhits(cell)=this%nhits(cell)+1
   end subroutine grid_add_point
 
+  ! Convert accumulated grid information into a new monotone grid.
   subroutine grid_update(this,npoints,new_grid)
     implicit none
     class(grid),intent(inout) :: this
@@ -1084,6 +1341,7 @@ contains
     call new_grid%init(npoints,current)
   end subroutine grid_update
   
+  ! Resize a monotone grid with shape-preserving interpolation.
   subroutine interpolate_current(this,size_in,size_out,current_in,current_out)
     use pchip_uniform_strict
     implicit none
@@ -1094,6 +1352,7 @@ contains
     call resize_arr_pchip_strict(current_in,size_out,current_out)
   end subroutine interpolate_current
   
+  ! Smooth and normalise the adaptation histogram into a cumulative map.
   subroutine massage_accum(this)
     implicit none
     class(grid),intent(inout) :: this
@@ -1129,6 +1388,7 @@ contains
     this%accum=this%accum/this%accum(this%size_fill)
   end subroutine massage_accum
 
+  ! Generate one full point for a channel, including flat extra coordinates.
   subroutine channel_get_point(this,x,wgt)
     implicit none
     class(channel),intent(inout) :: this
@@ -1144,6 +1404,7 @@ contains
     enddo
   end subroutine channel_get_point
 
+  ! Generate one adapted coordinate and multiply by its Jacobian.
   subroutine get_x(this,x,wgt)
     implicit none
     class(grid),intent(inout) :: this
@@ -1159,6 +1420,7 @@ contains
     wgt=wgt*dx*this%size
   end subroutine get_x
 
+  ! Randomly select an unfinished channel/integral pair for the next batch.
   subroutine get_channel_and_integral(this,ichan,iint,wgt_chan)
     implicit none
     class(integrator),intent(inout) :: this
@@ -1179,6 +1441,8 @@ contains
     this%channels(ichan)%current_integral=iint
   end subroutine get_channel_and_integral
   
+  ! Public helper: compute the current adaptive-grid weight for an existing
+  ! point in channel ichan.
   subroutine compute_wgt_from_x(this,ichan,x,wgt)
     implicit none
     class(integrator),intent(inout) :: this
@@ -1188,17 +1452,16 @@ contains
     call this%channels(ichan)%recompute_wgt_from_x(this%channels(ichan)%current_iter,x,wgt)
   end subroutine compute_wgt_from_x
   
+  ! Placeholder for future grid restart support.
   subroutine read_all_grids(this)
     implicit none
     class(integrator),intent(inout) :: this
   end subroutine read_all_grids
   
+  ! Placeholder for future grid checkpoint support.
   subroutine write_all_grids(this)
     implicit none
     class(integrator),intent(inout) :: this
   end subroutine write_all_grids
   
 end module simple_integrator_mod
-
-
-
