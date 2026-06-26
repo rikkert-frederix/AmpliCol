@@ -1,9 +1,12 @@
 .DEFAULT_GOAL := amplicol_generate
 
+.PHONY: test_matrix_elements update_matrix_cases update_matrix_goldens
+
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 #FFLAGS = -ffast-math -O3 -mcmodel=large
 FFLAGS = -ffast-math -O3
+PYTHON ?= python
 
 CXX ?= g++
 
@@ -104,6 +107,9 @@ pdf_lhapdf62.o
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o
 
+FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+amplitude_QCD.o matrix_element_regression.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -117,6 +123,27 @@ amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
+
+matrix_element_regression: $(FILES_M_TEST_ME)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_ME)
+
+matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
+	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output $@
+
+tests/matrix_elements/golden.dat: matrix_element_regression tests/matrix_elements/cases.dat
+	./matrix_element_regression --write tests/matrix_elements/cases.dat $@
+
+test_matrix_elements: matrix_element_regression
+	./matrix_element_regression --check tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
+
+update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
+	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat
+
+update_matrix_goldens: matrix_element_regression update_matrix_cases
+	./matrix_element_regression --write tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
 
 # ----------------------------------------------------------------------
 # 6. Manual dependency rules
