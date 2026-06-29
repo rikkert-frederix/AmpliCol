@@ -37,12 +37,13 @@ program amplicol_generate
   character(len=5) :: zone
   character(len=19) :: formatted
   logical :: create_amplitude_library,use_amplitude_library,read_momenta
-  logical :: time_detail_point,time_point_sample
+  logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
-  call cpu_time(tTot_B)
 
   call get_run_arguments()
+  timing_enabled=timing_mode.ne.timing_none
+  if (timing_enabled) call cpu_time(tTot_B)
   
   if (include_pdf) then
      if (use_lhapdf) then
@@ -58,7 +59,7 @@ program amplicol_generate
                            80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
   call phys_model%init_vert()
 
-  call cpu_time(tBefore)
+  if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
   if (use_amplitude_library) then
      call read_amplitude_lib()
   else
@@ -67,8 +68,10 @@ program amplicol_generate
        call setup_optimised_multichannel_weight_computation(pgl(i))
     enddo
  endif
-  call cpu_time(tAfter)
-  t_Proc_init=t_Proc_init+tAfter-tBefore
+  if (timing_mode.eq.timing_detailed) then
+     call cpu_time(tAfter)
+     t_Proc_init=t_Proc_init+tAfter-tBefore
+  endif
   call date_and_time(date, time, zone)
   write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
        date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
@@ -101,7 +104,7 @@ program amplicol_generate
         enddo
      enddo
      ! Initialise the phase-space parametrisation
-     call cpu_time(tBefore)
+     if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call setup_cuts_for_each_particle(pgl(igroup),igroup)
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
         call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
@@ -114,8 +117,10 @@ program amplicol_generate
      allocate(pgl(igroup)%ps(1))
      allocate(pgl(igroup)%ps(1)%x(1:pgl(igroup)%ndim+pgl(igroup)%ndim_extra))
      allocate(pgl(igroup)%ps(1)%p(0:3,1:pgl(igroup)%next))
-     call cpu_time(tAfter)
-     t_PS_init=t_PS_init+tAfter-tBefore
+     if (timing_mode.eq.timing_detailed) then
+        call cpu_time(tAfter)
+        t_PS_init=t_PS_init+tAfter-tBefore
+     endif
      deallocate(mass)
      deallocate(width)
 
@@ -135,7 +140,7 @@ program amplicol_generate
      ! initialize the amplitudes. This creates the whole tree-structure from
      ! which the amps%evaluation() can compute the amplitudes for given
      ! phase-space points.
-     call cpu_time(tBefore)
+     if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      if (keep_processes_separate) then
         do iamp=1,pgl(igroup)%nproc
            if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
@@ -156,8 +161,10 @@ program amplicol_generate
              pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
      endif
 
-     call cpu_time(tAfter)
-     t_amp_init=t_amp_init+tAfter-tBefore
+     if (timing_mode.eq.timing_detailed) then
+        call cpu_time(tAfter)
+        t_amp_init=t_amp_init+tAfter-tBefore
+     endif
 
      ! Total number of amplitudes is stored in 'nhel'
      if (keep_processes_separate) then
@@ -190,15 +197,17 @@ program amplicol_generate
   enddo ! loop over phase-space-order groups
 
   if (use_amplitude_library) then
-     call cpu_time(tBefore)
+     if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call test_lib
-     call cpu_time(tAfter)
-     t_lib_check=t_lib_check+tAfter-tBefore
+     if (timing_mode.eq.timing_detailed) then
+        call cpu_time(tAfter)
+        t_lib_check=t_lib_check+tAfter-tBefore
+     endif
   endif
   
   filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
   open(unit=11,file=filename,action='readwrite',status='unknown')
-  call cpu_time(tBefore)
+  if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
   call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
   
   allocate(nintegrals(ngroups))
@@ -208,8 +217,10 @@ program amplicol_generate
      nintegrals(1:ngroups)=1
   endif
   call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax))
-  call cpu_time(tAfter)
-  t_Int_init=t_Int_init+tAfter-tBefore
+  if (timing_mode.eq.timing_detailed) then
+     call cpu_time(tAfter)
+     t_Int_init=t_Int_init+tAfter-tBefore
+  endif
   call date_and_time(date, time, zone)
   write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
        date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
@@ -217,11 +228,18 @@ program amplicol_generate
   write (99,*) 'Start phase-space integration '//trim(formatted)
   call flush(99)
   timing_point=0_8
-  call cpu_time(tLoopBefore)
+  if (timing_enabled) then
+     call cpu_time(tLoopBefore)
+     t_Initialise=tLoopBefore-tTot_B
+  endif
   do
      timing_point=timing_point+1_8
-     time_point_sample=mod(timing_point-1_8,int(timing_sample,kind=8)).eq.0_8
-     time_detail_point=timing_mode.eq.timing_detailed .and. time_point_sample
+     time_point_sample=.false.
+     time_detail_point=.false.
+     if (timing_mode.eq.timing_detailed) then
+        time_point_sample=mod(timing_point-1_8,int(timing_sample,kind=8)).eq.0_8
+        time_detail_point=time_point_sample
+     endif
      if (time_detail_point) call cpu_time(tSampleBefore)
      call simple_integrator%get_points(1,ichan,iint)
      if (time_detail_point) then
@@ -241,10 +259,12 @@ program amplicol_generate
            done=done.and.all(pgl(igroup)%amps%lib_created)
         enddo
         if (done) then
-           call cpu_time(tBefore)
+           if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
            call create_amplitude_lib()
-           call cpu_time(tAfter)
-           t_Amp_opt=t_Amp_opt+tAfter-tBefore
+           if (timing_mode.eq.timing_detailed) then
+              call cpu_time(tAfter)
+              t_Amp_opt=t_Amp_opt+tAfter-tBefore
+           endif
         endif
      endif
      if (to_write(1)) then
@@ -259,9 +279,11 @@ program amplicol_generate
      endif
      if (done) exit
   enddo
-  call cpu_time(tLoopAfter)
-  t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
-  call cpu_time(tFinalBefore)
+  if (timing_enabled) then
+     call cpu_time(tLoopAfter)
+     t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
+     call cpu_time(tFinalBefore)
+  endif
   if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
   call flush(11)
   call simple_integrator%assign_evnt_wgts(wgts)
@@ -285,22 +307,21 @@ program amplicol_generate
      call cpu_time(tSampleAfter)
      t_Evt_wgt_update=t_Evt_wgt_update+tSampleAfter-tSampleBefore
   endif
-  call cpu_time(tFinalAfter)
-  t_Finalise=t_Finalise+tFinalAfter-tFinalBefore
-     
-  call cpu_time(tTot_a)
-  t_all=tTot_a-tTot_b
-  if (timing_mode.eq.timing_basic) then
-     t_other=t_all-(t_PS_init+t_Amp_init+t_Proc_init+t_Int_init+t_Int_loop+t_Finalise+t_lib_check)
-  elseif (timing_mode.eq.timing_standard) then
-     t_other=t_all-(t_PS_init+t_Amp_init+t_Proc_init+t_PS+t_Amp+t_mat+t_Amp_opt+t_weight+&
-          t_lib_check+t_Int_init+t_Finalise)
-  else
-     t_other=t_all-(t_PS_init+t_Amp_init+t_Proc_init+t_PS+t_Amp+t_mat+t_Amp_opt+t_weight+&
-          t_lib_check+t_Int_init+t_Int_get+t_Int_fill+t_Evt_write+t_Evt_wgt_assign+t_Evt_wgt_update)
+  if (timing_enabled) then
+     call cpu_time(tFinalAfter)
+     t_Finalise=t_Finalise+tFinalAfter-tFinalBefore
   endif
-  call print_timing(6)
-  call print_timing(99)
+     
+  if (timing_enabled) then
+     call cpu_time(tTot_a)
+     t_all=tTot_a-tTot_b
+     if (timing_mode.eq.timing_detailed) then
+        t_other=t_all-(t_PS_init+t_Amp_init+t_Proc_init+t_PS+t_Amp+t_mat+t_Amp_opt+t_weight+&
+             t_lib_check+t_Int_init+t_Int_get+t_Int_fill+t_Evt_write+t_Evt_wgt_assign+t_Evt_wgt_update)
+     endif
+     call print_timing(6)
+     call print_timing(99)
+  endif
   close(99)
   
 contains
@@ -308,50 +329,75 @@ contains
   subroutine print_timing(iunit)
     implicit none
     integer,intent(in) :: iunit
-    write(iunit,*) 'Time spent in phase-space initialisation',t_PS_init
-    write(iunit,*) 'Time spent in amplitude initialisation',t_Amp_init
-    write(iunit,*) 'Time spent in process initialisation',t_Proc_init
-    write(iunit,*) 'Time spent in integrator setup',t_Int_init
+    logical :: sampled
+    character(len=32) :: label_fmt
+    sampled=timing_mode.eq.timing_detailed .and. timing_sample.gt.1
+    label_fmt=adjustl('Timing summary')
+    write(iunit,'(a)') repeat('-',78)
+    write(iunit,'(a32,2x,a14,2x,a9,2x,a)') label_fmt,'seconds','percent','note'
+    write(iunit,'(a)') repeat('-',78)
     if (timing_mode.eq.timing_basic) then
-       write(iunit,*) 'Time spent in integration loop',t_Int_loop
-       write(iunit,*) 'Time spent in event finalisation',t_Finalise
+       call print_timing_row(iunit,'initialisation',t_Initialise,'')
+       call print_timing_row(iunit,'main integration loop',t_Int_loop,'')
+       call print_timing_row(iunit,'finalisation',t_Finalise,'')
     else
-       if (timing_sample.gt.1) then
-          write(iunit,*) 'Time spent in phase-space generation (sampled estimate)',t_PS
-          write(iunit,*) 'Time spent in amplitude evaluation (sampled estimate)',t_Amp
-          write(iunit,*) 'Time spent in squaring amplitudes (sampled estimate)',t_mat
-          write(iunit,*) 'Time spent in amplitude optimisation/library creation (sampled estimate)',t_Amp_opt
-          write(iunit,*) 'Time spent in matrix weight/PDF evaluation (sampled estimate)',t_weight
-       else
-          write(iunit,*) 'Time spent in phase-space generation:',t_PS
-          write(iunit,*) 'Time spent in amplitude evaluation',t_Amp
-          write(iunit,*) 'Time spent in squaring amplitudes',t_mat
-          write(iunit,*) 'Time spent in amplitude optimisation/library creation',t_Amp_opt
-          write(iunit,*) 'Time spent in matrix weight/PDF evaluation',t_weight
-       endif
-       write(iunit,*) 'Time spent in amplitude library checks'
-       if (timing_mode.eq.timing_standard) then
-          write(iunit,*) 'Time spent in event finalisation',t_Finalise 
-       else
-          if (timing_sample.gt.1) then
-             write(iunit,*) 'Time spent in integrator point generation (sampled estimate)',t_Int_get
-             write(iunit,*) 'Time spent in integrator fill/grid update (sampled estimate)',t_Int_fill
-          else
-             write(iunit,*) 'Time spent in integrator point generation',t_Int_get
-             write(iunit,*) 'Time spent in integrator fill/grid update',t_Int_fill
-          endif
-          write(iunit,*) 'Time spent in event writing',t_Evt_write
-          write(iunit,*) 'Time spent in event weight assignment',t_Evt_wgt_assign
-          write(iunit,*) 'Time spent in event weight update',t_Evt_wgt_update
-       endif
+       call print_timing_row(iunit,'phase-space initialisation',t_PS_init,'')
+       call print_timing_row(iunit,'amplitude initialisation',t_Amp_init,'')
+       call print_timing_row(iunit,'process initialisation',t_Proc_init,'')
+       call print_timing_row(iunit,'integrator setup',t_Int_init,'')
+       call print_timing_row(iunit,'phase-space generation',t_PS,estimate_note(sampled))
+       call print_timing_row(iunit,'amplitude evaluation',t_Amp,estimate_note(sampled))
+       call print_timing_row(iunit,'squaring amplitudes',t_mat,estimate_note(sampled))
+       call print_timing_row(iunit,'amp optimisation/library',t_Amp_opt,estimate_note(sampled))
+       call print_timing_row(iunit,'matrix weight/PDF',t_weight,estimate_note(sampled))
+       call print_timing_row(iunit,'amplitude library checks',t_lib_check,'')
+       call print_timing_row(iunit,'integrator point generation',t_Int_get,estimate_note(sampled))
+       call print_timing_row(iunit,'integrator fill/grid update',t_Int_fill,estimate_note(sampled))
+       call print_timing_row(iunit,'event writing',t_Evt_write,'')
+       call print_timing_row(iunit,'event weight assignment',t_Evt_wgt_assign,'')
+       call print_timing_row(iunit,'event weight update',t_Evt_wgt_update,'')
+       call print_timing_row(iunit,'other/overhead',t_other,residual_note(sampled))
     endif
-    if (timing_mode.eq.timing_detailed .and. timing_sample.gt.1) then
-       write(iunit,*) 'Time spent in other/overhead (residual after sampled estimates)',t_other
-    else
-       write(iunit,*) 'Time spent in other/overhead',t_other
+    write(iunit,'(a)') repeat('-',78)
+    call print_timing_row(iunit,'total',t_all,'')
+    if (sampled) then
+       write(iunit,'(a,i0,a)') 'Note: rows marked "estimate" are extrapolated from every ',&
+            timing_sample,'th phase-space point.'
+       write(iunit,'(a)') '      other/overhead is the residual after subtracting those estimates.'
     endif
-    write(iunit,*) 'Total time:',t_all
+    write(iunit,'(a)') repeat('-',78)
   end subroutine print_timing
+
+  subroutine print_timing_row(iunit,label,time,note)
+    implicit none
+    integer,intent(in) :: iunit
+    character(len=*),intent(in) :: label
+    real(kind=8),intent(in) :: time
+    character(len=*),intent(in) :: note
+    real(kind=8) :: pct
+    character(len=32) :: label_fmt
+    if (t_all.gt.0d0) then
+       pct=100d0*time/t_all
+    else
+       pct=0d0
+    endif
+    label_fmt=adjustl(label)
+    write(iunit,'(a32,2x,f14.6,2x,f8.2,a,2x,a)') label_fmt,time,pct,'%',trim(note)
+  end subroutine print_timing_row
+
+  character(len=8) function estimate_note(sampled)
+    implicit none
+    logical,intent(in) :: sampled
+    estimate_note=''
+    if (sampled) estimate_note='estimate'
+  end function estimate_note
+
+  character(len=8) function residual_note(sampled)
+    implicit none
+    logical,intent(in) :: sampled
+    residual_note=''
+    if (sampled) residual_note='residual'
+  end function residual_note
 
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
     use scales
@@ -367,7 +413,7 @@ contains
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     logical :: done,time_physics
     real(kind=8),external :: alphaspdf
-    time_physics=(timing_mode.ne.timing_basic) .and. time_point_sample
+    time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
     endif
@@ -689,14 +735,14 @@ contains
     open(unit=99,file=logfile,status='unknown')
 
     timing_arg=trim(adjustl(timing_arg))
-    if (timing_arg.eq.'basic') then
+    if (timing_arg.eq.'none') then
+       timing_mode=timing_none
+    elseif (timing_arg.eq.'basic') then
        timing_mode=timing_basic
-    elseif (timing_arg.eq.'standard') then
-       timing_mode=timing_standard
     elseif (timing_arg.eq.'detailed') then
        timing_mode=timing_detailed
     else
-       write (*,*) 'Timing mode must be basic, standard, or detailed: ',trim(timing_arg)
+       write (*,*) 'Timing mode must be none, basic, or detailed: ',trim(timing_arg)
        stop 1
     endif
     if (timing_sample_arg.lt.1) then
@@ -715,6 +761,9 @@ contains
        create_amplitude_library=.false.
        use_amplitude_library=.true.
        return
+    else
+       write (*,*) 'library must be none, create or use: ',trim(library)
+       stop 1
     endif
 
     if (PS_choice.ne.1 .and. PS_choice.ne.2 .and. PS_choice.ne.3 .and. PS_choice.ne.4) then

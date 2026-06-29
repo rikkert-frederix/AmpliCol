@@ -23,7 +23,7 @@ contains
     library='none'
     tag=''
     read_momenta=.false.
-    timing='standard'
+    timing='basic'
     timing_sample=100
 
     do i = 1, command_argument_count()
@@ -81,8 +81,8 @@ contains
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
        write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
             "with [X] points tested (single PS kinematics)"
-       write (*,'(a)') "  --timing=[X]              : Timing mode: basic, standard (default), or detailed."
-       write (*,'(a)') "  --timing-sample=[X]       : In standard/detailed timing, sample get/fill timers every [X] points. Default is 100."
+       write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
+       write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') ""
        stop
     end if
