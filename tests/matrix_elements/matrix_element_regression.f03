@@ -140,6 +140,7 @@ contains
        call compare_case(case_id,family,group_id,row_id,n,n_amps,spins,amps,&
             g_n_amps,g_spins,g_amps,total_failures,total_checks)
        total_cases=total_cases+1
+       if (mod(icase,100).eq.0) write (*,*) 'Checked matrix-element goldens:',icase,'/',ncases
 
        deallocate(process,order,g_process,g_order,spins,g_spins,amps,g_amps)
     enddo
