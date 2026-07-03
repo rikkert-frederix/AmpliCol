@@ -17,7 +17,7 @@ module phase_space_gen23_mod
   logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8) :: ip,ip_shat
+  real(kind=8) :: ip,ip_shat,ip_dt,ip_mass
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -189,13 +189,19 @@ contains
        if (flat) then
           ip=0d0
           ip_shat=0d0
+          ip_dt=0d0
+          ip_mass=0d0
        else
           ip=-1d0
           ip_shat=-1.2d0
+          ip_dt=-1d0
+          ip_mass=-0.5d0
        endif
     else
        ip=-1d0
        ip_shat=-1.2d0
+       ip_dt=-1d0
+       ip_mass=-0.5d0
     endif
     if (verbose) then
        write (99,*) "Power in importance sampling:",ip
@@ -612,7 +618,7 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,tmin,tmax,invm(i+ia),ps%jac)
+      call random_to_var(ps%x(ix),ip_dt,tmin,tmax,invm(i+ia),ps%jac)
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
       endif
@@ -630,7 +636,7 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,tmin,tmax,invm(i+ib),ps%jac)
+      call random_to_var(ps%x(ix),ip_dt,tmin,tmax,invm(i+ib),ps%jac)
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,invm(i+ib),tmin,tmax
       endif
@@ -979,7 +985,7 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),-0.5d0,shatmin,shatmax,invm(i),ps%jac)
+      call random_to_var(ps%x(ix),ip_mass,shatmin,shatmax,invm(i),ps%jac)
     end subroutine generate_mass
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
@@ -1118,6 +1124,9 @@ contains
          elseif (ip.eq.0) then
             var=varmin+x*(varmax-varmin)
             jac=jac*(varmax-varmin)
+         elseif (ip.eq.101) then
+            var=varmin+(varmax-varmin)*(1d0-cos(pi*x))/2d0
+            jac=jac*(varmax-varmin)*pi*sin(pi*x)/2d0
          else
             var=(varmin**(1+ip)*(1d0-x)+varmax**(1+ip)*x)**(1d0/(1d0+power))
             jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
@@ -1496,7 +1505,7 @@ contains
          write (*,*) 'dti- i+ia',i+ia,tmin,tmax,invm(i+ia)
       endif
       ix=ix+1
-      call var_to_random(invm(i+ia),ip,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+ia),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir)
       tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
       if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
@@ -1514,7 +1523,7 @@ contains
          write (*,*) 'dti- i+ib',i+ib,tmin,tmax,invm(i+ib)
       endif
       ix=ix+1
-      call var_to_random(invm(i+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+ib),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       phi=atan(pp(2,i)/pp(1,i))
       if(pp(1,i).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
@@ -1723,6 +1732,9 @@ contains
          elseif (ip.eq.0) then
             x=(var-varmin)/(varmax-varmin)
             jac=jac*(varmax-varmin)
+         elseif (ip.eq.101) then
+            x=acos(min(max(1d0-2d0*(var-varmin)/(varmax-varmin),-1d0),1d0))/pi
+            jac=jac*(varmax-varmin)*pi*sin(pi*x)/2d0
          else
             x=(var**(1+ip)-varmin**(1+ip))/(varmax**(1+ip)-varmin**(1+ip))
             jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
@@ -1747,7 +1759,7 @@ contains
          write (*,*) 'mi- i',i,shatmin,shatmax,invm(i)
       endif
       ix=ix+1
-      call var_to_random(invm(i),-0.5d0,shatmin,shatmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
     end subroutine generate_mass_inverse
 
   end subroutine gen23_compute_x_from_momenta
