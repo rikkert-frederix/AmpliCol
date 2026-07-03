@@ -111,7 +111,7 @@ program amplicol_generate
              pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
      elseif (PS_choice.eq.4) then
         call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
+             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.true.,include_pdf)
      endif
      pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
      allocate(pgl(igroup)%ps(1))
