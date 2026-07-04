@@ -1,0 +1,33 @@
+# Fortran and native build outputs
+*.o
+*.mod
+*.so
+*.dylib
+*.a
+/amplicol_generate
+/libamp*.so
+/z
+
+# Generated AmpliCol process/library outputs
+/processes.txt
+/Library/*.f03
+/Library/*.data
+/Library/*.bin
+/Outputs/*
+!/Outputs/.placeholder
+
+# ME-check run outputs
+/Utilities/ME_checks/momenta*.txt
+/Utilities/ME_checks/output.txt
+/Utilities/ME_checks/script.txt
+
+# Python/editor/cache noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyamplicol-cache/
+*.swp
+*.swo
+.DS_Store

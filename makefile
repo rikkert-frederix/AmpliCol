@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements update_matrix_cases update_matrix_goldens
+.PHONY: clean cleanlib test_matrix_elements update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -8,7 +8,9 @@ FC = gfortran
 FFLAGS = -ffast-math -O3
 PYTHON ?= python
 
-CXX ?= g++
+ifeq ($(origin CXX),default)
+  CXX = g++
+endif
 
 ifeq ($(shell $(CXX) --version | grep -c clang),1)
   STDLIB_FLAG = -stdlib=libc++
@@ -18,8 +20,9 @@ else
   STDLIB_LDLIBS   =
 endif
 
-LHAPDF_CFLAGS  := $(shell lhapdf-config --cflags)
-
+LHAPDF_CONFIG ?= /Users/vjhirsch/HEP_programs/LHAPDF-6.2.3/install_lhapdf62/bin/lhapdf-config
+LHAPDF_CFLAGS  := $(shell $(LHAPDF_CONFIG) --cflags)
+LHAPDF_LDFLAGS := $(shell $(LHAPDF_CONFIG) --ldflags)
 
 # ----------------------------------------------------------------------
 # 1. Detect amplitude sources and group them
@@ -81,6 +84,9 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: Library/%.f03
 	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
+dummy.o: Library/dummy.f03
+	$(FC) $(FFLAGS) -c $<
+
 # ----------------------------------------------------------------------
 # 3. Build one shared library per amplitude group
 # ----------------------------------------------------------------------
@@ -114,12 +120,12 @@ amplitude_QCD.o matrix_element_regression.o
 # 5. Build executables
 # ----------------------------------------------------------------------
 
-amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o `lhapdf-config --ldflags` -lstdc++ 
+amplicol_generate: $(FILES_M_INT_QCD) dummy.o
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o $(LHAPDF_LDFLAGS) -lstdc++
 
 amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
-	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
+	$(LHAPDF_LDFLAGS) -lstdc++ -Wl,-rpath,$(PWD)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
@@ -158,7 +164,7 @@ amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o parti
 amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
-	command_line_parser.o mg_checks.o scales.o
+	command_line_parser.o mg_checks.o scales.o dummy.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
@@ -167,9 +173,10 @@ handling_processes.o : math_functions.o common.o phase_space.o amplitude_QCD.o
 cuts.o : common.o particles.o handling_processes.o
 pdf_wrap.o : handling_processes.o
 simple_integrator.o : helper_modules.o
-amplitude_library.o : handling_processes.o read_process_file.o
+amplitude_library.o : handling_processes.o read_process_file.o dummy.o
 mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.o
 scales.o : common.o particles.o cuts.o
+pdf_lhapdf62.o : makefile
 amplib.o: $(notdir $(AMPSRC:.f03=.o))
 
 # ----------------------------------------------------------------------

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyamplicol"
+version = "0.0.1"
+description = "Python interface and tooling foundation for AmpliCol."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "AmpliCol developers" },
+]
+dependencies = [
+    "progressbar2",
+    "colorama",
+    "numpy<2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "mypy",
+    "ipykernel",
+]
+
+[project.scripts]
+pyamplicol = "pyamplicol.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pyamplicol = ["py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "dependencies: dependency installer and local dependency import tests",
+    "integration: integration tests grouped by feature area",
+    "slow: tests that are intentionally slower and should be batched before full-suite gates",
+    "typing: static typing and mypy gate tests",
+    "unit: focused unit tests grouped by feature area",
+]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+files = ["src/pyamplicol", "tests"]
+show_error_codes = true
+pretty = true
+warn_unused_ignores = true
