@@ -3,9 +3,11 @@ from __future__ import annotations
 from pyamplicol.benchmarks import (
     _legacy_runtime_per_point,
     _legacy_runtime_per_point_error,
+    _time_shared_dag_evaluations,
     format_mode_benchmark_table,
     summarize_mode_benchmark,
 )
+from pyamplicol.dag_runtime import DAGEvaluationTiming
 from pyamplicol.reference import TimingRow
 
 
@@ -58,3 +60,25 @@ def test_legacy_runtime_uses_probe_point_count() -> None:
 
     assert _legacy_runtime_per_point(rows, 1000) == 0.000125
     assert _legacy_runtime_per_point_error(rows, 1000) == 0.5e-6
+
+
+def test_shared_dag_profile_warms_full_batch() -> None:
+    class DummyEvaluator:
+        batch_size = 4
+
+        def __init__(self) -> None:
+            self.call_sizes: list[int] = []
+            self.last_runtime_timing = DAGEvaluationTiming(evaluator_time_s=0.0)
+
+        def evaluate_matrix_elements_many(self, particles):
+            self.call_sizes.append(len(particles))
+            self.last_runtime_timing = DAGEvaluationTiming(evaluator_time_s=0.0)
+            return [0.0 for _ in particles]
+
+    evaluator = DummyEvaluator()
+    particles = tuple(() for _ in range(10))
+
+    _time_shared_dag_evaluations(evaluator, particles)
+
+    assert evaluator.call_sizes[0] == evaluator.batch_size
+    assert evaluator.call_sizes[1:] == [4, 4, 2]

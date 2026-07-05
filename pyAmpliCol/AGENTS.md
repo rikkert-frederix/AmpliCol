@@ -255,6 +255,51 @@ monolithic expression for high multiplicity when it exceeds the watchdog or
 causes expression blow-up; prefer staged evaluator layers that preserve the
 legacy current-table structure.
 
+The `--compiled-dag-evaluator` mode is a separate full-symbolic route. It must
+reuse the same AmpliCol-style shared current table, but move runtime current
+orchestration to generation time: source current components and real momentum
+sums are runtime parameters, while internal current components are opaque
+Symbolica aliases and the final retained helicity amplitudes are one
+multi-output evaluator. Final complex conjugation, helicity/color factors, and
+the ME sum remain outside the evaluator until the multi-output amplitude vector
+is validated. Keep this route isolated in compiled-DAG modules while factoring
+shared current-table and expression utilities only when that removes real
+duplication.
+
+For compiled-DAG lowering, support both `spenso` and `symbolic` routes.
+`spenso` is the intended default and should build each current body as a small
+tensor network using the fixed model-owned `hep_lib` plus explicit temporary
+parent-current tensors whose entries are aliases. `symbolic` constructs the
+same current components directly with the verified Symbolica component
+builders and is the debugging baseline. Current aliases and temporary parent
+tensors are graph construction artifacts; do not register them as new model
+physics tensors.
+
+Manual Symbolica aliasing is required for the final compiled-DAG path. Prefer a
+managed `symbolica_mod` fork over pyamplicol-side evaluator workarounds, and keep
+Symbolica fork changes as small as possible by weaving in existing alias/dev code
+rather than rewriting evaluator internals. The currently installable branch is
+`pyamplicol-dev-base`, chosen because it is compatible with current
+`spenso`/`idenso`; it exposes a minimal Python evaluator hook,
+`aliases=[(handle, body), ...]`, plus `Expression.alias(handle=None,
+opaque=True)` for constructing such pairs. pyamplicol uses this interface for
+current-component alias handles. Compiled-DAG metadata must report whether that hook is active
+(`symbolica_alias_available`) and how many current components are represented by
+aliases (`opaque_alias_component_count`). Tests for this mode should prove that
+aliases survive evaluator construction as reusable DAG slots, and the dependency
+installer should remain the source of truth for fetching the selected fork
+branch.
+
+Compiled-DAG evaluator construction should apply the warmup helicity filter
+before final roots are sent to Symbolica. The filter must be deterministic,
+stored in evaluator artifacts, and should use the pure Python/orchestrated
+recursion path for signatures rather than compiling another D-mode evaluator.
+The default warmup point source is deterministic RAMBO-style on-shell
+phase-space generation; fixed canonical pyAmpliCol points remain available for
+sanity checks and debugging. Filtering trims roots and records multiplicities;
+it must not change the leading-color normalization or move the final
+helicity/color sum into the evaluator.
+
 Expose both evaluator-build strategies. `--no-merge-evaluators-strategy` is the
 current default and may build a bounded multi-output evaluator in one call,
 which has measured faster generation for the current D-mode path.
@@ -271,6 +316,15 @@ legacy AmpliCol should use evaluator-only pyamplicol timing for the primary
 runtime ratio, after warming up JIT-compiled evaluators. Still report full
 runtime overhead separately so slow wavefunction or parameter packing remains
 visible.
+
+Rusticol is a PyO3 runtime that links the local Symbolica Rust crate while
+pyamplicol also uses Symbolica through the Python extension. Until the linking
+model is unified, keep rusticol extension-load/error-path tests isolated in
+subprocesses when the same pytest process also constructs Python-side
+Symbolica graph objects. Direct runtime use through `rusticol.Runtime.load(...)`
+is still the target API, but tests that intentionally exercise failed loads or
+unsupported manifests should not poison the main pytest process before later
+Symbolica construction tests.
 
 For compiled Symbolica backends, distinguish the valid scalar compiled modes
 from SIMD complex mode. On Apple Silicon/aarch64, `compiled-complex-4x` is not

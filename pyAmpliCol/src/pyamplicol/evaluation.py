@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Sequence, cast
 
 from .model import AmplicolSMLeadingColorModel
@@ -10,9 +11,18 @@ from .native import (
     LeadingColorZJetsNativeEvaluator,
     MatrixElementEvaluation,
     NativeEvaluationError,
+    _final_state_identical_factor,
+    _initial_state_average_factor,
 )
 
-RuntimeBackend = Literal["auto", "python", "dag", "numeric-tensor-network"]
+RuntimeBackend = Literal[
+    "auto",
+    "python",
+    "dag",
+    "numeric-tensor-network",
+    "compiled-dag",
+    "rusticol",
+]
 
 
 @dataclass(frozen=True)
@@ -54,11 +64,11 @@ class NativeRuntimeEvaluator:
         symbolica_cpe_iterations: int | None = None,
         symbolica_n_cores: int = 4,
         symbolica_direct_translation: bool = True,
-        symbolica_jit_direct_translation: bool = False,
+        symbolica_jit_direct_translation: bool | None = None,
         symbolica_jit_optimization_level: int = 3,
         symbolica_max_horner_scheme_variables: int = 500,
         symbolica_max_common_pair_cache_entries: int = 1000000,
-        symbolica_max_common_pair_distance: int = 100,
+        symbolica_max_common_pair_distance: int | None = None,
         symbolica_collect_factors: bool = False,
         symbolica_compiled_preset: str = "adaptive",
         symbolica_compiled_inline_asm: str = "default",
@@ -71,6 +81,15 @@ class NativeRuntimeEvaluator:
         symbolica_compiled_output_dir: str | None = None,
         symbolica_load_evaluator_dir: str | None = None,
         symbolica_raw_sum_final_stage: bool = False,
+        compiled_dag_lowering: str = "spenso",
+        compiled_dag_cross_check_lowering: bool = False,
+        compiled_dag_inline_external_wavefunctions: bool = True,
+        compiled_dag_helicity_filter: bool = True,
+        compiled_dag_helicity_filter_samples: int = 10,
+        compiled_dag_helicity_filter_seed: int = 12345,
+        compiled_dag_helicity_filter_relative_tolerance: float = 1.0e-12,
+        compiled_dag_helicity_filter_zero_tolerance: float = 1.0e-300,
+        compiled_dag_helicity_filter_phase_space: str = "rambo",
     ) -> None:
         setup_start = time.perf_counter()
         self.process = process
@@ -105,10 +124,106 @@ class NativeRuntimeEvaluator:
                 backend = "native-spenso-numeric-tensor-network"
                 kernel = numeric_metadata.kernel
                 evaluator_metadata = numeric_metadata.to_json_dict()
+            elif runtime_backend == "compiled-dag":
+                from .compiled_dag_runtime import ZGluonCompiledDAGEvaluator
+
+                compiled_dag_common_pair_distance = (
+                    250
+                    if symbolica_max_common_pair_distance is None
+                    else symbolica_max_common_pair_distance
+                )
+                self._runtime = ZGluonCompiledDAGEvaluator(
+                    process,
+                    model=self.model,
+                    batch_size=batch_size,
+                    lowering=compiled_dag_lowering,  # type: ignore[arg-type]
+                    cross_check_lowering=compiled_dag_cross_check_lowering,
+                    verbose_evaluator_build=verbose_evaluator_build,
+                    symbolica_evaluator_backend=symbolica_evaluator_backend,
+                    symbolica_iterations=symbolica_iterations,
+                    symbolica_cpe_iterations=symbolica_cpe_iterations,
+                    symbolica_n_cores=symbolica_n_cores,
+                    symbolica_direct_translation=symbolica_direct_translation,
+                    symbolica_jit_direct_translation=symbolica_jit_direct_translation,
+                    symbolica_jit_optimization_level=symbolica_jit_optimization_level,
+                    symbolica_max_horner_scheme_variables=(
+                        symbolica_max_horner_scheme_variables
+                    ),
+                    symbolica_max_common_pair_cache_entries=(
+                        symbolica_max_common_pair_cache_entries
+                    ),
+                    symbolica_max_common_pair_distance=(
+                        compiled_dag_common_pair_distance
+                    ),
+                    symbolica_collect_factors=symbolica_collect_factors,
+                    symbolica_compiled_preset=symbolica_compiled_preset,
+                    symbolica_compiled_inline_asm=symbolica_compiled_inline_asm,
+                    symbolica_compiled_optimization_level=(
+                        symbolica_compiled_optimization_level
+                    ),
+                    symbolica_compiled_native=symbolica_compiled_native,
+                    symbolica_compiler_path=symbolica_compiler_path,
+                    symbolica_compiler_flags=symbolica_compiler_flags,
+                    symbolica_compiled_output_chunk_size=(
+                        symbolica_compiled_output_chunk_size
+                    ),
+                    symbolica_compiled_chunk_compile_workers=(
+                        symbolica_compiled_chunk_compile_workers
+                    ),
+                    symbolica_compiled_output_dir=(
+                        None
+                        if symbolica_compiled_output_dir is None
+                        else str(symbolica_compiled_output_dir)
+                    ),
+                    symbolica_load_evaluator_dir=(
+                        None
+                        if symbolica_load_evaluator_dir is None
+                        else str(symbolica_load_evaluator_dir)
+                    ),
+                    symbolica_raw_sum_final_stage=symbolica_raw_sum_final_stage,
+                    compiled_dag_inline_external_wavefunctions=(
+                        compiled_dag_inline_external_wavefunctions
+                    ),
+                    compiled_dag_helicity_filter=compiled_dag_helicity_filter,
+                    compiled_dag_helicity_filter_samples=(
+                        compiled_dag_helicity_filter_samples
+                    ),
+                    compiled_dag_helicity_filter_seed=compiled_dag_helicity_filter_seed,
+                    compiled_dag_helicity_filter_relative_tolerance=(
+                        compiled_dag_helicity_filter_relative_tolerance
+                    ),
+                    compiled_dag_helicity_filter_zero_tolerance=(
+                        compiled_dag_helicity_filter_zero_tolerance
+                    ),
+                    compiled_dag_helicity_filter_phase_space=(
+                        compiled_dag_helicity_filter_phase_space  # type: ignore[arg-type]
+                    ),
+                )
+                compiled_dag_metadata = self._runtime.metadata
+                backend = "native-symbolica-compiled-shared-current-alias-dag"
+                kernel = compiled_dag_metadata.kernel
+                evaluator_metadata = compiled_dag_metadata.to_json_dict()
+            elif runtime_backend == "rusticol":
+                if symbolica_load_evaluator_dir is None:
+                    raise NativeEvaluationError(
+                        "runtime backend 'rusticol' requires --load-evaluator-dir "
+                        "pointing at a generated process directory"
+                    )
+                import rusticol  # type: ignore[import-not-found]
+
+                self._runtime = rusticol.Runtime.load(str(symbolica_load_evaluator_dir))
+                backend = "rusticol-pyo3-shared-current-dag"
+                kernel = "rusticol-pyo3-shared-current-dag"
+                evaluator_metadata = dict(self._runtime.metadata())
             else:
                 try:
                     from .dag_runtime import ZGluonDAGEvaluator
 
+                    dag_common_pair_distance = (
+                        100
+                        if symbolica_max_common_pair_distance is None
+                        else symbolica_max_common_pair_distance
+                    )
                     self._runtime = ZGluonDAGEvaluator(
                         process,
                         model=self.model,
@@ -121,7 +236,11 @@ class NativeRuntimeEvaluator:
                         symbolica_cpe_iterations=symbolica_cpe_iterations,
                         symbolica_n_cores=symbolica_n_cores,
                         symbolica_direct_translation=symbolica_direct_translation,
-                        symbolica_jit_direct_translation=symbolica_jit_direct_translation,
+                        symbolica_jit_direct_translation=(
+                            False
+                            if symbolica_jit_direct_translation is None
+                            else symbolica_jit_direct_translation
+                        ),
                         symbolica_jit_optimization_level=symbolica_jit_optimization_level,
                         symbolica_max_horner_scheme_variables=(
                             symbolica_max_horner_scheme_variables
@@ -129,9 +248,7 @@ class NativeRuntimeEvaluator:
                         symbolica_max_common_pair_cache_entries=(
                             symbolica_max_common_pair_cache_entries
                         ),
-                        symbolica_max_common_pair_distance=(
-                            symbolica_max_common_pair_distance
-                        ),
+                        symbolica_max_common_pair_distance=dag_common_pair_distance,
                         symbolica_collect_factors=symbolica_collect_factors,
                         symbolica_compiled_preset=symbolica_compiled_preset,
                         symbolica_compiled_inline_asm=symbolica_compiled_inline_asm,
@@ -192,6 +309,8 @@ class NativeRuntimeEvaluator:
                 "q q~ -> Z plus ordered gluons"
             )
         point = tuple(particles) if particles is not None else self._canonical_point(sqrt_s)
+        if self.metadata.backend == "rusticol-pyo3-shared-current-dag":
+            return self._evaluate_rusticol_many((point,))[0]
         if self._runtime is not None:
             return cast(MatrixElementEvaluation, self._runtime.evaluate(point))
         return self._python.evaluate(self.process, particles=point)
@@ -205,6 +324,8 @@ class NativeRuntimeEvaluator:
                 "native numerical evaluation is currently implemented only for "
                 "q q~ -> Z plus ordered gluons"
             )
+        if self.metadata.backend == "rusticol-pyo3-shared-current-dag":
+            return self._evaluate_rusticol_many(points)
         if self._runtime is not None and hasattr(self._runtime, "evaluate_many"):
             return cast(
                 tuple[MatrixElementEvaluation, ...],
@@ -216,6 +337,57 @@ class NativeRuntimeEvaluator:
             for point in batch:
                 results.append(self.evaluate(particles=point))
         return tuple(results)
+
+    def materialize_compiled_evaluators(self) -> None:
+        if self._runtime is None:
+            return
+        materialize = getattr(self._runtime, "materialize_compiled_evaluators", None)
+        if callable(materialize):
+            materialize()
+
+    def save_evaluator_artifact(self, output_dir: str) -> Any:
+        if self._runtime is None:
+            raise NativeEvaluationError(
+                "selected native runtime does not expose a reusable evaluator artifact"
+            )
+        save = getattr(self._runtime, "save_evaluator_artifact", None)
+        if not callable(save):
+            raise NativeEvaluationError(
+                "selected native runtime does not support evaluator artifact saving"
+            )
+        return save(output_dir)
+
+    def refresh_metadata(self) -> NativeRuntimeMetadata:
+        if self._runtime is None:
+            return self.metadata
+        runtime_metadata = getattr(self._runtime, "metadata", None)
+        if runtime_metadata is None:
+            return self.metadata
+        to_json = getattr(runtime_metadata, "to_json_dict", None)
+        if not callable(to_json):
+            return self.metadata
+        self.metadata = replace(
+            self.metadata,
+            evaluator_metadata=to_json(),
+        )
+        return self.metadata
+
+    def stage_diagnostics_many(
+        self,
+        points: Sequence[Sequence[ExternalMomentum]],
+    ) -> dict[str, object]:
+        if self._runtime is None:
+            raise NativeEvaluationError(
+                "selected native runtime does not expose stage diagnostics"
+            )
+        if self.metadata.backend == "rusticol-pyo3-shared-current-dag":
+            return dict(self._runtime.stage_diagnostics(_momenta_array(points)))
+        diagnostics = getattr(self._runtime, "stage_diagnostics_many", None)
+        if not callable(diagnostics):
+            raise NativeEvaluationError(
+                "selected native runtime does not expose stage diagnostics"
+            )
+        return cast(dict[str, object], diagnostics(points))
 
     def _canonical_point(
         self,
@@ -236,6 +408,57 @@ class NativeRuntimeEvaluator:
             "native numerical evaluation is currently implemented only for "
             "q q~ -> Z plus ordered gluons"
         )
+
+    def _evaluate_rusticol_many(
+        self,
+        points: Sequence[Sequence[ExternalMomentum]],
+    ) -> tuple[MatrixElementEvaluation, ...]:
+        if self._runtime is None:
+            raise NativeEvaluationError("rusticol runtime is not initialized")
+        values = self._runtime.evaluate(_momenta_array(points))
+        output: list[MatrixElementEvaluation] = []
+        for point, value in zip(points, values, strict=True):
+            particles = tuple(point)
+            pdgs = tuple(particle.pdg for particle in particles)
+            color_factor = self.model.leading_color_factor(pdgs)
+            average_factor = _initial_state_average_factor(pdgs[:2])
+            identical_factor = _final_state_identical_factor(
+                particle.pdg for particle in particles[2:]
+            )
+            gluon_count = 0 if self._gluon_count is None else self._gluon_count
+            coupling_factor = (
+                (4.0 * math.pi * self.model.alpha_s_me_check) ** gluon_count
+                * (2.0 * 4.0 * math.pi * self.model.alpha_ew)
+            )
+            output.append(
+                MatrixElementEvaluation(
+                    process=self.process,
+                    particles=particles,
+                    matrix_element=float(value),
+                    raw_helicity_sum=float("nan"),
+                    color_factor=color_factor,
+                    average_factor=average_factor,
+                    coupling_factor=coupling_factor,
+                    helicity_contributions=(),
+                    identical_factor=identical_factor,
+                )
+            )
+        return tuple(output)
+
+
+def _momenta_array(points: Sequence[Sequence[ExternalMomentum]]) -> Any:
+    import numpy as np
+
+    return np.asarray(
+        [
+            [
+                [float(component) for component in particle.momentum]
+                for particle in point
+            ]
+            for point in points
+        ],
+        dtype=np.float64,
+    )
 
 
 __all__ = [

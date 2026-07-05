@@ -9,6 +9,7 @@ __pycache__/
 dependencies/.venv/
 dependencies/wheels/
 dependencies/symbolica/
+dependencies/symbolica_alias_branch/
 dependencies/symbolica-community/
 dependencies/gammaloop/
 dependencies/xsimd/

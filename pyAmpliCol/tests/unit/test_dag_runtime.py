@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from pyamplicol.dag_runtime import (
@@ -257,6 +259,41 @@ def test_z_gluon_dag_compiled_evaluator_artifact_roundtrip(tmp_path) -> None:
     ) < 1.0e-12
 
 
+def test_z_gluon_dag_jit_evaluator_artifact_roundtrip(tmp_path) -> None:
+    process = "d d~ > z g"
+    reference = LeadingColorZJetsNativeEvaluator()
+    particles = reference.canonical_z_gluon_point(
+        process,
+        gluon_count=1,
+        sqrt_s=1000.0,
+    )
+    artifact_dir = tmp_path / "jit-artifact"
+    evaluator = ZGluonDAGEvaluator(
+        process,
+        symbolica_evaluator_backend="jit",
+        symbolica_n_cores=1,
+    )
+    expected = evaluator.evaluate(particles)
+
+    manifest_path = evaluator.save_evaluator_artifact(artifact_dir)
+    manifest = json.loads(manifest_path.read_text())
+    loaded = ZGluonDAGEvaluator(
+        process,
+        symbolica_load_evaluator_dir=artifact_dir,
+    )
+    actual = loaded.evaluate(particles)
+
+    assert "jit-symbolica-evaluator" in _artifact_kinds(manifest["compiled"])
+    assert (
+        loaded.metadata.symbolica_evaluator_settings["loaded_from_artifact"]
+        is True
+    )
+    assert _relative_difference(
+        actual.matrix_element,
+        expected.matrix_element,
+    ) < 1.0e-12
+
+
 def test_z_gluon_dag_split_vertex_current_stages_match_default() -> None:
     process = "d d~ > z g g"
     reference = LeadingColorZJetsNativeEvaluator()
@@ -284,6 +321,20 @@ def test_z_gluon_dag_split_vertex_current_stages_match_default() -> None:
 
 def _relative_difference(left: float, right: float) -> float:
     return abs(left - right) / max(abs(left), abs(right), 1e-300)
+
+
+def _artifact_kinds(value: object) -> set[str]:
+    kinds: set[str] = set()
+    if isinstance(value, dict):
+        kind = value.get("kind")
+        if isinstance(kind, str):
+            kinds.add(kind)
+        for child in value.values():
+            kinds.update(_artifact_kinds(child))
+    elif isinstance(value, list):
+        for child in value:
+            kinds.update(_artifact_kinds(child))
+    return kinds
 
 
 def _max_helicity_amplitude_difference(left: object, right: object) -> float:

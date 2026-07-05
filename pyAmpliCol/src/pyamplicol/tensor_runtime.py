@@ -106,6 +106,8 @@ class HelicityFilter:
     relative_tolerance: float
     zero_tolerance: float
     sample_sqrt_s: tuple[float, ...]
+    phase_space_mode: str = "canonical"
+    seed: int | None = None
 
     @property
     def kept_count(self) -> int:
@@ -121,6 +123,8 @@ class HelicityFilter:
             "relative_tolerance": self.relative_tolerance,
             "zero_tolerance": self.zero_tolerance,
             "sample_sqrt_s": list(self.sample_sqrt_s),
+            "phase_space_mode": self.phase_space_mode,
+            "seed": self.seed,
         }
 
     @classmethod
@@ -146,6 +150,12 @@ class HelicityFilter:
                 payload.get("zero_tolerance", 1.0e-300)
             ),
             sample_sqrt_s=tuple(float(value) for value in sample_sqrt_s),
+            phase_space_mode=str(payload.get("phase_space_mode", "canonical")),
+            seed=(
+                None
+                if payload.get("seed") is None
+                else _int_payload_value(payload.get("seed"))
+            ),
         )
 
 
@@ -861,6 +871,8 @@ def build_z_gluon_helicity_filter(
         relative_tolerance=relative_tolerance,
         zero_tolerance=zero_tolerance,
         sample_sqrt_s=tuple(point[0].momentum[0] + point[1].momentum[0] for point in points),
+        phase_space_mode="canonical",
+        seed=None,
     )
 
 

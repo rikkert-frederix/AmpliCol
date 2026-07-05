@@ -13,24 +13,37 @@
     "source_rev": "db79edc84f6a1580decbcc4ede7ea0b1c79d9a08",
     "symbolica_features": []
   },
+  "rusticol": {
+    "installed": true,
+    "requested": true,
+    "source_path": "../rusticol",
+    "source_rev": "142a48ec621ba1c54b5ed1eacec7a8260067bf0c",
+    "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts"
+  },
   "schema_version": 1,
   "symbolica": {
     "installed": true,
     "requested": true,
     "source_path": "dependencies/symbolica",
-    "source_rev": "e4167e767147ab8f3b4f039057c396c8fa961f6a"
+    "source_ref": "pyamplicol-dev-base",
+    "source_rev": "fe3084804c8677b1341e84428d65e0e713b5901c",
+    "source_url": "https://github.com/ValentinHirschi/symbolica_mod.git"
   },
   "symbolica_community": {
     "installed": true,
     "requested": true,
     "source_path": "dependencies/symbolica-community",
-    "source_rev": "4daa45e793a3775f13bee33c4ddd2ba7f22ba714"
+    "source_ref": "main",
+    "source_rev": "4daa45e793a3775f13bee33c4ddd2ba7f22ba714",
+    "source_url": "https://github.com/symbolica-dev/symbolica-community.git"
   },
   "xsimd": {
     "installed": true,
     "requested": true,
     "source_path": "dependencies/xsimd",
+    "source_ref": "master",
     "source_rev": "e79f9d36c04b88fd902307c338527b73e77882c9",
+    "source_url": "https://github.com/xtensor-stack/xsimd.git",
     "usage": "header-only include path for Symbolica complex_4x compiled evaluators"
   }
 }

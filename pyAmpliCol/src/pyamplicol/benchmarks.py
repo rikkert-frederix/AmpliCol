@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import multiprocessing as mp
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -88,6 +89,7 @@ def benchmark_z_gluon_modes(
         "batch_size": batch_size,
         "merge_evaluators_strategy": merge_evaluators_strategy,
         "evaluator_build_kwargs": shared_build_kwargs,
+        "shared_runtime_backend": shared_build_kwargs.get("runtime_backend", "dag"),
         "definitions": {
             "generation_s": {
                 "legacy": (
@@ -260,6 +262,7 @@ def profile_z_gluon_dag_evaluator(
     repetitions: int = 100,
     evaluator_build_kwargs: dict[str, Any] | None = None,
     save_evaluator_dir: str | Path | None = None,
+    runtime_backend: str = "dag",
 ) -> dict[str, Any]:
     """Profile the shared-current D-mode evaluator without legacy rebuilds."""
 
@@ -283,32 +286,112 @@ def profile_z_gluon_dag_evaluator(
     batch_size = int(build_kwargs.get("batch_size", 16))
     if batch_size < 16:
         raise ValueError("batch_size must be at least 16 for timing profiles")
+    backend = _profile_runtime_backend(runtime_backend)
 
-    from .dag_runtime import ZGluonDAGEvaluator
     from .native import LeadingColorZJetsNativeEvaluator
 
     native = LeadingColorZJetsNativeEvaluator()
-    gluon_count = native.supported_z_gluon_count(process)
-    if gluon_count is None or gluon_count < 1:
+    if native.supports_zero_gluon_z(process):
+        gluon_count = 0
+    else:
+        gluon_count = native.supported_z_gluon_count(process)
+    if gluon_count is None:
         raise ValueError(
-            "D-mode profiling currently supports q q~ -> Z plus at least one gluon"
+            "D-mode profiling currently supports q q~ -> Z plus ordered gluons"
         )
-    point_list = tuple(
-        native.canonical_z_gluon_point(
-            process,
-            gluon_count=gluon_count,
-            sqrt_s=sqrt_s * (1.0 + 0.037 * index),
+    if gluon_count == 0:
+        point_list = tuple(
+            native.canonical_zero_gluon_point(
+                process,
+                sqrt_s=sqrt_s * (1.0 + 0.037 * index),
+            )
+            for index in range(points)
         )
-        for index in range(points)
-    )
+    else:
+        point_list = tuple(
+            native.canonical_z_gluon_point(
+                process,
+                gluon_count=gluon_count,
+                sqrt_s=sqrt_s * (1.0 + 0.037 * index),
+            )
+            for index in range(points)
+        )
 
-    generation_start = time.perf_counter()
-    evaluator = ZGluonDAGEvaluator(process, **build_kwargs)
     saved_evaluator_manifest = None
-    if save_evaluator_dir is not None:
-        saved_evaluator_manifest = str(
-            evaluator.save_evaluator_artifact(save_evaluator_dir)
+    temp_artifact_dir: tempfile.TemporaryDirectory[str] | None = None
+    generation_start = time.perf_counter()
+    if backend == "rusticol":
+        load_dir = build_kwargs.get("symbolica_load_evaluator_dir")
+        if load_dir is None:
+            if save_evaluator_dir is None:
+                temp_artifact_dir = tempfile.TemporaryDirectory(
+                    prefix="pyamplicol-rusticol-"
+                )
+                artifact_dir = Path(temp_artifact_dir.name)
+            else:
+                artifact_dir = Path(save_evaluator_dir).expanduser()
+            if gluon_count == 0:
+                from .dag_runtime import _write_zero_gluon_rusticol_process_artifacts
+
+                saved_evaluator_manifest = str(
+                    _write_zero_gluon_rusticol_process_artifacts(
+                        artifact_dir,
+                        process=process,
+                        model=native.model,
+                    )
+                )
+            else:
+                py_build_kwargs = dict(build_kwargs)
+                py_build_kwargs.pop("symbolica_load_evaluator_dir", None)
+                py_build_kwargs.setdefault(
+                    "symbolica_evaluator_backend",
+                    "compiled-complex",
+                )
+                if py_build_kwargs.get("symbolica_compiled_output_dir") is None:
+                    py_build_kwargs["symbolica_compiled_output_dir"] = str(
+                        artifact_dir / "compiled"
+                    )
+                py_evaluator = _build_profile_evaluator(
+                    process,
+                    runtime_backend="dag",
+                    build_kwargs=py_build_kwargs,
+                )
+                saved_evaluator_manifest = str(
+                    py_evaluator.save_evaluator_artifact(artifact_dir)
+                )
+            evaluator = _RusticolProfileEvaluator(
+                artifact_dir,
+                batch_size=batch_size,
+            )
+        else:
+            artifact_dir = Path(str(load_dir)).expanduser()
+            evaluator = _RusticolProfileEvaluator(
+                artifact_dir,
+                batch_size=batch_size,
+            )
+            manifest_name = (
+                "process_manifest.json"
+                if (artifact_dir / "process_manifest.json").exists()
+                and not (artifact_dir / "manifest.json").exists()
+                else "manifest.json"
+            )
+            saved_evaluator_manifest = str(artifact_dir / manifest_name)
+    else:
+        if gluon_count == 0:
+            raise ValueError(
+                "profile-dag-evaluator uses the scalar zero-gluon path for "
+                "q q~ -> Z; use --runtime-backend rusticol to profile the "
+                "self-contained zero-gluon process artifact"
+            )
+        evaluator = _build_profile_evaluator(
+            process,
+            runtime_backend=backend,
+            build_kwargs=build_kwargs,
         )
+        if save_evaluator_dir is not None:
+            saved_evaluator_manifest = str(
+                evaluator.save_evaluator_artifact(save_evaluator_dir)
+            )
     generation_s = time.perf_counter() - generation_start
 
     _time_shared_dag_evaluations(evaluator, point_list)
@@ -347,6 +430,7 @@ def profile_z_gluon_dag_evaluator(
     }
     return {
         "process": process,
+        "runtime_backend": backend,
         "sqrt_s": sqrt_s,
         "gluon_count": gluon_count,
         "points": points,
@@ -389,7 +473,218 @@ def profile_z_gluon_dag_evaluator(
         },
         "runtime_breakdown_samples_s_per_point": timing_samples,
         "matrix_elements": matrix_elements,
+        "metadata_after_runtime": evaluator.metadata.to_json_dict(),
     }
+
+
+def _profile_runtime_backend(value: str) -> str:
+    if value in ("auto", "dag"):
+        return "dag"
+    if value == "compiled-dag":
+        return "compiled-dag"
+    if value == "rusticol":
+        return "rusticol"
+    raise ValueError(
+        "profile-dag-evaluator supports runtime backend 'dag', "
+        "'compiled-dag', or 'rusticol'"
+    )
+
+
+def _build_profile_evaluator(
+    process: str,
+    *,
+    runtime_backend: str,
+    build_kwargs: dict[str, Any],
+) -> Any:
+    if runtime_backend == "dag":
+        from .dag_runtime import ZGluonDAGEvaluator
+
+        return ZGluonDAGEvaluator(
+            process,
+            **_filter_kwargs(build_kwargs, _DAG_PROFILE_KWARGS),
+        )
+    if runtime_backend == "compiled-dag":
+        from .compiled_dag_runtime import ZGluonCompiledDAGEvaluator
+
+        return ZGluonCompiledDAGEvaluator(
+            process,
+            **_compiled_dag_profile_kwargs(build_kwargs),
+        )
+    if runtime_backend == "rusticol":
+        load_dir = build_kwargs.get("symbolica_load_evaluator_dir")
+        if load_dir is None:
+            raise ValueError(
+                "rusticol profile evaluator needs a generated process directory"
+            )
+        return _RusticolProfileEvaluator(
+            load_dir,
+            batch_size=int(build_kwargs.get("batch_size", 16)),
+        )
+    raise ValueError(f"unsupported profile runtime backend: {runtime_backend!r}")
+
+
+def build_z_gluon_dag_profile_evaluator(
+    process: str,
+    *,
+    build_kwargs: dict[str, Any],
+) -> Any:
+    """Build the Python shared-current DAG evaluator used for process artifacts."""
+
+    return _build_profile_evaluator(
+        process,
+        runtime_backend="dag",
+        build_kwargs=build_kwargs,
+    )
+
+
+class _RusticolProfileEvaluator:
+    def __init__(self, process_dir: str | Path, *, batch_size: int) -> None:
+        import numpy as np
+        import rusticol  # type: ignore[import-not-found]
+
+        from .dag_runtime import DAGEvaluationTiming
+        from .process_runtime import load_process_manifest
+
+        self._np = np
+        self.runtime = rusticol.Runtime.load(str(Path(process_dir).expanduser()))
+        self.manifest = load_process_manifest(process_dir)
+        self.batch_size = int(batch_size)
+        self.last_runtime_timing = DAGEvaluationTiming()
+        self._momenta_cache: dict[tuple[int, ...], Any] = {}
+
+    @property
+    def metadata(self) -> Any:
+        return self
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "process": self.manifest.process,
+            "kernel": "rusticol-pyo3-shared-current-dag",
+            "gluon_count": self.manifest.gluon_count,
+            "batch_size": self.batch_size,
+            "runtime_metadata": dict(self.runtime.metadata()),
+        }
+
+    def evaluate_matrix_elements_many(
+        self,
+        points: Sequence[Sequence[ExternalMomentum]],
+    ) -> tuple[float, ...]:
+        values = self.evaluate_matrix_elements_array(points, validate=False)
+        return tuple(float(value) for value in values)
+
+    def evaluate_matrix_elements_array(
+        self,
+        points: Sequence[Sequence[ExternalMomentum]],
+        *,
+        validate: bool = False,
+    ) -> Any:
+        from .dag_runtime import DAGEvaluationTiming
+
+        del validate
+        key = tuple(id(point) for point in points)
+        momenta = self._momenta_cache.get(key)
+        if momenta is None:
+            momenta = self._np.asarray(
+                [
+                    [
+                        [float(component) for component in particle.momentum]
+                        for particle in point
+                    ]
+                    for point in points
+                ],
+                dtype=self._np.float64,
+            )
+            self._momenta_cache[key] = momenta
+        payload = dict(self.runtime.profile(momenta, precision=16))
+        self.last_runtime_timing = DAGEvaluationTiming(
+            source_fill_time_s=float(payload.get("source_fill_time_s", 0.0)),
+            momentum_setup_time_s=float(payload.get("momentum_setup_time_s", 0.0)),
+            parameter_pack_time_s=0.0,
+            evaluator_time_s=(
+                float(payload.get("stage_evaluator_time_s", 0.0))
+                + float(payload.get("amplitude_evaluator_time_s", 0.0))
+            ),
+            output_transfer_time_s=float(payload.get("output_assign_time_s", 0.0)),
+            result_reduction_time_s=float(
+                payload.get("result_reduction_time_s", 0.0)
+            ),
+        )
+        return self._np.asarray(payload["values"], dtype=self._np.float64)
+
+
+def _filter_kwargs(
+    values: dict[str, Any],
+    allowed: frozenset[str],
+) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if key in allowed}
+
+
+def _compiled_dag_profile_kwargs(values: dict[str, Any]) -> dict[str, Any]:
+    filtered = _filter_kwargs(values, _COMPILED_DAG_PROFILE_KWARGS)
+    if "compiled_dag_lowering" in filtered:
+        filtered["lowering"] = filtered.pop("compiled_dag_lowering")
+    if "compiled_dag_cross_check_lowering" in filtered:
+        filtered["cross_check_lowering"] = filtered.pop(
+            "compiled_dag_cross_check_lowering"
+        )
+    filtered.setdefault("symbolica_max_common_pair_distance", 250)
+    return filtered
+
+
+_SYMBOLICA_PROFILE_KWARGS = frozenset(
+    {
+        "verbose_evaluator_build",
+        "symbolica_evaluator_backend",
+        "symbolica_iterations",
+        "symbolica_cpe_iterations",
+        "symbolica_n_cores",
+        "symbolica_direct_translation",
+        "symbolica_jit_direct_translation",
+        "symbolica_jit_optimization_level",
+        "symbolica_max_horner_scheme_variables",
+        "symbolica_max_common_pair_cache_entries",
+        "symbolica_max_common_pair_distance",
+        "symbolica_collect_factors",
+        "symbolica_compiled_preset",
+        "symbolica_compiled_inline_asm",
+        "symbolica_compiled_optimization_level",
+        "symbolica_compiled_native",
+        "symbolica_compiler_path",
+        "symbolica_compiler_flags",
+        "symbolica_compiled_output_chunk_size",
+        "symbolica_compiled_chunk_compile_workers",
+        "symbolica_compiled_output_dir",
+        "symbolica_load_evaluator_dir",
+    }
+)
+
+
+_DAG_PROFILE_KWARGS = frozenset(
+    {
+        "batch_size",
+        "merge_evaluators_strategy",
+        "split_vertex_current_stages",
+        "symbolica_raw_sum_final_stage",
+        "progress_callback",
+    }
+) | _SYMBOLICA_PROFILE_KWARGS
+
+
+_COMPILED_DAG_PROFILE_KWARGS = frozenset(
+    {
+        "batch_size",
+        "compiled_dag_lowering",
+        "compiled_dag_cross_check_lowering",
+        "compiled_dag_inline_external_wavefunctions",
+        "compiled_dag_helicity_filter",
+        "compiled_dag_helicity_filter_samples",
+        "compiled_dag_helicity_filter_seed",
+        "compiled_dag_helicity_filter_relative_tolerance",
+        "compiled_dag_helicity_filter_zero_tolerance",
+        "compiled_dag_helicity_filter_phase_space",
+        "symbolica_raw_sum_final_stage",
+    }
+) | _SYMBOLICA_PROFILE_KWARGS
 
 
 def summarize_mode_benchmark(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -667,14 +962,24 @@ def _worker(
                     }
                 )
                 return
-            from .dag_runtime import ZGluonDAGEvaluator
-
+            runtime_backend = str(evaluator_build_kwargs.get("runtime_backend", "dag"))
             setup_start = time.perf_counter()
-            shared_evaluator = ZGluonDAGEvaluator(
-                process,
-                **evaluator_build_kwargs,
-            )
+            if runtime_backend == "compiled-dag":
+                from .compiled_dag_runtime import ZGluonCompiledDAGEvaluator
+
+                shared_evaluator = ZGluonCompiledDAGEvaluator(
+                    process,
+                    **_compiled_dag_profile_kwargs(evaluator_build_kwargs),
+                )
+            else:
+                from .dag_runtime import ZGluonDAGEvaluator
+
+                shared_evaluator = ZGluonDAGEvaluator(
+                    process,
+                    **_filter_kwargs(evaluator_build_kwargs, _DAG_PROFILE_KWARGS),
+                )
             result["generation_s"] = time.perf_counter() - setup_start
+            result["runtime_backend"] = runtime_backend
             result["generation_report_s"] = (
                 shared_evaluator.symbolica_evaluator_build_time_s
                 + shared_evaluator.current_table_build_time_s
@@ -856,10 +1161,14 @@ def _time_shared_dag_evaluations(
         from .dag_runtime import DAGEvaluationTiming
 
         return [], 0.0, 0.0, DAGEvaluationTiming()
+    warmup_count = min(
+        len(particles),
+        max(1, int(getattr(evaluator, "batch_size", 1))),
+    )
     if hasattr(evaluator, "evaluate_matrix_elements_many"):
-        evaluator.evaluate_matrix_elements_many(particles[:1])
+        evaluator.evaluate_matrix_elements_many(particles[:warmup_count])
     else:
-        evaluator.evaluate_many(particles[:1])
+        evaluator.evaluate_many(particles[:warmup_count])
     return _evaluate_shared_dag_points_once(evaluator, particles)
 
 
@@ -869,20 +1178,47 @@ def _evaluate_shared_dag_points_once(
 ) -> tuple[list[float], float, float, Any]:
     from .dag_runtime import DAGEvaluationTiming
 
+    array_values: list[Any] = []
     values: list[float] = []
     evaluator_runtime_s = 0.0
     timing = DAGEvaluationTiming()
     start = time.perf_counter()
     for offset in range(0, len(particles), evaluator.batch_size):
         batch = particles[offset : offset + evaluator.batch_size]
-        if hasattr(evaluator, "evaluate_matrix_elements_many"):
+        if hasattr(evaluator, "evaluate_matrix_elements_array"):
+            array_values.append(
+                evaluator.evaluate_matrix_elements_array(
+                    batch,
+                    validate=False,
+                )
+            )
+        elif hasattr(evaluator, "evaluate_matrix_elements_many"):
             values.extend(float(value) for value in evaluator.evaluate_matrix_elements_many(batch))
         else:
             results = evaluator.evaluate_many(batch)
             values.extend(float(result.matrix_element) for result in results)
-        evaluator_runtime_s += evaluator.compiled.last_evaluator_time_s
+        evaluator_runtime_s += _last_evaluator_time_s(evaluator)
         timing += evaluator.last_runtime_timing
-    return values, time.perf_counter() - start, evaluator_runtime_s, timing
+    runtime_s = time.perf_counter() - start
+    if array_values:
+        values = [
+            float(value)
+            for array in array_values
+            for value in array.tolist()
+        ]
+    return values, runtime_s, evaluator_runtime_s, timing
+
+
+def _last_evaluator_time_s(evaluator: Any) -> float:
+    compiled = getattr(evaluator, "compiled", None)
+    value = getattr(compiled, "last_evaluator_time_s", None)
+    if isinstance(value, (float, int)):
+        return float(value)
+    timing = getattr(evaluator, "last_runtime_timing", None)
+    value = getattr(timing, "evaluator_time_s", None)
+    if isinstance(value, (float, int)):
+        return float(value)
+    return 0.0
 
 
 def _time_repeated(func: Any, repetitions: int) -> float:

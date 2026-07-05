@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from typing import TextIO
 
 LOGGER_NAME = "pyamplicol"
-DEFAULT_LOG_FORMAT = "%(levelname)s:%(name)s:%(message)s"
+DEFAULT_LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s"
+DEFAULT_LOG_DATE_FORMAT = "%H:%M:%S"
 
 _HANDLER_MARKER = "_pyamplicol_configured_handler"
 
@@ -26,7 +27,7 @@ def configure_logging(
     *,
     stream: TextIO | None = None,
     fmt: str = DEFAULT_LOG_FORMAT,
-    datefmt: str | None = None,
+    datefmt: str | None = DEFAULT_LOG_DATE_FORMAT,
     force: bool = False,
 ) -> logging.Logger:
     """Configure pyamplicol progress logging."""
@@ -110,7 +111,10 @@ def _remove_configured_handlers(logger: logging.Logger) -> None:
     for handler in tuple(logger.handlers):
         if getattr(handler, _HANDLER_MARKER, False):
             logger.removeHandler(handler)
-            handler.close()
+            try:
+                handler.close()
+            except ValueError:
+                pass
 
 
 def _ensure_null_handler(logger: logging.Logger) -> None:
@@ -123,6 +127,7 @@ _ensure_null_handler(get_logger())
 
 __all__ = [
     "DEFAULT_LOG_FORMAT",
+    "DEFAULT_LOG_DATE_FORMAT",
     "LOGGER_NAME",
     "configure_logging",
     "disable_logging",

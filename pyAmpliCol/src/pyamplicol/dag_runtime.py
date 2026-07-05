@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
+from importlib import metadata as importlib_metadata
 import json
 import math
 import os
 import platform
+import shutil
 import tempfile
 import time
 import uuid
@@ -11,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from itertools import product
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 
@@ -27,6 +30,7 @@ from .model import AmplicolSMLeadingColorModel
 from .native import (
     ExternalMomentum,
     HelicityContribution,
+    LeadingColorZJetsNativeEvaluator,
     MatrixElementEvaluation,
     NativeEvaluationError,
     _ext_antiquark_weyl,
@@ -38,6 +42,54 @@ from .native import (
 )
 from .params import ParamBuilder
 from .symbols import symbols
+
+ProgressCallback = Callable[[dict[str, object]], None]
+
+
+def _report_progress(
+    callback: ProgressCallback | None,
+    *,
+    stage: str,
+    item: str,
+    increment: int = 0,
+    total: int | None = None,
+) -> None:
+    if callback is None:
+        return
+    payload: dict[str, object] = {
+        "stage": stage,
+        "item": item,
+    }
+    if increment:
+        payload["increment"] = int(increment)
+    if total is not None:
+        payload["total"] = int(total)
+    callback(payload)
+
+
+def generation_progress_total(*, gluon_count: int, split_vertex_current_stages: bool = False) -> int:
+    """Return the number of coarse generation steps exposed to the CLI."""
+
+    source_total = 4 + 2 * gluon_count + 3
+    gluon_total = sum(
+        (gluon_count - length + 1) * (2**length)
+        for length in range(2, gluon_count + 1)
+    )
+    quark_no_z_total = 2 * sum(2**end for end in range(1, gluon_count + 1))
+    quark_with_z_total = 2 * 3 * sum(2**end for end in range(0, gluon_count + 1))
+    amplitude_total = 2 * 3 * (2**gluon_count)
+    stage_total = gluon_count + 1
+    compile_total = 2 * stage_total if split_vertex_current_stages else stage_total
+    compile_total += 1  # amplitude stage
+    return (
+        source_total
+        + gluon_total
+        + quark_no_z_total
+        + quark_with_z_total
+        + amplitude_total
+        + compile_total
+        + 2  # compiled materialization plus artifact/process save
+    )
 
 
 @dataclass(frozen=True)
@@ -63,6 +115,10 @@ class SymbolicaEvaluatorSettings:
     compiled_chunk_compile_workers: int = 1
     compiled_output_dir: str | None = None
     raw_sum_final_stage: bool = False
+    real_param_sqrt_real: bool = False
+    real_param_log_real: bool = False
+    real_param_powf_real: bool = False
+    real_param_real_if_args_real: bool = False
 
     def __post_init__(self) -> None:
         if self.backend not in ("jit", "compiled-complex", "compiled-complex-4x"):
@@ -144,6 +200,10 @@ class SymbolicaEvaluatorSettings:
             "compiled_chunk_compile_workers": self.compiled_chunk_compile_workers,
             "compiled_output_dir": self.compiled_output_dir,
             "raw_sum_final_stage": self.raw_sum_final_stage,
+            "real_param_sqrt_real": self.real_param_sqrt_real,
+            "real_param_log_real": self.real_param_log_real,
+            "real_param_powf_real": self.real_param_powf_real,
+            "real_param_real_if_args_real": self.real_param_real_if_args_real,
         }
 
 
@@ -377,6 +437,7 @@ class ZGluonDAGEvaluator:
         symbolica_compiled_output_dir: str | Path | None = None,
         symbolica_load_evaluator_dir: str | Path | None = None,
         symbolica_raw_sum_final_stage: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         if batch_size < 1:
             raise NativeEvaluationError("batch_size must be positive")
@@ -385,6 +446,7 @@ class ZGluonDAGEvaluator:
         self.graph = graph or _z_gluon_graph(process, self.model)
         self.gluon_count = _validate_z_gluon_graph(self.graph)
         self.batch_size = int(batch_size)
+        self.progress_callback = progress_callback
         self.last_runtime_timing = DAGEvaluationTiming()
         self.loaded_evaluator_artifact_metadata: dict[str, Any] | None = None
         (
@@ -436,6 +498,7 @@ class ZGluonDAGEvaluator:
             self.graph,
             self.model,
             gluon_count=self.gluon_count,
+            progress_callback=progress_callback,
         )
         self.current_table_build_time_s = time.perf_counter() - table_start
         compiled_start = time.perf_counter()
@@ -456,6 +519,7 @@ class ZGluonDAGEvaluator:
                 self.table,
                 Path(symbolica_load_evaluator_dir),
                 symbolica_settings=symbolica_settings,
+                progress_callback=progress_callback,
             )
         elif split_vertex_current_stages:
             self.compiled = _SharedSplitCompiledSweepEvaluator(
@@ -463,6 +527,7 @@ class ZGluonDAGEvaluator:
                 merge_evaluators_strategy=merge_evaluators_strategy,
                 verbose_evaluator_build=verbose_evaluator_build,
                 symbolica_settings=symbolica_settings,
+                progress_callback=progress_callback,
             )
         else:
             self.compiled = _SharedCompiledSweepEvaluator(
@@ -470,20 +535,32 @@ class ZGluonDAGEvaluator:
                 merge_evaluators_strategy=merge_evaluators_strategy,
                 verbose_evaluator_build=verbose_evaluator_build,
                 symbolica_settings=symbolica_settings,
+                progress_callback=progress_callback,
             )
         self.symbolica_evaluator_build_time_s = time.perf_counter() - compiled_start
         self.blocks: _DAGBlockEvaluators | None = None
         self.block_build_time_s = 0.0
 
     def materialize_compiled_evaluators(self) -> None:
+        _report_progress(
+            self.progress_callback,
+            stage="materialize",
+            item="compiled evaluators",
+        )
         materialize = getattr(self.compiled, "materialize", None)
         if callable(materialize):
             materialize()
+        _report_progress(
+            self.progress_callback,
+            stage="materialize",
+            item="compiled evaluators",
+            increment=1,
+        )
 
     def save_evaluator_artifact(self, output_dir: str | Path) -> Path:
         self.materialize_compiled_evaluators()
         output_path = Path(output_dir).expanduser()
-        output_path.mkdir(parents=True, exist_ok=True)
+        _prepare_process_output_directory(output_path)
         artifact = {
             "schema_version": 1,
             "kind": "pyamplicol-zgluon-shared-dag-compiled",
@@ -502,6 +579,22 @@ class ZGluonDAGEvaluator:
         manifest_path.write_text(
             json.dumps(artifact, indent=2, sort_keys=True),
             encoding="utf-8",
+        )
+        _write_rusticol_process_artifacts(
+            output_path,
+            evaluator_manifest=artifact,
+            evaluator_manifest_name=manifest_path.name,
+            process=self.process,
+            gluon_count=self.gluon_count,
+            table=self.table,
+            layout=self.compiled.layout,
+            model=self.model,
+        )
+        _report_progress(
+            self.progress_callback,
+            stage="save",
+            item="process artifacts",
+            increment=1,
         )
         return manifest_path
 
@@ -630,6 +723,25 @@ class ZGluonDAGEvaluator:
             time.perf_counter() - reduction_start
         )
         return matrix_elements
+
+    def stage_diagnostics_many(
+        self,
+        points: Sequence[Sequence[ExternalMomentum]],
+    ) -> dict[str, object]:
+        batch = tuple(
+            _validate_z_gluon_point(
+                particles,
+                gluon_count=self.gluon_count,
+            )
+            for particles in points
+        )
+        diagnostics = self.compiled.stage_diagnostics(
+            batch,
+            self.model,
+            gluon_count=self.gluon_count,
+        )
+        self.last_runtime_timing = self.compiled.last_timing
+        return diagnostics
 
     def _evaluation_from_amplitudes(
         self,
@@ -851,24 +963,41 @@ class _SharedCompiledSweepEvaluator:
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.table = table
         self.layout = _build_shared_global_parameter_layout(table)
         self._init_common(table)
-        self.stages = tuple(
-            _CompiledCurrentStage(
-                table,
-                layout=self.layout,
-                current_ids=current_ids,
-                stage_index=stage_index,
-                merge_evaluators_strategy=merge_evaluators_strategy,
-                verbose_evaluator_build=verbose_evaluator_build,
-                symbolica_settings=symbolica_settings,
+        stage_id_groups = _shared_current_stage_ids(table)
+        stages: list[_CompiledCurrentStage] = []
+        for stage_index, current_ids in enumerate(stage_id_groups, start=1):
+            _report_progress(
+                progress_callback,
+                stage="compile",
+                item=f"stage {stage_index}/{len(stage_id_groups)}",
             )
-            for stage_index, current_ids in enumerate(
-                _shared_current_stage_ids(table),
-                start=1,
+            stages.append(
+                _CompiledCurrentStage(
+                    table,
+                    layout=self.layout,
+                    current_ids=current_ids,
+                    stage_index=stage_index,
+                    merge_evaluators_strategy=merge_evaluators_strategy,
+                    verbose_evaluator_build=verbose_evaluator_build,
+                    symbolica_settings=symbolica_settings,
+                )
             )
+            _report_progress(
+                progress_callback,
+                stage="compile",
+                item=f"stage {stage_index}/{len(stage_id_groups)}",
+                increment=1,
+            )
+        self.stages = tuple(stages)
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item="amplitude stage",
         )
         self.amplitude_stage = _CompiledAmplitudeStage(
             table,
@@ -876,6 +1005,12 @@ class _SharedCompiledSweepEvaluator:
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+        )
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item="amplitude stage",
+            increment=1,
         )
         self.output_length = len(table.amplitudes)
         self.parameter_count = self.layout.parameter_count
@@ -927,6 +1062,7 @@ class _SharedCompiledSweepEvaluator:
         artifact_dir: Path,
         *,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> "_SharedCompiledSweepEvaluator":
         manifest = _read_evaluator_artifact_manifest(artifact_dir)
         if manifest.get("kind") != "pyamplicol-zgluon-shared-dag-compiled":
@@ -948,26 +1084,46 @@ class _SharedCompiledSweepEvaluator:
         stage_manifests = compiled_manifest.get("stages")
         if not isinstance(stage_manifests, list):
             raise NativeEvaluationError("compiled evaluator artifact has no stages")
-        instance.stages = tuple(
-            _CompiledCurrentStage.from_artifact(
-                table,
-                layout=instance.layout,
-                manifest=stage_manifest,
-                artifact_dir=artifact_dir,
+        stages: list[_CompiledCurrentStage] = []
+        for index, stage_manifest in enumerate(stage_manifests, start=1):
+            _report_progress(
+                progress_callback,
+                stage="load",
+                item=f"stage {index}/{len(stage_manifests)}",
             )
-            for stage_manifest in stage_manifests
-        )
+            stages.append(
+                _CompiledCurrentStage.from_artifact(
+                    table,
+                    layout=instance.layout,
+                    manifest=stage_manifest,
+                    artifact_dir=artifact_dir,
+                )
+            )
+            _report_progress(
+                progress_callback,
+                stage="load",
+                item=f"stage {index}/{len(stage_manifests)}",
+                increment=1,
+            )
+        instance.stages = tuple(stages)
         amplitude_manifest = compiled_manifest.get("amplitude_stage")
         if not isinstance(amplitude_manifest, dict):
             raise NativeEvaluationError(
                 "compiled evaluator artifact has no amplitude stage"
             )
+        _report_progress(progress_callback, stage="load", item="amplitude stage")
         instance.amplitude_stage = _CompiledAmplitudeStage.from_artifact(
             table,
             layout=instance.layout,
             manifest=amplitude_manifest,
             artifact_dir=artifact_dir,
             symbolica_settings=symbolica_settings,
+        )
+        _report_progress(
+            progress_callback,
+            stage="load",
+            item="amplitude stage",
+            increment=1,
         )
         instance.output_length = len(table.amplitudes)
         instance.parameter_count = instance.layout.parameter_count
@@ -1047,6 +1203,51 @@ class _SharedCompiledSweepEvaluator:
         self.last_evaluator_time_s = timing.evaluator_time_s
         self.last_timing = timing
         return raw_sums
+
+    def stage_diagnostics(
+        self,
+        points: Sequence[tuple[ExternalMomentum, ...]],
+        model: AmplicolSMLeadingColorModel,
+        *,
+        gluon_count: int,
+    ) -> dict[str, object]:
+        state_rows, current_rows, timing = self._source_current_rows(
+            points,
+            model,
+            gluon_count=gluon_count,
+        )
+        stages: list[dict[str, object]] = [
+            {
+                "stage": "sources",
+                "output_len": int(current_rows.size),
+                **_complex_array_checksum(current_rows),
+            }
+        ]
+        for stage_index, stage in enumerate(self.stages, start=1):
+            timing += stage.evaluate_and_assign(
+                state_rows,
+                current_rows,
+                self.table,
+            )
+            values = _selected_current_components(
+                current_rows,
+                stage.output_current_ids,
+                stage.output_current_components,
+            )
+            stages.append(
+                {
+                    "stage": stage_index,
+                    "output_len": int(values.size),
+                    **_complex_array_checksum(values),
+                }
+            )
+        self.last_evaluator_time_s = timing.evaluator_time_s
+        self.last_timing = timing
+        return {
+            "points": len(points),
+            "stages": stages,
+            "timing": timing.to_json_dict(),
+        }
 
     def _source_current_rows(
         self,
@@ -1132,6 +1333,7 @@ class _SharedSplitCompiledSweepEvaluator:
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.table = table
         self.layout = _build_shared_split_global_parameter_layout(table)
@@ -1171,27 +1373,40 @@ class _SharedSplitCompiledSweepEvaluator:
             (len(table.currents), 6),
             dtype=np.complex128,
         )
-        self.stages = tuple(
-            _CompiledSplitCurrentStage(
+        stage_id_groups = _shared_current_stage_ids(table)
+        stages: list[_CompiledSplitCurrentStage] = []
+        for stage_index, current_ids in enumerate(stage_id_groups, start=1):
+            _report_progress(
+                progress_callback,
+                stage="compile",
+                item=f"vertices {stage_index}/{len(stage_id_groups)}",
+            )
+            stage = _CompiledSplitCurrentStage(
                 table,
                 layout=self.layout,
                 current_ids=current_ids,
                 stage_index=stage_index,
+                stage_count=len(stage_id_groups),
                 merge_evaluators_strategy=merge_evaluators_strategy,
                 verbose_evaluator_build=verbose_evaluator_build,
                 symbolica_settings=symbolica_settings,
+                progress_callback=progress_callback,
             )
-            for stage_index, current_ids in enumerate(
-                _shared_current_stage_ids(table),
-                start=1,
-            )
-        )
+            stages.append(stage)
+        self.stages = tuple(stages)
+        _report_progress(progress_callback, stage="compile", item="amplitude stage")
         self.amplitude_stage = _CompiledAmplitudeStage(
             table,
             layout=self.layout,
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+        )
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item="amplitude stage",
+            increment=1,
         )
         self.output_length = len(table.amplitudes)
         self.parameter_count = self.layout.parameter_count
@@ -1411,11 +1626,1009 @@ def _read_evaluator_artifact_manifest(artifact_dir: Path) -> dict[str, Any]:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
-def _artifact_path_for_manifest(path: Path, artifact_dir: Path) -> str:
+def _prepare_process_output_directory(output_path: Path) -> None:
+    output_path.mkdir(parents=True, exist_ok=True)
+    for stale_file in output_path.glob("*.evaluator.bin"):
+        stale_file.unlink()
+    for stale_pattern in ("pyamplicol_*.cpp", "libpyamplicol_*"):
+        for stale_file in output_path.glob(stale_pattern):
+            if stale_file.is_file() or stale_file.is_symlink():
+                stale_file.unlink()
+    pycache = output_path / "__pycache__"
+    if pycache.exists():
+        shutil.rmtree(pycache)
+
+
+def _rusticol_backend_settings(
+    evaluator_manifest: dict[str, Any],
+    *,
+    evaluator_manifest_name: str | None,
+) -> dict[str, Any]:
+    metadata = evaluator_manifest.get("metadata")
+    evaluator_settings = (
+        metadata.get("symbolica_evaluator_settings")
+        if isinstance(metadata, dict)
+        else None
+    )
+    compiled = evaluator_manifest.get("compiled")
+    return {
+        "runtime": "rusticol",
+        "compiled_kind": (
+            compiled.get("kind") if isinstance(compiled, dict) else None
+        ),
+        "evaluator_manifest": evaluator_manifest_name,
+        "symbolica_evaluator_settings": (
+            evaluator_settings if isinstance(evaluator_settings, dict) else {}
+        ),
+    }
+
+
+def _rusticol_dependency_fingerprint() -> dict[str, Any]:
+    fingerprint: dict[str, Any] = {
+        "pyamplicol_version": _installed_package_version("pyamplicol"),
+        "rusticol_version": _installed_package_version("rusticol"),
+        "symbolica": _symbolica_runtime_fingerprint(),
+    }
+    manifest_path = (
+        Path(__file__).resolve().parents[2]
+        / "dependencies"
+        / "install_manifest.json"
+    )
+    if manifest_path.exists():
+        try:
+            install_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            fingerprint["install_manifest_error"] = str(exc)
+        else:
+            if isinstance(install_manifest, dict):
+                fingerprint["install_manifest"] = {
+                    key: install_manifest[key]
+                    for key in (
+                        "schema_version",
+                        "dependency_patches",
+                        "rusticol",
+                        "symbolica",
+                        "symbolica_community",
+                    )
+                    if key in install_manifest
+                }
+    return fingerprint
+
+
+def _installed_package_version(name: str) -> str | None:
     try:
-        return os.path.relpath(path, artifact_dir)
+        return importlib_metadata.version(name)
+    except importlib_metadata.PackageNotFoundError:
+        return None
+
+
+def _symbolica_runtime_fingerprint() -> dict[str, Any]:
+    try:
+        import symbolica
+    except Exception as exc:
+        return {
+            "available": False,
+            "error": str(exc),
+        }
+    local_versions = getattr(symbolica, "LOCAL_VERSIONS", None)
+    return {
+        "available": True,
+        "version": getattr(symbolica, "__version__", None),
+        "local_versions": (
+            dict(local_versions) if isinstance(local_versions, dict) else None
+        ),
+    }
+
+
+def _rusticol_helicity_filter_manifest(table: SharedCurrentTable) -> dict[str, Any]:
+    return {
+        "strategy": "shared-current-retained-amplitudes",
+        "retained_amplitude_count": len(table.amplitudes),
+        "amplitudes": [
+            {
+                "index": index,
+                "left_current_id": amplitude.left_id,
+                "right_current_id": amplitude.right_id,
+                "helicities": list(amplitude.helicities),
+                "multiplicity": amplitude.multiplicity,
+                "raw_sum_weight": float(amplitude.multiplicity),
+            }
+            for index, amplitude in enumerate(table.amplitudes)
+        ],
+        "raw_sum_weights": [
+            float(amplitude.multiplicity)
+            for amplitude in table.amplitudes
+        ],
+    }
+
+
+def _rusticol_external_particles_manifest(
+    point: Sequence[ExternalMomentum],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": index + 1,
+            "index": index,
+            "pdg": int(particle.pdg),
+            "role": "initial" if index < 2 else "final",
+            "momentum_slot": index,
+            "momentum_components": ["E", "px", "py", "pz"],
+        }
+        for index, particle in enumerate(point)
+    ]
+
+
+def _rusticol_momentum_conventions_manifest(
+    point: Sequence[ExternalMomentum],
+) -> dict[str, Any]:
+    incoming_labels = [
+        index + 1
+        for index in range(min(2, len(point)))
+    ]
+    final_labels = [
+        index + 1
+        for index in range(2, len(point))
+    ]
+    return {
+        "input_shape": ["batch", len(point), 4],
+        "component_order": ["E", "px", "py", "pz"],
+        "input_momenta": "physical external four-momenta in process order",
+        "incoming_labels": incoming_labels,
+        "final_state_labels": final_labels,
+        "source_current_crossing": {
+            "crossed_incoming_labels": incoming_labels,
+            "operation": "negate four-vector when filling source currents",
+        },
+        "metric": "mostly-minus",
+    }
+
+
+def _rusticol_model_manifest(model: AmplicolSMLeadingColorModel) -> dict[str, Any]:
+    return {
+        "name": model.name,
+        "alpha_s_me_check": model.alpha_s_me_check,
+        "alpha_ew": model.alpha_ew,
+        "mass_z": model.mass(23),
+        "sqrt_s_default": model.sqrt_s,
+        "particles": [
+            {
+                "pdg": particle.pdg,
+                "anti_pdg": particle.anti_pdg,
+                "spin": particle.spin,
+                "dimension": particle.dimension,
+                "color_rep": particle.color_rep,
+                "mass": particle.mass,
+                "width": particle.width,
+                "charge": particle.charge,
+                "weak_isospin": list(particle.weak_isospin),
+                "weak_hypercharge": list(particle.weak_hypercharge),
+            }
+            for particle in sorted(
+                model.particles.values(),
+                key=lambda item: item.pdg,
+            )
+        ],
+        "vertices": [
+            {
+                "kind": vertex.kind,
+                "particles": list(vertex.particles),
+                "coupling": list(vertex.coupling),
+            }
+            for vertex in model.vertices
+        ],
+    }
+
+
+def _write_rusticol_process_artifacts(
+    output_path: Path,
+    *,
+    evaluator_manifest: dict[str, Any],
+    evaluator_manifest_name: str,
+    process: str,
+    gluon_count: int,
+    table: SharedCurrentTable,
+    layout: _SharedGlobalParameterLayout,
+    model: AmplicolSMLeadingColorModel,
+) -> None:
+    validation_points = _rusticol_validation_points(
+        process,
+        gluon_count=gluon_count,
+        model=model,
+    )
+    process_manifest = {
+        "schema_version": 1,
+        "kind": "pyamplicol-rusticol-process",
+        "process": process,
+        "family": "q-qbar-z-gluons-leading-color",
+        "gluon_count": gluon_count,
+        "external_pdg_order": [
+            int(particle.pdg)
+            for particle in validation_points[0]
+        ],
+        "external_particles": _rusticol_external_particles_manifest(
+            validation_points[0]
+        ),
+        "momentum_conventions": _rusticol_momentum_conventions_manifest(
+            validation_points[0]
+        ),
+        "model": _rusticol_model_manifest(model),
+        "normalization": {
+            "color_factor": model.leading_color_factor(
+                particle.pdg for particle in validation_points[0]
+            ),
+            "average_factor": _initial_state_average_factor(
+                particle.pdg for particle in validation_points[0][:2]
+            ),
+            "identical_factor": _final_state_identical_factor(
+                particle.pdg for particle in validation_points[0][2:]
+            ),
+            "coupling_factor": (
+                (4.0 * math.pi * model.alpha_s_me_check) ** gluon_count
+                * (2.0 * 4.0 * math.pi * model.alpha_ew)
+            ),
+        },
+        "helicity_filter": _rusticol_helicity_filter_manifest(table),
+        "layout": _rusticol_layout_manifest(table, layout),
+        "table": _rusticol_table_manifest(table),
+        "evaluator_manifest": evaluator_manifest_name,
+        "compiled": evaluator_manifest["compiled"],
+        "backend_settings": _rusticol_backend_settings(
+            evaluator_manifest,
+            evaluator_manifest_name=evaluator_manifest_name,
+        ),
+        "dependency_fingerprint": _rusticol_dependency_fingerprint(),
+        "metadata": evaluator_manifest.get("metadata", {}),
+    }
+    (output_path / "process_manifest.json").write_text(
+        json.dumps(process_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (output_path / "validation_momenta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "pyamplicol-rusticol-validation-momenta",
+                "process": process,
+                "points": [
+                    [
+                        {
+                            "pdg": int(particle.pdg),
+                            "momentum": [
+                                _decimal_string(component)
+                                for component in particle.momentum
+                            ],
+                        }
+                        for particle in point
+                    ]
+                    for point in validation_points
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (output_path / "check_standalone.py").write_text(
+        _RUSTICOL_STANDALONE_CHECK_SCRIPT,
+        encoding="utf-8",
+    )
+
+
+def _write_zero_gluon_rusticol_process_artifacts(
+    output_path: Path,
+    *,
+    process: str,
+    model: AmplicolSMLeadingColorModel,
+) -> Path:
+    from .symbolic import ZeroGluonSymbolicEvaluator
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    validation_points = _rusticol_validation_points(
+        process,
+        gluon_count=0,
+        model=model,
+    )
+    symbolic = ZeroGluonSymbolicEvaluator(model=model).metadata.to_json_dict()
+    parameter_names = list(symbolic["parameter_names"])
+    state_dir = output_path / "zero_gluon"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_path = state_dir / "evaluator.bin"
+    state_path.write_bytes(base64.b64decode(str(symbolic["evaluator_state_b64"])))
+    pdgs = tuple(particle.pdg for particle in validation_points[0])
+    z_left, z_right = model.z_fermion_coupling(abs(pdgs[0]))
+    process_manifest = {
+        "schema_version": 1,
+        "kind": "pyamplicol-rusticol-process",
+        "process": process,
+        "family": "q-qbar-z-gluons-leading-color",
+        "gluon_count": 0,
+        "external_pdg_order": [int(particle.pdg) for particle in validation_points[0]],
+        "external_particles": _rusticol_external_particles_manifest(
+            validation_points[0]
+        ),
+        "momentum_conventions": _rusticol_momentum_conventions_manifest(
+            validation_points[0]
+        ),
+        "model": _rusticol_model_manifest(model),
+        "normalization": {
+            "color_factor": model.leading_color_factor(pdgs),
+            "average_factor": _initial_state_average_factor(pdgs[:2]),
+            "identical_factor": _final_state_identical_factor(
+                particle.pdg for particle in validation_points[0][2:]
+            ),
+            "coupling_factor": 2.0 * 4.0 * math.pi * model.alpha_ew,
+        },
+        "helicity_filter": {
+            "strategy": "zero-gluon-symbolic-scalar",
+            "retained_amplitude_count": 1,
+            "amplitudes": [],
+            "raw_sum_weights": [1.0],
+        },
+        "layout": {
+            "parameter_count": len(parameter_names),
+            "current_offsets": [],
+            "momentum_offsets": {},
+            "real_valued_inputs": list(range(len(parameter_names))),
+            "momentum_offsets_and_labels": [],
+        },
+        "table": {
+            "currents": [],
+            "sources": [],
+            "interactions": [],
+            "interactions_by_result": [],
+            "amplitudes": [],
+        },
+        "evaluator_manifest": None,
+        "compiled": {
+            "kind": "zero-gluon-symbolic-scalar",
+            "stages": [],
+            "amplitude_stage": {
+                "kind": "amplitude-stage",
+                "output_length": 1,
+                "raw_sum_weights": [1.0],
+                "amplitude_evaluator": None,
+                "raw_sum_evaluator": None,
+            },
+            "zero_gluon": {
+                "parameter_names": parameter_names,
+                "evaluator_state_path": _artifact_path_for_manifest(
+                    state_path,
+                    output_path,
+                ),
+                "z_left": z_left,
+                "z_right": z_right,
+            },
+        },
+        "backend_settings": {
+            "runtime": "rusticol",
+            "compiled_kind": "zero-gluon-symbolic-scalar",
+            "evaluator_manifest": None,
+            "symbolica_evaluator_settings": {
+                "backend": "symbolica-evaluator-state",
+            },
+        },
+        "dependency_fingerprint": _rusticol_dependency_fingerprint(),
+        "metadata": {
+            "kernel": "symbolica-zero-gluon",
+            "symbolica_evaluator_settings": {
+                "backend": "symbolica-evaluator-state",
+            },
+            "symbolic_scalar_evaluator": {
+                key: value
+                for key, value in symbolic.items()
+                if key != "evaluator_state_b64"
+            },
+        },
+    }
+    manifest_path = output_path / "process_manifest.json"
+    manifest_path.write_text(
+        json.dumps(process_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (output_path / "validation_momenta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "pyamplicol-rusticol-validation-momenta",
+                "process": process,
+                "points": [
+                    [
+                        {
+                            "pdg": int(particle.pdg),
+                            "momentum": [
+                                _decimal_string(component)
+                                for component in particle.momentum
+                            ],
+                        }
+                        for particle in point
+                    ]
+                    for point in validation_points
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (output_path / "check_standalone.py").write_text(
+        _RUSTICOL_STANDALONE_CHECK_SCRIPT,
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def _rusticol_validation_points(
+    process: str,
+    *,
+    gluon_count: int,
+    model: AmplicolSMLeadingColorModel,
+) -> tuple[tuple[ExternalMomentum, ...], ...]:
+    native = LeadingColorZJetsNativeEvaluator(model)
+    if gluon_count == 0:
+        return (
+            native.canonical_zero_gluon_point(
+                process,
+                sqrt_s=1000.0,
+            ),
+        )
+    return (
+        native.canonical_z_gluon_point(
+            process,
+            gluon_count=gluon_count,
+            sqrt_s=1000.0,
+        ),
+    )
+
+
+def _rusticol_layout_manifest(
+    table: SharedCurrentTable,
+    layout: _SharedGlobalParameterLayout,
+) -> dict[str, Any]:
+    return {
+        "parameter_count": layout.parameter_count,
+        "current_offsets": list(layout.current_offsets),
+        "momentum_offsets": {
+            str(current_id): int(offset)
+            for current_id, offset in sorted(layout.momentum_offsets.items())
+        },
+        "real_valued_inputs": list(layout.real_valued_inputs),
+        "momentum_offsets_and_labels": [
+            {
+                "offset": int(offset),
+                "labels": list(labels),
+            }
+            for offset, labels in _unique_momentum_offsets_and_labels(table, layout)
+        ],
+    }
+
+
+def _rusticol_table_manifest(table: SharedCurrentTable) -> dict[str, Any]:
+    return {
+        "currents": [
+            {
+                "id": current.id,
+                "pdg": current.pdg,
+                "external_labels": list(current.external_labels),
+                "chirality": current.chirality,
+                "ext_source_bits": current.ext_source_bits,
+                "source_ids": list(current.source_ids),
+                "is_source": current.is_source,
+                "needs_propagator": current.needs_propagator,
+                "dimension": current.dimension,
+            }
+            for current in table.currents
+        ],
+        "sources": [
+            {
+                "current_id": source.current_id,
+                "leg_label": source.leg_label,
+                "helicity": source.helicity,
+                "physical_helicity": source.physical_helicity,
+                "chirality": source.chirality,
+                "source_bit": source.source_bit,
+            }
+            for source in table.sources
+        ],
+        "interactions": [
+            {
+                "id": interaction.id,
+                "vertex_kind": interaction.vertex_kind,
+                "left_id": interaction.left_id,
+                "right_id": interaction.right_id,
+                "result_id": interaction.result_id,
+                "coupling": list(interaction.coupling),
+            }
+            for interaction in table.interactions
+        ],
+        "interactions_by_result": [
+            list(interaction_ids)
+            for interaction_ids in table.interactions_by_result
+        ],
+        "amplitudes": [
+            {
+                "left_id": amplitude.left_id,
+                "right_id": amplitude.right_id,
+                "helicities": list(amplitude.helicities),
+                "multiplicity": amplitude.multiplicity,
+            }
+            for amplitude in table.amplitudes
+        ],
+    }
+
+
+def _shared_current_table_from_rusticol_manifest(
+    manifest: dict[str, Any],
+) -> SharedCurrentTable:
+    table_payload = manifest.get("table")
+    if not isinstance(table_payload, dict):
+        raise NativeEvaluationError("process manifest is missing current-table metadata")
+
+    current_payloads = table_payload.get("currents")
+    if not isinstance(current_payloads, list):
+        raise NativeEvaluationError("process manifest table is missing currents")
+    currents: list[SharedCurrentNode] = []
+    for expected_id, payload in enumerate(current_payloads):
+        if not isinstance(payload, dict):
+            raise NativeEvaluationError("current table entry is not a JSON object")
+        current_id = int(payload["id"])
+        if current_id != expected_id:
+            raise NativeEvaluationError(
+                "current table ids must be contiguous and ordered in process manifest"
+            )
+        key = CurrentKey(
+            int(payload["pdg"]),
+            tuple(int(label) for label in payload["external_labels"]),
+            int(payload["chirality"]),
+        )
+        currents.append(
+            SharedCurrentNode(
+                id=current_id,
+                key=key,
+                ext_source_bits=int(payload["ext_source_bits"]),
+                source_ids=tuple(int(source_id) for source_id in payload["source_ids"]),
+                is_source=bool(payload["is_source"]),
+                needs_propagator=bool(payload["needs_propagator"]),
+                dimension=int(payload["dimension"]),
+            )
+        )
+
+    source_payloads = table_payload.get("sources")
+    if not isinstance(source_payloads, list):
+        raise NativeEvaluationError("process manifest table is missing sources")
+    sources = tuple(
+        SharedSourceCurrent(
+            current_id=int(payload["current_id"]),
+            leg_label=int(payload["leg_label"]),
+            helicity=int(payload["helicity"]),
+            physical_helicity=int(payload["physical_helicity"]),
+            chirality=int(payload["chirality"]),
+            source_bit=int(payload["source_bit"]),
+        )
+        for payload in source_payloads
+        if isinstance(payload, dict)
+    )
+    if len(sources) != len(source_payloads):
+        raise NativeEvaluationError("source table entry is not a JSON object")
+
+    interaction_payloads = table_payload.get("interactions")
+    if not isinstance(interaction_payloads, list):
+        raise NativeEvaluationError("process manifest table is missing interactions")
+    interactions: list[SharedInteractionNode] = []
+    for expected_id, payload in enumerate(interaction_payloads):
+        if not isinstance(payload, dict):
+            raise NativeEvaluationError("interaction table entry is not a JSON object")
+        interaction_id = int(payload["id"])
+        if interaction_id != expected_id:
+            raise NativeEvaluationError(
+                "interaction table ids must be contiguous and ordered in process manifest"
+            )
+        left_id = int(payload["left_id"])
+        right_id = int(payload["right_id"])
+        result_id = int(payload["result_id"])
+        coupling = payload.get("coupling")
+        if not isinstance(coupling, list) or len(coupling) != 2:
+            raise NativeEvaluationError(
+                "interaction table entry has invalid coupling metadata"
+            )
+        interactions.append(
+            SharedInteractionNode(
+                id=interaction_id,
+                vertex_kind=int(payload["vertex_kind"]),
+                left_id=left_id,
+                right_id=right_id,
+                result_id=result_id,
+                left=currents[left_id].key,
+                right=currents[right_id].key,
+                result=currents[result_id].key,
+                coupling=(float(coupling[0]), float(coupling[1])),
+            )
+        )
+
+    interactions_by_result_payload = table_payload.get("interactions_by_result")
+    if not isinstance(interactions_by_result_payload, list):
+        raise NativeEvaluationError(
+            "process manifest table is missing interactions_by_result"
+        )
+    interactions_by_result = tuple(
+        tuple(int(interaction_id) for interaction_id in payload)
+        for payload in interactions_by_result_payload
+        if isinstance(payload, list)
+    )
+    if len(interactions_by_result) != len(interactions_by_result_payload):
+        raise NativeEvaluationError("interactions_by_result entry is not a list")
+    if len(interactions_by_result) != len(currents):
+        raise NativeEvaluationError(
+            "interactions_by_result length does not match current table length"
+        )
+
+    amplitude_payloads = table_payload.get("amplitudes")
+    if not isinstance(amplitude_payloads, list):
+        raise NativeEvaluationError("process manifest table is missing amplitudes")
+    amplitudes = tuple(
+        SharedAmplitudeRecord(
+            left_id=int(payload["left_id"]),
+            right_id=int(payload["right_id"]),
+            helicities=tuple(int(helicity) for helicity in payload["helicities"]),
+            multiplicity=int(payload["multiplicity"]),
+        )
+        for payload in amplitude_payloads
+        if isinstance(payload, dict)
+    )
+    if len(amplitudes) != len(amplitude_payloads):
+        raise NativeEvaluationError("amplitude table entry is not a JSON object")
+
+    return SharedCurrentTable(
+        currents=tuple(currents),
+        sources=sources,
+        interactions=tuple(interactions),
+        interactions_by_result=interactions_by_result,
+        amplitudes=amplitudes,
+    )
+
+
+def _decimal_string(value: float) -> str:
+    return format(float(value), ".17g")
+
+
+_RUSTICOL_STANDALONE_CHECK_SCRIPT = r'''#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import math
+import statistics
+import sys
+import time
+from decimal import Decimal
+from pathlib import Path
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - standalone convenience path
+    np = None
+
+
+class Color:
+    enabled = sys.stdout.isatty()
+    cyan = "\033[36m" if enabled else ""
+    green = "\033[32m" if enabled else ""
+    yellow = "\033[33m" if enabled else ""
+    red = "\033[31m" if enabled else ""
+    bold = "\033[1m" if enabled else ""
+    dim = "\033[2m" if enabled else ""
+    reset = "\033[0m" if enabled else ""
+
+
+def style(text, color: str):
+    return f"{getattr(Color, color)}{text}{Color.reset}" if Color.enabled else str(text)
+
+
+def format_float(value, digits: int = 4):
+    return f"{float(value):.{digits}g}"
+
+
+def format_measurement(value, error=None, unit: str = ""):
+    formatted = format_float(value)
+    if error is not None:
+        formatted = f"{formatted} +/- {format_float(error, 2)}"
+    return f"{formatted} {unit}".strip()
+
+
+def render_table(title: str, rows):
+    columns = ("Metric", "Value")
+    string_rows = [(str(metric), str(value), row_style) for metric, value, row_style in rows]
+    width_metric = max([len(columns[0])] + [len(metric) for metric, _, _ in string_rows])
+    width_value = max([len(columns[1])] + [len(value) for _, value, _ in string_rows])
+    border = f"+-{'-' * width_metric}-+-{'-' * width_value}-+"
+    lines = [style(title, "bold"), border]
+    lines.append(
+        "| "
+        + style(columns[0].ljust(width_metric), "bold")
+        + " | "
+        + style(columns[1].rjust(width_value), "bold")
+        + " |"
+    )
+    lines.append(border)
+    for metric, value, row_style in string_rows:
+        metric_cell = metric.ljust(width_metric)
+        value_cell = value.rjust(width_value)
+        if row_style:
+            metric_cell = style(metric_cell, row_style)
+            value_cell = style(value_cell, row_style)
+        lines.append(f"| {metric_cell} | {value_cell} |")
+    lines.append(border)
+    return "\n".join(lines)
+
+
+def print_table(title: str, rows):
+    print(render_table(title, rows))
+
+
+def rusticol_candidate_paths(root: Path, explicit_folder: Path | None = None):
+    seeds = []
+    if explicit_folder is not None:
+        seeds.append(explicit_folder.expanduser())
+    seeds.extend([root, Path.cwd(), *root.parents])
+
+    seen = set()
+    for seed in seeds:
+        for candidate in expand_rusticol_seed(seed):
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                resolved = candidate
+            key = str(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield resolved
+
+
+def expand_rusticol_seed(seed: Path):
+    yield seed
+    if seed.name == "rusticol":
+        yield seed.parent
+    for pattern in (
+        "lib/python*/site-packages",
+        ".venv/lib/python*/site-packages",
+        "dependencies/.venv/lib/python*/site-packages",
+        "pyAmpliCol/dependencies/.venv/lib/python*/site-packages",
+    ):
+        yield from seed.glob(pattern)
+
+
+def import_rusticol(root: Path, rusticol_folder: Path | None):
+    errors = []
+    searched = []
+    for candidate in rusticol_candidate_paths(root, rusticol_folder):
+        if not candidate.exists():
+            continue
+        sys.path.insert(0, str(candidate))
+        searched.append(candidate)
+        loaded = False
+        try:
+            import rusticol
+
+            loaded = True
+            return rusticol
+        except ModuleNotFoundError as exc:
+            if exc.name != "rusticol":
+                raise
+            errors.append(str(exc))
+        finally:
+            if not loaded:
+                with contextlib.suppress(ValueError):
+                    sys.path.remove(str(candidate))
+
+    print(
+        "Could not import rusticol. Re-run with --rusticol-folder pointing to "
+        "the pyAmpliCol managed venv, a site-packages directory, or the "
+        "rusticol package directory.",
+        file=sys.stderr,
+    )
+    if searched:
+        print("Searched import roots:", file=sys.stderr)
+        for candidate in searched:
+            print(f"  - {candidate}", file=sys.stderr)
+    else:
+        print("No existing candidate import roots were found.", file=sys.stderr)
+    if errors:
+        print(f"Last import error: {errors[-1]}", file=sys.stderr)
+    return None
+
+
+def load_points(root: Path, precision: int):
+    payload = json.loads((root / "validation_momenta.json").read_text())
+    points = [
+        [[Decimal(component) for component in particle["momentum"]] for particle in point]
+        for point in payload["points"]
+    ]
+    if precision == 16 and np is not None:
+        return np.asarray(points, dtype=np.float64)
+    if precision == 16:
+        return [[[float(component) for component in particle] for particle in point] for point in points]
+    return points
+
+
+def repeat_points(points, count: int):
+    if np is not None and hasattr(points, "shape"):
+        reps = int(math.ceil(count / max(int(points.shape[0]), 1)))
+        return np.tile(points, (reps, 1, 1))[:count]
+    reps = int(math.ceil(count / max(len(points), 1)))
+    return (points * reps)[:count]
+
+
+def evaluate(runtime, points, precision: int):
+    if precision == 16:
+        return runtime.evaluate(points)
+    return runtime.evaluate_with_prec(points, precision)
+
+
+def profile(runtime, points, precision: int, target_s: float):
+    estimate_points = repeat_points(points, 16)
+    t0 = time.perf_counter()
+    evaluate(runtime, estimate_points, precision)
+    estimate_s = max(time.perf_counter() - t0, 1.0e-9)
+    per_point = estimate_s / 16.0
+    sample_count = max(16, int(target_s / per_point))
+    block_count = 8
+    block_size = max(1, sample_count // block_count)
+    samples = []
+    breakdown = None
+    for _ in range(block_count):
+        batch = repeat_points(points, block_size)
+        t0 = time.perf_counter()
+        profile_payload = runtime.profile(batch, precision=precision)
+        elapsed = time.perf_counter() - t0
+        samples.append(elapsed / block_size)
+        breakdown = profile_payload
+    mean = statistics.fmean(samples)
+    stderr = statistics.stdev(samples) / math.sqrt(len(samples)) if len(samples) > 1 else 0.0
+    return {
+        "samples": block_count * block_size,
+        "block_count": block_count,
+        "block_size": block_size,
+        "mean_us_per_point": mean * 1.0e6,
+        "stderr_us_per_point": stderr * 1.0e6,
+        "last_profile": breakdown,
+    }
+
+
+def profile_breakdown_rows(payload):
+    last_profile = payload.get("last_profile")
+    if not isinstance(last_profile, dict):
+        return []
+    points = max(int(last_profile.get("points", payload.get("block_size", 1))), 1)
+    rows = []
+    labels = {
+        "source_fill_time_s": "Source fill",
+        "parameter_pack_time_s": "Parameter pack",
+        "stage_evaluator_time_s": "Stage evaluators",
+        "amplitude_evaluator_time_s": "Amplitude evaluator",
+        "me_reduction_time_s": "ME reduction",
+        "output_transfer_time_s": "Output transfer",
+        "wall_time_s": "Profile wall",
+    }
+    for key, label in labels.items():
+        value = last_profile.get(key)
+        if not isinstance(value, (int, float)):
+            continue
+        row_style = "cyan" if key in {"stage_evaluator_time_s", "amplitude_evaluator_time_s"} else None
+        rows.append((label, format_measurement(float(value) * 1.0e6 / points, unit="us/point"), row_style))
+    return rows
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Standalone rusticol process check")
+    parser.add_argument("--precision", type=int, default=16)
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--target-runtime", type=float, default=10.0)
+    parser.add_argument(
+        "--rusticol-folder",
+        type=Path,
+        help=(
+            "Optional rusticol location. Accepts the pyAmpliCol managed venv, "
+            "a site-packages directory, or the rusticol package directory."
+        ),
+    )
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parent
+    rusticol = import_rusticol(root, args.rusticol_folder)
+    if rusticol is None:
+        return 1
+
+    manifest = json.loads((root / "process_manifest.json").read_text())
+    runtime = rusticol.Runtime.load(str(root))
+    points = load_points(root, args.precision)
+    values = evaluate(runtime, points, args.precision)
+
+    backend = manifest.get("backend_settings", {})
+    helicity_filter = manifest.get("helicity_filter", {})
+    print_table(
+        "Rusticol Standalone Check",
+        [
+            ("Process", manifest["process"], "bold"),
+            ("family", manifest.get("family"), None),
+            ("gluons", manifest.get("gluon_count"), None),
+            (
+                "backend",
+                backend.get("compiled_kind") if isinstance(backend, dict) else None,
+                None,
+            ),
+            (
+                "retained amplitudes",
+                helicity_filter.get("retained_amplitude_count")
+                if isinstance(helicity_filter, dict)
+                else None,
+                None,
+            ),
+            ("precision", args.precision, None),
+            ("points", len(values), None),
+            ("matrix element(s)", values, "green"),
+        ],
+    )
+
+    if args.profile:
+        payload = profile(runtime, points, args.precision, args.target_runtime)
+        print_table(
+            "Rusticol Timing Summary",
+            [
+                (
+                    "Wall runtime",
+                    format_measurement(
+                        payload["mean_us_per_point"],
+                        payload["stderr_us_per_point"],
+                        unit="us/point",
+                    ),
+                    "green",
+                ),
+                (
+                    "Samples",
+                    f"{payload['samples']} ({payload['block_count']} x {payload['block_size']})",
+                    None,
+                ),
+                ("Target runtime", format_measurement(args.target_runtime, unit="s"), None),
+            ],
+        )
+        rows = profile_breakdown_rows(payload)
+        if rows:
+            print_table("Rusticol Runtime Breakdown", rows)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def _artifact_path_for_manifest(path: Path, artifact_dir: Path) -> str:
+    artifact_root = artifact_dir.resolve()
+    source_path = path.expanduser()
+    source_resolved = source_path.resolve()
+    try:
+        source_resolved.relative_to(artifact_root)
     except ValueError:
-        return str(path)
+        if source_path.exists():
+            target_dir = artifact_dir / "compiled" / "repackaged"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / source_path.name
+            if source_resolved != target.resolve():
+                shutil.copy2(source_path, target)
+            source_path = target
+        else:
+            source_path = source_resolved
+    try:
+        return os.path.relpath(source_path, artifact_dir)
+    except ValueError:
+        return str(source_path)
+
+
+def _artifact_subdirectory(artifact_dir: Path, name: str) -> Path:
+    directory = artifact_dir / name
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def _artifact_path_from_manifest(path: str, artifact_dir: Path) -> Path:
@@ -1755,11 +2968,18 @@ class _CompiledSplitCurrentStage:
         layout: _SharedGlobalParameterLayout,
         current_ids: tuple[int, ...],
         stage_index: int,
+        stage_count: int,
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         interaction_ids = _shared_stage_interaction_ids(table, current_ids)
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item=f"vertices {stage_index}/{stage_count}",
+        )
         self.vertex_stage = _CompiledVertexStage(
             table,
             layout=layout,
@@ -1769,6 +2989,17 @@ class _CompiledSplitCurrentStage:
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
         )
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item=f"vertices {stage_index}/{stage_count}",
+            increment=1,
+        )
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item=f"currents {stage_index}/{stage_count}",
+        )
         self.combine_stage = _CompiledCurrentCombineStage(
             table,
             layout=layout,
@@ -1777,6 +3008,12 @@ class _CompiledSplitCurrentStage:
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+        )
+        _report_progress(
+            progress_callback,
+            stage="compile",
+            item=f"currents {stage_index}/{stage_count}",
+            increment=1,
         )
         self.current_ids = current_ids
         self.output_length = self.vertex_stage.output_length + self.combine_stage.output_length
@@ -2283,6 +3520,7 @@ def _compile_symbolica_outputs(
     *,
     merge_evaluators_strategy: bool,
     verbose_evaluator_build: bool,
+    aliases: Sequence[tuple[Any, Any]] = (),
     real_params: Sequence[int] = (),
     symbolica_settings: SymbolicaEvaluatorSettings | None = None,
     jit_compile: bool = True,
@@ -2314,6 +3552,7 @@ def _compile_symbolica_outputs(
                 params,
                 merge_evaluators_strategy=merge_evaluators_strategy,
                 verbose_evaluator_build=verbose_evaluator_build,
+                aliases=aliases,
                 real_params=real_params,
                 symbolica_settings=unchunked_settings,
                 jit_compile=jit_compile,
@@ -2339,9 +3578,11 @@ def _compile_symbolica_outputs(
         verbose=verbose_evaluator_build,
         jit_compile=jit_compile,
     )
+    alias_kwargs = {"aliases": list(aliases)} if aliases else {}
     if merge_evaluators_strategy:
         evaluator = outputs[0].evaluator(
             params,
+            **alias_kwargs,
             **evaluator_kwargs,
         )
         for expression in _progress_outputs(
@@ -2350,6 +3591,7 @@ def _compile_symbolica_outputs(
         ):
             other = expression.evaluator(
                 params,
+                **alias_kwargs,
                 **evaluator_kwargs,
             )
             evaluator.merge(
@@ -2363,6 +3605,10 @@ def _compile_symbolica_outputs(
         if real_params:
             evaluator.set_real_params(
                 list(real_params),
+                sqrt_real=settings.real_param_sqrt_real,
+                log_real=settings.real_param_log_real,
+                powf_real=settings.real_param_powf_real,
+                real_if_args_real=settings.real_param_real_if_args_real,
                 verbose=verbose_evaluator_build,
             )
         return _finalize_symbolica_evaluator(
@@ -2378,11 +3624,16 @@ def _compile_symbolica_outputs(
     evaluator = Expression.evaluator_multiple(
         outputs,
         params,
+        **alias_kwargs,
         **evaluator_kwargs,
     )
     if real_params:
         evaluator.set_real_params(
             list(real_params),
+            sqrt_real=settings.real_param_sqrt_real,
+            log_real=settings.real_param_log_real,
+            powf_real=settings.real_param_powf_real,
+            real_if_args_real=settings.real_param_real_if_args_real,
             verbose=verbose_evaluator_build,
         )
     return _finalize_symbolica_evaluator(
@@ -2496,7 +3747,13 @@ def _finalize_symbolica_evaluator(
     output_len: int,
 ) -> Any:
     if settings.backend == "jit":
-        return evaluator
+        return _JITSymbolicaEvaluatorAdapter(
+            evaluator,
+            settings,
+            label,
+            input_len=input_len,
+            output_len=output_len,
+        )
     if settings.backend in ("compiled-complex", "compiled-complex-4x"):
         return _CompiledComplexEvaluatorAdapter(
             evaluator,
@@ -2508,6 +3765,79 @@ def _finalize_symbolica_evaluator(
     raise NativeEvaluationError(
         f"unsupported symbolica evaluator backend: {settings.backend}"
     )
+
+
+class _JITSymbolicaEvaluatorAdapter:
+    def __init__(
+        self,
+        evaluator: Any,
+        settings: SymbolicaEvaluatorSettings,
+        label: str,
+        *,
+        input_len: int,
+        output_len: int,
+    ) -> None:
+        self.input_len = int(input_len)
+        self.output_len = int(output_len)
+        self.backend = settings.backend
+        self.label = _safe_symbol_name(label)
+        self._source_evaluator = evaluator
+        self.evaluator_state_path: Path | None = None
+
+    def evaluate_complex(self, parameter_rows: Any) -> Any:
+        return self._source_evaluator.evaluate_complex(parameter_rows)
+
+    def evaluate(self, parameter_rows: Any) -> Any:
+        return self._source_evaluator.evaluate(parameter_rows)
+
+    def _evaluate_complex_prepared(self, parameter_rows: np.ndarray) -> Any:
+        return self._source_evaluator.evaluate_complex(parameter_rows)
+
+    def materialize(self) -> None:
+        self._ensure_jit_compiled()
+
+    def _ensure_jit_compiled(self) -> None:
+        # The Symbolica saved evaluator state includes a JIT payload only after
+        # the complex evaluator has been called at least once.
+        dummy = np.ones((1, self.input_len), dtype=np.complex128)
+        self._source_evaluator.evaluate_complex(dummy)
+
+    @classmethod
+    def from_artifact(
+        cls,
+        manifest: dict[str, Any],
+        artifact_dir: Path,
+    ) -> "_JITSymbolicaEvaluatorAdapter":
+        from symbolica import Evaluator
+
+        instance = cls.__new__(cls)
+        instance.input_len = int(manifest["input_len"])
+        instance.output_len = int(manifest["output_len"])
+        instance.backend = str(manifest["backend"])
+        instance.label = str(manifest.get("label", "jit_symbolica_evaluator"))
+        instance.evaluator_state_path = _artifact_path_from_manifest(
+            str(manifest["evaluator_state_path"]),
+            artifact_dir,
+        )
+        instance._source_evaluator = Evaluator.load(
+            instance.evaluator_state_path.read_bytes()
+        )
+        return instance
+
+    def artifact_manifest(self, artifact_dir: Path) -> dict[str, Any]:
+        self._ensure_jit_compiled()
+        evaluator_dir = _artifact_subdirectory(artifact_dir, "evaluators")
+        path = evaluator_dir / f"{self.label}_{uuid.uuid4().hex}.evaluator.bin"
+        path.write_bytes(self._source_evaluator.save())
+        self.evaluator_state_path = path
+        return {
+            "kind": "jit-symbolica-evaluator",
+            "backend": self.backend,
+            "label": self.label,
+            "input_len": self.input_len,
+            "output_len": self.output_len,
+            "evaluator_state_path": _artifact_path_for_manifest(path, artifact_dir),
+        }
 
 
 class _CompiledComplexEvaluatorAdapter:
@@ -2540,6 +3870,7 @@ class _CompiledComplexEvaluatorAdapter:
             if settings.backend == "compiled-complex-4x"
             else "complex"
         )
+        self._source_evaluator = evaluator
         if settings.compiled_output_dir is None:
             self._tmpdir: tempfile.TemporaryDirectory[str] | None = (
                 tempfile.TemporaryDirectory(prefix="pyamplicol-symbolica-")
@@ -2590,6 +3921,7 @@ class _CompiledComplexEvaluatorAdapter:
         instance.output_len = int(manifest["output_len"])
         instance.backend = str(manifest["backend"])
         instance.number_type = str(manifest["number_type"])
+        instance._source_evaluator = None
         instance.source_path = _artifact_path_from_manifest(
             str(manifest["source_path"]),
             artifact_dir,
@@ -2756,6 +4088,8 @@ def _load_symbolica_evaluator_artifact(
     if not isinstance(manifest, dict):
         raise NativeEvaluationError("compiled evaluator artifact entry is invalid")
     kind = manifest.get("kind")
+    if kind == "jit-symbolica-evaluator":
+        return _JITSymbolicaEvaluatorAdapter.from_artifact(manifest, artifact_dir)
     if kind == "compiled-complex-evaluator":
         return _CompiledComplexEvaluatorAdapter.from_artifact(manifest, artifact_dir)
     if kind == "chunked-symbolica-evaluator":
@@ -2783,14 +4117,56 @@ def _assign_complex_outputs(
     target_rows[:, output_ids, output_components] = evaluated[:, output_columns]
 
 
+def _selected_current_components(
+    current_rows: np.ndarray,
+    output_ids: np.ndarray,
+    output_components: np.ndarray,
+) -> np.ndarray:
+    if output_ids.size == 0:
+        return np.empty((current_rows.shape[0], 0), dtype=np.complex128)
+    return current_rows[:, output_ids, output_components]
+
+
+def _complex_array_checksum(values: np.ndarray) -> dict[str, float]:
+    array = np.asarray(values, dtype=np.complex128)
+    if array.size == 0:
+        return {
+            "sum_re": 0.0,
+            "sum_im": 0.0,
+            "sum_abs2": 0.0,
+            "max_abs": 0.0,
+        }
+    return {
+        "sum_re": float(np.sum(array.real)),
+        "sum_im": float(np.sum(array.imag)),
+        "sum_abs2": float(np.sum(array.real * array.real + array.imag * array.imag)),
+        "max_abs": float(np.max(np.abs(array))),
+    }
+
+
 def _weighted_abs2_sums(
     evaluated: ComplexOutput,
     weights: np.ndarray,
     output_length: int,
 ) -> tuple[float, ...]:
+    return tuple(
+        float(value)
+        for value in _weighted_abs2_sums_array(
+            evaluated,
+            weights,
+            output_length,
+        ).tolist()
+    )
+
+
+def _weighted_abs2_sums_array(
+    evaluated: ComplexOutput,
+    weights: np.ndarray,
+    output_length: int,
+) -> np.ndarray:
     if isinstance(evaluated, tuple):
         if not evaluated:
-            return ()
+            return np.empty(0, dtype=np.float64)
         raw_sums = np.zeros(evaluated[0].shape[0], dtype=np.float64)
         offset = 0
         for chunk in evaluated:
@@ -2801,10 +4177,10 @@ def _weighted_abs2_sums(
             squared = amplitudes.real * amplitudes.real + amplitudes.imag * amplitudes.imag
             raw_sums += squared @ weights[offset : offset + width]
             offset += width
-        return tuple(float(value) for value in raw_sums.tolist())
+        return raw_sums
     amplitudes = evaluated[:, :output_length]
     squared = amplitudes.real * amplitudes.real + amplitudes.imag * amplitudes.imag
-    return tuple(float(value) for value in np.dot(squared, weights).tolist())
+    return np.dot(squared, weights)
 
 
 def _safe_symbol_name(value: str) -> str:
@@ -3053,6 +4429,7 @@ def _build_shared_helicity_current_table(
     model: AmplicolSMLeadingColorModel,
     *,
     gluon_count: int,
+    progress_callback: ProgressCallback | None = None,
 ) -> SharedCurrentTable:
     """Build an AmpliCol-style imode=1 current table for q q~ -> Z+n gluons.
 
@@ -3133,6 +4510,12 @@ def _build_shared_helicity_current_table(
                 chirality=chirality,
                 source_bit=source_bit,
             )
+        )
+        _report_progress(
+            progress_callback,
+            stage="recursion",
+            item=f"source leg {leg_label}",
+            increment=1,
         )
         return current_id
 
@@ -3237,6 +4620,12 @@ def _build_shared_helicity_current_table(
             end = start + length
             labels = gluon_labels[start:end]
             for helicities in product((-1, 1), repeat=length):
+                _report_progress(
+                    progress_callback,
+                    stage="recursion",
+                    item=f"gluon L{length} {start + 1}-{end}",
+                    increment=1,
+                )
                 if length < gluon_count:
                     first_left = gluon_currents[(start, start + 1, helicities[:1])]
                     first_right = gluon_currents[(start + 1, end, helicities[1:])]
@@ -3293,6 +4682,12 @@ def _build_shared_helicity_current_table(
         for end in range(1, gluon_count + 1):
             labels = (2, *gluon_labels[:end])
             for helicities in product((-1, 1), repeat=end):
+                _report_progress(
+                    progress_callback,
+                    stage="recursion",
+                    item=f"quark g{end}/{gluon_count}",
+                    increment=1,
+                )
                 first_left = quark_without_z[(chirality, 0, ())]
                 first_right = gluon_currents[(0, end, helicities)]
                 result_id = add_current(
@@ -3314,6 +4709,12 @@ def _build_shared_helicity_current_table(
             for helicities in product((-1, 1), repeat=end):
                 without_z_id = quark_without_z[(chirality, end, helicities)]
                 for z_helicity, z_id in z_sources.items():
+                    _report_progress(
+                        progress_callback,
+                        stage="recursion",
+                        item=f"quark+Z g{end}/{gluon_count}",
+                        increment=1,
+                    )
                     result_id = add_current(
                         CurrentKey(quark_current_pdg, labels, chirality),
                         source_ids=merge_source_ids(without_z_id, z_id),
@@ -3339,6 +4740,12 @@ def _build_shared_helicity_current_table(
         anti_id = anti_source_by_physical[physical_quark_helicity]
         for z_helicity in (-1, 0, 1):
             for gluon_helicities in product((-1, 1), repeat=gluon_count):
+                _report_progress(
+                    progress_callback,
+                    stage="recursion",
+                    item="amplitude closure",
+                    increment=1,
+                )
                 amplitudes.append(
                     SharedAmplitudeRecord(
                         left_id=quark_with_z[

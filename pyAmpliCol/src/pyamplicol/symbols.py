@@ -16,6 +16,11 @@ class SymbolRegistry:
 
         return S(f"{self.namespace}::{name}")
 
+    def real_symbol(self, name: str) -> Any:
+        from symbolica import S
+
+        return S(f"{self.namespace}::{name}", is_real=True)
+
     def parameter(self, name: str) -> Any:
         return self.symbol(f"param::{name}")
 

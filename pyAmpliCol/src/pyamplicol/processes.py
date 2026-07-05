@@ -268,7 +268,7 @@ class ProcessEnumerator:
         self._process_order_to_index: dict[tuple[ProcessTuple, OrderTuple], int] = {}
 
     def parse(self, process_string: str) -> ParsedProcess:
-        input_string = process_string.replace("bar", "~").replace(" j", " 1j")
+        input_string = process_string.lower().replace("bar", "~").replace(" j", " 1j")
         parts = input_string.split(">")
         if len(parts) != 2:
             raise ValueError("invalid collision format; expected 'initial > final'")

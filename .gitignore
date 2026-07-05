@@ -28,6 +28,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pyamplicol-cache/
+tmp/
 *.swp
 *.swo
 .DS_Store
+
+# Rust build outputs
+/rusticol/target/

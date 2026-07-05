@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import statistics
+import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 from pprint import pprint
 from typing import Any, Sequence, cast
@@ -11,9 +15,16 @@ from typing import Any, Sequence, cast
 from . import __version__
 from .benchmarks import (
     benchmark_z_gluon_modes,
+    build_z_gluon_dag_profile_evaluator,
     format_mode_benchmark_table,
     profile_z_gluon_dag_evaluator,
     profile_z_gluon_tensor_evaluator,
+)
+from .cli_display import (
+    DisplayColumn,
+    DisplayRow,
+    default_display_for_args,
+    format_measurement,
 )
 from .evaluation import NativeRuntimeEvaluator, RuntimeBackend
 from .matrix import (
@@ -27,7 +38,14 @@ from .processes import ProcessEnumeration, ProcessEnumerator, ProcessOptions
 from .reference import AmplicolAdapter, CommandResult
 from .symbolic import ZeroGluonSymbolicEvaluator
 
-_RUNTIME_BACKENDS = ("auto", "python", "dag", "numeric-tensor-network")
+_RUNTIME_BACKENDS = (
+    "auto",
+    "python",
+    "dag",
+    "numeric-tensor-network",
+    "compiled-dag",
+    "rusticol",
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -180,8 +198,53 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     dag_profile.add_argument("--sqrt-s", type=float, default=1000.0)
     dag_profile.add_argument("--points", type=int, default=16)
     dag_profile.add_argument("--repetitions", type=int, default=100)
+    dag_profile.add_argument(
+        "--generate-only",
+        action="store_true",
+        help=(
+            "Generate and save a reusable DAG process artifact, then exit "
+            "without timing runtime evaluation. This is primarily for the "
+            "rusticol two-stage workflow."
+        ),
+    )
+    _add_runtime_backend_option(dag_profile)
     _add_evaluator_build_options(dag_profile)
+    _set_fast_rusticol_dag_defaults(dag_profile)
     dag_profile.add_argument("--json", action="store_true")
+
+    generate_process = subparsers.add_parser(
+        "generate-process",
+        help=(
+            "Generate the default fast Rusticol eager-DAG process directory. "
+            "Defaults to C++ O3 stage evaluators."
+        ),
+    )
+    generate_process.add_argument("process", metavar="PROCESS")
+    generate_process.add_argument("output_dir", type=Path, metavar="OUTPUT_DIR")
+    _add_evaluator_build_options(generate_process)
+    _set_fast_rusticol_dag_defaults(generate_process)
+    generate_process.add_argument("--json", action="store_true")
+
+    time_process = subparsers.add_parser(
+        "time-process",
+        help=(
+            "Load a generated process directory with Rusticol and time the "
+            "validation momenta. Defaults to precision 16 and a 10 second target."
+        ),
+    )
+    time_process.add_argument("process_dir", type=Path, metavar="PROCESS_DIR")
+    time_process.add_argument("--precision", type=int, default=16)
+    time_process.add_argument("--target-runtime", type=float, default=10.0)
+    time_process.add_argument(
+        "--batch-size",
+        type=int,
+        help=(
+            "Number of samples per repeated timing block. Defaults to the "
+            "batch size recorded in the process artifact, which matches the "
+            "performance-summary benchmark setup."
+        ),
+    )
+    time_process.add_argument("--json", action="store_true")
 
     profile = subparsers.add_parser(
         "profile",
@@ -202,6 +265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.version:
         print(__version__)
         return 0
+    args._display = default_display_for_args(args)
 
     if args.command in (None, "inspect"):
         return _cmd_inspect()
@@ -221,6 +285,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_profile_tensor_evaluator(args)
     if args.command == "profile-dag-evaluator":
         return _cmd_profile_dag_evaluator(args)
+    if args.command == "generate-process":
+        return _cmd_generate_process(args)
+    if args.command == "time-process":
+        return _cmd_time_process(args)
     if args.command == "profile":
         return _cmd_profile(args)
     raise ValueError(f"unknown command: {args.command}")
@@ -246,7 +314,9 @@ def _add_runtime_backend_option(parser: argparse.ArgumentParser) -> None:
         help=(
             "Native runtime backend: auto prefers the spenso/Symbolica current DAG; "
             "numeric-tensor-network executes the factorized network with fully "
-            "numeric tensors in hep_lib."
+            "numeric tensors in hep_lib; compiled-dag builds one alias-backed "
+            "multi-output Symbolica evaluator; rusticol loads the generated "
+            "shared-current DAG process folder through the PyO3 Rust runtime."
         ),
     )
 
@@ -256,6 +326,7 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         merge_evaluators_strategy=False,
         symbolica_direct_translation=True,
         symbolica_compiled_native=True,
+        symbolica_jit_direct_translation=None,
     )
     parser.add_argument(
         "--merge-evaluators-strategy",
@@ -285,6 +356,113 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--compiled-dag-evaluator",
+        action="store_true",
+        help=(
+            "Shortcut for --runtime-backend compiled-dag: build/evaluate the "
+            "single multi-output alias-backed compiled DAG evaluator."
+        ),
+    )
+    parser.add_argument(
+        "--compiled-dag-lowering",
+        choices=("spenso", "symbolic"),
+        default="spenso",
+        help=(
+            "Current-body lowering route for --compiled-dag-evaluator. spenso "
+            "is the intended default; symbolic uses direct Symbolica component "
+            "builders for debugging and cross-checks."
+        ),
+    )
+    parser.add_argument(
+        "--compiled-dag-cross-check-lowering",
+        action="store_true",
+        help=(
+            "Build/evaluate both compiled-DAG lowering routes for low-n "
+            "debugging where supported."
+        ),
+    )
+    parser.add_argument(
+        "--compiled-dag-output-chunk-size",
+        type=int,
+        help=(
+            "Chunk the final compiled-DAG multi-output evaluator into outputs "
+            "of this size. Defaults to no chunking for compiled-DAG, including "
+            "compiled presets; use only for debugging or memory experiments."
+        ),
+    )
+    parser.set_defaults(compiled_dag_inline_external_wavefunctions=True)
+    parser.add_argument(
+        "--compiled-dag-inline-external-wavefunctions",
+        dest="compiled_dag_inline_external_wavefunctions",
+        action="store_true",
+        help=(
+            "Inline physical q q~ -> Z + gluon external wavefunctions into "
+            "the compiled-DAG evaluator. This is the optimized default."
+        ),
+    )
+    parser.add_argument(
+        "--no-compiled-dag-inline-external-wavefunctions",
+        dest="compiled_dag_inline_external_wavefunctions",
+        action="store_false",
+        help=(
+            "Use source-current components as runtime parameters instead of "
+            "inlining physical external wavefunctions; useful for debugging."
+        ),
+    )
+    parser.set_defaults(compiled_dag_helicity_filter=True)
+    parser.add_argument(
+        "--compiled-dag-helicity-filter",
+        dest="compiled_dag_helicity_filter",
+        action="store_true",
+        help=(
+            "Enable the deterministic warmup helicity filter before compiled-DAG "
+            "evaluator construction. This is the default."
+        ),
+    )
+    parser.add_argument(
+        "--no-compiled-dag-helicity-filter",
+        dest="compiled_dag_helicity_filter",
+        action="store_false",
+        help=(
+            "Disable the compiled-DAG warmup helicity filter for debugging; all "
+            "helicity amplitudes become evaluator outputs."
+        ),
+    )
+    parser.add_argument(
+        "--compiled-dag-helicity-filter-samples",
+        type=int,
+        default=10,
+        help="Number of deterministic warmup points used by the compiled-DAG helicity filter.",
+    )
+    parser.add_argument(
+        "--compiled-dag-helicity-filter-seed",
+        type=int,
+        default=12345,
+        help="Base RNG seed for RAMBO warmup points in the compiled-DAG helicity filter.",
+    )
+    parser.add_argument(
+        "--compiled-dag-helicity-filter-relative-tolerance",
+        type=float,
+        default=1.0e-12,
+        help="Relative tolerance for grouping equivalent helicity squared-amplitude signatures.",
+    )
+    parser.add_argument(
+        "--compiled-dag-helicity-filter-zero-tolerance",
+        type=float,
+        default=1.0e-300,
+        help="Absolute zero threshold for pruning inactive helicities.",
+    )
+    parser.add_argument(
+        "--compiled-dag-helicity-filter-phase-space",
+        choices=("rambo", "canonical"),
+        default="rambo",
+        help=(
+            "Warmup phase-space source for the compiled-DAG helicity filter. "
+            "rambo is deterministic from the seed; canonical reuses the fixed "
+            "pyAmpliCol sanity points."
+        ),
+    )
+    parser.add_argument(
         "--verbose-evaluator-build",
         action="store_true",
         help="Pass verbose evaluator-build progress through to supported backends.",
@@ -306,7 +484,7 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--symbolica-evaluator-backend",
         choices=("jit", "compiled-complex", "compiled-complex-4x"),
-        default="jit",
+        default=argparse.SUPPRESS,
         help=(
             "Symbolica evaluator backend for D-mode blocks. compiled-complex "
             "writes and compiles C++ complex evaluators; compiled-complex-4x "
@@ -326,7 +504,11 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         "--symbolica-n-cpe-iterations",
         dest="symbolica_cpe_iterations",
         type=int,
-        help="Number of common-pair elimination iterations; default is unbounded.",
+        help=(
+            "Number of common-pair elimination iterations. The compiled-DAG "
+            "default is adaptive: 2 through five gluons and unbounded above "
+            "that; other modes default to unbounded."
+        ),
     )
     parser.add_argument(
         "--symbolica-n-cores",
@@ -348,8 +530,15 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--symbolica-jit-direct-translation",
+        dest="symbolica_jit_direct_translation",
         action="store_true",
         help="Translate Symbolica instructions directly to SymJIT IR.",
+    )
+    parser.add_argument(
+        "--symbolica-no-jit-direct-translation",
+        dest="symbolica_jit_direct_translation",
+        action="store_false",
+        help="Disable direct translation to SymJIT IR.",
     )
     parser.add_argument(
         "--symbolica-jit-optimization-level",
@@ -373,8 +562,10 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--symbolica-max-common-pair-distance",
         type=int,
-        default=100,
-        help="Maximum distance between common pairs before cache eviction.",
+        help=(
+            "Maximum distance between common pairs before cache eviction. "
+            "Defaults to 250 for --compiled-dag-evaluator and 100 otherwise."
+        ),
     )
     parser.add_argument(
         "--symbolica-collect-factors",
@@ -471,9 +662,9 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         "--save-evaluator-dir",
         type=Path,
         help=(
-            "Save a reusable compiled shared-current DAG evaluator artifact "
-            "to this directory after generation. Supported for the "
-            "compiled-complex D-mode used by profiling."
+            "Save a reusable shared-current DAG evaluator artifact to this "
+            "directory after generation. The compiled-DAG route supports both "
+            "serialized JIT evaluators and generated-code artifacts."
         ),
     )
     parser.add_argument(
@@ -495,7 +686,36 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _set_fast_rusticol_dag_defaults(parser: argparse.ArgumentParser) -> None:
+    parser.set_defaults(
+        runtime_backend="rusticol",
+        symbolica_evaluator_backend="compiled-complex",
+        symbolica_compiled_preset="runtime-o3",
+        symbolica_n_cores=10,
+        symbolica_compiled_chunk_compile_workers=10,
+        batch_size=128,
+    )
+
+
+def _generation_build_kwargs(
+    args: argparse.Namespace,
+    runtime_backend: RuntimeBackend,
+    save_dir: Path,
+) -> dict[str, Any]:
+    build_kwargs = _runtime_evaluator_kwargs(args)
+    if (
+        build_kwargs.get("symbolica_load_evaluator_dir") is None
+        and build_kwargs.get("symbolica_compiled_output_dir") is None
+    ):
+        build_kwargs["symbolica_compiled_output_dir"] = str(
+            Path(save_dir).expanduser() / "compiled"
+        )
+    return build_kwargs
+
+
 def _runtime_backend(args: argparse.Namespace) -> RuntimeBackend:
+    if bool(getattr(args, "compiled_dag_evaluator", False)):
+        return "compiled-dag"
     value = getattr(args, "runtime_backend", "auto")
     if value not in _RUNTIME_BACKENDS:
         raise ValueError(f"unknown runtime backend: {value}")
@@ -503,6 +723,18 @@ def _runtime_backend(args: argparse.Namespace) -> RuntimeBackend:
 
 
 def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    runtime_backend = _runtime_backend(args)
+    jit_direct_translation = getattr(args, "symbolica_jit_direct_translation", None)
+    if jit_direct_translation is None and runtime_backend != "compiled-dag":
+        jit_direct_translation = False
+    cpe_iterations = getattr(args, "symbolica_cpe_iterations", None)
+    common_pair_distance = getattr(
+        args,
+        "symbolica_max_common_pair_distance",
+        None,
+    )
+    if common_pair_distance is None:
+        common_pair_distance = 250 if runtime_backend == "compiled-dag" else 100
     return {
         "batch_size": int(getattr(args, "batch_size", 16)),
         "merge_evaluators_strategy": bool(
@@ -518,14 +750,12 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
             getattr(args, "symbolica_evaluator_backend", "jit")
         ),
         "symbolica_iterations": int(getattr(args, "symbolica_iterations", 1)),
-        "symbolica_cpe_iterations": getattr(args, "symbolica_cpe_iterations", None),
+        "symbolica_cpe_iterations": cpe_iterations,
         "symbolica_n_cores": int(getattr(args, "symbolica_n_cores", 4)),
         "symbolica_direct_translation": bool(
             getattr(args, "symbolica_direct_translation", True)
         ),
-        "symbolica_jit_direct_translation": bool(
-            getattr(args, "symbolica_jit_direct_translation", False)
-        ),
+        "symbolica_jit_direct_translation": jit_direct_translation,
         "symbolica_jit_optimization_level": int(
             getattr(args, "symbolica_jit_optimization_level", 3)
         ),
@@ -535,9 +765,7 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "symbolica_max_common_pair_cache_entries": int(
             getattr(args, "symbolica_max_common_pair_cache_entries", 1_000_000)
         ),
-        "symbolica_max_common_pair_distance": int(
-            getattr(args, "symbolica_max_common_pair_distance", 100)
-        ),
+        "symbolica_max_common_pair_distance": int(common_pair_distance),
         "symbolica_collect_factors": bool(
             getattr(args, "symbolica_collect_factors", False)
         ),
@@ -557,11 +785,7 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "symbolica_compiler_flags": tuple(
             getattr(args, "symbolica_compiler_flags", ())
         ),
-        "symbolica_compiled_output_chunk_size": getattr(
-            args,
-            "symbolica_compiled_output_chunk_size",
-            None,
-        ),
+        "symbolica_compiled_output_chunk_size": _compiled_output_chunk_size(args),
         "symbolica_compiled_chunk_compile_workers": int(
             getattr(args, "symbolica_compiled_chunk_compile_workers", 1)
         ),
@@ -578,7 +802,40 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "symbolica_raw_sum_final_stage": bool(
             getattr(args, "symbolica_raw_sum_final_stage", False)
         ),
+        "compiled_dag_lowering": str(getattr(args, "compiled_dag_lowering", "spenso")),
+        "compiled_dag_cross_check_lowering": bool(
+            getattr(args, "compiled_dag_cross_check_lowering", False)
+        ),
+        "compiled_dag_inline_external_wavefunctions": bool(
+            getattr(args, "compiled_dag_inline_external_wavefunctions", True)
+        ),
+        "compiled_dag_helicity_filter": bool(
+            getattr(args, "compiled_dag_helicity_filter", True)
+        ),
+        "compiled_dag_helicity_filter_samples": int(
+            getattr(args, "compiled_dag_helicity_filter_samples", 10)
+        ),
+        "compiled_dag_helicity_filter_seed": int(
+            getattr(args, "compiled_dag_helicity_filter_seed", 12345)
+        ),
+        "compiled_dag_helicity_filter_relative_tolerance": float(
+            getattr(args, "compiled_dag_helicity_filter_relative_tolerance", 1.0e-12)
+        ),
+        "compiled_dag_helicity_filter_zero_tolerance": float(
+            getattr(args, "compiled_dag_helicity_filter_zero_tolerance", 1.0e-300)
+        ),
+        "compiled_dag_helicity_filter_phase_space": str(
+            getattr(args, "compiled_dag_helicity_filter_phase_space", "rambo")
+        ),
     }
+
+
+def _compiled_output_chunk_size(args: argparse.Namespace) -> int | None:
+    compiled_dag_chunk_size = getattr(args, "compiled_dag_output_chunk_size", None)
+    if compiled_dag_chunk_size is not None:
+        return int(compiled_dag_chunk_size)
+    value = getattr(args, "symbolica_compiled_output_chunk_size", None)
+    return None if value is None else int(value)
 
 
 def _process_options(args: argparse.Namespace) -> ProcessOptions:
@@ -595,18 +852,17 @@ def _cmd_inspect() -> int:
     import symbolica
     import symbolica.community.idenso  # noqa: F401
     import symbolica.community.spenso  # noqa: F401
-    import symbolica.community.vakint  # noqa: F401
 
     local_versions = getattr(symbolica, "LOCAL_VERSIONS", None)
     if not isinstance(local_versions, dict):
         raise RuntimeError("symbolica.LOCAL_VERSIONS is missing or is not a dict")
 
-    expected = {"symbolica", "spenso", "idenso", "vakint"}
+    expected = {"symbolica", "spenso", "idenso"}
     missing = expected.difference(local_versions)
     if missing:
         raise RuntimeError(f"symbolica.LOCAL_VERSIONS is missing keys: {sorted(missing)}")
 
-    print("Loaded pyamplicol with Symbolica community modules: idenso, spenso, vakint")
+    print("Loaded pyamplicol with Symbolica community modules: idenso, spenso")
     print("LOCAL_VERSIONS:")
     pprint(local_versions)
     return 0
@@ -641,11 +897,35 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         write_cache_metadata=not args.no_cache,
     )
     payload = result.to_json_dict()
+    if bool(getattr(args, "compiled_dag_evaluator", False)) or getattr(
+        args,
+        "save_evaluator_dir",
+        None,
+    ) is not None:
+        runtime = NativeRuntimeEvaluator(
+            args.process,
+            runtime_backend=_runtime_backend(args),
+            allow_python_fallback=False,
+            **_runtime_evaluator_kwargs(args),
+        )
+        payload["native_runtime_backend"] = runtime.metadata.to_json_dict()
+        save_dir = getattr(args, "save_evaluator_dir", None)
+        if save_dir is not None:
+            manifest_path = runtime.save_evaluator_artifact(save_dir)
+            payload["saved_evaluator_manifest"] = str(manifest_path)
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         status = "supported" if result.supported_native_target else "unsupported"
         print(f"{args.process}: native target {status}; backend={result.backend}")
+        runtime_payload = payload.get("native_runtime_backend")
+        if isinstance(runtime_payload, dict):
+            print(
+                "runtime evaluator: "
+                f"{runtime_payload.get('backend')} ({runtime_payload.get('kernel')})"
+            )
+        if "saved_evaluator_manifest" in payload:
+            print(f"saved evaluator: {payload['saved_evaluator_manifest']}")
         if result.cache_file is not None:
             print(f"metadata cache: {result.cache_file}")
         for note in result.notes:
@@ -681,7 +961,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             print(payload["reason"])
         return 2
 
-    runtime_metadata = evaluator.metadata.to_json_dict()
+    runtime_metadata = evaluator.refresh_metadata().to_json_dict()
     payload = _evaluation_to_dict(result, runtime_metadata=runtime_metadata)
     payload["native_runtime_backend"] = runtime_metadata
     payload["native_evaluation_time_s"] = evaluation_time_s
@@ -995,6 +1275,10 @@ def _cmd_validate_z_gluon_family(args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark_z_gluon_modes(args: argparse.Namespace) -> int:
+    evaluator_build_kwargs = _runtime_evaluator_kwargs(args)
+    evaluator_build_kwargs["runtime_backend"] = (
+        "compiled-dag" if _runtime_backend(args) == "compiled-dag" else "dag"
+    )
     payload = benchmark_z_gluon_modes(
         min_gluons=args.min_gluons,
         max_gluons=args.max_gluons,
@@ -1012,7 +1296,7 @@ def _cmd_benchmark_z_gluon_modes(args: argparse.Namespace) -> int:
         batch_size=args.batch_size,
         merge_evaluators_strategy=args.merge_evaluators_strategy,
         verbose_evaluator_build=args.verbose_evaluator_build,
-        evaluator_build_kwargs=_runtime_evaluator_kwargs(args),
+        evaluator_build_kwargs=evaluator_build_kwargs,
         include_python=not args.only_legacy_shared,
         include_numeric_tn=not args.only_legacy_shared,
         include_parametric_tn=not args.only_legacy_shared,
@@ -1075,39 +1359,91 @@ def _cmd_profile_tensor_evaluator(args: argparse.Namespace) -> int:
 
 
 def _cmd_profile_dag_evaluator(args: argparse.Namespace) -> int:
-    payload = profile_z_gluon_dag_evaluator(
-        args.process,
-        sqrt_s=args.sqrt_s,
-        points=args.points,
-        repetitions=args.repetitions,
-        evaluator_build_kwargs=_runtime_evaluator_kwargs(args),
-        save_evaluator_dir=getattr(args, "save_evaluator_dir", None),
-    )
+    runtime_backend = _runtime_backend(args)
+    if bool(getattr(args, "generate_only", False)):
+        return _cmd_generate_dag_evaluator_artifact(args, runtime_backend)
+    display = _display(args)
+    try:
+        with display.progress(
+            "Profiling shared-current DAG evaluator",
+            metadata=f"{args.process}, backend={runtime_backend}",
+        ):
+            payload = profile_z_gluon_dag_evaluator(
+                args.process,
+                sqrt_s=args.sqrt_s,
+                points=args.points,
+                repetitions=args.repetitions,
+                evaluator_build_kwargs=_runtime_evaluator_kwargs(args),
+                save_evaluator_dir=getattr(args, "save_evaluator_dir", None),
+                runtime_backend=runtime_backend,
+            )
+    except (NativeEvaluationError, ValueError) as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "available": False,
+                        "error": str(exc),
+                        "process": args.process,
+                        "runtime_backend": runtime_backend,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
-        print(
-            f"{args.process}: shared D-mode profile, "
-            f"points={payload['points']}, repetitions={payload['repetitions']}, "
-            f"batch_size={payload['batch_size']}"
-        )
-        print(f"generation: {payload['generation_s']:.6g} s")
-        print(
-            "full runtime: "
-            f"{payload['runtime_us_per_point']:.6g} "
-            f"+/- {_format_error(payload.get('runtime_us_per_point_error'))} us/point"
-        )
-        print(
-            "evaluator-only runtime: "
-            f"{payload['runtime_evaluator_only_us_per_point']:.6g} "
-            "+/- "
-            f"{_format_error(payload.get('runtime_evaluator_only_us_per_point_error'))} "
-            "us/point"
+        display.print_table(
+            "DAG Evaluator Profile",
+            _kv_columns(),
+            [
+                DisplayRow({"metric": "Process", "value": args.process}, "bold"),
+                {"metric": "Backend", "value": payload["runtime_backend"]},
+                {"metric": "Points", "value": payload["points"]},
+                {"metric": "Repetitions", "value": payload["repetitions"]},
+                {"metric": "Batch size", "value": payload["batch_size"]},
+                {
+                    "metric": "Generation",
+                    "value": format_measurement(float(payload["generation_s"]), unit="s"),
+                },
+                DisplayRow(
+                    {
+                        "metric": "Wall runtime",
+                        "value": format_measurement(
+                            float(payload["runtime_us_per_point"]),
+                            _float_or_none(
+                                payload.get("runtime_us_per_point_error")
+                            ),
+                            unit="us/point",
+                        ),
+                    },
+                    "green",
+                ),
+                DisplayRow(
+                    {
+                        "metric": "Evaluator runtime",
+                        "value": format_measurement(
+                            float(payload["runtime_evaluator_only_us_per_point"]),
+                            _float_or_none(
+                                payload.get(
+                                    "runtime_evaluator_only_us_per_point_error"
+                                )
+                            ),
+                            unit="us/point",
+                        ),
+                    },
+                    "cyan",
+                ),
+            ],
         )
         breakdown = payload.get("runtime_breakdown_us_per_point")
         breakdown_errors = payload.get("runtime_breakdown_us_per_point_error")
         if isinstance(breakdown, dict):
-            print("runtime breakdown:")
+            rows: list[DisplayRow | dict[str, object]] = []
             for key in (
                 "source_fill_time_s",
                 "momentum_setup_time_s",
@@ -1125,10 +1461,393 @@ def _cmd_profile_dag_evaluator(args: argparse.Namespace) -> int:
                     if isinstance(breakdown_errors, dict)
                     else None
                 )
-                print(
-                    f"  {key.removesuffix('_time_s')}: "
-                    f"{float(value):.6g} +/- {_format_error(error)} us/point"
+                rows.append(
+                    {
+                        "metric": key.removesuffix("_time_s").replace("_", " "),
+                        "value": format_measurement(
+                            float(value),
+                            _float_or_none(error),
+                            unit="us/point",
+                        ),
+                    }
                 )
+            if rows:
+                display.print_table("Runtime Breakdown", _kv_columns(), rows)
+    if runtime_backend == "rusticol":
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
+    return 0
+
+
+def _cmd_generate_process(args: argparse.Namespace) -> int:
+    args.save_evaluator_dir = args.output_dir
+    return _cmd_generate_dag_evaluator_artifact(args, "rusticol")
+
+
+def _cmd_time_process(args: argparse.Namespace) -> int:
+    root = Path(args.process_dir).expanduser()
+    display = _display(args)
+    try:
+        import numpy as np
+        import rusticol  # type: ignore[import-not-found]
+
+        with display.progress("Loading Rusticol process", metadata=str(root)):
+            manifest = json.loads((root / "process_manifest.json").read_text())
+            runtime = rusticol.Runtime.load(str(root))
+            points = _load_rusticol_validation_momenta(root, int(args.precision), np)
+            values = _rusticol_evaluate(runtime, points, int(args.precision))
+        with display.progress(
+            "Profiling Rusticol runtime",
+            metadata=f"precision={int(args.precision)}, target={float(args.target_runtime):.3g}s",
+        ):
+            profile_payload = _profile_rusticol_process(
+                runtime,
+                points,
+                precision=int(args.precision),
+                target_s=float(args.target_runtime),
+                batch_size=_time_process_batch_size(args, manifest),
+                np_module=np,
+            )
+    except Exception as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "available": False,
+                        "error": str(exc),
+                        "process_dir": str(root),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "available": True,
+        "process_dir": str(root),
+        "process": manifest.get("process"),
+        "family": manifest.get("family"),
+        "gluon_count": manifest.get("gluon_count"),
+        "precision": int(args.precision),
+        "target_runtime_s": float(args.target_runtime),
+        "values": [float(value) for value in values],
+        "profile": profile_payload,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        display.print_table(
+            "Rusticol Timing Summary",
+            _kv_columns(),
+            [
+                DisplayRow({"metric": "Process", "value": payload["process"]}, "bold"),
+                {"metric": "Process dir", "value": root},
+                {"metric": "Family", "value": payload.get("family")},
+                {"metric": "Gluons", "value": payload.get("gluon_count")},
+                {"metric": "Precision", "value": payload["precision"]},
+                {
+                    "metric": "Target runtime",
+                    "value": format_measurement(
+                        float(payload["target_runtime_s"]),
+                        unit="s",
+                    ),
+                },
+                {"metric": "Validation value(s)", "value": payload["values"]},
+                DisplayRow(
+                    {
+                        "metric": "Wall runtime",
+                        "value": format_measurement(
+                            float(profile_payload["wall_us_per_point"]),
+                            _float_or_none(
+                                profile_payload.get("wall_us_per_point_error")
+                            ),
+                            unit="us/point",
+                        ),
+                    },
+                    "green",
+                ),
+                DisplayRow(
+                    {
+                        "metric": "Core evaluator",
+                        "value": format_measurement(
+                            float(profile_payload["core_evaluator_us_per_point"]),
+                            _float_or_none(
+                                profile_payload.get(
+                                    "core_evaluator_us_per_point_error"
+                                )
+                            ),
+                            unit="us/point",
+                        ),
+                    },
+                    "cyan",
+                ),
+                {
+                    "metric": "Batch size",
+                    "value": profile_payload["block_size"],
+                },
+                {
+                    "metric": "Samples",
+                    "value": (
+                        f"{profile_payload['samples']} "
+                        f"({profile_payload['block_count']} x "
+                        f"{profile_payload['block_size']})"
+                    ),
+                },
+            ],
+        )
+        breakdown_rows = _rusticol_breakdown_rows(profile_payload)
+        if breakdown_rows:
+            display.print_table(
+                "Rusticol Runtime Breakdown",
+                _kv_columns(),
+                breakdown_rows,
+            )
+    return 0
+
+
+def _load_rusticol_validation_momenta(
+    root: Path,
+    precision: int,
+    np_module: Any,
+) -> Any:
+    payload = json.loads((root / "validation_momenta.json").read_text())
+    points = [
+        [
+            [Decimal(str(component)) for component in particle["momentum"]]
+            for particle in point
+        ]
+        for point in payload["points"]
+    ]
+    if precision == 16:
+        return np_module.asarray(points, dtype=np_module.float64)
+    return points
+
+
+def _repeat_rusticol_points(points: Any, count: int, np_module: Any) -> Any:
+    if hasattr(points, "shape"):
+        reps = int(math.ceil(count / max(int(points.shape[0]), 1)))
+        return np_module.tile(points, (reps, 1, 1))[:count]
+    reps = int(math.ceil(count / max(len(points), 1)))
+    return (points * reps)[:count]
+
+
+def _rusticol_evaluate(runtime: Any, points: Any, precision: int) -> Sequence[Any]:
+    if precision == 16:
+        return runtime.evaluate(points)
+    return runtime.evaluate_with_prec(points, precision)
+
+
+def _time_process_batch_size(args: argparse.Namespace, manifest: dict[str, Any]) -> int:
+    requested = getattr(args, "batch_size", None)
+    if requested is not None:
+        return max(int(requested), 1)
+    metadata = manifest.get("metadata")
+    if isinstance(metadata, dict):
+        batch_size = metadata.get("batch_size")
+        if isinstance(batch_size, int) and batch_size > 0:
+            return batch_size
+    return 128
+
+
+def _mean_and_error(samples: Sequence[float]) -> tuple[float, float]:
+    mean = statistics.fmean(samples) if samples else 0.0
+    error = (
+        statistics.stdev(samples) / math.sqrt(len(samples))
+        if len(samples) > 1
+        else 0.0
+    )
+    return mean, error
+
+
+def _profile_rusticol_process(
+    runtime: Any,
+    points: Any,
+    *,
+    precision: int,
+    target_s: float,
+    batch_size: int,
+    np_module: Any,
+) -> dict[str, Any]:
+    block_size = max(int(batch_size), 1)
+    estimate_points = _repeat_rusticol_points(points, block_size, np_module)
+    last_profile = dict(runtime.profile(estimate_points, precision=precision))
+    min_block_count = 8
+    target_elapsed_s = max(float(target_s), 0.0)
+    samples: list[float] = []
+    core_samples: list[float] = []
+    elapsed_total_s = 0.0
+    while len(samples) < min_block_count or elapsed_total_s < target_elapsed_s:
+        batch = _repeat_rusticol_points(points, block_size, np_module)
+        start = time.perf_counter()
+        last_profile = dict(runtime.profile(batch, precision=precision))
+        elapsed_s = time.perf_counter() - start
+        elapsed_total_s += elapsed_s
+        samples.append(elapsed_s / block_size)
+        core_samples.append(
+            (
+                float(last_profile.get("stage_evaluator_time_s", 0.0))
+                + float(last_profile.get("amplitude_evaluator_time_s", 0.0))
+            )
+            / max(int(last_profile.get("points", block_size)), 1)
+        )
+    wall_s, wall_error_s = _mean_and_error(samples)
+    core_s, core_error_s = _mean_and_error(core_samples)
+    return {
+        "samples": len(samples) * block_size,
+        "block_count": len(samples),
+        "block_size": block_size,
+        "wall_us_per_point": wall_s * 1.0e6,
+        "wall_us_per_point_error": wall_error_s * 1.0e6,
+        "core_evaluator_us_per_point": core_s * 1.0e6,
+        "core_evaluator_us_per_point_error": core_error_s * 1.0e6,
+        "last_profile": last_profile,
+    }
+
+
+def _cmd_generate_dag_evaluator_artifact(
+    args: argparse.Namespace,
+    runtime_backend: RuntimeBackend,
+) -> int:
+    display = _display(args)
+    save_dir = getattr(args, "save_evaluator_dir", None)
+    if save_dir is None:
+        message = "--generate-only requires --save-evaluator-dir"
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "available": False,
+                        "error": message,
+                        "process": args.process,
+                        "runtime_backend": runtime_backend,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(message, file=sys.stderr)
+        return 1
+    if runtime_backend not in ("dag", "rusticol"):
+        message = (
+            "--generate-only currently supports runtime backends 'dag' and "
+            "'rusticol'"
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "available": False,
+                        "error": message,
+                        "process": args.process,
+                        "runtime_backend": runtime_backend,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(message, file=sys.stderr)
+        return 1
+
+    generation_start = time.perf_counter()
+    build_kwargs = _generation_build_kwargs(args, runtime_backend, Path(save_dir))
+    try:
+        from .native import LeadingColorZJetsNativeEvaluator
+        from .dag_runtime import generation_progress_total
+
+        progress_total = generation_progress_total(
+            gluon_count=_process_gluon_count_hint(args.process),
+            split_vertex_current_stages=bool(
+                build_kwargs.get("split_vertex_current_stages", False)
+            ),
+        )
+        with display.stage_progress(
+            "Generating eager-DAG process artifact",
+            total=progress_total,
+            metadata=f"{args.process}, backend={runtime_backend}",
+        ) as progress:
+            build_kwargs["progress_callback"] = progress.callback
+            native = LeadingColorZJetsNativeEvaluator()
+            if (
+                runtime_backend == "rusticol"
+                and native.supports_zero_gluon_z(args.process)
+            ):
+                from .dag_runtime import _write_zero_gluon_rusticol_process_artifacts
+
+                manifest_path = _write_zero_gluon_rusticol_process_artifacts(
+                    Path(save_dir).expanduser(),
+                    process=args.process,
+                    model=native.model,
+                )
+                metadata = {
+                    "kernel": "symbolica-zero-gluon",
+                    "gluon_count": 0,
+                }
+                progress.update(
+                    stage="save",
+                    item="zero-gluon artifact",
+                    increment=progress_total,
+                )
+            else:
+                evaluator = build_z_gluon_dag_profile_evaluator(
+                    args.process,
+                    build_kwargs=build_kwargs,
+                )
+                manifest_path = evaluator.save_evaluator_artifact(save_dir)
+                metadata = evaluator.metadata.to_json_dict()
+        payload = {
+            "available": True,
+            "generation_s": time.perf_counter() - generation_start,
+            "metadata": metadata,
+            "process": args.process,
+            "runtime_backend": runtime_backend,
+            "saved_evaluator_manifest": str(manifest_path),
+        }
+    except (NativeEvaluationError, ValueError) as exc:
+        payload = {
+            "available": False,
+            "error": str(exc),
+            "process": args.process,
+            "runtime_backend": runtime_backend,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        display.print_table(
+            "Generated Process Artifact",
+            _kv_columns(),
+            [
+                DisplayRow({"metric": "Process", "value": args.process}, "bold"),
+                {"metric": "Runtime", "value": runtime_backend},
+                {
+                    "metric": "Evaluator backend",
+                    "value": build_kwargs.get("symbolica_evaluator_backend"),
+                },
+                {
+                    "metric": "Generation",
+                    "value": format_measurement(
+                        float(payload["generation_s"]),
+                        unit="s",
+                    ),
+                },
+                {"metric": "Manifest", "value": payload["saved_evaluator_manifest"]},
+            ],
+        )
+    if runtime_backend == "rusticol":
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
     return 0
 
 
@@ -1136,6 +1855,70 @@ def _format_error(value: object) -> str:
     if not isinstance(value, (float, int)):
         return "n/a"
     return f"{float(value):.3g}"
+
+
+def _display(args: argparse.Namespace):
+    return getattr(args, "_display", default_display_for_args(args))
+
+
+def _kv_columns() -> tuple[DisplayColumn, DisplayColumn]:
+    return (
+        DisplayColumn("metric", "Metric"),
+        DisplayColumn("value", "Value", align="right"),
+    )
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, (float, int)):
+        return float(value)
+    return None
+
+
+def _rusticol_breakdown_rows(
+    profile_payload: dict[str, Any],
+) -> list[DisplayRow | dict[str, object]]:
+    last_profile = profile_payload.get("last_profile")
+    if not isinstance(last_profile, dict):
+        return []
+    points = max(
+        int(last_profile.get("points", profile_payload.get("block_size", 1))),
+        1,
+    )
+    labels = {
+        "source_fill_time_s": "Source fill",
+        "parameter_pack_time_s": "Parameter pack",
+        "stage_evaluator_time_s": "Stage evaluators",
+        "amplitude_evaluator_time_s": "Amplitude evaluator",
+        "me_reduction_time_s": "ME reduction",
+        "output_transfer_time_s": "Output transfer",
+        "wall_time_s": "Profile wall",
+    }
+    rows: list[DisplayRow | dict[str, object]] = []
+    for key, label in labels.items():
+        value = last_profile.get(key)
+        if not isinstance(value, (float, int)):
+            continue
+        style = "cyan" if key in {"stage_evaluator_time_s", "amplitude_evaluator_time_s"} else None
+        rows.append(
+            DisplayRow(
+                {
+                    "metric": label,
+                    "value": format_measurement(
+                        float(value) * 1.0e6 / points,
+                        unit="us/point",
+                    ),
+                },
+                style,
+            )
+        )
+    return rows
+
+
+def _process_gluon_count_hint(process: str) -> int:
+    if ">" not in process:
+        return 0
+    final_state = process.split(">", 1)[1]
+    return sum(1 for token in final_state.lower().split() if token == "g")
 
 
 def _cmd_profile(args: argparse.Namespace) -> int:
@@ -1749,7 +2532,11 @@ def _z_gluon_family_runtime_backend(
     gluon_count: int,
     requested: RuntimeBackend,
 ) -> RuntimeBackend:
-    if gluon_count == 0 and requested in ("dag", "numeric-tensor-network"):
+    if gluon_count == 0 and requested in (
+        "dag",
+        "numeric-tensor-network",
+        "compiled-dag",
+    ):
         return "python"
     return requested
 
@@ -1808,9 +2595,18 @@ def _attach_native_probe_comparison(
         runtime_backend=runtime_backend,
         **(runtime_evaluator_kwargs or {}),
     )
-    payload["native_runtime_backend"] = evaluator.metadata.to_json_dict()
     native_points: list[dict[str, int | float]] = []
     failures: list[str] = []
+    timing_component_fields = (
+        "source_fill_time_s",
+        "momentum_setup_time_s",
+        "parameter_pack_time_s",
+        "evaluator_time_s",
+        "output_transfer_time_s",
+        "result_reduction_time_s",
+    )
+    timing_components = {field: 0.0 for field in timing_component_fields}
+    timing_seen = False
     for point in reference_points:
         try:
             start = time.perf_counter()
@@ -1830,6 +2626,17 @@ def _attach_native_probe_comparison(
                 "native_runtime_s": elapsed_s,
             }
         )
+        runtime_impl = getattr(evaluator, "_runtime", None)
+        timing = getattr(runtime_impl, "last_runtime_timing", None)
+        timing_to_json = getattr(timing, "to_json_dict", None)
+        if callable(timing_to_json):
+            timing_payload = timing_to_json()
+            timing_seen = True
+            for field in timing_component_fields:
+                timing_components[field] += float(timing_payload.get(field, 0.0))
+
+    runtime_metadata = evaluator.refresh_metadata().to_json_dict()
+    payload["native_runtime_backend"] = runtime_metadata
 
     if native_points:
         first = native_points[0]
@@ -1854,6 +2661,27 @@ def _attach_native_probe_comparison(
     if native_points:
         runtimes = [float(point["native_runtime_s"]) for point in native_points]
         total_s = sum(runtimes)
+        timing_breakdown: dict[str, object] | None = None
+        if timing_seen:
+            python_overhead = (
+                timing_components["source_fill_time_s"]
+                + timing_components["momentum_setup_time_s"]
+                + timing_components["parameter_pack_time_s"]
+                + timing_components["output_transfer_time_s"]
+                + timing_components["result_reduction_time_s"]
+            )
+            timing_breakdown = {
+                **timing_components,
+                "python_overhead_time_s": python_overhead,
+                "measured_time_s": python_overhead
+                + timing_components["evaluator_time_s"],
+            }
+        evaluator_only_total_s = (
+            float(timing_breakdown["evaluator_time_s"])
+            if isinstance(timing_breakdown, dict)
+            and timing_breakdown.get("evaluator_time_s") is not None
+            else None
+        )
         payload["native_runtime"] = {
             "evaluated_points": len(runtimes),
             "total_s": total_s,
@@ -1861,6 +2689,13 @@ def _attach_native_probe_comparison(
             "min_per_point_s": min(runtimes),
             "max_per_point_s": max(runtimes),
             "setup_time_s": evaluator.metadata.setup_time_s,
+            "timing_breakdown_total_s": timing_breakdown,
+            "evaluator_only_total_s": evaluator_only_total_s,
+            "evaluator_only_mean_per_point_s": (
+                evaluator_only_total_s / len(runtimes)
+                if evaluator_only_total_s is not None
+                else None
+            ),
             "evaluations_per_second": (
                 len(runtimes) / total_s if total_s > 0.0 else None
             ),

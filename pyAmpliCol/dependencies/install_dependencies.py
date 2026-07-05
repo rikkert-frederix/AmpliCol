@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -13,6 +14,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+AMPLICOL_ROOT = REPO_ROOT.parent
 DEPS_DIR = Path(__file__).resolve().parent
 VENV_DIR = DEPS_DIR / ".venv"
 WHEEL_DIR = DEPS_DIR / "wheels"
@@ -20,22 +22,48 @@ DEPENDENCY_MANIFEST = DEPS_DIR / "install_manifest.json"
 PATCHES_DIR = DEPS_DIR / "patches"
 SYMBOLICA_WHEEL_DIR = WHEEL_DIR / "symbolica"
 GAMMALOOP_WHEEL_DIR = WHEEL_DIR / "gammaloop"
+RUSTICOL_WHEEL_DIR = WHEEL_DIR / "rusticol"
 
 SYMBOLICA_COMMUNITY_DIR = DEPS_DIR / "symbolica-community"
 SYMBOLICA_DIR = DEPS_DIR / "symbolica"
 GAMMALOOP_DIR = DEPS_DIR / "gammaloop"
 XSIMD_DIR = DEPS_DIR / "xsimd"
+RUSTICOL_DIR = AMPLICOL_ROOT / "rusticol"
 
 SYMBOLICA_COMMUNITY_URL = "https://github.com/symbolica-dev/symbolica-community.git"
-SYMBOLICA_URL = "https://github.com/symbolica-dev/symbolica.git"
+SYMBOLICA_URL = "https://github.com/ValentinHirschi/symbolica_mod.git"
+SYMBOLICA_REF = "pyamplicol-dev-base"
 GAMMALOOP_URL = "https://github.com/alphal00p/gammaloop.git"
 XSIMD_URL = "https://github.com/xtensor-stack/xsimd.git"
+SYMBOLICA_COMMUNITY_REF = "main"
+XSIMD_REF = "master"
 DEFAULT_GAMMALOOP_REF = "db79edc84f6a1580decbcc4ede7ea0b1c79d9a08"
 
 MIN_RUST_VERSION = (1, 89, 0)
+MIN_PYTHON_VERSION = (3, 11)
 REEXEC_SENTINEL = "PYAMPLICOL_REEXECED_OUTSIDE_VENV"
-BOOTSTRAP_REQUIREMENTS = ("pip", "maturin", "pytest", "mypy", "numpy<2.5", "ipykernel")
-BOOTSTRAP_IMPORTS = ("pip", "maturin", "pytest", "mypy", "numpy", "ipykernel")
+BOOTSTRAP_REQUIREMENTS = (
+    "pip",
+    "maturin",
+    "pytest",
+    "mypy",
+    "numpy<2.5",
+    "ipykernel",
+    "colorama",
+    "progressbar2",
+    "tabled",
+)
+BOOTSTRAP_IMPORTS = (
+    "pip",
+    "maturin",
+    "pytest",
+    "mypy",
+    "numpy",
+    "ipykernel",
+    "colorama",
+    "progressbar",
+    "tabled",
+)
 
 MANAGED_PATHS = (
     VENV_DIR,
@@ -148,20 +176,130 @@ def parse_rust_version(output: str) -> tuple[int, int, int] | None:
     return tuple(int(part) for part in match.groups())
 
 
-def ensure_system_prerequisites() -> None:
-    require_tool("git")
-    require_tool("cargo")
-    require_tool("rustc")
+def format_version(version: tuple[int, ...]) -> str:
+    return ".".join(str(part) for part in version)
 
-    rustc = run(["rustc", "--version"], capture=True)
-    rust_version = parse_rust_version(rustc.stdout)
-    if rust_version and rust_version < MIN_RUST_VERSION:
-        required = ".".join(str(part) for part in MIN_RUST_VERSION)
-        current = ".".join(str(part) for part in rust_version)
-        raise DependencySetupError(
-            f"Rust {required} or newer is required, but rustc reports {current}. "
-            "Update Rust with `rustup update stable`, then rerun this script."
+
+def resolved_executable(command: str) -> str | None:
+    if os.sep in command:
+        return command if Path(command).exists() else None
+    return shutil.which(command)
+
+
+def command_version(command: str) -> str | None:
+    completed = run([command, "--version"], capture=True, check=False)
+    if completed.returncode != 0:
+        return None
+    output = (completed.stdout or completed.stderr).strip().splitlines()
+    return output[0] if output else None
+
+
+def system_prerequisite_issues() -> list[str]:
+    issues: list[str] = []
+    current_python = sys.version_info[:3]
+    if current_python < MIN_PYTHON_VERSION:
+        issues.append(
+            "Python "
+            f"{format_version(MIN_PYTHON_VERSION)} or newer is required "
+            f"for pyAmpliCol/rusticol, but this interpreter is "
+            f"{format_version(current_python)} at {sys.executable}."
         )
+
+    for module in ("venv", "ensurepip"):
+        if importlib.util.find_spec(module) is None:
+            issues.append(
+                f"Python module `{module}` is required to create/bootstrap "
+                f"{display_path(VENV_DIR)}. Install a Python distribution that "
+                f"ships `{module}` or install the corresponding OS package."
+            )
+
+    required_tools = (
+        (
+            "git",
+            "clone and update Symbolica, symbolica-community, GammaLoop, and xsimd",
+            "Install Git and make sure `git` is on PATH.",
+        ),
+        (
+            "cargo",
+            "build the Symbolica community and rusticol PyO3 wheels",
+            "Install Rust with rustup or your system package manager.",
+        ),
+        (
+            "rustc",
+            "compile Symbolica and rusticol",
+            "Install Rust with rustup or your system package manager.",
+        ),
+        (
+            "make",
+            "build and validate the Fortran AmpliCol reference code",
+            "Install GNU Make or a compatible make implementation.",
+        ),
+        (
+            "gfortran",
+            "compile the Fortran AmpliCol reference and generated libraries",
+            "Install GCC/GFortran, for example with your system package manager.",
+        ),
+    )
+    for name, purpose, hint in required_tools:
+        if shutil.which(name) is None:
+            issues.append(f"`{name}` is required to {purpose}. {hint}")
+
+    cxx = os.environ.get("CXX", "g++")
+    if resolved_executable(cxx) is None:
+        if "CXX" in os.environ:
+            issues.append(
+                f"`CXX={cxx}` does not resolve to an executable C++ compiler. "
+                "Set CXX to a valid compiler, or unset it and install `g++`."
+            )
+        else:
+            issues.append(
+                "`g++` is required to compile legacy C++ shims and Symbolica "
+                "compiled-complex evaluator code. Install g++, or set CXX to "
+                "a valid C++ compiler before running the installer."
+            )
+
+    if shutil.which("rustc") is not None:
+        rustc = run(["rustc", "--version"], capture=True, check=False)
+        if rustc.returncode != 0:
+            issues.append(
+                "`rustc --version` failed; make sure the Rust compiler works "
+                "before running the installer."
+            )
+        else:
+            rust_version = parse_rust_version(rustc.stdout)
+            if rust_version is None:
+                issues.append(
+                    f"Could not parse rustc version from {rustc.stdout.strip()!r}."
+                )
+            elif rust_version < MIN_RUST_VERSION:
+                issues.append(
+                    "Rust "
+                    f"{format_version(MIN_RUST_VERSION)} or newer is required, "
+                    f"but rustc reports {format_version(rust_version)}. "
+                    "Update Rust with `rustup update stable`, then rerun this script."
+                )
+    return issues
+
+
+def ensure_system_prerequisites() -> None:
+    issues = system_prerequisite_issues()
+    if issues:
+        formatted = "\n".join(f"  - {issue}" for issue in issues)
+        raise DependencySetupError(
+            "Missing or incompatible system prerequisites:\n"
+            f"{formatted}\n\n"
+            "After installing the missing tools, rerun this script."
+        )
+
+    print("System prerequisite check passed:")
+    for command in ("git", "cargo", "rustc", "make", "gfortran"):
+        version = command_version(command)
+        print(f"  {command}: {version or shutil.which(command)}")
+    cxx = os.environ.get("CXX", "g++")
+    cxx_source = "CXX" if "CXX" in os.environ else "default"
+    print(f"  C++ compiler ({cxx_source}): {command_version(cxx) or cxx}")
+    print(f"  maturin: {maturin_status()}")
+    print(f"  python: {format_version(sys.version_info[:3])} ({sys.executable})")
 
 
 def create_venv() -> None:
@@ -254,13 +392,13 @@ def discover_gammaloop_ref() -> str:
 def ensure_sources(*, update_existing: bool) -> None:
     ensure_branch_checkout(
         SYMBOLICA_COMMUNITY_URL,
-        "main",
+        SYMBOLICA_COMMUNITY_REF,
         SYMBOLICA_COMMUNITY_DIR,
         update_existing=update_existing,
     )
     ensure_branch_checkout(
         SYMBOLICA_URL,
-        "dev",
+        SYMBOLICA_REF,
         SYMBOLICA_DIR,
         update_existing=update_existing,
     )
@@ -272,7 +410,7 @@ def ensure_sources(*, update_existing: bool) -> None:
     )
     ensure_branch_checkout(
         XSIMD_URL,
-        "master",
+        XSIMD_REF,
         XSIMD_DIR,
         update_existing=update_existing,
     )
@@ -303,9 +441,6 @@ idenso = { path = "../gammaloop/crates/idenso", features = ["bincode", "python"]
 spenso = { path = "../gammaloop/crates/spenso", features = ["shadowing", "python"] }
 spynso3 = { path = "../gammaloop/crates/spynso3" }
 symbolica = { path = "../symbolica", features = ["python_export"] }
-vakint = { path = "../gammaloop/crates/vakint", features = [
-    "symbolica_community_module",
-] }
 pyo3 = { version = "0.28", features = ["abi3"] }
 pyo3-stub-gen = { version = "0.17", optional = true, default-features = false, features = [
     "numpy",
@@ -326,12 +461,28 @@ spenso-hep-lib = { path = "../gammaloop/crates/spenso-hep-lib" }
 spenso-macros = { path = "../gammaloop/crates/spenso-macros" }
 spynso3 = { path = "../gammaloop/crates/spynso3" }
 symbolica = { path = "../symbolica" }
-vakint = { path = "../gammaloop/crates/vakint" }
 """
 
     text = replace_toml_section(text, "dependencies", dependencies)
     text = replace_toml_section(text, "patch.crates-io", patches)
+    text = text.replace('    "vakint/python_stubgen",\n', "")
+    text = re.sub(
+        r'(?m)^numerica\s*=\s*\{[^\n]*\}\s*$',
+        'numerica = { path = "../symbolica/lib/numerica" }',
+        text,
+        count=1,
+    )
     cargo_toml.write_text(text.rstrip() + "\n", encoding="utf-8")
+
+    example_cargo_toml = SYMBOLICA_COMMUNITY_DIR / "example_extension" / "Cargo.toml"
+    example_text = example_cargo_toml.read_text(encoding="utf-8")
+    example_text = re.sub(
+        r'(?m)^symbolica\s*=\s*\{[^\n]*\}\s*$',
+        'symbolica = { path = "../../symbolica", features = ["python_export"] }',
+        example_text,
+        count=1,
+    )
+    example_cargo_toml.write_text(example_text.rstrip() + "\n", encoding="utf-8")
 
 
 def patch_gammaloop_cargo() -> None:
@@ -382,7 +533,10 @@ def display_path(path: Path) -> str:
     try:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
-        return str(path)
+        try:
+            return os.path.relpath(path, REPO_ROOT)
+        except ValueError:
+            return str(path)
 
 
 def apply_dependency_patch(target_dir: Path, patch_path: Path) -> bool:
@@ -437,8 +591,6 @@ def git_head(path: Path) -> str:
 
 
 def optional_git_head(path: Path) -> str | None:
-    if not (path / ".git").exists():
-        return None
     try:
         return git_head(path)
     except DependencySetupError:
@@ -456,14 +608,18 @@ def write_dependency_manifest(
         "symbolica": {
             "requested": True,
             "installed": symbolica_installed,
+            "source_ref": SYMBOLICA_REF,
             "source_path": str(SYMBOLICA_DIR.relative_to(REPO_ROOT)),
             "source_rev": optional_git_head(SYMBOLICA_DIR),
+            "source_url": SYMBOLICA_URL,
         },
         "symbolica_community": {
             "requested": True,
             "installed": symbolica_installed,
+            "source_ref": SYMBOLICA_COMMUNITY_REF,
             "source_path": str(SYMBOLICA_COMMUNITY_DIR.relative_to(REPO_ROOT)),
             "source_rev": optional_git_head(SYMBOLICA_COMMUNITY_DIR),
+            "source_url": SYMBOLICA_COMMUNITY_URL,
         },
         "gammaloop": {
             "requested": gammaloop_requested,
@@ -476,9 +632,18 @@ def write_dependency_manifest(
         "xsimd": {
             "requested": True,
             "installed": xsimd_headers_are_ready(),
+            "source_ref": XSIMD_REF,
             "source_path": str(XSIMD_DIR.relative_to(REPO_ROOT)),
             "source_rev": optional_git_head(XSIMD_DIR),
+            "source_url": XSIMD_URL,
             "usage": "header-only include path for Symbolica complex_4x compiled evaluators",
+        },
+        "rusticol": {
+            "requested": True,
+            "installed": python_package_is_installed("rusticol"),
+            "source_path": display_path(RUSTICOL_DIR),
+            "source_rev": optional_git_head(RUSTICOL_DIR),
+            "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts",
         },
         "dependency_patches": dependency_patch_manifest_entries(),
     }
@@ -494,7 +659,6 @@ def local_versions() -> dict[str, str]:
         "symbolica": git_head(SYMBOLICA_DIR),
         "spenso": gammaloop_head,
         "idenso": gammaloop_head,
-        "vakint": gammaloop_head,
     }
 
 
@@ -539,6 +703,11 @@ def patch_symbolica_community_module() -> None:
             )
         text = text.replace(anchor, anchor + "\n" + block + "\n", 1)
 
+    text = text.replace(
+        "    register_module!(m, vakint::symbolica_community_module::VakintWrapper);\n",
+        "",
+    )
+
     lib_rs.write_text(text, encoding="utf-8")
 
 
@@ -553,21 +722,67 @@ BASE_SMOKE_TEST = """
 import symbolica
 import symbolica.community.idenso
 import symbolica.community.spenso
-import symbolica.community.vakint
+import rusticol
+
+runtime = getattr(rusticol, "Runtime", None)
+if runtime is None:
+    raise SystemExit("rusticol.Runtime is missing")
+
+required_runtime_methods = {
+    "load",
+    "evaluate",
+    "evaluate_with_prec",
+    "profile",
+    "stage_diagnostics",
+    "metadata",
+}
+missing_runtime_methods = [
+    name for name in sorted(required_runtime_methods)
+    if not hasattr(runtime, name)
+]
+if missing_runtime_methods:
+    raise SystemExit(
+        f"rusticol.Runtime is missing methods: {missing_runtime_methods}"
+    )
 
 versions = getattr(symbolica, "LOCAL_VERSIONS", None)
 if not isinstance(versions, dict):
     raise SystemExit("symbolica.LOCAL_VERSIONS is missing or is not a dict")
 
-expected = {"symbolica", "spenso", "idenso", "vakint"}
+expected = {"symbolica", "spenso", "idenso"}
 missing = expected.difference(versions)
 if missing:
     raise SystemExit(f"symbolica.LOCAL_VERSIONS is missing keys: {sorted(missing)}")
 """
 
 
+def expected_local_versions_for_smoke() -> dict[str, str]:
+    try:
+        return local_versions()
+    except DependencySetupError:
+        return {}
+
+
 def smoke_test_code(*, include_gammaloop: bool) -> str:
     code = BASE_SMOKE_TEST
+    expected_versions = expected_local_versions_for_smoke()
+    if expected_versions:
+        code += (
+            "\nexpected_versions = "
+            + json.dumps(expected_versions, sort_keys=True)
+            + "\n"
+            + """
+mismatched_versions = {
+    name: (expected, versions.get(name))
+    for name, expected in expected_versions.items()
+    if versions.get(name) != expected
+}
+if mismatched_versions:
+    raise SystemExit(
+        f"symbolica.LOCAL_VERSIONS does not match managed sources: {mismatched_versions}"
+    )
+"""
+        )
     if include_gammaloop:
         code += "\nimport gammaloop\n"
     return code
@@ -638,7 +853,35 @@ def bootstrap_tools_are_ready(*, verbose: bool = False) -> bool:
             print(completed.stdout, end="")
         if completed.stderr:
             print(completed.stderr, end="", file=sys.stderr)
-    return completed.returncode == 0
+    if completed.returncode != 0:
+        return False
+    maturin = run(
+        [venv_python(), "-m", "maturin", "--version"],
+        env=venv_environment(),
+        capture=True,
+        check=False,
+    )
+    if verbose:
+        if maturin.stdout:
+            print(maturin.stdout, end="")
+        if maturin.stderr:
+            print(maturin.stderr, end="", file=sys.stderr)
+    return maturin.returncode == 0
+
+
+def maturin_status() -> str:
+    if not venv_python().exists():
+        return f"will be bootstrapped into {display_path(VENV_DIR)}"
+    completed = run(
+        [venv_python(), "-m", "maturin", "--version"],
+        env=venv_environment(),
+        capture=True,
+        check=False,
+    )
+    if completed.returncode == 0:
+        output = (completed.stdout or completed.stderr).strip().splitlines()
+        return output[0] if output else "installed in managed venv"
+    return f"will be installed/refreshed in {display_path(VENV_DIR)}"
 
 
 def build_maturin_wheel(
@@ -706,6 +949,13 @@ def build_wheels_and_install(*, include_gammaloop: bool) -> None:
         release=True,
     )
     install_wheel(symbolica_wheel, force_reinstall=True, no_deps=True)
+
+    rusticol_wheel = build_maturin_wheel(
+        RUSTICOL_DIR,
+        RUSTICOL_WHEEL_DIR,
+        release=True,
+    )
+    install_wheel(rusticol_wheel, force_reinstall=True, no_deps=True)
 
     if not include_gammaloop:
         print("Skipping GammaLoop API build because it was not requested.")
@@ -789,6 +1039,8 @@ def main(argv: list[str] | None = None) -> int:
     if not include_gammaloop and not args.reset:
         ensure_gammaloop_api_absent()
 
+    ensure_system_prerequisites()
+
     if (
         not args.recompile
         and not args.reset
@@ -798,7 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
             require_tool("git")
             ensure_branch_checkout(
                 XSIMD_URL,
-                "master",
+                XSIMD_REF,
                 XSIMD_DIR,
                 update_existing=False,
             )
@@ -826,7 +1078,6 @@ def main(argv: list[str] | None = None) -> int:
             f"and create/use {VENV_DIR} with {base_python_executable()}."
         )
 
-    ensure_system_prerequisites()
     ensure_maturin()
     if not include_gammaloop:
         ensure_gammaloop_api_absent()

@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pyamplicol
+import pyamplicol.__main__ as cli
 from pyamplicol.__main__ import (
     _attach_native_probe_comparison,
+    _generation_build_kwargs,
     _native_generation_profile,
+    _runtime_backend,
+    _runtime_evaluator_kwargs,
     _z_gluon_family_passed,
     main,
+    parse_args,
 )
 from pyamplicol.native import ExternalMomentum
 from pyamplicol.processes import ProcessOptions
@@ -40,6 +47,237 @@ def test_cli_processes_json_and_legacy_export(
     assert payload["n_groups"] == 1
     assert payload["n_records"] == 1
     assert export.exists()
+
+
+def test_cli_process_parser_accepts_uppercase_bosons(capsys) -> None:
+    assert main(["processes", "d d~ > Z g", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["request"]["rest"] == ["z", "g"]
+
+
+def test_cli_compiled_dag_shortcut_selects_runtime_backend() -> None:
+    args = parse_args(
+        [
+            "evaluate",
+            "--compiled-dag-evaluator",
+            "d d~ > z g",
+        ]
+    )
+
+    assert _runtime_backend(args) == "compiled-dag"
+    assert args.compiled_dag_lowering == "spenso"
+
+
+def test_cli_rusticol_runtime_backend_is_available() -> None:
+    args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--runtime-backend",
+            "rusticol",
+            "d d~ > z g",
+        ]
+    )
+
+    assert _runtime_backend(args) == "rusticol"
+
+
+def test_cli_profile_dag_defaults_to_fast_rusticol_cxx_o3() -> None:
+    args = parse_args(["profile-dag-evaluator", "d d~ > z g"])
+    kwargs = _runtime_evaluator_kwargs(args)
+
+    assert _runtime_backend(args) == "rusticol"
+    assert kwargs["symbolica_evaluator_backend"] == "compiled-complex"
+    assert kwargs["symbolica_compiled_preset"] == "runtime-o3"
+    assert kwargs["symbolica_n_cores"] == 10
+    assert kwargs["symbolica_compiled_chunk_compile_workers"] == 10
+    assert kwargs["batch_size"] == 128
+
+
+def test_cli_profile_dag_generate_only_flag_is_available(tmp_path: Path) -> None:
+    args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--runtime-backend",
+            "rusticol",
+            "--generate-only",
+            "--save-evaluator-dir",
+            str(tmp_path / "process"),
+            "d d~ > z g",
+        ]
+    )
+
+    assert _runtime_backend(args) == "rusticol"
+    assert args.generate_only is True
+    assert args.save_evaluator_dir == tmp_path / "process"
+
+
+def test_cli_generate_process_minimal_command_uses_fast_rusticol_defaults(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(["generate-process", "d d~ > z g", str(output_dir)])
+    kwargs = _runtime_evaluator_kwargs(args)
+
+    assert args.process == "d d~ > z g"
+    assert args.output_dir == output_dir
+    assert _runtime_backend(args) == "rusticol"
+    assert kwargs["symbolica_evaluator_backend"] == "compiled-complex"
+    assert kwargs["symbolica_compiled_preset"] == "runtime-o3"
+    assert kwargs["symbolica_n_cores"] == 10
+    assert kwargs["symbolica_compiled_chunk_compile_workers"] == 10
+    assert kwargs["batch_size"] == 128
+
+
+def test_cli_generate_process_explicit_jit_backend_overrides_fast_default(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(
+        [
+            "generate-process",
+            "--symbolica-evaluator-backend",
+            "jit",
+            "d d~ > z g",
+            str(output_dir),
+        ]
+    )
+    kwargs = _generation_build_kwargs(args, _runtime_backend(args), output_dir)
+
+    assert kwargs["symbolica_evaluator_backend"] == "jit"
+    assert kwargs["symbolica_compiled_output_dir"] == str(output_dir / "compiled")
+
+
+def test_cli_time_process_defaults_to_double_precision_and_ten_seconds(
+    tmp_path: Path,
+) -> None:
+    process_dir = tmp_path / "process"
+    args = parse_args(["time-process", str(process_dir)])
+
+    assert args.process_dir == process_dir
+    assert args.precision == 16
+    assert args.target_runtime == 10.0
+
+
+def test_cli_compiled_dag_helicity_filter_flags() -> None:
+    args = parse_args(
+        [
+            "generate",
+            "--compiled-dag-evaluator",
+            "--no-compiled-dag-helicity-filter",
+            "--compiled-dag-helicity-filter-samples",
+            "3",
+            "--compiled-dag-helicity-filter-seed",
+            "91",
+            "--compiled-dag-helicity-filter-phase-space",
+            "canonical",
+            "d d~ > z g",
+        ]
+    )
+    kwargs = _runtime_evaluator_kwargs(args)
+
+    assert _runtime_backend(args) == "compiled-dag"
+    assert kwargs["compiled_dag_helicity_filter"] is False
+    assert kwargs["compiled_dag_helicity_filter_samples"] == 3
+    assert kwargs["compiled_dag_helicity_filter_seed"] == 91
+    assert kwargs["compiled_dag_helicity_filter_phase_space"] == "canonical"
+
+
+def test_cli_compiled_dag_inline_external_wavefunction_flags() -> None:
+    default_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--compiled-dag-evaluator",
+            "d d~ > z g",
+        ]
+    )
+    disabled_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--compiled-dag-evaluator",
+            "--no-compiled-dag-inline-external-wavefunctions",
+            "d d~ > z g",
+        ]
+    )
+
+    assert _runtime_evaluator_kwargs(default_args)[
+        "compiled_dag_inline_external_wavefunctions"
+    ] is True
+    assert _runtime_evaluator_kwargs(disabled_args)[
+        "compiled_dag_inline_external_wavefunctions"
+    ] is False
+
+
+def test_cli_compiled_dag_defers_jit_direct_translation_default() -> None:
+    compiled_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--compiled-dag-evaluator",
+            "d d~ > z g",
+        ]
+    )
+    staged_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "d d~ > z g",
+        ]
+    )
+    disabled_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--compiled-dag-evaluator",
+            "--symbolica-no-jit-direct-translation",
+            "d d~ > z g",
+        ]
+    )
+
+    assert _runtime_evaluator_kwargs(compiled_args)[
+        "symbolica_jit_direct_translation"
+    ] is None
+    assert _runtime_evaluator_kwargs(staged_args)[
+        "symbolica_jit_direct_translation"
+    ] is False
+    assert _runtime_evaluator_kwargs(disabled_args)[
+        "symbolica_jit_direct_translation"
+    ] is False
+
+
+def test_cli_compiled_dag_uses_tuned_common_pair_defaults() -> None:
+    compiled_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--compiled-dag-evaluator",
+            "d d~ > z g",
+        ]
+    )
+    staged_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "d d~ > z g",
+        ]
+    )
+    explicit_args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--compiled-dag-evaluator",
+            "--symbolica-cpe-iterations",
+            "5",
+            "--symbolica-max-common-pair-distance",
+            "75",
+            "d d~ > z g",
+        ]
+    )
+
+    compiled_kwargs = _runtime_evaluator_kwargs(compiled_args)
+    staged_kwargs = _runtime_evaluator_kwargs(staged_args)
+    explicit_kwargs = _runtime_evaluator_kwargs(explicit_args)
+
+    assert compiled_kwargs["symbolica_cpe_iterations"] is None
+    assert compiled_kwargs["symbolica_max_common_pair_distance"] == 250
+    assert staged_kwargs["symbolica_cpe_iterations"] is None
+    assert staged_kwargs["symbolica_max_common_pair_distance"] == 100
+    assert explicit_kwargs["symbolica_cpe_iterations"] == 5
+    assert explicit_kwargs["symbolica_max_common_pair_distance"] == 75
 
 
 def test_cli_generate_writes_metadata_cache(capsys, tmp_path: Path) -> None:
@@ -590,6 +828,180 @@ def test_cli_profile_reports_artifact_and_native_runtime(
     assert profile["per_point_runtime_s"] >= 0.0
 
 
+def test_cli_profile_dag_evaluator_supports_compiled_dag_backend(capsys) -> None:
+    assert (
+        main(
+            [
+                "profile-dag-evaluator",
+                "--compiled-dag-evaluator",
+                "--no-compiled-dag-helicity-filter",
+                "d d~ > z g",
+                "--points",
+                "16",
+                "--repetitions",
+                "1",
+                "--batch-size",
+                "16",
+                "--symbolica-evaluator-backend",
+                "jit",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["runtime_backend"] == "compiled-dag"
+    assert payload["metadata"]["effective_lowering"] == "spenso"
+    assert payload["metadata"]["spenso_body_count"] > 0
+    assert payload["runtime_evaluator_only_us_per_point"] >= 0.0
+
+
+def test_cli_profile_dag_evaluator_reports_unsupported_process_json(capsys) -> None:
+    for process in (
+        "u d~ > w+ g g",
+        "d d~ > e+ e- g g",
+        "d d~ > z z g",
+    ):
+        assert (
+            main(
+                [
+                    "profile-dag-evaluator",
+                    process,
+                    "--runtime-backend",
+                    "rusticol",
+                    "--json",
+                ]
+            )
+            == 1
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["available"] is False
+        assert payload["process"] == process
+        assert payload["runtime_backend"] == "rusticol"
+        assert "currently supports q q~ -> Z" in payload["error"]
+
+
+def test_cli_rusticol_generate_only_reports_unsupported_process_json(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    for index, process in enumerate(
+        (
+            "u d~ > w+ g g",
+            "d d~ > e+ e- g g",
+            "d d~ > z z g",
+        )
+    ):
+        assert (
+            main(
+                [
+                    "profile-dag-evaluator",
+                    process,
+                    "--runtime-backend",
+                    "rusticol",
+                    "--generate-only",
+                    "--save-evaluator-dir",
+                    str(tmp_path / f"process-{index}"),
+                    "--json",
+                ]
+            )
+            == 1
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["available"] is False
+        assert payload["process"] == process
+        assert payload["runtime_backend"] == "rusticol"
+        assert payload["error"] == f"no native graph available for {process}"
+
+
+def test_cli_rusticol_generate_only_supports_zero_gluon_process(
+    tmp_path: Path,
+) -> None:
+    env = dict(
+        os.environ,
+        PYTHONPATH=str(Path(pyamplicol.__file__).resolve().parents[1]),
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyamplicol",
+            "profile-dag-evaluator",
+            "d d~ > z",
+            "--runtime-backend",
+            "rusticol",
+            "--generate-only",
+            "--save-evaluator-dir",
+            str(tmp_path / "zero"),
+            "--json",
+        ],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["available"] is True
+    assert payload["runtime_backend"] == "rusticol"
+    assert payload["metadata"]["kernel"] == "symbolica-zero-gluon"
+    assert (tmp_path / "zero" / "process_manifest.json").exists()
+    assert (tmp_path / "zero" / "check_standalone.py").exists()
+
+
+def test_cli_benchmark_routes_compiled_dag_backend(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_benchmark_z_gluon_modes(**kwargs):
+        captured.update(kwargs)
+        return {
+            "rows": [],
+            "summary": {
+                "mode_success_counts": {
+                    "legacy": 0,
+                    "python": 0,
+                    "numeric_tn": 0,
+                    "parametric_tn": 0,
+                    "shared_dag": 0,
+                },
+                "max_relative_difference_to_legacy": None,
+                "all_four_modes_match_for_all_rows": False,
+            },
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "benchmark_z_gluon_modes",
+        fake_benchmark_z_gluon_modes,
+    )
+
+    assert (
+        main(
+            [
+                "benchmark-z-gluon-modes",
+                "--compiled-dag-evaluator",
+                "--only-legacy-shared",
+                "--min-gluons",
+                "1",
+                "--max-gluons",
+                "1",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["rows"] == []
+    evaluator_kwargs = captured["evaluator_build_kwargs"]
+    assert isinstance(evaluator_kwargs, dict)
+    assert evaluator_kwargs["runtime_backend"] == "compiled-dag"
+
+
 def test_memory_watchdog_allows_small_command() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script = repo_root / "pyAmpliCol" / "scripts" / "run_with_memory_watch.py"
@@ -611,6 +1023,42 @@ def test_memory_watchdog_allows_small_command() -> None:
     )
 
     assert completed.stdout.strip() == "ok"
+
+
+def test_memory_watchdog_writes_peak_rss_report(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script = repo_root / "pyAmpliCol" / "scripts" / "run_with_memory_watch.py"
+    report_path = tmp_path / "watchdog.json"
+
+    completed = subprocess.run(
+        [
+            str(script),
+            "--limit-gb",
+            "30",
+            "--poll-s",
+            "0.01",
+            "--report-json",
+            str(report_path),
+            "--",
+            "python3",
+            "-c",
+            "print('ok')",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == "ok"
+    report = json.loads(report_path.read_text())
+    assert report["returncode"] == 0
+    assert report["limit_gb"] == 30
+    assert report["limit_bytes"] == 30 * 1024**3
+    assert isinstance(report["rss_polling_available"], bool)
+    if report["peak_rss_bytes"] is not None:
+        assert report["peak_rss_bytes"] > 0
+        assert report["peak_rss_gb"] > 0.0
 
 
 def test_cli_version_mode_does_not_import_native_dependencies(capsys) -> None:

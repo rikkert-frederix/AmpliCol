@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 import resource
 import signal
@@ -20,6 +21,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit-gb", type=float, required=True)
     parser.add_argument("--poll-s", type=float, default=1.0)
     parser.add_argument("--stop-file", type=Path, default=Path("stop.order"))
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        default=None,
+        help="Optional path where peak RSS and exit status are written as JSON.",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if not args.command or args.command[0] != "--":
@@ -39,18 +46,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         preexec_fn=lambda: _apply_process_memory_limit(limit_bytes),
     )
     warned_no_rss = False
+    peak_rss_bytes: int | None = None
+    rss_polling_available = True
     try:
         while True:
             returncode = child.poll()
             if returncode is not None:
+                _write_report(
+                    args.report_json,
+                    limit_gb=args.limit_gb,
+                    limit_bytes=limit_bytes,
+                    peak_rss_bytes=peak_rss_bytes,
+                    returncode=returncode,
+                    rss_polling_available=rss_polling_available,
+                )
                 return returncode
 
             if args.stop_file.exists():
                 _terminate_group(child.pid, signal.SIGTERM)
-                return _wait_or_kill(child)
+                returncode = _wait_or_kill(child)
+                _write_report(
+                    args.report_json,
+                    limit_gb=args.limit_gb,
+                    limit_bytes=limit_bytes,
+                    peak_rss_bytes=peak_rss_bytes,
+                    returncode=returncode,
+                    rss_polling_available=rss_polling_available,
+                )
+                return returncode
 
             rss = _process_tree_rss_bytes(child.pid)
             if rss is None:
+                rss_polling_available = False
                 if not warned_no_rss:
                     print(
                         "memory watchdog: RSS polling is unavailable; relying on "
@@ -59,21 +86,69 @@ def main(argv: Sequence[str] | None = None) -> int:
                         flush=True,
                     )
                     warned_no_rss = True
-            elif rss > limit_bytes:
-                print(
-                    f"memory watchdog: RSS {rss / 1024**3:.3f} GiB exceeded "
-                    f"limit {args.limit_gb:.3f} GiB",
-                    file=sys.stderr,
-                    flush=True,
+            else:
+                peak_rss_bytes = (
+                    rss
+                    if peak_rss_bytes is None
+                    else max(peak_rss_bytes, rss)
                 )
-                _terminate_group(child.pid, signal.SIGTERM)
-                _wait_or_kill(child)
-                return 137
+                if rss > limit_bytes:
+                    print(
+                        f"memory watchdog: RSS {rss / 1024**3:.3f} GiB exceeded "
+                        f"limit {args.limit_gb:.3f} GiB",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    _terminate_group(child.pid, signal.SIGTERM)
+                    _wait_or_kill(child)
+                    _write_report(
+                        args.report_json,
+                        limit_gb=args.limit_gb,
+                        limit_bytes=limit_bytes,
+                        peak_rss_bytes=peak_rss_bytes,
+                        returncode=137,
+                        rss_polling_available=rss_polling_available,
+                    )
+                    return 137
 
             time.sleep(args.poll_s)
     except KeyboardInterrupt:
         _terminate_group(child.pid, signal.SIGINT)
-        return _wait_or_kill(child)
+        returncode = _wait_or_kill(child)
+        _write_report(
+            args.report_json,
+            limit_gb=args.limit_gb,
+            limit_bytes=limit_bytes,
+            peak_rss_bytes=peak_rss_bytes,
+            returncode=returncode,
+            rss_polling_available=rss_polling_available,
+        )
+        return returncode
+
+
+def _write_report(
+    path: Path | None,
+    *,
+    limit_gb: float,
+    limit_bytes: int,
+    peak_rss_bytes: int | None,
+    returncode: int,
+    rss_polling_available: bool,
+) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "limit_gb": limit_gb,
+        "limit_bytes": limit_bytes,
+        "peak_rss_bytes": peak_rss_bytes,
+        "peak_rss_gb": (
+            None if peak_rss_bytes is None else peak_rss_bytes / 1024**3
+        ),
+        "returncode": returncode,
+        "rss_polling_available": rss_polling_available,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _wait_or_kill(child: subprocess.Popen[bytes]) -> int:
