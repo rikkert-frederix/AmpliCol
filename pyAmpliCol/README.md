@@ -27,6 +27,28 @@ default; request it explicitly with:
 python3 ./dependencies/install_dependencies.py --with-gammaloop
 ```
 
+## Symbolica License
+
+Symbolica requires a license for evaluator generation.  If you do not already
+have one, request a free trial from the managed Python environment:
+
+```sh
+source dependencies/.venv/bin/activate
+python3
+```
+
+```python
+from symbolica import *
+request_trial_license('NAME', 'EMAIL', 'ORGANIZATION')
+```
+
+Save the returned license string in the `SYMBOLICA_LICENSE` environment
+variable before running pyAmpliCol:
+
+```sh
+export SYMBOLICA_LICENSE='PASTE_THE_RETURNED_LICENSE_HERE'
+```
+
 ## Quick Start
 
 Generate a reusable process artifact and then time it with the default Rusticol
