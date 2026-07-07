@@ -448,7 +448,17 @@ def test_load_process_manifest_resolves_process_set_default_and_key(tmp_path: Pa
     )
 
     assert load_process_manifest(root).process == "d d~ > z g"
-    runtime = load_process(root, runtime="python", process_key="u_ubar_to_z_g")
+    with pytest.raises(
+        NativeEvaluationError,
+        match="schema-v1 process artifacts are retired from production",
+    ):
+        load_process(root, runtime="python", process_key="u_ubar_to_z_g")
+    runtime = load_process(
+        root,
+        runtime="python",
+        process_key="u_ubar_to_z_g",
+        allow_legacy_schema_v1=True,
+    )
     assert runtime.process == "u u~ > z g"
 
 
@@ -842,7 +852,11 @@ def test_zero_gluon_process_artifact_loads_in_python_and_rusticol(
         "d d~ > z",
         particles=native.canonical_zero_gluon_point("d d~ > z", sqrt_s=1000.0),
     ).matrix_element
-    python_runtime = load_process(process_dir, runtime="python")
+    python_runtime = load_process(
+        process_dir,
+        runtime="python",
+        allow_legacy_schema_v1=True,
+    )
     python_value = python_runtime.evaluate(momenta)[0]
     assert abs(python_value - reference) / abs(reference) < 1.0e-15
     assert python_runtime.metadata["runtime"] == "python-zero-gluon-symbolic-scalar"
@@ -1135,7 +1149,11 @@ def test_python_process_runtime_loads_nonzero_manifest_without_regenerating_grap
         raise AssertionError("process runtime rebuilt the graph from the process string")
 
     monkeypatch.setattr(dag_runtime_module, "_z_gluon_graph", fail_graph_rebuild)
-    runtime = load_process(process_dir, runtime="python")
+    runtime = load_process(
+        process_dir,
+        runtime="python",
+        allow_legacy_schema_v1=True,
+    )
     metadata = runtime.metadata
     assert metadata["loaded_from_process_manifest"] is True
     assert metadata["current_count"] == generator.metadata.shared_current_count
@@ -1285,7 +1303,11 @@ def test_zero_gluon_neutral_dilepton_artifact_loads_in_python_and_rusticol(
         for validation_point in payload["points"]
     ]
     reference = native.evaluate(process, particles=point).matrix_element
-    python_value = load_process(process_dir, runtime="python").evaluate(momenta)[0]
+    python_value = load_process(
+        process_dir,
+        runtime="python",
+        allow_legacy_schema_v1=True,
+    ).evaluate(momenta)[0]
     assert abs(python_value - reference) / abs(reference) < 1.0e-12
 
     code = f"""
@@ -1335,7 +1357,11 @@ momenta = np.asarray([
 ], dtype=np.float64)
 
 rust_runtime = rusticol.Runtime.load_legacy(str(root))
-python_runtime = pyamplicol.load_process(root, runtime="python")
+python_runtime = pyamplicol.load_process(
+    root,
+    runtime="python",
+    allow_legacy_schema_v1=True,
+)
 rust_diag = dict(rust_runtime.stage_diagnostics(momenta))
 python_diag = python_runtime.stage_diagnostics(momenta)
 

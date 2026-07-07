@@ -36,7 +36,7 @@ This document separates three layers that are easy to conflate:
 | Matrix generation facade | Generic-only | `matrix.py` is now a process-generic schema-v2 planning facade.  The previous `CurrentKey`/`RecursionGraph` family graph builder is quarantined in `legacy_matrix.py` for reference tests and migration diagnostics. |
 | Arbitrary quark-pair counts in enumeration formulas | Implemented | The Python process layer uses generic quark-line combinatorics instead of explicit 1/2/3 branches. |
 | Production ME lowering | Implemented and validated for broad generic leading colour | The schema-v2 generic DAG path reaches model-owned kernels for multi-boson, scalar/Higgs, pure-gluon, and multi-quark-line processes, builds evaluator-stage expressions, serializes evaluator artifacts, and records explicit blockers when a requested process or colour accuracy is not yet implemented. |
-| Python artifact loader | Implemented for schema-v2 generic DAG artifacts | `load_process(..., runtime="python")` resolves process sets, subprocess keys, generic external layouts, and stage-plan metadata without depending on process-family labels. |
+| Python artifact loader | Implemented for schema-v2 generic DAG artifacts | `load_process(..., runtime="python")` resolves process sets, subprocess keys, generic external layouts, and stage-plan metadata without depending on process-family labels. Schema-v1 execution is rejected by default and requires the explicit `allow_legacy_schema_v1=True` reference-only opt-in. |
 | Rusticol runtime | Implemented for schema-v2 generic DAG artifacts | `rusticol.Runtime.load()` is the production loader and accepts only schema-v2 generic DAG artifacts.  Schema-v1 family artifacts are reference-only and require the explicit `rusticol.Runtime.load_legacy()` entry point. |
 | NLC/full-colour | Scaffold only | Public `--color-accuracy` plumbing exists for process artifact generation; production artifacts currently require `lc`. |
 | Production CLI surface | Generic DAG only | `processes`, `process-plan`, `generate-process`, `time-process`, and `compare-amplicol --runtime-backend rusticol` are the visible workflow. `compare-amplicol` defaults to the generated-library supplied-momenta probe (`--library=create`, `make amplicol_generate_library`, `--library=use`). Legacy native/tensor/Z-family commands remain compatibility stubs only and are hidden from help output. |
@@ -250,12 +250,14 @@ backend/preset options, split-stage settings, and process-enumeration options,
 so a multi-entry artifact cannot silently fall back to an LC or legacy
 family-specific child mode.
 
-Rusticol's production API intentionally rejects schema-v1 artifacts.  Those
-artifacts still exist in tests and migration diagnostics because they were used
-to validate the original `q q~ > V + n g` eager-DAG route, but they are loaded
-only through `rusticol.Runtime.load_legacy()`.  New process-generation work
-must target schema-v2 manifests and must not add new production behavior to the
-schema-v1 family loader.
+Rusticol's production API intentionally rejects schema-v1 artifacts, and the
+Python loader now does the same unless `allow_legacy_schema_v1=True` is passed
+explicitly for reference-only diagnostics.  Those artifacts still exist in
+tests and migration diagnostics because they were used to validate the original
+`q q~ > V + n g` eager-DAG route, but they are loaded only through explicit
+legacy entry points such as `rusticol.Runtime.load_legacy()` or the Python
+opt-in above.  New process-generation work must target schema-v2 manifests and
+must not add new production behavior to the schema-v1 family loader.
 
 ## Current LC Validation Snapshot
 

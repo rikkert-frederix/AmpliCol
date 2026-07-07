@@ -32,10 +32,23 @@ class ProcessArtifactManifest:
 class PythonProcessRuntime:
     """Load a self-contained pyAmpliCol process directory in Python."""
 
-    def __init__(self, process_dir: str | Path, *, process_key: str | None = None) -> None:
+    def __init__(
+        self,
+        process_dir: str | Path,
+        *,
+        process_key: str | None = None,
+        allow_legacy_schema_v1: bool = False,
+    ) -> None:
         resolved = _resolve_process_artifact_dir(process_dir, process_key)
         self.manifest = load_process_manifest(resolved)
         self._payload = _load_process_manifest_payload(resolved)
+        if not self._is_generic_schema_v2() and not allow_legacy_schema_v1:
+            raise NativeEvaluationError(
+                "schema-v1 process artifacts are retired from production; "
+                "generate a schema-v2 generic DAG artifact or pass "
+                "allow_legacy_schema_v1=True only for reference-only legacy "
+                "artifact diagnostics"
+            )
         self._compiled_sweep: Any | None = None
         self._model = AmplicolSMLeadingColorModel()
         self._zero_gluon_evaluator: Any | None = None
@@ -410,11 +423,16 @@ def load_process(
     *,
     runtime: ProcessRuntimeBackend = "python",
     process_key: str | None = None,
+    allow_legacy_schema_v1: bool = False,
 ) -> Any:
     """Load a generated process directory with either Python or rusticol."""
 
     if runtime == "python":
-        return PythonProcessRuntime(process_dir, process_key=process_key)
+        return PythonProcessRuntime(
+            process_dir,
+            process_key=process_key,
+            allow_legacy_schema_v1=allow_legacy_schema_v1,
+        )
     if runtime == "rusticol":
         rusticol = cast(Any, __import__("rusticol"))
 
