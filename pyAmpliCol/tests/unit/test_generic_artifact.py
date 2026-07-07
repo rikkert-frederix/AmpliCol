@@ -173,6 +173,32 @@ def test_generic_artifact_can_filter_amplitude_stage_to_one_lc_sector(
     assert artifact["compiled"]["selected_color_sector_ids"] == [0]
 
 
+def test_low_n_pruning_policy_distinguishes_massless_qcd_and_massive_top() -> None:
+    pure_gluon = build_generic_process_manifest(
+        "g g > g g g g g",
+        selected_color_sector_ids={0},
+    ).to_json_dict()
+    top_pair = build_generic_process_manifest(
+        "g g > t t~ g g g",
+        selected_color_sector_ids={0},
+    ).to_json_dict()
+
+    assert len(pure_gluon["currents"]) == 310
+    assert len(pure_gluon["interactions"]) == 1665
+    assert len(pure_gluon["amplitude_roots"]) == 56
+    assert {
+        root["helicity_weight"]
+        for root in pure_gluon["runtime_schema"]["amplitude_stage"]["roots"]
+    } == {2.0}
+
+    assert len(top_pair["amplitude_roots"]) == 128
+    assert len(top_pair["interactions"]) <= 1332
+    assert {
+        root["helicity_weight"]
+        for root in top_pair["runtime_schema"]["amplitude_stage"]["roots"]
+    } == {1.0}
+
+
 def test_generic_process_manifest_records_lc_topology_reuse_plan() -> None:
     payload = build_generic_process_manifest("d d~ > z g g").to_json_dict()
     reuse = payload["lc_topology_reuse"]
