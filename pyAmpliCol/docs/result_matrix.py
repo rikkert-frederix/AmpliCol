@@ -1181,6 +1181,13 @@ def _run_pyamplicol_case(
         )
     except Exception as exc:  # noqa: BLE001 - benchmark harness records failures.
         payload.update(_error_payload(exc))
+        limitation = _documented_backend_limitation_from_error(
+            str(payload.get("error", "")),
+            backend_key=backend_key,
+        )
+        if limitation is not None:
+            payload["status"] = "backend_unsupported"
+            payload["backend_limitation"] = limitation
     return payload
 
 
@@ -1480,8 +1487,8 @@ def _matrix_status_notes_latex(
                     r"current managed dependency set uses SymJIT \texttt{2.19.2}, "
                     r"which fixes the smaller historical \texttt{v220} AArch64 "
                     r"JIT segfault reproduced by \texttt{MRE\_symjit\_bug\_new.py}; "
-                    r"the larger four-quark-line \(n=8\) materialization still "
-                    r"requires an upstream SymJIT fix."
+                    r"the remaining listed AArch64 vector-offset assertions still "
+                    r"require an upstream SymJIT fix."
                 ),
                 r"\par\smallskip",
             ]
