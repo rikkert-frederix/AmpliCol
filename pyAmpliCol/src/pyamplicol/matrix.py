@@ -26,8 +26,8 @@ class GenerationResult:
     """Result of model-driven generic DAG matrix-element planning.
 
     This production-facing result is intentionally process-family agnostic.
-    Legacy staged native graph metadata lives in :mod:`pyamplicol.legacy_matrix`
-    for reference tests and migration diagnostics only.
+    Retired staged native graph metadata remains in reference-only modules for
+    migration diagnostics only.
     """
 
     process: str

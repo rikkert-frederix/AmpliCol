@@ -888,7 +888,7 @@ def test_generic_stage_evaluator_artifact_writer_default_symbolica_bridge(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pyamplicol import dag_runtime
+    from pyamplicol import symbolica_evaluator
 
     manifest = build_generic_process_manifest("d d~ > z g")
     blueprint = build_generic_stage_compiler_blueprint(manifest)
@@ -930,12 +930,12 @@ def test_generic_stage_evaluator_artifact_writer_default_symbolica_bridge(
         }
 
     monkeypatch.setattr(
-        dag_runtime,
+        symbolica_evaluator,
         "_compile_symbolica_outputs",
         fake_compile_symbolica_outputs,
     )
     monkeypatch.setattr(
-        dag_runtime,
+        symbolica_evaluator,
         "_symbolica_evaluator_artifact_manifest",
         fake_artifact_manifest,
     )

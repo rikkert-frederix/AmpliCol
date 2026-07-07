@@ -1097,7 +1097,10 @@ def _symbolica_settings_from_runtime_kwargs(
     *,
     process: str | None = None,
 ):
-    from .dag_runtime import SymbolicaEvaluatorSettings, _resolve_compiled_preset
+    from .symbolica_evaluator import (
+        SymbolicaEvaluatorSettings,
+        _resolve_compiled_preset,
+    )
 
     (
         compiled_inline_asm,

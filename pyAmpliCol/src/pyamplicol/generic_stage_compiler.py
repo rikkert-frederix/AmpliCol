@@ -359,7 +359,7 @@ def _compile_default_stage_evaluator(
     jit_compile: bool,
     progress_callback: Any | None,
 ) -> dict[str, object]:
-    from .dag_runtime import (
+    from .symbolica_evaluator import (
         SymbolicaEvaluatorSettings,
         _compile_symbolica_outputs,
         _symbolica_evaluator_artifact_manifest,

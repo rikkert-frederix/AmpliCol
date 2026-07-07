@@ -16,6 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
         "src/pyamplicol/generic_stage_compiler.py",
         "src/pyamplicol/process_support.py",
         "src/pyamplicol/current_plan.py",
+        "src/pyamplicol/matrix.py",
+        "src/pyamplicol/symbolica_evaluator.py",
     ],
 )
 def test_schema_v2_production_modules_do_not_reference_family_runtimes(
@@ -30,6 +32,12 @@ def test_schema_v2_production_modules_do_not_reference_family_runtimes(
         "tensor_runtime",
         "compiled_dag_runtime",
         "legacy_matrix",
+        "from .dag_runtime",
+        "from .native",
+        "from .evaluation",
+        "from .tensor_runtime",
+        "from .compiled_dag_runtime",
+        "from .legacy_matrix",
         "LeadingColorZJets",
     )
 

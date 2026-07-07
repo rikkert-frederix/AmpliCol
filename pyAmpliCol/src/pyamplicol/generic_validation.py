@@ -9,7 +9,7 @@ from typing import Any, Sequence, cast
 import numpy as np
 
 from .core_types import ExternalMomentum
-from .dag_runtime import SymbolicaEvaluatorSettings
+from .symbolica_evaluator import SymbolicaEvaluatorSettings
 from .generic_artifact import (
     build_generic_process_manifest,
     select_leading_color_sector_ids,
