@@ -258,6 +258,7 @@ def _audit_row_statuses(
 
 
 def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
+    gate = _gate_summary(data, findings)
     lines = [
         "# Result Matrix Audit",
         "",
@@ -266,6 +267,27 @@ def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
         "unresolved statuses in `result_matrix_data.json`.",
         "",
         f"Matrix updated at: `{data.get('updated_at', 'unknown')}`",
+        "",
+        f"Gate status: **{gate['status']}**.",
+        "",
+        (
+            "Gate counts: "
+            f"`errors`={gate['error_findings']}, "
+            f"`validation_failures`={gate['validation_failures']}, "
+            f"`missing_amplicol`={gate['missing_amplicol']}, "
+            f"`missing_jit`={gate['missing_jit']}, "
+            f"`amplicol_unsupported`={gate['amplicol_unsupported']}, "
+            f"`jit_backend_unsupported`={gate['jit_backend_unsupported']}, "
+            f"`missing_cpp_o3`={gate['missing_cpp_o3']}."
+        ),
+        "",
+        (
+            "`missing_cpp_o3` is informational: C++ O3 cells are intentionally "
+            "filled only where generation was feasible within the matrix-run "
+            "time budget. `amplicol_unsupported` records processes outside "
+            "Fortran AmpliCol's supported quark-line range; pyAmpliCol entries "
+            "for those cells are still shown as absolute timings."
+        ),
         "",
     ]
     if not findings:
@@ -288,6 +310,65 @@ def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
     )
     lines.extend(finding.markdown_row() for finding in findings)
     return "\n".join(lines) + "\n"
+
+
+def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, int | str]:
+    entries = data.get("entries", {})
+    error_findings = sum(1 for finding in findings if finding.severity == "error")
+    validation_failures = 0
+    missing_amplicol = 0
+    missing_jit = 0
+    amplicol_unsupported = 0
+    jit_backend_unsupported = 0
+    missing_cpp_o3 = 0
+    if isinstance(entries, dict):
+        for row in entries.values():
+            if not isinstance(row, dict):
+                continue
+            for _, case in _iter_cases(row):
+                if case.get("status") == "not_applicable":
+                    continue
+                validation = _mode(case, "validation")
+                if validation:
+                    tolerance = _float(validation.get("tolerance")) or 1.0e-8
+                    rel = _float(validation.get("max_relative_difference"))
+                    if validation.get("status") != "ok" or (
+                        rel is not None and rel > tolerance
+                    ):
+                        validation_failures += 1
+                amplicol = _mode(case, "amplicol")
+                if not amplicol:
+                    missing_amplicol += 1
+                elif amplicol.get("status") == "unsupported":
+                    amplicol_unsupported += 1
+                jit = _mode(case, "pyamplicol_jit")
+                if not jit:
+                    missing_jit += 1
+                elif jit.get("status") == "backend_unsupported":
+                    jit_backend_unsupported += 1
+                cpp = _mode(case, "pyamplicol_cpp_o3")
+                if not cpp or cpp.get("status") == "missing":
+                    missing_cpp_o3 += 1
+    status = (
+        "PASS"
+        if (
+            error_findings == 0
+            and validation_failures == 0
+            and missing_amplicol == 0
+            and missing_jit == 0
+        )
+        else "FAIL"
+    )
+    return {
+        "status": status,
+        "error_findings": error_findings,
+        "validation_failures": validation_failures,
+        "missing_amplicol": missing_amplicol,
+        "missing_jit": missing_jit,
+        "amplicol_unsupported": amplicol_unsupported,
+        "jit_backend_unsupported": jit_backend_unsupported,
+        "missing_cpp_o3": missing_cpp_o3,
+    }
 
 
 def _iter_cases(row: dict[str, Any]) -> Iterable[tuple[int, dict[str, Any]]]:
