@@ -11,12 +11,15 @@ dependencies/wheels/
 dependencies/symbolica/
 dependencies/symbolica_alias_branch/
 dependencies/symbolica-community/
+dependencies/symjit/
 dependencies/gammaloop/
 dependencies/xsimd/
 
 TEMPORARY_JUST_FOR_REFERENCE/
 
 .benchmarks/
+.generic-lc-validation/
+.lc-topology-replay-validation/
 outputs/
 
 run.order
@@ -24,5 +27,13 @@ run.output
 stop.order
 
 docs/*.swp
+docs/.result_matrix_outputs/
+docs/*.aux
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.synctex.gz
 
 .DS_Store

@@ -205,6 +205,49 @@ program amplicol_generate
      endif
   endif
 
+  if (amplicol_momenta_probe_points.gt.0) then
+     if (timing_enabled) then
+        call cpu_time(tLoopBefore)
+        t_Initialise=tLoopBefore-tTot_B
+     endif
+     call run_amplicol_momenta_probe()
+     if (create_amplitude_library) then
+        done=.true.
+        do igroup=1,ngroups
+           done=done.and.all(pgl(igroup)%amps%lib_created)
+        enddo
+        if (done) then
+           if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
+           call create_amplitude_lib()
+           if (timing_mode.eq.timing_detailed) then
+              call cpu_time(tAfter)
+              t_Amp_opt=t_Amp_opt+tAfter-tBefore
+           endif
+        else
+           write (*,*) 'Supplied-momenta library creation did not create all amplitude libraries.'
+           write (99,*) 'Supplied-momenta library creation did not create all amplitude libraries.'
+           stop 1
+        endif
+     endif
+     if (timing_enabled) then
+        call cpu_time(tLoopAfter)
+        t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
+        call cpu_time(tFinalBefore)
+        call cpu_time(tFinalAfter)
+        t_Finalise=tFinalAfter-tFinalBefore
+        call cpu_time(tTot_a)
+        t_all=tTot_a-tTot_b
+        if (timing_mode.eq.timing_detailed) then
+           t_other=t_all-(t_PS_init+t_Amp_init+t_Proc_init+t_PS+t_Amp+t_mat+t_Amp_opt+t_weight+&
+                t_lib_check+t_Int_init+t_Int_get+t_Int_fill+t_Evt_write+t_Evt_wgt_assign+t_Evt_wgt_update)
+        endif
+        call print_timing(6)
+        call print_timing(99)
+     endif
+     close(99)
+     stop
+  endif
+
   if (amplicol_fixed_probe_points.gt.0) then
      if (timing_enabled) then
         call cpu_time(tLoopBefore)
@@ -404,6 +447,61 @@ contains
     enddo
   end subroutine run_amplicol_fixed_probe
 
+  subroutine run_amplicol_momenta_probe()
+    implicit none
+    integer :: ipoint,igroup,iint,i
+    real(kind=8) :: point_before,point_after
+    logical :: done
+
+    write (*,*) 'Start supplied-momenta AmpliCol probe.'
+    write (99,*) 'Start supplied-momenta AmpliCol probe.'
+    do igroup=1,ngroups
+       if (pgl(igroup)%nproc.eq.0) cycle
+       do iint=1,size(pgl(igroup)%amps)
+          if (allocated(p_read)) then
+             if (size(p_read,dim=1).ne.pgl(igroup)%next) deallocate(p_read)
+          endif
+          if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
+          call read_in_momenta(pgl(igroup)%next,igroup,iint,p_read)
+          do i=1,pgl(igroup)%next
+             pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
+          enddo
+          pgl(igroup)%ps(1)%jac=1d0
+          pgl(igroup)%ps(1)%xbjrk=1d0
+          do ipoint=1,amplicol_momenta_probe_points
+             pgl(igroup)%passed(iint)=pgl(igroup)%passed(iint)+1
+             if (timing_mode.eq.timing_detailed) call cpu_time(point_before)
+             call compute_the_amps(iint,igroup)
+             if (timing_mode.eq.timing_detailed) then
+                call cpu_time(point_after)
+                t_Amp=t_Amp+point_after-point_before
+                point_before=point_after
+             endif
+             call square_the_amps(iint,igroup)
+             if (timing_mode.eq.timing_detailed) then
+                call cpu_time(point_after)
+                t_mat=t_mat+point_after-point_before
+             endif
+             if (create_amplitude_library .and. &
+                  (.not.pgl(igroup)%amps(iint)%lib_created)) then
+                if (timing_mode.eq.timing_detailed) call cpu_time(point_before)
+                call optimise_the_amplitudes(iint,igroup,done)
+                if (timing_mode.eq.timing_detailed) then
+                   call cpu_time(point_after)
+                   t_Amp_opt=t_Amp_opt+point_after-point_before
+                endif
+             endif
+             if (.not.create_amplitude_library) then
+                call perform_amplicol_probe(iint,igroup)
+                if (amplicol_probe_done) exit
+             endif
+          enddo
+          if ((.not.create_amplitude_library) .and. amplicol_probe_done) exit
+       enddo
+       if ((.not.create_amplitude_library) .and. amplicol_probe_done) exit
+    enddo
+  end subroutine run_amplicol_momenta_probe
+
   logical function is_fixed_z_probe_process(igroup,iint)
     implicit none
     integer,intent(in) :: igroup,iint
@@ -558,7 +656,7 @@ contains
        endif
        return
     endif
-    if (.not.read_momenta) then
+    if (.not.(read_momenta .or. amplicol_probe_points.gt.0)) then
     if (.not.pass_cuts(pgl(ichan))) then
        val=0d0
        if (time_physics) then
@@ -844,12 +942,14 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         amplicol_probe_points,amplicol_fixed_probe_points,amplicol_probe_quiet,timing_arg,timing_sample_arg)
+         amplicol_probe_points,amplicol_fixed_probe_points,amplicol_momenta_probe_points,&
+         amplicol_probe_quiet,timing_arg,timing_sample_arg)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
 
     if (amplicol_fixed_probe_points.gt.0) amplicol_probe_points=amplicol_fixed_probe_points
+    if (amplicol_momenta_probe_points.gt.0) amplicol_probe_points=amplicol_momenta_probe_points
 
     timing_arg=trim(adjustl(timing_arg))
     read(timing_arg,*,iostat=io) timing_numeric_arg
@@ -883,11 +983,6 @@ contains
        create_amplitude_library=.true.
        use_amplitude_library=.false.
     elseif (library.eq.'use') then
-       if (read_momenta .or. amplicol_probe_points.gt.0) then
-          write (*,*) '--me_test/--amplicol_probe cannot be combined with --library=use'
-          write (*,*) 'Run direct checks with the direct amplitude evaluator before building or using the library.'
-          stop 1
-       endif
        create_amplitude_library=.false.
        use_amplitude_library=.true.
        return

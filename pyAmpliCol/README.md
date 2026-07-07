@@ -5,10 +5,23 @@ AmpliCol matrix-element prototype.  The current production path generates a
 shared-current eager-DAG process artifact in Python and evaluates it through the
 Rusticol PyO3 runtime using serialized Symbolica evaluators.
 
-The validated fast path currently targets leading-colour
-`q q~ > Z + n gluons` processes.  The surrounding process/model architecture is
-kept broader, but other electroweak final states still require additional
-current lowering before they can be used with `generate-process`.
+The production path is now the leading-colour generic DAG artifact route.  The
+process parser/enumerator expands concrete subprocesses, process sets,
+anonymous multiparticle slots, built-in `p`/`j` labels, repetition syntax, and
+arbitrary quark-line counts.  The model supplies particles, vertices,
+propagators, source kernels, and vertex lowerings; the generic DAG compiler
+discovers valid currents from that local model information rather than from
+process-family branches.  Generated schema-v2 artifacts contain serialized
+Symbolica evaluator stages.  `pyamplicol.load_process(..., runtime="python")`
+can inspect the same generic artifact metadata and stage plan, while
+`runtime="rusticol"` is the production evaluator for serialized stage
+execution.
+
+Current validation covers representative `V + gluons`, explicit dilepton,
+charged-current, multi-boson, pure-gluon, and multi-quark-line leading-colour
+processes.  Unsupported requests fail explicitly with diagnostics that name the
+missing layer, such as colour expansion, current closure, or a missing
+vertex/propagator lowering.
 
 ## Installation
 
@@ -72,22 +85,70 @@ python3 check_standalone.py --precision 16 --profile
 
 ```sh
 ./pyamplicol.sh processes 'd d~ > Z g g' --json
-./pyamplicol.sh generate 'd d~ > Z g g' --json
-./pyamplicol.sh evaluate 'd d~ > Z g g' --sqrt-s 1000 --json
-./pyamplicol.sh compare-amplicol 'd d~ > Z g g g g' --amplicol-probe --points 10
-./pyamplicol.sh validate-z-gluon-family --max-gluons 6 --points 10 --runtime-backend dag
+./pyamplicol.sh processes 'd d~ > e+ e- [d g] [d g] | p p > Z 2j' --json
+./pyamplicol.sh process-plan 'd d~ > Z Z g' outputs/plans/dd_zz_g
+./pyamplicol.sh generate-process 'd d~ > e+ e-' outputs/dd_epem_0g
+./pyamplicol.sh time-process outputs/dd_epem_0g
+./pyamplicol.sh generate-process 'd d~ > e+ e- g' outputs/dd_epem_1g
+./pyamplicol.sh time-process outputs/dd_epem_1g
+./pyamplicol.sh generate-process 'u d~ > e+ ve g' outputs/ud_epve_1g
+./pyamplicol.sh time-process outputs/ud_epve_1g
+./pyamplicol.sh generate-process 'd d~ > u u~ s s~' outputs/dd_uuss
+./pyamplicol.sh time-process outputs/dd_uuss
+./pyamplicol.sh compare-amplicol 'd d~ > Z g g g g' --runtime-backend rusticol --points 10
 ```
+
+`generate-process` also accepts process sets.  A process-set output contains a
+root `process_set_manifest.json` and one nested subprocess artifact per
+canonical process key.  The root also has a `check_standalone.py` wrapper that
+forwards to the selected subprocess checker:
+
+```sh
+./pyamplicol.sh generate-process 'd d~ > Z g | u u~ > Z g' outputs/z_1g_set
+./pyamplicol.sh time-process outputs/z_1g_set --process u_ubar_to_z_g
+python outputs/z_1g_set/check_standalone.py --process 'u u~ > z g' --precision 16
+```
+
+Inclusive labels are expanded at the process-set boundary.  For example,
+`p p > Z g` becomes concrete subprocess entries such as `d d~ > g z`,
+`u u~ > g z`, and their reversed beam-order partners.  The vector-plus-gluon
+artifact route supports both beam orders for these concrete entries.  Entries
+whose current lowering is not implemented yet fail with explicit diagnostics
+instead of being silently folded into a parent inclusive artifact.
+
+The production artifact colour mode is leading colour:
+
+```sh
+./pyamplicol.sh generate-process --color-accuracy lc 'd d~ > Z 4*g' outputs/dd_z_4g
+```
+
+Large inclusive or many-quark-line requests can be controlled with generic
+physics budgets, not process-family modes.  Useful examples are coupling-order
+caps, explicit LC sector ids, line-pairing representative sectors, and a cap on
+external quark-pair count:
+
+```sh
+./pyamplicol.sh process-plan --coupling-order-policy minimal 'd d~ > Z 4*g' outputs/plans/dd_z_4g
+./pyamplicol.sh process-plan --lc-sector-strategy line-pairing-representatives 'd d~ > u u~ s s~ c c~' outputs/plans/dd_3pairs
+./pyamplicol.sh generate-process --max-quark-pairs 2 'p p > Z 2j' outputs/pp_z_2j_qcap2
+```
+
+`--color-accuracy nlc` and `--color-accuracy full` are reserved for the
+Idenso-backed colour-expansion scaffold and currently return explicit
+unsupported diagnostics for production artifacts.
 
 Long validation and benchmark jobs should be run behind the bundled RAM
 watchdog so the process is stopped before exceeding the repository guideline of
 30 GB:
 
 ```sh
-python3 ./scripts/run_with_memory_watch.py --max-rss-gb 30 -- \
-  ./pyamplicol.sh validate-z-gluon-family --max-gluons 6 --points 10
+python3 ./scripts/run_with_memory_watch.py --limit-gb 30 -- \
+  ./pyamplicol.sh compare-amplicol 'd d~ > Z g g g g' \
+    --runtime-backend rusticol --points 10
 ```
 
 ## Documentation
 
-See `docs/description.pdf` for the architecture overview and
-`docs/performance_summary.md` for the current benchmark summary.
+See `docs/description.pdf` for the architecture overview,
+`docs/performance_summary.md` for the current benchmark summary, and
+`docs/process_coverage.md` for the current parser/model/runtime coverage.

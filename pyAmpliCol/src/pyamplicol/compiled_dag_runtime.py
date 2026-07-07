@@ -1,3 +1,11 @@
+# mypy: ignore-errors
+"""Retired monolithic compiled-DAG experiment.
+
+This module is kept only as historical reference while the generic staged DAG
+and Rusticol runtime replace it. Do not route production CLI commands here and
+do not add new alias-branch Symbolica dependencies for this path.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -45,7 +53,7 @@ from .dag_runtime import (
     _z_gluon_graph,
 )
 from .lowering import _quark_vector_weyl_tensor_name, _weyl_coupling_for_chirality
-from .matrix import RecursionGraph
+from .legacy_matrix import RecursionGraph
 from .model import AmplicolSMLeadingColorModel
 from .native import (
     ExternalMomentum,
@@ -60,7 +68,7 @@ from .native import (
     _negate_momentum,
 )
 from .params import ParamBuilder
-from .phase_space import rambo_z_gluon_point
+from .phase_space import _legacy_rambo_z_gluon_point as rambo_z_gluon_point
 from .symbols import symbols
 from .tensor_runtime import HelicityFilter, HelicityFilterEntry
 
@@ -317,10 +325,9 @@ class ZGluonCompiledDAGEvaluator:
             optimization_level=symbolica_compiled_optimization_level,
             output_chunk_size=symbolica_compiled_output_chunk_size,
         )
-        effective_cpe_iterations = (
-            2
-            if symbolica_cpe_iterations is None and self.gluon_count <= 5
-            else symbolica_cpe_iterations
+        effective_cpe_iterations = _resolve_compiled_dag_cpe_iterations(
+            self.gluon_count,
+            symbolica_cpe_iterations,
         )
         self.symbolica_settings = SymbolicaEvaluatorSettings(
             backend=symbolica_evaluator_backend,
@@ -3749,6 +3756,13 @@ def _resolve_compiled_dag_compiled_preset(
     if output_chunk_size is None:
         effective_chunk_size = None
     return effective_inline_asm, effective_optimization_level, effective_chunk_size
+
+
+def _resolve_compiled_dag_cpe_iterations(
+    gluon_count: int,
+    requested: int | None,
+) -> int | None:
+    return 2 if requested is None and gluon_count <= 5 else requested
 
 
 def _compiled_dag_progress(

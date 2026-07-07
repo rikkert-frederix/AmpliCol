@@ -1,51 +1,159 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
+import queue
+import signal
+import shutil
 import statistics
+import subprocess
 import sys
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
 from pprint import pprint
-from typing import Any, Sequence, cast
+from typing import Any, Literal, Mapping, Sequence, cast
 
 from . import __version__
-from .benchmarks import (
-    benchmark_z_gluon_modes,
-    build_z_gluon_dag_profile_evaluator,
-    format_mode_benchmark_table,
-    profile_z_gluon_dag_evaluator,
-    profile_z_gluon_tensor_evaluator,
-)
 from .cli_display import (
     DisplayColumn,
     DisplayRow,
     default_display_for_args,
     format_measurement,
 )
-from .evaluation import NativeRuntimeEvaluator, RuntimeBackend
-from .matrix import (
-    EvaluatorArtifact,
-    NativeMatrixElementGenerator,
-    evaluator_artifact_path,
-    load_evaluator_artifact,
+from .core_types import NativeEvaluationError
+from .processes import (
+    PDGS,
+    ProcessEnumeration,
+    ProcessEnumerator,
+    ProcessOptions,
+    ProcessSetEntry,
+    enumerate_generic_process_set,
+    enumerate_process_set,
 )
-from .native import NativeEvaluationError
-from .processes import ProcessEnumeration, ProcessEnumerator, ProcessOptions
-from .reference import AmplicolAdapter, CommandResult
-from .symbolic import ZeroGluonSymbolicEvaluator
+from .reference import (
+    AmplicolAdapter,
+    CommandResult,
+    amplicol_process_file_entry,
+    reference_color_order_for_run,
+)
 
 _RUNTIME_BACKENDS = (
     "auto",
     "python",
     "dag",
     "numeric-tensor-network",
-    "compiled-dag",
     "rusticol",
 )
+_PRODUCTION_RUNTIME_BACKENDS = ("rusticol",)
+RuntimeBackend = Literal[
+    "auto",
+    "python",
+    "dag",
+    "numeric-tensor-network",
+    "rusticol",
+]
+
+_CHILD_PROGRESS_ENV = "PYAMPLICOL_CHILD_PROGRESS"
+_CHILD_PROGRESS_PREFIX = "::pyamplicol-progress::"
+
+
+_PROCESS_SET_STANDALONE_CHECK_SCRIPT = r'''#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import runpy
+import sys
+from pathlib import Path
+
+
+def resolve_process(root: Path, selected: str | None):
+    manifest = json.loads((root / "process_set_manifest.json").read_text())
+    entries = manifest.get("processes", [])
+    if not isinstance(entries, list) or not entries:
+        raise SystemExit(f"process-set artifact contains no subprocesses: {root}")
+    selected_key = selected or str(manifest.get("default_process_key"))
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("key"))
+        process = str(entry.get("process"))
+        if selected_key in {key, process}:
+            path = Path(str(entry.get("path", "")))
+            process_dir = path if path.is_absolute() else root / path
+            return entry, process_dir
+    available = ", ".join(
+        str(entry.get("key"))
+        for entry in entries
+        if isinstance(entry, dict) and "key" in entry
+    )
+    raise SystemExit(
+        f"process {selected_key!r} not found in {root}; available: {available}"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Standalone rusticol process-set check")
+    parser.add_argument(
+        "--process",
+        help=(
+            "Canonical process key or process string to select from this "
+            "process-set artifact. Defaults to the manifest default."
+        ),
+    )
+    parser.add_argument("--precision", type=int, default=16)
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--target-runtime", type=float, default=10.0)
+    parser.add_argument(
+        "--rusticol-folder",
+        type=Path,
+        help=(
+            "Optional rusticol location forwarded to the selected subprocess "
+            "checker."
+        ),
+    )
+    args, passthrough = parser.parse_known_args()
+
+    root = Path(__file__).resolve().parent
+    _, process_dir = resolve_process(root, args.process)
+    checker = process_dir / "check_standalone.py"
+    if not checker.exists():
+        raise SystemExit(f"selected subprocess has no standalone checker: {checker}")
+
+    forwarded = [
+        str(checker),
+        "--precision",
+        str(args.precision),
+        "--target-runtime",
+        str(args.target_runtime),
+    ]
+    if args.profile:
+        forwarded.append("--profile")
+    if args.rusticol_folder is not None:
+        forwarded.extend(["--rusticol-folder", str(args.rusticol_folder)])
+    forwarded.extend(passthrough)
+    sys.argv = forwarded
+    try:
+        runpy.run_path(str(checker), run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        print(code, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -58,7 +166,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Print the pyamplicol package version and exit.",
     )
 
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     subparsers.add_parser(
         "inspect",
@@ -74,9 +182,43 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     processes.add_argument("--legacy-output", type=Path)
     processes.add_argument("--json", action="store_true")
 
+    process_plan = subparsers.add_parser(
+        "process-plan",
+        help=(
+            "Write generic schema-v2 current-planning manifests without "
+            "building runtime evaluators."
+        ),
+    )
+    _add_process_options(process_plan)
+    process_plan.add_argument("process", metavar="PROCESS")
+    process_plan.add_argument("output_dir", type=Path, metavar="OUTPUT_DIR")
+    process_plan.add_argument(
+        "--color-accuracy",
+        choices=("lc", "nlc", "full"),
+        default="lc",
+        help=(
+            "Colour treatment to record in the planning manifest. LC is the "
+            "production target; NLC/full are accepted as scaffolded metadata."
+        ),
+    )
+    process_plan.add_argument(
+        "--max-currents",
+        type=int,
+        default=20000,
+        help="Safety cap for generic current-plan construction.",
+    )
+    process_plan.add_argument(
+        "--max-color-sectors",
+        type=int,
+        default=20000,
+        help="Safety cap for generic colour-flow sector enumeration.",
+    )
+    _add_generic_dag_pruning_options(process_plan)
+    process_plan.add_argument("--json", action="store_true")
+
     generate = subparsers.add_parser(
         "generate",
-        help="Generate native matrix-element metadata/evaluator artifacts.",
+        help=argparse.SUPPRESS,
     )
     _add_process_options(generate)
     generate.add_argument("process", metavar="PROCESS")
@@ -87,7 +229,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     evaluate = subparsers.add_parser(
         "evaluate",
-        help="Evaluate a deterministic point with the native backend.",
+        help=argparse.SUPPRESS,
     )
     _add_process_options(evaluate)
     evaluate.add_argument("process", metavar="PROCESS")
@@ -111,22 +253,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     compare.add_argument("--timeout", type=float)
     compare.add_argument("--process-file", type=Path)
     compare.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    _add_runtime_backend_option(compare)
+    _add_runtime_backend_option(compare, production=True)
     _add_evaluator_build_options(compare)
+    _add_generic_dag_pruning_options(compare)
     compare.add_argument("--skip-build", action="store_true")
     compare.add_argument(
         "--amplicol-probe",
         action="store_true",
-        help="Use direct AmpliCol probing without MadGraph instead of --me_test.",
+        help=(
+            "Use AmpliCol's built-in generated-library random/fixed probe "
+            "instead of the default deterministic supplied-momenta probe. "
+            "When building is enabled, this creates and uses the generated "
+            "Fortran amplitude library."
+        ),
+    )
+    compare.add_argument(
+        "--amplicol-momenta-probe",
+        action="store_true",
+        help=(
+            "Use a deterministic pyAmpliCol validation point and evaluate it "
+            "with the generated Fortran AmpliCol library. This is the default."
+        ),
+    )
+    compare.add_argument(
+        "--me-test",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     compare.add_argument("--dry-run", action="store_true")
     compare.add_argument("--json", action="store_true")
 
     family = subparsers.add_parser(
         "validate-z-gluon-family",
-        help=(
-            "Validate d d~ -> Z + n gluons against legacy AmpliCol direct probes."
-        ),
+        help=argparse.SUPPRESS,
     )
     _add_process_options(family)
     family.add_argument("--min-gluons", type=int, default=0)
@@ -145,10 +304,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     benchmark = subparsers.add_parser(
         "benchmark-z-gluon-modes",
-        help=(
-            "Benchmark legacy AmpliCol, native Python, numerical tensor-network, "
-            "and parametric tensor-network modes on d d~ -> Z + n gluons."
-        ),
+        help=argparse.SUPPRESS,
     )
     _add_process_options(benchmark)
     benchmark.add_argument("--min-gluons", type=int, default=0)
@@ -177,7 +333,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     tensor_profile = subparsers.add_parser(
         "profile-tensor-evaluator",
-        help="Profile the parametric Z+gluon tensor-network evaluator hot path.",
+        help=argparse.SUPPRESS,
     )
     tensor_profile.add_argument("process", metavar="PROCESS")
     tensor_profile.add_argument("--sqrt-s", type=float, default=1000.0)
@@ -192,7 +348,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     dag_profile = subparsers.add_parser(
         "profile-dag-evaluator",
-        help="Profile the shared-current D-mode evaluator hot path.",
+        help=argparse.SUPPRESS,
     )
     dag_profile.add_argument("process", metavar="PROCESS")
     dag_profile.add_argument("--sqrt-s", type=float, default=1000.0)
@@ -219,9 +375,52 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Defaults to C++ O3 stage evaluators."
         ),
     )
+    _add_process_options(generate_process)
     generate_process.add_argument("process", metavar="PROCESS")
     generate_process.add_argument("output_dir", type=Path, metavar="OUTPUT_DIR")
+    generate_process.add_argument(
+        "--append",
+        action="store_true",
+        help="Append new process entries to an existing process-set output.",
+    )
+    generate_process.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace existing process entries with matching canonical keys.",
+    )
+    generate_process.add_argument(
+        "--color-accuracy",
+        choices=("lc", "nlc", "full"),
+        default="lc",
+        help=(
+            "Colour treatment requested for process generation. Only lc is "
+            "implemented for production artifacts in this milestone."
+        ),
+    )
+    generate_process.add_argument(
+        "--n_cores",
+        type=int,
+        default=1,
+        help=(
+            "Number of subprocess artifacts to generate concurrently for a "
+            "process-set request. Each subprocess still uses the Symbolica "
+            "core settings specified by --symbolica-n-cores."
+        ),
+    )
+    generate_process.add_argument(
+        "--max-currents",
+        type=int,
+        default=50000,
+        help="Safety cap for generic current-plan construction.",
+    )
+    generate_process.add_argument(
+        "--max-color-sectors",
+        type=int,
+        default=20000,
+        help="Safety cap for generic colour-flow sector enumeration.",
+    )
     _add_evaluator_build_options(generate_process)
+    _add_generic_dag_pruning_options(generate_process)
     _set_fast_rusticol_dag_defaults(generate_process)
     generate_process.add_argument("--json", action="store_true")
 
@@ -233,6 +432,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     time_process.add_argument("process_dir", type=Path, metavar="PROCESS_DIR")
+    time_process.add_argument(
+        "--process",
+        dest="process_key",
+        help=(
+            "Canonical process key or process string to select from a "
+            "process-set artifact. Defaults to the first entry."
+        ),
+    )
     time_process.add_argument("--precision", type=int, default=16)
     time_process.add_argument("--target-runtime", type=float, default=10.0)
     time_process.add_argument(
@@ -248,7 +455,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     profile = subparsers.add_parser(
         "profile",
-        help="Profile native generation stages and cache behavior.",
+        help=argparse.SUPPRESS,
     )
     _add_process_options(profile)
     profile.add_argument("process", metavar="PROCESS")
@@ -257,7 +464,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     _add_evaluator_build_options(profile)
     profile.add_argument("--json", action="store_true")
 
+    for legacy_command in (
+        "generate",
+        "evaluate",
+        "validate-z-gluon-family",
+        "benchmark-z-gluon-modes",
+        "profile-tensor-evaluator",
+        "profile-dag-evaluator",
+        "profile",
+    ):
+        _hide_subcommand_from_help(subparsers, legacy_command)
+
     return parser.parse_args(argv)
+
+
+def _hide_subcommand_from_help(
+    subparsers: Any,
+    name: str,
+) -> None:
+    """Keep a compatibility subcommand parseable while removing it from help."""
+
+    choices_actions = getattr(subparsers, "_choices_actions", None)
+    if not isinstance(choices_actions, list):
+        return
+    choices_actions[:] = [
+        action for action in choices_actions if getattr(action, "dest", None) != name
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -271,6 +503,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_inspect()
     if args.command == "processes":
         return _cmd_processes(args)
+    if args.command == "process-plan":
+        return _cmd_process_plan(args)
     if args.command == "generate":
         return _cmd_generate(args)
     if args.command == "evaluate":
@@ -306,22 +540,187 @@ def _add_process_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_runtime_backend_option(parser: argparse.ArgumentParser) -> None:
+def _add_generic_dag_pruning_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--runtime-backend",
-        choices=_RUNTIME_BACKENDS,
-        default="auto",
+        "--max-coupling-order",
+        action="append",
+        default=[],
+        metavar="NAME=N",
         help=(
-            "Native runtime backend: auto prefers the spenso/Symbolica current DAG; "
-            "numeric-tensor-network executes the factorized network with fully "
-            "numeric tensors in hep_lib; compiled-dag builds one alias-backed "
-            "multi-output Symbolica evaluator; rusticol loads the generated "
-            "shared-current DAG process folder through the PyO3 Rust runtime."
+            "Generic model-level coupling-order cap, repeatable. Examples: "
+            "--max-coupling-order QED=1 --max-coupling-order QCD=4. "
+            "This is not a process-family tag; orders are accumulated from "
+            "local model vertices."
+        ),
+    )
+    parser.add_argument(
+        "--max-qcd-order",
+        type=int,
+        help="Shortcut for --max-coupling-order QCD=N.",
+    )
+    parser.add_argument(
+        "--max-qed-order",
+        type=int,
+        help="Shortcut for --max-coupling-order QED=N.",
+    )
+    parser.add_argument(
+        "--coupling-order-policy",
+        choices=("all", "minimal"),
+        default="all",
+        help=(
+            "Generic coupling-order pruning policy. 'all' keeps every "
+            "model-reachable order allowed by explicit caps. 'minimal' first "
+            "infers the lowest contributing model coupling-order envelope and "
+            "uses it as an additional cap; this is useful for fast leading-order "
+            "generation without naming a process family."
+        ),
+    )
+    parser.add_argument(
+        "--max-lc-current-line-groups",
+        type=int,
+        help=(
+            "Generic leading-colour pruning cap on how many colour-line groups "
+            "one intermediate current may span. This can be used to restrict "
+            "multi-quark-line warmups without naming a process family."
+        ),
+    )
+    parser.add_argument(
+        "--max-quark-pairs",
+        type=int,
+        help=(
+            "Generic cap on the number of external quark-antiquark colour "
+            "lines allowed in a subprocess. Useful for pruning inclusive "
+            "p/j requests without naming a process family."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-particles",
+        default="",
+        metavar="LIST",
+        help=(
+            "Comma-separated particle names or PDG ids to remove from generic "
+            "DAG construction, e.g. 'h,a' or '25,22'."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-vertex-kinds",
+        default="",
+        metavar="LIST",
+        help="Comma-separated model vertex-kind ids to remove during DAG construction.",
+    )
+    parser.add_argument(
+        "--no-closure-side-mask-pruning",
+        dest="closure_side_mask_pruning",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable generic closure-side subset pruning. This is intended for "
+            "diagnostics; production generation keeps it enabled."
+        ),
+    )
+    parser.add_argument(
+        "--no-color-order-mask-pruning",
+        dest="color_order_mask_pruning",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable generic LC colour-order subset pruning. This is intended "
+            "for diagnostics; production generation keeps it enabled."
+        ),
+    )
+    parser.add_argument(
+        "--no-species-reachability-pruning",
+        dest="species_reachability_pruning",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable generic particle-id reachability pruning. This is "
+            "intended for diagnostics; production generation keeps it enabled."
+        ),
+    )
+    parser.add_argument(
+        "--lc-sector-strategy",
+        choices=(
+            "all",
+            "topology-representatives",
+            "line-pairing-representatives",
+            "reference",
+        ),
+        default="topology-representatives",
+        help=(
+            "Leading-colour generation strategy. 'all' materializes every LC "
+            "sector. 'topology-representatives' is the default: it compiles a "
+            "single representative for replay-safe isomorphic LC topologies "
+            "and falls back to all sectors when the topology is not safe. "
+            "'line-pairing-representatives' compiles one representative per "
+            "open quark-line pairing/allocation, dropping only permutations of "
+            "whole open-line blocks. "
+            "'reference' compiles only LC sector 0. Sibling-sector replay is "
+            "opt-in via --lc-topology-replay."
+        ),
+    )
+    parser.add_argument(
+        "--lc-sector-ids",
+        default="",
+        metavar="LIST",
+        help=(
+            "Comma-separated explicit LC colour-sector ids to materialize. "
+            "This is a generic colour-flow pruning hint for large multi-line "
+            "processes and overrides --lc-sector-strategy when supplied."
+        ),
+    )
+    parser.add_argument(
+        "--reference-color-order",
+        default="",
+        metavar="LIST",
+        help=(
+            "Comma-separated external labels of a reference LC colour order. "
+            "This is used for generic AmpliCol row comparisons so closure "
+            "endpoints follow the supplied ordered amplitude."
+        ),
+    )
+    parser.add_argument(
+        "--lc-topology-replay",
+        action="store_true",
+        help=(
+            "After compiling topology representatives, evaluate all replay-safe "
+            "sibling LC sectors by external-label permutation and sum them. "
+            "This is useful for full-sector diagnostics; the default matches "
+            "the Fortran AmpliCol reference-order convention."
         ),
     )
 
 
-def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
+def _add_runtime_backend_option(
+    parser: argparse.ArgumentParser,
+    *,
+    production: bool = False,
+) -> None:
+    choices = _PRODUCTION_RUNTIME_BACKENDS if production else _RUNTIME_BACKENDS
+    default = "rusticol" if production else "auto"
+    help_text = (
+        "Production runtime backend. The generic DAG workflow currently uses "
+        "Rusticol process artifacts."
+        if production
+        else (
+            "Legacy native runtime backend for compatibility commands. "
+            "Production generation uses `generate-process` and Rusticol "
+            "process artifacts."
+        )
+    )
+    parser.add_argument(
+        "--runtime-backend",
+        choices=choices,
+        default=default,
+        help=help_text,
+    )
+
+
+def _add_evaluator_build_options(
+    parser: argparse.ArgumentParser,
+    *,
+    include_legacy_compiled_dag_options: bool = False,
+) -> None:
     parser.set_defaults(
         merge_evaluators_strategy=False,
         symbolica_direct_translation=True,
@@ -350,118 +749,99 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         "--symbolica-split-vertex-current-stages",
         action="store_true",
         help=(
-            "Experimental D-mode lowering that mirrors legacy AmpliCol more "
-            "closely by compiling separate vertex and current-combine "
-            "evaluators for each current-size stage."
-        ),
-    )
-    parser.add_argument(
-        "--compiled-dag-evaluator",
-        action="store_true",
-        help=(
-            "Shortcut for --runtime-backend compiled-dag: build/evaluate the "
-            "single multi-output alias-backed compiled DAG evaluator."
-        ),
-    )
-    parser.add_argument(
-        "--compiled-dag-lowering",
-        choices=("spenso", "symbolic"),
-        default="spenso",
-        help=(
-            "Current-body lowering route for --compiled-dag-evaluator. spenso "
-            "is the intended default; symbolic uses direct Symbolica component "
-            "builders for debugging and cross-checks."
-        ),
-    )
-    parser.add_argument(
-        "--compiled-dag-cross-check-lowering",
-        action="store_true",
-        help=(
-            "Build/evaluate both compiled-DAG lowering routes for low-n "
-            "debugging where supported."
-        ),
-    )
-    parser.add_argument(
-        "--compiled-dag-output-chunk-size",
-        type=int,
-        help=(
-            "Chunk the final compiled-DAG multi-output evaluator into outputs "
-            "of this size. Defaults to no chunking for compiled-DAG, including "
-            "compiled presets; use only for debugging or memory experiments."
+            "Compile separate generic vertex and current-combine evaluators "
+            "for each current-size stage. The default keeps the established "
+            "generic Rusticol eager-DAG stage layout."
         ),
     )
     parser.set_defaults(compiled_dag_inline_external_wavefunctions=True)
-    parser.add_argument(
-        "--compiled-dag-inline-external-wavefunctions",
-        dest="compiled_dag_inline_external_wavefunctions",
-        action="store_true",
-        help=(
-            "Inline physical q q~ -> Z + gluon external wavefunctions into "
-            "the compiled-DAG evaluator. This is the optimized default."
-        ),
-    )
-    parser.add_argument(
-        "--no-compiled-dag-inline-external-wavefunctions",
-        dest="compiled_dag_inline_external_wavefunctions",
-        action="store_false",
-        help=(
-            "Use source-current components as runtime parameters instead of "
-            "inlining physical external wavefunctions; useful for debugging."
-        ),
-    )
     parser.set_defaults(compiled_dag_helicity_filter=True)
-    parser.add_argument(
-        "--compiled-dag-helicity-filter",
-        dest="compiled_dag_helicity_filter",
-        action="store_true",
-        help=(
-            "Enable the deterministic warmup helicity filter before compiled-DAG "
-            "evaluator construction. This is the default."
-        ),
+    parser.set_defaults(
+        compiled_dag_lowering="spenso",
+        compiled_dag_cross_check_lowering=False,
+        compiled_dag_output_chunk_size=None,
+        compiled_dag_helicity_filter_samples=10,
+        compiled_dag_helicity_filter_seed=12345,
+        compiled_dag_helicity_filter_relative_tolerance=1.0e-12,
+        compiled_dag_helicity_filter_zero_tolerance=1.0e-300,
+        compiled_dag_helicity_filter_phase_space="rambo",
     )
-    parser.add_argument(
-        "--no-compiled-dag-helicity-filter",
-        dest="compiled_dag_helicity_filter",
-        action="store_false",
-        help=(
-            "Disable the compiled-DAG warmup helicity filter for debugging; all "
-            "helicity amplitudes become evaluator outputs."
-        ),
-    )
-    parser.add_argument(
-        "--compiled-dag-helicity-filter-samples",
-        type=int,
-        default=10,
-        help="Number of deterministic warmup points used by the compiled-DAG helicity filter.",
-    )
-    parser.add_argument(
-        "--compiled-dag-helicity-filter-seed",
-        type=int,
-        default=12345,
-        help="Base RNG seed for RAMBO warmup points in the compiled-DAG helicity filter.",
-    )
-    parser.add_argument(
-        "--compiled-dag-helicity-filter-relative-tolerance",
-        type=float,
-        default=1.0e-12,
-        help="Relative tolerance for grouping equivalent helicity squared-amplitude signatures.",
-    )
-    parser.add_argument(
-        "--compiled-dag-helicity-filter-zero-tolerance",
-        type=float,
-        default=1.0e-300,
-        help="Absolute zero threshold for pruning inactive helicities.",
-    )
-    parser.add_argument(
-        "--compiled-dag-helicity-filter-phase-space",
-        choices=("rambo", "canonical"),
-        default="rambo",
-        help=(
-            "Warmup phase-space source for the compiled-DAG helicity filter. "
-            "rambo is deterministic from the seed; canonical reuses the fixed "
-            "pyAmpliCol sanity points."
-        ),
-    )
+    if include_legacy_compiled_dag_options:
+        parser.add_argument(
+            "--compiled-dag-evaluator",
+            action="store_true",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-lowering",
+            choices=("spenso", "symbolic"),
+            default="spenso",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-cross-check-lowering",
+            action="store_true",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-output-chunk-size",
+            type=int,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-inline-external-wavefunctions",
+            dest="compiled_dag_inline_external_wavefunctions",
+            action="store_true",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--no-compiled-dag-inline-external-wavefunctions",
+            dest="compiled_dag_inline_external_wavefunctions",
+            action="store_false",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-helicity-filter",
+            dest="compiled_dag_helicity_filter",
+            action="store_true",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--no-compiled-dag-helicity-filter",
+            dest="compiled_dag_helicity_filter",
+            action="store_false",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-helicity-filter-samples",
+            type=int,
+            default=10,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-helicity-filter-seed",
+            type=int,
+            default=12345,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-helicity-filter-relative-tolerance",
+            type=float,
+            default=1.0e-12,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-helicity-filter-zero-tolerance",
+            type=float,
+            default=1.0e-300,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--compiled-dag-helicity-filter-phase-space",
+            choices=("rambo", "canonical"),
+            default="rambo",
+            help=argparse.SUPPRESS,
+        )
     parser.add_argument(
         "--verbose-evaluator-build",
         action="store_true",
@@ -486,9 +866,9 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         choices=("jit", "compiled-complex", "compiled-complex-4x"),
         default=argparse.SUPPRESS,
         help=(
-            "Symbolica evaluator backend for D-mode blocks. compiled-complex "
-            "writes and compiles C++ complex evaluators; compiled-complex-4x "
-            "uses Symbolica's SIMD complex backend."
+            "Symbolica evaluator backend for generic DAG stage blocks. "
+            "compiled-complex writes and compiles C++ complex evaluators; "
+            "compiled-complex-4x uses Symbolica's SIMD complex backend."
         ),
     )
     parser.add_argument(
@@ -505,9 +885,9 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         dest="symbolica_cpe_iterations",
         type=int,
         help=(
-            "Number of common-pair elimination iterations. The compiled-DAG "
-            "default is adaptive: 2 through five gluons and unbounded above "
-            "that; other modes default to unbounded."
+            "Number of common-pair elimination iterations for generic DAG "
+            "stage evaluator optimization. Defaults to Symbolica's backend "
+            "choice unless specified."
         ),
     )
     parser.add_argument(
@@ -564,7 +944,7 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         type=int,
         help=(
             "Maximum distance between common pairs before cache eviction. "
-            "Defaults to 250 for --compiled-dag-evaluator and 100 otherwise."
+            "Defaults to 100 for generic DAG stage evaluators unless specified."
         ),
     )
     parser.add_argument(
@@ -585,9 +965,9 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         default="adaptive",
         help=(
             "Preset for compiled-complex code generation. adaptive uses the "
-            "best currently measured default by gluon multiplicity, including "
-            "output chunking when not set explicitly; manual respects the "
-            "explicit inline-asm and optimization options; "
+            "generic Rusticol stage-evaluator default, including output "
+            "chunking when not set explicitly; manual respects the explicit "
+            "inline-asm and optimization options; "
             "generation uses inline assembly; balanced uses generic C++ at "
             "-O1; runtime uses the measured generic C++ fast path; runtime-o3 "
             "uses generic C++ at -O3 with the runtime chunking policy."
@@ -662,9 +1042,8 @@ def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
         "--save-evaluator-dir",
         type=Path,
         help=(
-            "Save a reusable shared-current DAG evaluator artifact to this "
-            "directory after generation. The compiled-DAG route supports both "
-            "serialized JIT evaluators and generated-code artifacts."
+            "Save a reusable generic shared-current DAG process artifact to "
+            "this directory after generation."
         ),
     )
     parser.add_argument(
@@ -693,13 +1072,13 @@ def _set_fast_rusticol_dag_defaults(parser: argparse.ArgumentParser) -> None:
         symbolica_compiled_preset="runtime-o3",
         symbolica_n_cores=10,
         symbolica_compiled_chunk_compile_workers=10,
-        batch_size=128,
+        batch_size=64,
     )
 
 
 def _generation_build_kwargs(
     args: argparse.Namespace,
-    runtime_backend: RuntimeBackend,
+    runtime_backend: str,
     save_dir: Path,
 ) -> dict[str, Any]:
     build_kwargs = _runtime_evaluator_kwargs(args)
@@ -713,9 +1092,79 @@ def _generation_build_kwargs(
     return build_kwargs
 
 
+def _symbolica_settings_from_runtime_kwargs(
+    values: dict[str, Any],
+    *,
+    process: str | None = None,
+):
+    from .dag_runtime import SymbolicaEvaluatorSettings, _resolve_compiled_preset
+
+    (
+        compiled_inline_asm,
+        compiled_optimization_level,
+        compiled_output_chunk_size,
+    ) = _resolve_compiled_preset(
+        str(values["symbolica_compiled_preset"]),
+        gluon_count=(
+            None if process is None else _external_gluon_count(process)
+        ),
+        inline_asm=str(values["symbolica_compiled_inline_asm"]),
+        optimization_level=int(values["symbolica_compiled_optimization_level"]),
+        output_chunk_size=values["symbolica_compiled_output_chunk_size"],
+    )
+
+    return SymbolicaEvaluatorSettings(
+        backend=str(values["symbolica_evaluator_backend"]),
+        iterations=int(values["symbolica_iterations"]),
+        cpe_iterations=values["symbolica_cpe_iterations"],
+        n_cores=int(values["symbolica_n_cores"]),
+        direct_translation=bool(values["symbolica_direct_translation"]),
+        jit_direct_translation=values["symbolica_jit_direct_translation"],
+        jit_optimization_level=int(values["symbolica_jit_optimization_level"]),
+        max_horner_scheme_variables=int(
+            values["symbolica_max_horner_scheme_variables"]
+        ),
+        max_common_pair_cache_entries=int(
+            values["symbolica_max_common_pair_cache_entries"]
+        ),
+        max_common_pair_distance=int(values["symbolica_max_common_pair_distance"]),
+        collect_factors=bool(values["symbolica_collect_factors"]),
+        compiled_preset=str(values["symbolica_compiled_preset"]),
+        compiled_inline_asm=compiled_inline_asm,
+        compiled_optimization_level=compiled_optimization_level,
+        compiled_native=bool(values["symbolica_compiled_native"]),
+        compiler_path=(
+            None
+            if values["symbolica_compiler_path"] is None
+            else str(values["symbolica_compiler_path"])
+        ),
+        compiler_flags=tuple(str(flag) for flag in values["symbolica_compiler_flags"]),
+        compiled_output_chunk_size=compiled_output_chunk_size,
+        compiled_chunk_compile_workers=int(
+            values["symbolica_compiled_chunk_compile_workers"]
+        ),
+        compiled_output_dir=(
+            None
+            if values["symbolica_compiled_output_dir"] is None
+            else str(values["symbolica_compiled_output_dir"])
+        ),
+        raw_sum_final_stage=bool(values["symbolica_raw_sum_final_stage"]),
+    )
+
+
+def _external_gluon_count(process: str) -> int:
+    from .process_ir import build_process_ir
+
+    ir = build_process_ir(process)
+    return sum(1 for pdg in ir.outgoing_pdgs if abs(int(pdg)) == 21)
+
+
 def _runtime_backend(args: argparse.Namespace) -> RuntimeBackend:
     if bool(getattr(args, "compiled_dag_evaluator", False)):
-        return "compiled-dag"
+        raise ValueError(
+            "--compiled-dag-evaluator is deprecated; use generic DAG process "
+            "artifacts with Rusticol instead."
+        )
     value = getattr(args, "runtime_backend", "auto")
     if value not in _RUNTIME_BACKENDS:
         raise ValueError(f"unknown runtime backend: {value}")
@@ -725,7 +1174,7 @@ def _runtime_backend(args: argparse.Namespace) -> RuntimeBackend:
 def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     runtime_backend = _runtime_backend(args)
     jit_direct_translation = getattr(args, "symbolica_jit_direct_translation", None)
-    if jit_direct_translation is None and runtime_backend != "compiled-dag":
+    if jit_direct_translation is None:
         jit_direct_translation = False
     cpe_iterations = getattr(args, "symbolica_cpe_iterations", None)
     common_pair_distance = getattr(
@@ -734,7 +1183,7 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         None,
     )
     if common_pair_distance is None:
-        common_pair_distance = 250 if runtime_backend == "compiled-dag" else 100
+        common_pair_distance = 100
     return {
         "batch_size": int(getattr(args, "batch_size", 16)),
         "merge_evaluators_strategy": bool(
@@ -848,6 +1297,240 @@ def _process_options(args: argparse.Namespace) -> ProcessOptions:
     )
 
 
+def _generic_dag_pruning_kwargs(
+    args: argparse.Namespace,
+    *,
+    process: str | None = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "max_coupling_orders": _parse_max_coupling_orders(args),
+        "max_lc_current_line_groups": getattr(
+            args,
+            "max_lc_current_line_groups",
+            None,
+        ),
+        "max_quark_pairs": getattr(args, "max_quark_pairs", None),
+        "closure_side_mask_pruning": bool(
+            getattr(args, "closure_side_mask_pruning", True)
+        ),
+        "color_order_mask_pruning": bool(
+            getattr(args, "color_order_mask_pruning", True)
+        ),
+        "species_reachability_pruning": bool(
+            getattr(args, "species_reachability_pruning", True)
+        ),
+        "ignored_particle_ids": _parse_ignored_particle_ids(
+            str(getattr(args, "ignore_particles", ""))
+        ),
+        "ignored_vertex_kinds": _parse_int_list(
+            str(getattr(args, "ignore_vertex_kinds", "")),
+            option="--ignore-vertex-kinds",
+        ),
+    }
+    explicit_sector_ids = _parse_int_list(
+        str(getattr(args, "lc_sector_ids", "")),
+        option="--lc-sector-ids",
+    )
+    reference_color_order = _parse_int_list(
+        str(getattr(args, "reference_color_order", "")),
+        option="--reference-color-order",
+    )
+    if reference_color_order:
+        kwargs["reference_color_order"] = tuple(reference_color_order)
+    if explicit_sector_ids:
+        kwargs["selected_color_sector_ids"] = set(explicit_sector_ids)
+    elif (
+        process is not None
+        and str(getattr(args, "color_accuracy", "lc")) == "lc"
+        and str(getattr(args, "lc_sector_strategy", "topology-representatives"))
+        == "reference"
+    ):
+        kwargs["selected_color_sector_ids"] = {0}
+    elif (
+        process is not None
+        and str(getattr(args, "color_accuracy", "lc")) == "lc"
+        and str(getattr(args, "lc_sector_strategy", "topology-representatives"))
+        == "line-pairing-representatives"
+    ):
+        representative_ids = _lc_line_pairing_representative_ids(
+            process,
+            args,
+        )
+        if representative_ids:
+            kwargs["selected_color_sector_ids"] = representative_ids
+    elif (
+        process is not None
+        and str(getattr(args, "color_accuracy", "lc")) == "lc"
+        and str(getattr(args, "lc_sector_strategy", "topology-representatives"))
+        == "topology-representatives"
+    ):
+        representative_ids = _lc_topology_representative_ids(
+            process,
+            args,
+        )
+        if representative_ids:
+            kwargs["selected_color_sector_ids"] = representative_ids
+    if (
+        process is not None
+        and str(getattr(args, "coupling_order_policy", "all")) == "minimal"
+    ):
+        from .generic_dag import infer_minimal_coupling_order_limits
+
+        inferred_limits = infer_minimal_coupling_order_limits(
+            process,
+            color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+            options=_process_options(args),
+            max_color_sectors=int(getattr(args, "max_color_sectors", 20000)),
+            selected_color_sector_ids=kwargs.get("selected_color_sector_ids"),
+            max_coupling_orders=kwargs["max_coupling_orders"],
+            closure_side_mask_pruning=kwargs["closure_side_mask_pruning"],
+            color_order_mask_pruning=kwargs["color_order_mask_pruning"],
+            ignored_particle_ids=kwargs["ignored_particle_ids"],
+            ignored_vertex_kinds=kwargs["ignored_vertex_kinds"],
+        )
+        kwargs["max_coupling_orders"] = _merge_coupling_order_limits(
+            kwargs["max_coupling_orders"],
+            inferred_limits,
+        )
+    return kwargs
+
+
+def _compare_generic_dag_pruning_kwargs(
+    args: argparse.Namespace,
+    *,
+    process: str,
+) -> dict[str, Any]:
+    """Generic DAG controls for AmpliCol comparison artifacts.
+
+    Comparison defaults should stay tied to the LC sector selected by the
+    Fortran process file.  Other generic pruning options still use the process
+    string when needed, for example minimal coupling-order inference.
+    """
+
+    kwargs = _generic_dag_pruning_kwargs(args, process=process)
+    explicit_sector_ids = _parse_int_list(
+        str(getattr(args, "lc_sector_ids", "")),
+        option="--lc-sector-ids",
+    )
+    strategy = str(getattr(args, "lc_sector_strategy", "topology-representatives"))
+    if not explicit_sector_ids and strategy in {"topology-representatives", "reference"}:
+        kwargs.pop("selected_color_sector_ids", None)
+    return kwargs
+
+
+def _normalize_generic_dag_pruning_kwargs(
+    values: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if values is None:
+        return {}
+    normalized = dict(values)
+    selected_ids = normalized.get("selected_color_sector_ids")
+    if selected_ids is not None:
+        normalized["selected_color_sector_ids"] = {
+            int(sector_id) for sector_id in selected_ids
+        }
+    coupling_orders = normalized.get("max_coupling_orders")
+    if isinstance(coupling_orders, Mapping):
+        normalized["max_coupling_orders"] = {
+            str(name).upper(): int(value)
+            for name, value in coupling_orders.items()
+        }
+    for key in ("ignored_particle_ids", "ignored_vertex_kinds"):
+        if normalized.get(key) is not None:
+            normalized[key] = [int(value) for value in normalized[key]]
+    return normalized
+
+
+def _merge_coupling_order_limits(
+    explicit_limits: Mapping[str, int],
+    inferred_limits: Mapping[str, int],
+) -> dict[str, int]:
+    merged = {str(name).upper(): int(value) for name, value in explicit_limits.items()}
+    for name, value in inferred_limits.items():
+        normalized = str(name).upper()
+        if normalized in merged:
+            merged[normalized] = min(merged[normalized], int(value))
+        else:
+            merged[normalized] = int(value)
+    return merged
+
+
+def _parse_max_coupling_orders(args: argparse.Namespace) -> dict[str, int]:
+    limits: dict[str, int] = {}
+    for item in getattr(args, "max_coupling_order", ()) or ():
+        if "=" not in str(item):
+            raise ValueError(
+                "--max-coupling-order expects NAME=N, for example QED=1"
+            )
+        name, value = str(item).split("=", 1)
+        limits[name.strip().upper()] = int(value)
+    if getattr(args, "max_qcd_order", None) is not None:
+        limits["QCD"] = int(args.max_qcd_order)
+    if getattr(args, "max_qed_order", None) is not None:
+        limits["QED"] = int(args.max_qed_order)
+    return limits
+
+
+def _parse_ignored_particle_ids(value: str) -> tuple[int, ...]:
+    ids: list[int] = []
+    for item in _split_cli_list(value):
+        lowered = item.lower()
+        if lowered in PDGS:
+            ids.append(int(PDGS[lowered]))
+        else:
+            ids.append(int(item))
+    return tuple(ids)
+
+
+def _parse_int_list(value: str, *, option: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(item) for item in _split_cli_list(value))
+    except ValueError as exc:
+        raise ValueError(f"{option} expects comma-separated integers") from exc
+
+
+def _split_cli_list(value: str) -> tuple[str, ...]:
+    return tuple(
+        item.strip()
+        for chunk in value.split(",")
+        for item in chunk.split()
+        if item.strip()
+    )
+
+
+def _lc_topology_representative_ids(
+    process: str,
+    args: argparse.Namespace,
+) -> set[int]:
+    from .color_plan import build_color_plan, lc_topology_replay_safe_groups
+
+    plan = build_color_plan(
+        process,
+        color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+        options=_process_options(args),
+        max_sectors=int(getattr(args, "max_color_sectors", 20000)),
+    )
+    return {
+        int(group.representative_sector_id)
+        for group in lc_topology_replay_safe_groups(plan)
+    }
+
+
+def _lc_line_pairing_representative_ids(
+    process: str,
+    args: argparse.Namespace,
+) -> set[int]:
+    from .color_plan import build_color_plan, lc_line_pairing_representative_ids
+
+    plan = build_color_plan(
+        process,
+        color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+        options=_process_options(args),
+        max_sectors=int(getattr(args, "max_color_sectors", 20000)),
+    )
+    return set(lc_line_pairing_representative_ids(plan))
+
+
 def _cmd_inspect() -> int:
     import symbolica
     import symbolica.community.idenso  # noqa: F401
@@ -869,17 +1552,38 @@ def _cmd_inspect() -> int:
 
 
 def _cmd_processes(args: argparse.Namespace) -> int:
-    enumerator = ProcessEnumerator(_process_options(args))
-    enumeration = enumerator.enumerate(args.process)
+    try:
+        process_set = enumerate_process_set(args.process, _process_options(args))
+    except ValueError as exc:
+        payload = {
+            "available": False,
+            "error": str(exc),
+            "process": args.process,
+            "runtime_backend": "rusticol",
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
     if args.legacy_output is not None:
-        enumerator.write_legacy_file(enumeration, args.legacy_output)
+        if len(process_set.entries) != 1:
+            raise ValueError(
+                "--legacy-output is only supported for one concrete process entry"
+            )
+        enumerator = ProcessEnumerator(_process_options(args))
+        enumerator.write_legacy_file(
+            process_set.entries[0].enumeration,
+            args.legacy_output,
+        )
 
-    payload = _process_enumeration_to_dict(enumeration)
+    payload = _process_set_enumeration_to_dict(process_set)
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(
-            f"{args.process}: {payload['n_unique_processes']} unique processes, "
+            f"{args.process}: {payload['n_entries']} process entries, "
+            f"{payload['n_unique_processes']} unique processes, "
             f"{payload['n_groups']} phase-space groups, {payload['n_records']} records"
         )
         if args.legacy_output is not None:
@@ -887,7 +1591,108 @@ def _cmd_processes(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_process_plan(args: argparse.Namespace) -> int:
+    from .generic_artifact import (
+        build_generic_process_set_manifest,
+        write_generic_process_manifest,
+        write_generic_process_set_manifest,
+    )
+
+    manifest = build_generic_process_set_manifest(
+        args.process,
+        options=_process_options(args),
+        color_accuracy=str(args.color_accuracy),
+        max_currents=int(args.max_currents),
+        max_color_sectors=int(args.max_color_sectors),
+        **_generic_dag_pruning_kwargs(
+            args,
+            process=(
+                args.process
+                if not any(marker in args.process for marker in ("|", "[", "p", "j"))
+                else None
+            ),
+        ),
+    )
+    output_dir = Path(args.output_dir).expanduser()
+    if len(manifest.processes) == 1:
+        subprocess_manifest = manifest.processes[0]
+        subprocess_payload = subprocess_manifest.to_json_dict()
+        manifest_path = write_generic_process_manifest(
+            subprocess_manifest,
+            output_dir,
+        )
+        payload = {
+            "available": True,
+            "kind": "pyamplicol-generic-process-plan",
+            "manifest": str(manifest_path),
+            "process": subprocess_manifest.process,
+            "key": subprocess_manifest.key,
+            "planning_status": subprocess_payload["planning_status"],
+            "lowering_status": subprocess_payload["lowering_status"],
+        }
+    else:
+        manifest_path = write_generic_process_set_manifest(manifest, output_dir)
+        payload = {
+            "available": True,
+            "kind": "pyamplicol-generic-process-set-plan",
+            "manifest": str(manifest_path),
+            "request": manifest.request,
+            "default_process_key": manifest.default_key,
+            "generic_generation": manifest.generation_metadata,
+            "n_processes": len(manifest.processes),
+            "processes": [
+                {
+                    "key": subprocess_manifest.key,
+                    "process": subprocess_manifest.process,
+                    "manifest": str(
+                        output_dir
+                        / "subprocesses"
+                        / subprocess_manifest.key
+                        / "generic_process_manifest.json"
+                    ),
+                    "planning_status": subprocess_payload["planning_status"],
+                    "lowering_status": subprocess_payload["lowering_status"],
+                }
+                for subprocess_manifest in manifest.processes
+                for subprocess_payload in (subprocess_manifest.to_json_dict(),)
+            ],
+        }
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        rows = [
+            DisplayRow({"metric": "Request", "value": args.process}, "bold"),
+            {"metric": "Processes", "value": payload.get("n_processes", 1)},
+            {"metric": "Colour", "value": args.color_accuracy},
+            {"metric": "Manifest", "value": payload["manifest"]},
+        ]
+        if len(manifest.processes) == 1:
+            status = payload["lowering_status"]
+            if isinstance(status, dict):
+                rows.extend(
+                    [
+                        {"metric": "Currents", "value": status["current_count"]},
+                        {"metric": "Interactions", "value": status["interaction_count"]},
+                        {"metric": "Closures", "value": status["closure_count"]},
+                        {
+                            "metric": "Tensor-ready",
+                            "value": status["full_tensor_network_ready"],
+                        },
+                    ]
+                )
+        _display(args).print_table("Generic Process Plan", _kv_columns(), rows)
+    return 0
+
+
 def _cmd_generate(args: argparse.Namespace) -> int:
+    return _legacy_native_command_unavailable(args, "generate")
+
+
+def _cmd_generate_reference(args: argparse.Namespace) -> int:
+    from .evaluation import NativeRuntimeEvaluator
+    from .legacy_matrix import NativeMatrixElementGenerator
+
     generator = NativeMatrixElementGenerator(
         cache_dir=None if args.no_cache else args.cache_dir
     )
@@ -906,6 +1711,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
             args.process,
             runtime_backend=_runtime_backend(args),
             allow_python_fallback=False,
+            allow_reference_legacy=True,
             **_runtime_evaluator_kwargs(args),
         )
         payload["native_runtime_backend"] = runtime.metadata.to_json_dict()
@@ -934,11 +1740,19 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
+    return _legacy_native_command_unavailable(args, "evaluate")
+
+
+def _cmd_evaluate_reference(args: argparse.Namespace) -> int:
+    from .evaluation import NativeRuntimeEvaluator
+    from .legacy_matrix import NativeMatrixElementGenerator
+
     artifact = _load_optional_evaluator_artifact(args.cache_dir, args.process)
     try:
         evaluator = NativeRuntimeEvaluator(
             args.process,
             runtime_backend=_runtime_backend(args),
+            allow_reference_legacy=True,
             **_runtime_evaluator_kwargs(args),
         )
         evaluation_start = time.perf_counter()
@@ -1004,19 +1818,29 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 
 def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
     options = _process_options(args)
-    fixed_probe = args.amplicol_probe and _should_use_fixed_amplicol_probe(
-        args.process, options
+    runtime_backend = _runtime_backend(args)
+    runtime_evaluator_kwargs = _runtime_evaluator_kwargs(args)
+    legacy_me_test = bool(getattr(args, "me_test", False))
+    momenta_probe = bool(
+        getattr(args, "amplicol_momenta_probe", False)
+        or (not args.amplicol_probe and not legacy_me_test)
+    )
+    fixed_probe = (
+        args.amplicol_probe
+        and not momenta_probe
+        and _should_use_fixed_amplicol_probe(args.process, options)
     )
     if args.dry_run:
-        payload = _amplicol_dry_run_payload(args, options, fixed_probe=fixed_probe)
+        payload = _amplicol_dry_run_payload(
+            args,
+            options,
+            fixed_probe=fixed_probe,
+            momenta_probe=momenta_probe,
+        )
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
-    native_generation = _native_generation_profile(
-        args.process,
-        args.cache_dir,
-        options,
-    )
+    rusticol_process_dir: Path | None = None
     adapter = AmplicolAdapter(
         args.amplicol_root,
         jobs=args.jobs,
@@ -1024,24 +1848,39 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
     )
     commands: list[CommandResult] = []
     if not args.skip_build:
-        if fixed_probe:
-            build = adapter.prepare_direct_probe(
-                args.process,
-                process_file=args.process_file,
-                options=options,
-            )
-        else:
+        if args.amplicol_probe or momenta_probe:
             build = adapter.prepare_library(
                 args.process,
                 process_file=args.process_file,
                 options=options,
             )
+        elif legacy_me_test:
+            build = adapter.prepare_direct_probe(
+                args.process,
+                process_file=args.process_file,
+                options=options,
+            )
+        else:  # pragma: no cover - parser logic keeps one compare mode selected.
+            raise RuntimeError("no AmpliCol comparison mode selected")
         commands.extend(build.commands)
         process_file = build.process_file
     else:
         process_file = args.process_file
 
-    if args.amplicol_probe:
+    if momenta_probe:
+        from .phase_space import generic_validation_point
+
+        run = adapter.run_amplicol_momenta_probe(
+            args.process,
+            particles=generic_validation_point(args.process),
+            points=args.points,
+            process_file=process_file,
+            options=options,
+            timing_sample=args.timing,
+            use_library=True,
+        )
+        mode = "amplicol_momenta_probe_library"
+    elif args.amplicol_probe:
         if fixed_probe:
             run = adapter.run_amplicol_fixed_probe(
                 args.process,
@@ -1049,8 +1888,9 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
                 process_file=process_file,
                 options=options,
                 timing_sample=args.timing,
+                use_library=True,
             )
-            mode = "amplicol_fixed_probe"
+            mode = "amplicol_fixed_probe_library"
         else:
             run = adapter.run_amplicol_probe(
                 args.process,
@@ -1058,9 +1898,10 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
                 process_file=process_file,
                 options=options,
                 timing_sample=args.timing,
+                use_library=True,
             )
-            mode = "amplicol_probe"
-    else:
+            mode = "amplicol_probe_library"
+    elif legacy_me_test:
         run = adapter.run_me_test(
             args.process,
             points=args.points,
@@ -1070,7 +1911,27 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
             timing_sample=args.timing,
         )
         mode = "me_test"
+    else:  # pragma: no cover - parser logic keeps one compare mode selected.
+        raise RuntimeError("no AmpliCol comparison mode selected")
     commands.extend(run.commands)
+    if runtime_backend == "rusticol":
+        native_generation, rusticol_process_dir = _rusticol_generation_profile(
+            args.process,
+            args.cache_dir,
+            options,
+            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
+            reference_color_order=_amplicol_reference_color_order_for_run(run),
+            generic_dag_pruning_kwargs=_compare_generic_dag_pruning_kwargs(
+                args,
+                process=args.process,
+            ),
+        )
+    else:
+        native_generation = _native_generation_profile(
+            args.process,
+            args.cache_dir,
+            options,
+        )
     payload = {
         "mode": mode,
         "process": args.process,
@@ -1086,13 +1947,23 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
         "total_command_time_s": sum(command.elapsed_s for command in commands),
         "pyamplicol_generation": native_generation,
     }
-    _attach_native_probe_comparison(
-        args.process,
-        run,
-        payload,
-        runtime_backend=_runtime_backend(args),
-        runtime_evaluator_kwargs=_runtime_evaluator_kwargs(args),
-    )
+    if runtime_backend == "rusticol" and rusticol_process_dir is not None:
+        _attach_rusticol_probe_comparison(
+            run,
+            payload,
+            rusticol_process_dir,
+            options=options,
+            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
+            compare_args=args,
+        )
+    else:
+        _attach_native_probe_comparison(
+            args.process,
+            run,
+            payload,
+            runtime_backend=runtime_backend,
+            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
+        )
     payload["pyamplicol_performance"] = {
         "generation": native_generation,
         "runtime": payload.get("native_runtime"),
@@ -1150,6 +2021,63 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate_z_gluon_family(args: argparse.Namespace) -> int:
+    return _legacy_z_gluon_command_unavailable(args, "validate-z-gluon-family")
+
+
+def _legacy_z_gluon_command_unavailable(
+    args: argparse.Namespace,
+    command: str,
+) -> int:
+    message = (
+        f"{command} is a legacy Z+gluon-only command. Production generation, "
+        "validation, and profiling now go through generic DAG process "
+        "artifacts: use `process-plan`, `generate-process`, "
+        "`time-process`, and `compare-amplicol --runtime-backend rusticol`."
+    )
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "available": False,
+                    "command": command,
+                    "error": message,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print(message, file=sys.stderr)
+    return 1
+
+
+def _legacy_native_command_unavailable(
+    args: argparse.Namespace,
+    command: str,
+) -> int:
+    message = (
+        f"{command} is a legacy native-kernel command. Production pyAmpliCol "
+        "now uses generic DAG process artifacts: run `process-plan` to inspect "
+        "support, `generate-process PROCESS OUTPUT_DIR` to build an artifact, "
+        "`time-process OUTPUT_DIR` to evaluate/profile it through Rusticol, "
+        "or `compare-amplicol --runtime-backend rusticol` for Fortran "
+        "validation."
+    )
+    payload = {
+        "available": False,
+        "command": command,
+        "error": message,
+        "process": getattr(args, "process", None),
+        "runtime_backend": _runtime_backend(args) if hasattr(args, "runtime_backend") else None,
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(message, file=sys.stderr)
+    return 1
+
+
+def _cmd_validate_z_gluon_family_reference(args: argparse.Namespace) -> int:
     if args.min_gluons < 0:
         raise ValueError("--min-gluons must be non-negative")
     if args.max_gluons < args.min_gluons:
@@ -1174,30 +2102,42 @@ def _cmd_validate_z_gluon_family(args: argparse.Namespace) -> int:
             options,
         )
         commands: list[CommandResult] = []
+        build = adapter.prepare_library(process, options=options)
         if gluon_count == 0:
-            build = adapter.prepare_direct_probe(process, options=options)
             run = adapter.run_amplicol_fixed_probe(
                 process,
                 points=args.points,
+                process_file=build.process_file,
                 options=options,
                 timing_sample=args.timing,
+                use_library=True,
             )
-            mode = "amplicol_fixed_probe"
+            mode = "amplicol_fixed_probe_library"
         else:
-            build = adapter.prepare_library(process, options=options)
             run = adapter.run_amplicol_probe(
                 process,
                 points=args.points,
+                process_file=build.process_file,
                 options=options,
                 timing_sample=args.timing,
+                use_library=True,
             )
-            mode = "amplicol_probe"
+            mode = "amplicol_probe_library"
+        timing_run = adapter.run_library_use(
+            process,
+            nevents=args.points if args.timing is None else args.timing,
+            seed=101,
+            options=options,
+            timing_sample=1,
+        )
         commands.extend(build.commands)
         commands.extend(run.commands)
+        commands.extend(timing_run.commands)
         row: dict[str, object] = {
             "gluon_count": gluon_count,
             "process": process,
             "mode": mode,
+            "fortran_timing_workflow": "generated_library_use",
             "runtime_backend": _z_gluon_family_runtime_backend(
                 gluon_count,
                 _runtime_backend(args),
@@ -1206,7 +2146,7 @@ def _cmd_validate_z_gluon_family(args: argparse.Namespace) -> int:
             "probe_points": [_probe_point_to_dict(point) for point in run.probe_points],
             "timing_rows": [
                 {"label": timing.label, "seconds": timing.seconds, "note": timing.note}
-                for timing in run.timing_rows
+                for timing in timing_run.timing_rows
             ],
             "commands": [_command_summary(command) for command in commands],
             "total_command_time_s": sum(command.elapsed_s for command in commands),
@@ -1275,10 +2215,14 @@ def _cmd_validate_z_gluon_family(args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark_z_gluon_modes(args: argparse.Namespace) -> int:
+    return _legacy_z_gluon_command_unavailable(args, "benchmark-z-gluon-modes")
+
+
+def _cmd_benchmark_z_gluon_modes_reference(args: argparse.Namespace) -> int:
+    from .benchmarks import benchmark_z_gluon_modes, format_mode_benchmark_table
+
     evaluator_build_kwargs = _runtime_evaluator_kwargs(args)
-    evaluator_build_kwargs["runtime_backend"] = (
-        "compiled-dag" if _runtime_backend(args) == "compiled-dag" else "dag"
-    )
+    evaluator_build_kwargs["runtime_backend"] = "dag"
     payload = benchmark_z_gluon_modes(
         min_gluons=args.min_gluons,
         max_gluons=args.max_gluons,
@@ -1332,6 +2276,12 @@ def _cmd_benchmark_z_gluon_modes(args: argparse.Namespace) -> int:
 
 
 def _cmd_profile_tensor_evaluator(args: argparse.Namespace) -> int:
+    return _legacy_z_gluon_command_unavailable(args, "profile-tensor-evaluator")
+
+
+def _cmd_profile_tensor_evaluator_reference(args: argparse.Namespace) -> int:
+    from .benchmarks import profile_z_gluon_tensor_evaluator
+
     payload = profile_z_gluon_tensor_evaluator(
         args.process,
         sqrt_s=args.sqrt_s,
@@ -1362,140 +2312,1247 @@ def _cmd_profile_dag_evaluator(args: argparse.Namespace) -> int:
     runtime_backend = _runtime_backend(args)
     if bool(getattr(args, "generate_only", False)):
         return _cmd_generate_dag_evaluator_artifact(args, runtime_backend)
+    message = (
+        "profile-dag-evaluator is a legacy Z+gluon profiler. Production "
+        "profiling now uses generic DAG process artifacts: run "
+        "`generate-process PROCESS OUTPUT_DIR` and then `time-process OUTPUT_DIR`."
+    )
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "available": False,
+                    "error": message,
+                    "process": args.process,
+                    "runtime_backend": runtime_backend,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print(message, file=sys.stderr)
+    return 1
+
+
+def _cmd_generate_process(args: argparse.Namespace) -> int:
+    try:
+        process_set = enumerate_generic_process_set(
+            args.process,
+            _process_options(args),
+            max_quark_pairs=getattr(args, "max_quark_pairs", None),
+        )
+    except ValueError as exc:
+        payload = {
+            "available": False,
+            "error": str(exc),
+            "process": args.process,
+            "runtime_backend": "rusticol",
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    color_accuracy = str(getattr(args, "color_accuracy", "lc"))
+    if color_accuracy != "lc":
+        message = (
+            f"--color-accuracy={color_accuracy} process artifacts require Idenso "
+            "basis/metric generation and are not implemented yet"
+        )
+        payload = {
+            "available": False,
+            "error": message,
+            "process": args.process,
+            "runtime_backend": "rusticol",
+            "color_accuracy": color_accuracy,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(message, file=sys.stderr)
+        return 1
+    if len(process_set.entries) == 1 and not any(
+        marker in args.process for marker in ("|", "[")
+    ):
+        args.process = process_set.entries[0].process
+        return _cmd_generate_generic_dag_artifact(args, process_set.entries[0])
+
+    return _cmd_generate_process_set(args, process_set)
+
+
+def _rusticol_artifact_unavailable_message(
+    process: str,
+    *,
+    color_accuracy: str = "lc",
+) -> str | None:
+    """Return the current Rusticol artifact support diagnostic for a process."""
+
+    report = _rusticol_artifact_support_report(
+        process,
+        color_accuracy=color_accuracy,
+    )
+    if bool(report.runtime_artifact_supported):
+        return None
+    return report.artifact_unavailable_message
+
+
+def _rusticol_artifact_support_report(
+    process: str,
+    *,
+    color_accuracy: str = "lc",
+):
+    """Return the current Rusticol artifact support report for a process."""
+
+    from .process_support import classify_process_support
+
+    return classify_process_support(process, color_accuracy=color_accuracy)
+
+
+def _cmd_generate_generic_dag_artifact(
+    args: argparse.Namespace,
+    entry: ProcessSetEntry,
+) -> int:
+    from .generic_artifact import write_generic_dag_process_artifact
+
+    output_dir = Path(args.output_dir).expanduser()
+    if bool(getattr(args, "replace", False)) and output_dir.exists():
+        shutil.rmtree(output_dir)
+    generation_start = time.perf_counter()
+    build_kwargs = _generation_build_kwargs(args, "rusticol", output_dir)
+    symbolica_settings = _symbolica_settings_from_runtime_kwargs(
+        build_kwargs,
+        process=entry.process,
+    )
+    manifest_path, manifest = write_generic_dag_process_artifact(
+        entry.process,
+        output_dir,
+        options=_process_options(args),
+        color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+        max_currents=int(getattr(args, "max_currents", 50000)),
+        max_color_sectors=int(getattr(args, "max_color_sectors", 20000)),
+        evaluator_backend=str(build_kwargs["symbolica_evaluator_backend"]),
+        compiled_preset=str(build_kwargs["symbolica_compiled_preset"]),
+        batch_size=int(build_kwargs["batch_size"]),
+        emit_stage_evaluator_artifacts=True,
+        symbolica_settings=symbolica_settings,
+        merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
+        verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
+        progress_callback=_child_generation_progress_callback(entry.process),
+        lc_topology_replay=bool(getattr(args, "lc_topology_replay", False)),
+        **_generic_dag_pruning_kwargs(args, process=entry.process),
+    )
+    compiled = cast(dict[str, Any], manifest["compiled"])
+    generation_s = time.perf_counter() - generation_start
+    runtime_available = bool(compiled.get("stage_evaluators"))
+    payload = {
+        "available": True,
+        "runtime_available": runtime_available,
+        "runtime_backend": "rusticol",
+        "kind": manifest["kind"],
+        "artifact_class": manifest.get("artifact_class", "generic-dag-schema-v2"),
+        "generation_s": generation_s,
+        "process": entry.process,
+        "key": entry.key,
+        "saved_evaluator_manifest": str(manifest_path),
+        "manifest": str(manifest_path),
+        "planning_status": manifest["planning_status"],
+        "lowering_status": manifest["lowering_status"],
+        "runtime_unavailable_message": (
+            None
+            if runtime_available
+            else compiled["runtime_unavailable_message"]
+        ),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _display(args).print_table(
+            "Generated Generic DAG Process Artifact",
+            _kv_columns(),
+            [
+                DisplayRow({"metric": "Process", "value": entry.process}, "bold"),
+                {
+                    "metric": "Runtime",
+                    "value": "rusticol schema-v2" if runtime_available else "pending schema-v2",
+                },
+                {"metric": "Manifest", "value": manifest_path},
+                {
+                    "metric": "Generation",
+                    "value": format_measurement(generation_s, unit="s"),
+                },
+            ],
+        )
+    return 0
+
+
+def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> int:
+    root = Path(args.output_dir).expanduser()
+    manifest_path = root / "process_set_manifest.json"
+    root.mkdir(parents=True, exist_ok=True)
+    existing = _load_process_set_manifest(root)
+    if existing is not None and not (args.append or args.replace):
+        message = (
+            f"process-set output already exists at {root}; use --append or "
+            "--replace"
+        )
+        if args.json:
+            print(json.dumps({"available": False, "error": message}, indent=2))
+        else:
+            print(message, file=sys.stderr)
+        return 1
+
+    existing_entries = {
+        str(entry["key"]): dict(entry)
+        for entry in _process_set_manifest_entries(existing or {})
+        if isinstance(entry, dict) and "key" in entry
+    }
+    generated: list[dict[str, object]] = []
+    skipped: list[str] = []
+    subprocess_root = root / "subprocesses"
+    subprocess_root.mkdir(parents=True, exist_ok=True)
+    generation_metadata = _generic_process_set_generation_metadata(args)
+    entries = cast(list[ProcessSetEntry], list(getattr(process_set, "entries")))
+    work_items: list[tuple[ProcessSetEntry, Path]] = []
+    representative_by_signature: dict[tuple[int, ...], ProcessSetEntry] = {}
+    representative_for_key: dict[str, ProcessSetEntry] = {}
+    crossing_signature_by_key: dict[str, tuple[int, ...]] = {}
+    for existing_entry in existing_entries.values():
+        if existing_entry.get("crossing_alias_of") is not None:
+            continue
+        existing_process = existing_entry.get("process")
+        if isinstance(existing_process, str):
+            try:
+                signature = _process_crossing_reuse_signature(
+                    existing_process,
+                    color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+                    options=_process_options(args),
+                )
+            except ValueError:
+                continue
+            representative_by_signature.setdefault(
+                signature,
+                ProcessSetEntry(
+                    key=str(existing_entry["key"]),
+                    process=existing_process,
+                    enumeration=entries[0].enumeration,
+                ),
+            )
+    for entry in entries:
+        signature = _process_crossing_reuse_signature(
+            entry.process,
+            color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+            options=_process_options(args),
+        )
+        representative = representative_by_signature.setdefault(signature, entry)
+        representative_for_key[entry.key] = representative
+        crossing_signature_by_key[entry.key] = signature
+        if entry.key in existing_entries and args.append and not args.replace:
+            skipped.append(entry.key)
+            generated.append(existing_entries[entry.key])
+            continue
+        if representative.key != entry.key:
+            continue
+        subdir = subprocess_root / entry.key
+        if subdir.exists() and not args.replace and entry.key in existing_entries:
+            message = (
+                f"process entry {entry.key!r} already exists; use --replace to rebuild it"
+            )
+            if args.json:
+                print(json.dumps({"available": False, "error": message}, indent=2))
+            else:
+                print(message, file=sys.stderr)
+            return 1
+        if args.replace and subdir.exists():
+            shutil.rmtree(subdir)
+        work_items.append((entry, subdir))
+
+    worker_count = max(int(getattr(args, "n_cores", 1)), 1)
+    active: dict[int, tuple[subprocess.Popen[str], Any, Path, float]] = {}
+    stderr_buffers: dict[int, list[str]] = {}
+    stderr_threads: dict[int, threading.Thread] = {}
+    child_progress_events: queue.SimpleQueue[tuple[int, dict[str, object]]] = (
+        queue.SimpleQueue()
+    )
+    child_progress_seen: dict[int, tuple[str, str, float]] = {}
+    failures: list[dict[str, object]] = []
     display = _display(args)
     try:
-        with display.progress(
-            "Profiling shared-current DAG evaluator",
-            metadata=f"{args.process}, backend={runtime_backend}",
-        ):
-            payload = profile_z_gluon_dag_evaluator(
-                args.process,
-                sqrt_s=args.sqrt_s,
-                points=args.points,
-                repetitions=args.repetitions,
-                evaluator_build_kwargs=_runtime_evaluator_kwargs(args),
-                save_evaluator_dir=getattr(args, "save_evaluator_dir", None),
-                runtime_backend=runtime_backend,
-            )
-    except (NativeEvaluationError, ValueError) as exc:
+        with display.stage_progress(
+            "Generating process set",
+            total=len(entries),
+            metadata=f"workers={worker_count}",
+        ) as progress:
+            if skipped:
+                progress.update(
+                    stage="skip",
+                    item=f"{len(skipped)} existing",
+                    increment=len(skipped),
+                    ram=_rss_text_for_active_processes(active),
+                )
+            pending = list(work_items)
+            while pending or active:
+                while pending and len(active) < worker_count:
+                    entry, subdir = pending.pop(0)
+                    cmd = _generate_process_child_command(args, entry.process, subdir)
+                    env = _child_generation_environment()
+                    process = subprocess.Popen(
+                        cmd,
+                        cwd=Path.cwd(),
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        start_new_session=True,
+                    )
+                    active[process.pid] = (process, entry, subdir, time.perf_counter())
+                    stderr_buffers[process.pid] = []
+                    stderr_threads[process.pid] = _start_child_stderr_reader(
+                        process,
+                        stderr_buffers[process.pid],
+                        child_progress_events,
+                    )
+                    progress.update(
+                        stage=f"run {len(active):02d}/{worker_count:02d}",
+                        item=str(entry.key),
+                        ram=_rss_text_for_active_processes(active),
+                    )
+
+                _drain_child_progress_events(
+                    child_progress_events,
+                    active,
+                    progress,
+                    child_progress_seen,
+                )
+                finished: list[int] = []
+                for pid, (process, entry, subdir, started) in list(active.items()):
+                    if process.poll() is None:
+                        continue
+                    stdout, stderr = _finish_generation_child_output(
+                        process,
+                        pid=pid,
+                        stderr_buffers=stderr_buffers,
+                        stderr_threads=stderr_threads,
+                    )
+                    finished.append(pid)
+                    elapsed_s = time.perf_counter() - started
+                    if process.returncode != 0:
+                        child_payload = _parse_child_generation_payload(stdout)
+                        child_error = str(
+                            child_payload.get("error")
+                            or stderr.strip()
+                            or stdout.strip()
+                            or f"subprocess exited with {process.returncode}"
+                        )
+                        failures.append(
+                            {
+                                "key": entry.key,
+                                "process": entry.process,
+                                "returncode": process.returncode,
+                                "error": child_error,
+                                "payload": child_payload,
+                                "stdout": stdout,
+                                "stderr": stderr,
+                                "elapsed_s": elapsed_s,
+                            }
+                        )
+                        progress.update(
+                            stage="failed",
+                            item=str(entry.key),
+                            increment=1,
+                            ram=_rss_text_for_active_processes(active),
+                        )
+                        continue
+                    child_payload = _parse_child_generation_payload(stdout)
+                    generated.append(
+                        {
+                            "key": entry.key,
+                            "process": entry.process,
+                            "path": str(Path("subprocesses") / entry.key),
+                            "kind": str(
+                                child_payload.get(
+                                    "kind",
+                                    "pyamplicol-generic-dag-process",
+                                )
+                            ),
+                            "artifact_class": str(
+                                child_payload.get(
+                                    "artifact_class",
+                                    "generic-dag-schema-v2",
+                                )
+                            ),
+                            "generation_s": child_payload.get("generation_s", elapsed_s),
+                            "runtime_available": bool(
+                                child_payload.get("runtime_available", False)
+                            ),
+                            "generation_request": generation_metadata,
+                        }
+                    )
+                    progress.update(
+                        stage="done",
+                        item=str(entry.key),
+                        increment=1,
+                        ram=_rss_text_for_active_processes(active),
+                    )
+                for pid in finished:
+                    active.pop(pid, None)
+                    stderr_buffers.pop(pid, None)
+                    stderr_threads.pop(pid, None)
+                _drain_child_progress_events(
+                    child_progress_events,
+                    active,
+                    progress,
+                    child_progress_seen,
+                )
+                if pending or active:
+                    if not finished:
+                        progress.update(
+                            stage=f"run {len(active):02d}/{worker_count:02d}",
+                            item=f"pending={len(pending):03d}",
+                            ram=_rss_text_for_active_processes(active),
+                        )
+                        time.sleep(0.25)
+            if failures:
+                progress.update(
+                    stage="failed",
+                    item=f"{len(failures)} failures",
+                    ram=_rss_text_for_active_processes(active),
+                )
+    except KeyboardInterrupt:
+        _terminate_generation_children(active)
+        _join_child_stderr_threads(stderr_threads)
+        message = "process-set generation interrupted; active subprocesses were terminated"
+        if args.json:
+            print(json.dumps({"available": False, "error": message}, indent=2))
+        else:
+            print(message, file=sys.stderr)
+        return 130
+    except BaseException:
+        _terminate_generation_children(active)
+        _join_child_stderr_threads(stderr_threads)
+        raise
+
+    if failures:
         if args.json:
             print(
                 json.dumps(
-                    {
-                        "available": False,
-                        "error": str(exc),
-                        "process": args.process,
-                        "runtime_backend": runtime_backend,
-                    },
+                    {"available": False, "failures": failures},
                     indent=2,
                     sort_keys=True,
                 )
             )
         else:
-            print(str(exc), file=sys.stderr)
+            first = failures[0]
+            print(
+                f"failed to generate {first['key']}: {first.get('error')}",
+                file=sys.stderr,
+            )
         return 1
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
+
+    representative_entries: dict[str, dict[str, object]] = dict(existing_entries)
+    for item in generated:
+        representative_entries[str(item["key"])] = item
+    alias_generated: list[dict[str, object]] = []
+    for entry in entries:
+        if entry.key in existing_entries and args.append and not args.replace:
+            continue
+        alias_representative: ProcessSetEntry | None = representative_for_key.get(
+            entry.key
+        )
+        if alias_representative is None or alias_representative.key == entry.key:
+            continue
+        representative_item = representative_entries.get(alias_representative.key)
+        if representative_item is None:
+            failures.append(
+                {
+                    "key": entry.key,
+                    "process": entry.process,
+                    "error": (
+                        "crossing representative "
+                        f"{alias_representative.key!r} was not generated"
+                    ),
+                }
+            )
+            continue
+        alias_item = {
+            "key": entry.key,
+            "process": entry.process,
+            "path": representative_item["path"],
+            "kind": representative_item.get(
+                "kind",
+                "pyamplicol-generic-dag-process",
+            ),
+            "artifact_class": representative_item.get(
+                "artifact_class",
+                "generic-dag-schema-v2",
+            ),
+            "generation_s": 0.0,
+            "runtime_available": bool(
+                representative_item.get("runtime_available", False)
+            ),
+            "generation_request": generation_metadata,
+            "crossing_alias_of": alias_representative.key,
+            "crossing_signature": list(crossing_signature_by_key[entry.key]),
+            "input_crossing_map": _process_input_crossing_map(
+                alias_representative.process,
+                entry.process,
+                color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+                options=_process_options(args),
+            ),
+        }
+        alias_generated.append(alias_item)
+        generated.append(alias_item)
+    if failures:
+        if args.json:
+            print(
+                json.dumps(
+                    {"available": False, "failures": failures},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            first = failures[0]
+            print(
+                f"failed to generate {first['key']}: {first.get('error')}",
+                file=sys.stderr,
+            )
+        return 1
+
+    merged: dict[str, dict[str, object]] = dict(existing_entries)
+    for item in generated:
+        merged[str(item["key"])] = item
+    if args.append and existing is not None and not args.replace:
+        ordered_keys = [
+            str(entry["key"])
+            for entry in _process_set_manifest_entries(existing)
+            if isinstance(entry, dict) and "key" in entry
+        ]
+        for entry in entries:
+            if entry.key not in ordered_keys:
+                ordered_keys.append(entry.key)
     else:
-        display.print_table(
-            "DAG Evaluator Profile",
+        ordered_keys = [entry.key for entry in entries]
+        for key in existing_entries:
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+    process_entries = [merged[key] for key in ordered_keys if key in merged]
+    existing_default_key = (
+        str(existing.get("default_process_key"))
+        if isinstance(existing, dict)
+        and existing.get("default_process_key") in {entry["key"] for entry in process_entries}
+        else None
+    )
+    default_process_key = (
+        existing_default_key
+        if args.append and existing is not None and not args.replace
+        else (str(process_entries[0]["key"]) if process_entries else None)
+    )
+    runtime_available = all(
+        bool(entry.get("runtime_available", False)) for entry in process_entries
+    )
+    process_set_manifest = {
+        "schema_version": 2,
+        "kind": "pyamplicol-generic-dag-process-set",
+        "artifact_class": "generic-dag-schema-v2",
+        "request": getattr(process_set, "request"),
+        "default_process_key": default_process_key,
+        "color_accuracy": getattr(args, "color_accuracy", "lc"),
+        "generic_generation": generation_metadata,
+        "runtime_available": runtime_available,
+        "runtime_unavailable_message": (
+            None
+            if runtime_available
+            else "one or more subprocesses do not contain serialized generic stage evaluators"
+        ),
+        "processes": process_entries,
+    }
+    manifest_path.write_text(
+        json.dumps(process_set_manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (root / "check_standalone.py").write_text(
+        _PROCESS_SET_STANDALONE_CHECK_SCRIPT,
+        encoding="utf-8",
+    )
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "available": True,
+                    "manifest": str(manifest_path),
+                    "generated": generated,
+                    "crossing_aliases": alias_generated,
+                    "skipped": skipped,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        _display(args).print_table(
+            "Generated Process Set",
             _kv_columns(),
             [
-                DisplayRow({"metric": "Process", "value": args.process}, "bold"),
-                {"metric": "Backend", "value": payload["runtime_backend"]},
-                {"metric": "Points", "value": payload["points"]},
-                {"metric": "Repetitions", "value": payload["repetitions"]},
-                {"metric": "Batch size", "value": payload["batch_size"]},
-                {
-                    "metric": "Generation",
-                    "value": format_measurement(float(payload["generation_s"]), unit="s"),
-                },
-                DisplayRow(
-                    {
-                        "metric": "Wall runtime",
-                        "value": format_measurement(
-                            float(payload["runtime_us_per_point"]),
-                            _float_or_none(
-                                payload.get("runtime_us_per_point_error")
-                            ),
-                            unit="us/point",
-                        ),
-                    },
-                    "green",
-                ),
-                DisplayRow(
-                    {
-                        "metric": "Evaluator runtime",
-                        "value": format_measurement(
-                            float(payload["runtime_evaluator_only_us_per_point"]),
-                            _float_or_none(
-                                payload.get(
-                                    "runtime_evaluator_only_us_per_point_error"
-                                )
-                            ),
-                            unit="us/point",
-                        ),
-                    },
-                    "cyan",
-                ),
+                DisplayRow({"metric": "Request", "value": getattr(process_set, "request")}, "bold"),
+                {"metric": "Entries", "value": len(process_entries)},
+                {"metric": "Skipped", "value": len(skipped)},
+                {"metric": "Manifest", "value": manifest_path},
             ],
         )
-        breakdown = payload.get("runtime_breakdown_us_per_point")
-        breakdown_errors = payload.get("runtime_breakdown_us_per_point_error")
-        if isinstance(breakdown, dict):
-            rows: list[DisplayRow | dict[str, object]] = []
-            for key in (
-                "source_fill_time_s",
-                "momentum_setup_time_s",
-                "parameter_pack_time_s",
-                "evaluator_time_s",
-                "output_transfer_time_s",
-                "result_reduction_time_s",
-                "python_overhead_time_s",
-            ):
-                value = breakdown.get(key)
-                if not isinstance(value, (float, int)):
-                    continue
-                error = (
-                    breakdown_errors.get(key)
-                    if isinstance(breakdown_errors, dict)
-                    else None
-                )
-                rows.append(
-                    {
-                        "metric": key.removesuffix("_time_s").replace("_", " "),
-                        "value": format_measurement(
-                            float(value),
-                            _float_or_none(error),
-                            unit="us/point",
-                        ),
-                    }
-                )
-            if rows:
-                display.print_table("Runtime Breakdown", _kv_columns(), rows)
-    if runtime_backend == "rusticol":
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os._exit(0)
     return 0
 
 
-def _cmd_generate_process(args: argparse.Namespace) -> int:
-    args.save_evaluator_dir = args.output_dir
-    return _cmd_generate_dag_evaluator_artifact(args, "rusticol")
+def _generic_process_set_generation_metadata(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    return {
+        "process_options": {
+            "flavour_scheme": int(getattr(args, "flavour_scheme", 5)),
+            "include_3qqbar": bool(getattr(args, "include_3qqbar", False)),
+            "include_cc": bool(getattr(args, "include_cc", False)),
+            "include_resonance": bool(getattr(args, "include_resonance", False)),
+        },
+        "pruning": _json_ready_generic_dag_pruning_kwargs(
+            _generic_dag_pruning_kwargs(args, process=None)
+        ),
+        "coupling_order_policy": str(getattr(args, "coupling_order_policy", "all")),
+        "lc_sector_strategy": str(
+            getattr(args, "lc_sector_strategy", "topology-representatives")
+        ),
+        "lc_topology_replay": bool(getattr(args, "lc_topology_replay", False)),
+        "n_cores": int(getattr(args, "n_cores", 1)),
+    }
+
+
+def _generate_process_child_command(
+    args: argparse.Namespace,
+    process: str,
+    output_dir: Path,
+) -> list[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "pyamplicol",
+        "generate-process",
+        process,
+        str(output_dir),
+        "--json",
+        "--color-accuracy",
+        str(getattr(args, "color_accuracy", "lc")),
+        "--flavour-scheme",
+        str(int(getattr(args, "flavour_scheme", 5))),
+        "--batch-size",
+        str(int(getattr(args, "batch_size", 128))),
+        "--symbolica-n-cores",
+        str(int(getattr(args, "symbolica_n_cores", 4))),
+        "--symbolica-evaluator-backend",
+        str(getattr(args, "symbolica_evaluator_backend", "compiled-complex")),
+        "--symbolica-iterations",
+        str(int(getattr(args, "symbolica_iterations", 1))),
+        "--symbolica-compiled-preset",
+        str(getattr(args, "symbolica_compiled_preset", "runtime-o3")),
+        "--symbolica-compiled-inline-asm",
+        str(getattr(args, "symbolica_compiled_inline_asm", "default")),
+        "--symbolica-compiled-optimization-level",
+        str(int(getattr(args, "symbolica_compiled_optimization_level", 3))),
+        "--symbolica-compiled-chunk-compile-workers",
+        str(int(getattr(args, "symbolica_compiled_chunk_compile_workers", 1))),
+        "--n_cores",
+        "1",
+        "--max-currents",
+        str(int(getattr(args, "max_currents", 50000))),
+        "--max-color-sectors",
+        str(int(getattr(args, "max_color_sectors", 20000))),
+    ]
+    if bool(getattr(args, "include_3qqbar", False)):
+        command.append("--include-3qqbar")
+    if bool(getattr(args, "include_cc", False)):
+        command.append("--include-cc")
+    if bool(getattr(args, "include_resonance", False)):
+        command.append("--include-resonance")
+    for item in getattr(args, "max_coupling_order", ()) or ():
+        command.extend(["--max-coupling-order", str(item)])
+    if getattr(args, "max_qcd_order", None) is not None:
+        command.extend(["--max-qcd-order", str(int(args.max_qcd_order))])
+    if getattr(args, "max_qed_order", None) is not None:
+        command.extend(["--max-qed-order", str(int(args.max_qed_order))])
+    if str(getattr(args, "coupling_order_policy", "all")) != "all":
+        command.extend(
+            [
+                "--coupling-order-policy",
+                str(getattr(args, "coupling_order_policy", "all")),
+            ]
+        )
+    if getattr(args, "max_lc_current_line_groups", None) is not None:
+        command.extend(
+            [
+                "--max-lc-current-line-groups",
+                str(int(args.max_lc_current_line_groups)),
+            ]
+        )
+    if getattr(args, "max_quark_pairs", None) is not None:
+        command.extend(["--max-quark-pairs", str(int(args.max_quark_pairs))])
+    if not bool(getattr(args, "closure_side_mask_pruning", True)):
+        command.append("--no-closure-side-mask-pruning")
+    if not bool(getattr(args, "color_order_mask_pruning", True)):
+        command.append("--no-color-order-mask-pruning")
+    if not bool(getattr(args, "species_reachability_pruning", True)):
+        command.append("--no-species-reachability-pruning")
+    ignore_particles = str(getattr(args, "ignore_particles", ""))
+    if ignore_particles:
+        command.extend(["--ignore-particles", ignore_particles])
+    ignore_vertex_kinds = str(getattr(args, "ignore_vertex_kinds", ""))
+    if ignore_vertex_kinds:
+        command.extend(["--ignore-vertex-kinds", ignore_vertex_kinds])
+    command.extend(
+        [
+            "--lc-sector-strategy",
+            str(getattr(args, "lc_sector_strategy", "topology-representatives")),
+        ]
+    )
+    lc_sector_ids = str(getattr(args, "lc_sector_ids", ""))
+    if lc_sector_ids:
+        command.extend(["--lc-sector-ids", lc_sector_ids])
+    reference_color_order = str(getattr(args, "reference_color_order", ""))
+    if reference_color_order:
+        command.extend(["--reference-color-order", reference_color_order])
+    if bool(getattr(args, "lc_topology_replay", False)):
+        command.append("--lc-topology-replay")
+    optional_integer_options = (
+        ("symbolica_cpe_iterations", "--symbolica-cpe-iterations"),
+        ("symbolica_max_horner_scheme_variables", "--symbolica-max-horner-scheme-variables"),
+        ("symbolica_max_common_pair_cache_entries", "--symbolica-max-common-pair-cache-entries"),
+        ("symbolica_max_common_pair_distance", "--symbolica-max-common-pair-distance"),
+        ("symbolica_compiled_output_chunk_size", "--symbolica-compiled-output-chunk-size"),
+    )
+    for attribute, option in optional_integer_options:
+        value = getattr(args, attribute, None)
+        if value is not None:
+            command.extend([option, str(int(value))])
+    compiler_path = getattr(args, "symbolica_compiler_path", None)
+    if compiler_path:
+        command.extend(["--symbolica-compiler-path", str(compiler_path)])
+    for flag in getattr(args, "symbolica_compiler_flags", ()) or ():
+        command.extend(["--symbolica-compiler-flag", str(flag)])
+    if bool(getattr(args, "symbolica_collect_factors", False)):
+        command.append("--symbolica-collect-factors")
+    if bool(getattr(args, "symbolica_split_vertex_current_stages", False)):
+        command.append("--symbolica-split-vertex-current-stages")
+    if bool(getattr(args, "merge_evaluators_strategy", False)):
+        command.append("--merge-evaluators-strategy")
+    else:
+        command.append("--no-merge-evaluators-strategy")
+    if bool(getattr(args, "symbolica_compiled_native", True)):
+        command.append("--symbolica-compiled-native")
+    else:
+        command.append("--symbolica-no-compiled-native")
+    jit_direct = getattr(args, "symbolica_jit_direct_translation", None)
+    if jit_direct is True:
+        command.append("--symbolica-jit-direct-translation")
+    elif jit_direct is False:
+        command.append("--symbolica-no-jit-direct-translation")
+    if bool(getattr(args, "symbolica_direct_translation", True)):
+        command.append("--symbolica-direct-translation")
+    else:
+        command.append("--symbolica-no-direct-translation")
+    return command
+
+
+def _process_crossing_reuse_signature(
+    process: str,
+    *,
+    color_accuracy: str,
+    options: ProcessOptions,
+) -> tuple[int, ...]:
+    from .process_ir import build_process_ir
+
+    ir = build_process_ir(
+        process,
+        color_accuracy=color_accuracy,
+        options=options,
+    )
+    return tuple(sorted(int(pdg) for pdg in ir.outgoing_pdgs))
+
+
+def _process_input_crossing_map(
+    representative_process: str,
+    selected_process: str,
+    *,
+    color_accuracy: str,
+    options: ProcessOptions,
+) -> list[dict[str, int | float]]:
+    from .process_ir import build_process_ir
+
+    representative = build_process_ir(
+        representative_process,
+        color_accuracy=color_accuracy,
+        options=options,
+    )
+    selected = build_process_ir(
+        selected_process,
+        color_accuracy=color_accuracy,
+        options=options,
+    )
+    selected_legs = _external_all_outgoing_legs(selected)
+    used: set[int] = set()
+    mapping: list[dict[str, int | float]] = []
+    for target_index, target in enumerate(_external_all_outgoing_legs(representative)):
+        for source_index, source in enumerate(selected_legs):
+            if source_index in used:
+                continue
+            if int(source["outgoing_pdg"]) != int(target["outgoing_pdg"]):
+                continue
+            used.add(source_index)
+            mapping.append(
+                {
+                    "target_index": target_index,
+                    "source_index": source_index,
+                    "sign": float(target["sign"]) * float(source["sign"]),
+                }
+            )
+            break
+        else:
+            raise ValueError(
+                "could not build crossing map from "
+                f"{selected_process!r} to {representative_process!r}"
+            )
+    return mapping
+
+
+def _external_all_outgoing_legs(process_ir: Any) -> list[dict[str, int]]:
+    legs: list[dict[str, int]] = []
+    for index, pdg in enumerate(process_ir.initial_pdgs):
+        legs.append(
+            {
+                "external_index": index,
+                "outgoing_pdg": -int(pdg),
+                "sign": -1,
+            }
+        )
+    offset = len(process_ir.initial_pdgs)
+    for index, pdg in enumerate(process_ir.final_pdgs):
+        legs.append(
+            {
+                "external_index": offset + index,
+                "outgoing_pdg": int(pdg),
+                "sign": 1,
+            }
+        )
+    return legs
+
+
+def _child_generation_environment() -> dict[str, str]:
+    env = dict(os.environ)
+    source_path = str(Path(__file__).resolve().parents[2])
+    current = env.get("PYTHONPATH")
+    if current:
+        env["PYTHONPATH"] = f"{source_path}{os.pathsep}{current}"
+    else:
+        env["PYTHONPATH"] = source_path
+    env.setdefault("PYAMPLICOL_NO_PROGRESS", "1")
+    env[_CHILD_PROGRESS_ENV] = "1"
+    return env
+
+
+def _child_generation_progress_callback(process: str):
+    if os.environ.get(_CHILD_PROGRESS_ENV) != "1":
+        return None
+
+    def callback(event: dict[str, object]) -> None:
+        payload: dict[str, object] = {
+            "process": process,
+            "stage": str(event.get("stage", "")),
+            "item": str(event.get("item", "")),
+        }
+        for key in ("increment", "total", "ram"):
+            if key in event:
+                payload[key] = event[key]
+        print(
+            _CHILD_PROGRESS_PREFIX + json.dumps(payload, sort_keys=True),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    return callback
+
+
+def _combined_progress_callback(
+    display_callback,
+    child_callback,
+):
+    if child_callback is None:
+        return display_callback
+
+    def callback(event: dict[str, object]) -> None:
+        display_callback(event)
+        child_callback(event)
+
+    return callback
+
+
+def _parse_child_generation_payload(stdout: str) -> dict[str, object]:
+    text = stdout.strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return {"raw_stdout": stdout}
+        payload = json.loads(text[start : end + 1])
+    return payload if isinstance(payload, dict) else {}
+
+
+def _start_child_stderr_reader(
+    process: subprocess.Popen[str],
+    buffer: list[str],
+    events: queue.SimpleQueue[tuple[int, dict[str, object]]],
+) -> threading.Thread:
+    def run() -> None:
+        stream = getattr(process, "stderr", None)
+        if stream is None:
+            return
+        while True:
+            try:
+                line = stream.readline()
+            except (OSError, ValueError):
+                return
+            if not line:
+                return
+            buffer.append(line)
+            payload = _parse_child_progress_event(line)
+            if payload is not None:
+                events.put((int(process.pid), payload))
+
+    thread = threading.Thread(
+        target=run,
+        name=f"pyamplicol-child-stderr-{process.pid}",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def _finish_generation_child_output(
+    process: subprocess.Popen[str],
+    *,
+    pid: int,
+    stderr_buffers: dict[int, list[str]],
+    stderr_threads: dict[int, threading.Thread],
+) -> tuple[str, str]:
+    stdout = ""
+    stderr_tail = ""
+    stdout_stream = getattr(process, "stdout", None)
+    if stdout_stream is not None and hasattr(stdout_stream, "read"):
+        stdout = str(stdout_stream.read())
+    else:
+        stdout, stderr_tail = process.communicate()
+    thread = stderr_threads.get(pid)
+    if thread is not None:
+        thread.join(timeout=1.0)
+    stderr = "".join(stderr_buffers.get(pid, ())) + stderr_tail
+    return stdout, stderr
+
+
+def _join_child_stderr_threads(
+    stderr_threads: dict[int, threading.Thread],
+) -> None:
+    for thread in tuple(stderr_threads.values()):
+        thread.join(timeout=1.0)
+    stderr_threads.clear()
+
+
+def _parse_child_progress_event(line: str) -> dict[str, object] | None:
+    if not line.startswith(_CHILD_PROGRESS_PREFIX):
+        return None
+    text = line[len(_CHILD_PROGRESS_PREFIX) :].strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _drain_child_progress_events(
+    events: queue.SimpleQueue[tuple[int, dict[str, object]]],
+    active: dict[int, tuple[subprocess.Popen[str], object, Path, float]],
+    progress: Any,
+    seen: dict[int, tuple[str, str, float]] | None = None,
+    *,
+    min_interval_s: float = 0.5,
+) -> None:
+    while True:
+        try:
+            pid, event = events.get_nowait()
+        except queue.Empty:
+            return
+        child = active.get(pid)
+        if child is None:
+            continue
+        _, entry, _, _ = child
+        stage = str(event.get("stage", "child"))
+        item = str(event.get("item", ""))
+        now = time.perf_counter()
+        if seen is not None:
+            previous_stage, previous_item, previous_at = seen.get(pid, ("", "", 0.0))
+            changed_stage = stage != previous_stage
+            changed_item = item != previous_item
+            has_counter_update = "increment" in event or "total" in event
+            if (
+                not changed_stage
+                and not has_counter_update
+                and (not changed_item or now - previous_at < min_interval_s)
+            ):
+                continue
+            if (
+                not changed_stage
+                and changed_item
+                and not has_counter_update
+                and now - previous_at < min_interval_s
+            ):
+                continue
+            seen[pid] = (stage, item, now)
+        progress.update(
+            stage=f"child {stage}",
+            item=f"{getattr(entry, 'key', pid)}:{item}",
+            ram=_rss_text_for_active_processes(active),
+        )
+
+
+def _terminate_generation_children(
+    active: dict[int, tuple[subprocess.Popen[str], object, Path, float]],
+) -> None:
+    root_pids = tuple(active)
+    for process, _, _, _ in active.values():
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGTERM)
+    for pid in sorted(_process_tree_pids(root_pids), reverse=True):
+        if pid == os.getpid():
+            continue
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGTERM)
+    for process, _, _, _ in active.values():
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                process.terminate()
+    deadline = time.perf_counter() + 5.0
+    for process, _, _, _ in active.values():
+        remaining = max(deadline - time.perf_counter(), 0.0)
+        try:
+            process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                process.kill()
+    for process, _, _, _ in active.values():
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGKILL)
+    for pid in sorted(_process_tree_pids(root_pids), reverse=True):
+        if pid == os.getpid():
+            continue
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+    for process, _, _, _ in active.values():
+        with contextlib.suppress(Exception):
+            process.communicate(timeout=1.0)
+    active.clear()
+
+
+def _rss_text_for_active_processes(
+    active: dict[int, tuple[subprocess.Popen[str], object, Path, float]],
+) -> str:
+    rss = _process_tree_rss_bytes((os.getpid(), *tuple(active)))
+    return _format_bytes(rss) if rss is not None else "n/a"
+
+
+def _process_tree_rss_bytes(root_pids: Sequence[int]) -> int | None:
+    if not root_pids:
+        return 0
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,rss="],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    rss_by_pid: dict[int, int] = {}
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+            rss_kb = int(parts[2])
+        except ValueError:
+            continue
+        rss_by_pid[pid] = max(rss_kb, 0) * 1024
+        children.setdefault(ppid, []).append(pid)
+    seen: set[int] = set()
+    stack = list(root_pids)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        stack.extend(children.get(pid, ()))
+    return sum(rss_by_pid.get(pid, 0) for pid in seen)
+
+
+def _process_tree_pids(root_pids: Sequence[int]) -> set[int]:
+    if not root_pids:
+        return set()
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid="],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return set(root_pids)
+    if result.returncode != 0:
+        return set(root_pids)
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+    seen: set[int] = set()
+    stack = list(root_pids)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        stack.extend(children.get(pid, ()))
+    return seen
+
+
+def _format_bytes(value: int) -> str:
+    amount = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if amount < 1024.0 or unit == "TB":
+            return f"{amount:.1f}{unit}" if unit != "B" else f"{int(amount)}B"
+        amount /= 1024.0
+    return f"{amount:.1f}TB"
+
+
+def _load_process_set_manifest(root: Path) -> dict[str, object] | None:
+    path = root / "process_set_manifest.json"
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"process-set manifest is not a JSON object: {path}")
+    if payload.get("kind") not in {
+        "pyamplicol-rusticol-process-set",
+        "pyamplicol-generic-dag-process-set",
+    }:
+        raise ValueError(f"unsupported process-set artifact kind: {payload.get('kind')!r}")
+    return payload
+
+
+def _resolve_process_artifact_dir(root: Path, process_key: str | None = None) -> Path:
+    if (root / "process_manifest.json").exists():
+        if process_key is not None:
+            raise ValueError("--process can only be used with a process-set artifact")
+        return root
+    manifest = _load_process_set_manifest(root)
+    if manifest is None:
+        raise ValueError(f"no process artifact manifest found in {root}")
+    entries = _process_set_manifest_entries(manifest)
+    if not entries:
+        raise ValueError(f"process-set artifact contains no subprocesses: {root}")
+    selected = process_key or str(manifest.get("default_process_key"))
+    for entry in entries:
+        key = str(entry.get("key"))
+        process = str(entry.get("process"))
+        if selected in {key, process}:
+            path = Path(str(entry.get("path", "")))
+            return path if path.is_absolute() else root / path
+    available = ", ".join(str(entry.get("key")) for entry in entries)
+    raise ValueError(f"process {selected!r} not found in {root}; available: {available}")
+
+
+def _process_set_manifest_entries(payload: dict[str, object]) -> list[dict[str, object]]:
+    entries = payload.get("processes", [])
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
+def _select_process_set_manifest_entry(
+    payload: dict[str, object],
+    process_key: str | None,
+) -> dict[str, object]:
+    entries = _process_set_manifest_entries(payload)
+    if not entries:
+        raise ValueError("process-set artifact contains no subprocesses")
+    selected = process_key or str(payload.get("default_process_key"))
+    for entry in entries:
+        if selected in {str(entry.get("key")), str(entry.get("process"))}:
+            return entry
+    available = ", ".join(str(entry.get("key")) for entry in entries)
+    raise ValueError(f"process {selected!r} not found; available: {available}")
 
 
 def _cmd_time_process(args: argparse.Namespace) -> int:
-    root = Path(args.process_dir).expanduser()
+    requested_root = Path(args.process_dir).expanduser()
+    root = requested_root
     display = _display(args)
     try:
         import numpy as np
         import rusticol  # type: ignore[import-not-found]
 
+        rusticol_build = _rusticol_build_metadata(rusticol)
+        _require_release_rusticol(rusticol_build)
         with display.progress("Loading Rusticol process", metadata=str(root)):
+            process_set_manifest = _load_process_set_manifest(requested_root)
+            selected_process_entry = (
+                _select_process_set_manifest_entry(
+                    process_set_manifest,
+                    args.process_key,
+                )
+                if process_set_manifest is not None
+                else None
+            )
+            root = _resolve_process_artifact_dir(requested_root, args.process_key)
             manifest = json.loads((root / "process_manifest.json").read_text())
-            runtime = rusticol.Runtime.load(str(root))
+            unavailable = _generic_dag_runtime_unavailable_message(manifest)
+            if unavailable is not None:
+                raise RuntimeError(unavailable)
+            runtime = getattr(rusticol, "Runtime").load(
+                str(requested_root if process_set_manifest is not None else root),
+                args.process_key if process_set_manifest is not None else None,
+            )
+            runtime_metadata = dict(runtime.metadata())
             points = _load_rusticol_validation_momenta(root, int(args.precision), np)
+            if selected_process_entry is not None:
+                points = _validation_momenta_for_selected_crossing(
+                    points,
+                    selected_process_entry,
+                    np,
+                )
             values = _rusticol_evaluate(runtime, points, int(args.precision))
         with display.progress(
             "Profiling Rusticol runtime",
@@ -1516,7 +3573,7 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
                     {
                         "available": False,
                         "error": str(exc),
-                        "process_dir": str(root),
+                        "process_dir": str(requested_root),
                     },
                     indent=2,
                     sort_keys=True,
@@ -1529,11 +3586,17 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
     payload = {
         "available": True,
         "process_dir": str(root),
-        "process": manifest.get("process"),
-        "family": manifest.get("family"),
-        "gluon_count": manifest.get("gluon_count"),
+        "requested_process_dir": str(requested_root),
+        "process": runtime_metadata.get("process") or manifest.get("process"),
+        "artifact_class": (
+            manifest.get("artifact_class")
+            or runtime_metadata.get("artifact_class")
+            or "generic-dag-schema-v2"
+        ),
+        "schema_version": runtime_metadata.get("schema_version"),
         "precision": int(args.precision),
         "target_runtime_s": float(args.target_runtime),
+        "rusticol_build": rusticol_build,
         "values": [float(value) for value in values],
         "profile": profile_payload,
     }
@@ -1546,8 +3609,20 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
             [
                 DisplayRow({"metric": "Process", "value": payload["process"]}, "bold"),
                 {"metric": "Process dir", "value": root},
-                {"metric": "Family", "value": payload.get("family")},
-                {"metric": "Gluons", "value": payload.get("gluon_count")},
+                {"metric": "Requested dir", "value": requested_root},
+                {"metric": "Artifact class", "value": payload.get("artifact_class")},
+                {
+                    "metric": "Schema",
+                    "value": payload.get("schema_version"),
+                },
+                {
+                    "metric": "Rusticol build",
+                    "value": (
+                        f"{rusticol_build.get('profile', 'unknown')} "
+                        f"[{rusticol_build.get('target', 'unknown')}]"
+                    ),
+                },
+                {"metric": "Rusticol module", "value": rusticol_build.get("module_path")},
                 {"metric": "Precision", "value": payload["precision"]},
                 {
                     "metric": "Target runtime",
@@ -1606,7 +3681,73 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
                 _kv_columns(),
                 breakdown_rows,
             )
+    if not bool(getattr(args, "_suppress_rusticol_exit", False)):
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
     return 0
+
+
+def _rusticol_build_metadata(rusticol_module: Any) -> dict[str, str | None]:
+    module = rusticol_module
+    if not callable(getattr(module, "build_profile", None)):
+        try:
+            import importlib
+
+            module = importlib.import_module("rusticol.rusticol")
+        except Exception:  # noqa: BLE001 - metadata helper reports best effort.
+            module = rusticol_module
+    build_profile = getattr(module, "build_profile", None)
+    build_target = getattr(module, "build_target", None)
+    return {
+        "profile": str(build_profile()) if callable(build_profile) else None,
+        "target": str(build_target()) if callable(build_target) else None,
+        "module_path": str(
+            getattr(module, "__file__", getattr(rusticol_module, "__file__", ""))
+        ),
+    }
+
+
+def _require_release_rusticol(build_metadata: Mapping[str, str | None]) -> None:
+    profile = build_metadata.get("profile")
+    if profile == "release":
+        return
+    if os.environ.get("PYAMPLICOL_ALLOW_DEBUG_RUSTICOL") == "1":
+        return
+    if profile is None:
+        raise RuntimeError(
+            "rusticol does not expose build-profile metadata. Reinstall it with "
+            "`maturin develop --release` or run "
+            "`python pyAmpliCol/dependencies/install_dependencies.py` before "
+            "timing."
+        )
+    raise RuntimeError(
+        "rusticol was built with Cargo profile "
+        f"{profile!r}; timing requires the release PyO3 extension. Reinstall it "
+        "with `maturin develop --release` or rerun the pyAmpliCol dependency "
+        "installer."
+    )
+
+
+def _generic_dag_runtime_unavailable_message(
+    manifest: dict[str, object],
+) -> str | None:
+    if manifest.get("kind") != "pyamplicol-generic-dag-process":
+        return None
+    compiled = manifest.get("compiled")
+    if isinstance(compiled, dict):
+        if bool(compiled.get("runtime_available", False)) and isinstance(
+            compiled.get("stage_evaluators"),
+            dict,
+        ):
+            return None
+        message = compiled.get("runtime_unavailable_message")
+        if isinstance(message, str) and message:
+            return message
+    return (
+        "generic DAG evaluator stages are symbolically lowered, but serialized "
+        "evaluator emission and Rusticol schema-v2 execution are not available"
+    )
 
 
 def _load_rusticol_validation_momenta(
@@ -1615,6 +3756,11 @@ def _load_rusticol_validation_momenta(
     np_module: Any,
 ) -> Any:
     payload = json.loads((root / "validation_momenta.json").read_text())
+    if payload.get("available") is False or not payload.get("points"):
+        detail = payload.get("error") or "no validation momenta are bundled"
+        raise RuntimeError(
+            f"process artifact has no usable bundled validation momenta: {detail}"
+        )
     points = [
         [
             [Decimal(str(component)) for component in particle["momentum"]]
@@ -1625,6 +3771,44 @@ def _load_rusticol_validation_momenta(
     if precision == 16:
         return np_module.asarray(points, dtype=np_module.float64)
     return points
+
+
+def _validation_momenta_for_selected_crossing(
+    points: Any,
+    process_entry: dict[str, object],
+    np_module: Any,
+) -> Any:
+    crossing_map = process_entry.get("input_crossing_map")
+    if not isinstance(crossing_map, list) or not crossing_map:
+        return points
+    if hasattr(points, "shape"):
+        mapped = np_module.empty_like(points)
+        for item in crossing_map:
+            if not isinstance(item, dict):
+                raise RuntimeError("invalid input_crossing_map entry in process-set manifest")
+            target_index = int(item["target_index"])
+            source_index = int(item["source_index"])
+            sign = float(item["sign"])
+            mapped[:, source_index, :] = sign * points[:, target_index, :]
+        return mapped
+
+    mapped_points: list[list[list[Decimal]]] = []
+    for point in points:
+        mapped_point: list[list[Decimal] | None] = [None] * len(point)
+        for item in crossing_map:
+            if not isinstance(item, dict):
+                raise RuntimeError("invalid input_crossing_map entry in process-set manifest")
+            target_index = int(item["target_index"])
+            source_index = int(item["source_index"])
+            sign = -1 if float(item["sign"]) < 0.0 else 1
+            mapped_point[source_index] = [
+                (-component if sign < 0 else component)
+                for component in point[target_index]
+            ]
+        if any(component is None for component in mapped_point):
+            raise RuntimeError("input_crossing_map does not cover every selected leg")
+        mapped_points.append(cast(list[list[Decimal]], mapped_point))
+    return mapped_points
 
 
 def _repeat_rusticol_points(points: Any, count: int, np_module: Any) -> Any:
@@ -1674,7 +3858,9 @@ def _profile_rusticol_process(
 ) -> dict[str, Any]:
     block_size = max(int(batch_size), 1)
     estimate_points = _repeat_rusticol_points(points, block_size, np_module)
-    last_profile = dict(runtime.profile(estimate_points, precision=precision))
+    last_profile = dict(
+        runtime.profile(estimate_points, precision=precision, include_values=False)
+    )
     min_block_count = 8
     target_elapsed_s = max(float(target_s), 0.0)
     samples: list[float] = []
@@ -1683,7 +3869,9 @@ def _profile_rusticol_process(
     while len(samples) < min_block_count or elapsed_total_s < target_elapsed_s:
         batch = _repeat_rusticol_points(points, block_size, np_module)
         start = time.perf_counter()
-        last_profile = dict(runtime.profile(batch, precision=precision))
+        last_profile = dict(
+            runtime.profile(batch, precision=precision, include_values=False)
+        )
         elapsed_s = time.perf_counter() - start
         elapsed_total_s += elapsed_s
         samples.append(elapsed_s / block_size)
@@ -1704,15 +3892,22 @@ def _profile_rusticol_process(
         "wall_us_per_point_error": wall_error_s * 1.0e6,
         "core_evaluator_us_per_point": core_s * 1.0e6,
         "core_evaluator_us_per_point_error": core_error_s * 1.0e6,
-        "last_profile": last_profile,
+        "last_profile": _compact_rusticol_profile(last_profile),
     }
+
+
+def _compact_rusticol_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(profile)
+    values = compact.pop("values", None)
+    if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+        compact["value_count"] = len(values)
+    return compact
 
 
 def _cmd_generate_dag_evaluator_artifact(
     args: argparse.Namespace,
-    runtime_backend: RuntimeBackend,
+    runtime_backend: str,
 ) -> int:
-    display = _display(args)
     save_dir = getattr(args, "save_evaluator_dir", None)
     if save_dir is None:
         message = "--generate-only requires --save-evaluator-dir"
@@ -1732,10 +3927,11 @@ def _cmd_generate_dag_evaluator_artifact(
         else:
             print(message, file=sys.stderr)
         return 1
-    if runtime_backend not in ("dag", "rusticol"):
+    if runtime_backend != "rusticol":
         message = (
-            "--generate-only currently supports runtime backends 'dag' and "
-            "'rusticol'"
+            "--generate-only only writes production generic DAG process "
+            "artifacts through the Rusticol runtime. Use `generate-process` "
+            "for new workflows."
         )
         if args.json:
             print(
@@ -1754,101 +3950,22 @@ def _cmd_generate_dag_evaluator_artifact(
             print(message, file=sys.stderr)
         return 1
 
-    generation_start = time.perf_counter()
-    build_kwargs = _generation_build_kwargs(args, runtime_backend, Path(save_dir))
-    try:
-        from .native import LeadingColorZJetsNativeEvaluator
-        from .dag_runtime import generation_progress_total
-
-        progress_total = generation_progress_total(
-            gluon_count=_process_gluon_count_hint(args.process),
-            split_vertex_current_stages=bool(
-                build_kwargs.get("split_vertex_current_stages", False)
-            ),
-        )
-        with display.stage_progress(
-            "Generating eager-DAG process artifact",
-            total=progress_total,
-            metadata=f"{args.process}, backend={runtime_backend}",
-        ) as progress:
-            build_kwargs["progress_callback"] = progress.callback
-            native = LeadingColorZJetsNativeEvaluator()
-            if (
-                runtime_backend == "rusticol"
-                and native.supports_zero_gluon_z(args.process)
-            ):
-                from .dag_runtime import _write_zero_gluon_rusticol_process_artifacts
-
-                manifest_path = _write_zero_gluon_rusticol_process_artifacts(
-                    Path(save_dir).expanduser(),
-                    process=args.process,
-                    model=native.model,
-                )
-                metadata = {
-                    "kernel": "symbolica-zero-gluon",
-                    "gluon_count": 0,
-                }
-                progress.update(
-                    stage="save",
-                    item="zero-gluon artifact",
-                    increment=progress_total,
-                )
-            else:
-                evaluator = build_z_gluon_dag_profile_evaluator(
-                    args.process,
-                    build_kwargs=build_kwargs,
-                )
-                manifest_path = evaluator.save_evaluator_artifact(save_dir)
-                metadata = evaluator.metadata.to_json_dict()
-        payload = {
-            "available": True,
-            "generation_s": time.perf_counter() - generation_start,
-            "metadata": metadata,
-            "process": args.process,
-            "runtime_backend": runtime_backend,
-            "saved_evaluator_manifest": str(manifest_path),
-        }
-    except (NativeEvaluationError, ValueError) as exc:
-        payload = {
-            "available": False,
-            "error": str(exc),
-            "process": args.process,
-            "runtime_backend": runtime_backend,
-        }
-        if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
-        else:
-            print(str(exc), file=sys.stderr)
-        return 1
-
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        display.print_table(
-            "Generated Process Artifact",
-            _kv_columns(),
-            [
-                DisplayRow({"metric": "Process", "value": args.process}, "bold"),
-                {"metric": "Runtime", "value": runtime_backend},
-                {
-                    "metric": "Evaluator backend",
-                    "value": build_kwargs.get("symbolica_evaluator_backend"),
-                },
-                {
-                    "metric": "Generation",
-                    "value": format_measurement(
-                        float(payload["generation_s"]),
-                        unit="s",
-                    ),
-                },
-                {"metric": "Manifest", "value": payload["saved_evaluator_manifest"]},
-            ],
-        )
-    if runtime_backend == "rusticol":
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os._exit(0)
-    return 0
+    delegate = argparse.Namespace(**vars(args))
+    delegate.output_dir = Path(save_dir)
+    delegate.color_accuracy = getattr(delegate, "color_accuracy", "lc")
+    delegate.append = getattr(delegate, "append", False)
+    delegate.replace = getattr(delegate, "replace", False)
+    delegate.n_cores = getattr(delegate, "n_cores", 1)
+    delegate.flavour_scheme = getattr(delegate, "flavour_scheme", 5)
+    delegate.include_3qqbar = getattr(delegate, "include_3qqbar", False)
+    delegate.include_cc = getattr(delegate, "include_cc", False)
+    delegate.include_resonance = getattr(delegate, "include_resonance", False)
+    delegate.parallel_process_enumeration = getattr(
+        delegate,
+        "parallel_process_enumeration",
+        False,
+    )
+    return _cmd_generate_process(delegate)
 
 
 def _format_error(value: object) -> str:
@@ -1921,7 +4038,51 @@ def _process_gluon_count_hint(process: str) -> int:
     return sum(1 for token in final_state.lower().split() if token == "g")
 
 
+def _charged_leptonic_w_effective_process(
+    process: str,
+    *,
+    vector_pdg: int,
+    gluon_count: int,
+) -> str:
+    initial, separator, _final = process.partition(">")
+    if not separator:
+        raise NativeEvaluationError(
+            "invalid charged-current process string; expected 'initial > final'"
+        )
+    if vector_pdg == 24:
+        vector_name = "w+"
+    elif vector_pdg == -24:
+        vector_name = "w-"
+    else:
+        raise NativeEvaluationError(
+            f"charged-current effective process needs W+/W-, got {vector_pdg}"
+        )
+    final_tokens = [vector_name, *(["g"] * gluon_count)]
+    return f"{initial.strip()} > {' '.join(final_tokens)}"
+
+
+def _neutral_dilepton_effective_process(
+    process: str,
+    *,
+    gluon_count: int,
+) -> str:
+    initial, separator, _final = process.partition(">")
+    if not separator:
+        raise NativeEvaluationError(
+            "invalid neutral-dilepton process string; expected 'initial > final'"
+        )
+    final_tokens = ["z", *(["g"] * gluon_count)]
+    return f"{initial.strip()} > {' '.join(final_tokens)}"
+
+
 def _cmd_profile(args: argparse.Namespace) -> int:
+    return _legacy_native_command_unavailable(args, "profile")
+
+
+def _cmd_profile_reference(args: argparse.Namespace) -> int:
+    from .evaluation import NativeRuntimeEvaluator
+    from .legacy_matrix import NativeMatrixElementGenerator
+
     generator = NativeMatrixElementGenerator(cache_dir=args.cache_dir)
     result = generator.generate(args.process, options=_process_options(args))
     artifact = _load_optional_evaluator_artifact(args.cache_dir, args.process)
@@ -1931,6 +4092,7 @@ def _cmd_profile(args: argparse.Namespace) -> int:
         evaluator = NativeRuntimeEvaluator(
             args.process,
             runtime_backend=_runtime_backend(args),
+            allow_reference_legacy=True,
             **_runtime_evaluator_kwargs(args),
         )
         start = time.perf_counter()
@@ -2012,6 +4174,45 @@ def _process_enumeration_to_dict(enumeration: ProcessEnumeration) -> dict[str, o
     }
 
 
+def _process_set_enumeration_to_dict(process_set: object) -> dict[str, object]:
+    entries = getattr(process_set, "entries")
+    entry_payloads = [
+        {
+            "key": entry.key,
+            "process": entry.process,
+            "enumeration": _process_enumeration_to_dict(entry.enumeration),
+        }
+        for entry in entries
+    ]
+    if len(entry_payloads) == 1:
+        payload = dict(entry_payloads[0]["enumeration"])
+        payload.update(
+            {
+                "process_set_request": getattr(process_set, "request"),
+                "default_key": getattr(process_set, "default_key"),
+                "n_entries": 1,
+                "entries": entry_payloads,
+            }
+        )
+        return payload
+    return {
+        "request": getattr(process_set, "request"),
+        "default_key": getattr(process_set, "default_key"),
+        "n_entries": len(entry_payloads),
+        "n_unique_processes": sum(
+            int(payload["enumeration"]["n_unique_processes"])
+            for payload in entry_payloads
+        ),
+        "n_groups": sum(
+            int(payload["enumeration"]["n_groups"]) for payload in entry_payloads
+        ),
+        "n_records": sum(
+            int(payload["enumeration"]["n_records"]) for payload in entry_payloads
+        ),
+        "entries": entry_payloads,
+    }
+
+
 def _evaluation_to_dict(
     result: object,
     *,
@@ -2068,6 +4269,8 @@ def _native_generation_profile(
     cache_dir: Path,
     options: ProcessOptions,
 ) -> dict[str, object]:
+    from .legacy_matrix import NativeMatrixElementGenerator
+
     result = NativeMatrixElementGenerator(cache_dir=cache_dir).generate(
         process,
         options=options,
@@ -2126,7 +4329,9 @@ def _tensor_network_blueprint_summary(
 def _load_optional_evaluator_artifact(
     cache_dir: Path,
     process: str,
-) -> EvaluatorArtifact | None:
+) -> Any | None:
+    from .legacy_matrix import load_evaluator_artifact
+
     try:
         return load_evaluator_artifact(cache_dir, process)
     except (OSError, ValueError):
@@ -2136,8 +4341,10 @@ def _load_optional_evaluator_artifact(
 def _artifact_status(
     cache_dir: Path,
     process: str,
-    artifact: EvaluatorArtifact | None,
+    artifact: Any | None,
 ) -> dict[str, object]:
+    from .legacy_matrix import evaluator_artifact_path
+
     if artifact is None:
         return {
             "available": False,
@@ -2165,7 +4372,7 @@ def _artifact_status(
 def _symbolic_artifact_evaluation(
     process: str,
     native_result: object,
-    artifact: EvaluatorArtifact | None,
+    artifact: Any | None,
 ) -> dict[str, object]:
     if artifact is None:
         return {
@@ -2198,8 +4405,10 @@ def _symbolic_artifact_evaluation(
 def _zero_gluon_artifact_evaluation(
     process: str,
     native_result: object,
-    artifact: EvaluatorArtifact,
+    artifact: Any,
 ) -> dict[str, object]:
+    from .symbolic import ZeroGluonSymbolicEvaluator
+
     evaluator_payload = artifact.payload.get("symbolic_scalar_evaluator")
     if not isinstance(evaluator_payload, dict):
         return {
@@ -2234,7 +4443,7 @@ def _zero_gluon_artifact_evaluation(
 def _z_gluon_tensor_network_artifact_evaluation(
     process: str,
     native_result: object,
-    artifact: EvaluatorArtifact,
+    artifact: Any,
     *,
     kernel: str,
 ) -> dict[str, object]:
@@ -2293,7 +4502,7 @@ def _symbolic_evaluation_success_payload(
 
 
 def _symbolic_evaluator_build_time(
-    artifact: EvaluatorArtifact | None,
+    artifact: Any | None,
 ) -> float | None:
     if artifact is None:
         return None
@@ -2311,7 +4520,7 @@ def _symbolic_evaluator_build_time(
 
 
 def _tensor_network_reduction_time(
-    artifact: EvaluatorArtifact | None,
+    artifact: Any | None,
 ) -> float | None:
     if artifact is None:
         return None
@@ -2330,15 +4539,17 @@ def _amplicol_dry_run_payload(
     options: ProcessOptions,
     *,
     fixed_probe: bool = False,
+    momenta_probe: bool = False,
 ) -> dict[str, object]:
     root = Path(args.amplicol_root)
     process_file = args.process_file or root / "processes.txt"
+    legacy_me_test = bool(getattr(args, "me_test", False))
     commands = []
     if not args.skip_build:
         commands.extend(
             [["make", "cleanlib"], ["make", f"-j{args.jobs}", "amplicol_generate"]]
         )
-        if not fixed_probe:
+        if args.amplicol_probe or momenta_probe:
             commands.extend(
                 [
                     ["./amplicol_generate", "--library=create", f"--process={process_file}"],
@@ -2346,7 +4557,17 @@ def _amplicol_dry_run_payload(
                 ]
             )
     timing = args.points if args.timing is None else args.timing
-    if args.amplicol_probe:
+    if momenta_probe:
+        commands.append(
+            [
+                "./amplicol_generate",
+                f"--amplicol_momenta_probe={args.points}",
+                f"--timing={timing}",
+                f"--process={process_file}",
+                "--library=use",
+            ]
+        )
+    elif args.amplicol_probe:
         probe_flag = "--amplicol_fixed_probe" if fixed_probe else "--amplicol_probe"
         commands.append(
             [
@@ -2354,9 +4575,10 @@ def _amplicol_dry_run_payload(
                 f"{probe_flag}={args.points}",
                 f"--timing={timing}",
                 f"--process={process_file}",
+                "--library=use",
             ]
         )
-    else:
+    elif legacy_me_test:
         commands.append(
             [
                 "./amplicol_generate",
@@ -2365,9 +4587,13 @@ def _amplicol_dry_run_payload(
                 f"--process={process_file}",
             ]
         )
-    mode = "me_test"
-    if args.amplicol_probe:
-        mode = "amplicol_fixed_probe" if fixed_probe else "amplicol_probe"
+    else:  # pragma: no cover - parser logic keeps one compare mode selected.
+        raise RuntimeError("no AmpliCol comparison mode selected")
+    mode = "me_test" if legacy_me_test else "amplicol_momenta_probe_library"
+    if momenta_probe:
+        mode = "amplicol_momenta_probe_library"
+    elif args.amplicol_probe:
+        mode = "amplicol_fixed_probe_library" if fixed_probe else "amplicol_probe_library"
     return {
         "mode": mode,
         "process": args.process,
@@ -2400,45 +4626,39 @@ def _z_gluon_family_dry_run_payload(
     rows: list[dict[str, object]] = []
     for gluon_count in range(args.min_gluons, args.max_gluons + 1):
         process = _z_gluon_family_process(gluon_count)
-        commands = []
-        if gluon_count == 0:
-            commands.extend(
-                [["make", "cleanlib"], ["make", f"-j{args.jobs}", "amplicol_generate"]]
-            )
-            commands.append(
-                [
-                    "./amplicol_generate",
-                    f"--amplicol_fixed_probe={args.points}",
-                    f"--timing={args.points if args.timing is None else args.timing}",
-                    "--process=processes.txt",
-                ]
-            )
-            mode = "amplicol_fixed_probe"
-        else:
-            commands.extend(
-                [
-                    ["make", "cleanlib"],
-                    ["make", f"-j{args.jobs}", "amplicol_generate"],
-                    [
-                        "./amplicol_generate",
-                        "--library=create",
-                        "--process=processes.txt",
-                    ],
-                    ["make", f"-j{args.jobs}", "amplicol_generate_library"],
-                    [
-                        "./amplicol_generate",
-                        f"--amplicol_probe={args.points}",
-                        f"--timing={args.points if args.timing is None else args.timing}",
-                        "--process=processes.txt",
-                    ],
-                ]
-            )
-            mode = "amplicol_probe"
+        timing = args.points if args.timing is None else args.timing
+        probe_flag = "--amplicol_fixed_probe" if gluon_count == 0 else "--amplicol_probe"
+        mode = "amplicol_fixed_probe_library" if gluon_count == 0 else "amplicol_probe_library"
+        commands = [
+            ["make", "cleanlib"],
+            ["make", f"-j{args.jobs}", "amplicol_generate"],
+            [
+                "./amplicol_generate",
+                "--library=create",
+                "--process=processes.txt",
+            ],
+            ["make", f"-j{args.jobs}", "amplicol_generate_library"],
+            [
+                "./amplicol_generate",
+                f"{probe_flag}={args.points}",
+                f"--timing={timing}",
+                "--process=processes.txt",
+                "--library=use",
+            ],
+            [
+                "./amplicol_generate",
+                "--library=use",
+                f"--nevents={timing}",
+                "--seed=101",
+                "--timing=1",
+            ],
+        ]
         rows.append(
             {
                 "gluon_count": gluon_count,
                 "process": process,
                 "mode": mode,
+                "fortran_timing_workflow": "generated_library_use",
                 "runtime_backend": _z_gluon_family_runtime_backend(
                     gluon_count,
                     _runtime_backend(args),
@@ -2530,15 +4750,139 @@ def _z_gluon_family_passed(
 
 def _z_gluon_family_runtime_backend(
     gluon_count: int,
-    requested: RuntimeBackend,
-) -> RuntimeBackend:
-    if gluon_count == 0 and requested in (
-        "dag",
-        "numeric-tensor-network",
-        "compiled-dag",
-    ):
+    requested: str,
+) -> str:
+    if gluon_count == 0 and requested in ("dag", "numeric-tensor-network"):
         return "python"
     return requested
+
+
+def _rusticol_generation_profile(
+    process: str,
+    cache_dir: Path,
+    options: ProcessOptions,
+    *,
+    runtime_evaluator_kwargs: dict[str, Any],
+    reference_color_order: Sequence[int] | None = None,
+    generic_dag_pruning_kwargs: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, object], Path]:
+    from .generic_artifact import (
+        GenericProcessManifest,
+        build_generic_process_manifest,
+        select_leading_color_sector_ids_from_plan,
+        write_generic_dag_process_artifact,
+    )
+    from .color_plan import build_color_plan
+    from .process_ir import build_process_ir
+
+    pruning_kwargs = _normalize_generic_dag_pruning_kwargs(generic_dag_pruning_kwargs)
+    process_ir = build_process_ir(process, options=options)
+    color_plan = build_color_plan(
+        process_ir,
+        color_accuracy=process_ir.color_accuracy,
+        options=options,
+    )
+    selected_color_sector_ids = pruning_kwargs.pop("selected_color_sector_ids", None)
+    if selected_color_sector_ids is None:
+        selected_color_sector_ids = select_leading_color_sector_ids_from_plan(
+            color_plan,
+            reference_color_order=reference_color_order,
+        )
+    generic_manifest = build_generic_process_manifest(
+        process_ir,
+        options=options,
+        reference_color_order=reference_color_order,
+        selected_color_sector_ids=selected_color_sector_ids,
+        **pruning_kwargs,
+    )
+    if selected_color_sector_ids is None:
+        selected_color_sector_ids = _amplicol_reference_color_sector_ids(
+            generic_manifest,
+            reference_color_order=reference_color_order,
+        )
+    output_dir = Path(cache_dir).expanduser() / "generic-rusticol-compare" / process_ir.key
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    build_kwargs = dict(runtime_evaluator_kwargs)
+    if (
+        build_kwargs.get("symbolica_load_evaluator_dir") is None
+        and build_kwargs.get("symbolica_compiled_output_dir") is None
+    ):
+        build_kwargs["symbolica_compiled_output_dir"] = str(output_dir / "compiled")
+    settings = _symbolica_settings_from_runtime_kwargs(
+        build_kwargs,
+        process=process_ir.process,
+    )
+    start = time.perf_counter()
+    manifest_path, manifest = write_generic_dag_process_artifact(
+        generic_manifest,
+        output_dir,
+        options=options,
+        evaluator_backend=str(build_kwargs["symbolica_evaluator_backend"]),
+        compiled_preset=str(build_kwargs["symbolica_compiled_preset"]),
+        batch_size=int(build_kwargs["batch_size"]),
+        emit_stage_evaluator_artifacts=True,
+        symbolica_settings=settings,
+        merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
+        verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
+        selected_color_sector_ids=selected_color_sector_ids,
+        **pruning_kwargs,
+    )
+    generation_s = time.perf_counter() - start
+    return (
+        {
+            "backend": "rusticol-generic-schema-v2",
+            "generation_time_s": generation_s,
+            "artifact_cache_hit": False,
+            "artifact_load_s": None,
+            "manifest": str(manifest_path),
+            "process_dir": str(output_dir),
+            "runtime_available": bool(
+                cast(dict[str, Any], manifest["compiled"]).get("runtime_available")
+            ),
+            "evaluator_backend": str(build_kwargs["symbolica_evaluator_backend"]),
+            "compiled_preset": str(build_kwargs["symbolica_compiled_preset"]),
+            "validation_color_sector_ids": (
+                None
+                if selected_color_sector_ids is None
+                else sorted(selected_color_sector_ids)
+            ),
+            "validation_color_sector_policy": (
+                "first legacy LC ordering"
+                if selected_color_sector_ids is not None
+                else "full available LC sector set"
+            ),
+        },
+        output_dir,
+    )
+
+
+def _amplicol_reference_color_sector_ids(
+    manifest: Any,
+    *,
+    reference_color_order: Sequence[int] | None = None,
+) -> set[int] | None:
+    from .generic_artifact import select_leading_color_sector_ids
+
+    return select_leading_color_sector_ids(
+        manifest,
+        reference_color_order=reference_color_order,
+    )
+
+
+def _amplicol_reference_color_order_for_run(run: object) -> tuple[int, ...] | None:
+    if not hasattr(run, "process_file"):
+        return None
+    return reference_color_order_for_run(cast(Any, run))
+
+
+def _amplicol_process_file_entry(
+    process_file: Path,
+    *,
+    group: int,
+    integral: int,
+) -> dict[str, list[int]] | None:
+    return amplicol_process_file_entry(process_file, group=group, integral=integral)
 
 
 def _should_use_fixed_amplicol_probe(process: str, options: ProcessOptions) -> bool:
@@ -2578,7 +4922,7 @@ def _attach_native_probe_comparison(
     run: object,
     payload: dict[str, object],
     *,
-    runtime_backend: RuntimeBackend = "auto",
+    runtime_backend: str = "auto",
     runtime_evaluator_kwargs: dict[str, Any] | None = None,
 ) -> None:
     reference_points = list(getattr(run, "probe_points"))
@@ -2590,9 +4934,12 @@ def _attach_native_probe_comparison(
     if not reference_points:
         return
 
+    from .evaluation import NativeRuntimeEvaluator
+
     evaluator = NativeRuntimeEvaluator(
         process,
-        runtime_backend=runtime_backend,
+        runtime_backend=cast(RuntimeBackend, runtime_backend),
+        allow_reference_legacy=True,
         **(runtime_evaluator_kwargs or {}),
     )
     native_points: list[dict[str, int | float]] = []
@@ -2677,9 +5024,8 @@ def _attach_native_probe_comparison(
                 + timing_components["evaluator_time_s"],
             }
         evaluator_only_total_s = (
-            float(timing_breakdown["evaluator_time_s"])
+            _float_or_none(timing_breakdown.get("evaluator_time_s"))
             if isinstance(timing_breakdown, dict)
-            and timing_breakdown.get("evaluator_time_s") is not None
             else None
         )
         payload["native_runtime"] = {
@@ -2700,6 +5046,352 @@ def _attach_native_probe_comparison(
                 len(runtimes) / total_s if total_s > 0.0 else None
             ),
         }
+
+
+def _attach_rusticol_probe_comparison(
+    run: object,
+    payload: dict[str, object],
+    process_dir: Path,
+    *,
+    options: ProcessOptions,
+    runtime_evaluator_kwargs: dict[str, Any],
+    compare_args: argparse.Namespace | None = None,
+) -> None:
+    manifest_path = process_dir / "process_manifest.json"
+    external_pdg_order: tuple[int, ...] | None = None
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text())
+        raw_order = manifest.get("external_pdg_order")
+        if isinstance(raw_order, list):
+            external_pdg_order = tuple(int(pdg) for pdg in raw_order)
+
+    concrete_process = _concrete_probe_process_if_needed(
+        run,
+        external_pdg_order=external_pdg_order,
+    )
+    reference_color_order = _amplicol_reference_color_order_for_run(run)
+    if concrete_process is not None:
+        generation, process_dir = _rusticol_generation_profile_subprocess(
+            concrete_process,
+            process_dir.parent.parent,
+            options,
+            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
+            reference_color_order=reference_color_order,
+            generic_dag_pruning_kwargs=(
+                None
+                if compare_args is None
+                else _compare_generic_dag_pruning_kwargs(
+                    compare_args,
+                    process=concrete_process,
+                )
+            ),
+        )
+        payload["native_probe_generation"] = generation
+        payload["native_probe_process"] = concrete_process
+        manifest_path = process_dir / "process_manifest.json"
+        external_pdg_order = None
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+            raw_order = manifest.get("external_pdg_order")
+            if isinstance(raw_order, list):
+                external_pdg_order = tuple(int(pdg) for pdg in raw_order)
+
+    import rusticol  # type: ignore[import-not-found]
+
+    runtime = getattr(rusticol, "Runtime").load(str(process_dir))
+    _attach_rusticol_probe_comparison_from_runtime(
+        run,
+        payload,
+        runtime,
+        external_pdg_order=external_pdg_order,
+    )
+
+
+def _rusticol_generation_profile_subprocess(
+    process: str,
+    cache_dir: Path,
+    options: ProcessOptions,
+    *,
+    runtime_evaluator_kwargs: dict[str, Any],
+    reference_color_order: Sequence[int] | None = None,
+    generic_dag_pruning_kwargs: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, object], Path]:
+    """Build a probe artifact in a fresh Python process.
+
+    Symbolica's current Python bindings are not robust to building a second
+    independent JIT artifact in the same interpreter after the first compare
+    artifact has been built.  Probe-crossing fallbacks therefore keep the exact
+    same generic generation function but run it in a short-lived interpreter.
+    """
+
+    code = r"""
+import json
+import os
+from pathlib import Path
+
+from pyamplicol.__main__ import _rusticol_generation_profile
+from pyamplicol.processes import ProcessOptions
+
+generation, process_dir = _rusticol_generation_profile(
+    os.environ["PYAMPLICOL_PROBE_PROCESS"],
+    Path(os.environ["PYAMPLICOL_PROBE_CACHE_DIR"]),
+    ProcessOptions(**json.loads(os.environ["PYAMPLICOL_PROBE_OPTIONS"])),
+    runtime_evaluator_kwargs=json.loads(os.environ["PYAMPLICOL_PROBE_RUNTIME"]),
+    reference_color_order=json.loads(os.environ["PYAMPLICOL_REFERENCE_COLOR_ORDER"]),
+    generic_dag_pruning_kwargs=json.loads(
+        os.environ["PYAMPLICOL_PROBE_GENERIC_DAG_PRUNING"]
+    ),
+)
+print(json.dumps({"generation": generation, "process_dir": str(process_dir)}, sort_keys=True))
+"""
+    env = _child_generation_environment()
+    env.update(
+        {
+            "PYAMPLICOL_PROBE_PROCESS": process,
+            "PYAMPLICOL_PROBE_CACHE_DIR": str(Path(cache_dir).expanduser()),
+            "PYAMPLICOL_PROBE_OPTIONS": json.dumps(
+                {
+                    "flavour_scheme": options.flavour_scheme,
+                    "include_3qqbar": options.include_3qqbar,
+                    "include_cc": options.include_cc,
+                    "include_resonance": options.include_resonance,
+                    "serial": options.serial,
+                },
+                sort_keys=True,
+            ),
+            "PYAMPLICOL_PROBE_RUNTIME": json.dumps(
+                _json_ready_runtime_kwargs(runtime_evaluator_kwargs),
+                sort_keys=True,
+            ),
+            "PYAMPLICOL_REFERENCE_COLOR_ORDER": json.dumps(
+                None
+                if reference_color_order is None
+                else [int(label) for label in reference_color_order],
+                sort_keys=True,
+            ),
+            "PYAMPLICOL_PROBE_GENERIC_DAG_PRUNING": json.dumps(
+                _json_ready_generic_dag_pruning_kwargs(
+                    generic_dag_pruning_kwargs or {}
+                ),
+                sort_keys=True,
+            ),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path.cwd(),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = _parse_child_generation_payload(result.stdout)
+    if result.returncode != 0:
+        message = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or f"probe subprocess generation exited with {result.returncode}"
+        )
+        raise RuntimeError(message)
+    generation = payload.get("generation")
+    process_dir = payload.get("process_dir")
+    if not isinstance(generation, dict) or not isinstance(process_dir, str):
+        raise RuntimeError(
+            "probe subprocess generation did not return a valid artifact payload"
+        )
+    if result.stderr.strip():
+        generation["subprocess_stderr"] = result.stderr.strip()
+    return generation, Path(process_dir)
+
+
+def _json_ready_runtime_kwargs(values: dict[str, Any]) -> dict[str, object]:
+    converted: dict[str, object] = {}
+    for key, value in values.items():
+        if isinstance(value, Path):
+            converted[key] = str(value)
+        elif isinstance(value, tuple):
+            converted[key] = list(value)
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            converted[key] = value
+        elif isinstance(value, list):
+            converted[key] = [
+                str(item) if isinstance(item, Path) else item for item in value
+            ]
+        else:
+            converted[key] = str(value)
+    return converted
+
+
+def _json_ready_generic_dag_pruning_kwargs(
+    values: Mapping[str, Any],
+) -> dict[str, object]:
+    converted: dict[str, object] = {}
+    for key, value in values.items():
+        if isinstance(value, set):
+            converted[key] = sorted(int(item) for item in value)
+        elif isinstance(value, tuple):
+            converted[key] = list(value)
+        elif isinstance(value, list):
+            converted[key] = value
+        elif isinstance(value, Mapping):
+            converted[key] = {
+                str(item_key): item_value
+                for item_key, item_value in value.items()
+            }
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            converted[key] = value
+        else:
+            converted[key] = str(value)
+    return converted
+
+
+def _concrete_probe_process_if_needed(
+    run: object,
+    *,
+    external_pdg_order: Sequence[int] | None,
+) -> str | None:
+    if external_pdg_order is None or len(external_pdg_order) < 2:
+        return None
+    reference_points = list(getattr(run, "probe_points"))
+    first_phase_space_point = getattr(run, "first_phase_space_point", None)
+    if not reference_points and first_phase_space_point is not None:
+        matrix_element = getattr(first_phase_space_point, "matrix_element", None)
+        if matrix_element is not None:
+            reference_points = [first_phase_space_point]
+    if not reference_points:
+        return None
+    particles = tuple(getattr(reference_points[0], "particles"))
+    probe_order = tuple(int(getattr(particle, "pdg")) for particle in particles)
+    if len(probe_order) != len(external_pdg_order):
+        return None
+    if probe_order[:2] == tuple(int(pdg) for pdg in external_pdg_order[:2]):
+        return None
+    try:
+        initial = " ".join(_particle_name_from_pdg(pdg) for pdg in probe_order[:2])
+        final = " ".join(_particle_name_from_pdg(pdg) for pdg in probe_order[2:])
+    except KeyError:
+        return None
+    return f"{initial} > {final}"
+
+
+def _particle_name_from_pdg(pdg: int) -> str:
+    from .processes import PDGS
+
+    names = {int(value): name for name, value in PDGS.items()}
+    return names[int(pdg)]
+
+
+def _attach_rusticol_probe_comparison_from_runtime(
+    run: object,
+    payload: dict[str, object],
+    runtime: object,
+    *,
+    external_pdg_order: Sequence[int] | None = None,
+) -> None:
+    import numpy as np
+
+    reference_points = list(getattr(run, "probe_points"))
+    first_phase_space_point = getattr(run, "first_phase_space_point", None)
+    if not reference_points and first_phase_space_point is not None:
+        matrix_element = getattr(first_phase_space_point, "matrix_element", None)
+        if matrix_element is not None:
+            reference_points = [first_phase_space_point]
+    if not reference_points:
+        return
+
+    native_points: list[dict[str, int | float]] = []
+    failures: list[str] = []
+    runtime_total_s = 0.0
+    for point in reference_points:
+        particles = tuple(getattr(point, "particles"))
+        if external_pdg_order is not None:
+            particles = _reorder_probe_particles_by_pdg(
+                particles,
+                external_pdg_order,
+            )
+        momenta = np.asarray(
+            [
+                [
+                    [float(component) for component in particle.momentum]
+                    for particle in particles
+                ]
+            ],
+            dtype=np.float64,
+        )
+        try:
+            start = time.perf_counter()
+            values = runtime.evaluate(momenta)  # type: ignore[attr-defined]
+            elapsed_s = time.perf_counter() - start
+        except Exception as exc:  # pragma: no cover - surfaced in CLI payload
+            failures.append(str(exc))
+            continue
+        pyamplicol_me = float(values[0])
+        runtime_total_s += elapsed_s
+        reference_me = float(getattr(point, "matrix_element"))
+        denom = max(abs(reference_me), abs(pyamplicol_me), 1.0e-300)
+        native_points.append(
+            {
+                "point": getattr(point, "point", 1),
+                "reference_matrix_element": reference_me,
+                "native_matrix_element": pyamplicol_me,
+                "relative_difference": abs(pyamplicol_me - reference_me) / denom,
+                "native_runtime_s": elapsed_s,
+            }
+        )
+
+    metadata = dict(runtime.metadata())  # type: ignore[attr-defined]
+    metadata["backend"] = "rusticol-generic-schema-v2"
+    payload["native_runtime_backend"] = metadata
+
+    if native_points:
+        first = native_points[0]
+        payload["native_first_point_available"] = True
+        payload["native_first_point_matrix_element"] = first["native_matrix_element"]
+        payload["native_first_point_relative_difference"] = first["relative_difference"]
+    elif failures:
+        payload["native_first_point_available"] = False
+        payload["native_first_point_reason"] = failures[0]
+
+    payload["native_probe_points"] = native_points
+    payload["native_probe_summary"] = {
+        "reference_points": len(reference_points),
+        "available_points": len(native_points),
+        "max_relative_difference": (
+            max(float(point["relative_difference"]) for point in native_points)
+            if native_points
+            else None
+        ),
+        "failures": failures,
+    }
+    payload["native_runtime"] = {
+        "total_s": runtime_total_s,
+        "mean_per_point_s": runtime_total_s / max(len(native_points), 1),
+    }
+
+
+def _reorder_probe_particles_by_pdg(
+    particles: Sequence[object],
+    external_pdg_order: Sequence[int],
+) -> tuple[object, ...]:
+    if len(particles) != len(external_pdg_order):
+        return tuple(particles)
+    unused = list(range(len(particles)))
+    reordered: list[object] = []
+    for pdg in external_pdg_order:
+        match_index = next(
+            (
+                index
+                for index in unused
+                if int(getattr(particles[index], "pdg")) == int(pdg)
+            ),
+            None,
+        )
+        if match_index is None:
+            return tuple(particles)
+        unused.remove(match_index)
+        reordered.append(particles[match_index])
+    return tuple(reordered)
 
 
 def _command_summary(command: object) -> dict[str, object]:

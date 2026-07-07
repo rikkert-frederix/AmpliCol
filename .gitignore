@@ -5,6 +5,7 @@
 *.dylib
 *.a
 /amplicol_generate
+/amplicol_library_benchmark
 /libamp*.so
 /z
 

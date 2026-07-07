@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Iterable, Sequence
@@ -29,6 +30,25 @@ class Vertex:
     coupling: tuple[float, float] = (1.0, 0.0)
 
 
+CouplingOrders = tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class SourceSpinState:
+    helicity: int
+    chirality: int
+    spin_state: int | tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class QuantumFlow:
+    chirality: int
+    spin_state: int | tuple[int, ...]
+    flavour_flow: tuple[int, ...]
+    charge_flow: int
+    coupling: tuple[float, float]
+
+
 @dataclass(frozen=True)
 class VertexLoweringRule:
     kind: int
@@ -37,6 +57,111 @@ class VertexLoweringRule:
     expression_head: str = ""
     full_tensor_network_ready: bool = False
     description: str = ""
+    kernel: str = ""
+    input_roles: tuple[str, str] = ("", "")
+    output_role: str = ""
+    coupling_mode: str = "none"
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "backend": self.backend,
+            "tensor_names": list(self.tensor_names),
+            "expression_head": self.expression_head,
+            "full_tensor_network_ready": self.full_tensor_network_ready,
+            "description": self.description,
+            "kernel": self.kernel,
+            "input_roles": list(self.input_roles),
+            "output_role": self.output_role,
+            "coupling_mode": self.coupling_mode,
+        }
+
+
+@dataclass(frozen=True)
+class PropagatorLoweringRule:
+    particle_id: int
+    chirality: int
+    backend: str
+    full_tensor_network_ready: bool
+    applies_propagator: bool
+    kernel: str
+    description: str = ""
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "particle_id": self.particle_id,
+            "chirality": self.chirality,
+            "backend": self.backend,
+            "full_tensor_network_ready": self.full_tensor_network_ready,
+            "applies_propagator": self.applies_propagator,
+            "kernel": self.kernel,
+            "description": self.description,
+        }
+
+
+@dataclass(frozen=True)
+class VertexLoweringCoverageEntry:
+    kind: int
+    vertex_count: int
+    backend: str
+    full_tensor_network_ready: bool
+    tensor_names: tuple[str, ...]
+    expression_head: str
+    description: str
+    kernel: str
+    input_roles: tuple[str, str]
+    output_role: str
+    coupling_mode: str
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "vertex_count": self.vertex_count,
+            "backend": self.backend,
+            "full_tensor_network_ready": self.full_tensor_network_ready,
+            "tensor_names": list(self.tensor_names),
+            "expression_head": self.expression_head,
+            "description": self.description,
+            "kernel": self.kernel,
+            "input_roles": list(self.input_roles),
+            "output_role": self.output_role,
+            "coupling_mode": self.coupling_mode,
+        }
+
+
+@dataclass(frozen=True)
+class VertexLoweringCoverageReport:
+    model: str
+    entries: tuple[VertexLoweringCoverageEntry, ...]
+
+    @property
+    def ready_kinds(self) -> tuple[int, ...]:
+        return tuple(
+            entry.kind for entry in self.entries if entry.full_tensor_network_ready
+        )
+
+    @property
+    def pending_kinds(self) -> tuple[int, ...]:
+        return tuple(
+            entry.kind
+            for entry in self.entries
+            if entry.backend != "unimplemented" and not entry.full_tensor_network_ready
+        )
+
+    @property
+    def unimplemented_kinds(self) -> tuple[int, ...]:
+        return tuple(
+            entry.kind for entry in self.entries if entry.backend == "unimplemented"
+        )
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "model": self.model,
+            "ready_kinds": list(self.ready_kinds),
+            "pending_kinds": list(self.pending_kinds),
+            "unimplemented_kinds": list(self.unimplemented_kinds),
+            "entries": [entry.to_json_dict() for entry in self.entries],
+        }
 
 
 @dataclass
@@ -45,8 +170,42 @@ class Model:
     particles: dict[int, Particle] = field(default_factory=dict)
     vertices: tuple[Vertex, ...] = ()
 
+    @cached_property
+    def _species_by_pdg(self) -> dict[int, Particle]:
+        species: dict[int, Particle] = {}
+        for particle in self.particles.values():
+            species.setdefault(particle.pdg, particle)
+            species.setdefault(particle.anti_pdg, particle)
+        return species
+
+    @cached_property
+    def _property_sign_by_pdg(self) -> dict[int, int]:
+        signs: dict[int, int] = {}
+        for particle in self.particles.values():
+            signs.setdefault(particle.pdg, 1)
+            if particle.anti_pdg != particle.pdg:
+                signs.setdefault(particle.anti_pdg, -1)
+            else:
+                signs.setdefault(particle.anti_pdg, 1)
+        return signs
+
+    @cached_property
+    def _color_rep_by_pdg(self) -> dict[int, int]:
+        reps: dict[int, int] = {}
+        for pdg, particle in self._species_by_pdg.items():
+            color = particle.color_rep
+            if self._property_sign_by_pdg[pdg] < 0 and abs(color) == 3:
+                reps[pdg] = -color
+            else:
+                reps[pdg] = color
+        return reps
+
+    @cached_property
+    def _vertices_by_input(self) -> dict[tuple[str, int, int], tuple[Vertex, ...]]:
+        return {}
+
     def particle(self, pdg: int) -> Particle:
-        species = self._species_particle(pdg)
+        species = self._species_by_pdg.get(pdg)
         if species is None:
             raise KeyError(f"particle not in model: {pdg}")
         return species
@@ -80,10 +239,10 @@ class Model:
         return self._property_sign(pdg) * self.particle(pdg).weak_isospin[1]
 
     def color_rep(self, pdg: int) -> int:
-        color = self.particle(pdg).color_rep
-        if self._property_sign(pdg) < 0 and abs(color) == 3:
-            return -color
-        return color
+        try:
+            return self._color_rep_by_pdg[pdg]
+        except KeyError as exc:
+            raise KeyError(f"particle not in model: {pdg}") from exc
 
     def color_dim(self, pdg: int) -> int:
         return abs(self.color_rep(pdg))
@@ -135,6 +294,335 @@ class Model:
     def vertex_lowering_rule(self, kind: int) -> VertexLoweringRule:
         raise NotImplementedError
 
+    def propagator_lowering_rule(
+        self,
+        particle_id: int,
+        chirality: int = 0,
+    ) -> PropagatorLoweringRule:
+        if self.is_tensor(particle_id):
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="identity",
+                full_tensor_network_ready=True,
+                applies_propagator=False,
+                kernel="auxiliary_tensor_embedded_propagator",
+                description=(
+                    "auxiliary-tensor propagator factors are embedded in the "
+                    "adjacent AmpliCol vertex kernels"
+                ),
+            )
+        if particle_id in (125, 126, 127):
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="identity",
+                full_tensor_network_ready=True,
+                applies_propagator=False,
+                kernel="auxiliary_scalar_no_propagator",
+                description=(
+                    "Higgsor auxiliary scalar currents are non-propagating in "
+                    "legacy AmpliCol"
+                ),
+            )
+        if particle_id in (21, 22, 99):
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="symbolica",
+                full_tensor_network_ready=True,
+                applies_propagator=True,
+                kernel="massless_vector_feynman_gauge",
+                description="massless vector propagator in mostly-minus metric",
+            )
+        if abs(particle_id) == 24 or particle_id == 23:
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="symbolica",
+                full_tensor_network_ready=True,
+                applies_propagator=True,
+                kernel="massive_vector_unitary_gauge",
+                description="massive vector propagator with width",
+            )
+        if self.is_chiral_eligible(particle_id) and chirality != 0:
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="spenso",
+                full_tensor_network_ready=True,
+                applies_propagator=True,
+                kernel="weyl_fermion",
+                description="massless Weyl fermion propagator",
+            )
+        if self.is_fermion(particle_id) and self.mass(particle_id) != 0.0:
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="symbolica",
+                full_tensor_network_ready=True,
+                applies_propagator=True,
+                kernel="massive_dirac_fermion",
+                description="massive Dirac fermion propagator",
+            )
+        if self.is_higgs(particle_id):
+            return PropagatorLoweringRule(
+                particle_id=particle_id,
+                chirality=chirality,
+                backend="symbolica",
+                full_tensor_network_ready=True,
+                applies_propagator=True,
+                kernel="scalar_with_width",
+                description="scalar propagator with optional width",
+            )
+        return PropagatorLoweringRule(
+            particle_id=particle_id,
+            chirality=chirality,
+            backend="unimplemented",
+            full_tensor_network_ready=False,
+            applies_propagator=True,
+            kernel="unknown",
+            description="no pyamplicol propagator lowering is registered",
+        )
+
+    def source_spin_states(self, particle_id: int) -> tuple[SourceSpinState, ...]:
+        if self.is_chiral_eligible(particle_id):
+            return (
+                SourceSpinState(helicity=-1, chirality=-1, spin_state=-1),
+                SourceSpinState(helicity=1, chirality=1, spin_state=1),
+            )
+        spin = self.spin(particle_id)
+        if spin == 1:
+            return (SourceSpinState(helicity=0, chirality=0, spin_state=0),)
+        if spin == 2:
+            return (
+                SourceSpinState(helicity=-1, chirality=0, spin_state=-1),
+                SourceSpinState(helicity=1, chirality=0, spin_state=1),
+            )
+        if spin == 3:
+            return (
+                SourceSpinState(helicity=-1, chirality=0, spin_state=-1),
+                SourceSpinState(helicity=0, chirality=0, spin_state=0),
+                SourceSpinState(helicity=1, chirality=0, spin_state=1),
+            )
+        return (SourceSpinState(helicity=0, chirality=0, spin_state=0),)
+
+    def allowed_quantum_flows(
+        self,
+        vertex: Vertex,
+        left_index: Any,
+        right_index: Any,
+    ) -> tuple[QuantumFlow, ...]:
+        result_particle = vertex.particles[2]
+        chiralities = _model_vertex_result_chiralities(
+            self,
+            vertex,
+            left_index,
+            right_index,
+        )
+        flows: list[QuantumFlow] = []
+        for chirality in chiralities:
+            flows.append(
+                QuantumFlow(
+                    chirality=chirality,
+                    spin_state=self.result_spin_state(result_particle, chirality),
+                    flavour_flow=self.combine_flavour_flow(
+                        result_particle,
+                        left_index,
+                        right_index,
+                    ),
+                    charge_flow=self.charge_units(result_particle),
+                    coupling=vertex.coupling,
+                )
+            )
+        return tuple(flows)
+
+    def combine_flavour_flow(
+        self,
+        result_particle: int,
+        left_index: Any,
+        right_index: Any,
+    ) -> tuple[int, ...]:
+        left_pdg = _index_particle_id(left_index)
+        right_pdg = _index_particle_id(right_index)
+        left_flow = _index_flavour_flow(left_index)
+        right_flow = _index_flavour_flow(right_index)
+
+        if self.is_fermion(result_particle):
+            if self.is_fermion(left_pdg):
+                return _append_flavour_transition(left_flow, result_particle)
+            if self.is_fermion(right_pdg):
+                return _append_flavour_transition(right_flow, result_particle)
+
+        if self.is_fermion(left_pdg) and self.is_fermion(right_pdg):
+            return (*left_flow, *right_flow, result_particle)
+
+        return (result_particle,)
+
+    def result_spin_state(self, particle_id: int, chirality: int) -> int:
+        if self.is_fermion(particle_id):
+            return chirality
+        return 0
+
+    def current_dimension(self, particle_id: int, chirality: int = 0) -> int:
+        if chirality != 0 and self.is_chiral_eligible(particle_id):
+            return 2
+        try:
+            return self.dimension(particle_id)
+        except KeyError:
+            return 0
+
+    def charge_units(self, particle_id: int) -> int:
+        return int(round(3.0 * self.charge(particle_id)))
+
+    def auxiliary_kind(self, particle_id: int) -> str | None:
+        if self.is_tensor(particle_id):
+            return "antisymmetric-tensor"
+        return None
+
+    def vertex_component_expression(
+        self,
+        kind: int,
+        left: Sequence[Any],
+        right: Sequence[Any],
+        *,
+        result_particle_id: int,
+        result_chirality: int,
+        left_chirality: int = 0,
+        right_chirality: int = 0,
+        coupling: tuple[Any, Any] = (1.0, 0.0),
+        left_momentum: Sequence[Any] | None = None,
+        right_momentum: Sequence[Any] | None = None,
+    ) -> tuple[Any, ...]:
+        raise NotImplementedError
+
+    def propagator_component_expression(
+        self,
+        particle_id: int,
+        value: Sequence[Any],
+        momentum: Sequence[Any],
+        *,
+        chirality: int = 0,
+    ) -> tuple[Any, ...]:
+        raise NotImplementedError
+
+    def iter_vertices(self, *, color_accuracy: str = "lc") -> tuple[Vertex, ...]:
+        if color_accuracy == "lc":
+            return tuple(self.vertices)
+        if color_accuracy in {"nlc", "full"}:
+            return tuple(self.vertices)
+        raise ValueError(f"unknown colour accuracy: {color_accuracy}")
+
+    def vertices_for_inputs(
+        self,
+        left_pdg: int,
+        right_pdg: int,
+        *,
+        color_accuracy: str = "lc",
+    ) -> tuple[Vertex, ...]:
+        key = (color_accuracy, int(left_pdg), int(right_pdg))
+        if key not in self._vertices_by_input:
+            self._vertices_by_input[key] = tuple(
+                vertex
+                for vertex in self.iter_vertices(color_accuracy=color_accuracy)
+                if vertex.particles[0] == left_pdg
+                and vertex.particles[1] == right_pdg
+            )
+        return self._vertices_by_input[key]
+
+    def vertices_accepting(
+        self,
+        left_pdg: int,
+        right_pdg: int,
+        *,
+        color_accuracy: str = "lc",
+    ) -> tuple[Vertex, ...]:
+        """Return model vertices for a local current-current combination.
+
+        This is the process-generic name used by the DAG compiler.  It is a
+        thin alias around the model table lookup, but keeping the name at the
+        model boundary prevents production code from classifying whole process
+        families before asking which local interactions are allowed.
+        """
+
+        return self.vertices_for_inputs(
+            left_pdg,
+            right_pdg,
+            color_accuracy=color_accuracy,
+        )
+
+    def skip_duplicate_vertex_orientation(self, vertex: Vertex) -> bool:
+        """Return whether a mirrored table entry should be skipped by DAG sweeps.
+
+        Generic DAG generation asks the model because duplicated orientations are
+        a model-table convention, not a process-family rule.
+        """
+
+        return False
+
+    def vertex_coupling_orders(self, vertex: Vertex) -> CouplingOrders:
+        """Return model-generic coupling-order increments for one vertex.
+
+        The keys intentionally mirror UFO-style coupling-order names.  They are
+        used only as local model metadata, so DAG pruning can cap e.g. QCD or
+        QED order without recognizing whole process families.
+        """
+
+        return (("QED", 1),)
+
+    def combine_coupling_orders(
+        self,
+        left_index: Any,
+        right_index: Any,
+        vertex: Vertex,
+    ) -> CouplingOrders:
+        totals: dict[str, int] = {}
+        for orders in (
+            _index_coupling_orders(left_index),
+            _index_coupling_orders(right_index),
+            self.vertex_coupling_orders(vertex),
+        ):
+            for name, value in orders:
+                totals[str(name).upper()] = totals.get(str(name).upper(), 0) + int(value)
+        return tuple(sorted((name, value) for name, value in totals.items() if value))
+
+    def current_allowed(self, index: Any) -> bool:
+        """Return whether a generated current index is valid in this model."""
+
+        try:
+            particle_id = int(getattr(index, "particle_id"))
+            chirality = int(getattr(index, "chirality", 0))
+            if chirality != 0 and self.is_chiral_eligible(particle_id):
+                return True
+            return self.dimension(particle_id) > 0
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def vertex_lowering_coverage(self) -> VertexLoweringCoverageReport:
+        counts = Counter(vertex.kind for vertex in self.vertices)
+        entries: list[VertexLoweringCoverageEntry] = []
+        for kind, count in sorted(counts.items()):
+            rule = self.vertex_lowering_rule(kind)
+            entries.append(
+                VertexLoweringCoverageEntry(
+                    kind=kind,
+                    vertex_count=count,
+                    backend=rule.backend,
+                    full_tensor_network_ready=rule.full_tensor_network_ready,
+                    tensor_names=rule.tensor_names,
+                    expression_head=rule.expression_head,
+                    description=rule.description,
+                    kernel=rule.kernel,
+                    input_roles=rule.input_roles,
+                    output_role=rule.output_role,
+                    coupling_mode=rule.coupling_mode,
+                )
+            )
+        return VertexLoweringCoverageReport(
+            model=self.name,
+            entries=tuple(entries),
+        )
+
     def three_gluon_current_expression(
         self,
         *,
@@ -162,22 +650,13 @@ class Model:
         raise NotImplementedError
 
     def _species_particle(self, pdg: int) -> Particle | None:
-        particle = self.particles.get(pdg)
-        if particle is not None:
-            return particle
-        for candidate in self.particles.values():
-            if candidate.anti_pdg == pdg:
-                return candidate
-        return None
+        return self._species_by_pdg.get(pdg)
 
     def _property_sign(self, pdg: int) -> int:
-        particle = self.particles.get(pdg)
-        if particle is not None and particle.pdg == pdg:
-            return 1
-        for candidate in self.particles.values():
-            if candidate.anti_pdg == pdg:
-                return -1
-        raise KeyError(f"particle not in model: {pdg}")
+        try:
+            return self._property_sign_by_pdg[pdg]
+        except KeyError as exc:
+            raise KeyError(f"particle not in model: {pdg}") from exc
 
 
 @dataclass
@@ -236,6 +715,18 @@ class AmplicolSMLeadingColorModel(Model):
         if exponent_twice % 2:
             raise ValueError(f"non-integer leading-color exponent for {tuple(process)}")
         return 3 ** (exponent_twice // 2)
+
+    def skip_duplicate_vertex_orientation(self, vertex: Vertex) -> bool:
+        """Skip mirrored model-table entries already covered by DAG sweeps."""
+
+        return False
+
+    def vertex_coupling_orders(self, vertex: Vertex) -> CouplingOrders:
+        """Classify AmpliCol SM vertices by UFO-style coupling order."""
+
+        if vertex.kind in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}:
+            return (("QCD", 1),)
+        return (("QED", 1),)
 
     def build_tensor_library(self) -> Any:
         from symbolica.community.spenso import (
@@ -296,6 +787,10 @@ class AmplicolSMLeadingColorModel(Model):
                 expression_head="three_gluon_current",
                 full_tensor_network_ready=True,
                 description="color-ordered three-gluon current",
+                kernel="three_vector_current",
+                input_roles=("vector", "vector"),
+                output_role="vector",
+                coupling_mode="fixed",
             )
         if kind == 1:
             return VertexLoweringRule(
@@ -305,6 +800,10 @@ class AmplicolSMLeadingColorModel(Model):
                 expression_head=str(symbols.two_gluon_to_tensor),
                 full_tensor_network_ready=True,
                 description="two gluons to auxiliary antisymmetric tensor",
+                kernel="two_vector_to_tensor",
+                input_roles=("vector", "vector"),
+                output_role="antisymmetric_tensor",
+                coupling_mode="fixed",
             )
         if kind == 2:
             return VertexLoweringRule(
@@ -314,6 +813,10 @@ class AmplicolSMLeadingColorModel(Model):
                 expression_head=str(symbols.tensor_gluon_to_gluon),
                 full_tensor_network_ready=True,
                 description="auxiliary tensor and gluon to gluon current",
+                kernel="tensor_vector_to_vector",
+                input_roles=("antisymmetric_tensor", "vector"),
+                output_role="vector",
+                coupling_mode="fixed",
             )
         if kind == 3:
             return VertexLoweringRule(
@@ -323,6 +826,10 @@ class AmplicolSMLeadingColorModel(Model):
                 expression_head=str(symbols.gluon_tensor_to_gluon),
                 full_tensor_network_ready=True,
                 description="gluon and auxiliary tensor to gluon current",
+                kernel="vector_tensor_to_vector",
+                input_roles=("vector", "antisymmetric_tensor"),
+                output_role="vector",
+                coupling_mode="fixed",
             )
         if kind == 6:
             return VertexLoweringRule(
@@ -335,13 +842,45 @@ class AmplicolSMLeadingColorModel(Model):
                 expression_head="quark_gluon_weyl_current",
                 full_tensor_network_ready=True,
                 description="Weyl quark-gluon current",
+                kernel="fermion_vector_to_fermion",
+                input_roles=("fermion", "vector"),
+                output_role="fermion",
+                coupling_mode="fixed",
             )
         if kind in {4, 5, 7, 9}:
+            qcd_role_map: dict[int, tuple[tuple[str, str], str, str]] = {
+                4: (("vector", "fermion"), "fermion", "vector-fermion current"),
+                5: (
+                    ("vector", "antifermion"),
+                    "antifermion",
+                    "vector-antifermion current",
+                ),
+                7: (
+                    ("antifermion", "vector"),
+                    "antifermion",
+                    "antifermion-vector current",
+                ),
+                9: (
+                    ("antifermion", "fermion"),
+                    "vector",
+                    "antifermion-fermion vector current",
+                ),
+            }
+            input_roles, output_role, description = qcd_role_map[kind]
             return VertexLoweringRule(
                 kind=kind,
-                backend="symbolica-pending",
+                backend="symbolica",
                 expression_head="quark_gluon_weyl_current",
-                description="Weyl quark-gluon current",
+                full_tensor_network_ready=True,
+                description=f"Weyl QCD {description}",
+                kernel=(
+                    "fermion_pair_to_vector"
+                    if kind == 9
+                    else "fermion_vector_to_fermion"
+                ),
+                input_roles=input_roles,
+                output_role=output_role,
+                coupling_mode="fixed",
             )
         if kind == 10:
             return VertexLoweringRule(
@@ -354,18 +893,466 @@ class AmplicolSMLeadingColorModel(Model):
                 expression_head="fermion_gauge_weyl_current",
                 full_tensor_network_ready=True,
                 description="Weyl fermion electroweak current with graph coupling",
+                kernel="fermion_vector_to_fermion",
+                input_roles=("fermion", "vector"),
+                output_role="fermion",
+                coupling_mode="vertex",
             )
         if kind in {11, 21, 22, 23, 24}:
+            fermion_gauge_role_map: dict[
+                int,
+                tuple[tuple[str, str], str, str, str],
+            ] = {
+                11: (
+                    ("antifermion", "vector"),
+                    "antifermion",
+                    "antifermion electroweak current",
+                    "fermion_vector_to_fermion",
+                ),
+                21: (
+                    ("fermion", "antifermion"),
+                    "vector",
+                    "lepton-antilepton electroweak current",
+                    "fermion_pair_to_vector",
+                ),
+                22: (
+                    ("antifermion", "fermion"),
+                    "vector",
+                    "antilepton-lepton electroweak current",
+                    "fermion_pair_to_vector",
+                ),
+                23: (
+                    ("vector", "fermion"),
+                    "fermion",
+                    "vector-fermion electroweak current",
+                    "fermion_vector_to_fermion",
+                ),
+                24: (
+                    ("vector", "antifermion"),
+                    "antifermion",
+                    "vector-antifermion electroweak current",
+                    "fermion_vector_to_fermion",
+                ),
+            }
+            input_roles, output_role, description, kernel = fermion_gauge_role_map[kind]
             return VertexLoweringRule(
                 kind=kind,
-                backend="symbolica-pending",
+                backend="symbolica",
                 expression_head="fermion_gauge_weyl_current",
-                description="Weyl fermion electroweak current with runtime coupling",
+                full_tensor_network_ready=True,
+                description=f"Weyl {description} with runtime coupling",
+                kernel=kernel,
+                input_roles=input_roles,
+                output_role=output_role,
+                coupling_mode="vertex",
+            )
+        if kind == 8:
+            return VertexLoweringRule(
+                kind=kind,
+                backend="symbolica",
+                expression_head="qcd_u1_subtraction_current",
+                full_tensor_network_ready=True,
+                description="QCD U(1) subtraction current",
+                kernel="fermion_pair_to_vector",
+                input_roles=("fermion", "antifermion"),
+                output_role="vector",
+                coupling_mode="vertex",
+            )
+        if kind in {12, 13, 14, 15}:
+            vector_role_map: dict[int, tuple[str, tuple[str, str], str, str]] = {
+                12: (
+                    "three_vector_current",
+                    ("vector", "vector"),
+                    "vector",
+                    "electroweak three-vector current",
+                ),
+                13: (
+                    "two_vector_to_tensor",
+                    ("vector", "vector"),
+                    "antisymmetric_tensor",
+                    "two electroweak vectors to auxiliary tensor",
+                ),
+                14: (
+                    "tensor_vector_to_vector",
+                    ("antisymmetric_tensor", "vector"),
+                    "vector",
+                    "auxiliary tensor and vector to electroweak vector",
+                ),
+                15: (
+                    "vector_tensor_to_vector",
+                    ("vector", "antisymmetric_tensor"),
+                    "vector",
+                    "electroweak vector and auxiliary tensor to vector",
+                ),
+            }
+            kernel, input_roles, output_role, description = vector_role_map[kind]
+            return VertexLoweringRule(
+                kind=kind,
+                backend="symbolica",
+                expression_head=kernel,
+                full_tensor_network_ready=True,
+                description=f"{description} with runtime coupling",
+                kernel=kernel,
+                input_roles=input_roles,
+                output_role=output_role,
+                coupling_mode="vertex",
+            )
+        if kind == 16:
+            return VertexLoweringRule(
+                kind=kind,
+                backend="symbolica",
+                expression_head="fermion_scalar_to_fermion",
+                description=(
+                    "massive Dirac fermion-scalar Yukawa current"
+                ),
+                full_tensor_network_ready=True,
+                kernel="fermion_scalar_to_fermion",
+                input_roles=("fermion", "scalar"),
+                output_role="fermion",
+                coupling_mode="vertex",
+            )
+        if kind in {17, 18, 19, 20}:
+            scalar_role_map: dict[int, tuple[str, tuple[str, str], str, str]] = {
+                17: (
+                    "two_vector_to_scalar",
+                    ("vector", "vector"),
+                    "scalar",
+                    "two vectors to scalar current",
+                ),
+                18: (
+                    "scalar_vector_to_vector",
+                    ("scalar", "vector"),
+                    "vector",
+                    "scalar-vector to vector current",
+                ),
+                19: (
+                    "vector_scalar_to_vector",
+                    ("vector", "scalar"),
+                    "vector",
+                    "vector-scalar to vector current",
+                ),
+                20: (
+                    "two_scalar_to_scalar",
+                    ("scalar", "scalar"),
+                    "scalar",
+                    "scalar-scalar to scalar current",
+                ),
+            }
+            kernel, input_roles, output_role, description = scalar_role_map[kind]
+            return VertexLoweringRule(
+                kind=kind,
+                backend="symbolica",
+                expression_head=kernel,
+                full_tensor_network_ready=True,
+                description=f"{description} with runtime coupling",
+                kernel=kernel,
+                input_roles=input_roles,
+                output_role=output_role,
+                coupling_mode="vertex",
             )
         return VertexLoweringRule(
             kind=kind,
             backend="unimplemented",
             description="no native pyamplicol lowering rule is registered yet",
+            kernel="unknown",
+        )
+
+    def vertex_component_expression(
+        self,
+        kind: int,
+        left: Sequence[Any],
+        right: Sequence[Any],
+        *,
+        result_particle_id: int,
+        result_chirality: int,
+        left_chirality: int = 0,
+        right_chirality: int = 0,
+        coupling: tuple[Any, Any] = (1.0, 0.0),
+        left_momentum: Sequence[Any] | None = None,
+        right_momentum: Sequence[Any] | None = None,
+    ) -> tuple[Any, ...]:
+        """Lower a local model vertex into component expressions.
+
+        The inputs are already component tuples for the two parent currents.
+        This method is intentionally process-blind: all decisions are local to
+        the vertex kind, chirality labels, particle id, coupling, and optional
+        current momenta.
+        """
+
+        if kind == 0:
+            if left_momentum is None or right_momentum is None:
+                raise ValueError("three-vector current requires parent momenta")
+            return _expr_three_vector_current(
+                tuple(left),
+                tuple(left_momentum),
+                tuple(right),
+                tuple(right_momentum),
+            )
+        if kind == 1:
+            return _expr_two_vector_to_tensor(tuple(left), tuple(right))
+        if kind == 2:
+            return _expr_tensor_vector_to_vector(tuple(left), tuple(right))
+        if kind == 3:
+            return _expr_vector_tensor_to_vector(tuple(left), tuple(right))
+        if kind == 12:
+            if left_momentum is None or right_momentum is None:
+                raise ValueError("three-vector current requires parent momenta")
+            return _expr_three_vector_current_coupled(
+                tuple(left),
+                tuple(left_momentum),
+                tuple(right),
+                tuple(right_momentum),
+                coupling,
+            )
+        if kind == 13:
+            return tuple(
+                coupling[0] * component
+                for component in _expr_two_vector_to_tensor(tuple(left), tuple(right))
+            )
+        if kind == 14:
+            return tuple(
+                coupling[0] * component
+                for component in _expr_tensor_vector_to_vector(
+                    tuple(left),
+                    tuple(right),
+                )
+            )
+        if kind == 15:
+            return tuple(
+                coupling[0] * component
+                for component in _expr_vector_tensor_to_vector(
+                    tuple(left),
+                    tuple(right),
+                )
+            )
+        if kind == 16:
+            return _expr_fermion_scalar_to_fermion(
+                tuple(left),
+                tuple(right),
+                coupling,
+            )
+        if kind == 17:
+            return (
+                (1j / math.sqrt(2.0))
+                * coupling[0]
+                * _expr_minkowski_dot(tuple(left), tuple(right)),
+            )
+        if kind == 18:
+            return tuple(
+                (1j / math.sqrt(2.0)) * coupling[0] * left[0] * component
+                for component in tuple(right)
+            )
+        if kind == 19:
+            return tuple(
+                (1j / math.sqrt(2.0)) * coupling[0] * right[0] * component
+                for component in tuple(left)
+            )
+        if kind == 20:
+            phase = 1j if coupling[1] == -10.0 else 1.0
+            return (
+                (1j / math.sqrt(2.0))
+                * phase
+                * coupling[0]
+                * left[0]
+                * right[0],
+            )
+        if kind in {4, 6}:
+            fermion, vector = (
+                (tuple(right), tuple(left)) if kind == 4 else (tuple(left), tuple(right))
+            )
+            if len(fermion) == 4:
+                return _expr_fermion_vector_dirac(
+                    fermion,
+                    vector,
+                    antifermion=False,
+                    coupling=None,
+                )
+            return _expr_fermion_vector_weyl(
+                fermion,
+                vector,
+                result_chirality,
+                antifermion=False,
+                coupling=None,
+            )
+        if kind in {5, 7}:
+            antifermion, vector = (
+                (tuple(right), tuple(left)) if kind == 5 else (tuple(left), tuple(right))
+            )
+            if len(antifermion) == 4:
+                return _expr_fermion_vector_dirac(
+                    antifermion,
+                    vector,
+                    antifermion=True,
+                    coupling=None,
+                )
+            return _expr_fermion_vector_weyl(
+                antifermion,
+                vector,
+                result_chirality,
+                antifermion=True,
+                coupling=None,
+            )
+        if kind == 9:
+            if len(tuple(right)) == 4 and len(tuple(left)) == 4:
+                return _expr_fermion_antifermion_to_vector_dirac(
+                    fermion=tuple(right),
+                    antifermion=tuple(left),
+                    coupling=(1.0, 1.0),
+                )
+            return _expr_fermion_antifermion_to_vector_weyl(
+                fermion=tuple(right),
+                antifermion=tuple(left),
+                coupling=(1.0, 1.0),
+                fermion_chirality=right_chirality,
+                antifermion_chirality=left_chirality,
+            )
+        if kind == 8:
+            qcd_coupling = (coupling[0], coupling[0])
+            if len(tuple(left)) == 4 and len(tuple(right)) == 4:
+                return _expr_fermion_antifermion_to_vector_dirac(
+                    fermion=tuple(left),
+                    antifermion=tuple(right),
+                    coupling=qcd_coupling,
+                )
+            return _expr_fermion_antifermion_to_vector_weyl(
+                fermion=tuple(left),
+                antifermion=tuple(right),
+                coupling=qcd_coupling,
+                fermion_chirality=left_chirality,
+                antifermion_chirality=right_chirality,
+            )
+        if kind in {10, 23}:
+            fermion, vector = (
+                (tuple(left), tuple(right))
+                if kind == 10
+                else (tuple(right), tuple(left))
+            )
+            if len(fermion) == 4:
+                return _expr_fermion_vector_dirac(
+                    fermion,
+                    vector,
+                    antifermion=False,
+                    coupling=coupling,
+                )
+            return _expr_fermion_vector_weyl(
+                fermion,
+                vector,
+                result_chirality,
+                antifermion=False,
+                coupling=coupling,
+            )
+        if kind in {11, 24}:
+            antifermion, vector = (
+                (tuple(left), tuple(right))
+                if kind == 11
+                else (tuple(right), tuple(left))
+            )
+            if len(antifermion) == 4:
+                return _expr_fermion_vector_dirac(
+                    antifermion,
+                    vector,
+                    antifermion=True,
+                    coupling=coupling,
+                )
+            return _expr_fermion_vector_weyl(
+                antifermion,
+                vector,
+                result_chirality,
+                antifermion=True,
+                coupling=coupling,
+            )
+        if kind == 21:
+            return _expr_fermion_antifermion_to_vector_weyl(
+                fermion=tuple(left),
+                antifermion=tuple(right),
+                coupling=coupling,
+                fermion_chirality=left_chirality,
+                antifermion_chirality=right_chirality,
+            )
+        if kind == 22:
+            return _expr_fermion_antifermion_to_vector_weyl(
+                fermion=tuple(right),
+                antifermion=tuple(left),
+                coupling=coupling,
+                fermion_chirality=right_chirality,
+                antifermion_chirality=left_chirality,
+            )
+        raise ValueError(f"vertex kind {kind} has no component expression lowering")
+
+    def propagator_component_expression(
+        self,
+        particle_id: int,
+        value: Sequence[Any],
+        momentum: Sequence[Any],
+        *,
+        chirality: int = 0,
+    ) -> tuple[Any, ...]:
+        rule = self.propagator_lowering_rule(particle_id, chirality)
+        components = tuple(value)
+        current_momentum = tuple(momentum)
+        if not rule.applies_propagator:
+            return components
+        if rule.kernel == "massless_vector_feynman_gauge":
+            denominator = _minkowski_square_expression(current_momentum)
+            prefactor = -1j / denominator
+            return tuple(component * prefactor for component in components)
+        if rule.kernel == "massive_vector_unitary_gauge":
+            mass = self.mass(particle_id)
+            width = self.width(particle_id)
+            denominator = (
+                _minkowski_square_expression(current_momentum)
+                - mass * mass
+                + 1j * mass * width
+            )
+            prefactor = -1j / denominator
+            longitudinal = (
+                _expr_minkowski_dot(components, current_momentum)
+                / (mass * mass)
+            )
+            return tuple(
+                (components[index] - current_momentum[index] * longitudinal)
+                * prefactor
+                for index in range(4)
+            )
+        if rule.kernel == "weyl_fermion":
+            if particle_id < 0:
+                return _expr_antiquark_propagator_weyl(
+                    components,
+                    current_momentum,
+                    chirality,
+                )
+            return _expr_quark_propagator_weyl(
+                components,
+                current_momentum,
+                chirality,
+            )
+        if rule.kernel == "massive_dirac_fermion":
+            if particle_id < 0:
+                return _expr_antiquark_propagator_dirac(
+                    components,
+                    current_momentum,
+                    self.mass(particle_id),
+                    self.width(particle_id),
+                )
+            return _expr_quark_propagator_dirac(
+                components,
+                current_momentum,
+                self.mass(particle_id),
+                self.width(particle_id),
+            )
+        if rule.kernel == "scalar_with_width":
+            mass = self.mass(particle_id)
+            width = self.width(particle_id)
+            denominator = (
+                _minkowski_square_expression(current_momentum)
+                - mass * mass
+                + 1j * mass * width
+            )
+            prefactor = 1j / denominator
+            return tuple(component * prefactor for component in components)
+        raise ValueError(
+            f"propagator kernel {rule.kernel!r} is not lowered for particle "
+            f"{particle_id}"
         )
 
     def three_gluon_current_expression(
@@ -663,6 +1650,503 @@ def _minkowski_square_expression(momentum: Sequence[Any]) -> Any:
     return p0 * p0 - p1 * p1 - p2 * p2 - p3 * p3
 
 
+def _model_vertex_result_chiralities(
+    model: Model,
+    vertex: Vertex,
+    left_index: Any,
+    right_index: Any,
+) -> tuple[int, ...]:
+    result_pdg = vertex.particles[2]
+    if model.is_chiral_eligible(result_pdg):
+        input_chirality = _model_fermion_input_chirality(model, left_index, right_index)
+        if input_chirality == 0:
+            return (0,)
+        if not _model_weyl_vertex_allowed(vertex, result_pdg, input_chirality):
+            return ()
+        return (input_chirality,)
+
+    if _model_is_fermion_pair_to_vector_vertex(vertex.kind):
+        left_pdg = _index_particle_id(left_index)
+        right_pdg = _index_particle_id(right_index)
+        left_chirality = (
+            _index_chirality(left_index) if model.is_fermion(left_pdg) else 0
+        )
+        right_chirality = (
+            _index_chirality(right_index) if model.is_fermion(right_pdg) else 0
+        )
+        if (
+            left_chirality != 0
+            and right_chirality != 0
+            and left_chirality != -right_chirality
+        ):
+            return ()
+        if not _model_fermion_pair_vector_coupling_allowed(
+            vertex,
+            left_chirality,
+            right_chirality,
+        ):
+            return ()
+    return (0,)
+
+
+def _model_fermion_input_chirality(
+    model: Model,
+    left_index: Any,
+    right_index: Any,
+) -> int:
+    left_pdg = _index_particle_id(left_index)
+    right_pdg = _index_particle_id(right_index)
+    left_chirality = _index_chirality(left_index)
+    right_chirality = _index_chirality(right_index)
+    if model.is_fermion(left_pdg) and left_chirality != 0:
+        return left_chirality
+    if model.is_fermion(right_pdg) and right_chirality != 0:
+        return right_chirality
+    return 0
+
+
+def _model_weyl_vertex_allowed(
+    vertex: Vertex,
+    result_pdg: int,
+    chirality: int,
+) -> bool:
+    if vertex.kind == 16:
+        return False
+    if vertex.kind in {10, 11, 23, 24}:
+        index = _model_fermion_coupling_index(result_pdg, chirality)
+        return vertex.coupling[index] != 0.0
+    return True
+
+
+def _model_fermion_coupling_index(pdg: int, chirality: int) -> int:
+    if pdg > 0:
+        return 0 if chirality == -1 else 1
+    return 0 if chirality == 1 else 1
+
+
+def _model_is_fermion_pair_to_vector_vertex(kind: int) -> bool:
+    return kind in {8, 9, 21, 22}
+
+
+def _model_fermion_pair_vector_coupling_allowed(
+    vertex: Vertex,
+    left_chirality: int,
+    right_chirality: int,
+) -> bool:
+    if vertex.kind in {8, 9}:
+        return True
+    if left_chirality == 0 or right_chirality == 0:
+        return any(component != 0.0 for component in vertex.coupling)
+    if vertex.kind == 21:
+        index = 0 if left_chirality == -1 and right_chirality == 1 else 1
+        return vertex.coupling[index] != 0.0
+    if vertex.kind == 22:
+        index = 0 if left_chirality == 1 and right_chirality == -1 else 1
+        return vertex.coupling[index] != 0.0
+    return True
+
+
+def _index_particle_id(index: Any) -> int:
+    if hasattr(index, "particle_id"):
+        return int(getattr(index, "particle_id"))
+    return int(getattr(index, "pdg"))
+
+
+def _index_chirality(index: Any) -> int:
+    return int(getattr(index, "chirality", 0))
+
+
+def _index_flavour_flow(index: Any) -> tuple[int, ...]:
+    flow = getattr(index, "flavour_flow", None)
+    if flow is None:
+        return (_index_particle_id(index),)
+    return tuple(int(value) for value in flow)
+
+
+def _index_coupling_orders(index: Any) -> CouplingOrders:
+    orders = getattr(index, "coupling_orders", None)
+    if orders is None:
+        return ()
+    return tuple(
+        sorted(
+            (str(name).upper(), int(value))
+            for name, value in orders
+            if int(value) != 0
+        )
+    )
+
+
+def _append_flavour_transition(
+    flow: tuple[int, ...],
+    result_particle: int,
+) -> tuple[int, ...]:
+    if flow and flow[-1] == result_particle:
+        return flow
+    return (*flow, result_particle)
+
+
+def _expr_three_vector_current(
+    left: tuple[Any, ...],
+    left_momentum: tuple[Any, ...],
+    right: tuple[Any, ...],
+    right_momentum: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    dot = _expr_minkowski_dot(left, right)
+    left_dot_right_momentum = _expr_minkowski_dot(left, right_momentum)
+    right_dot_left_momentum = _expr_minkowski_dot(right, left_momentum)
+    prefactor = 1j / math.sqrt(2.0)
+    return tuple(
+        prefactor
+        * (
+            dot * (left_momentum[index] - right_momentum[index])
+            + 2.0
+            * (
+                left_dot_right_momentum * right[index]
+                - right_dot_left_momentum * left[index]
+            )
+        )
+        for index in range(4)
+    )
+
+
+def _expr_three_vector_current_coupled(
+    left: tuple[Any, ...],
+    left_momentum: tuple[Any, ...],
+    right: tuple[Any, ...],
+    right_momentum: tuple[Any, ...],
+    coupling: tuple[Any, Any],
+) -> tuple[Any, ...]:
+    dot = _expr_minkowski_dot(left, right)
+    tmp2_momentum = tuple(
+        2.0 * right_momentum[index] + left_momentum[index]
+        for index in range(4)
+    )
+    tmp3_momentum = tuple(
+        -2.0 * left_momentum[index] - right_momentum[index]
+        for index in range(4)
+    )
+    tmp2 = _expr_minkowski_dot(left, tmp2_momentum)
+    tmp3 = _expr_minkowski_dot(right, tmp3_momentum)
+    prefactor = (1j / math.sqrt(2.0)) * coupling[0]
+    return tuple(
+        prefactor
+        * (
+            dot * (left_momentum[index] - right_momentum[index])
+            + tmp2 * right[index]
+            + tmp3 * left[index]
+        )
+        for index in range(4)
+    )
+
+
+def _expr_two_vector_to_tensor(
+    left: tuple[Any, ...],
+    right: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    return (
+        left[0] * right[1] - left[1] * right[0],
+        left[0] * right[2] - left[2] * right[0],
+        left[0] * right[3] - left[3] * right[0],
+        left[1] * right[2] - left[2] * right[1],
+        left[1] * right[3] - left[3] * right[1],
+        left[2] * right[3] - left[3] * right[2],
+    )
+
+
+def _expr_tensor_vector_to_vector(
+    tensor: tuple[Any, ...],
+    vector: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    prefactor = 0.5j
+    return (
+        (tensor[0] * vector[1] + tensor[1] * vector[2] + tensor[2] * vector[3])
+        * prefactor,
+        (tensor[0] * vector[0] + tensor[3] * vector[2] + tensor[4] * vector[3])
+        * prefactor,
+        (tensor[1] * vector[0] - tensor[3] * vector[1] + tensor[5] * vector[3])
+        * prefactor,
+        (tensor[2] * vector[0] - tensor[4] * vector[1] - tensor[5] * vector[2])
+        * prefactor,
+    )
+
+
+def _expr_vector_tensor_to_vector(
+    vector: tuple[Any, ...],
+    tensor: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    prefactor = 0.5j
+    return (
+        (-vector[1] * tensor[0] - vector[2] * tensor[1] - vector[3] * tensor[2])
+        * prefactor,
+        (-vector[0] * tensor[0] - vector[2] * tensor[3] - vector[3] * tensor[4])
+        * prefactor,
+        (-vector[0] * tensor[1] + vector[1] * tensor[3] - vector[3] * tensor[5])
+        * prefactor,
+        (-vector[0] * tensor[2] + vector[1] * tensor[4] + vector[2] * tensor[5])
+        * prefactor,
+    )
+
+
+def _expr_fermion_vector_weyl(
+    fermion: tuple[Any, ...],
+    vector: tuple[Any, ...],
+    chirality: int,
+    *,
+    antifermion: bool,
+    coupling: tuple[Any, Any] | None,
+) -> tuple[Any, ...]:
+    tmp1, tmp2, tmp3, tmp4 = _expr_vector_slash_terms(vector)
+    prefactor = 1j / math.sqrt(2.0)
+    f1, f2 = fermion
+    if antifermion:
+        if chirality == 1:
+            factor = prefactor if coupling is None else prefactor * coupling[0]
+            return (
+                factor * (tmp1 * f1 + tmp4 * f2),
+                factor * (tmp2 * f2 + tmp3 * f1),
+            )
+        if chirality == -1:
+            factor = prefactor if coupling is None else prefactor * coupling[1]
+            return (
+                factor * (tmp2 * f1 - tmp4 * f2),
+                factor * (tmp1 * f2 - tmp3 * f1),
+            )
+    else:
+        if chirality == 1:
+            factor = prefactor if coupling is None else prefactor * coupling[1]
+            return (
+                factor * (tmp2 * f1 - tmp3 * f2),
+                factor * (tmp1 * f2 - tmp4 * f1),
+            )
+        if chirality == -1:
+            factor = prefactor if coupling is None else prefactor * coupling[0]
+            return (
+                factor * (tmp1 * f1 + tmp3 * f2),
+                factor * (tmp2 * f2 + tmp4 * f1),
+            )
+    raise ValueError("fermion-vector Weyl kernel needs nonzero chirality")
+
+
+def _expr_fermion_vector_dirac(
+    fermion: tuple[Any, ...],
+    vector: tuple[Any, ...],
+    *,
+    antifermion: bool,
+    coupling: tuple[Any, Any] | None,
+) -> tuple[Any, ...]:
+    if len(fermion) != 4 or len(vector) != 4:
+        raise ValueError("Dirac fermion-vector current expects dimensions 4 and 4")
+    tmp1, tmp2, tmp3, tmp4 = _expr_vector_slash_terms(vector)
+    prefactor = 1j / math.sqrt(2.0)
+    f1, f2, f3, f4 = fermion
+    if coupling is None:
+        left_coupling = 1.0
+        right_coupling = 1.0
+    else:
+        left_coupling, right_coupling = coupling
+    if antifermion:
+        upper = prefactor * right_coupling
+        lower = prefactor * left_coupling
+        return (
+            upper * (tmp2 * f3 - tmp4 * f4),
+            upper * (tmp1 * f4 - tmp3 * f3),
+            lower * (tmp1 * f1 + tmp4 * f2),
+            lower * (tmp2 * f2 + tmp3 * f1),
+        )
+    upper = prefactor * left_coupling
+    lower = prefactor * right_coupling
+    return (
+        upper * (tmp1 * f3 + tmp3 * f4),
+        upper * (tmp2 * f4 + tmp4 * f3),
+        lower * (tmp2 * f1 - tmp3 * f2),
+        lower * (tmp1 * f2 - tmp4 * f1),
+    )
+
+
+def _expr_fermion_antifermion_to_vector_weyl(
+    *,
+    fermion: tuple[Any, ...],
+    antifermion: tuple[Any, ...],
+    coupling: tuple[Any, Any],
+    fermion_chirality: int,
+    antifermion_chirality: int,
+) -> tuple[Any, ...]:
+    prefactor = 1j / math.sqrt(2.0)
+    left, right = coupling
+    f1, f2 = fermion
+    a1, a2 = antifermion
+    if fermion_chirality == -1 and antifermion_chirality == 1:
+        factor = prefactor * left
+        return (
+            factor * (f1 * a1 + f2 * a2),
+            -factor * (f2 * a1 + f1 * a2),
+            1j * factor * (-f2 * a1 + f1 * a2),
+            factor * (-f1 * a1 + f2 * a2),
+        )
+    if fermion_chirality == 1 and antifermion_chirality == -1:
+        factor = prefactor * right
+        return (
+            factor * (f1 * a1 + f2 * a2),
+            factor * (f1 * a2 + f2 * a1),
+            1j * factor * (-f1 * a2 + f2 * a1),
+            factor * (f1 * a1 - f2 * a2),
+        )
+    return (0j, 0j, 0j, 0j)
+
+
+def _expr_fermion_antifermion_to_vector_dirac(
+    *,
+    fermion: tuple[Any, ...],
+    antifermion: tuple[Any, ...],
+    coupling: tuple[Any, Any],
+) -> tuple[Any, ...]:
+    if len(fermion) != 4 or len(antifermion) != 4:
+        raise ValueError("Dirac fermion-antifermion vector current expects dimensions 4 and 4")
+    prefactor = 1j / math.sqrt(2.0)
+    left_coupling, right_coupling = coupling
+    f1, f2, f3, f4 = fermion
+    a1, a2, a3, a4 = antifermion
+    left = (
+        f3 * a1 + f4 * a2,
+        -(f4 * a1 + f3 * a2),
+        1j * (-f4 * a1 + f3 * a2),
+        -f3 * a1 + f4 * a2,
+    )
+    right = (
+        f1 * a3 + f2 * a4,
+        f1 * a4 + f2 * a3,
+        1j * (-f1 * a4 + f2 * a3),
+        f1 * a3 - f2 * a4,
+    )
+    return tuple(
+        prefactor * (left_coupling * left[index] + right_coupling * right[index])
+        for index in range(4)
+    )
+
+
+def _expr_fermion_scalar_to_fermion(
+    fermion: tuple[Any, ...],
+    scalar: tuple[Any, ...],
+    coupling: tuple[Any, Any],
+) -> tuple[Any, ...]:
+    if len(fermion) != 4 or len(scalar) != 1:
+        raise ValueError("Dirac fermion-scalar current expects dimensions 4 and 1")
+    prefactor = -1j / math.sqrt(2.0)
+    return tuple(prefactor * coupling[0] * scalar[0] * component for component in fermion)
+
+
+def _expr_vector_slash_terms(vector: tuple[Any, ...]) -> tuple[Any, Any, Any, Any]:
+    v0, v1, v2, v3 = vector
+    return v0 + v3, v0 - v3, v1 + 1j * v2, v1 - 1j * v2
+
+
+def _expr_quark_propagator_weyl(
+    quark: tuple[Any, ...],
+    momentum: tuple[Any, ...],
+    chirality: int,
+) -> tuple[Any, ...]:
+    energy, px, py, pz = momentum
+    denominator = _minkowski_square_expression(momentum)
+    prefactor = 1j / denominator
+    tmp1 = energy + pz
+    tmp2 = energy - pz
+    tmp3 = px + 1j * py
+    tmp4 = px - 1j * py
+    q1, q2 = quark
+    if chirality == 1:
+        return (
+            (tmp1 * q1 + tmp3 * q2) * prefactor,
+            (tmp2 * q2 + tmp4 * q1) * prefactor,
+        )
+    if chirality == -1:
+        return (
+            (tmp2 * q1 - tmp3 * q2) * prefactor,
+            (tmp1 * q2 - tmp4 * q1) * prefactor,
+        )
+    raise ValueError("Weyl quark propagator expression needs nonzero chirality")
+
+
+def _expr_antiquark_propagator_weyl(
+    antiquark: tuple[Any, ...],
+    momentum: tuple[Any, ...],
+    chirality: int,
+) -> tuple[Any, ...]:
+    energy, px, py, pz = momentum
+    denominator = _minkowski_square_expression(momentum)
+    prefactor = 1j / denominator
+    tmp1 = -(energy + pz)
+    tmp2 = -(energy - pz)
+    tmp3 = -(px + 1j * py)
+    tmp4 = -(px - 1j * py)
+    a1, a2 = antiquark
+    if chirality == 1:
+        return (
+            (tmp2 * a1 - tmp4 * a2) * prefactor,
+            (tmp1 * a2 - tmp3 * a1) * prefactor,
+        )
+    if chirality == -1:
+        return (
+            (tmp1 * a1 + tmp4 * a2) * prefactor,
+            (tmp2 * a2 + tmp3 * a1) * prefactor,
+        )
+    raise ValueError("Weyl antiquark propagator expression needs nonzero chirality")
+
+
+def _expr_quark_propagator_dirac(
+    quark: tuple[Any, ...],
+    momentum: tuple[Any, ...],
+    mass: float,
+    width: float,
+) -> tuple[Any, ...]:
+    if len(quark) != 4 or len(momentum) != 4:
+        raise ValueError("Dirac quark propagator expects four components")
+    energy, px, py, pz = momentum
+    denominator = _minkowski_square_expression(momentum) - mass * mass + 1j * mass * width
+    prefactor = 1j / denominator
+    tmp1 = energy + pz
+    tmp2 = energy - pz
+    tmp3 = px + 1j * py
+    tmp4 = px - 1j * py
+    q1, q2, q3, q4 = quark
+    return (
+        (tmp1 * q3 + tmp3 * q4 + mass * q1) * prefactor,
+        (tmp2 * q4 + tmp4 * q3 + mass * q2) * prefactor,
+        (tmp2 * q1 - tmp3 * q2 + mass * q3) * prefactor,
+        (tmp1 * q2 - tmp4 * q1 + mass * q4) * prefactor,
+    )
+
+
+def _expr_antiquark_propagator_dirac(
+    antiquark: tuple[Any, ...],
+    momentum: tuple[Any, ...],
+    mass: float,
+    width: float,
+) -> tuple[Any, ...]:
+    if len(antiquark) != 4 or len(momentum) != 4:
+        raise ValueError("Dirac antiquark propagator expects four components")
+    energy, px, py, pz = momentum
+    denominator = _minkowski_square_expression(momentum) - mass * mass + 1j * mass * width
+    prefactor = 1j / denominator
+    tmp1 = -(energy + pz)
+    tmp2 = -(energy - pz)
+    tmp3 = -(px + 1j * py)
+    tmp4 = -(px - 1j * py)
+    a1, a2, a3, a4 = antiquark
+    return (
+        (tmp2 * a3 - tmp4 * a4 + mass * a1) * prefactor,
+        (tmp1 * a4 - tmp3 * a3 + mass * a2) * prefactor,
+        (tmp1 * a1 + tmp4 * a2 + mass * a3) * prefactor,
+        (tmp2 * a2 + tmp3 * a1 + mass * a4) * prefactor,
+    )
+
+
+def _expr_minkowski_dot(
+    left: tuple[Any, ...],
+    right: tuple[Any, ...],
+) -> Any:
+    return left[0] * right[0] - left[1] * right[1] - left[2] * right[2] - left[3] * right[3]
+
+
 def _two_gluon_to_tensor_data() -> list[complex]:
     data = [0j] * (6 * 4 * 4)
     metric = (1.0, -1.0, -1.0, -1.0)
@@ -753,8 +2237,12 @@ _ANTISYM_PAIRS = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
 
 __all__ = [
     "AmplicolSMLeadingColorModel",
+    "CouplingOrders",
     "Model",
     "Particle",
+    "PropagatorLoweringRule",
+    "QuantumFlow",
+    "SourceSpinState",
     "Vertex",
     "VertexLoweringRule",
 ]

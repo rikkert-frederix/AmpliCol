@@ -26,13 +26,18 @@ RUSTICOL_WHEEL_DIR = WHEEL_DIR / "rusticol"
 
 SYMBOLICA_COMMUNITY_DIR = DEPS_DIR / "symbolica-community"
 SYMBOLICA_DIR = DEPS_DIR / "symbolica"
+SYMJIT_DIR = DEPS_DIR / "symjit"
 GAMMALOOP_DIR = DEPS_DIR / "gammaloop"
 XSIMD_DIR = DEPS_DIR / "xsimd"
 RUSTICOL_DIR = AMPLICOL_ROOT / "rusticol"
 
 SYMBOLICA_COMMUNITY_URL = "https://github.com/symbolica-dev/symbolica-community.git"
-SYMBOLICA_URL = "https://github.com/ValentinHirschi/symbolica_mod.git"
-SYMBOLICA_REF = "pyamplicol-dev-base"
+SYMBOLICA_URL = "https://github.com/symbolica-dev/symbolica.git"
+SYMBOLICA_REF = "dev"
+SYMJIT_URL = "https://github.com/siravan/symjit.git"
+SYMJIT_REF = "54d6c6171f05b39505d18d1932f0972bfac9e4da"
+SYMJIT_REV = "54d6c6171f05b39505d18d1932f0972bfac9e4da"
+SYMJIT_VERSION = "2.19.2"
 GAMMALOOP_URL = "https://github.com/alphal00p/gammaloop.git"
 XSIMD_URL = "https://github.com/xtensor-stack/xsimd.git"
 SYMBOLICA_COMMUNITY_REF = "main"
@@ -71,6 +76,7 @@ MANAGED_PATHS = (
     DEPENDENCY_MANIFEST,
     SYMBOLICA_COMMUNITY_DIR,
     SYMBOLICA_DIR,
+    SYMJIT_DIR,
     GAMMALOOP_DIR,
     XSIMD_DIR,
 )
@@ -403,6 +409,12 @@ def ensure_sources(*, update_existing: bool) -> None:
         update_existing=update_existing,
     )
     ensure_ref_checkout(
+        SYMJIT_URL,
+        SYMJIT_REV,
+        SYMJIT_DIR,
+        update_existing=update_existing,
+    )
+    ensure_ref_checkout(
         GAMMALOOP_URL,
         discover_gammaloop_ref(),
         GAMMALOOP_DIR,
@@ -612,6 +624,11 @@ def write_dependency_manifest(
             "source_path": str(SYMBOLICA_DIR.relative_to(REPO_ROOT)),
             "source_rev": optional_git_head(SYMBOLICA_DIR),
             "source_url": SYMBOLICA_URL,
+            "symjit_version": SYMJIT_VERSION,
+            "symjit_source_ref": SYMJIT_REF,
+            "symjit_source_path": str(SYMJIT_DIR.relative_to(REPO_ROOT)),
+            "symjit_source_rev": optional_git_head(SYMJIT_DIR),
+            "symjit_source_url": SYMJIT_URL,
         },
         "symbolica_community": {
             "requested": True,
@@ -711,11 +728,56 @@ def patch_symbolica_community_module() -> None:
     lib_rs.write_text(text, encoding="utf-8")
 
 
+def patch_symbolica_symjit_constraint() -> None:
+    """Point Symbolica at the managed SymJIT checkout with AArch64 fixes."""
+
+    cargo_toml = SYMBOLICA_DIR / "Cargo.toml"
+    text = cargo_toml.read_text(encoding="utf-8")
+    patched, replacements = re.subn(
+        r'(?m)^symjit\s*=.*$',
+        'symjit = { path = "../symjit" }',
+        text,
+        count=1,
+    )
+    if replacements != 1:
+        raise DependencySetupError(f"Could not find the symjit dependency in {cargo_toml}")
+    cargo_toml.write_text(patched, encoding="utf-8")
+
+
+def patch_symjit_crate_type() -> None:
+    """Make the managed SymJIT checkout usable as a Rust library dependency."""
+
+    cargo_toml = SYMJIT_DIR / "Cargo.toml"
+    text = cargo_toml.read_text(encoding="utf-8")
+    patched, replacements = re.subn(
+        r'(?m)^crate-type\s*=\s*\["cdylib"\]\s*$',
+        'crate-type = ["rlib"]',
+        text,
+        count=1,
+    )
+    if replacements != 1 and 'crate-type = ["rlib"]' not in text:
+        raise DependencySetupError(f"Could not patch the symjit crate type in {cargo_toml}")
+    cargo_toml.write_text(patched, encoding="utf-8")
+
+
 def patch_sources() -> None:
     patch_symbolica_community_cargo()
     patch_symbolica_community_module()
+    patch_symjit_crate_type()
+    patch_symbolica_symjit_constraint()
+    pin_symbolica_symjit(SYMBOLICA_DIR)
+    pin_symbolica_symjit(SYMBOLICA_COMMUNITY_DIR)
     patch_gammaloop_cargo()
     apply_dependency_patches()
+
+
+def pin_symbolica_symjit(source_dir: Path) -> None:
+    """Refresh lockfiles after switching Symbolica to the managed SymJIT checkout."""
+
+    run(
+        ["cargo", "update", "-p", "symjit"],
+        cwd=source_dir,
+    )
 
 
 BASE_SMOKE_TEST = """

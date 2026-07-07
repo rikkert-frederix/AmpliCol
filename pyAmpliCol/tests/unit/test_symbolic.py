@@ -2,6 +2,15 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason=(
+        "legacy zero-gluon symbolic evaluator is schema-v1/Z-only and retired "
+        "from production; schema-v2 generic DAG/Rusticol tests cover the active path"
+    )
+)
+
 from pyamplicol.native import ExternalMomentum, LeadingColorZJetsNativeEvaluator
 from pyamplicol.symbolic import ZeroGluonSymbolicEvaluator
 

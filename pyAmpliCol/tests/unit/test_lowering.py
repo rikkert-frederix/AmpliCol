@@ -7,7 +7,7 @@ from pyamplicol.lowering import (
     _clean_symbolica_string,
     build_symbolic_lowering_report,
 )
-from pyamplicol.matrix import NativeMatrixElementGenerator
+from pyamplicol.legacy_matrix import NativeMatrixElementGenerator
 from pyamplicol.model import AmplicolSMLeadingColorModel
 
 
@@ -142,6 +142,98 @@ def test_one_gluon_blueprint_executes_with_parametric_source_currents() -> None:
     assert "propagator" not in blueprint.executed_expression
     assert "vertex_kind_6" not in blueprint.executed_expression
     assert "vertex_kind_10" not in blueprint.executed_expression
+
+
+def test_photon_gluon_process_builds_native_recursion_graph_without_z_artifact() -> None:
+    result = NativeMatrixElementGenerator().generate(
+        "d d~ > a g",
+        write_cache_metadata=False,
+    )
+
+    assert result.supported_native_target is True
+    assert result.graph is not None
+    assert result.graph.process == (1, -1, 21, 22)
+    assert result.symbolic_lowering is not None
+    assert "gamma" in " ".join(result.notes)
+    assert result.backend == "native-python-recursion-staged"
+
+
+def test_w_gluon_process_builds_flavour_changing_recursion_graph() -> None:
+    result = NativeMatrixElementGenerator().generate(
+        "u d~ > w+ g",
+        write_cache_metadata=False,
+    )
+
+    assert result.supported_native_target is True
+    assert result.graph is not None
+    assert result.graph.process == (2, -1, 21, 24)
+    assert result.backend == "native-python-recursion-staged"
+    assert "W+" in " ".join(result.notes)
+    charged_vertices = [
+        interaction
+        for interaction in result.graph.interactions
+        if interaction.vertex_kind == 10
+    ]
+    assert charged_vertices
+    assert {vertex.left.pdg for vertex in charged_vertices} == {1}
+    assert {vertex.right.pdg for vertex in charged_vertices} == {24}
+    assert {vertex.result.pdg for vertex in charged_vertices} == {2}
+    assert {amplitude[0].pdg for amplitude in result.graph.amplitudes} == {2}
+    assert {amplitude[1].pdg for amplitude in result.graph.amplitudes} == {-2}
+
+
+def test_neutral_dilepton_gluon_process_reports_native_recursion_support() -> None:
+    result = NativeMatrixElementGenerator().generate(
+        "d d~ > e+ e- g",
+        write_cache_metadata=False,
+    )
+
+    assert result.supported_native_target is True
+    assert result.graph is None
+    assert result.symbolic_lowering is None
+    assert result.backend == "native-python-recursion-staged"
+    assert "neutral dilepton" in " ".join(result.notes)
+
+
+def test_zero_gluon_neutral_dilepton_process_reports_native_recursion_support() -> None:
+    result = NativeMatrixElementGenerator().generate(
+        "d d~ > e+ e-",
+        write_cache_metadata=False,
+    )
+
+    assert result.supported_native_target is True
+    assert result.graph is None
+    assert result.symbolic_lowering is None
+    assert result.backend == "native-python-recursion-staged"
+    assert "neutral dilepton" in " ".join(result.notes)
+
+
+def test_charged_leptonic_w_gluon_process_reports_native_recursion_support() -> None:
+    result = NativeMatrixElementGenerator().generate(
+        "u d~ > e+ ve g",
+        write_cache_metadata=False,
+    )
+
+    assert result.supported_native_target is True
+    assert result.graph is None
+    assert result.symbolic_lowering is None
+    assert result.backend == "native-python-recursion-staged"
+    notes = " ".join(result.notes)
+    assert "charged-current leptonic W" in notes
+
+
+def test_zero_gluon_charged_leptonic_w_process_reports_native_recursion_support() -> None:
+    result = NativeMatrixElementGenerator().generate(
+        "u d~ > e+ ve",
+        write_cache_metadata=False,
+    )
+
+    assert result.supported_native_target is True
+    assert result.graph is None
+    assert result.symbolic_lowering is None
+    assert result.backend == "native-python-recursion-staged"
+    notes = " ".join(result.notes)
+    assert "charged-current leptonic W" in notes
 
 
 def test_one_gluon_tensor_network_input_remains_factorized() -> None:

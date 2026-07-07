@@ -94,8 +94,7 @@ def benchmark_z_gluon_modes(
             "generation_s": {
                 "legacy": (
                     "make cleanlib + make amplicol_generate + library=create + "
-                    "make amplicol_generate_library; n=0 fixed-probe setup uses "
-                    "cleanlib + amplicol_generate"
+                    "make amplicol_generate_library"
                 ),
                 "python": "NativeMatrixElementGenerator recursion/lowering metadata time",
                 "numeric_tn": "factorized skeleton build plus simplify_color",
@@ -111,7 +110,7 @@ def benchmark_z_gluon_modes(
                 "legacy": (
                     "AmpliCol detailed timing row 'amplitude evaluation' divided "
                     "by the requested timing sample count; benchmark timing uses a "
-                    "second quiet direct-probe run with --amplicol_probe_quiet. "
+                    "generated-library run with --library=use. "
                     "The error field is the printed-timer quantization floor."
                 ),
                 "pyamplicol": "mean wall time over the same AmpliCol probe points",
@@ -270,7 +269,7 @@ def profile_z_gluon_dag_evaluator(
         raise ValueError("points must be positive")
     if repetitions < 1:
         raise ValueError("repetitions must be positive")
-    build_kwargs = (
+    build_kwargs: dict[str, Any] = (
         {"batch_size": 16}
         if evaluator_build_kwargs is None
         else dict(evaluator_build_kwargs)
@@ -291,13 +290,25 @@ def profile_z_gluon_dag_evaluator(
     from .native import LeadingColorZJetsNativeEvaluator
 
     native = LeadingColorZJetsNativeEvaluator()
+    gluon_count: int | None
+    vector_pdg: int | None
     if native.supports_zero_gluon_z(process):
         gluon_count = 0
+        vector_pdg = 23
     else:
-        gluon_count = native.supported_z_gluon_count(process)
-    if gluon_count is None:
+        vector_target = native.supported_electroweak_vector_gluon_process(process)
+        gluon_count = None if vector_target is None else vector_target[1]
+        vector_pdg = None if vector_target is None else vector_target[0]
+    if gluon_count is None or vector_pdg is None:
+        from .process_support import classify_process_support
+
+        support = classify_process_support(process)
+        if support.artifact_unavailable_message is not None:
+            raise ValueError(support.artifact_unavailable_message)
         raise ValueError(
-            "D-mode profiling currently supports q q~ -> Z plus ordered gluons"
+            "D-mode profiling currently supports on-shell one-quark-line "
+            "electroweak vector plus ordered gluons; use generate-process and "
+            "time-process for explicit-lepton Rusticol artifacts."
         )
     if gluon_count == 0:
         point_list = tuple(
@@ -309,8 +320,9 @@ def profile_z_gluon_dag_evaluator(
         )
     else:
         point_list = tuple(
-            native.canonical_z_gluon_point(
+            native.canonical_neutral_vector_gluon_point(
                 process,
+                vector_pdg=vector_pdg,
                 gluon_count=gluon_count,
                 sqrt_s=sqrt_s * (1.0 + 0.037 * index),
             )
@@ -480,13 +492,11 @@ def profile_z_gluon_dag_evaluator(
 def _profile_runtime_backend(value: str) -> str:
     if value in ("auto", "dag"):
         return "dag"
-    if value == "compiled-dag":
-        return "compiled-dag"
     if value == "rusticol":
         return "rusticol"
     raise ValueError(
-        "profile-dag-evaluator supports runtime backend 'dag', "
-        "'compiled-dag', or 'rusticol'"
+        "profile-dag-evaluator supports runtime backend 'dag' or 'rusticol'. "
+        "The old monolithic compiled-DAG backend is deprecated."
     )
 
 
@@ -503,13 +513,10 @@ def _build_profile_evaluator(
             process,
             **_filter_kwargs(build_kwargs, _DAG_PROFILE_KWARGS),
         )
-    if runtime_backend == "compiled-dag":
-        from .compiled_dag_runtime import ZGluonCompiledDAGEvaluator
-
-        return ZGluonCompiledDAGEvaluator(
-            process,
-            **_compiled_dag_profile_kwargs(build_kwargs),
-        )
+    # The old alias/monolithic compiled-DAG route is intentionally not
+    # instantiated from profiling code anymore. Keep compiled_dag_runtime.py as
+    # a reference implementation only while the production path is generic DAG
+    # artifacts executed by Rusticol.
     if runtime_backend == "rusticol":
         load_dir = build_kwargs.get("symbolica_load_evaluator_dir")
         if load_dir is None:
@@ -540,13 +547,14 @@ def build_z_gluon_dag_profile_evaluator(
 class _RusticolProfileEvaluator:
     def __init__(self, process_dir: str | Path, *, batch_size: int) -> None:
         import numpy as np
-        import rusticol  # type: ignore[import-not-found]
+        import rusticol as rusticol_module  # type: ignore[import-not-found]
 
         from .dag_runtime import DAGEvaluationTiming
         from .process_runtime import load_process_manifest
 
         self._np = np
-        self.runtime = rusticol.Runtime.load(str(Path(process_dir).expanduser()))
+        runtime_factory: Any = getattr(rusticol_module, "Runtime")
+        self.runtime = runtime_factory.load(str(Path(process_dir).expanduser()))
         self.manifest = load_process_manifest(process_dir)
         self.batch_size = int(batch_size)
         self.last_runtime_timing = DAGEvaluationTiming()
@@ -666,6 +674,12 @@ _DAG_PROFILE_KWARGS = frozenset(
         "split_vertex_current_stages",
         "symbolica_raw_sum_final_stage",
         "progress_callback",
+        "model",
+        "graph",
+        "vector_source_specs",
+        "rusticol_validation_points",
+        "electroweak_coupling_power",
+        "rusticol_artifact_family",
     }
 ) | _SYMBOLICA_PROFILE_KWARGS
 
@@ -767,36 +781,28 @@ def _benchmark_one_gluon_count(
     include_parametric_tn: bool,
     include_shared_dag: bool,
 ) -> dict[str, Any]:
+    build = adapter.prepare_library(process, options=options)
     if gluon_count == 0:
-        build = adapter.prepare_direct_probe(process, options=options)
         reference_run = adapter.run_amplicol_fixed_probe(
             process,
             points=points,
             options=options,
             timing_sample=timing_sample,
         )
-        timing_run = adapter.run_amplicol_fixed_probe(
-            process,
-            points=timing_sample,
-            options=options,
-            timing_sample=1,
-            quiet=True,
-        )
     else:
-        build = adapter.prepare_library(process, options=options)
         reference_run = adapter.run_amplicol_probe(
             process,
             points=points,
             options=options,
             timing_sample=timing_sample,
         )
-        timing_run = adapter.run_amplicol_probe(
-            process,
-            points=timing_sample,
-            options=options,
-            timing_sample=1,
-            quiet=True,
-        )
+    timing_run = adapter.run_library_use(
+        process,
+        nevents=timing_sample,
+        seed=101,
+        options=options,
+        timing_sample=1,
+    )
     probe_points = tuple(reference_run.probe_points)
     if not probe_points:
         raise RuntimeError(f"AmpliCol probe produced no points for {process}")
@@ -825,7 +831,7 @@ def _benchmark_one_gluon_count(
             "commands_s": [command.elapsed_s for command in build.commands],
             "run_command_s": timing_run.total_command_time_s,
             "reference_collection_s": reference_run.total_command_time_s,
-            "timing_probe_quiet": True,
+            "timing_workflow": "generated_library_use",
         },
     }
 
@@ -916,7 +922,7 @@ def _worker(
 ) -> None:
     try:
         from .evaluation import NativeRuntimeEvaluator
-        from .matrix import NativeMatrixElementGenerator
+        from .legacy_matrix import NativeMatrixElementGenerator
         from .tensor_runtime import (
             TensorNetworkStrategy,
             ZGluonNumericTensorNetworkEvaluator,
@@ -946,6 +952,7 @@ def _worker(
             python_evaluator = NativeRuntimeEvaluator(
                 process,
                 runtime_backend="python",
+                allow_reference_legacy=True,
             )
             result["setup_s"] = time.perf_counter() - setup_start
             result["metadata"] = python_evaluator.metadata.to_json_dict()
@@ -964,20 +971,12 @@ def _worker(
                 return
             runtime_backend = str(evaluator_build_kwargs.get("runtime_backend", "dag"))
             setup_start = time.perf_counter()
-            if runtime_backend == "compiled-dag":
-                from .compiled_dag_runtime import ZGluonCompiledDAGEvaluator
+            from .dag_runtime import ZGluonDAGEvaluator
 
-                shared_evaluator = ZGluonCompiledDAGEvaluator(
-                    process,
-                    **_compiled_dag_profile_kwargs(evaluator_build_kwargs),
-                )
-            else:
-                from .dag_runtime import ZGluonDAGEvaluator
-
-                shared_evaluator = ZGluonDAGEvaluator(
-                    process,
-                    **_filter_kwargs(evaluator_build_kwargs, _DAG_PROFILE_KWARGS),
-                )
+            shared_evaluator = ZGluonDAGEvaluator(
+                process,
+                **_filter_kwargs(evaluator_build_kwargs, _DAG_PROFILE_KWARGS),
+            )
             result["generation_s"] = time.perf_counter() - setup_start
             result["runtime_backend"] = runtime_backend
             result["generation_report_s"] = (

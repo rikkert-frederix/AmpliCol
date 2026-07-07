@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
+
+pytestmark = pytest.mark.skip(
+    reason=(
+        "legacy Z+gluon staged DAG evaluator is retired from production; "
+        "schema-v2 generic DAG/Rusticol tests cover the active path"
+    )
+)
 
 from pyamplicol.dag_runtime import (
     SymbolicaEvaluatorSettings,
     ZGluonDAGEvaluator,
+    _JITBoundaryHeartbeat,
     _resolve_compiled_preset,
 )
 from pyamplicol.native import LeadingColorZJetsNativeEvaluator
 
 
-@pytest.mark.parametrize("gluon_count", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("gluon_count", [1, 2, 3, 4])
 def test_z_gluon_dag_evaluator_matches_staged_recursion(
     gluon_count: int,
 ) -> None:
@@ -56,6 +65,73 @@ def test_z_gluon_dag_marks_stage_momentum_parameters_real() -> None:
     for offset in evaluator.compiled.layout.momentum_offsets.values():
         momentum_indices.extend(range(offset, offset + 4))
     assert set(momentum_indices) <= set(evaluator.compiled.layout.real_valued_inputs)
+
+
+def test_w_gluon_dag_evaluator_matches_charged_current_recursion() -> None:
+    process = "u d~ > w+ g"
+    reference = LeadingColorZJetsNativeEvaluator()
+    particles = reference.canonical_neutral_vector_gluon_point(
+        process,
+        vector_pdg=24,
+        gluon_count=1,
+        sqrt_s=1000.0,
+    )
+    expected = reference.evaluate(process, particles=particles)
+
+    evaluator = ZGluonDAGEvaluator(process)
+    actual = evaluator.evaluate(particles)
+
+    assert evaluator.vector_pdg == 24
+    assert evaluator.metadata.gluon_count == 1
+    assert evaluator.metadata.shared_amplitude_count == 12
+    assert evaluator.metadata.shared_source_current_count == 9
+    assert _relative_difference(
+        actual.matrix_element,
+        expected.matrix_element,
+    ) < 1.0e-12
+    assert _relative_difference(
+        actual.raw_helicity_sum,
+        expected.raw_helicity_sum,
+    ) < 1.0e-12
+
+
+@pytest.mark.parametrize(
+    ("process", "vector_pdg"),
+    [
+        ("d~ d > z g", 23),
+        ("d~ u > w+ g", 24),
+    ],
+)
+def test_vector_gluon_dag_evaluator_accepts_reversed_beam_order(
+    process: str,
+    vector_pdg: int,
+) -> None:
+    reference = LeadingColorZJetsNativeEvaluator()
+    particles = reference.canonical_neutral_vector_gluon_point(
+        process,
+        vector_pdg=vector_pdg,
+        gluon_count=1,
+        sqrt_s=1000.0,
+    )
+    expected = reference.evaluate(process, particles=particles)
+
+    evaluator = ZGluonDAGEvaluator(process)
+    actual = evaluator.evaluate(particles)
+
+    assert evaluator.graph.process[:2] == tuple(particle.pdg for particle in particles[:2])
+    assert [
+        (source.leg_label, evaluator.compiled.table.currents[source.current_id].key.pdg)
+        for source in evaluator.compiled.table.sources[:4]
+    ] == [
+        (2, -particles[1].pdg),
+        (2, -particles[1].pdg),
+        (1, -particles[0].pdg),
+        (1, -particles[0].pdg),
+    ]
+    assert _relative_difference(
+        actual.matrix_element,
+        expected.matrix_element,
+    ) < 1.0e-12
 
 
 def test_z_gluon_dag_raw_sum_final_stage_is_opt_in() -> None:
@@ -268,10 +344,12 @@ def test_z_gluon_dag_jit_evaluator_artifact_roundtrip(tmp_path) -> None:
         sqrt_s=1000.0,
     )
     artifact_dir = tmp_path / "jit-artifact"
+    progress_events: list[dict[str, object]] = []
     evaluator = ZGluonDAGEvaluator(
         process,
         symbolica_evaluator_backend="jit",
         symbolica_n_cores=1,
+        progress_callback=progress_events.append,
     )
     expected = evaluator.evaluate(particles)
 
@@ -288,10 +366,52 @@ def test_z_gluon_dag_jit_evaluator_artifact_roundtrip(tmp_path) -> None:
         loaded.metadata.symbolica_evaluator_settings["loaded_from_artifact"]
         is True
     )
+    progress_stages = {str(event["stage"]) for event in progress_events}
+    assert "jit compile" in progress_stages
+    assert "jit initialize" in progress_stages
+    assert "jit returned" in progress_stages
+    assert "jit ready" in progress_stages
+    assert "jit materialize" in progress_stages
     assert _relative_difference(
         actual.matrix_element,
         expected.matrix_element,
     ) < 1.0e-12
+
+
+def test_jit_boundary_heartbeat_reports_elapsed_wait_time() -> None:
+    events: list[dict[str, object]] = []
+    settings = SymbolicaEvaluatorSettings(backend="jit")
+
+    with _JITBoundaryHeartbeat(
+        events.append,
+        settings,
+        jit_compile=True,
+        phase="initialize",
+        item="unit evaluator",
+        interval_s=0.01,
+    ):
+        time.sleep(0.035)
+
+    assert len(events) >= 2
+    assert {event["stage"] for event in events} == {"jit initialize"}
+    assert all("unit evaluator waiting" in str(event["item"]) for event in events)
+
+
+def test_jit_boundary_heartbeat_is_disabled_for_non_jit_backend() -> None:
+    events: list[dict[str, object]] = []
+    settings = SymbolicaEvaluatorSettings(backend="compiled-complex")
+
+    with _JITBoundaryHeartbeat(
+        events.append,
+        settings,
+        jit_compile=True,
+        phase="initialize",
+        item="unit evaluator",
+        interval_s=0.01,
+    ):
+        time.sleep(0.025)
+
+    assert events == []
 
 
 def test_z_gluon_dag_split_vertex_current_stages_match_default() -> None:

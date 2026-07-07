@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 from importlib import metadata as importlib_metadata
 import json
 import math
@@ -8,6 +9,7 @@ import os
 import platform
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +27,7 @@ from .lowering import (
     _source_currents,
     _weyl_coupling_for_chirality,
 )
-from .matrix import CurrentKey, NativeMatrixElementGenerator, RecursionGraph
+from .legacy_matrix import CurrentKey, NativeMatrixElementGenerator, RecursionGraph
 from .model import AmplicolSMLeadingColorModel
 from .native import (
     ExternalMomentum,
@@ -33,12 +35,16 @@ from .native import (
     LeadingColorZJetsNativeEvaluator,
     MatrixElementEvaluation,
     NativeEvaluationError,
+    _antilepton_lepton_to_vector_weyl,
     _ext_antiquark_weyl,
     _ext_gluon_cmplx,
     _ext_massive_vector,
     _ext_quark_weyl,
     _final_state_identical_factor,
     _initial_state_average_factor,
+    _lepton_antilepton_to_vector_weyl,
+    _neutral_vector_fermion_coupling,
+    _neutral_vector_propagator,
 )
 from .params import ParamBuilder
 from .symbols import symbols
@@ -360,6 +366,12 @@ class SharedSourceCurrent:
     physical_helicity: int
     chirality: int
     source_bit: int
+    source_kind: str = "external"
+    partner_leg_label: int | None = None
+    partner_helicity: int | None = None
+    partner_chirality: int | None = None
+    vector_pdg: int | None = None
+    coupling: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -381,6 +393,7 @@ class SharedAmplitudeRecord:
     right_id: int
     helicities: tuple[int, ...]
     multiplicity: int = 1
+    coherent_group_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -390,6 +403,23 @@ class SharedCurrentTable:
     interactions: tuple[SharedInteractionNode, ...]
     interactions_by_result: tuple[tuple[int, ...], ...]
     amplitudes: tuple[SharedAmplitudeRecord, ...]
+
+
+@dataclass(frozen=True)
+class _VectorSourceSpec:
+    key: tuple[int, ...]
+    external_labels: tuple[int, ...]
+    leg_label: int
+    helicity: int
+    physical_helicities: tuple[int, ...]
+    vector_pdg: int | None = None
+    chirality: int = 0
+    source_kind: str = "external"
+    partner_leg_label: int | None = None
+    partner_helicity: int | None = None
+    partner_chirality: int | None = None
+    coupling: tuple[float, float] | None = None
+    coherent_with_same_helicities: bool = False
 
 
 @dataclass(frozen=True)
@@ -437,6 +467,10 @@ class ZGluonDAGEvaluator:
         symbolica_compiled_output_dir: str | Path | None = None,
         symbolica_load_evaluator_dir: str | Path | None = None,
         symbolica_raw_sum_final_stage: bool = False,
+        vector_source_specs: Sequence[_VectorSourceSpec] | None = None,
+        rusticol_validation_points: Sequence[Sequence[ExternalMomentum]] | None = None,
+        electroweak_coupling_power: int = 1,
+        rusticol_artifact_family: str | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         if batch_size < 1:
@@ -445,7 +479,15 @@ class ZGluonDAGEvaluator:
         self.model = model or AmplicolSMLeadingColorModel()
         self.graph = graph or _z_gluon_graph(process, self.model)
         self.gluon_count = _validate_z_gluon_graph(self.graph)
+        self.vector_pdg = _vector_pdg_from_graph(self.graph)
         self.batch_size = int(batch_size)
+        self.rusticol_validation_points = (
+            None
+            if rusticol_validation_points is None
+            else tuple(tuple(point) for point in rusticol_validation_points)
+        )
+        self.electroweak_coupling_power = int(electroweak_coupling_power)
+        self.rusticol_artifact_family = rusticol_artifact_family
         self.progress_callback = progress_callback
         self.last_runtime_timing = DAGEvaluationTiming()
         self.loaded_evaluator_artifact_metadata: dict[str, Any] | None = None
@@ -498,6 +540,7 @@ class ZGluonDAGEvaluator:
             self.graph,
             self.model,
             gluon_count=self.gluon_count,
+            vector_source_specs=vector_source_specs,
             progress_callback=progress_callback,
         )
         self.current_table_build_time_s = time.perf_counter() - table_start
@@ -506,8 +549,8 @@ class ZGluonDAGEvaluator:
         if symbolica_load_evaluator_dir is not None:
             if split_vertex_current_stages:
                 raise NativeEvaluationError(
-                    "compiled evaluator loading is currently implemented only for "
-                    "the default shared-current D-mode, not split vertex/current stages"
+                        "compiled evaluator loading is currently implemented only for "
+                        "the default shared-current D-mode, not split vertex/current stages"
                 )
             loaded_manifest = _read_evaluator_artifact_manifest(
                 Path(symbolica_load_evaluator_dir)
@@ -563,9 +606,10 @@ class ZGluonDAGEvaluator:
         _prepare_process_output_directory(output_path)
         artifact = {
             "schema_version": 1,
-            "kind": "pyamplicol-zgluon-shared-dag-compiled",
+            "kind": "pyamplicol-vector-gluon-shared-dag-compiled",
             "process": self.process,
             "gluon_count": self.gluon_count,
+            "vector_pdg": self.vector_pdg,
             "table_counts": {
                 "currents": len(self.table.currents),
                 "sources": len(self.table.sources),
@@ -589,6 +633,10 @@ class ZGluonDAGEvaluator:
             table=self.table,
             layout=self.compiled.layout,
             model=self.model,
+            validation_points=self.rusticol_validation_points,
+            vector_pdg=self.vector_pdg,
+            electroweak_coupling_power=self.electroweak_coupling_power,
+            artifact_family=self.rusticol_artifact_family,
         )
         _report_progress(
             self.progress_callback,
@@ -820,22 +868,31 @@ class ZGluonDAGEvaluator:
         self,
         particles: tuple[ExternalMomentum, ...],
     ) -> tuple[tuple[tuple[int, ...], complex], ...]:
-        incoming_quark = particles[0]
-        incoming_antiquark = particles[1]
+        (
+            _incoming_quark_label,
+            incoming_quark,
+            _incoming_antiquark_label,
+            incoming_antiquark,
+        ) = _incoming_quark_antiquark_with_labels(particles)
         gluons = particles[2 : 2 + self.gluon_count]
-        z_boson = particles[-1]
+        vector_boson = particles[-1]
         anti_closure_momentum = _negate_momentum(incoming_quark.momentum)
         quark_start_momentum = _negate_momentum(incoming_antiquark.momentum)
         gluon_momenta = tuple(gluon.momentum for gluon in gluons)
-        z_momentum = z_boson.momentum
+        vector_momentum = vector_boson.momentum
 
         anti_plus = _ext_antiquark_weyl(anti_closure_momentum, 1, -1)
         anti_minus = _ext_antiquark_weyl(anti_closure_momentum, -1, 1)
         quark_minus = _ext_quark_weyl(quark_start_momentum, -1, 1)
         quark_plus = _ext_quark_weyl(quark_start_momentum, 1, -1)
-        z_vectors = {
-            helicity: _ext_massive_vector(z_momentum, helicity, self.model.mass(23))
-            for helicity in (-1, 0, 1)
+        vector_vectors = {
+            helicity: _ext_vector_wavefunction(
+                vector_momentum,
+                helicity,
+                vector_pdg=vector_boson.pdg,
+                model=self.model,
+            )
+            for helicity in _vector_helicities(vector_boson.pdg)
         }
         amplitudes: list[tuple[tuple[int, ...], complex]] = []
         for (
@@ -848,7 +905,7 @@ class ZGluonDAGEvaluator:
             (1, -1, 1, quark_minus, anti_plus),
             (-1, 1, -1, quark_plus, anti_minus),
         ):
-            for z_helicity in (-1, 0, 1):
+            for vector_helicity in _vector_helicities(vector_boson.pdg):
                 for gluon_helicities in product(
                     (-1, 1),
                     repeat=self.gluon_count,
@@ -867,7 +924,7 @@ class ZGluonDAGEvaluator:
                         quark_wf=quark_wf,
                         anti_wf=anti_wf,
                         gluon_wfs=gluon_wfs,
-                        z_wf=z_vectors[z_helicity],
+                        vector_wf=vector_vectors[vector_helicity],
                     )
                     amplitudes.extend(
                         (
@@ -875,7 +932,7 @@ class ZGluonDAGEvaluator:
                                 physical_quark_helicity,
                                 physical_antiquark_helicity,
                                 *gluon_helicities,
-                                z_helicity,
+                                vector_helicity,
                             ),
                             _dot_weyl(
                                 currents[_current_key_tuple(left)],
@@ -895,7 +952,7 @@ class ZGluonDAGEvaluator:
         quark_wf: tuple[complex, complex],
         anti_wf: tuple[complex, complex],
         gluon_wfs: tuple[tuple[complex, complex, complex, complex], ...],
-        z_wf: tuple[complex, complex, complex, complex],
+        vector_wf: tuple[complex, complex, complex, complex],
     ) -> dict[tuple[int, tuple[int, ...], int], tuple[complex, ...]]:
         currents: dict[tuple[int, tuple[int, ...], int], tuple[complex, ...]] = {}
         for current in _source_currents(self.graph):
@@ -905,17 +962,29 @@ class ZGluonDAGEvaluator:
         if self.blocks is None:
             self.blocks = _DAGBlockEvaluators(self.model)
 
-        incoming_quark = particles[0]
-        incoming_antiquark = particles[1]
-        currents[_current_key_tuple(CurrentKey(-incoming_quark.pdg, (1,), 0))] = anti_wf
+        (
+            incoming_quark_label,
+            incoming_quark,
+            incoming_antiquark_label,
+            incoming_antiquark,
+        ) = _incoming_quark_antiquark_with_labels(particles)
         currents[
-            _current_key_tuple(CurrentKey(-incoming_antiquark.pdg, (2,), chirality))
+            _current_key_tuple(CurrentKey(-incoming_quark.pdg, (incoming_quark_label,), 0))
+        ] = anti_wf
+        currents[
+            _current_key_tuple(
+                CurrentKey(
+                    -incoming_antiquark.pdg,
+                    (incoming_antiquark_label,),
+                    chirality,
+                )
+            )
         ] = quark_wf
         for offset, gluon_wf in enumerate(gluon_wfs, start=3):
             currents[_current_key_tuple(CurrentKey(21, (offset,), 0))] = gluon_wf
         currents[
-            _current_key_tuple(CurrentKey(23, (self.gluon_count + 3,), 0))
-        ] = z_wf
+            _current_key_tuple(CurrentKey(particles[-1].pdg, (self.gluon_count + 3,), 0))
+        ] = vector_wf
 
         momenta_by_label = _current_momenta_by_label(particles)
         interactions_by_result: dict[tuple[int, tuple[int, ...], int], list[Any]] = {}
@@ -985,6 +1054,7 @@ class _SharedCompiledSweepEvaluator:
                     merge_evaluators_strategy=merge_evaluators_strategy,
                     verbose_evaluator_build=verbose_evaluator_build,
                     symbolica_settings=symbolica_settings,
+                    progress_callback=progress_callback,
                 )
             )
             _report_progress(
@@ -1005,6 +1075,7 @@ class _SharedCompiledSweepEvaluator:
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+            progress_callback=progress_callback,
         )
         _report_progress(
             progress_callback,
@@ -1065,7 +1136,10 @@ class _SharedCompiledSweepEvaluator:
         progress_callback: ProgressCallback | None = None,
     ) -> "_SharedCompiledSweepEvaluator":
         manifest = _read_evaluator_artifact_manifest(artifact_dir)
-        if manifest.get("kind") != "pyamplicol-zgluon-shared-dag-compiled":
+        if manifest.get("kind") not in {
+            "pyamplicol-zgluon-shared-dag-compiled",
+            "pyamplicol-vector-gluon-shared-dag-compiled",
+        }:
             raise NativeEvaluationError(
                 f"unsupported evaluator artifact kind: {manifest.get('kind')!r}"
             )
@@ -1132,6 +1206,15 @@ class _SharedCompiledSweepEvaluator:
         return instance
 
     def materialize(self) -> None:
+        for index, stage in enumerate(self.stages, start=1):
+            _report_progress(
+                getattr(stage, "progress_callback", None),
+                stage="materialize",
+                item=f"stage {index}/{len(self.stages)}",
+            )
+            materialize = getattr(stage, "materialize", None)
+            if callable(materialize):
+                materialize()
         self.amplitude_stage.materialize()
 
     def artifact_manifest(self, artifact_dir: Path) -> dict[str, Any]:
@@ -1401,6 +1484,7 @@ class _SharedSplitCompiledSweepEvaluator:
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+            progress_callback=progress_callback,
         )
         _report_progress(
             progress_callback,
@@ -1732,11 +1816,16 @@ def _rusticol_helicity_filter_manifest(table: SharedCurrentTable) -> dict[str, A
                 "helicities": list(amplitude.helicities),
                 "multiplicity": amplitude.multiplicity,
                 "raw_sum_weight": float(amplitude.multiplicity),
+                "coherent_group_id": amplitude.coherent_group_id,
             }
             for index, amplitude in enumerate(table.amplitudes)
         ],
         "raw_sum_weights": [
             float(amplitude.multiplicity)
+            for amplitude in table.amplitudes
+        ],
+        "raw_sum_group_ids": [
+            amplitude.coherent_group_id
             for amplitude in table.amplitudes
         ],
     }
@@ -1789,6 +1878,9 @@ def _rusticol_model_manifest(model: AmplicolSMLeadingColorModel) -> dict[str, An
         "alpha_s_me_check": model.alpha_s_me_check,
         "alpha_ew": model.alpha_ew,
         "mass_z": model.mass(23),
+        "width_z": model.width(23),
+        "mass_w": model.mass(24),
+        "width_w": model.width(24),
         "sqrt_s_default": model.sqrt_s,
         "particles": [
             {
@@ -1829,18 +1921,34 @@ def _write_rusticol_process_artifacts(
     table: SharedCurrentTable,
     layout: _SharedGlobalParameterLayout,
     model: AmplicolSMLeadingColorModel,
+    validation_points: Sequence[Sequence[ExternalMomentum]] | None = None,
+    vector_pdg: int | None = None,
+    electroweak_coupling_power: int = 1,
+    artifact_family: str | None = None,
 ) -> None:
-    validation_points = _rusticol_validation_points(
-        process,
-        gluon_count=gluon_count,
-        model=model,
+    if validation_points is None:
+        validation_points = _rusticol_validation_points(
+            process,
+            gluon_count=gluon_count,
+            model=model,
+        )
+    validation_points = tuple(tuple(point) for point in validation_points)
+    if not validation_points:
+        raise NativeEvaluationError("Rusticol process artifact needs validation points")
+    if vector_pdg is None:
+        vector_pdg = int(validation_points[0][-1].pdg)
+    family = artifact_family or (
+        "q-qbar-z-gluons-leading-color"
+        if vector_pdg == 23
+        else "q-qbar-vector-gluons-leading-color"
     )
     process_manifest = {
         "schema_version": 1,
         "kind": "pyamplicol-rusticol-process",
         "process": process,
-        "family": "q-qbar-z-gluons-leading-color",
+        "family": family,
         "gluon_count": gluon_count,
+        "vector_pdg": vector_pdg,
         "external_pdg_order": [
             int(particle.pdg)
             for particle in validation_points[0]
@@ -1865,6 +1973,7 @@ def _write_rusticol_process_artifacts(
             "coupling_factor": (
                 (4.0 * math.pi * model.alpha_s_me_check) ** gluon_count
                 * (2.0 * 4.0 * math.pi * model.alpha_ew)
+                ** electroweak_coupling_power
             ),
         },
         "helicity_filter": _rusticol_helicity_filter_manifest(table),
@@ -2071,9 +2180,14 @@ def _rusticol_validation_points(
                 sqrt_s=1000.0,
             ),
         )
+    vector_target = native.supported_electroweak_vector_gluon_process(process)
+    if vector_target is None:
+        raise NativeEvaluationError(f"no one-quark-line vector target for {process}")
+    vector_pdg, _ = vector_target
     return (
-        native.canonical_z_gluon_point(
+        native.canonical_neutral_vector_gluon_point(
             process,
+            vector_pdg=vector_pdg,
             gluon_count=gluon_count,
             sqrt_s=1000.0,
         ),
@@ -2119,14 +2233,7 @@ def _rusticol_table_manifest(table: SharedCurrentTable) -> dict[str, Any]:
             for current in table.currents
         ],
         "sources": [
-            {
-                "current_id": source.current_id,
-                "leg_label": source.leg_label,
-                "helicity": source.helicity,
-                "physical_helicity": source.physical_helicity,
-                "chirality": source.chirality,
-                "source_bit": source.source_bit,
-            }
+            _source_current_manifest(source)
             for source in table.sources
         ],
         "interactions": [
@@ -2150,10 +2257,35 @@ def _rusticol_table_manifest(table: SharedCurrentTable) -> dict[str, Any]:
                 "right_id": amplitude.right_id,
                 "helicities": list(amplitude.helicities),
                 "multiplicity": amplitude.multiplicity,
+                "coherent_group_id": amplitude.coherent_group_id,
             }
             for amplitude in table.amplitudes
         ],
     }
+
+
+def _source_current_manifest(source: SharedSourceCurrent) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "current_id": source.current_id,
+        "leg_label": source.leg_label,
+        "helicity": source.helicity,
+        "physical_helicity": source.physical_helicity,
+        "chirality": source.chirality,
+        "source_bit": source.source_bit,
+    }
+    if source.source_kind != "external":
+        payload["source_kind"] = source.source_kind
+    if source.partner_leg_label is not None:
+        payload["partner_leg_label"] = source.partner_leg_label
+    if source.partner_helicity is not None:
+        payload["partner_helicity"] = source.partner_helicity
+    if source.partner_chirality is not None:
+        payload["partner_chirality"] = source.partner_chirality
+    if source.vector_pdg is not None:
+        payload["vector_pdg"] = source.vector_pdg
+    if source.coupling is not None:
+        payload["coupling"] = [float(source.coupling[0]), float(source.coupling[1])]
+    return payload
 
 
 def _shared_current_table_from_rusticol_manifest(
@@ -2203,6 +2335,28 @@ def _shared_current_table_from_rusticol_manifest(
             physical_helicity=int(payload["physical_helicity"]),
             chirality=int(payload["chirality"]),
             source_bit=int(payload["source_bit"]),
+            source_kind=str(payload.get("source_kind", "external")),
+            partner_leg_label=(
+                None
+                if payload.get("partner_leg_label") is None
+                else int(payload["partner_leg_label"])
+            ),
+            partner_helicity=(
+                None
+                if payload.get("partner_helicity") is None
+                else int(payload["partner_helicity"])
+            ),
+            partner_chirality=(
+                None
+                if payload.get("partner_chirality") is None
+                else int(payload["partner_chirality"])
+            ),
+            vector_pdg=(
+                None
+                if payload.get("vector_pdg") is None
+                else int(payload["vector_pdg"])
+            ),
+            coupling=_source_coupling_from_payload(payload),
         )
         for payload in source_payloads
         if isinstance(payload, dict)
@@ -2270,6 +2424,11 @@ def _shared_current_table_from_rusticol_manifest(
             right_id=int(payload["right_id"]),
             helicities=tuple(int(helicity) for helicity in payload["helicities"]),
             multiplicity=int(payload["multiplicity"]),
+            coherent_group_id=(
+                None
+                if payload.get("coherent_group_id") is None
+                else int(payload["coherent_group_id"])
+            ),
         )
         for payload in amplitude_payloads
         if isinstance(payload, dict)
@@ -2284,6 +2443,15 @@ def _shared_current_table_from_rusticol_manifest(
         interactions_by_result=interactions_by_result,
         amplitudes=amplitudes,
     )
+
+
+def _source_coupling_from_payload(payload: dict[str, Any]) -> tuple[float, float] | None:
+    coupling = payload.get("coupling")
+    if coupling is None:
+        return None
+    if not isinstance(coupling, list | tuple) or len(coupling) != 2:
+        raise NativeEvaluationError("source coupling metadata must have two entries")
+    return float(coupling[0]), float(coupling[1])
 
 
 def _decimal_string(value: float) -> str:
@@ -2540,7 +2708,7 @@ def main() -> int:
         return 1
 
     manifest = json.loads((root / "process_manifest.json").read_text())
-    runtime = rusticol.Runtime.load(str(root))
+    runtime = rusticol.Runtime.load_legacy(str(root))
     points = load_points(root, args.precision)
     values = evaluate(runtime, points, args.precision)
 
@@ -2796,9 +2964,13 @@ class _CompiledCurrentStage:
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.layout = layout
         self.current_ids = current_ids
+        self.progress_callback = progress_callback
+        self.label = f"shared_stage_{stage_index}"
+        self._materialized = False
         self.input_current_ids: tuple[int, ...] = ()
         self.momentum_current_ids: tuple[int, ...] = ()
         self.output_slices: dict[int, tuple[int, int]] = {}
@@ -2818,7 +2990,8 @@ class _CompiledCurrentStage:
             verbose_evaluator_build=verbose_evaluator_build,
             real_params=layout.real_valued_inputs,
             symbolica_settings=symbolica_settings,
-            label=f"shared_stage_{stage_index}",
+            label=self.label,
+            progress_callback=progress_callback,
         )
         self.parameter_count = layout.parameter_count
 
@@ -2842,6 +3015,9 @@ class _CompiledCurrentStage:
         )
         instance.output_slices = _output_slices_from_manifest(manifest)
         instance.output_length = int(manifest["output_length"])
+        instance.progress_callback = None
+        instance.label = str(manifest.get("label", "current_stage"))
+        instance._materialized = True
         instance.output_slots = tuple(instance.output_slices.items())
         (
             instance.output_columns,
@@ -2856,8 +3032,10 @@ class _CompiledCurrentStage:
         return instance
 
     def artifact_manifest(self, artifact_dir: Path) -> dict[str, Any]:
+        self.materialize()
         return {
             "kind": "current-stage",
+            "label": self.label,
             "current_ids": list(self.current_ids),
             "input_current_ids": list(self.input_current_ids),
             "momentum_current_ids": list(self.momentum_current_ids),
@@ -2868,6 +3046,32 @@ class _CompiledCurrentStage:
                 artifact_dir,
             ),
         }
+
+    def materialize(self) -> None:
+        if self._materialized:
+            return
+        backend = str(getattr(self.evaluator, "backend", ""))
+        _report_progress(
+            self.progress_callback,
+            stage="jit materialize" if backend == "jit" else "materialize",
+            item=self.label,
+        )
+        materialize = getattr(self.evaluator, "materialize", None)
+        if callable(materialize):
+            heartbeat = (
+                _JITBoundaryHeartbeat(
+                    self.progress_callback,
+                    SymbolicaEvaluatorSettings(backend="jit"),
+                    jit_compile=True,
+                    phase="materialize",
+                    item=self.label,
+                )
+                if backend == "jit"
+                else contextlib.nullcontext()
+            )
+            with heartbeat:
+                materialize()
+        self._materialized = True
 
     def evaluate_and_assign(
         self,
@@ -2988,6 +3192,7 @@ class _CompiledSplitCurrentStage:
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+            progress_callback=progress_callback,
         )
         _report_progress(
             progress_callback,
@@ -3008,6 +3213,7 @@ class _CompiledSplitCurrentStage:
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             symbolica_settings=symbolica_settings,
+            progress_callback=progress_callback,
         )
         _report_progress(
             progress_callback,
@@ -3049,6 +3255,7 @@ class _CompiledVertexStage:
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.layout = layout
         self.interaction_ids = interaction_ids
@@ -3072,6 +3279,7 @@ class _CompiledVertexStage:
             real_params=layout.real_valued_inputs,
             symbolica_settings=symbolica_settings,
             label=f"shared_stage_{stage_index}_vertices",
+            progress_callback=progress_callback,
         )
         self.parameter_count = layout.parameter_count
 
@@ -3163,6 +3371,7 @@ class _CompiledCurrentCombineStage:
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.layout = layout
         self.current_ids = current_ids
@@ -3186,6 +3395,7 @@ class _CompiledCurrentCombineStage:
             real_params=layout.real_valued_inputs,
             symbolica_settings=symbolica_settings,
             label=f"shared_stage_{stage_index}_currents",
+            progress_callback=progress_callback,
         )
         self.parameter_count = layout.parameter_count
 
@@ -3276,6 +3486,7 @@ class _CompiledAmplitudeStage:
         merge_evaluators_strategy: bool,
         verbose_evaluator_build: bool,
         symbolica_settings: SymbolicaEvaluatorSettings,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.layout = layout
         self.input_current_ids: tuple[int, ...] = ()
@@ -3286,9 +3497,15 @@ class _CompiledAmplitudeStage:
             [amplitude.multiplicity for amplitude in table.amplitudes],
             dtype=np.float64,
         )
+        self.raw_sum_group_ids = tuple(
+            amplitude.coherent_group_id
+            for amplitude in table.amplitudes
+        )
         self.merge_evaluators_strategy = merge_evaluators_strategy
         self.verbose_evaluator_build = verbose_evaluator_build
         self.symbolica_settings = symbolica_settings
+        self.progress_callback = progress_callback
+        self._materialized = False
         self._amplitude_evaluator: Any | None = None
         self._raw_sum_evaluator = self._build_raw_sum_evaluator()
         self.parameter_count = layout.parameter_count
@@ -3314,9 +3531,20 @@ class _CompiledAmplitudeStage:
             manifest["raw_sum_weights"],
             dtype=np.float64,
         )
+        raw_sum_group_ids = manifest.get("raw_sum_group_ids")
+        instance.raw_sum_group_ids = (
+            tuple(None for _ in range(instance.output_length))
+            if raw_sum_group_ids is None
+            else tuple(
+                None if value is None else int(value)
+                for value in raw_sum_group_ids
+            )
+        )
         instance.merge_evaluators_strategy = False
         instance.verbose_evaluator_build = False
         instance.symbolica_settings = symbolica_settings
+        instance.progress_callback = None
+        instance._materialized = True
         amplitude_manifest = manifest.get("amplitude_evaluator")
         instance._amplitude_evaluator = (
             None
@@ -3341,7 +3569,31 @@ class _CompiledAmplitudeStage:
         return instance
 
     def materialize(self) -> None:
-        self._ensure_amplitude_evaluator()
+        if self._materialized:
+            return
+        evaluator = self._ensure_amplitude_evaluator()
+        backend = str(getattr(evaluator, "backend", ""))
+        _report_progress(
+            self.progress_callback,
+            stage="jit materialize" if backend == "jit" else "materialize",
+            item="shared_amplitude",
+        )
+        materialize = getattr(evaluator, "materialize", None)
+        if callable(materialize):
+            heartbeat = (
+                _JITBoundaryHeartbeat(
+                    self.progress_callback,
+                    SymbolicaEvaluatorSettings(backend="jit"),
+                    jit_compile=True,
+                    phase="materialize",
+                    item="shared_amplitude",
+                )
+                if backend == "jit"
+                else contextlib.nullcontext()
+            )
+            with heartbeat:
+                materialize()
+        self._materialized = True
 
     def artifact_manifest(self, artifact_dir: Path) -> dict[str, Any]:
         return {
@@ -3349,6 +3601,7 @@ class _CompiledAmplitudeStage:
             "input_current_ids": list(self.input_current_ids),
             "output_length": self.output_length,
             "raw_sum_weights": self.raw_sum_weights.tolist(),
+            "raw_sum_group_ids": list(self.raw_sum_group_ids),
             "amplitude_evaluator": _symbolica_evaluator_artifact_manifest(
                 self._ensure_amplitude_evaluator(),
                 artifact_dir,
@@ -3417,6 +3670,7 @@ class _CompiledAmplitudeStage:
                 evaluated,
                 self.raw_sum_weights,
                 self.output_length,
+                self.raw_sum_group_ids,
             )
         else:
             evaluated_array = _concatenate_complex_outputs(evaluated)
@@ -3445,6 +3699,7 @@ class _CompiledAmplitudeStage:
                 real_params=self.layout.real_valued_inputs,
                 symbolica_settings=self.symbolica_settings,
                 label="shared_amplitude",
+                progress_callback=self.progress_callback,
             )
         return self._amplitude_evaluator
 
@@ -3454,13 +3709,10 @@ class _CompiledAmplitudeStage:
             or self.symbolica_settings.backend == "jit"
         ):
             return None
-        raw_sum = sum(
-            weight * amplitude * amplitude.conj()
-            for weight, amplitude in zip(
-                self.raw_sum_weights.tolist(),
-                self.outputs,
-                strict=True,
-            )
+        raw_sum = _symbolic_weighted_abs2_sum(
+            self.outputs,
+            self.raw_sum_weights.tolist(),
+            self.raw_sum_group_ids,
         )
         return _compile_symbolica_outputs(
             (raw_sum,),
@@ -3471,6 +3723,7 @@ class _CompiledAmplitudeStage:
             symbolica_settings=self.symbolica_settings,
             jit_compile=False,
             label="shared_raw_sum",
+            progress_callback=self.progress_callback,
         )
 
     def _register_parameters(self, table: SharedCurrentTable) -> None:
@@ -3525,10 +3778,17 @@ def _compile_symbolica_outputs(
     symbolica_settings: SymbolicaEvaluatorSettings | None = None,
     jit_compile: bool = True,
     label: str = "symbolica",
+    progress_callback: ProgressCallback | None = None,
 ) -> Any:
     if not outputs:
         raise NativeEvaluationError("cannot build evaluator with zero outputs")
     settings = symbolica_settings or SymbolicaEvaluatorSettings()
+    progress_stage = _symbolica_progress_stage(settings, jit_compile=jit_compile)
+    _report_progress(
+        progress_callback,
+        stage=progress_stage,
+        item=f"{label} prepare {len(outputs)}",
+    )
     outputs = tuple(_prepare_symbolica_output(output, settings) for output in outputs)
     chunk_size = settings.compiled_output_chunk_size
     if chunk_size is not None and len(outputs) > chunk_size:
@@ -3547,6 +3807,11 @@ def _compile_symbolica_outputs(
 
         def compile_chunk(chunk_index: int, start: int) -> Any:
             stop = min(start + chunk_size, len(outputs))
+            _report_progress(
+                progress_callback,
+                stage=progress_stage,
+                item=f"{label} chunk {chunk_index + 1}/{len(chunk_ranges)}",
+            )
             return _compile_symbolica_outputs(
                 outputs[start:stop],
                 params,
@@ -3557,6 +3822,7 @@ def _compile_symbolica_outputs(
                 symbolica_settings=unchunked_settings,
                 jit_compile=jit_compile,
                 label=f"{label}_chunk_{chunk_index}",
+                progress_callback=progress_callback,
             )
 
         workers = min(settings.compiled_chunk_compile_workers, len(chunk_ranges))
@@ -3580,19 +3846,71 @@ def _compile_symbolica_outputs(
     )
     alias_kwargs = {"aliases": list(aliases)} if aliases else {}
     if merge_evaluators_strategy:
-        evaluator = outputs[0].evaluator(
-            params,
-            **alias_kwargs,
-            **evaluator_kwargs,
+        _report_progress(
+            progress_callback,
+            stage=progress_stage,
+            item=f"{label} evaluator 1/{len(outputs)}",
+        )
+        _report_jit_boundary(
+            progress_callback,
+            settings,
+            jit_compile=jit_compile,
+            phase="initialize",
+            item=f"{label} eval 1/{len(outputs)} p={len(params)}",
+        )
+        with _JITBoundaryHeartbeat(
+            progress_callback,
+            settings,
+            jit_compile=jit_compile,
+            phase="initialize",
+            item=f"{label} eval 1/{len(outputs)} p={len(params)}",
+        ):
+            evaluator = outputs[0].evaluator(
+                params,
+                **alias_kwargs,
+                **evaluator_kwargs,
+            )
+        _report_jit_boundary(
+            progress_callback,
+            settings,
+            jit_compile=jit_compile,
+            phase="returned",
+            item=f"{label} eval 1/{len(outputs)}",
         )
         for expression in _progress_outputs(
             outputs[1:],
             enabled=verbose_evaluator_build,
         ):
-            other = expression.evaluator(
-                params,
-                **alias_kwargs,
-                **evaluator_kwargs,
+            _report_progress(
+                progress_callback,
+                stage=progress_stage,
+                item=f"{label} merge",
+            )
+            _report_jit_boundary(
+                progress_callback,
+                settings,
+                jit_compile=jit_compile,
+                phase="initialize",
+                item=f"{label} merge p={len(params)}",
+            )
+            with _JITBoundaryHeartbeat(
+                progress_callback,
+                settings,
+                jit_compile=jit_compile,
+                phase="initialize",
+                item=f"{label} merge p={len(params)}",
+            ):
+                other = expression.evaluator(
+                    params,
+                    **alias_kwargs,
+                    **evaluator_kwargs,
+                )
+            _report_jit_boundary(
+                progress_callback,
+                settings,
+                jit_compile=jit_compile,
+                phase="returned",
+                item=f"{label} merge",
             )
             evaluator.merge(
                 other,
@@ -3603,6 +3921,13 @@ def _compile_symbolica_outputs(
                 ),
             )
         if real_params:
+            _report_jit_boundary(
+                progress_callback,
+                settings,
+                jit_compile=jit_compile,
+                phase="real params",
+                item=f"{label} real={len(real_params)}",
+            )
             evaluator.set_real_params(
                 list(real_params),
                 sqrt_real=settings.real_param_sqrt_real,
@@ -3617,17 +3942,51 @@ def _compile_symbolica_outputs(
             label,
             input_len=len(params),
             output_len=len(outputs),
+            progress_callback=progress_callback,
         )
 
     from symbolica import Expression
 
-    evaluator = Expression.evaluator_multiple(
-        outputs,
-        params,
-        **alias_kwargs,
-        **evaluator_kwargs,
+    _report_progress(
+        progress_callback,
+        stage=progress_stage,
+        item=f"{label} evaluator {len(outputs)}",
+    )
+    _report_jit_boundary(
+        progress_callback,
+        settings,
+        jit_compile=jit_compile,
+        phase="initialize",
+        item=f"{label} out={len(outputs)} p={len(params)}",
+    )
+    with _JITBoundaryHeartbeat(
+        progress_callback,
+        settings,
+        jit_compile=jit_compile,
+        phase="initialize",
+        item=f"{label} out={len(outputs)} p={len(params)}",
+    ):
+        evaluator = Expression.evaluator_multiple(
+            outputs,
+            params,
+            **alias_kwargs,
+            **evaluator_kwargs,
+        )
+    _report_jit_boundary(
+        progress_callback,
+        settings,
+        jit_compile=jit_compile,
+        phase="returned",
+        item=f"{label} out={len(outputs)}",
     )
     if real_params:
+        _report_jit_boundary(
+            progress_callback,
+            settings,
+            jit_compile=jit_compile,
+            phase="real params",
+            item=f"{label} real={len(real_params)}",
+        )
         evaluator.set_real_params(
             list(real_params),
             sqrt_real=settings.real_param_sqrt_real,
@@ -3642,7 +4001,87 @@ def _compile_symbolica_outputs(
         label,
         input_len=len(params),
         output_len=len(outputs),
+        progress_callback=progress_callback,
     )
+
+
+def _report_jit_boundary(
+    progress_callback: ProgressCallback | None,
+    settings: SymbolicaEvaluatorSettings,
+    *,
+    jit_compile: bool,
+    phase: str,
+    item: str,
+) -> None:
+    if settings.backend != "jit" or not jit_compile:
+        return
+    _report_progress(
+        progress_callback,
+        stage=f"jit {phase}",
+        item=item,
+    )
+
+
+class _JITBoundaryHeartbeat:
+    """Emit progress while Symbolica is inside a blocking JIT build call."""
+
+    def __init__(
+        self,
+        progress_callback: ProgressCallback | None,
+        settings: SymbolicaEvaluatorSettings,
+        *,
+        jit_compile: bool,
+        phase: str,
+        item: str,
+        interval_s: float = 5.0,
+    ) -> None:
+        self.progress_callback = progress_callback
+        self.settings = settings
+        self.jit_compile = jit_compile
+        self.phase = phase
+        self.item = item
+        self.interval_s = max(float(interval_s), 0.01)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started_at = 0.0
+
+    def __enter__(self) -> "_JITBoundaryHeartbeat":
+        if (
+            self.progress_callback is None
+            or self.settings.backend != "jit"
+            or not self.jit_compile
+        ):
+            return self
+        self._started_at = time.perf_counter()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_s):
+            elapsed_s = time.perf_counter() - self._started_at
+            _report_progress(
+                self.progress_callback,
+                stage=f"jit {self.phase}",
+                item=f"{self.item} waiting {elapsed_s:.0f}s",
+            )
+
+
+def _symbolica_progress_stage(
+    settings: SymbolicaEvaluatorSettings,
+    *,
+    jit_compile: bool,
+) -> str:
+    if settings.backend == "jit":
+        return "jit compile" if jit_compile else "jit build"
+    if settings.backend in ("compiled-complex", "compiled-complex-4x"):
+        return "c++ build"
+    return "eval build"
 
 
 def _prepare_symbolica_output(
@@ -3745,8 +4184,14 @@ def _finalize_symbolica_evaluator(
     *,
     input_len: int,
     output_len: int,
+    progress_callback: ProgressCallback | None = None,
 ) -> Any:
     if settings.backend == "jit":
+        _report_progress(
+            progress_callback,
+            stage="jit ready",
+            item=label,
+        )
         return _JITSymbolicaEvaluatorAdapter(
             evaluator,
             settings,
@@ -3755,6 +4200,11 @@ def _finalize_symbolica_evaluator(
             output_len=output_len,
         )
     if settings.backend in ("compiled-complex", "compiled-complex-4x"):
+        _report_progress(
+            progress_callback,
+            stage="c++ compile",
+            item=label,
+        )
         return _CompiledComplexEvaluatorAdapter(
             evaluator,
             settings,
@@ -4148,6 +4598,7 @@ def _weighted_abs2_sums(
     evaluated: ComplexOutput,
     weights: np.ndarray,
     output_length: int,
+    group_ids: Sequence[int | None] | None = None,
 ) -> tuple[float, ...]:
     return tuple(
         float(value)
@@ -4155,6 +4606,7 @@ def _weighted_abs2_sums(
             evaluated,
             weights,
             output_length,
+            group_ids,
         ).tolist()
     )
 
@@ -4163,7 +4615,17 @@ def _weighted_abs2_sums_array(
     evaluated: ComplexOutput,
     weights: np.ndarray,
     output_length: int,
+    group_ids: Sequence[int | None] | None = None,
 ) -> np.ndarray:
+    if group_ids is not None and any(group_id is not None for group_id in group_ids):
+        amplitudes = _concatenate_complex_outputs(evaluated)[:, :output_length]
+        raw_sums = np.zeros(amplitudes.shape[0], dtype=np.float64)
+        for indices, weight in _raw_sum_groups(weights, output_length, group_ids):
+            coherent = np.sum(amplitudes[:, indices], axis=1)
+            raw_sums += weight * (
+                coherent.real * coherent.real + coherent.imag * coherent.imag
+            )
+        return raw_sums
     if isinstance(evaluated, tuple):
         if not evaluated:
             return np.empty(0, dtype=np.float64)
@@ -4181,6 +4643,55 @@ def _weighted_abs2_sums_array(
     amplitudes = evaluated[:, :output_length]
     squared = amplitudes.real * amplitudes.real + amplitudes.imag * amplitudes.imag
     return np.dot(squared, weights)
+
+
+def _symbolic_weighted_abs2_sum(
+    amplitudes: Sequence[Any],
+    weights: Sequence[float],
+    group_ids: Sequence[int | None],
+) -> Any:
+    if not any(group_id is not None for group_id in group_ids):
+        return sum(
+            weight * amplitude * amplitude.conj()
+            for weight, amplitude in zip(weights, amplitudes, strict=True)
+        )
+    return sum(
+        weight * coherent * coherent.conj()
+        for indices, weight in _raw_sum_groups(
+            np.asarray(weights, dtype=np.float64),
+            len(amplitudes),
+            group_ids,
+        )
+        for coherent in (sum(amplitudes[index] for index in indices),)
+    )
+
+
+def _raw_sum_groups(
+    weights: np.ndarray,
+    output_length: int,
+    group_ids: Sequence[int | None],
+) -> tuple[tuple[tuple[int, ...], float], ...]:
+    if len(group_ids) != output_length:
+        raise NativeEvaluationError(
+            "raw-sum coherent group metadata length does not match amplitude outputs"
+        )
+    grouped: dict[int, list[int]] = {}
+    ordered: list[tuple[tuple[int, ...], float]] = []
+    for index in range(output_length):
+        group_id = group_ids[index]
+        if group_id is None:
+            ordered.append(((index,), float(weights[index])))
+            continue
+        grouped.setdefault(int(group_id), []).append(index)
+    for group_id in sorted(grouped):
+        indices = tuple(grouped[group_id])
+        group_weights = {float(weights[index]) for index in indices}
+        if len(group_weights) != 1:
+            raise NativeEvaluationError(
+                f"coherent amplitude group {group_id} has inconsistent raw-sum weights"
+            )
+        ordered.append((indices, group_weights.pop()))
+    return tuple(ordered)
 
 
 def _safe_symbol_name(value: str) -> str:
@@ -4223,34 +4734,31 @@ def _expr_vertex(
     right: tuple[Any, ...],
     momentum_expressions: dict[int, tuple[Any, ...]],
 ) -> tuple[Any, ...]:
-    kind = int(interaction.vertex_kind)
-    if kind == 0:
-        return _expr_three_gluon(
-            left,
-            momentum_expressions[interaction.left_id],
-            right,
-            momentum_expressions[interaction.right_id],
-        )
-    if kind == 1:
-        return _expr_two_gluon_to_tensor(left, right)
-    if kind == 2:
-        return _expr_tensor_gluon_to_gluon(left, right)
-    if kind == 3:
-        return _expr_gluon_tensor_to_gluon(left, right)
-    if kind == 6:
-        return _expr_quark_vector_weyl(
+    try:
+        return _dag_expression_model().vertex_component_expression(
+            int(interaction.vertex_kind),
             left,
             right,
-            int(interaction.result.chirality),
+            result_particle_id=int(interaction.result.pdg),
+            result_chirality=int(interaction.result.chirality),
+            left_chirality=int(interaction.left.chirality),
+            right_chirality=int(interaction.right.chirality),
+            coupling=interaction.coupling,
+            left_momentum=momentum_expressions.get(interaction.left_id),
+            right_momentum=momentum_expressions.get(interaction.right_id),
         )
-    if kind == 10:
-        chirality = int(interaction.result.chirality)
-        coupling = _weyl_coupling_for_chirality(chirality, interaction.coupling)
-        return tuple(
-            coupling * component
-            for component in _expr_quark_vector_weyl(left, right, chirality)
-        )
-    raise NativeEvaluationError(f"unsupported shared DAG vertex kind: {kind}")
+    except ValueError as error:
+        raise NativeEvaluationError(str(error)) from error
+
+
+_DAG_EXPRESSION_MODEL: AmplicolSMLeadingColorModel | None = None
+
+
+def _dag_expression_model() -> AmplicolSMLeadingColorModel:
+    global _DAG_EXPRESSION_MODEL
+    if _DAG_EXPRESSION_MODEL is None:
+        _DAG_EXPRESSION_MODEL = AmplicolSMLeadingColorModel()
+    return _DAG_EXPRESSION_MODEL
 
 
 def _expr_three_gluon(
@@ -4429,9 +4937,10 @@ def _build_shared_helicity_current_table(
     model: AmplicolSMLeadingColorModel,
     *,
     gluon_count: int,
+    vector_source_specs: Sequence[_VectorSourceSpec] | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> SharedCurrentTable:
-    """Build an AmpliCol-style imode=1 current table for q q~ -> Z+n gluons.
+    """Build an AmpliCol-style imode=1 current table for q q~ -> V+n gluons.
 
     External helicities become source-current ids.  Internal currents are then
     keyed by the ordinary current identity plus the bitset of source currents
@@ -4441,12 +4950,43 @@ def _build_shared_helicity_current_table(
     process = graph.process
     if len(process) != gluon_count + 3:
         raise NativeEvaluationError("shared-helicity table received a mismatched graph")
-    incoming_quark_pdg = int(process[0])
-    incoming_antiquark_pdg = int(process[1])
-    quark_current_pdg = -incoming_antiquark_pdg
-    anti_closure_pdg = -incoming_quark_pdg
+    incoming_current_pdgs = ((1, -int(process[0])), (2, -int(process[1])))
+    quark_candidates = [
+        (label, pdg) for label, pdg in incoming_current_pdgs if pdg > 0
+    ]
+    anti_candidates = [
+        (label, pdg) for label, pdg in incoming_current_pdgs if pdg < 0
+    ]
+    if len(quark_candidates) != 1 or len(anti_candidates) != 1:
+        raise NativeEvaluationError(
+            "shared-current table expects one incoming quark and one antiquark"
+        )
+    quark_label, quark_current_pdg = quark_candidates[0]
+    anti_label, anti_closure_pdg = anti_candidates[0]
     gluon_labels = tuple(range(3, 3 + gluon_count))
-    z_label = gluon_count + 3
+    vector_label = gluon_count + 3
+    vector_pdg = int(process[-1])
+    if vector_source_specs is None:
+        vector_source_specs = tuple(
+            _VectorSourceSpec(
+                key=(helicity,),
+                external_labels=(vector_label,),
+                leg_label=vector_label,
+                helicity=helicity,
+                physical_helicities=(helicity,),
+                vector_pdg=vector_pdg,
+            )
+            for helicity in _vector_helicities(vector_pdg)
+        )
+    else:
+        vector_source_specs = tuple(vector_source_specs)
+        if not vector_source_specs:
+            raise NativeEvaluationError("shared-current table needs at least one vector source")
+    vector_current_pdg = _vector_result_pdg(quark_current_pdg, vector_pdg)
+    if anti_closure_pdg != -vector_current_pdg:
+        raise NativeEvaluationError(
+            "shared-current table received incompatible vector quark flavours"
+        )
 
     currents: list[SharedCurrentNode] = []
     sources: list[SharedSourceCurrent] = []
@@ -4492,6 +5032,12 @@ def _build_shared_helicity_current_table(
         helicity: int,
         physical_helicity: int,
         chirality: int,
+        source_kind: str = "external",
+        partner_leg_label: int | None = None,
+        partner_helicity: int | None = None,
+        partner_chirality: int | None = None,
+        vector_pdg: int | None = None,
+        coupling: tuple[float, float] | None = None,
     ) -> int:
         source_bit = 1 << len(sources)
         current_id = add_current(
@@ -4509,6 +5055,12 @@ def _build_shared_helicity_current_table(
                 physical_helicity=physical_helicity,
                 chirality=chirality,
                 source_bit=source_bit,
+                source_kind=source_kind,
+                partner_leg_label=partner_leg_label,
+                partner_helicity=partner_helicity,
+                partner_chirality=partner_chirality,
+                vector_pdg=vector_pdg,
+                coupling=coupling,
             )
         )
         _report_progress(
@@ -4545,15 +5097,15 @@ def _build_shared_helicity_current_table(
 
     anti_source_by_physical: dict[int, int] = {
         1: add_source(
-            CurrentKey(anti_closure_pdg, (1,), 0),
-            leg_label=1,
+            CurrentKey(anti_closure_pdg, (anti_label,), 0),
+            leg_label=anti_label,
             helicity=1,
             physical_helicity=1,
             chirality=1,
         ),
         -1: add_source(
-            CurrentKey(anti_closure_pdg, (1,), 0),
-            leg_label=1,
+            CurrentKey(anti_closure_pdg, (anti_label,), 0),
+            leg_label=anti_label,
             helicity=-1,
             physical_helicity=-1,
             chirality=-1,
@@ -4561,15 +5113,15 @@ def _build_shared_helicity_current_table(
     }
     quark_source_by_chirality: dict[int, int] = {
         1: add_source(
-            CurrentKey(quark_current_pdg, (2,), 1),
-            leg_label=2,
+            CurrentKey(quark_current_pdg, (quark_label,), 1),
+            leg_label=quark_label,
             helicity=-1,
             physical_helicity=-1,
             chirality=1,
         ),
         -1: add_source(
-            CurrentKey(quark_current_pdg, (2,), -1),
-            leg_label=2,
+            CurrentKey(quark_current_pdg, (quark_label,), -1),
+            leg_label=quark_label,
             helicity=1,
             physical_helicity=1,
             chirality=-1,
@@ -4585,15 +5137,29 @@ def _build_shared_helicity_current_table(
                 physical_helicity=helicity,
                 chirality=0,
             )
-    z_sources: dict[int, int] = {}
-    for helicity in (-1, 0, 1):
-        z_sources[helicity] = add_source(
-            CurrentKey(23, (z_label,), 0),
-            leg_label=z_label,
-            helicity=helicity,
-            physical_helicity=helicity,
-            chirality=0,
+    vector_sources: dict[tuple[int, ...], int] = {}
+    vector_source_physical_helicities: dict[tuple[int, ...], tuple[int, ...]] = {}
+    vector_source_pdgs: dict[tuple[int, ...], int] = {}
+    coherent_vector_source_keys: set[tuple[int, ...]] = set()
+    for spec in vector_source_specs:
+        source_vector_pdg = spec.vector_pdg or vector_pdg
+        vector_sources[spec.key] = add_source(
+            CurrentKey(source_vector_pdg, spec.external_labels, 0),
+            leg_label=spec.leg_label,
+            helicity=spec.helicity,
+            physical_helicity=spec.physical_helicities[0],
+            chirality=spec.chirality,
+            source_kind=spec.source_kind,
+            partner_leg_label=spec.partner_leg_label,
+            partner_helicity=spec.partner_helicity,
+            partner_chirality=spec.partner_chirality,
+            vector_pdg=source_vector_pdg if spec.source_kind != "external" else None,
+            coupling=spec.coupling,
         )
+        vector_source_physical_helicities[spec.key] = spec.physical_helicities
+        vector_source_pdgs[spec.key] = source_vector_pdg
+        if spec.coherent_with_same_helicities:
+            coherent_vector_source_keys.add(spec.key)
 
     def merge_source_ids(*current_ids_to_merge: int) -> tuple[int, ...]:
         merged: set[int] = set()
@@ -4673,14 +5239,13 @@ def _build_shared_helicity_current_table(
                         )
                 gluon_currents[(start, end, helicities)] = gluon_id
 
-    z_coupling = model.z_fermion_coupling(abs(incoming_quark_pdg))
-    quark_without_z: dict[tuple[int, int, tuple[int, ...]], int] = {}
-    quark_with_z: dict[tuple[int, int, tuple[int, ...], int], int] = {}
+    quark_without_vector: dict[tuple[int, int, tuple[int, ...]], int] = {}
+    quark_with_vector: dict[tuple[int, int, tuple[int, ...], int], int] = {}
     for chirality in (1, -1):
         source_id = quark_source_by_chirality[chirality]
-        quark_without_z[(chirality, 0, ())] = source_id
+        quark_without_vector[(chirality, 0, ())] = source_id
         for end in range(1, gluon_count + 1):
-            labels = (2, *gluon_labels[:end])
+            labels = (quark_label, *gluon_labels[:end])
             for helicities in product((-1, 1), repeat=end):
                 _report_progress(
                     progress_callback,
@@ -4688,7 +5253,7 @@ def _build_shared_helicity_current_table(
                     item=f"quark g{end}/{gluon_count}",
                     increment=1,
                 )
-                first_left = quark_without_z[(chirality, 0, ())]
+                first_left = quark_without_vector[(chirality, 0, ())]
                 first_right = gluon_currents[(0, end, helicities)]
                 result_id = add_current(
                     CurrentKey(quark_current_pdg, labels, chirality),
@@ -4699,47 +5264,76 @@ def _build_shared_helicity_current_table(
                 for split in range(0, end):
                     left_helicities = helicities[:split]
                     right_helicities = helicities[split:]
-                    left_id = quark_without_z[(chirality, split, left_helicities)]
+                    left_id = quark_without_vector[(chirality, split, left_helicities)]
                     right_id = gluon_currents[(split, end, right_helicities)]
                     add_interaction(6, left_id, right_id, result_id)
-                quark_without_z[(chirality, end, helicities)] = result_id
+                quark_without_vector[(chirality, end, helicities)] = result_id
 
         for end in range(0, gluon_count + 1):
-            labels = (2, *gluon_labels[:end], z_label)
             for helicities in product((-1, 1), repeat=end):
-                without_z_id = quark_without_z[(chirality, end, helicities)]
-                for z_helicity, z_id in z_sources.items():
+                without_vector_id = quark_without_vector[(chirality, end, helicities)]
+                for vector_source_key, vector_id in vector_sources.items():
+                    vector_labels = currents[vector_id].external_labels
+                    labels = (quark_label, *gluon_labels[:end], *vector_labels)
                     _report_progress(
                         progress_callback,
                         stage="recursion",
-                        item=f"quark+Z g{end}/{gluon_count}",
+                        item=f"quark+V g{end}/{gluon_count}",
                         increment=1,
                     )
                     result_id = add_current(
-                        CurrentKey(quark_current_pdg, labels, chirality),
-                        source_ids=merge_source_ids(without_z_id, z_id),
-                        ext_source_bits=merge_source_bits(without_z_id, z_id),
+                        CurrentKey(vector_current_pdg, labels, chirality),
+                        source_ids=merge_source_ids(without_vector_id, vector_id),
+                        ext_source_bits=merge_source_bits(without_vector_id, vector_id),
                         needs_propagator=end != gluon_count,
                     )
-                    add_interaction(10, without_z_id, z_id, result_id, z_coupling)
+                    add_interaction(
+                        10,
+                        without_vector_id,
+                        vector_id,
+                        result_id,
+                        _vector_quark_coupling(
+                            model,
+                            fermion_pdg=quark_current_pdg,
+                            vector_pdg=vector_source_pdgs[vector_source_key],
+                        ),
+                    )
                     for split in range(0, end):
                         left_helicities = helicities[:split]
                         right_helicities = helicities[split:]
-                        left_id = quark_with_z[
-                            (chirality, split, left_helicities, z_helicity)
+                        left_id = quark_with_vector[
+                            (chirality, split, left_helicities, *vector_source_key)
                         ]
                         right_id = gluon_currents[(split, end, right_helicities)]
                         add_interaction(6, left_id, right_id, result_id)
-                    quark_with_z[(chirality, end, helicities, z_helicity)] = result_id
+                    quark_with_vector[
+                        (chirality, end, helicities, *vector_source_key)
+                    ] = result_id
 
     amplitudes: list[SharedAmplitudeRecord] = []
+    coherent_group_ids: dict[tuple[int, ...], int] = {}
     for physical_quark_helicity, physical_antiquark_helicity, chirality in (
         (1, -1, 1),
         (-1, 1, -1),
     ):
         anti_id = anti_source_by_physical[physical_quark_helicity]
-        for z_helicity in (-1, 0, 1):
+        for vector_source_key in vector_sources:
+            vector_physical_helicities = vector_source_physical_helicities[
+                vector_source_key
+            ]
             for gluon_helicities in product((-1, 1), repeat=gluon_count):
+                amplitude_helicities = (
+                    physical_quark_helicity,
+                    physical_antiquark_helicity,
+                    *gluon_helicities,
+                    *vector_physical_helicities,
+                )
+                coherent_group_id = None
+                if vector_source_key in coherent_vector_source_keys:
+                    coherent_group_id = coherent_group_ids.setdefault(
+                        amplitude_helicities,
+                        len(coherent_group_ids),
+                    )
                 _report_progress(
                     progress_callback,
                     stage="recursion",
@@ -4748,16 +5342,17 @@ def _build_shared_helicity_current_table(
                 )
                 amplitudes.append(
                     SharedAmplitudeRecord(
-                        left_id=quark_with_z[
-                            (chirality, gluon_count, gluon_helicities, z_helicity)
+                        left_id=quark_with_vector[
+                            (
+                                chirality,
+                                gluon_count,
+                                gluon_helicities,
+                                *vector_source_key,
+                            )
                         ],
                         right_id=anti_id,
-                        helicities=(
-                            physical_quark_helicity,
-                            physical_antiquark_helicity,
-                            *gluon_helicities,
-                            z_helicity,
-                        ),
+                        helicities=amplitude_helicities,
+                        coherent_group_id=coherent_group_id,
                     )
                 )
 
@@ -4775,6 +5370,94 @@ def _build_shared_helicity_current_table(
     )
 
 
+def _charged_leptonic_w_vector_source_specs(
+    *,
+    vector_pdg: int,
+    first_lepton_label: int,
+    second_lepton_label: int,
+    model: AmplicolSMLeadingColorModel,
+) -> tuple[_VectorSourceSpec, ...]:
+    if vector_pdg == 24:
+        return (
+            _VectorSourceSpec(
+                key=(1, -1),
+                external_labels=(first_lepton_label, second_lepton_label),
+                leg_label=first_lepton_label,
+                helicity=1,
+                physical_helicities=(1, -1),
+                chirality=1,
+                source_kind="lepton_pair_vector",
+                partner_leg_label=second_lepton_label,
+                partner_helicity=-1,
+                partner_chirality=-1,
+                coupling=(model.charged_current_coupling(), 0.0),
+            ),
+        )
+    if vector_pdg == -24:
+        return (
+            _VectorSourceSpec(
+                key=(-1, 1),
+                external_labels=(first_lepton_label, second_lepton_label),
+                leg_label=first_lepton_label,
+                helicity=-1,
+                physical_helicities=(-1, 1),
+                chirality=-1,
+                source_kind="lepton_pair_vector",
+                partner_leg_label=second_lepton_label,
+                partner_helicity=1,
+                partner_chirality=1,
+                coupling=(model.charged_current_coupling(), 0.0),
+            ),
+        )
+    raise NativeEvaluationError(
+        f"charged leptonic vector source specs need W+/W-, got {vector_pdg}"
+    )
+
+
+def _neutral_dilepton_vector_source_specs(
+    *,
+    lepton_pdg: int,
+    antilepton_pdg: int,
+    lepton_label: int,
+    antilepton_label: int,
+    model: AmplicolSMLeadingColorModel,
+) -> tuple[_VectorSourceSpec, ...]:
+    if lepton_pdg <= 0 or antilepton_pdg >= 0 or lepton_pdg != -antilepton_pdg:
+        raise NativeEvaluationError(
+            "neutral dilepton vector source specs need l- and matching l+"
+        )
+    specs: list[_VectorSourceSpec] = []
+    for vector_pdg in (22, 23):
+        coupling = _neutral_vector_fermion_coupling(
+            model,
+            vector_pdg=vector_pdg,
+            fermion_pdg=lepton_pdg,
+        )
+        for lepton_helicity in (-1, 1):
+            for antilepton_helicity in (-1, 1):
+                specs.append(
+                    _VectorSourceSpec(
+                        key=(vector_pdg, lepton_helicity, antilepton_helicity),
+                        external_labels=(lepton_label, antilepton_label),
+                        leg_label=lepton_label,
+                        helicity=lepton_helicity,
+                        physical_helicities=(
+                            lepton_helicity,
+                            antilepton_helicity,
+                        ),
+                        vector_pdg=vector_pdg,
+                        chirality=lepton_helicity,
+                        source_kind="lepton_pair_vector",
+                        partner_leg_label=antilepton_label,
+                        partner_helicity=antilepton_helicity,
+                        partner_chirality=antilepton_helicity,
+                        coupling=coupling,
+                        coherent_with_same_helicities=True,
+                    )
+                )
+    return tuple(specs)
+
+
 def _fill_shared_source_currents(
     values: np.ndarray,
     table: SharedCurrentTable,
@@ -4790,42 +5473,59 @@ def _fill_shared_source_currents(
             values[:, :] = zero_current_values
         else:
             values[:, :] = 0.0
-    incoming_quark = particles[0]
-    incoming_antiquark = particles[1]
-    anti_closure_momentum = _negate_momentum(incoming_quark.momentum)
-    quark_start_momentum = _negate_momentum(incoming_antiquark.momentum)
     gluons = particles[2 : 2 + gluon_count]
-    z_boson = particles[-1]
+    vector_boson = particles[-1]
 
     for source in table.sources:
         current = table.currents[source.current_id]
-        if source.leg_label == 1:
-            wavefunction: Sequence[complex]
-            if source.physical_helicity == 1:
-                wavefunction = _ext_antiquark_weyl(
-                    anti_closure_momentum,
-                    1,
-                    -1,
-                )
-            else:
-                wavefunction = _ext_antiquark_weyl(
-                    anti_closure_momentum,
-                    -1,
-                    1,
-                )
+        if source.source_kind == "lepton_pair_vector":
+            wavefunction = _lepton_pair_vector_source(
+                source,
+                particles,
+                model,
+                vector_pdg=source.vector_pdg or int(current.key.pdg),
+                coupling=source.coupling,
+            )
             values[current.id, : len(wavefunction)] = wavefunction
-        elif source.leg_label == 2:
-            if source.chirality == 1:
-                wavefunction = _ext_quark_weyl(
-                    quark_start_momentum,
-                    -1,
-                    1,
-                )
+            continue
+        if source.source_kind != "external":
+            raise NativeEvaluationError(
+                f"unsupported shared source-current kind: {source.source_kind}"
+            )
+        if source.leg_label in (1, 2):
+            source_momentum = _negate_momentum(
+                particles[source.leg_label - 1].momentum
+            )
+            wavefunction: Sequence[complex]
+            if current.key.pdg < 0:
+                if source.physical_helicity == 1:
+                    wavefunction = _ext_antiquark_weyl(
+                        source_momentum,
+                        1,
+                        -1,
+                    )
+                else:
+                    wavefunction = _ext_antiquark_weyl(
+                        source_momentum,
+                        -1,
+                        1,
+                    )
+            elif current.key.pdg > 0:
+                if source.chirality == 1:
+                    wavefunction = _ext_quark_weyl(
+                        source_momentum,
+                        -1,
+                        1,
+                    )
+                else:
+                    wavefunction = _ext_quark_weyl(
+                        source_momentum,
+                        1,
+                        -1,
+                    )
             else:
-                wavefunction = _ext_quark_weyl(
-                    quark_start_momentum,
-                    1,
-                    -1,
+                raise NativeEvaluationError(
+                    f"unexpected fermion source current PDG: {current.key.pdg}"
                 )
             values[current.id, : len(wavefunction)] = wavefunction
         elif 3 <= source.leg_label < gluon_count + 3:
@@ -4833,16 +5533,254 @@ def _fill_shared_source_currents(
             wavefunction = _ext_gluon_cmplx(gluon.momentum, source.helicity)
             values[current.id, : len(wavefunction)] = wavefunction
         elif source.leg_label == gluon_count + 3:
-            wavefunction = _ext_massive_vector(
-                z_boson.momentum,
+            wavefunction = _ext_vector_wavefunction(
+                vector_boson.momentum,
                 source.helicity,
-                model.mass(23),
+                vector_pdg=vector_boson.pdg,
+                model=model,
             )
             values[current.id, : len(wavefunction)] = wavefunction
         else:
             raise NativeEvaluationError(
                 f"unexpected source leg label: {source.leg_label}"
             )
+
+
+def _lepton_pair_vector_source(
+    source: SharedSourceCurrent,
+    particles: tuple[ExternalMomentum, ...],
+    model: AmplicolSMLeadingColorModel,
+    *,
+    vector_pdg: int,
+    coupling: tuple[float, float] | None = None,
+) -> tuple[complex, complex, complex, complex]:
+    partner_leg_label = source.partner_leg_label
+    partner_helicity = source.partner_helicity
+    partner_chirality = source.partner_chirality
+    if (
+        partner_leg_label is None
+        or partner_helicity is None
+        or partner_chirality is None
+    ):
+        raise NativeEvaluationError(
+            "lepton-pair vector source is missing partner leg/helicity/chirality metadata"
+        )
+    try:
+        first = particles[source.leg_label - 1]
+        second = particles[partner_leg_label - 1]
+    except IndexError as exc:
+        raise NativeEvaluationError(
+            "lepton-pair vector source refers to a leg outside the process"
+        ) from exc
+
+    momentum = _sum_momenta((first.momentum, second.momentum))
+    if vector_pdg in (22, 23):
+        current = _neutral_lepton_pair_current(
+            first,
+            second,
+            source_helicity=source.helicity,
+            source_chirality=source.chirality,
+            partner_helicity=partner_helicity,
+            partner_chirality=partner_chirality,
+            vector_pdg=vector_pdg,
+            model=model,
+            coupling=coupling,
+        )
+    elif vector_pdg == 24:
+        current = _charged_lepton_pair_current(
+            first,
+            second,
+            source_helicity=source.helicity,
+            source_chirality=source.chirality,
+            partner_helicity=partner_helicity,
+            partner_chirality=partner_chirality,
+            vector_pdg=vector_pdg,
+            model=model,
+            coupling=coupling,
+        )
+    elif vector_pdg == -24:
+        current = _charged_lepton_pair_current(
+            first,
+            second,
+            source_helicity=source.helicity,
+            source_chirality=source.chirality,
+            partner_helicity=partner_helicity,
+            partner_chirality=partner_chirality,
+            vector_pdg=vector_pdg,
+            model=model,
+            coupling=coupling,
+        )
+    else:
+        raise NativeEvaluationError(
+            f"unsupported lepton-pair vector source PDG: {vector_pdg}"
+        )
+    return _neutral_vector_propagator(
+        current,
+        momentum,
+        vector_pdg=vector_pdg,
+        model=model,
+    )
+
+
+def _neutral_lepton_pair_current(
+    first: ExternalMomentum,
+    second: ExternalMomentum,
+    *,
+    source_helicity: int,
+    source_chirality: int,
+    partner_helicity: int,
+    partner_chirality: int,
+    vector_pdg: int,
+    model: AmplicolSMLeadingColorModel,
+    coupling: tuple[float, float] | None = None,
+) -> tuple[complex, complex, complex, complex]:
+    if first.pdg > 0 and second.pdg < 0 and first.pdg == -second.pdg:
+        current_coupling = coupling or _neutral_vector_fermion_coupling(
+            model,
+            vector_pdg=vector_pdg,
+            fermion_pdg=first.pdg,
+        )
+        lepton = _ext_quark_weyl(
+            first.momentum,
+            source_helicity,
+            source_chirality,
+        )
+        antilepton = _ext_antiquark_weyl(
+            second.momentum,
+            partner_helicity,
+            partner_chirality,
+        )
+        return _lepton_antilepton_to_vector_weyl(
+            lepton,
+            antilepton,
+            current_coupling,
+            source_chirality,
+            partner_chirality,
+        )
+    if first.pdg < 0 and second.pdg > 0 and second.pdg == -first.pdg:
+        current_coupling = coupling or _neutral_vector_fermion_coupling(
+            model,
+            vector_pdg=vector_pdg,
+            fermion_pdg=second.pdg,
+        )
+        antilepton = _ext_antiquark_weyl(
+            first.momentum,
+            source_helicity,
+            source_chirality,
+        )
+        lepton = _ext_quark_weyl(
+            second.momentum,
+            partner_helicity,
+            partner_chirality,
+        )
+        return _antilepton_lepton_to_vector_weyl(
+            antilepton,
+            lepton,
+            current_coupling,
+            source_chirality,
+            partner_chirality,
+        )
+    raise NativeEvaluationError(
+        f"neutral lepton-pair vector source expects l- l+, got {first.pdg} {second.pdg}"
+    )
+
+
+def _charged_lepton_pair_current(
+    first: ExternalMomentum,
+    second: ExternalMomentum,
+    *,
+    source_helicity: int,
+    source_chirality: int,
+    partner_helicity: int,
+    partner_chirality: int,
+    vector_pdg: int,
+    model: AmplicolSMLeadingColorModel,
+    coupling: tuple[float, float] | None = None,
+) -> tuple[complex, complex, complex, complex]:
+    current_coupling = coupling or (model.charged_current_coupling(), 0.0)
+    if vector_pdg == 24:
+        if first.pdg in (-11, -13, -15) and second.pdg in (12, 14, 16):
+            antilepton = _ext_antiquark_weyl(
+                first.momentum,
+                source_helicity,
+                source_chirality,
+            )
+            lepton = _ext_quark_weyl(
+                second.momentum,
+                partner_helicity,
+                partner_chirality,
+            )
+            return _antilepton_lepton_to_vector_weyl(
+                antilepton,
+                lepton,
+                current_coupling,
+                source_chirality,
+                partner_chirality,
+            )
+        if first.pdg in (12, 14, 16) and second.pdg in (-11, -13, -15):
+            lepton = _ext_quark_weyl(
+                first.momentum,
+                source_helicity,
+                source_chirality,
+            )
+            antilepton = _ext_antiquark_weyl(
+                second.momentum,
+                partner_helicity,
+                partner_chirality,
+            )
+            return _lepton_antilepton_to_vector_weyl(
+                lepton,
+                antilepton,
+                current_coupling,
+                source_chirality,
+                partner_chirality,
+            )
+        raise NativeEvaluationError(
+            f"W+ lepton-pair vector source expects l+ nu, got {first.pdg} {second.pdg}"
+        )
+    if vector_pdg == -24:
+        if first.pdg in (11, 13, 15) and second.pdg in (-12, -14, -16):
+            lepton = _ext_quark_weyl(
+                first.momentum,
+                source_helicity,
+                source_chirality,
+            )
+            antilepton = _ext_antiquark_weyl(
+                second.momentum,
+                partner_helicity,
+                partner_chirality,
+            )
+            return _lepton_antilepton_to_vector_weyl(
+                lepton,
+                antilepton,
+                current_coupling,
+                source_chirality,
+                partner_chirality,
+            )
+        if first.pdg in (-12, -14, -16) and second.pdg in (11, 13, 15):
+            antilepton = _ext_antiquark_weyl(
+                first.momentum,
+                source_helicity,
+                source_chirality,
+            )
+            lepton = _ext_quark_weyl(
+                second.momentum,
+                partner_helicity,
+                partner_chirality,
+            )
+            return _antilepton_lepton_to_vector_weyl(
+                antilepton,
+                lepton,
+                current_coupling,
+                source_chirality,
+                partner_chirality,
+            )
+        raise NativeEvaluationError(
+            f"W- lepton-pair vector source expects l- nu~, got {first.pdg} {second.pdg}"
+        )
+    raise NativeEvaluationError(
+        f"charged lepton-pair vector source expects W+/W-, got {vector_pdg}"
+    )
 
 
 def _zero_current_tuple(dimension: int) -> tuple[complex, ...]:
@@ -5315,13 +6253,21 @@ def _z_gluon_graph(
 
 def _validate_z_gluon_graph(graph: RecursionGraph) -> int:
     gluon_count = sum(1 for pdg in graph.process[2:] if pdg == 21)
-    if gluon_count < 1 or graph.process[-1] != 23:
+    if graph.process[-1] not in (22, 23, 24, -24):
         raise NativeEvaluationError(
-            "DAG evaluator currently supports q q~ -> Z plus ordered gluons"
+            "DAG evaluator currently supports one-quark-line electroweak vector plus ordered gluons"
         )
     if any(pdg != 21 for pdg in graph.process[2:-1]):
-        raise NativeEvaluationError("DAG graph is not an ordered Z+gluon graph")
+        raise NativeEvaluationError("DAG graph is not an ordered vector+gluon graph")
     return gluon_count
+
+
+def _vector_pdg_from_graph(graph: RecursionGraph) -> int:
+    if graph.process[-1] not in (22, 23, 24, -24):
+        raise NativeEvaluationError(
+            f"DAG graph final vector is not supported: {graph.process[-1]}"
+        )
+    return int(graph.process[-1])
 
 
 def _validate_z_gluon_point(
@@ -5333,15 +6279,45 @@ def _validate_z_gluon_point(
     expected = gluon_count + 3
     if len(point) != expected:
         raise NativeEvaluationError(
-            f"q q~ -> Z + {gluon_count} gluons requires exactly {expected} external momenta"
+            f"q q~ -> vector + {gluon_count} gluons requires exactly {expected} external momenta"
         )
-    if point[0].pdg + point[1].pdg != 0 or not 1 <= abs(point[0].pdg) <= 6:
-        raise NativeEvaluationError("incoming particles must be a quark/antiquark pair")
+    incoming_currents = tuple(-particle.pdg for particle in point[:2])
+    quark_currents = [pdg for pdg in incoming_currents if pdg > 0]
+    anti_closures = [pdg for pdg in incoming_currents if pdg < 0]
+    if len(quark_currents) != 1 or len(anti_closures) != 1:
+        raise NativeEvaluationError(
+            "incoming particles must contain one quark and one antiquark"
+        )
     if any(particle.pdg != 21 for particle in point[2 : 2 + gluon_count]):
-        raise NativeEvaluationError("final-state gluons must precede the Z boson")
-    if point[-1].pdg != 23:
-        raise NativeEvaluationError("final state must end with one Z boson")
+        raise NativeEvaluationError("final-state gluons must precede the vector boson")
+    if point[-1].pdg not in (22, 23, 24, -24):
+        raise NativeEvaluationError("final state must end with one electroweak vector boson")
+    vector_result = _vector_result_pdg(quark_currents[0], point[-1].pdg)
+    if anti_closures[0] != -vector_result:
+        raise NativeEvaluationError(
+            "incoming quark flavours are not compatible with the requested vector emission"
+        )
     return point
+
+
+def _incoming_quark_antiquark_with_labels(
+    particles: Sequence[ExternalMomentum],
+) -> tuple[int, ExternalMomentum, int, ExternalMomentum]:
+    incoming = tuple(enumerate(particles[:2], start=1))
+    quarks = [(label, particle) for label, particle in incoming if particle.pdg > 0]
+    antiquarks = [
+        (label, particle) for label, particle in incoming if particle.pdg < 0
+    ]
+    if (
+        len(quarks) != 1
+        or len(antiquarks) != 1
+        or not 1 <= abs(quarks[0][1].pdg) <= 6
+        or not 1 <= abs(antiquarks[0][1].pdg) <= 6
+    ):
+        raise NativeEvaluationError(
+            "incoming particles must contain one quark and one antiquark"
+        )
+    return quarks[0][0], quarks[0][1], antiquarks[0][0], antiquarks[0][1]
 
 
 def _current_momenta_by_label(
@@ -5392,6 +6368,70 @@ def _negate_momentum(
     momentum: tuple[float, float, float, float],
 ) -> tuple[float, float, float, float]:
     return -momentum[0], -momentum[1], -momentum[2], -momentum[3]
+
+
+def _vector_helicities(vector_pdg: int) -> tuple[int, ...]:
+    if vector_pdg == 22:
+        return (-1, 1)
+    if vector_pdg in (23, 24, -24):
+        return (-1, 0, 1)
+    raise NativeEvaluationError(f"unsupported electroweak vector PDG: {vector_pdg}")
+
+
+def _vector_wavefunction_mass(vector_pdg: int, model: AmplicolSMLeadingColorModel) -> float:
+    if vector_pdg == 22:
+        return 0.0
+    if vector_pdg in (23, 24, -24):
+        return model.mass(vector_pdg)
+    raise NativeEvaluationError(f"unsupported electroweak vector PDG: {vector_pdg}")
+
+
+def _ext_vector_wavefunction(
+    momentum: tuple[float, float, float, float],
+    helicity: int,
+    *,
+    vector_pdg: int,
+    model: AmplicolSMLeadingColorModel,
+) -> tuple[complex, complex, complex, complex]:
+    if vector_pdg == 22:
+        return _ext_gluon_cmplx(momentum, helicity)
+    return _ext_massive_vector(
+        momentum,
+        helicity,
+        _vector_wavefunction_mass(vector_pdg, model),
+    )
+
+
+def _vector_quark_coupling(
+    model: AmplicolSMLeadingColorModel,
+    *,
+    fermion_pdg: int,
+    vector_pdg: int,
+) -> tuple[float, float]:
+    if vector_pdg == 22:
+        return model.photon_fermion_coupling(fermion_pdg)
+    if vector_pdg == 23:
+        return model.z_fermion_coupling(fermion_pdg)
+    if abs(vector_pdg) == 24:
+        _ = _vector_result_pdg(fermion_pdg, vector_pdg)
+        return model.charged_current_coupling(), 0.0
+    raise NativeEvaluationError(f"unsupported electroweak vector PDG: {vector_pdg}")
+
+
+def _vector_result_pdg(fermion_pdg: int, vector_pdg: int) -> int:
+    if not 1 <= fermion_pdg <= 6:
+        raise NativeEvaluationError(
+            f"charged-current quark-line support expects a quark, got {fermion_pdg}"
+        )
+    if vector_pdg in (22, 23):
+        return fermion_pdg
+    if vector_pdg == 24 and fermion_pdg in (1, 3, 5):
+        return fermion_pdg + 1
+    if vector_pdg == -24 and fermion_pdg in (2, 4, 6):
+        return fermion_pdg - 1
+    raise NativeEvaluationError(
+        f"unsupported charged-current transition {fermion_pdg} + {vector_pdg}"
+    )
 
 
 __all__ = [

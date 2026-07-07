@@ -5,17 +5,12 @@ from typing import Sequence
 
 import numpy as np
 
+from .core_types import ExternalMomentum, FourMomentum, NativeEvaluationError
 from .model import AmplicolSMLeadingColorModel
-from .native import (
-    ExternalMomentum,
-    FourMomentum,
-    NativeEvaluationError,
-    _boost_from_rest,
-    _physical_pdgs,
-)
+from .process_ir import build_process_ir
 
 
-def rambo_z_gluon_point(
+def _legacy_rambo_z_gluon_point(
     process: str,
     model: AmplicolSMLeadingColorModel,
     *,
@@ -23,7 +18,7 @@ def rambo_z_gluon_point(
     sqrt_s: float,
     seed: int,
 ) -> tuple[ExternalMomentum, ...]:
-    """Generate a deterministic RAMBO-style point for q q~ -> Z + n g.
+    """Generate a legacy deterministic RAMBO-style point for q q~ -> Z + n g.
 
     The massless construction follows the standard flat RAMBO mapping of
     Kleiss, Stirling and Ellis, CPC 40 (1986).  Massive final particles are
@@ -61,6 +56,80 @@ def rambo_z_gluon_point(
     return (
         ExternalMomentum(pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
         ExternalMomentum(pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
+        *(
+            ExternalMomentum(pdg, momentum)
+            for pdg, momentum in zip(final_pdgs, final_momenta, strict=True)
+        ),
+    )
+
+
+def massive_rambo_final_state(
+    multiplicity: int,
+    *,
+    sqrt_s: float,
+    masses: Sequence[float],
+    seed: int,
+) -> tuple[FourMomentum, ...]:
+    """Generate a deterministic massive RAMBO final state.
+
+    This process-independent helper is the public version of the RAMBO
+    construction used by the generic DAG artifact writer.  It returns momenta
+    in the centre-of-mass frame with total four-momentum
+    ``(sqrt_s, 0, 0, 0)``.
+    """
+
+    return _massive_rambo_final_state(
+        multiplicity,
+        sqrt_s=sqrt_s,
+        masses=masses,
+        rng=np.random.default_rng(seed),
+    )
+
+
+def generic_validation_point(
+    process: str,
+    *,
+    model: AmplicolSMLeadingColorModel | None = None,
+    sqrt_s: float | None = None,
+    seed: int = 101,
+) -> tuple[ExternalMomentum, ...]:
+    """Return deterministic process-generic two-beam validation kinematics."""
+
+    model = model or AmplicolSMLeadingColorModel()
+    ir = build_process_ir(process)
+    initial_pdgs = tuple(int(pdg) for pdg in ir.initial_pdgs)
+    final_pdgs = tuple(int(pdg) for pdg in ir.final_pdgs)
+    if len(initial_pdgs) != 2:
+        raise NativeEvaluationError(
+            "generic validation momenta currently require a two-body initial state"
+        )
+    if not final_pdgs:
+        raise NativeEvaluationError(
+            "generic validation momenta require at least one final-state particle"
+        )
+    final_masses = tuple(float(model.mass(pdg)) for pdg in final_pdgs)
+    threshold = sum(final_masses)
+    if sqrt_s is None:
+        sqrt_s = threshold if len(final_pdgs) == 1 else max(1000.0, threshold + 100.0)
+    if sqrt_s < threshold:
+        raise NativeEvaluationError("sqrt(s) is below the final-state mass threshold")
+    if len(final_pdgs) == 1:
+        if threshold <= 0.0:
+            raise NativeEvaluationError(
+                "no finite centre-of-mass validation point exists for one massless final state"
+            )
+        final_momenta = ((float(sqrt_s), 0.0, 0.0, 0.0),)
+    else:
+        final_momenta = massive_rambo_final_state(
+            len(final_pdgs),
+            sqrt_s=float(sqrt_s),
+            masses=final_masses,
+            seed=seed,
+        )
+    beam_energy = 0.5 * float(sqrt_s)
+    return (
+        ExternalMomentum(initial_pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
+        ExternalMomentum(initial_pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
         *(
             ExternalMomentum(pdg, momentum)
             for pdg, momentum in zip(final_pdgs, final_momenta, strict=True)
@@ -144,6 +213,28 @@ def _massless_rambo_final_state(
     )
 
 
+def _physical_pdgs(process: str) -> tuple[int, ...]:
+    ir = build_process_ir(process)
+    return (*ir.initial_pdgs, *ir.final_pdgs)
+
+
+def _boost_from_rest(momentum: FourMomentum, beta: tuple[float, float, float]) -> FourMomentum:
+    beta2 = beta[0] ** 2 + beta[1] ** 2 + beta[2] ** 2
+    if beta2 == 0.0:
+        return momentum
+    if beta2 >= 1.0:
+        raise NativeEvaluationError("invalid canonical boost with beta >= 1")
+    gamma = 1.0 / math.sqrt(1.0 - beta2)
+    beta_dot_p = beta[0] * momentum[1] + beta[1] * momentum[2] + beta[2] * momentum[3]
+    spatial_factor = ((gamma - 1.0) * beta_dot_p / beta2) + gamma * momentum[0]
+    return (
+        gamma * (momentum[0] + beta_dot_p),
+        momentum[1] + spatial_factor * beta[0],
+        momentum[2] + spatial_factor * beta[1],
+        momentum[3] + spatial_factor * beta[2],
+    )
+
+
 def _massive_spatial_scale(
     spatial_norms: Sequence[float],
     masses: Sequence[float],
@@ -197,4 +288,4 @@ def _minkowski_square(momentum: FourMomentum) -> float:
     )
 
 
-__all__ = ["rambo_z_gluon_point"]
+__all__ = ["generic_validation_point", "massive_rambo_final_state"]

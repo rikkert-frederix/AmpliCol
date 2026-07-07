@@ -2,52 +2,25 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
 from itertools import product
 from typing import Iterable, Sequence
 
+from .core_types import (
+    ExternalMomentum,
+    FourMomentum,
+    HelicityContribution,
+    MatrixElementEvaluation,
+    NativeEvaluationError,
+    TensorWaveFunction,
+    WaveFunction,
+    WeylWaveFunction,
+)
 from .model import AmplicolSMLeadingColorModel, Model
 from .processes import ANTI_PARTICLE, PDGS, ProcessEnumerator
 
 
-FourMomentum = tuple[float, float, float, float]
-WaveFunction = tuple[complex, complex, complex, complex]
-WeylWaveFunction = tuple[complex, complex]
-TensorWaveFunction = tuple[complex, complex, complex, complex, complex, complex]
-
-
-@dataclass(frozen=True)
-class ExternalMomentum:
-    pdg: int
-    momentum: FourMomentum
-
-
-@dataclass(frozen=True)
-class HelicityContribution:
-    helicities: tuple[int, ...]
-    amplitude: complex
-    squared: float
-
-
-@dataclass(frozen=True)
-class MatrixElementEvaluation:
-    process: str
-    particles: tuple[ExternalMomentum, ...]
-    matrix_element: float
-    raw_helicity_sum: float
-    color_factor: int
-    average_factor: int
-    coupling_factor: float
-    helicity_contributions: tuple[HelicityContribution, ...]
-    identical_factor: int = 1
-
-
-class NativeEvaluationError(ValueError):
-    pass
-
-
 class LeadingColorZJetsNativeEvaluator:
-    """Native evaluator entry point for staged q q~ -> Z + n g kernels."""
+    """Native evaluator entry point for staged one-quark-line vector + n g kernels."""
 
     def __init__(self, model: AmplicolSMLeadingColorModel | None = None) -> None:
         self.model: AmplicolSMLeadingColorModel = model or AmplicolSMLeadingColorModel()
@@ -66,21 +39,77 @@ class LeadingColorZJetsNativeEvaluator:
                 else self.canonical_zero_gluon_point(process, sqrt_s=sqrt_s)
             )
             return self.evaluate_zero_gluon_z(process, point)
-        gluon_count = self.supported_z_gluon_count(process)
-        if gluon_count is not None and gluon_count >= 1:
+        vector_target = self.supported_electroweak_vector_gluon_process(process)
+        if vector_target is not None:
+            vector_pdg, gluon_count = vector_target
             point = (
                 tuple(particles)
                 if particles is not None
-                else self.canonical_z_gluon_point(
+                else self.canonical_neutral_vector_gluon_point(
                     process,
+                    vector_pdg=vector_pdg,
                     gluon_count=gluon_count,
                     sqrt_s=sqrt_s,
                 )
             )
-            return self.evaluate_z_gluons(process, point, gluon_count=gluon_count)
+            return self.evaluate_neutral_vector_gluons(
+                process,
+                point,
+                vector_pdg=vector_pdg,
+                gluon_count=gluon_count,
+            )
+        dilepton_target = self.supported_neutral_dilepton_gluon_process(process)
+        if dilepton_target is not None:
+            lepton_pdg, antilepton_pdg, gluon_count = dilepton_target
+            point = (
+                tuple(particles)
+                if particles is not None
+                else self.canonical_neutral_dilepton_gluon_point(
+                    process,
+                    lepton_pdg=lepton_pdg,
+                    antilepton_pdg=antilepton_pdg,
+                    gluon_count=gluon_count,
+                    sqrt_s=sqrt_s,
+                )
+            )
+            return self.evaluate_neutral_dilepton_gluons(
+                process,
+                point,
+                lepton_pdg=lepton_pdg,
+                antilepton_pdg=antilepton_pdg,
+                gluon_count=gluon_count,
+            )
+        charged_leptonic_target = (
+            self.supported_charged_leptonic_w_gluon_process(process)
+        )
+        if charged_leptonic_target is not None:
+            vector_pdg, first_lepton_pdg, second_lepton_pdg, gluon_count = (
+                charged_leptonic_target
+            )
+            point = (
+                tuple(particles)
+                if particles is not None
+                else self.canonical_charged_leptonic_w_gluon_point(
+                    process,
+                    vector_pdg=vector_pdg,
+                    first_lepton_pdg=first_lepton_pdg,
+                    second_lepton_pdg=second_lepton_pdg,
+                    gluon_count=gluon_count,
+                    sqrt_s=sqrt_s,
+                )
+            )
+            return self.evaluate_charged_leptonic_w_gluons(
+                process,
+                point,
+                vector_pdg=vector_pdg,
+                first_lepton_pdg=first_lepton_pdg,
+                second_lepton_pdg=second_lepton_pdg,
+                gluon_count=gluon_count,
+            )
         raise NativeEvaluationError(
             "native numerical evaluation is currently implemented only for "
-            "q q~ -> Z plus ordered gluons"
+            "one-quark-line electroweak vector, neutral dilepton, or charged-current "
+            "leptonic W plus ordered gluons"
         )
 
     def supports_zero_gluon_z(self, process: str) -> bool:
@@ -90,35 +119,188 @@ class LeadingColorZJetsNativeEvaluator:
             return False
         if parsed.rest != ("z",):
             return False
-        incoming = parsed.initial_state
+        physical_pdgs = _physical_pdgs(process)
+        if len(physical_pdgs) != 3:
+            return False
+        initial_pdgs = physical_pdgs[:2]
         return (
-            len(incoming) == 2
-            and incoming[0].endswith("~")
-            and incoming[0].replace("~", "") == incoming[1].replace("~", "")
+            all(1 <= abs(pdg) <= 6 for pdg in initial_pdgs)
+            and initial_pdgs[0] * initial_pdgs[1] < 0
+            and abs(initial_pdgs[0]) == abs(initial_pdgs[1])
         )
 
     def supports_one_gluon_z(self, process: str) -> bool:
         return self.supported_z_gluon_count(process) == 1
 
     def supported_z_gluon_count(self, process: str) -> int | None:
+        supported = self.supported_electroweak_vector_gluon_process(process)
+        if supported is None or supported[0] != 23:
+            return None
+        return supported[1]
+
+    def supported_photon_gluon_count(self, process: str) -> int | None:
+        supported = self.supported_electroweak_vector_gluon_process(process)
+        if supported is None or supported[0] != 22:
+            return None
+        return supported[1]
+
+    def supported_neutral_vector_gluon_process(self, process: str) -> tuple[int, int] | None:
+        supported = self.supported_electroweak_vector_gluon_process(process)
+        if supported is None or supported[0] not in (22, 23):
+            return None
+        return supported
+
+    def supported_w_gluon_count(self, process: str) -> int | None:
+        supported = self.supported_electroweak_vector_gluon_process(process)
+        if supported is None or abs(supported[0]) != 24:
+            return None
+        return supported[1]
+
+    def supported_electroweak_vector_gluon_process(
+        self,
+        process: str,
+    ) -> tuple[int, int] | None:
         try:
             parsed = ProcessEnumerator().parse(process)
         except ValueError:
             return None
         rest = Counter(parsed.rest)
-        if rest.get("z", 0) != 1:
+        vector_names = [
+            name for name in ("a", "z", "w+", "w-") if rest.get(name, 0) == 1
+        ]
+        if len(vector_names) != 1:
             return None
+        vector_name = vector_names[0]
         gluon_count = rest.get("g", 0)
         if gluon_count == 0 or sum(rest.values()) != gluon_count + 1:
             return None
-        incoming = parsed.initial_state
-        if not (
-            len(incoming) == 2
-            and incoming[0].endswith("~")
-            and incoming[0].replace("~", "") == incoming[1].replace("~", "")
+        physical_pdgs = _physical_pdgs(process)
+        if len(physical_pdgs) != gluon_count + 3:
+            return None
+        initial_pdgs = physical_pdgs[:2]
+        if (
+            any(not 1 <= abs(pdg) <= 6 for pdg in initial_pdgs)
+            or initial_pdgs[0] * initial_pdgs[1] >= 0
         ):
             return None
-        return gluon_count
+        vector_pdg = int(PDGS[vector_name])
+        current_pdgs = tuple(-pdg for pdg in initial_pdgs)
+        quark_currents = [pdg for pdg in current_pdgs if pdg > 0]
+        anti_closures = [pdg for pdg in current_pdgs if pdg < 0]
+        if len(quark_currents) != 1 or len(anti_closures) != 1:
+            return None
+        line_start = quark_currents[0]
+        anti_closure = anti_closures[0]
+        try:
+            line_result = _electroweak_vector_result_pdg(line_start, vector_pdg)
+            if anti_closure != -line_result:
+                return None
+        except NativeEvaluationError:
+            return None
+        return vector_pdg, gluon_count
+
+    def supported_neutral_dilepton_gluon_process(
+        self,
+        process: str,
+    ) -> tuple[int, int, int] | None:
+        try:
+            parsed = ProcessEnumerator().parse(process)
+        except ValueError:
+            return None
+        rest = Counter(parsed.rest)
+        gluon_count = rest.get("g", 0)
+        if sum(rest.values()) != gluon_count + 2:
+            return None
+        physical_pdgs = _physical_pdgs(process)
+        if len(physical_pdgs) != gluon_count + 4:
+            return None
+        initial_pdgs = physical_pdgs[:2]
+        if (
+            any(not 1 <= abs(pdg) <= 6 for pdg in initial_pdgs)
+            or initial_pdgs[0] * initial_pdgs[1] >= 0
+        ):
+            return None
+        if abs(initial_pdgs[0]) != abs(initial_pdgs[1]):
+            return None
+        final_leptons = [
+            pdg
+            for pdg in physical_pdgs[2:]
+            if 11 <= abs(pdg) <= 16
+        ]
+        if len(final_leptons) != 2:
+            return None
+        positive = [pdg for pdg in final_leptons if pdg > 0]
+        negative = [pdg for pdg in final_leptons if pdg < 0]
+        if len(positive) != 1 or len(negative) != 1:
+            return None
+        lepton_pdg = positive[0]
+        antilepton_pdg = negative[0]
+        if lepton_pdg != -antilepton_pdg:
+            return None
+        return lepton_pdg, antilepton_pdg, gluon_count
+
+    def supported_charged_leptonic_w_gluon_process(
+        self,
+        process: str,
+    ) -> tuple[int, int, int, int] | None:
+        try:
+            parsed = ProcessEnumerator().parse(process)
+        except ValueError:
+            return None
+        rest = Counter(parsed.rest)
+        gluon_count = rest.get("g", 0)
+        if sum(rest.values()) != gluon_count + 2:
+            return None
+        physical_pdgs = _physical_pdgs(process)
+        if len(physical_pdgs) != gluon_count + 4:
+            return None
+        initial_pdgs = physical_pdgs[:2]
+        if (
+            any(not 1 <= abs(pdg) <= 6 for pdg in initial_pdgs)
+            or initial_pdgs[0] * initial_pdgs[1] >= 0
+        ):
+            return None
+        final_leptons = [
+            pdg
+            for pdg in physical_pdgs[2:]
+            if 11 <= abs(pdg) <= 16
+        ]
+        if len(final_leptons) != 2:
+            return None
+        charge3 = sum(_pdg_charge3(pdg) for pdg in final_leptons)
+        if charge3 == 3:
+            vector_pdg = 24
+            charged = [pdg for pdg in final_leptons if pdg in (-11, -13, -15)]
+            neutrino = [pdg for pdg in final_leptons if pdg in (12, 14, 16)]
+            if len(charged) != 1 or len(neutrino) != 1:
+                return None
+            first_lepton_pdg, second_lepton_pdg = charged[0], neutrino[0]
+        elif charge3 == -3:
+            vector_pdg = -24
+            charged = [pdg for pdg in final_leptons if pdg in (11, 13, 15)]
+            neutrino = [pdg for pdg in final_leptons if pdg in (-12, -14, -16)]
+            if len(charged) != 1 or len(neutrino) != 1:
+                return None
+            first_lepton_pdg, second_lepton_pdg = charged[0], neutrino[0]
+        else:
+            return None
+        if abs(abs(first_lepton_pdg) - abs(second_lepton_pdg)) != 1:
+            return None
+        current_pdgs = tuple(-pdg for pdg in initial_pdgs)
+        quark_currents = [pdg for pdg in current_pdgs if pdg > 0]
+        anti_closures = [pdg for pdg in current_pdgs if pdg < 0]
+        if len(quark_currents) != 1 or len(anti_closures) != 1:
+            return None
+        try:
+            expected_result = _electroweak_vector_result_pdg(
+                quark_currents[0],
+                vector_pdg,
+            )
+        except NativeEvaluationError:
+            return None
+        if anti_closures[0] != -expected_result:
+            return None
+        return vector_pdg, first_lepton_pdg, second_lepton_pdg, gluon_count
 
     def canonical_zero_gluon_point(
         self,
@@ -149,32 +331,47 @@ class LeadingColorZJetsNativeEvaluator:
         gluon_count: int,
         sqrt_s: float | None = None,
     ) -> tuple[ExternalMomentum, ...]:
+        return self.canonical_neutral_vector_gluon_point(
+            process,
+            vector_pdg=23,
+            gluon_count=gluon_count,
+            sqrt_s=sqrt_s,
+        )
+
+    def canonical_neutral_vector_gluon_point(
+        self,
+        process: str,
+        *,
+        vector_pdg: int,
+        gluon_count: int,
+        sqrt_s: float | None = None,
+    ) -> tuple[ExternalMomentum, ...]:
         pdgs = _physical_pdgs(process)
         energy_cm = self.model.sqrt_s if sqrt_s is None else sqrt_s
-        z_mass = self.model.mass(23)
-        if energy_cm <= z_mass:
+        vector_mass = self.model.mass(vector_pdg)
+        if energy_cm <= vector_mass:
             raise NativeEvaluationError(
-                "q q~ -> Z + gluons requires sqrt(s) above the Z mass"
+                "q q~ -> electroweak vector + gluons requires sqrt(s) above the vector mass"
             )
         beam_energy = 0.5 * energy_cm
         if gluon_count >= 2:
-            gluons, z = _canonical_multi_gluon_recoil_point(
+            gluons, vector = _canonical_multi_gluon_recoil_point(
                 energy_cm,
-                z_mass,
+                vector_mass,
                 gluon_count,
             )
             return (
                 ExternalMomentum(pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
                 ExternalMomentum(pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
                 *(ExternalMomentum(21, momentum) for momentum in gluons),
-                ExternalMomentum(23, z),
+                ExternalMomentum(vector_pdg, vector),
             )
         if gluon_count != 1:
             raise NativeEvaluationError(
                 "canonical native points are currently available for at least one gluon"
             )
-        gluon_energy = (energy_cm**2 - z_mass**2) / (2.0 * energy_cm)
-        z_energy = (energy_cm**2 + z_mass**2) / (2.0 * energy_cm)
+        gluon_energy = (energy_cm**2 - vector_mass**2) / (2.0 * energy_cm)
+        vector_energy = (energy_cm**2 + vector_mass**2) / (2.0 * energy_cm)
         theta = 0.7
         phi = 0.3
         sin_theta = math.sin(theta)
@@ -185,7 +382,130 @@ class LeadingColorZJetsNativeEvaluator:
             ExternalMomentum(pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
             ExternalMomentum(pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
             ExternalMomentum(21, (gluon_energy, px, py, pz)),
-            ExternalMomentum(23, (z_energy, -px, -py, -pz)),
+            ExternalMomentum(vector_pdg, (vector_energy, -px, -py, -pz)),
+        )
+
+    def canonical_neutral_dilepton_gluon_point(
+        self,
+        process: str,
+        *,
+        lepton_pdg: int,
+        antilepton_pdg: int,
+        gluon_count: int,
+        sqrt_s: float | None = None,
+    ) -> tuple[ExternalMomentum, ...]:
+        pdgs = _physical_pdgs(process)
+        energy_cm = self.model.sqrt_s if sqrt_s is None else sqrt_s
+        if energy_cm <= 0.0:
+            raise NativeEvaluationError("sqrt(s) must be positive")
+        beam_energy = 0.5 * energy_cm
+        if gluon_count == 0:
+            gluons: tuple[FourMomentum, ...] = ()
+            dilepton_system = (energy_cm, 0.0, 0.0, 0.0)
+        else:
+            dilepton_mass = min(max(0.2 * energy_cm, 20.0), 120.0)
+            if energy_cm <= dilepton_mass:
+                raise NativeEvaluationError("sqrt(s) must be above the dilepton mass")
+            if gluon_count >= 2:
+                gluons, dilepton_system = _canonical_multi_gluon_recoil_point(
+                    energy_cm,
+                    dilepton_mass,
+                    gluon_count,
+                )
+            elif gluon_count == 1:
+                gluon_energy = (energy_cm**2 - dilepton_mass**2) / (2.0 * energy_cm)
+                dilepton_energy = (energy_cm**2 + dilepton_mass**2) / (2.0 * energy_cm)
+                direction = _unit_vector(theta=0.7, phi=0.3)
+                gluon = (
+                    gluon_energy,
+                    gluon_energy * direction[0],
+                    gluon_energy * direction[1],
+                    gluon_energy * direction[2],
+                )
+                gluons = (gluon,)
+                dilepton_system = (
+                    dilepton_energy,
+                    -gluon[1],
+                    -gluon[2],
+                    -gluon[3],
+                )
+            else:
+                raise NativeEvaluationError(
+                    "neutral dilepton plus gluons needs a non-negative gluon count"
+                )
+        lepton, antilepton = _decay_timelike_to_two_massless(
+            dilepton_system,
+            theta=1.03,
+            phi=0.41,
+        )
+        return (
+            ExternalMomentum(pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
+            ExternalMomentum(pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
+            *(ExternalMomentum(21, momentum) for momentum in gluons),
+            ExternalMomentum(lepton_pdg, lepton),
+            ExternalMomentum(antilepton_pdg, antilepton),
+        )
+
+    def canonical_charged_leptonic_w_gluon_point(
+        self,
+        process: str,
+        *,
+        vector_pdg: int,
+        first_lepton_pdg: int,
+        second_lepton_pdg: int,
+        gluon_count: int,
+        sqrt_s: float | None = None,
+    ) -> tuple[ExternalMomentum, ...]:
+        pdgs = _physical_pdgs(process)
+        energy_cm = self.model.sqrt_s if sqrt_s is None else sqrt_s
+        if energy_cm <= 0.0:
+            raise NativeEvaluationError("sqrt(s) must be positive")
+        beam_energy = 0.5 * energy_cm
+        if gluon_count == 0:
+            gluons = ()
+            w_system = (energy_cm, 0.0, 0.0, 0.0)
+        else:
+            w_mass = min(max(0.2 * energy_cm, 20.0), 120.0)
+            if energy_cm <= w_mass:
+                raise NativeEvaluationError("sqrt(s) must be above the leptonic W mass")
+            if gluon_count >= 2:
+                gluons, w_system = _canonical_multi_gluon_recoil_point(
+                    energy_cm,
+                    w_mass,
+                    gluon_count,
+                )
+            elif gluon_count == 1:
+                gluon_energy = (energy_cm**2 - w_mass**2) / (2.0 * energy_cm)
+                w_energy = (energy_cm**2 + w_mass**2) / (2.0 * energy_cm)
+                direction = _unit_vector(theta=0.7, phi=0.3)
+                gluon = (
+                    gluon_energy,
+                    gluon_energy * direction[0],
+                    gluon_energy * direction[1],
+                    gluon_energy * direction[2],
+                )
+                gluons = (gluon,)
+                w_system = (
+                    w_energy,
+                    -gluon[1],
+                    -gluon[2],
+                    -gluon[3],
+                )
+            else:
+                raise NativeEvaluationError(
+                    "charged-current leptonic W plus gluons needs a non-negative gluon count"
+                )
+        first, second = _decay_timelike_to_two_massless(
+            w_system,
+            theta=1.03,
+            phi=0.41,
+        )
+        return (
+            ExternalMomentum(pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
+            ExternalMomentum(pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
+            *(ExternalMomentum(21, momentum) for momentum in gluons),
+            ExternalMomentum(first_lepton_pdg, first),
+            ExternalMomentum(second_lepton_pdg, second),
         )
 
     def evaluate_zero_gluon_z(
@@ -267,19 +587,45 @@ class LeadingColorZJetsNativeEvaluator:
         *,
         gluon_count: int,
     ) -> MatrixElementEvaluation:
-        point = _normalise_z_gluon_particles(particles, gluon_count=gluon_count)
-        if point[0].pdg + point[1].pdg != 0:
-            raise NativeEvaluationError("incoming particles must be a quark/antiquark pair")
-        if not 1 <= abs(point[0].pdg) <= 6:
-            raise NativeEvaluationError("incoming pair must be quarks")
-        if point[0].pdg < 0 or point[1].pdg > 0:
+        return self.evaluate_neutral_vector_gluons(
+            process,
+            particles,
+            vector_pdg=23,
+            gluon_count=gluon_count,
+        )
+
+    def evaluate_neutral_vector_gluons(
+        self,
+        process: str,
+        particles: Sequence[ExternalMomentum],
+        *,
+        vector_pdg: int,
+        gluon_count: int,
+    ) -> MatrixElementEvaluation:
+        point = _normalise_neutral_vector_gluon_particles(
+            particles,
+            gluon_count=gluon_count,
+            vector_pdg=vector_pdg,
+        )
+        initial_currents = tuple(-particle.pdg for particle in point[:2])
+        quark_currents = [pdg for pdg in initial_currents if pdg > 0]
+        anti_closures = [pdg for pdg in initial_currents if pdg < 0]
+        if len(quark_currents) != 1 or len(anti_closures) != 1:
+            raise NativeEvaluationError("incoming pair must contain one quark and one antiquark")
+        line_start = quark_currents[0]
+        anti_closure = anti_closures[0]
+        expected_result = _electroweak_vector_result_pdg(line_start, vector_pdg)
+        if anti_closure != -expected_result:
             raise NativeEvaluationError(
-                "q q~ -> Z g native evaluator expects the quark before the antiquark"
+                "incoming quark flavours are not compatible with the requested "
+                f"vector emission: {line_start} + {vector_pdg} -> {expected_result}, "
+                f"but closure requires {-anti_closure}"
             )
 
-        amplitudes = _evaluate_ordered_z_gluon_amplicol_recursion(
+        amplitudes = _evaluate_ordered_neutral_vector_gluon_amplicol_recursion(
             self.model,
             point,
+            vector_pdg=vector_pdg,
             gluon_count=gluon_count,
         )
         raw_sum = sum(
@@ -294,6 +640,160 @@ class LeadingColorZJetsNativeEvaluator:
         )
         matrix_element = (
             raw_sum * color_factor * coupling_factor / (average_factor * identical_factor)
+        )
+        return MatrixElementEvaluation(
+            process=process,
+            particles=point,
+            matrix_element=matrix_element,
+            raw_helicity_sum=raw_sum,
+            color_factor=color_factor,
+            average_factor=average_factor,
+            coupling_factor=coupling_factor,
+            identical_factor=identical_factor,
+            helicity_contributions=tuple(
+                HelicityContribution(
+                    helicities=helicities,
+                    amplitude=amplitude,
+                    squared=float((amplitude * amplitude.conjugate()).real),
+                )
+                for helicities, amplitude in amplitudes
+            ),
+        )
+
+    def evaluate_neutral_dilepton_gluons(
+        self,
+        process: str,
+        particles: Sequence[ExternalMomentum],
+        *,
+        lepton_pdg: int,
+        antilepton_pdg: int,
+        gluon_count: int,
+    ) -> MatrixElementEvaluation:
+        point = _normalise_neutral_dilepton_gluon_particles(
+            particles,
+            gluon_count=gluon_count,
+            lepton_pdg=lepton_pdg,
+            antilepton_pdg=antilepton_pdg,
+        )
+        incoming = tuple(particle.pdg for particle in point[:2])
+        if (
+            any(not 1 <= abs(pdg) <= 6 for pdg in incoming)
+            or incoming[0] * incoming[1] >= 0
+        ):
+            raise NativeEvaluationError(
+                "incoming pair must contain one quark and one antiquark"
+            )
+        if abs(incoming[0]) != abs(incoming[1]):
+            raise NativeEvaluationError(
+                "neutral dilepton native evaluator expects a flavour-preserving "
+                "incoming quark/antiquark pair"
+            )
+
+        amplitudes = _evaluate_ordered_neutral_dilepton_gluon_amplicol_recursion(
+            self.model,
+            point,
+            lepton_pdg=lepton_pdg,
+            antilepton_pdg=antilepton_pdg,
+            gluon_count=gluon_count,
+        )
+        raw_sum = sum(
+            float((amplitude * amplitude.conjugate()).real)
+            for _, amplitude in amplitudes
+        )
+        color_factor = self.model.leading_color_factor(
+            particle.pdg for particle in point
+        )
+        average_factor = _initial_state_average_factor(
+            particle.pdg for particle in point[:2]
+        )
+        identical_factor = _final_state_identical_factor(
+            particle.pdg for particle in point[2:]
+        )
+        coupling_factor = (
+            (4.0 * math.pi * self.model.alpha_s_me_check) ** gluon_count
+            * (2.0 * 4.0 * math.pi * self.model.alpha_ew) ** 2
+        )
+        matrix_element = (
+            raw_sum
+            * color_factor
+            * coupling_factor
+            / (average_factor * identical_factor)
+        )
+        return MatrixElementEvaluation(
+            process=process,
+            particles=point,
+            matrix_element=matrix_element,
+            raw_helicity_sum=raw_sum,
+            color_factor=color_factor,
+            average_factor=average_factor,
+            coupling_factor=coupling_factor,
+            identical_factor=identical_factor,
+            helicity_contributions=tuple(
+                HelicityContribution(
+                    helicities=helicities,
+                    amplitude=amplitude,
+                    squared=float((amplitude * amplitude.conjugate()).real),
+                )
+                for helicities, amplitude in amplitudes
+            ),
+        )
+
+    def evaluate_charged_leptonic_w_gluons(
+        self,
+        process: str,
+        particles: Sequence[ExternalMomentum],
+        *,
+        vector_pdg: int,
+        first_lepton_pdg: int,
+        second_lepton_pdg: int,
+        gluon_count: int,
+    ) -> MatrixElementEvaluation:
+        point = _normalise_charged_leptonic_w_gluon_particles(
+            particles,
+            gluon_count=gluon_count,
+            vector_pdg=vector_pdg,
+            first_lepton_pdg=first_lepton_pdg,
+            second_lepton_pdg=second_lepton_pdg,
+        )
+        line_start, anti_closure = _incoming_current_line(point)
+        expected_result = _electroweak_vector_result_pdg(line_start, vector_pdg)
+        if anti_closure != -expected_result:
+            raise NativeEvaluationError(
+                "incoming quark flavours are not compatible with the requested "
+                f"leptonic W current: {line_start} + {vector_pdg} -> "
+                f"{expected_result}, but closure requires {-anti_closure}"
+            )
+
+        amplitudes = _evaluate_ordered_charged_leptonic_w_gluon_amplicol_recursion(
+            self.model,
+            point,
+            vector_pdg=vector_pdg,
+            first_lepton_pdg=first_lepton_pdg,
+            second_lepton_pdg=second_lepton_pdg,
+            gluon_count=gluon_count,
+        )
+        raw_sum = sum(
+            float((amplitude * amplitude.conjugate()).real)
+            for _, amplitude in amplitudes
+        )
+        color_factor = self.model.leading_color_factor(
+            particle.pdg for particle in point
+        )
+        average_factor = _initial_state_average_factor(
+            particle.pdg for particle in point[:2]
+        )
+        identical_factor = _final_state_identical_factor(
+            particle.pdg for particle in point[2:]
+        )
+        coupling_factor = (
+            (4.0 * math.pi * self.model.alpha_s_me_check) ** gluon_count
+            * (2.0 * 4.0 * math.pi * self.model.alpha_ew) ** 2
+        )
+        matrix_element = (
+            raw_sum
+            * color_factor
+            * coupling_factor
+            / (average_factor * identical_factor)
         )
         return MatrixElementEvaluation(
             process=process,
@@ -365,6 +865,81 @@ def _final_state_identical_factor(final_pdgs: Iterable[int]) -> int:
     return factor
 
 
+def _incoming_quark_antiquark(
+    particles: Sequence[ExternalMomentum],
+) -> tuple[ExternalMomentum, ExternalMomentum]:
+    incoming = tuple(particles[:2])
+    quarks = [particle for particle in incoming if particle.pdg > 0]
+    antiquarks = [particle for particle in incoming if particle.pdg < 0]
+    if (
+        len(quarks) != 1
+        or len(antiquarks) != 1
+        or not 1 <= abs(quarks[0].pdg) <= 6
+        or not 1 <= abs(antiquarks[0].pdg) <= 6
+    ):
+        raise NativeEvaluationError(
+            "incoming pair must contain one quark and one antiquark"
+        )
+    return quarks[0], antiquarks[0]
+
+
+def _incoming_current_line(
+    particles: Sequence[ExternalMomentum],
+) -> tuple[int, int]:
+    incoming_currents = tuple(-particle.pdg for particle in particles[:2])
+    quark_currents = [pdg for pdg in incoming_currents if pdg > 0]
+    anti_closures = [pdg for pdg in incoming_currents if pdg < 0]
+    if (
+        len(quark_currents) != 1
+        or len(anti_closures) != 1
+        or not 1 <= quark_currents[0] <= 6
+        or not 1 <= abs(anti_closures[0]) <= 6
+    ):
+        raise NativeEvaluationError(
+            "incoming pair must contain one quark and one antiquark"
+        )
+    return quark_currents[0], anti_closures[0]
+
+
+def _pdg_charge3(pdg: int) -> int:
+    charges = {
+        1: -1,
+        2: 2,
+        3: -1,
+        4: 2,
+        5: -1,
+        6: 2,
+        -1: 1,
+        -2: -2,
+        -3: 1,
+        -4: -2,
+        -5: 1,
+        -6: -2,
+        11: -3,
+        -11: 3,
+        13: -3,
+        -13: 3,
+        15: -3,
+        -15: 3,
+        12: 0,
+        -12: 0,
+        14: 0,
+        -14: 0,
+        16: 0,
+        -16: 0,
+        21: 0,
+        22: 0,
+        23: 0,
+        24: 3,
+        -24: -3,
+        25: 0,
+    }
+    try:
+        return charges[pdg]
+    except KeyError as exc:
+        raise NativeEvaluationError(f"unsupported PDG charge lookup: {pdg}") from exc
+
+
 def _normalise_one_gluon_z_particles(
     particles: Sequence[ExternalMomentum],
 ) -> tuple[ExternalMomentum, ExternalMomentum, ExternalMomentum, ExternalMomentum]:
@@ -377,24 +952,100 @@ def _normalise_z_gluon_particles(
     *,
     gluon_count: int,
 ) -> tuple[ExternalMomentum, ...]:
+    return _normalise_neutral_vector_gluon_particles(
+        particles,
+        gluon_count=gluon_count,
+        vector_pdg=23,
+    )
+
+
+def _normalise_neutral_vector_gluon_particles(
+    particles: Sequence[ExternalMomentum],
+    *,
+    gluon_count: int,
+    vector_pdg: int,
+) -> tuple[ExternalMomentum, ...]:
     expected = gluon_count + 3
     if len(particles) != expected:
         raise NativeEvaluationError(
-            f"q q~ -> Z + {gluon_count} gluons requires exactly {expected} external momenta"
+            f"q q~ -> electroweak vector + {gluon_count} gluons requires exactly {expected} external momenta"
         )
     if gluon_count < 1:
         raise NativeEvaluationError(
-            "native ordered q q~ -> Z + gluon recursion needs at least one gluon"
+            "native ordered q q~ -> electroweak vector + gluon recursion needs at least one gluon"
         )
     initial = tuple(particles[:2])
     finals = tuple(particles[2:])
     gluons = [particle for particle in finals if particle.pdg == 21]
-    z_bosons = [particle for particle in finals if particle.pdg == 23]
-    if len(gluons) != gluon_count or len(z_bosons) != 1:
+    vectors = [particle for particle in finals if particle.pdg == vector_pdg]
+    if len(gluons) != gluon_count or len(vectors) != 1:
         raise NativeEvaluationError(
-            f"final state must contain exactly {gluon_count} gluons and one Z"
+            f"final state must contain exactly {gluon_count} gluons and one requested electroweak vector"
         )
-    return (*initial, *gluons, z_bosons[0])
+    return (*initial, *gluons, vectors[0])
+
+
+def _normalise_neutral_dilepton_gluon_particles(
+    particles: Sequence[ExternalMomentum],
+    *,
+    gluon_count: int,
+    lepton_pdg: int,
+    antilepton_pdg: int,
+) -> tuple[ExternalMomentum, ...]:
+    expected = gluon_count + 4
+    if len(particles) != expected:
+        raise NativeEvaluationError(
+            "q q~ -> neutral dilepton + "
+            f"{gluon_count} gluons requires exactly {expected} external momenta"
+        )
+    if gluon_count < 0:
+        raise NativeEvaluationError(
+            "native ordered neutral dilepton recursion needs a non-negative gluon count"
+        )
+    initial = tuple(particles[:2])
+    finals = tuple(particles[2:])
+    gluons = [particle for particle in finals if particle.pdg == 21]
+    leptons = [particle for particle in finals if particle.pdg == lepton_pdg]
+    antileptons = [particle for particle in finals if particle.pdg == antilepton_pdg]
+    if len(gluons) != gluon_count or len(leptons) != 1 or len(antileptons) != 1:
+        raise NativeEvaluationError(
+            "final state must contain the requested gluons and exactly one "
+            "neutral lepton/antilepton pair"
+        )
+    return (*initial, *gluons, leptons[0], antileptons[0])
+
+
+def _normalise_charged_leptonic_w_gluon_particles(
+    particles: Sequence[ExternalMomentum],
+    *,
+    gluon_count: int,
+    vector_pdg: int,
+    first_lepton_pdg: int,
+    second_lepton_pdg: int,
+) -> tuple[ExternalMomentum, ...]:
+    expected = gluon_count + 4
+    if len(particles) != expected:
+        raise NativeEvaluationError(
+            "q q~ -> charged leptonic W + "
+            f"{gluon_count} gluons requires exactly {expected} external momenta"
+        )
+    if gluon_count < 0:
+        raise NativeEvaluationError(
+            "native ordered charged leptonic W recursion needs a non-negative gluon count"
+        )
+    if abs(vector_pdg) != 24:
+        raise NativeEvaluationError("charged leptonic W normalization needs W+ or W-")
+    initial = tuple(particles[:2])
+    finals = tuple(particles[2:])
+    gluons = [particle for particle in finals if particle.pdg == 21]
+    first = [particle for particle in finals if particle.pdg == first_lepton_pdg]
+    second = [particle for particle in finals if particle.pdg == second_lepton_pdg]
+    if len(gluons) != gluon_count or len(first) != 1 or len(second) != 1:
+        raise NativeEvaluationError(
+            "final state must contain the requested gluons and one charged-current "
+            "lepton/neutrino pair"
+        )
+    return (*initial, *gluons, first[0], second[0])
 
 
 def _canonical_multi_gluon_recoil_point(
@@ -454,6 +1105,38 @@ def _canonical_multi_gluon_recoil_point(
 def _unit_vector(*, theta: float, phi: float) -> tuple[float, float, float]:
     sin_theta = math.sin(theta)
     return sin_theta * math.cos(phi), sin_theta * math.sin(phi), math.cos(theta)
+
+
+def _decay_timelike_to_two_massless(
+    parent: FourMomentum,
+    *,
+    theta: float,
+    phi: float,
+) -> tuple[FourMomentum, FourMomentum]:
+    parent_mass2 = _minkowski_square(parent)
+    if parent_mass2 <= 0.0:
+        raise NativeEvaluationError("dilepton system must be timelike")
+    parent_mass = math.sqrt(parent_mass2)
+    energy = 0.5 * parent_mass
+    direction = _unit_vector(theta=theta, phi=phi)
+    first_rest = (
+        energy,
+        energy * direction[0],
+        energy * direction[1],
+        energy * direction[2],
+    )
+    second_rest = (
+        energy,
+        -first_rest[1],
+        -first_rest[2],
+        -first_rest[3],
+    )
+    beta = (
+        parent[1] / parent[0],
+        parent[2] / parent[0],
+        parent[3] / parent[0],
+    )
+    return _boost_from_rest(first_rest, beta), _boost_from_rest(second_rest, beta)
 
 
 def _boost_from_rest(momentum: FourMomentum, beta: tuple[float, float, float]) -> FourMomentum:
@@ -715,6 +1398,66 @@ def _fermion_antifermion_to_vector(
     )
 
 
+def _lepton_antilepton_to_vector_weyl(
+    lepton: WeylWaveFunction,
+    antilepton: WeylWaveFunction,
+    coupling: tuple[float, float],
+    lepton_chirality: int,
+    antilepton_chirality: int,
+) -> WaveFunction:
+    prefactor = 1j / math.sqrt(2.0)
+    left, right = coupling
+    l1, l2 = lepton
+    a1, a2 = antilepton
+    if lepton_chirality == -1 and antilepton_chirality == 1:
+        factor = prefactor * left
+        return (
+            factor * (l1 * a1 + l2 * a2),
+            -factor * (l2 * a1 + l1 * a2),
+            1j * factor * (-l2 * a1 + l1 * a2),
+            factor * (-l1 * a1 + l2 * a2),
+        )
+    if lepton_chirality == 1 and antilepton_chirality == -1:
+        factor = prefactor * right
+        return (
+            factor * (l1 * a1 + l2 * a2),
+            factor * (l1 * a2 + l2 * a1),
+            1j * factor * (-l1 * a2 + l2 * a1),
+            factor * (l1 * a1 - l2 * a2),
+        )
+    return 0j, 0j, 0j, 0j
+
+
+def _antilepton_lepton_to_vector_weyl(
+    antilepton: WeylWaveFunction,
+    lepton: WeylWaveFunction,
+    coupling: tuple[float, float],
+    antilepton_chirality: int,
+    lepton_chirality: int,
+) -> WaveFunction:
+    prefactor = 1j / math.sqrt(2.0)
+    left, right = coupling
+    a1, a2 = antilepton
+    l1, l2 = lepton
+    if antilepton_chirality == 1 and lepton_chirality == -1:
+        factor = prefactor * left
+        return (
+            factor * (l1 * a1 + l2 * a2),
+            -factor * (l2 * a1 + l1 * a2),
+            1j * factor * (-l2 * a1 + l1 * a2),
+            factor * (-l1 * a1 + l2 * a2),
+        )
+    if antilepton_chirality == -1 and lepton_chirality == 1:
+        factor = prefactor * right
+        return (
+            factor * (l1 * a1 + l2 * a2),
+            factor * (l1 * a2 + l2 * a1),
+            1j * factor * (-l1 * a2 + l2 * a1),
+            factor * (l1 * a1 - l2 * a2),
+        )
+    return 0j, 0j, 0j, 0j
+
+
 def _quark_gluon_to_quark_weyl(
     quark: WeylWaveFunction,
     gluon: WaveFunction,
@@ -804,36 +1547,59 @@ def _evaluate_ordered_z_gluon_amplicol_recursion(
     *,
     gluon_count: int,
 ) -> tuple[tuple[tuple[int, ...], complex], ...]:
+    return _evaluate_ordered_neutral_vector_gluon_amplicol_recursion(
+        model,
+        particles,
+        vector_pdg=23,
+        gluon_count=gluon_count,
+    )
+
+
+def _evaluate_ordered_neutral_vector_gluon_amplicol_recursion(
+    model: AmplicolSMLeadingColorModel,
+    particles: tuple[ExternalMomentum, ...],
+    *,
+    vector_pdg: int,
+    gluon_count: int,
+) -> tuple[tuple[tuple[int, ...], complex], ...]:
     if gluon_count < 1:
         raise NativeEvaluationError(
-            "ordered q q~ -> Z + gluon recursion needs at least one gluon"
+            "ordered q q~ -> neutral vector + gluon recursion needs at least one gluon"
         )
-    incoming_quark = particles[0]
-    incoming_antiquark = particles[1]
+    incoming_quark, incoming_antiquark = _incoming_quark_antiquark(particles)
     gluons = particles[2 : 2 + gluon_count]
-    z_boson = particles[-1]
+    vector_boson = particles[-1]
 
     anti_closure_momentum = _negate_momentum(incoming_quark.momentum)
     quark_start_momentum = _negate_momentum(incoming_antiquark.momentum)
     gluon_momenta = tuple(gluon.momentum for gluon in gluons)
-    z_momentum = z_boson.momentum
+    vector_momentum = vector_boson.momentum
 
     anti_plus = _ext_antiquark_weyl(anti_closure_momentum, 1, -1)
     anti_minus = _ext_antiquark_weyl(anti_closure_momentum, -1, 1)
     quark_minus = _ext_quark_weyl(quark_start_momentum, -1, 1)
     quark_plus = _ext_quark_weyl(quark_start_momentum, 1, -1)
-    z_vectors = {
-        helicity: _ext_massive_vector(z_momentum, helicity, model.mass(23))
-        for helicity in (-1, 0, 1)
+    vector_vectors = {
+            helicity: _ext_neutral_vector(
+                vector_momentum,
+                helicity,
+                vector_pdg=vector_pdg,
+                model=model,
+            )
+        for helicity in _neutral_vector_helicities(vector_pdg)
     }
-    coupling = model.z_fermion_coupling(abs(incoming_quark.pdg))
+    coupling = _neutral_vector_fermion_coupling(
+        model,
+        vector_pdg=vector_pdg,
+        fermion_pdg=-incoming_antiquark.pdg,
+    )
 
     amplitudes: list[tuple[tuple[int, ...], complex]] = []
     for physical_quark_helicity, physical_antiquark_helicity, chirality, quark_wf, anti_wf in (
         (1, -1, 1, quark_minus, anti_plus),
         (-1, 1, -1, quark_plus, anti_minus),
     ):
-        for z_helicity in (-1, 0, 1):
+        for vector_helicity in _neutral_vector_helicities(vector_pdg):
             for gluon_helicities in product((-1, 1), repeat=gluon_count):
                 gluon_vectors = tuple(
                     _ext_gluon_cmplx(momentum, helicity)
@@ -850,8 +1616,8 @@ def _evaluate_ordered_z_gluon_amplicol_recursion(
                     quark_start_momentum,
                     gluon_currents,
                     gluon_momenta,
-                    z_vectors[z_helicity],
-                    z_momentum,
+                    vector_vectors[vector_helicity],
+                    vector_momentum,
                     coupling,
                     chirality,
                 )
@@ -861,12 +1627,356 @@ def _evaluate_ordered_z_gluon_amplicol_recursion(
                             physical_quark_helicity,
                             physical_antiquark_helicity,
                             *gluon_helicities,
-                            z_helicity,
+                            vector_helicity,
                         ),
                         _weyl_dot(final_current, anti_wf),
                     )
                 )
     return tuple(amplitudes)
+
+
+def _evaluate_ordered_neutral_dilepton_gluon_amplicol_recursion(
+    model: AmplicolSMLeadingColorModel,
+    particles: tuple[ExternalMomentum, ...],
+    *,
+    lepton_pdg: int,
+    antilepton_pdg: int,
+    gluon_count: int,
+) -> tuple[tuple[tuple[int, ...], complex], ...]:
+    if gluon_count < 0:
+        raise NativeEvaluationError(
+            "ordered q q~ -> neutral dilepton recursion needs a non-negative gluon count"
+        )
+    incoming_quark, incoming_antiquark = _incoming_quark_antiquark(particles)
+    gluons = particles[2 : 2 + gluon_count]
+    lepton = particles[-2]
+    antilepton = particles[-1]
+
+    anti_closure_momentum = _negate_momentum(incoming_quark.momentum)
+    quark_start_momentum = _negate_momentum(incoming_antiquark.momentum)
+    gluon_momenta = tuple(gluon.momentum for gluon in gluons)
+    dilepton_momentum = _sum_momenta((lepton.momentum, antilepton.momentum))
+
+    anti_plus = _ext_antiquark_weyl(anti_closure_momentum, 1, -1)
+    anti_minus = _ext_antiquark_weyl(anti_closure_momentum, -1, 1)
+    quark_minus = _ext_quark_weyl(quark_start_momentum, -1, 1)
+    quark_plus = _ext_quark_weyl(quark_start_momentum, 1, -1)
+
+    neutral_vectors = (22, 23)
+    quark_couplings = {
+        vector_pdg: _neutral_vector_fermion_coupling(
+            model,
+            vector_pdg=vector_pdg,
+            fermion_pdg=-incoming_antiquark.pdg,
+        )
+        for vector_pdg in neutral_vectors
+    }
+    lepton_couplings = {
+        vector_pdg: _neutral_vector_fermion_coupling(
+            model,
+            vector_pdg=vector_pdg,
+            fermion_pdg=lepton_pdg,
+        )
+        for vector_pdg in neutral_vectors
+    }
+
+    amplitudes: list[tuple[tuple[int, ...], complex]] = []
+    for physical_quark_helicity, physical_antiquark_helicity, chirality, quark_wf, anti_wf in (
+        (1, -1, 1, quark_minus, anti_plus),
+        (-1, 1, -1, quark_plus, anti_minus),
+    ):
+        for lepton_helicity in (-1, 1):
+            lepton_chirality = lepton_helicity
+            lepton_wf = _ext_quark_weyl(
+                lepton.momentum,
+                lepton_helicity,
+                lepton_chirality,
+            )
+            for antilepton_helicity in (-1, 1):
+                antilepton_chirality = antilepton_helicity
+                antilepton_wf = _ext_antiquark_weyl(
+                    antilepton.momentum,
+                    antilepton_helicity,
+                    antilepton_chirality,
+                )
+                propagated_vectors = {
+                    vector_pdg: _neutral_vector_propagator(
+                        _lepton_antilepton_to_vector_weyl(
+                            lepton_wf,
+                            antilepton_wf,
+                            lepton_couplings[vector_pdg],
+                            lepton_chirality,
+                            antilepton_chirality,
+                        ),
+                        dilepton_momentum,
+                        vector_pdg=vector_pdg,
+                        model=model,
+                    )
+                    for vector_pdg in neutral_vectors
+                }
+                for gluon_helicities in product((-1, 1), repeat=gluon_count):
+                    gluon_vectors = tuple(
+                        _ext_gluon_cmplx(momentum, helicity)
+                        for momentum, helicity in zip(
+                            gluon_momenta,
+                            gluon_helicities,
+                            strict=True,
+                        )
+                    )
+                    gluon_currents = _build_ordered_gluon_currents(
+                        gluon_vectors,
+                        gluon_momenta,
+                    )
+                    amplitude = 0j
+                    for vector_pdg in neutral_vectors:
+                        final_current = _build_ordered_quark_current(
+                            quark_wf,
+                            quark_start_momentum,
+                            gluon_currents,
+                            gluon_momenta,
+                            propagated_vectors[vector_pdg],
+                            dilepton_momentum,
+                            quark_couplings[vector_pdg],
+                            chirality,
+                        )
+                        amplitude += _weyl_dot(final_current, anti_wf)
+                    amplitudes.append(
+                        (
+                            (
+                                physical_quark_helicity,
+                                physical_antiquark_helicity,
+                                *gluon_helicities,
+                                lepton_helicity,
+                                antilepton_helicity,
+                            ),
+                            amplitude,
+                        )
+                    )
+    return tuple(amplitudes)
+
+
+def _evaluate_ordered_charged_leptonic_w_gluon_amplicol_recursion(
+    model: AmplicolSMLeadingColorModel,
+    particles: tuple[ExternalMomentum, ...],
+    *,
+    vector_pdg: int,
+    first_lepton_pdg: int,
+    second_lepton_pdg: int,
+    gluon_count: int,
+) -> tuple[tuple[tuple[int, ...], complex], ...]:
+    if gluon_count < 0:
+        raise NativeEvaluationError(
+            "ordered q q~ -> charged leptonic W recursion needs a non-negative gluon count"
+        )
+    if abs(vector_pdg) != 24:
+        raise NativeEvaluationError("charged leptonic W recursion needs W+ or W-")
+
+    incoming_quark, incoming_antiquark = _incoming_quark_antiquark(particles)
+    gluons = particles[2 : 2 + gluon_count]
+    first_lepton = particles[-2]
+    second_lepton = particles[-1]
+
+    anti_closure_momentum = _negate_momentum(incoming_quark.momentum)
+    quark_start_momentum = _negate_momentum(incoming_antiquark.momentum)
+    gluon_momenta = tuple(gluon.momentum for gluon in gluons)
+    w_momentum = _sum_momenta((first_lepton.momentum, second_lepton.momentum))
+
+    anti_plus = _ext_antiquark_weyl(anti_closure_momentum, 1, -1)
+    anti_minus = _ext_antiquark_weyl(anti_closure_momentum, -1, 1)
+    quark_minus = _ext_quark_weyl(quark_start_momentum, -1, 1)
+    quark_plus = _ext_quark_weyl(quark_start_momentum, 1, -1)
+    quark_coupling = _neutral_vector_fermion_coupling(
+        model,
+        vector_pdg=vector_pdg,
+        fermion_pdg=-incoming_antiquark.pdg,
+    )
+    lepton_coupling = (model.charged_current_coupling(), 0.0)
+
+    amplitudes: list[tuple[tuple[int, ...], complex]] = []
+    for physical_quark_helicity, physical_antiquark_helicity, chirality, quark_wf, anti_wf in (
+        (1, -1, 1, quark_minus, anti_plus),
+        (-1, 1, -1, quark_plus, anti_minus),
+    ):
+        for first_helicity in (-1, 1):
+            first_chirality = first_helicity
+            for second_helicity in (-1, 1):
+                second_chirality = second_helicity
+                if vector_pdg == 24:
+                    if first_lepton_pdg not in (-11, -13, -15) or second_lepton_pdg not in (
+                        12,
+                        14,
+                        16,
+                    ):
+                        raise NativeEvaluationError(
+                            "W+ leptonic recursion expects charged antilepton and neutrino"
+                        )
+                    first_wf = _ext_antiquark_weyl(
+                        first_lepton.momentum,
+                        first_helicity,
+                        first_chirality,
+                    )
+                    second_wf = _ext_quark_weyl(
+                        second_lepton.momentum,
+                        second_helicity,
+                        second_chirality,
+                    )
+                    w_current = _antilepton_lepton_to_vector_weyl(
+                        first_wf,
+                        second_wf,
+                        lepton_coupling,
+                        first_chirality,
+                        second_chirality,
+                    )
+                else:
+                    if first_lepton_pdg not in (11, 13, 15) or second_lepton_pdg not in (
+                        -12,
+                        -14,
+                        -16,
+                    ):
+                        raise NativeEvaluationError(
+                            "W- leptonic recursion expects charged lepton and antineutrino"
+                        )
+                    first_wf = _ext_quark_weyl(
+                        first_lepton.momentum,
+                        first_helicity,
+                        first_chirality,
+                    )
+                    second_wf = _ext_antiquark_weyl(
+                        second_lepton.momentum,
+                        second_helicity,
+                        second_chirality,
+                    )
+                    w_current = _lepton_antilepton_to_vector_weyl(
+                        first_wf,
+                        second_wf,
+                        lepton_coupling,
+                        first_chirality,
+                        second_chirality,
+                    )
+                propagated_w = _neutral_vector_propagator(
+                    w_current,
+                    w_momentum,
+                    vector_pdg=vector_pdg,
+                    model=model,
+                )
+                for gluon_helicities in product((-1, 1), repeat=gluon_count):
+                    gluon_vectors = tuple(
+                        _ext_gluon_cmplx(momentum, helicity)
+                        for momentum, helicity in zip(
+                            gluon_momenta,
+                            gluon_helicities,
+                            strict=True,
+                        )
+                    )
+                    gluon_currents = _build_ordered_gluon_currents(
+                        gluon_vectors,
+                        gluon_momenta,
+                    )
+                    final_current = _build_ordered_quark_current(
+                        quark_wf,
+                        quark_start_momentum,
+                        gluon_currents,
+                        gluon_momenta,
+                        propagated_w,
+                        w_momentum,
+                        quark_coupling,
+                        chirality,
+                    )
+                    amplitudes.append(
+                        (
+                            (
+                                physical_quark_helicity,
+                                physical_antiquark_helicity,
+                                *gluon_helicities,
+                                first_helicity,
+                                second_helicity,
+                            ),
+                            _weyl_dot(final_current, anti_wf),
+                        )
+                    )
+    return tuple(amplitudes)
+
+
+def _neutral_vector_helicities(vector_pdg: int) -> tuple[int, ...]:
+    if vector_pdg == 22:
+        return (-1, 1)
+    if vector_pdg in (23, 24, -24):
+        return (-1, 0, 1)
+    raise NativeEvaluationError(f"unsupported electroweak vector PDG: {vector_pdg}")
+
+
+def _neutral_vector_fermion_coupling(
+    model: AmplicolSMLeadingColorModel,
+    *,
+    vector_pdg: int,
+    fermion_pdg: int,
+) -> tuple[float, float]:
+    if vector_pdg == 22:
+        return model.photon_fermion_coupling(fermion_pdg)
+    if vector_pdg == 23:
+        return model.z_fermion_coupling(fermion_pdg)
+    if abs(vector_pdg) == 24:
+        _ = _electroweak_vector_result_pdg(fermion_pdg, vector_pdg)
+        return (model.charged_current_coupling(), 0.0)
+    raise NativeEvaluationError(f"unsupported electroweak vector PDG: {vector_pdg}")
+
+
+def _ext_neutral_vector(
+    momentum: FourMomentum,
+    helicity: int,
+    *,
+    vector_pdg: int,
+    model: AmplicolSMLeadingColorModel,
+) -> WaveFunction:
+    if vector_pdg == 22:
+        return _ext_gluon_cmplx(momentum, helicity)
+    if vector_pdg in (23, 24, -24):
+        return _ext_massive_vector(momentum, helicity, model.mass(vector_pdg))
+    raise NativeEvaluationError(f"unsupported electroweak vector PDG: {vector_pdg}")
+
+
+def _neutral_vector_propagator(
+    vector: WaveFunction,
+    momentum: FourMomentum,
+    *,
+    vector_pdg: int,
+    model: AmplicolSMLeadingColorModel,
+) -> WaveFunction:
+    if vector_pdg == 22:
+        return _gluon_propagator(vector, momentum)
+    if vector_pdg == 23:
+        return _massive_vector_propagator(
+            vector,
+            momentum,
+            model.mass(23),
+            model.width(23),
+        )
+    if abs(vector_pdg) == 24:
+        return _massive_vector_propagator(
+            vector,
+            momentum,
+            model.mass(vector_pdg),
+            model.width(vector_pdg),
+        )
+    raise NativeEvaluationError(
+        f"unsupported electroweak-vector propagator PDG: {vector_pdg}"
+    )
+
+
+def _electroweak_vector_result_pdg(fermion_pdg: int, vector_pdg: int) -> int:
+    if not 1 <= fermion_pdg <= 6:
+        raise NativeEvaluationError(
+            f"charged-current quark-line support expects a quark, got {fermion_pdg}"
+        )
+    if vector_pdg in (22, 23):
+        return fermion_pdg
+    if vector_pdg == 24 and fermion_pdg in (1, 3, 5):
+        return fermion_pdg + 1
+    if vector_pdg == -24 and fermion_pdg in (2, 4, 6):
+        return fermion_pdg - 1
+    raise NativeEvaluationError(
+        f"unsupported charged-current transition {fermion_pdg} + {vector_pdg}"
+    )
 
 
 def _build_ordered_gluon_currents(
@@ -1027,6 +2137,25 @@ def _gluon_propagator(gluon: WaveFunction, momentum: FourMomentum) -> WaveFuncti
         gluon[1] * prefactor,
         gluon[2] * prefactor,
         gluon[3] * prefactor,
+    )
+
+
+def _massive_vector_propagator(
+    vector: WaveFunction,
+    momentum: FourMomentum,
+    mass: float,
+    width: float,
+) -> WaveFunction:
+    denominator = _minkowski_square(momentum) - mass**2 + 1j * mass * width
+    if denominator == 0.0:
+        raise NativeEvaluationError("singular massive vector propagator")
+    prefactor = -1j / denominator
+    longitudinal = _minkowski_dot_momentum(vector, momentum) / mass**2
+    return (
+        (vector[0] - momentum[0] * longitudinal) * prefactor,
+        (vector[1] - momentum[1] * longitudinal) * prefactor,
+        (vector[2] - momentum[2] * longitudinal) * prefactor,
+        (vector[3] - momentum[3] * longitudinal) * prefactor,
     )
 
 

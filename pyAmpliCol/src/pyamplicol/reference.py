@@ -7,10 +7,12 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence
+from typing import Literal, Mapping, Protocol, Sequence
 
-from .native import ExternalMomentum
+from .core_types import ExternalMomentum
 from .processes import ProcessOptions, ProcessEnumerator
+
+ProcessListBackend = Literal["python", "legacy"]
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,14 @@ def popen_runner(
         except subprocess.TimeoutExpired:
             _terminate_process_group(process.pid, signal.SIGKILL)
             stdout, stderr = process.communicate()
+    except KeyboardInterrupt:
+        _terminate_process_group(process.pid, signal.SIGTERM)
+        try:
+            process.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            _terminate_process_group(process.pid, signal.SIGKILL)
+            process.communicate()
+        raise
     return CommandResult(
         args=tuple(args),
         cwd=cwd,
@@ -122,6 +132,195 @@ class AmplicolProbePoint:
     matrix_element: float
 
 
+def amplicol_process_file_entry(
+    process_file: str | Path,
+    *,
+    group: int,
+    integral: int,
+) -> dict[str, list[int]] | None:
+    """Return the legacy process-file row for a group/integral pair."""
+
+    path = Path(process_file)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    cursor = 0
+
+    def next_nonempty() -> str | None:
+        nonlocal cursor
+        while cursor < len(lines):
+            line = lines[cursor].strip()
+            cursor += 1
+            if line:
+                return line
+        return None
+
+    header = next_nonempty()
+    if header is None:
+        return None
+    try:
+        external_count, unique_count = (int(value) for value in header.split()[:2])
+    except (ValueError, IndexError):
+        return None
+    for _ in range(unique_count):
+        if next_nonempty() is None:
+            return None
+    group_count_line = next_nonempty()
+    if group_count_line is None:
+        return None
+    try:
+        group_count = int(group_count_line.split()[0])
+    except (ValueError, IndexError):
+        return None
+    for _ in range(group_count):
+        group_header = next_nonempty()
+        if group_header is None:
+            return None
+        try:
+            group_tokens = [int(token) for token in group_header.split()]
+            group_id = group_tokens[0]
+            process_count = group_tokens[1]
+        except (ValueError, IndexError):
+            return None
+        for row_index in range(1, process_count + 1):
+            row = next_nonempty()
+            if row is None:
+                return None
+            tokens = row.split()
+            try:
+                channel_count = int(tokens[0])
+            except (ValueError, IndexError):
+                return None
+            start = 1 + channel_count
+            stop_process = start + external_count
+            stop_order = stop_process + external_count
+            if len(tokens) < stop_order:
+                return None
+            try:
+                process = [int(token) for token in tokens[start:stop_process]]
+                color_order = [int(token) for token in tokens[stop_process:stop_order]]
+            except ValueError:
+                return None
+            if group_id == group and row_index == integral:
+                return {
+                    "process": process,
+                    "color_order": color_order,
+                }
+    return None
+
+
+def amplicol_process_file_integrals(process_file: str | Path) -> tuple[tuple[int, int], ...]:
+    """Return ``(group, integral)`` entries present in a legacy process file."""
+
+    path = Path(process_file)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ()
+    cursor = 0
+
+    def next_nonempty() -> str | None:
+        nonlocal cursor
+        while cursor < len(lines):
+            line = lines[cursor].strip()
+            cursor += 1
+            if line:
+                return line
+        return None
+
+    header = next_nonempty()
+    if header is None:
+        return ()
+    try:
+        _, unique_count = (int(value) for value in header.split()[:2])
+    except (ValueError, IndexError):
+        return ()
+    for _ in range(unique_count):
+        if next_nonempty() is None:
+            return ()
+    group_count_line = next_nonempty()
+    if group_count_line is None:
+        return ()
+    try:
+        group_count = int(group_count_line.split()[0])
+    except (ValueError, IndexError):
+        return ()
+    entries: list[tuple[int, int]] = []
+    for _ in range(group_count):
+        group_header = next_nonempty()
+        if group_header is None:
+            return ()
+        try:
+            group_tokens = [int(token) for token in group_header.split()]
+            group_id = group_tokens[0]
+            process_count = group_tokens[1]
+        except (ValueError, IndexError):
+            return ()
+        for row_index in range(1, process_count + 1):
+            if next_nonempty() is None:
+                return ()
+            entries.append((group_id, row_index))
+    return tuple(entries)
+
+
+def reorder_external_momenta_by_pdg(
+    particles: Sequence[ExternalMomentum],
+    expected_pdgs: Sequence[int],
+) -> tuple[ExternalMomentum, ...]:
+    """Return ``particles`` in ``expected_pdgs`` order using stable PDG matching.
+
+    The generated Fortran process file is allowed to use an external ordering
+    different from pyAmpliCol's canonical process order, for example
+    ``d d~ > g z`` for a user request ``d d~ > z g``.  Supplied momenta used
+    for AmpliCol library warmup/probing must therefore be reordered before
+    being written to ``Utilities/ME_checks/momenta_*.txt``.  Equal-PDG legs are
+    matched stably, preserving the user's order among identical particles.
+    """
+
+    remaining = list(particles)
+    ordered: list[ExternalMomentum] = []
+    for expected in expected_pdgs:
+        for index, particle in enumerate(remaining):
+            if int(particle.pdg) == int(expected):
+                ordered.append(particle)
+                del remaining[index]
+                break
+        else:
+            raise ValueError(
+                "external momenta cannot be reordered to Fortran process "
+                f"PDG order {list(expected_pdgs)}"
+            )
+    if remaining:
+        raise ValueError(
+            "external momenta contain extra particles after Fortran PDG reordering"
+        )
+    return tuple(ordered)
+
+
+def reference_color_order_for_run(
+    run: AmplicolWorkflowResult,
+) -> tuple[int, ...] | None:
+    """Extract the leading-colour ordering used by a probe/ME-check run."""
+
+    reference_points: list[AmplicolProbePoint | AmplicolFirstPoint] = list(
+        run.probe_points
+    )
+    if not reference_points and run.first_phase_space_point is not None:
+        reference_points = [run.first_phase_space_point]
+    if not reference_points:
+        return None
+    point = reference_points[0]
+    entry = amplicol_process_file_entry(
+        run.process_file,
+        group=point.group,
+        integral=point.integral,
+    )
+    if entry is None:
+        return None
+    return tuple(int(label) for label in entry["color_order"])
+
+
 class AmplicolAdapter:
     """Python steering layer for the legacy Fortran AmpliCol executable."""
 
@@ -144,10 +343,23 @@ class AmplicolAdapter:
         path: str | Path | None = None,
         *,
         options: ProcessOptions | None = None,
+        process_list_backend: ProcessListBackend = "python",
     ) -> Path:
         output = self.repo_root / "processes.txt" if path is None else Path(path)
         if not output.is_absolute():
             output = self.repo_root / output
+        if process_list_backend == "legacy":
+            self.run_legacy_process_list(
+                process,
+                options=options,
+                output=output,
+            )
+            return output
+        if process_list_backend != "python":
+            raise ValueError(
+                "process_list_backend must be either 'python' or 'legacy', "
+                f"got {process_list_backend!r}"
+            )
         enumerator = ProcessEnumerator(options)
         enumeration = enumerator.enumerate(process)
         enumerator.write_legacy_file(enumeration, output)
@@ -159,15 +371,60 @@ class AmplicolAdapter:
         *,
         process_file: str | Path | None = None,
         options: ProcessOptions | None = None,
+        process_list_backend: ProcessListBackend = "python",
+        warmup_particles: Sequence[ExternalMomentum] | None = None,
+        warmup_points: int = 10,
     ) -> AmplicolWorkflowResult:
-        path = self.write_process_file(process, process_file, options=options)
-        commands = [
-            self._run(["make", "cleanlib"]),
-            self._run(["make", f"-j{self.jobs}", "amplicol_generate"]),
-            self._run(["./amplicol_generate", "--library=create", f"--process={path}"]),
-            self._run(["make", f"-j{self.jobs}", "amplicol_generate_library"]),
-        ]
-        for command in commands:
+        """Create and compile the generated Fortran amplitude library.
+
+        When ``warmup_particles`` are supplied, ``--library=create`` is driven
+        by deterministic supplied momenta instead of the legacy phase-space
+        integrator.  This still exercises the intended create/compile/use
+        library chain, but avoids reference-side phase-space failures in
+        point-by-point validation jobs.
+        """
+
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
+        create_args = ["./amplicol_generate", "--library=create", f"--process={path}"]
+        if warmup_particles is not None:
+            entries = amplicol_process_file_integrals(path) or ((1, 1),)
+            for group, integral in entries:
+                entry = amplicol_process_file_entry(
+                    path,
+                    group=group,
+                    integral=integral,
+                )
+                ordered_particles: Sequence[ExternalMomentum] = warmup_particles
+                if entry is not None:
+                    ordered_particles = reorder_external_momenta_by_pdg(
+                        warmup_particles,
+                        entry["process"],
+                    )
+                self.write_momenta_probe_file(
+                    ordered_particles,
+                    group=group,
+                    integral=integral,
+                )
+            create_args.extend(
+                [
+                    f"--amplicol_momenta_probe={warmup_points}",
+                    "--amplicol_probe_quiet",
+                ]
+            )
+        commands: list[CommandResult] = []
+        for args in (
+            ["make", "cleanlib"],
+            ["make", f"-j{self.jobs}", "amplicol_generate"],
+            create_args,
+            ["make", f"-j{self.jobs}", "amplicol_generate_library"],
+        ):
+            command = self._run(args)
+            commands.append(command)
             command.check_returncode()
         return AmplicolWorkflowResult(commands=tuple(commands), process_file=path)
 
@@ -177,13 +434,21 @@ class AmplicolAdapter:
         *,
         process_file: str | Path | None = None,
         options: ProcessOptions | None = None,
+        process_list_backend: ProcessListBackend = "python",
     ) -> AmplicolWorkflowResult:
-        path = self.write_process_file(process, process_file, options=options)
-        commands = [
-            self._run(["make", "cleanlib"]),
-            self._run(["make", f"-j{self.jobs}", "amplicol_generate"]),
-        ]
-        for command in commands:
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
+        commands: list[CommandResult] = []
+        for args in (
+            ["make", "cleanlib"],
+            ["make", f"-j{self.jobs}", "amplicol_generate"],
+        ):
+            command = self._run(args)
+            commands.append(command)
             command.check_returncode()
         return AmplicolWorkflowResult(commands=tuple(commands), process_file=path)
 
@@ -196,8 +461,14 @@ class AmplicolAdapter:
         options: ProcessOptions | None = None,
         mg5_path: str | Path | None = None,
         timing_sample: int | None = None,
+        process_list_backend: ProcessListBackend = "python",
     ) -> AmplicolWorkflowResult:
-        path = self.write_process_file(process, process_file, options=options)
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
         env = {}
         if mg5_path is not None:
             env["MG5_PATH"] = str(mg5_path)
@@ -223,6 +494,99 @@ class AmplicolAdapter:
             probe_points=probe_points,
         )
 
+    def run_library_use(
+        self,
+        process: str,
+        *,
+        nevents: int = 10000,
+        seed: int | None = None,
+        process_file: str | Path | None = None,
+        options: ProcessOptions | None = None,
+        timing_sample: int | None = None,
+        process_list_backend: ProcessListBackend = "python",
+    ) -> AmplicolWorkflowResult:
+        """Run the generated-library integration path.
+
+        This is the benchmark path recommended by the Fortran AmpliCol author:
+        first call :meth:`prepare_library`, then run ``./amplicol_generate
+        --library=use``.  Direct probes remain useful for deterministic
+        point-by-point debugging, but they do not exercise the generated
+        library.
+        """
+
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
+        args = [
+            "./amplicol_generate",
+            "--library=use",
+            f"--nevents={nevents}",
+        ]
+        if seed is not None:
+            args.append(f"--seed={seed}")
+        if timing_sample is not None:
+            args.append(f"--timing={timing_sample}")
+        if process_file is not None:
+            args.append(f"--process={path}")
+        command = self._run(args)
+        command.check_returncode()
+        output = "\n".join([command.stdout, command.stderr])
+        return AmplicolWorkflowResult(
+            commands=(command,),
+            process_file=path,
+            timing_rows=parse_timing_rows(output),
+            first_point_matrix_element=parse_first_matrix_element(output),
+            first_phase_space_point=parse_first_phase_space_point(output),
+            probe_points=parse_amplicol_probe_points(output),
+        )
+
+    def run_library_benchmark(
+        self,
+        process: str,
+        *,
+        points: int = 100000,
+        group: int = 1,
+        integral: int = 1,
+        process_file: str | Path | None = None,
+        options: ProcessOptions | None = None,
+        process_list_backend: ProcessListBackend = "python",
+    ) -> AmplicolWorkflowResult:
+        """Run the direct generated-library timing driver.
+
+        The driver calls the generated ``amp_lib:evaluate_amp`` dispatcher
+        directly on the saved library test momentum.  It intentionally bypasses
+        the AmpliCol integration/probe control flow, phase-space generation,
+        PDFs, cuts, and event-weight bookkeeping.  This is the cleanest runtime
+        benchmark for the generated Fortran amplitude library itself.
+        """
+
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
+        build = self._run(["make", f"-j{self.jobs}", "amplicol_library_benchmark"])
+        build.check_returncode()
+        command = self._run(
+            [
+                "./amplicol_library_benchmark",
+                str(max(1, points)),
+                str(group),
+                str(integral),
+            ]
+        )
+        command.check_returncode()
+        output = "\n".join([command.stdout, command.stderr])
+        return AmplicolWorkflowResult(
+            commands=(build, command),
+            process_file=path,
+            timing_rows=parse_timing_rows(output),
+        )
+
     def run_amplicol_probe(
         self,
         process: str,
@@ -232,15 +596,25 @@ class AmplicolAdapter:
         options: ProcessOptions | None = None,
         timing_sample: int | None = None,
         quiet: bool = False,
+        use_library: bool = False,
+        process_list_backend: ProcessListBackend = "python",
     ) -> AmplicolWorkflowResult:
-        path = self.write_process_file(process, process_file, options=options)
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
         timing = points if timing_sample is None else timing_sample
         args = [
             "./amplicol_generate",
             f"--amplicol_probe={points}",
+            f"--nevents={max(1, points)}",
             f"--timing={timing}",
             f"--process={path}",
         ]
+        if use_library:
+            args.append("--library=use")
         if quiet:
             args.append("--amplicol_probe_quiet")
         command = self._run(args)
@@ -265,15 +639,95 @@ class AmplicolAdapter:
         options: ProcessOptions | None = None,
         timing_sample: int | None = None,
         quiet: bool = False,
+        use_library: bool = False,
+        process_list_backend: ProcessListBackend = "python",
     ) -> AmplicolWorkflowResult:
-        path = self.write_process_file(process, process_file, options=options)
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
         timing = points if timing_sample is None else timing_sample
         args = [
             "./amplicol_generate",
             f"--amplicol_fixed_probe={points}",
+            f"--nevents={max(1, points)}",
             f"--timing={timing}",
             f"--process={path}",
         ]
+        if use_library:
+            args.append("--library=use")
+        if quiet:
+            args.append("--amplicol_probe_quiet")
+        command = self._run(args)
+        command.check_returncode()
+        output = "\n".join([command.stdout, command.stderr])
+        probe_points = parse_amplicol_probe_points(output)
+        return AmplicolWorkflowResult(
+            commands=(command,),
+            process_file=path,
+            timing_rows=parse_timing_rows(output),
+            first_point_matrix_element=parse_first_matrix_element(output),
+            first_phase_space_point=parse_first_phase_space_point(output),
+            probe_points=probe_points,
+        )
+
+    def write_momenta_probe_file(
+        self,
+        particles: Sequence[ExternalMomentum],
+        *,
+        group: int = 1,
+        integral: int = 1,
+    ) -> Path:
+        directory = self.repo_root / "Utilities" / "ME_checks"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"momenta_{group}_{integral}.txt"
+        with path.open("w", encoding="utf-8") as handle:
+            for particle in particles:
+                handle.write(
+                    " ".join(f"{component:.17e}" for component in particle.momentum)
+                    + "\n"
+                )
+        return path
+
+    def run_amplicol_momenta_probe(
+        self,
+        process: str,
+        *,
+        particles: Sequence[ExternalMomentum],
+        points: int = 1,
+        process_file: str | Path | None = None,
+        options: ProcessOptions | None = None,
+        timing_sample: int | None = None,
+        quiet: bool = False,
+        use_library: bool = False,
+        process_list_backend: ProcessListBackend = "python",
+    ) -> AmplicolWorkflowResult:
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
+        ordered_particles: Sequence[ExternalMomentum] = particles
+        entry = amplicol_process_file_entry(path, group=1, integral=1)
+        if entry is not None:
+            ordered_particles = reorder_external_momenta_by_pdg(
+                particles,
+                entry["process"],
+            )
+        self.write_momenta_probe_file(ordered_particles, group=1, integral=1)
+        timing = points if timing_sample is None else timing_sample
+        args = [
+            "./amplicol_generate",
+            f"--amplicol_momenta_probe={points}",
+            f"--nevents={max(1, points)}",
+            f"--timing={timing}",
+            f"--process={path}",
+        ]
+        if use_library:
+            args.append("--library=use")
         if quiet:
             args.append("--amplicol_probe_quiet")
         command = self._run(args)
@@ -307,11 +761,21 @@ class AmplicolAdapter:
         if opts.include_resonance:
             args.append("-res")
         args.append(process)
+        legacy_output = self.repo_root / "processes.txt"
+        try:
+            legacy_output.unlink()
+        except FileNotFoundError:
+            pass
         command = self._run(args)
         command.check_returncode()
         target = self.repo_root / output
+        if not legacy_output.exists():
+            raise RuntimeError(
+                "legacy process_list.py did not produce processes.txt for "
+                f"process {process!r}; required process-list options may be missing"
+            )
         if target.name != "processes.txt":
-            (self.repo_root / "processes.txt").replace(target)
+            legacy_output.replace(target)
         return command
 
     def _run(
@@ -479,9 +943,13 @@ __all__ = [
     "AmplicolWorkflowResult",
     "CommandResult",
     "TimingRow",
+    "amplicol_process_file_entry",
+    "amplicol_process_file_integrals",
     "parse_amplicol_probe_points",
     "parse_first_phase_space_point",
     "parse_first_matrix_element",
     "parse_timing_rows",
     "popen_runner",
+    "reference_color_order_for_run",
+    "reorder_external_momenta_by_pdg",
 ]

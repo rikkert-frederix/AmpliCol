@@ -17,6 +17,7 @@ module mg_checks
   integer :: me_points
   integer :: amplicol_probe_points=0
   integer :: amplicol_fixed_probe_points=0
+  integer :: amplicol_momenta_probe_points=0
   logical :: amplicol_probe_quiet=.false.
 
 contains
@@ -107,7 +108,7 @@ contains
     implicit none
     integer :: i,nord,iint,ichan,matched_index
     if (.not.allocated(mg_check)) allocate(mg_check(1000))
-    me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
+    me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))&
                *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(iint))
     call get_madgraph_results(pgl(ichan)%next,ichan,iint,mg_check,nord)
     match=.false.
@@ -150,10 +151,43 @@ contains
 
   subroutine perform_amplicol_probe(iint,ichan)
     implicit none
-    integer :: i,iint,ichan
+    integer :: i,iint,ichan,env_status
+    character(len=16) :: debug_helicities
     if (amplicol_probe_points.le.0) return
-    me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(next-2-pgl(ichan)%amps(iint)%n_sing(1))&
+    me_code = pgl(ichan)%amp2(:)*(4*pi*alpha_check)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))&
                *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)/dble(pgl(ichan)%iden(iint))
+    call get_environment_variable('AMPICOL_PROBE_HELICITY_DEBUG',debug_helicities,status=env_status)
+    if (env_status.eq.0 .and. trim(debug_helicities).eq.'1') then
+       write(*,'(a,1x,i0,1x,i0,1x,i0,1x,i0,1x,es31.23,1x,i0,1x,i0)') &
+            'AMPICOL_PROBE_DEBUG_HEADER',pgl(ichan)%passed(iint),ichan,iint,&
+            pgl(ichan)%amps(iint)%n_amps,dble(pgl(ichan)%col_fac(1)),&
+            pgl(ichan)%iden(iint),pgl(ichan)%amps(iint)%n_sing(1)
+       write(*,'(a,1x,i0,1x,i0,1x,i0,1x,es31.23,1x,es31.23,1x,es31.23)') &
+            'AMPICOL_PROBE_DEBUG_NORMALIZATION',pgl(ichan)%passed(iint),&
+            next,pgl(ichan)%next,alpha_check,alphaEW,&
+            (4*pi*alpha_check)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))&
+            *(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
+       write(*,'(a,1x,i0,1x,i0,99(1x,i0))') &
+            'AMPICOL_PROBE_DEBUG_IPROC_START',pgl(ichan)%passed(iint),&
+            size(pgl(ichan)%amps(iint)%iproc_start),&
+            pgl(ichan)%amps(iint)%iproc_start
+       do i=1,size(pgl(ichan)%amp2)
+          write(*,'(a,1x,i0,1x,i0,1x,es31.23,1x,es31.23)') &
+               'AMPICOL_PROBE_DEBUG_PROC_AMP2',pgl(ichan)%passed(iint),i,&
+               pgl(ichan)%amp2(i),me_code(i)
+       enddo
+       do i=1,pgl(ichan)%nproc
+          write(*,'(a,1x,i0,1x,i0,99(1x,i0))') &
+               'AMPICOL_PROBE_DEBUG_PROC_ROW',pgl(ichan)%passed(iint),i,&
+               pgl(ichan)%processes(1:pgl(ichan)%next,i)
+       enddo
+       do i=1,pgl(ichan)%amps(iint)%n_amps
+          write(*,'(a,1x,i0,1x,i0,1x,es31.23,1x,i0,99(1x,i0))') &
+               'AMPICOL_PROBE_DEBUG_HEL',pgl(ichan)%passed(iint),i,&
+               pgl(ichan)%amp2_hel(i),pgl(ichan)%hel_fac(i,iint),&
+               pgl(ichan)%amps(iint)%spins(1:pgl(ichan)%next,1,i)
+       enddo
+    endif
     if (.not.amplicol_probe_quiet) then
        write(*,'(a,1x,i0,1x,i0,1x,i0,1x,es31.23)') 'AMPICOL_PROBE_VALUE',&
             pgl(ichan)%passed(iint),ichan,iint,dble(me_code(1))

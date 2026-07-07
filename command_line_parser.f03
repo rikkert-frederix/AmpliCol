@@ -2,7 +2,8 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       amplicol_probe_points,amplicol_fixed_probe_points,amplicol_probe_quiet,timing,timing_sample)
+       amplicol_probe_points,amplicol_fixed_probe_points,amplicol_momenta_probe_points,&
+       amplicol_probe_quiet,timing,timing_sample)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -11,7 +12,8 @@ contains
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
     logical :: read_momenta,amplicol_probe_quiet
-    integer :: me_points,amplicol_probe_points,amplicol_fixed_probe_points,timing_sample
+    integer :: me_points,amplicol_probe_points,amplicol_fixed_probe_points
+    integer :: amplicol_momenta_probe_points,timing_sample
 
     ! Default values:
     show_help=.false.
@@ -25,6 +27,7 @@ contains
     read_momenta=.false.
     amplicol_probe_points=0
     amplicol_fixed_probe_points=0
+    amplicol_momenta_probe_points=0
     amplicol_probe_quiet=.false.
     timing='basic'
     timing_sample=100
@@ -66,6 +69,10 @@ contains
             index(arg, "--amplicol-fixed-probe=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) amplicol_fixed_probe_points
+       elseif (index(arg, "--amplicol_momenta_probe=").eq.1 .or. &
+            index(arg, "--amplicol-momenta-probe=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) amplicol_momenta_probe_points
        elseif (arg.eq."--amplicol_probe_quiet" .or. &
             arg.eq."--amplicol-probe-quiet") then
           amplicol_probe_quiet=.true.
@@ -105,6 +112,8 @@ contains
             "without running MadGraph."
        write (*,'(a)') "  --amplicol_fixed_probe=[X]: Print [X] direct AmpliCol ME values at a fixed "//&
             "2-to-1 on-shell kinematic point. Currently supports q q~ > Z."
+       write (*,'(a)') "  --amplicol_momenta_probe=[X]: Print direct AmpliCol ME values using momenta "//&
+            "from Utilities/ME_checks/momenta_<group>_<integral>.txt, bypassing integration."
        write (*,'(a)') "  --amplicol_probe_quiet   : Suppress per-point direct-probe ME/momentum stdout. "//&
             "Can also be enabled with AMPICOL_PROBE_QUIET=1."
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), detailed, or numeric "//&

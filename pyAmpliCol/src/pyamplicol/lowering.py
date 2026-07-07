@@ -922,7 +922,7 @@ class _GraphTensorExpressionBuilder:
         pdg = int(current.pdg)
         if pdg == -21:
             return (self._aux6(f"{prefix}_A"),)
-        if pdg == 21 or pdg == 22 or pdg == 23:
+        if _is_lorentz_vector_current_pdg(pdg):
             return (self._mink(f"{prefix}_mu"),)
         if 1 <= abs(pdg) <= 6 or 11 <= abs(pdg) <= 16:
             return (self._weyl(f"{prefix}_alpha"),)
@@ -1044,7 +1044,7 @@ def _register_parametric_source_currents(
         pdg = int(current.pdg)
         if pdg == -21:
             representation = aux6
-        elif pdg == 21 or pdg == 22 or pdg == 23:
+        elif _is_lorentz_vector_current_pdg(pdg):
             representation = mink
         elif 1 <= abs(pdg) <= 6 or 11 <= abs(pdg) <= 16:
             representation = weyl
@@ -1156,11 +1156,15 @@ def _is_weyl_fermion_current(current: Any) -> bool:
     return (1 <= abs(pdg) <= 6 or 11 <= abs(pdg) <= 16) and int(current.chirality) != 0
 
 
+def _is_lorentz_vector_current_pdg(pdg: int) -> bool:
+    return pdg in (21, 22, 23, 24, -24)
+
+
 def _current_dimension(current: Any) -> int:
     pdg = int(current.pdg)
     if pdg == -21:
         return 6
-    if pdg == 21 or pdg == 22 or pdg == 23:
+    if _is_lorentz_vector_current_pdg(pdg):
         return 4
     if 1 <= abs(pdg) <= 6 or 11 <= abs(pdg) <= 16:
         return 2

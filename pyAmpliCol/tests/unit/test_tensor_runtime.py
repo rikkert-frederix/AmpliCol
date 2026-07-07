@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.skip(
+    reason=(
+        "legacy Z+gluon tensor-network evaluators are retired from production; "
+        "schema-v2 generic DAG/Rusticol tests cover the active path"
+    )
+)
+
 from pyamplicol.native import LeadingColorZJetsNativeEvaluator
 from pyamplicol.lowering import (
     _current_momentum_currents,

@@ -47,11 +47,13 @@ def test_dependency_manifest_records_rusticol_source() -> None:
     assert installer.RUSTICOL_WHEEL_DIR.name == "rusticol"
 
 
-def test_dependency_installer_uses_symbolica_mod_and_skips_gammaloop_by_default() -> None:
+def test_dependency_installer_uses_upstream_symbolica_dev_and_skips_gammaloop_by_default() -> None:
     installer = _load_installer_module()
 
-    assert installer.SYMBOLICA_URL == "https://github.com/ValentinHirschi/symbolica_mod.git"
-    assert installer.SYMBOLICA_REF == "pyamplicol-dev-base"
+    assert installer.SYMBOLICA_URL == "https://github.com/symbolica-dev/symbolica.git"
+    assert installer.SYMBOLICA_REF == "dev"
+    assert installer.SYMJIT_VERSION == "2.19.2"
+    assert installer.SYMJIT_REF == "54d6c6171f05b39505d18d1932f0972bfac9e4da"
     assert "import gammaloop" not in installer.smoke_test_code(include_gammaloop=False)
 
 

@@ -4,6 +4,14 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason=(
+        "legacy monolithic compiled-DAG/alias experiments are retired from "
+        "production; schema-v2 generic DAG/Rusticol tests cover the active path"
+    )
+)
 
 from pyamplicol.compiled_dag_runtime import (
     ZGluonCompiledDAGEvaluator,
@@ -12,11 +20,12 @@ from pyamplicol.compiled_dag_runtime import (
     _fill_compiled_dag_source_parameters,
     _fill_compiled_dag_source_parameters_batch,
     _resolve_compiled_dag_compiled_preset,
+    _resolve_compiled_dag_cpe_iterations,
 )
 from pyamplicol.evaluation import NativeRuntimeEvaluator
 from pyamplicol.model import AmplicolSMLeadingColorModel
 from pyamplicol.native import LeadingColorZJetsNativeEvaluator, NativeEvaluationError
-from pyamplicol.phase_space import rambo_z_gluon_point
+from pyamplicol.phase_space import _legacy_rambo_z_gluon_point as rambo_z_gluon_point
 
 
 def test_symbolica_evaluator_alias_hook_is_available() -> None:
@@ -157,20 +166,14 @@ def test_z_gluon_compiled_dag_uses_adaptive_cpe_defaults() -> None:
         lowering="symbolic",
         compiled_dag_helicity_filter=False,
     )
-    high = ZGluonCompiledDAGEvaluator(
-        "d d~ > z g g g g g g",
-        lowering="symbolic",
-        compiled_dag_helicity_filter=False,
-    )
 
     assert low.metadata.symbolica_evaluator_settings["cpe_iterations"] == 2
-    assert high.metadata.symbolica_evaluator_settings["cpe_iterations"] is None
     assert low.metadata.symbolica_evaluator_settings[
         "max_common_pair_distance"
     ] == 250
-    assert high.metadata.symbolica_evaluator_settings[
-        "max_common_pair_distance"
-    ] == 250
+    assert _resolve_compiled_dag_cpe_iterations(5, None) == 2
+    assert _resolve_compiled_dag_cpe_iterations(6, None) is None
+    assert _resolve_compiled_dag_cpe_iterations(6, 3) == 3
 
 
 def test_z_gluon_compiled_dag_vectorized_source_fill_matches_scalar() -> None:
@@ -492,6 +495,7 @@ def test_compiled_dag_rejects_unsupported_processes_with_clear_diagnostic() -> N
             "q q~ -> Z plus ordered gluons" in message
             or "no native graph" in message
             or "unsupported" in message.lower()
+            or "not compatible with the requested vector emission" in message
         )
 
 

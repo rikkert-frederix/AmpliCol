@@ -207,9 +207,104 @@ Use:
 ## Matrix-Element Architecture
 
 pyamplicol is a modern matrix-element generator for AmpliCol-style
-leading-colour recursion. Keep the implementation architecture-general, but
-stage numerical validation first on the `q q~ -> Z + n g` family through at
-least six final-state gluons.
+current recursion. The production target is now DAG-only and process-generic:
+external legs come from the process IR, physics comes from the model, colour
+comes from the colour engine, and the recursion discovers valid currents. Do
+not add or preserve production branches that recognize whole process families
+such as `Z + gluons`, dileptons, W production, Higgs production, or
+multi-quark examples. Such recognizers may exist only in clearly named legacy
+reference/benchmark modules while the generic DAG/Rusticol schema-v2 runtime is
+being completed.
+
+The central current identity is physics state, never a family tag. A production
+current key must carry at least model particle/species id, external subset,
+external labels, `ext_cur`-style helicity ancestry, chirality/spin state,
+flavour/charge-flow data, colour state, momentum mask, and any auxiliary
+current kind. Deduplication is equality of that physics index. If the model and
+colour engine say two currents can combine through a local vertex, add or merge
+the resulting current; otherwise do not generate it.
+
+Flavour flow is part of the physics index and must be supplied by the model,
+not by process-family code. It should preserve open fermion-line transitions
+such as `d -> u` through a `W+` and fermion-pair origins such as
+`e- e+ -> gamma/Z`. Do not encode arbitrary pure-boson split history into the
+flow key, because that would prevent equivalent recursive contributions from
+merging into the same current.
+
+For leading-colour multi-quark sectors, colourless singlet labels allocated to
+an open quark line must stay attached to that line. The LC colour engine should
+reject a local combination where a colourless current assigned to line `i`
+attaches to a coloured current living only on line `j != i`; do not fix this by
+special-casing Z, W, dilepton, or Higgs process families.
+
+The public CLI should expose the generic DAG workflow first: `processes`,
+`process-plan`, `generate-process`, `time-process`, and
+`compare-amplicol --runtime-backend rusticol`. Legacy native/tensor/Z-family
+commands may stay parseable only as compatibility stubs or reference helpers,
+but they must be hidden from help output and must not be used as production
+entry points. Process-set child generation must forward generic generation
+options, including `--color-accuracy`, rather than silently forcing LC or a
+family-specific mode.
+
+`pyamplicol.evaluation.NativeRuntimeEvaluator` is retired reference-only code.
+It must reject accidental construction by default and may only be used with an
+explicit `allow_reference_legacy=True` opt-in inside hidden compatibility
+commands, migration diagnostics, or historical reference tests. New production
+evaluation must load schema-v2 generic DAG artifacts through Rusticol.
+Unit modules that exercise retired Z-family native kernels, tensor-network
+runtimes, schema-v1 symbolic artifacts, or the old staged `ZGluonDAGEvaluator`
+should remain skipped in the default suite unless they are being run manually
+for historical diagnostics. New regression coverage belongs on the generic
+DAG/schema-v2/Rusticol path.
+
+Phase-space helpers in the public API must be process-independent. Use
+`massive_rambo_final_state` for generic validation/warmup momenta. Any
+Z+gluon-specific point generator belongs to legacy modules or private helpers,
+not the exported generic phase-space API.
+
+The generic recursion shape is:
+
+```python
+sources = build_external_source_currents(process_ir, model, color_engine)
+currents = CurrentTable(sources)
+for subset_size in range(2, process_ir.n_external + 1):
+    for left_mask, right_mask in compatible_splits(subset_size):
+        for left in currents.by_mask(left_mask):
+            for right in currents.by_mask(right_mask):
+                if left.index.overlaps(right.index):
+                    continue
+                for vertex in model.vertices_accepting(
+                    left.index.particle_id,
+                    right.index.particle_id,
+                ):
+                    for quantum_flow in allowed_quantum_flows(vertex, left, right):
+                        for color_flow in color_engine.combine(
+                            left.index.color_state,
+                            right.index.color_state,
+                            vertex.color_kernel,
+                        ):
+                            out_index = CurrentIndex(
+                                particle_id=vertex.output_particle_id,
+                                external_mask=left.index.external_mask
+                                    | right.index.external_mask,
+                                helicity_ancestry=left.index.helicity_ancestry
+                                    | right.index.helicity_ancestry,
+                                chirality=quantum_flow.chirality,
+                                spin_state=quantum_flow.spin_state,
+                                flavour_flow=quantum_flow.flavour_flow,
+                                charge_flow=quantum_flow.charge_flow,
+                                color_state=color_flow.state,
+                                momentum_mask=left.index.momentum_mask
+                                    | right.index.momentum_mask,
+                            )
+                            if model.current_allowed(out_index):
+                                currents.add_or_get(out_index)
+```
+
+Any implementation that instead says "if this is `q q~ -> Z + n g`, build this
+specific graph" is legacy and must not be extended. The validated
+`d d~ -> Z + n g` performance table is a regression target for the generic
+compiler, not the template for new process support.
 
 Strict ownership rules:
 
@@ -221,13 +316,90 @@ Strict ownership rules:
   masses, widths, colour representations, tensor registration, auxiliary
   particles, normalization constants, and Feynman-rule lowering. Do not hard-code
   Feynman rules, coupling constants, colour factors, or auxiliary tensor data
-  outside model classes.
-- The native matrix-element generator owns recursion graphs, current identity
-  keys, chirality propagation, colour-order compatibility, propagators, final
-  closure, tensor-network construction, evaluator cache metadata, and timing
-  breakdowns.
+  outside model classes. Model-table conventions such as duplicate mirrored
+  vertex orientations must also live behind model hooks such as
+  `skip_duplicate_vertex_orientation(...)`; the compiler should only ask the
+  model, not inspect special vertex families itself.
+- The generic DAG compiler owns recursion graphs, current identity indices,
+  chirality/spin propagation, flavour/charge-flow propagation, colour-state
+  propagation, propagators, amplitude roots, evaluator stage metadata, and
+  timing breakdowns. It must query the model and colour engine locally; it must
+  not classify or special-case whole process families.
+- `current_plan.py` is only a compatibility facade over `GenericDAGCompiler`.
+  It must not grow a second recursion implementation or a weaker current key.
+  Current inspection, support diagnostics, and stage-plan summaries must read
+  the production `CurrentIndex` objects emitted by `generic_dag.py`.
+- Shared value types such as `ExternalMomentum`, `MatrixElementEvaluation`, and
+  `NativeEvaluationError` live in `core_types.py`. Generic production modules
+  and CLI code must import these neutral types directly instead of importing
+  `native.py`, which is now reference-only.
+- `matrix.py` is the generic schema-v2 planning facade. Its public API should not
+  export native/family compatibility aliases or old `supported_native_target`
+  fields. Old `CurrentKey`/`RecursionGraph` family graph construction belongs
+  only in clearly named legacy/reference modules such as `legacy_matrix.py`.
+- `rusticol.Runtime.load()` is the production runtime entry point and accepts
+  only schema-v2 generic DAG artifacts.  Schema-v1 family artifacts from the old
+  eager-DAG route are reference-only and require the explicit
+  `rusticol.Runtime.load_legacy()` API. Do not add new process support by
+  extending the schema-v1 loader.
 - The AmpliCol adapter owns all legacy process steering through
   `subprocess.Popen`. Do not call `run.sh` from pyamplicol library code.
+
+Process coverage and quark-line generalization rules:
+
+- The process parser/enumerator must target the full legacy AmpliCol particle
+  vocabulary: QCD partons, photons, `Z`, `W+`, `W-`, Higgs, charged leptons,
+  neutrinos, and charge-conjugate variants. Do not add new syntax by
+  hard-coding only the current `Z + gluons` fast path.
+- Process-set syntax uses `|` for multiple process requests in one artifact.
+  Built-in `p` and `j` remain named inclusive labels. Bracket syntax such as
+  `[d g]` is an anonymous local multiparticle slot, and `n*X` repeats either a
+  particle or an anonymous slot.
+- Process-set generation must exploit crossing symmetry. Concrete subprocesses
+  with the same all-outgoing external PDG multiset share one representative
+  artifact, and later entries are recorded as crossing aliases with an explicit
+  input momentum/sign map. Do not compile crossing-equivalent subprocesses
+  independently unless the colour accuracy or generation options make the
+  artifact genuinely inequivalent. Rusticol and any Python runtime loader must
+  apply the recorded map when an alias subprocess is selected.
+- Leading colour is implemented first through the same generic DAG. NLC and
+  full colour are real refactor targets after generic LC is stable: keep
+  `--color-accuracy {lc,nlc,full}` plumbing, use Idenso for colour basis/metric
+  construction, and make Rusticol execute the same staged evaluator plan plus
+  colour contractions. Never silently fall back from NLC/full to LC.
+- Arbitrary numbers of quark-pair lines must be represented algorithmically:
+  use generic combinatorics for colour-order sectors, multichannel singlet
+  distributions, symmetry factors, and dual-amplitude counts. Do not restore
+  the legacy explicit 1/2/3 quark-pair branches in the Python process layer.
+- When a closed-form arbitrary-quark-line rule is not practical, use
+  Symbolica, spenso, and idenso during generation warmup to derive or simplify
+  the necessary current and colour-flow inputs for the concrete process set,
+  then cache those inputs in the process artifact. This is the intended
+  generalization of AmpliCol's approach, not a request to hand-code larger
+  special cases.
+- Matrix-element generation must be model-driven. If a legacy-supported
+  process cannot yet be lowered because a vertex/current rule is missing, fail
+  with a diagnostic naming the unsupported process and missing lowering instead
+  of routing it through a process-specific approximation.
+
+Milestone ordering is strict. First establish generic leading-colour coverage
+for the full Fortran AmpliCol process class within the generalized DAG:
+arbitrary numbers of fermion lines in principle, all legacy-supported particle
+families, and process-set/multiparticle syntax. Then add broad tests for that
+coverage, reproduce the documented `Z + n*g` performance with the generic DAG,
+and extend performance comparisons to a few additional low-multiplicity
+generic processes. Commit and push that LC milestone before starting NLC or
+full-colour implementation work. NLC/full-colour planning and scaffolding may
+remain visible, but active implementation follows only after the generic LC
+milestone is validated and pushed.
+
+Once the generic LC implementation is under control, remove legacy code before
+the milestone commit. During the refactor, old family-specific native kernels,
+tensor-network-only modes, schema-v1 eager-DAG compatibility, and experimental
+compiled-DAG routes may remain only as temporary validation aids. They should
+not survive as production code after the generic DAG/Rusticol path covers the
+legacy Fortran AmpliCol LC process range and reproduces the documented
+performance. This cleanup happens before NLC/full-colour implementation work.
 
 The first native implementation strategy is one whole symbolic/tensor network:
 external wavefunctions and cached polarizations stay at the evaluator boundary,
@@ -235,6 +407,13 @@ while recursion, contractions, colour algebra, simplification, expression
 generation, and JIT evaluation are delegated to spenso, idenso, and Symbolica.
 Do not switch to nested Python numerical current recursion unless a measured
 milestone shows the whole-network strategy is not viable.
+
+The old native Python kernels, tensor-network-only execution experiments, and
+family-specific compiled-DAG prototypes are legacy validation aids. New
+production work should target generic DAG artifacts with Symbolica
+`jit`/`cpp`/`asm` evaluator backends executed by Rusticol. If legacy modes
+block the refactor or cause excessive test cost, quarantine or remove them
+rather than preserving backwards compatibility.
 
 For the production `q q~ -> Z + n g` D-mode milestone, stick very close to the
 ideas behind legacy AmpliCol conceptually. Build one shared helicity-aware
@@ -255,25 +434,13 @@ monolithic expression for high multiplicity when it exceeds the watchdog or
 causes expression blow-up; prefer staged evaluator layers that preserve the
 legacy current-table structure.
 
-The `--compiled-dag-evaluator` mode is a separate full-symbolic route. It must
-reuse the same AmpliCol-style shared current table, but move runtime current
-orchestration to generation time: source current components and real momentum
-sums are runtime parameters, while internal current components are opaque
-Symbolica aliases and the final retained helicity amplitudes are one
-multi-output evaluator. Final complex conjugation, helicity/color factors, and
-the ME sum remain outside the evaluator until the multi-output amplitude vector
-is validated. Keep this route isolated in compiled-DAG modules while factoring
-shared current-table and expression utilities only when that removes real
-duplication.
-
-For compiled-DAG lowering, support both `spenso` and `symbolic` routes.
-`spenso` is the intended default and should build each current body as a small
-tensor network using the fixed model-owned `hep_lib` plus explicit temporary
-parent-current tensors whose entries are aliases. `symbolic` constructs the
-same current components directly with the verified Symbolica component
-builders and is the debugging baseline. Current aliases and temporary parent
-tensors are graph construction artifacts; do not register them as new model
-physics tensors.
+The old monolithic `--compiled-dag-evaluator`/alias experiment is retired from
+production. Keep that code quarantined as reference-only until it is removed;
+do not add new features, tests, or dependency requirements for it. In
+particular, pyAmpliCol no longer requires Symbolica's alias branch for the
+production path. The supported route is the generic staged DAG artifact:
+Python generates model-driven current stages, Symbolica builds the bounded
+stage evaluators, and Rusticol executes the staged recursion at runtime.
 
 Manual Symbolica aliasing is required for the final compiled-DAG path. Prefer a
 managed `symbolica_mod` fork over pyamplicol-side evaluator workarounds, and keep
@@ -321,10 +488,12 @@ Rusticol is a PyO3 runtime that links the local Symbolica Rust crate while
 pyamplicol also uses Symbolica through the Python extension. Until the linking
 model is unified, keep rusticol extension-load/error-path tests isolated in
 subprocesses when the same pytest process also constructs Python-side
-Symbolica graph objects. Direct runtime use through `rusticol.Runtime.load(...)`
-is still the target API, but tests that intentionally exercise failed loads or
-unsupported manifests should not poison the main pytest process before later
-Symbolica construction tests.
+Symbolica graph objects. Direct production runtime use through
+`rusticol.Runtime.load(...)` is still the target API for schema-v2 generic DAG
+artifacts, while `rusticol.Runtime.load_legacy(...)` is only for schema-v1
+reference artifacts and migration diagnostics. Tests that intentionally
+exercise failed loads or unsupported manifests should not poison the main
+pytest process before later Symbolica construction tests.
 
 For compiled Symbolica backends, distinguish the valid scalar compiled modes
 from SIMD complex mode. On Apple Silicon/aarch64, `compiled-complex-4x` is not

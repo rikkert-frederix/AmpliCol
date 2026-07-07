@@ -22,7 +22,7 @@ from .lowering import (
     build_interleaved_tensor_network_scalar_bundle,
     build_tensor_network_scalar_bundle,
 )
-from .matrix import CurrentKey, NativeMatrixElementGenerator, RecursionGraph
+from .legacy_matrix import CurrentKey, NativeMatrixElementGenerator, RecursionGraph
 from .model import AmplicolSMLeadingColorModel
 from .native import (
     ExternalMomentum,

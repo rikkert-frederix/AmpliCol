@@ -290,9 +290,9 @@ early with clear unsupported diagnostics:
 
 | Process | Current status |
 |---|---|
-| `d d~ > e+ e- g g` | Unsupported: no native graph available. |
-| `u d~ > w+ g g` | Unsupported: no native graph available. |
-| `d d~ > z z g` | Unsupported: no native graph available. |
+| `d d~ > e+ e- g g` | Unsupported in compiled-DAG artifacts: pending the lepton-source shared-current artifact route. |
+| `u d~ > w+ g g` | Supported by the eager-DAG/Rusticol vector-plus-gluon route; compiled-DAG support remains outside the current exploratory lowering. |
+| `d d~ > z z g` | Unsupported in compiled-DAG artifacts: pending the model-driven multi-boson current lowering. |
 
 ## Reproduction Commands
 

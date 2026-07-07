@@ -11,10 +11,16 @@ from symbolica import E, Expression, S
 # Bug reproduced by this MRE:
 # On AArch64, Symbolica/SymJIT successfully builds a JIT evaluator for the
 # expressions in MRE_jit_fail_input.txt, but the first evaluate_complex() call
-# aborts in symjit-2.18.6/rust/arm/vector.rs:795 with
-# `assertion failed: x.abs() < 1048576`. The input file contains one dumped
-# pyamplicol shared-current block for d d~ -> Z + 7g, alpha-renamed to p0..pN
-# only; it is intentionally not simplified or minimized.
+# aborts with `assertion failed: x.abs() < 1048576` in SymJIT's arm vector
+# lowering. This was first seen in symjit-2.18.6/rust/arm/vector.rs:795 and
+# was still reproducible with the historical local SymJIT v220 source used by
+# pyAmpliCol during the generic-DAG result-matrix refresh. The managed
+# dependency set has since been moved to SymJIT 2.19.2, where the smaller
+# staged-expression crash is fixed; this MRE remains as a historical reproducer
+# for the original vector-lowering failure.
+# The input file contains one dumped pyamplicol shared-current block for
+# d d~ -> Z + 7g, alpha-renamed to p0..pN only; it is intentionally not
+# simplified or minimized.
 INPUT_FILE = Path(__file__).with_name("MRE_jit_fail_input.txt")
 
 

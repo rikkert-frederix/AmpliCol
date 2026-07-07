@@ -252,6 +252,233 @@ class ProcessEnumeration:
         return sum(len(group.records) for group in self.groups)
 
 
+@dataclass(frozen=True)
+class ProcessSetEntry:
+    key: str
+    process: str
+    enumeration: ProcessEnumeration
+
+
+@dataclass(frozen=True)
+class ProcessSetEnumeration:
+    request: str
+    options: ProcessOptions
+    entries: tuple[ProcessSetEntry, ...]
+
+    @property
+    def default_key(self) -> str:
+        if not self.entries:
+            raise ValueError("process set is empty")
+        return self.entries[0].key
+
+
+def split_process_set(process_string: str) -> tuple[str, ...]:
+    """Split ``PROC | PROC`` input without treating bars inside brackets as separators."""
+
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(process_string):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("unmatched ']' in process string")
+        elif char == "|" and depth == 0:
+            part = process_string[start:index].strip()
+            if not part:
+                raise ValueError("empty process in process set")
+            parts.append(part)
+            start = index + 1
+    if depth != 0:
+        raise ValueError("unmatched '[' in process string")
+    tail = process_string[start:].strip()
+    if not tail:
+        raise ValueError("empty process in process set")
+    parts.append(tail)
+    return tuple(parts)
+
+
+def expand_process_variants(process_string: str) -> tuple[str, ...]:
+    """Expand anonymous multiparticle slots and repetition syntax.
+
+    Built-in inclusive labels such as ``p`` and ``j`` are kept symbolic for the
+    enumerator. Anonymous slots like ``[d g]`` are expanded by cartesian product,
+    and each repeated slot in ``3*[d g]`` is treated independently.
+    """
+
+    variants: list[str] = []
+    for process in split_process_set(process_string):
+        parts = process.lower().replace("bar", "~").split(">")
+        if len(parts) != 2:
+            raise ValueError("invalid collision format; expected 'initial > final'")
+        initial_options = _expand_side_tokens(_tokenize_side(parts[0].strip()))
+        final_options = _expand_side_tokens(_tokenize_side(parts[1].strip()))
+        for initial in itertools.product(*initial_options):
+            for final in itertools.product(*final_options):
+                variants.append(
+                    f"{' '.join(initial)} > {' '.join(final)}"
+                )
+    return tuple(dict.fromkeys(variants))
+
+
+def canonical_process_key(process: str) -> str:
+    tokens = process.lower().replace("bar", "~").replace(">", " > ").split()
+    safe = []
+    for token in tokens:
+        if token == ">":
+            safe.append("to")
+        else:
+            safe.append(
+                token.replace("~", "bar")
+                .replace("+", "plus")
+                .replace("-", "minus")
+            )
+    return "_".join(safe)
+
+
+def _process_uses_inclusive_labels(process: str) -> bool:
+    parts = process.lower().replace("bar", "~").split(">")
+    if len(parts) != 2:
+        raise ValueError("invalid collision format; expected 'initial > final'")
+    for token in (*_tokenize_side(parts[0].strip()), *_tokenize_side(parts[1].strip())):
+        _, item = _split_repeat_token(token)
+        if item in {"p", "j"}:
+            return True
+        if item.startswith("[") and item.endswith("]"):
+            if any(option in {"p", "j"} for option in _anonymous_options(item)):
+                return True
+    return False
+
+
+def _request_allows_charged_current(request: ParsedProcess) -> bool:
+    """Return whether request quantum numbers imply charged-current flow."""
+
+    if "w+" in request.rest or "w-" in request.rest:
+        return True
+    non_qcd_rest = [
+        particle
+        for particle in request.rest
+        if particle not in ALL_COLOURED and particle in CHARGES3
+    ]
+    return abs(sum(CHARGES3[particle] for particle in non_qcd_rest)) == 3
+
+
+def _record_to_physical_process(record: SubprocessRecord) -> str:
+    initial = tuple(ANTI_PARTICLE[p] for p in record.process[:2])
+    final = record.process[2:]
+    return f"{' '.join(initial)} > {' '.join(final)}"
+
+
+def _concrete_processes_from_inclusive_enumeration(
+    enumeration: ProcessEnumeration,
+) -> tuple[str, ...]:
+    processes: dict[str, None] = {}
+    for group in enumeration.groups:
+        for record in group.records:
+            processes.setdefault(_record_to_physical_process(record), None)
+    return tuple(sorted(processes, key=_concrete_process_sort_key))
+
+
+def _concrete_process_sort_key(process: str) -> tuple[object, ...]:
+    initial, _, final = process.partition(">")
+    initial_tokens = tuple(_tokenize_side(initial.strip()))
+    final_tokens = tuple(_tokenize_side(final.strip()))
+    q_qbar_first = not (
+        len(initial_tokens) == 2
+        and not initial_tokens[0].endswith("~")
+        and initial_tokens[1].endswith("~")
+    )
+    return (
+        q_qbar_first,
+        tuple(SORT_PARTICLES.get(token, 999) for token in initial_tokens),
+        tuple(SORT_PARTICLES.get(token, 999) for token in final_tokens),
+        initial_tokens,
+        final_tokens,
+    )
+
+
+def _tokenize_side(side: str) -> list[str]:
+    tokens: list[str] = []
+    index = 0
+    while index < len(side):
+        if side[index].isspace():
+            index += 1
+            continue
+        if side[index] == "[":
+            end = side.find("]", index + 1)
+            if end < 0:
+                raise ValueError("unmatched '[' in process string")
+            tokens.append(side[index : end + 1])
+            index = end + 1
+            continue
+        end = index
+        while end < len(side) and not side[end].isspace():
+            if side[end] == "[":
+                bracket = side.find("]", end + 1)
+                if bracket < 0:
+                    raise ValueError("unmatched '[' in process string")
+                end = bracket + 1
+            else:
+                end += 1
+        tokens.append(side[index:end])
+        index = end
+    return tokens
+
+
+def _expand_side_tokens(tokens: Sequence[str]) -> tuple[tuple[str, ...], ...]:
+    expanded: list[tuple[str, ...]] = []
+    for token in tokens:
+        repeat, item = _split_repeat_token(token)
+        options = _anonymous_options(item)
+        expanded.extend(options for _ in range(repeat))
+    return tuple(expanded)
+
+
+def _split_repeat_token(token: str) -> tuple[int, str]:
+    match = re.fullmatch(r"(\d+)\*(.+)", token)
+    if match:
+        return int(match.group(1)), match.group(2)
+    compact = re.fullmatch(r"(\d+)([A-Za-z][A-Za-z0-9+~\-]*)", token)
+    if compact:
+        return int(compact.group(1)), compact.group(2)
+    return 1, token
+
+
+def _anonymous_options(token: str) -> tuple[str, ...]:
+    if token.startswith("[") and token.endswith("]"):
+        options = tuple(_tokenize_side(token[1:-1].strip()))
+        if not options:
+            raise ValueError("anonymous multiparticle label cannot be empty")
+        return options
+    return (token,)
+
+
+def _ordered_compositions(total: int, parts: int) -> tuple[tuple[int, ...], ...]:
+    if parts <= 0:
+        return ((),) if total == 0 else ()
+    if parts == 1:
+        return ((total,),)
+    return tuple(
+        (first, *rest)
+        for first in range(total + 1)
+        for rest in _ordered_compositions(total - first, parts - 1)
+    )
+
+
+def _chunk_sequence(
+    values: Sequence[int],
+    chunk_lengths: Sequence[int],
+) -> tuple[tuple[int, ...], ...]:
+    chunks: list[tuple[int, ...]] = []
+    start = 0
+    for length in chunk_lengths:
+        chunks.append(tuple(values[start : start + length]))
+        start += length
+    return tuple(chunks)
+
+
 class ProcessEnumerator:
     """Structured port of the legacy process_list.py enumeration logic."""
 
@@ -268,22 +495,35 @@ class ProcessEnumerator:
         self._process_order_to_index: dict[tuple[ProcessTuple, OrderTuple], int] = {}
 
     def parse(self, process_string: str) -> ParsedProcess:
-        input_string = process_string.lower().replace("bar", "~").replace(" j", " 1j")
+        variants = expand_process_variants(process_string)
+        if len(variants) != 1:
+            raise ValueError(
+                "ProcessEnumerator.parse expects one concrete process; "
+                "use enumerate_process_set for process sets or multiparticle expansion"
+            )
+        input_string = variants[0].lower().replace("bar", "~")
         parts = input_string.split(">")
         if len(parts) != 2:
             raise ValueError("invalid collision format; expected 'initial > final'")
 
-        initial_state = parts[0].strip().split()
+        initial_state = _tokenize_side(parts[0].strip())
         if len(initial_state) != 2:
             raise ValueError("exactly two incoming particles are required")
         crossed_initial = tuple(
-            ANTI_PARTICLE[p] if p != "p" else p for p in initial_state
+            ANTI_PARTICLE[p] if p not in {"p", "j"} else p for p in initial_state
         )
 
-        final_state = parts[1].strip().split()
-        jet_match = re.match(r"(\d+)j", final_state[-1]) if final_state else None
-        jet_count = int(jet_match.group(1)) if jet_match else 0
-        rest = list(final_state[:-1] if jet_match else final_state)
+        final_state = _tokenize_side(parts[1].strip())
+        jet_count = 0
+        rest: list[str] = []
+        for token in final_state:
+            jet_match = re.fullmatch(r"(\d+)j", token)
+            if token == "j":
+                jet_count += 1
+            elif jet_match:
+                jet_count += int(jet_match.group(1))
+            else:
+                rest.append(token)
         leptons: list[str] = []
         if self.options.include_resonance:
             leptons = [p for p in rest if 11 <= abs(int(PDGS[p])) <= 16]
@@ -349,7 +589,7 @@ class ProcessEnumerator:
         return frozenset(flavours[:value])
 
     def _validate_particles(self, particles: Iterable[str]) -> None:
-        unknown = sorted(set(particles).difference(PDGS).difference({"p"}))
+        unknown = sorted(set(particles).difference(PDGS).difference({"p", "j"}))
         if unknown:
             raise ValueError(f"unknown particle name(s): {unknown}")
 
@@ -422,7 +662,7 @@ class ProcessEnumerator:
         self, proc: ProcessTuple
     ) -> dict[OrderTuple, list[SubprocessRecord]]:
         local: dict[OrderTuple, list[SubprocessRecord]] = {}
-        for perm in itertools.permutations(range(len(proc))):
+        for perm in self._candidate_color_orders(proc):
             order = tuple(perm)
             if not self._valid_color_order(proc, order):
                 continue
@@ -436,21 +676,67 @@ class ProcessEnumerator:
             )
         return local
 
-    def _valid_process(self, proc: Sequence[str]) -> bool:
+    def _candidate_color_orders(self, proc: ProcessTuple) -> Iterable[OrderTuple]:
+        quark_indices = tuple(i for i, particle in enumerate(proc) if particle in QUARKS)
+        anti_indices = tuple(i for i, particle in enumerate(proc) if particle in ANTIQUARKS)
+        gluon_indices = tuple(i for i, particle in enumerate(proc) if particle in GLUONS)
+        singlet_indices = tuple(i for i, particle in enumerate(proc) if particle in SINGLETS)
+        if not quark_indices:
+            for tail in itertools.permutations(index for index in gluon_indices if index != 0):
+                yield (0, *tail)
+            return
+
+        if singlet_indices:
+            singlet_perms = tuple(itertools.permutations(singlet_indices))
+        else:
+            singlet_perms = ((),)
+        gluon_compositions = _ordered_compositions(
+            len(gluon_indices),
+            len(quark_indices),
+        )
+        singlet_compositions = _ordered_compositions(
+            len(singlet_indices),
+            len(quark_indices),
+        )
+        for quark_order in itertools.permutations(quark_indices):
+            for anti_order in itertools.permutations(anti_indices):
+                for gluon_perm in itertools.permutations(gluon_indices):
+                    for gluon_chunks in gluon_compositions:
+                        gluon_by_line = _chunk_sequence(gluon_perm, gluon_chunks)
+                        for singlet_perm in singlet_perms:
+                            for singlet_chunks in singlet_compositions:
+                                singlet_by_line = _chunk_sequence(
+                                    singlet_perm,
+                                    singlet_chunks,
+                                )
+                                order: list[int] = []
+                                for line in range(len(quark_indices)):
+                                    order.append(quark_order[line])
+                                    order.extend(gluon_by_line[line])
+                                    order.append(anti_order[line])
+                                    order.extend(singlet_by_line[line])
+                                yield tuple(order)
+
+    def _valid_process(
+        self,
+        proc: Sequence[str],
+        *,
+        allow_charged_current: bool | None = None,
+    ) -> bool:
+        allow_cc = (
+            self.options.include_cc
+            if allow_charged_current is None
+            else allow_charged_current
+        )
         nq = self._count_matching(proc, QUARKS)
         naq = self._count_matching(proc, ANTIQUARKS)
-        if self.options.include_3qqbar:
-            if nq > 3 or naq > 3:
-                return False
-        elif nq > 2 or naq > 2:
-            return False
         if nq != naq:
             return False
         if sum(CHARGES3[x] for x in proc) != 0:
             return False
-        if not self.options.include_cc:
-            if sum(FAMILY[x] for x in proc) != 0:
-                return False
+        if not self.options.include_cc and sum(FAMILY[x] for x in proc) != 0:
+            return False
+        if not allow_cc:
             if "w+" not in proc and "w-" not in proc:
                 for q in QUARKS:
                     if self._count_matching(proc, [q]) != self._count_matching(
@@ -462,7 +748,7 @@ class ProcessEnumerator:
     def _compatible_unique_process(
         self, request: ParsedProcess, proc: Sequence[str]
     ) -> bool:
-        mandatory = [p for p in request.initial_state if p != "p"]
+        mandatory = [p for p in request.initial_state if p not in {"p", "j"}]
         mandatory.extend(request.rest)
         proc_local = list(proc)
         try:
@@ -475,7 +761,7 @@ class ProcessEnumerator:
     def _compatible_process(self, request: ParsedProcess, proc: ProcessTuple) -> bool:
         proc_local = list(proc[2:])
         for i in (0, 1):
-            if request.initial_state[i] != "p" and proc[i] != request.initial_state[i]:
+            if request.initial_state[i] not in {"p", "j"} and proc[i] != request.initial_state[i]:
                 return False
         try:
             for particle in request.rest:
@@ -487,22 +773,30 @@ class ProcessEnumerator:
     def _generate_all_unique_processes(self, request: ParsedProcess) -> set[ProcessTuple]:
         processes: list[list[str]] = [[]]
         for part in request.initial_state:
-            if part != "p" and part not in self.massless_qcd:
+            if part not in {"p", "j"} and part not in self.massless_qcd:
                 raise ValueError("initial state should be a proton or massless QCD parton")
+
+        if request.jet_count == 0 and all(
+            part not in {"p", "j"} for part in request.initial_state
+        ):
+            proc = tuple(
+                sorted(
+                    (*request.initial_state, *request.rest),
+                    key=lambda item: SORT_PARTICLES[item],
+                )
+            )
+            if self._valid_process(
+                proc,
+                allow_charged_current=_request_allows_charged_current(request),
+            ) and self._compatible_unique_process(request, proc):
+                return {proc}
+            return set()
 
         qcd_rest = sum(1 for part in request.rest if part in self.massless_qcd)
         for part_index in range(request.jet_count + 2 + qcd_rest):
             new_processes: list[list[str]] = []
             for proc in processes:
                 for particle in self.massless_qcd:
-                    if (
-                        not self.options.include_3qqbar
-                        and part_index > 3
-                        and particle not in GLUONS
-                    ):
-                        continue
-                    if part_index > 5 and particle not in GLUONS:
-                        continue
                     new_processes.append(sorted([*proc, particle]))
             processes = new_processes
 
@@ -515,7 +809,11 @@ class ProcessEnumerator:
         return {
             tuple(proc)
             for proc in processes
-            if self._valid_process(proc) and self._compatible_unique_process(request, proc)
+            if self._valid_process(
+                proc,
+                allow_charged_current=_request_allows_charged_current(request),
+            )
+            and self._compatible_unique_process(request, proc)
         }
 
     def _generate_all_processes(
@@ -578,62 +876,39 @@ class ProcessEnumerator:
         else:
             singlet_perms = ()
 
-        iden = 2.0 if len(anti_quark_indices) == 3 else 1.0
+        iden = float(math.factorial(max(len(anti_quark_indices) - 1, 0)))
         possible: list[tuple[OrderTuple, ProcessTuple]] = []
         if not singlet_perms:
             possible.append((perm, proc))
-        elif len(anti_quark_indices) == 1:
+        elif anti_quark_indices:
             for singlets in singlet_perms:
-                order: list[int] = []
-                for i in range(len(perm)):
-                    if i == anti_quark_indices[0]:
-                        order.extend(perm[p] for p in (anti_quark_indices + singlets))
-                    elif i not in singlet_indices:
-                        order.append(perm[i])
-                possible.append((tuple(order), proc))
-        elif len(anti_quark_indices) == 2:
-            for j in range(nsinglets + 1):
-                for singlets in singlet_perms:
+                for chunks in _ordered_compositions(
+                    nsinglets,
+                    len(anti_quark_indices),
+                ):
+                    starts = [0]
+                    for chunk in chunks[:-1]:
+                        starts.append(starts[-1] + chunk)
+                    singlet_chunks = tuple(
+                        singlets[start : start + chunk]
+                        for start, chunk in zip(starts, chunks, strict=True)
+                    )
                     order_list: list[int] = []
                     for i in range(len(perm)):
-                        if i == anti_quark_indices[0]:
+                        if i in anti_quark_indices:
+                            anti_index = anti_quark_indices.index(i)
                             order_list.extend(
-                                perm[p] for p in ((anti_quark_indices[0],) + singlets[:j])
-                            )
-                        elif i == anti_quark_indices[1]:
-                            order_list.extend(
-                                perm[p] for p in ((anti_quark_indices[1],) + singlets[j:])
+                                perm[p]
+                                for p in (
+                                    (anti_quark_indices[anti_index],)
+                                    + singlet_chunks[anti_index]
+                                )
                             )
                         elif i not in singlet_indices:
                             order_list.append(perm[i])
                     possible.append((tuple(order_list), proc))
-        elif len(anti_quark_indices) == 3:
-            for j1 in range(nsinglets + 1):
-                for j2 in range(nsinglets - j1 + 1):
-                    for singlets in singlet_perms:
-                        order_list = []
-                        for i in range(len(perm)):
-                            if i == anti_quark_indices[0]:
-                                order_list.extend(
-                                    perm[p]
-                                    for p in ((anti_quark_indices[0],) + singlets[:j1])
-                                )
-                            elif i == anti_quark_indices[1]:
-                                order_list.extend(
-                                    perm[p]
-                                    for p in (
-                                        (anti_quark_indices[1],)
-                                        + singlets[j1 : j1 + j2]
-                                    )
-                                )
-                            elif i == anti_quark_indices[2]:
-                                order_list.extend(
-                                    perm[p]
-                                    for p in ((anti_quark_indices[2],) + singlets[j1 + j2 :])
-                                )
-                            elif i not in singlet_indices:
-                                order_list.append(perm[i])
-                        possible.append((tuple(order_list), proc))
+        else:
+            raise RuntimeError("colour-singlet partners require at least one quark line")
 
         partners: list[int] = []
         for possible_order, process in possible:
@@ -679,13 +954,11 @@ class ProcessEnumerator:
         ng = self._count_matching(proc, GLUONS)
         if nq == 0:
             return math.factorial(ng - 1)
-        if nq == 1:
-            return math.factorial(ng)
-        if nq == 2:
-            return math.factorial(ng) * (ng + 1) * 2
-        if nq == 3:
-            return math.factorial(ng) * ((ng + 2) * (ng + 1) / 2) * 6
-        raise ValueError(f"unknown number of quark lines: {nq}")
+        return (
+            math.factorial(ng)
+            * math.comb(ng + nq - 1, nq - 1)
+            * math.factorial(nq)
+        )
 
     def _unique_process_lines(self, enumeration: ProcessEnumeration) -> list[str]:
         sorted_processes = [list(proc) for proc in enumeration.unique_processes]
@@ -806,6 +1079,245 @@ def enumerate_processes(
     return ProcessEnumerator(options).enumerate(process_string)
 
 
+def enumerate_process_set(
+    process_string: str,
+    options: ProcessOptions | None = None,
+) -> ProcessSetEnumeration:
+    active_options = options or ProcessOptions()
+    entries: list[ProcessSetEntry] = []
+    seen: set[str] = set()
+    for process in expand_process_variants(process_string):
+        inclusive_enumeration: ProcessEnumeration | None = None
+        if _process_uses_inclusive_labels(process):
+            inclusive_enumeration = ProcessEnumerator(active_options).enumerate(process)
+            concrete_processes = _concrete_processes_from_inclusive_enumeration(
+                inclusive_enumeration
+            )
+        else:
+            concrete_processes = (process,)
+        for concrete_process in concrete_processes:
+            key = canonical_process_key(concrete_process)
+            if key in seen:
+                continue
+            seen.add(key)
+            enumeration = ProcessEnumerator(active_options).enumerate(concrete_process)
+            if enumeration.n_records == 0:
+                continue
+            entries.append(
+                ProcessSetEntry(
+                    key=key,
+                    process=concrete_process,
+                    enumeration=enumeration,
+                )
+            )
+    if not entries:
+        raise ValueError(f"no valid processes found for {process_string!r}")
+    return ProcessSetEnumeration(
+        request=process_string,
+        options=active_options,
+        entries=tuple(entries),
+    )
+
+
+def enumerate_generic_process_set(
+    process_string: str,
+    options: ProcessOptions | None = None,
+    *,
+    max_quark_pairs: int | None = None,
+) -> ProcessSetEnumeration:
+    """Expand process-set syntax for generic DAG generation.
+
+    The generic compiler only needs concrete subprocess keys and parser
+    metadata.  It should not pay the legacy phase-space/color-order enumeration
+    cost for an already concrete partonic process; colour sectors and closures
+    are discovered later by the model-driven DAG.  Inclusive ``p``/``j``
+    requests still use the legacy enumerator once to obtain concrete children.
+    """
+
+    active_options = options or ProcessOptions()
+    entries: list[ProcessSetEntry] = []
+    seen: set[str] = set()
+    for process in expand_process_variants(process_string):
+        if _process_uses_inclusive_labels(process):
+            concrete_processes = _generic_concrete_processes_from_inclusive_request(
+                process,
+                active_options,
+                max_quark_pairs=max_quark_pairs,
+            )
+        else:
+            concrete_processes = (process,)
+        for concrete_process in concrete_processes:
+            key = canonical_process_key(concrete_process)
+            if key in seen:
+                continue
+            seen.add(key)
+            enumeration = _lightweight_concrete_process_enumeration(
+                concrete_process,
+                active_options,
+            )
+            if enumeration.n_records == 0:
+                continue
+            entries.append(
+                ProcessSetEntry(
+                    key=key,
+                    process=concrete_process,
+                    enumeration=enumeration,
+                )
+            )
+    if not entries:
+        raise ValueError(f"no valid processes found for {process_string!r}")
+    return ProcessSetEnumeration(
+        request=process_string,
+        options=active_options,
+        entries=tuple(entries),
+    )
+
+
+def _generic_concrete_processes_from_inclusive_request(
+    process: str,
+    options: ProcessOptions,
+    *,
+    max_quark_pairs: int | None = None,
+) -> tuple[str, ...]:
+    """Expand ``p``/``j`` labels without legacy colour-order enumeration.
+
+    Generic DAG generation only needs concrete external particle assignments.
+    Colour sectors, current orderings, and closures are discovered by the
+    model-driven compiler later.  This routine therefore applies only
+    process-independent quantum-number filters: available massless QCD
+    flavours, charge/family conservation, and charged-current allowance.
+    """
+
+    enumerator = ProcessEnumerator(options)
+    request = enumerator.parse(process)
+    initial_options: list[tuple[str, ...]] = []
+    parton_options = tuple(sorted(enumerator.massless_qcd, key=lambda p: SORT_PARTICLES[p]))
+    for crossed_particle in request.initial_state:
+        if crossed_particle in {"p", "j"}:
+            initial_options.append(parton_options)
+        else:
+            initial_options.append((ANTI_PARTICLE[crossed_particle],))
+
+    final_candidates = tuple(
+        _generic_final_candidate(request.rest, jets)
+        for jets in itertools.combinations_with_replacement(
+            parton_options,
+            request.jet_count,
+        )
+    )
+    allow_charged_current = _request_allows_charged_current(request)
+    processes: dict[str, None] = {}
+    for initial_state in itertools.product(*initial_options):
+        crossed_initial = tuple(ANTI_PARTICLE[p] for p in initial_state)
+        initial_charge = sum(CHARGES3[p] for p in crossed_initial)
+        initial_family = sum(FAMILY[p] for p in crossed_initial)
+        initial_quarks, initial_antiquarks = _quark_counts(crossed_initial)
+        for (
+            final_state,
+            final_charge,
+            final_family,
+            final_quarks,
+            final_antiquarks,
+        ) in final_candidates:
+            if initial_charge + final_charge != 0:
+                continue
+            if not options.include_cc and initial_family + final_family != 0:
+                continue
+            all_outgoing = (*crossed_initial, *final_state)
+            quark_pair_count = min(
+                initial_quarks + final_quarks,
+                initial_antiquarks + final_antiquarks,
+            )
+            if (
+                max_quark_pairs is not None
+                and quark_pair_count > int(max_quark_pairs)
+            ):
+                continue
+            if not enumerator._valid_process(
+                all_outgoing,
+                allow_charged_current=allow_charged_current,
+            ):
+                continue
+            processes.setdefault(
+                f"{' '.join(initial_state)} > {' '.join(final_state)}",
+                None,
+            )
+    return tuple(sorted(processes, key=_concrete_process_sort_key))
+
+
+def _quark_pair_count(process: Sequence[str]) -> int:
+    quarks, antiquarks = _quark_counts(process)
+    return min(quarks, antiquarks)
+
+
+def _quark_counts(process: Sequence[str]) -> tuple[int, int]:
+    counts = Counter(process)
+    quarks = sum(counts[item] for item in QUARKS if item in counts)
+    antiquarks = sum(counts[item] for item in ANTIQUARKS if item in counts)
+    return quarks, antiquarks
+
+
+def _generic_final_candidate(
+    rest: Sequence[str],
+    jets: Sequence[str],
+) -> tuple[ProcessTuple, int, int, int, int]:
+    final_state = tuple(
+        sorted(
+            (*rest, *jets),
+            key=lambda particle: SORT_PARTICLES[particle],
+        )
+    )
+    quarks, antiquarks = _quark_counts(final_state)
+    return (
+        final_state,
+        sum(CHARGES3[p] for p in final_state),
+        sum(FAMILY[p] for p in final_state),
+        quarks,
+        antiquarks,
+    )
+
+
+def _lightweight_concrete_process_enumeration(
+    process: str,
+    options: ProcessOptions,
+) -> ProcessEnumeration:
+    enumerator = ProcessEnumerator(options)
+    request = enumerator.parse(process)
+    all_outgoing = (*request.initial_state, *request.rest)
+    if not enumerator._valid_process(
+        all_outgoing,
+        allow_charged_current=_request_allows_charged_current(request),
+    ):
+        return ProcessEnumeration(
+            request=request,
+            options=options,
+            unique_processes=(),
+            groups=(),
+        )
+    order = tuple(range(len(all_outgoing)))
+    return ProcessEnumeration(
+        request=request,
+        options=options,
+        unique_processes=(
+            tuple(sorted(all_outgoing, key=lambda item: SORT_PARTICLES[item])),
+        ),
+        groups=(
+            PhaseSpaceGroup(
+                group_id=1,
+                phase_space_order=order,
+                records=(
+                    SubprocessRecord(
+                        process=tuple(all_outgoing),
+                        color_order=order,
+                        multichannel_partners=(0,),
+                        identical_factor=1.0,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def write_legacy_process_file(
     process_string: str, path: str | Path, options: ProcessOptions | None = None
 ) -> ProcessEnumeration:
@@ -823,7 +1335,14 @@ __all__ = [
     "ProcessEnumeration",
     "ProcessEnumerator",
     "ProcessOptions",
+    "ProcessSetEntry",
+    "ProcessSetEnumeration",
     "SubprocessRecord",
+    "canonical_process_key",
+    "enumerate_generic_process_set",
     "enumerate_processes",
+    "enumerate_process_set",
+    "expand_process_variants",
+    "split_process_set",
     "write_legacy_process_file",
 ]

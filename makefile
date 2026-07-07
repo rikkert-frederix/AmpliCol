@@ -121,11 +121,16 @@ amplitude_QCD.o matrix_element_regression.o
 # ----------------------------------------------------------------------
 
 amplicol_generate: $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o $(LHAPDF_LDFLAGS) -lstdc++
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o $(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS)
 
 amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
-	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
-	$(LHAPDF_LDFLAGS) -lstdc++ -Wl,-rpath,$(PWD)
+	$(FC) $(FFLAGS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
+	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
+
+amplicol_library_benchmark: $(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) amplicol_library_benchmark.o
+	$(FC) $(FFLAGS) -o $@ amplicol_library_benchmark.o \
+	$(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) \
+	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
@@ -184,7 +189,7 @@ amplib.o: $(notdir $(AMPSRC:.f03=.o))
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so amplicol_library_benchmark
 
 cleanlib:
 	rm -f libamp*.so amp*lib.o amp*lib.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin

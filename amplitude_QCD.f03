@@ -3991,7 +3991,11 @@ contains
              if (j.eq.6) then
                 write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              elseif (j.eq.5 .or. j.eq.7) then
-                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                if (i.eq.1) then
+                   write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=int_c(1,int1(1,i))'
+                else
+                   write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)))'
+                endif
              elseif (j.ge.8 .and. j.le.11) then
                 write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              else

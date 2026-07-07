@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -105,7 +106,7 @@ class CliDisplay:
         try:
             spinner.start()
             yield
-        except Exception:
+        except BaseException:
             elapsed = time.perf_counter() - start
             spinner.finish(success=False, elapsed_s=elapsed)
             raise
@@ -135,7 +136,7 @@ class CliDisplay:
         try:
             progress.start()
             yield progress
-        except Exception:
+        except BaseException:
             progress.finish(success=False)
             raise
         else:
@@ -249,10 +250,16 @@ class StageProgress:
         self.current = 0
         self.stage = ""
         self.item = ""
+        self.ram = "n/a"
         self.start_time = 0.0
         self._bar: Any = None
         self._started = False
         self._last_logged_stage: str | None = None
+        self._last_logged_item: str | None = None
+        self._last_logged_at = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     @classmethod
     def disabled(cls) -> "StageProgress":
@@ -260,6 +267,8 @@ class StageProgress:
 
     def start(self) -> None:
         self.start_time = time.perf_counter()
+        if self.ram == "n/a":
+            self.ram = _current_process_tree_rss_text()
         if not self.enabled or self.display is None:
             return
         if not self.display.progress_enabled or self.progressbar_module is None:
@@ -287,6 +296,12 @@ class StageProgress:
                 width=28,
             ),
             " ",
+            self.progressbar_module.Variable(
+                "ram",
+                format="ram:{formatted_value}",
+                width=12,
+            ),
+            " ",
             self.progressbar_module.Timer(format="elapsed %(elapsed)s"),
             " ",
             self.progressbar_module.ETA(),
@@ -299,6 +314,7 @@ class StageProgress:
         self._bar.start(
             stage=_fixed_field("starting", 18),
             item=_fixed_field("initializing", 28),
+            ram=_fixed_field(self.ram, 12),
         )
         with contextlib.suppress(Exception):
             self._bar.update(
@@ -306,8 +322,11 @@ class StageProgress:
                 force=True,
                 stage=_fixed_field("starting", 18),
                 item=_fixed_field("initializing", 28),
+                ram=_fixed_field(self.ram, 12),
             )
         self._started = True
+        self._thread = threading.Thread(target=self._drive, daemon=True)
+        self._thread.start()
 
     def callback(self, event: dict[str, object]) -> None:
         increment = event.get("increment", 0)
@@ -315,6 +334,7 @@ class StageProgress:
         self.update(
             stage=_optional_str(event.get("stage")),
             item=_optional_str(event.get("item")),
+            ram=_optional_str(event.get("ram")),
             increment=increment if isinstance(increment, int) else 0,
             total=total if isinstance(total, int) else None,
         )
@@ -324,51 +344,49 @@ class StageProgress:
         *,
         stage: str | None = None,
         item: str | None = None,
+        ram: str | None = None,
         increment: int = 0,
         total: int | None = None,
     ) -> None:
-        if total is not None and total > self.total:
-            self.total = int(total)
-            if self._bar is not None:
-                with contextlib.suppress(Exception):
-                    self._bar.max_value = self.total
-        if stage is not None:
-            self.stage = stage
-        if item is not None:
-            self.item = item
-        if increment:
-            self.current = min(self.total, self.current + int(increment))
+        with self._lock:
+            if total is not None and total > self.total:
+                self.total = int(total)
+                if self._bar is not None:
+                    with contextlib.suppress(Exception):
+                        self._bar.max_value = self.total
+            if stage is not None:
+                self.stage = stage
+            if item is not None:
+                self.item = item
+            self.ram = ram if ram is not None else _current_process_tree_rss_text()
+            if increment:
+                self.current = min(self.total, self.current + int(increment))
 
-        if not self.enabled or self.display is None:
-            return
-        fixed_stage = _fixed_field(self.stage, 18)
-        fixed_item = _fixed_field(self.item, 28)
-        if self._started and self._bar is not None:
-            with contextlib.suppress(Exception):
-                self._bar.update(
-                    self.current,
-                    force=True,
-                    stage=fixed_stage,
-                    item=fixed_item,
-                )
-            return
-        if self.stage != self._last_logged_stage:
-            self._last_logged_stage = self.stage
-            self.display.info(self._line("running"))
+            if not self.enabled or self.display is None:
+                return
+            if self._started and self._bar is not None:
+                self._render_bar_locked()
+                return
+            if self._should_log_fallback_update():
+                self._last_logged_stage = self.stage
+                self._last_logged_item = self.item
+                self._last_logged_at = time.perf_counter()
+                self.display.info(self._line("running"))
 
     def finish(self, *, success: bool) -> None:
-        if self.current < self.total:
-            self.current = self.total
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        with self._lock:
+            if self.current < self.total:
+                self.current = self.total
+            self.ram = _current_process_tree_rss_text()
         elapsed = time.perf_counter() - self.start_time if self.start_time else 0.0
         if self._started and self._bar is not None:
-            with contextlib.suppress(Exception):
-                self._bar.update(
-                    self.total,
-                    force=True,
-                    stage=_fixed_field(self.stage, 18),
-                    item=_fixed_field(self.item, 28),
-                )
-                self._bar.finish()
+            with self._lock:
+                self._render_bar_locked()
+                with contextlib.suppress(Exception):
+                    self._bar.finish()
         if self.enabled and self.display is not None:
             status = "done" if success else "failed"
             color = "green" if success else "red"
@@ -380,13 +398,44 @@ class StageProgress:
                 ),
             )
 
+    def _drive(self) -> None:
+        while not self._stop.wait(1.0):
+            if not self.enabled or not self._started or self._bar is None:
+                continue
+            with self._lock:
+                self.ram = _current_process_tree_rss_text()
+                self._render_bar_locked()
+
+    def _render_bar_locked(self) -> None:
+        if self._bar is None:
+            return
+        with contextlib.suppress(Exception):
+            self._bar.update(
+                self.current,
+                force=True,
+                stage=_fixed_field(self.stage, 18),
+                item=_fixed_field(self.item, 28),
+                ram=_fixed_field(self.ram, 12),
+            )
+
     def _line(self, status: str) -> str:
         return (
             f"{self.label} {status}: "
             f"stage={_fixed_field(self.stage, 18)} "
             f"item={_fixed_field(self.item, 28)} "
+            f"ram={_fixed_field(self.ram, 12)} "
             f"{self.current:>6d}/{self.total:<6d}"
         )
+
+    def _should_log_fallback_update(self) -> bool:
+        if self.stage != self._last_logged_stage:
+            return True
+        if self.item == self._last_logged_item:
+            return False
+        if self.stage not in _FALLBACK_ITEM_LOG_STAGES:
+            return False
+        now = time.perf_counter()
+        return now - self._last_logged_at >= 0.5
 
 
 def default_display_for_args(args: object) -> CliDisplay:
@@ -536,6 +585,60 @@ def _load_tabled() -> Any | None:
     return None
 
 
+def _current_process_tree_rss_text() -> str:
+    value = _process_tree_rss_bytes((os.getpid(),))
+    return _format_bytes(value) if value is not None else "n/a"
+
+
+def _process_tree_rss_bytes(root_pids: Sequence[int]) -> int | None:
+    if not root_pids:
+        return 0
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,rss="],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    rss_by_pid: dict[int, int] = {}
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+            rss_kb = int(parts[2])
+        except ValueError:
+            continue
+        rss_by_pid[pid] = max(rss_kb, 0) * 1024
+        children.setdefault(ppid, []).append(pid)
+    seen: set[int] = set()
+    stack = list(root_pids)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        stack.extend(children.get(pid, ()))
+    return sum(rss_by_pid.get(pid, 0) for pid in seen)
+
+
+def _format_bytes(value: int) -> str:
+    amount = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if amount < 1024.0 or unit == "TB":
+            return f"{amount:.1f}{unit}" if unit != "B" else f"{int(amount)}B"
+        amount /= 1024.0
+    return f"{amount:.1f}TB"
+
+
 _STYLE_CODES = {
     "bold": "\033[1m",
     "cyan": "\033[36m",
@@ -544,6 +647,20 @@ _STYLE_CODES = {
     "red": "\033[31m",
     "dim": "\033[2m",
     "reset": "\033[0m",
+}
+
+
+_FALLBACK_ITEM_LOG_STAGES = {
+    "compile",
+    "c++ build",
+    "c++ compile",
+    "jit build",
+    "jit compile",
+    "jit ready",
+    "jit materialize",
+    "load",
+    "materialize",
+    "save",
 }
 
 

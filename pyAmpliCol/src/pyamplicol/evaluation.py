@@ -20,7 +20,6 @@ RuntimeBackend = Literal[
     "python",
     "dag",
     "numeric-tensor-network",
-    "compiled-dag",
     "rusticol",
 ]
 
@@ -46,7 +45,13 @@ class NativeRuntimeMetadata:
 
 
 class NativeRuntimeEvaluator:
-    """Select the strongest available native evaluator for a process."""
+    """Reference-only selector for retired native/tensor/Z-specific evaluators.
+
+    Production pyAmpliCol generation and evaluation are schema-v2 generic DAG
+    process artifacts executed by Rusticol.  This class remains available only
+    for migration diagnostics and historical reference tests, and callers must
+    opt in explicitly with ``allow_reference_legacy=True``.
+    """
 
     def __init__(
         self,
@@ -90,14 +95,36 @@ class NativeRuntimeEvaluator:
         compiled_dag_helicity_filter_relative_tolerance: float = 1.0e-12,
         compiled_dag_helicity_filter_zero_tolerance: float = 1.0e-300,
         compiled_dag_helicity_filter_phase_space: str = "rambo",
+        allow_reference_legacy: bool = False,
     ) -> None:
+        if not allow_reference_legacy:
+            raise NativeEvaluationError(
+                "NativeRuntimeEvaluator is a retired reference-only runtime. "
+                "Production pyAmpliCol uses generic DAG process artifacts: run "
+                "`pyamplicol generate-process PROCESS OUTPUT_DIR` and evaluate "
+                "the resulting directory with Rusticol or `pyamplicol time-process`."
+            )
         setup_start = time.perf_counter()
         self.process = process
         self.model = model or AmplicolSMLeadingColorModel()
         self._python = LeadingColorZJetsNativeEvaluator(self.model)
         self._runtime: Any | None = None
         self.batch_size = batch_size
-        self._gluon_count = self._python.supported_z_gluon_count(process)
+        self._neutral_vector_target = (
+            self._python.supported_electroweak_vector_gluon_process(process)
+        )
+        self._neutral_dilepton_target = (
+            self._python.supported_neutral_dilepton_gluon_process(process)
+        )
+        self._charged_leptonic_w_target = (
+            self._python.supported_charged_leptonic_w_gluon_process(process)
+        )
+        self._vector_pdg = (
+            None if self._neutral_vector_target is None else self._neutral_vector_target[0]
+        )
+        self._gluon_count = (
+            None if self._neutral_vector_target is None else self._neutral_vector_target[1]
+        )
         fallback_reason = None
         backend = "native-python-z-gluon"
         kernel = "staged-python-recursion"
@@ -110,7 +137,22 @@ class NativeRuntimeEvaluator:
                 )
             backend = "native-python-zero-gluon"
             kernel = "python-zero-gluon"
-        elif self._gluon_count is not None and self._gluon_count >= 1:
+        elif self._neutral_vector_target is not None and self._gluon_count is not None:
+            if self._vector_pdg != 23:
+                if runtime_backend in (
+                    "numeric-tensor-network",
+                    "rusticol",
+                ):
+                    raise NativeEvaluationError(
+                        f"runtime backend {runtime_backend!r} is not yet available for "
+                        "one-quark-line non-Z vector plus ordered gluons"
+                    )
+                backend = (
+                    "native-python-gamma-gluon"
+                    if self._vector_pdg == 22
+                    else "native-python-w-gluon"
+                )
+                kernel = "staged-python-recursion"
             if runtime_backend == "python":
                 pass
             elif runtime_backend == "numeric-tensor-network":
@@ -124,85 +166,6 @@ class NativeRuntimeEvaluator:
                 backend = "native-spenso-numeric-tensor-network"
                 kernel = numeric_metadata.kernel
                 evaluator_metadata = numeric_metadata.to_json_dict()
-            elif runtime_backend == "compiled-dag":
-                from .compiled_dag_runtime import ZGluonCompiledDAGEvaluator
-
-                compiled_dag_common_pair_distance = (
-                    250
-                    if symbolica_max_common_pair_distance is None
-                    else symbolica_max_common_pair_distance
-                )
-                self._runtime = ZGluonCompiledDAGEvaluator(
-                    process,
-                    model=self.model,
-                    batch_size=batch_size,
-                    lowering=compiled_dag_lowering,  # type: ignore[arg-type]
-                    cross_check_lowering=compiled_dag_cross_check_lowering,
-                    verbose_evaluator_build=verbose_evaluator_build,
-                    symbolica_evaluator_backend=symbolica_evaluator_backend,
-                    symbolica_iterations=symbolica_iterations,
-                    symbolica_cpe_iterations=symbolica_cpe_iterations,
-                    symbolica_n_cores=symbolica_n_cores,
-                    symbolica_direct_translation=symbolica_direct_translation,
-                    symbolica_jit_direct_translation=symbolica_jit_direct_translation,
-                    symbolica_jit_optimization_level=symbolica_jit_optimization_level,
-                    symbolica_max_horner_scheme_variables=(
-                        symbolica_max_horner_scheme_variables
-                    ),
-                    symbolica_max_common_pair_cache_entries=(
-                        symbolica_max_common_pair_cache_entries
-                    ),
-                    symbolica_max_common_pair_distance=(
-                        compiled_dag_common_pair_distance
-                    ),
-                    symbolica_collect_factors=symbolica_collect_factors,
-                    symbolica_compiled_preset=symbolica_compiled_preset,
-                    symbolica_compiled_inline_asm=symbolica_compiled_inline_asm,
-                    symbolica_compiled_optimization_level=(
-                        symbolica_compiled_optimization_level
-                    ),
-                    symbolica_compiled_native=symbolica_compiled_native,
-                    symbolica_compiler_path=symbolica_compiler_path,
-                    symbolica_compiler_flags=symbolica_compiler_flags,
-                    symbolica_compiled_output_chunk_size=(
-                        symbolica_compiled_output_chunk_size
-                    ),
-                    symbolica_compiled_chunk_compile_workers=(
-                        symbolica_compiled_chunk_compile_workers
-                    ),
-                    symbolica_compiled_output_dir=(
-                        None
-                        if symbolica_compiled_output_dir is None
-                        else str(symbolica_compiled_output_dir)
-                    ),
-                    symbolica_load_evaluator_dir=(
-                        None
-                        if symbolica_load_evaluator_dir is None
-                        else str(symbolica_load_evaluator_dir)
-                    ),
-                    symbolica_raw_sum_final_stage=symbolica_raw_sum_final_stage,
-                    compiled_dag_inline_external_wavefunctions=(
-                        compiled_dag_inline_external_wavefunctions
-                    ),
-                    compiled_dag_helicity_filter=compiled_dag_helicity_filter,
-                    compiled_dag_helicity_filter_samples=(
-                        compiled_dag_helicity_filter_samples
-                    ),
-                    compiled_dag_helicity_filter_seed=compiled_dag_helicity_filter_seed,
-                    compiled_dag_helicity_filter_relative_tolerance=(
-                        compiled_dag_helicity_filter_relative_tolerance
-                    ),
-                    compiled_dag_helicity_filter_zero_tolerance=(
-                        compiled_dag_helicity_filter_zero_tolerance
-                    ),
-                    compiled_dag_helicity_filter_phase_space=(
-                        compiled_dag_helicity_filter_phase_space  # type: ignore[arg-type]
-                    ),
-                )
-                compiled_dag_metadata = self._runtime.metadata
-                backend = "native-symbolica-compiled-shared-current-alias-dag"
-                kernel = compiled_dag_metadata.kernel
-                evaluator_metadata = compiled_dag_metadata.to_json_dict()
             elif runtime_backend == "rusticol":
                 if symbolica_load_evaluator_dir is None:
                     raise NativeEvaluationError(
@@ -211,10 +174,14 @@ class NativeRuntimeEvaluator:
                     )
                 import rusticol  # type: ignore[import-not-found]
 
-                self._runtime = rusticol.Runtime.load(str(symbolica_load_evaluator_dir))
+                self._runtime = rusticol.Runtime.load(  # type: ignore[attr-defined]
+                    str(symbolica_load_evaluator_dir)
+                )
                 backend = "rusticol-pyo3-shared-current-dag"
                 kernel = "rusticol-pyo3-shared-current-dag"
                 evaluator_metadata = dict(self._runtime.metadata())
+            elif self._vector_pdg != 23 and runtime_backend == "auto":
+                pass
             else:
                 try:
                     from .dag_runtime import ZGluonDAGEvaluator
@@ -284,6 +251,24 @@ class NativeRuntimeEvaluator:
                     if runtime_backend == "dag" or not allow_python_fallback:
                         raise
                     fallback_reason = str(exc)
+        elif self._neutral_dilepton_target is not None:
+            if runtime_backend not in ("auto", "python"):
+                raise NativeEvaluationError(
+                    f"runtime backend {runtime_backend!r} is not yet available for "
+                    "one-quark-line neutral dilepton plus ordered gluons"
+                )
+            self._gluon_count = self._neutral_dilepton_target[2]
+            backend = "native-python-neutral-dilepton-gluon"
+            kernel = "staged-python-recursion"
+        elif self._charged_leptonic_w_target is not None:
+            if runtime_backend not in ("auto", "python"):
+                raise NativeEvaluationError(
+                    f"runtime backend {runtime_backend!r} is not yet available for "
+                    "one-quark-line charged-current leptonic W plus ordered gluons"
+                )
+            self._gluon_count = self._charged_leptonic_w_target[3]
+            backend = "native-python-charged-leptonic-w-gluon"
+            kernel = "staged-python-recursion"
         else:
             backend = "not-implemented"
             kernel = "not-implemented"
@@ -306,7 +291,8 @@ class NativeRuntimeEvaluator:
         if self.metadata.backend == "not-implemented":
             raise NativeEvaluationError(
                 "native numerical evaluation is currently implemented only for "
-                "q q~ -> Z plus ordered gluons"
+                "one-quark-line electroweak vector, neutral dilepton, or "
+                "charged-current leptonic W plus ordered gluons"
             )
         point = tuple(particles) if particles is not None else self._canonical_point(sqrt_s)
         if self.metadata.backend == "rusticol-pyo3-shared-current-dag":
@@ -322,7 +308,8 @@ class NativeRuntimeEvaluator:
         if self.metadata.backend == "not-implemented":
             raise NativeEvaluationError(
                 "native numerical evaluation is currently implemented only for "
-                "q q~ -> Z plus ordered gluons"
+                "one-quark-line electroweak vector, neutral dilepton, or "
+                "charged-current leptonic W plus ordered gluons"
             )
         if self.metadata.backend == "rusticol-pyo3-shared-current-dag":
             return self._evaluate_rusticol_many(points)
@@ -398,15 +385,49 @@ class NativeRuntimeEvaluator:
                 self.process,
                 sqrt_s=sqrt_s,
             )
-        if self._gluon_count is not None and self._gluon_count >= 1:
-            return self._python.canonical_z_gluon_point(
+        if self._gluon_count is not None and self._gluon_count >= 0:
+            if self._vector_pdg is None:
+                if self._neutral_dilepton_target is not None:
+                    lepton_pdg, antilepton_pdg, gluon_count = (
+                        self._neutral_dilepton_target
+                    )
+                    return self._python.canonical_neutral_dilepton_gluon_point(
+                        self.process,
+                        lepton_pdg=lepton_pdg,
+                        antilepton_pdg=antilepton_pdg,
+                        gluon_count=gluon_count,
+                        sqrt_s=sqrt_s,
+                    )
+                if self._charged_leptonic_w_target is not None:
+                    (
+                        vector_pdg,
+                        first_lepton_pdg,
+                        second_lepton_pdg,
+                        gluon_count,
+                    ) = self._charged_leptonic_w_target
+                    return self._python.canonical_charged_leptonic_w_gluon_point(
+                        self.process,
+                        vector_pdg=vector_pdg,
+                        first_lepton_pdg=first_lepton_pdg,
+                        second_lepton_pdg=second_lepton_pdg,
+                        gluon_count=gluon_count,
+                        sqrt_s=sqrt_s,
+                    )
+                raise NativeEvaluationError(
+                    "native numerical evaluation is currently implemented only for "
+                    "one-quark-line electroweak vector, neutral dilepton, or "
+                    "charged-current leptonic W plus ordered gluons"
+                )
+            return self._python.canonical_neutral_vector_gluon_point(
                 self.process,
+                vector_pdg=self._vector_pdg,
                 gluon_count=self._gluon_count,
                 sqrt_s=sqrt_s,
             )
         raise NativeEvaluationError(
             "native numerical evaluation is currently implemented only for "
-            "q q~ -> Z plus ordered gluons"
+            "one-quark-line electroweak vector, neutral dilepton, or charged-current "
+            "leptonic W plus ordered gluons"
         )
 
     def _evaluate_rusticol_many(

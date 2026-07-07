@@ -194,13 +194,16 @@ def _collect_legacy(
     reference_run = adapter.run_amplicol_probe(
         process,
         points=points,
+        process_file=build.process_file,
         timing_sample=1,
+        use_library=True,
     )
-    timing_run = adapter.run_amplicol_probe(
+    timing_run = adapter.run_library_use(
         process,
-        points=timing,
+        nevents=timing,
+        seed=101,
+        process_file=build.process_file,
         timing_sample=1,
-        quiet=True,
     )
     runtime_s = _legacy_runtime_per_point(timing_run.timing_rows, timing)
     runtime_error_s = _legacy_runtime_per_point_error(timing_run.timing_rows, timing)
@@ -460,7 +463,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Modes",
         "",
-        "- A: legacy AmpliCol generated Fortran library, timed with the quiet `--amplicol_probe` timing path.",
+        "- A: legacy AmpliCol generated Fortran library, timed with the `--library=use` integration path. Probe reference values are also collected with `--library=use`.",
         "- X: pyamplicol shared-helicity-current D-mode with Symbolica `compiled-complex` generic C++ output and the `runtime` preset.",
         "- Y: pyamplicol shared-helicity-current D-mode with Symbolica `compiled-complex` emitted assembly output and the `generation` preset.",
         "- Z: pyamplicol shared-helicity-current D-mode with Symbolica JIT compilation. This is the generation-time-oriented mode.",
