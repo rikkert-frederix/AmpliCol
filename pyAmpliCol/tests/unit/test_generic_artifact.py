@@ -21,8 +21,11 @@ from pyamplicol.generic_artifact import (
     write_generic_process_set_manifest,
     write_generic_process_manifest,
     select_leading_color_sector_ids_from_plan,
+    _current_signature_relation,
+    _merge_currents_in_dag,
     _json_safe_bigints,
 )
+from pyamplicol.generic_dag import AmplitudeRoot, CurrentNode, GenericDAG
 from pyamplicol.color_plan import build_color_plan
 from pyamplicol.generic_stage_compiler import (
     build_generic_stage_compiler_blueprint,
@@ -89,8 +92,60 @@ def test_generic_process_manifest_keeps_physical_and_outgoing_pdg_orders() -> No
     assert runtime_schema["normalization"]["average_factor"] == 36
     assert runtime_schema["normalization"]["couplings_in_stage_evaluators"] is True
     assert runtime_schema["current_storage"]["component_count"] > 0
+
+
+def test_zero_current_filter_prunes_massive_top_chirality_currents() -> None:
+    unfiltered = build_generic_process_manifest(
+        "g g > t t~ g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    filtered = build_generic_process_manifest(
+        "g g > t t~ g",
+        selected_color_sector_ids={0},
+        numerical_current_merging=False,
+    )
+    report = filtered.to_json_dict()["generation_filters"]["zero_current"]
+
+    assert report["enabled"] is True
+    assert report["skipped"] is False
+    assert report["zero_current_ids"] == [12, 13, 14, 15]
+    assert report["removed_current_count"] == 4
+    assert len(filtered.dag.currents) == len(unfiltered.dag.currents) - 4
+    assert len(filtered.dag.interactions) == len(unfiltered.dag.interactions) - 16
+    assert len(filtered.dag.amplitude_roots) == len(unfiltered.dag.amplitude_roots)
+
+
+def test_zero_current_filter_can_be_disabled_in_artifact(tmp_path: Path) -> None:
+    manifest_path, payload = write_generic_dag_process_artifact(
+        "d d~ > z g",
+        tmp_path,
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    report = raw["generation_filters"]["zero_current"]
+    merge_report = raw["generation_filters"]["current_merging"]
+
+    assert payload == raw
+    assert report == {
+        "enabled": False,
+        "reason": "disabled by --no-numerical-filter-current",
+    }
+    assert merge_report == {
+        "enabled": False,
+        "reason": "disabled by --no-numerical-current-merging",
+    }
+    assert raw["compiled"]["generic_pruning"]["zero_current_filter"] == report
+    assert raw["compiled"]["generic_pruning"]["current_merging"] == merge_report
+    plan = json.loads(
+        (tmp_path / "generic_process_manifest.json").read_text(encoding="utf-8")
+    )
+    runtime_schema = plan["runtime_schema"]
     assert len(runtime_schema["current_storage"]["current_slots"]) == len(
-        payload["currents"]
+        plan["currents"]
     )
     value_storage = runtime_schema["value_storage"]
     assert value_storage["component_count"] >= runtime_schema["current_storage"][
@@ -100,7 +155,7 @@ def test_generic_process_manifest_keeps_physical_and_outgoing_pdg_orders() -> No
     assert {slot["variant"] for slot in value_slots}.issuperset(
         {"source", "propagated", "unpropagated"}
     )
-    assert len(runtime_schema["source_fill"]["sources"]) == len(payload["sources"])
+    assert len(runtime_schema["source_fill"]["sources"]) == len(plan["sources"])
     first_source = runtime_schema["source_fill"]["sources"][0]
     assert first_source["source_kind"] == "external-wavefunction"
     assert first_source["crossing"] == "negate-incoming-momentum"
@@ -128,14 +183,65 @@ def test_generic_process_manifest_keeps_physical_and_outgoing_pdg_orders() -> No
         }
     )
     assert runtime_schema["amplitude_stage"]["output_count"] == len(
-        payload["amplitude_roots"]
+        plan["amplitude_roots"]
     )
     first_root = runtime_schema["amplitude_stage"]["roots"][0]
     assert first_root["left_value_slot"]["variant"] in {"source", "unpropagated"}
     assert first_root["right_value_slot"]["variant"] in {"source", "unpropagated"}
-    assert payload["currents"][0]["index"]["particle_id"] == -1
-    assert "color_state" in payload["currents"][0]["index"]
-    assert payload["amplitude_roots"]
+    assert plan["currents"][0]["index"]["particle_id"] == -1
+    assert "color_state" in plan["currents"][0]["index"]
+    assert plan["amplitude_roots"]
+
+
+def test_numerical_current_merging_supports_opposite_sign_currents() -> None:
+    assert _current_signature_relation(
+        ((1.0 + 2.0j, -3.0 + 0.5j), (4.0 + 0.0j,)),
+        ((-1.0 - 2.0j, 3.0 - 0.5j), (-4.0 + 0.0j,)),
+        absolute_tolerance=1.0e-14,
+        relative_tolerance=1.0e-14,
+    ) == -1.0
+
+    base = build_generic_process_manifest(
+        "d d~ > z g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    ).dag
+    representative = next(current for current in base.currents if not current.is_source)
+    duplicate = CurrentNode(
+        id=len(base.currents),
+        index=representative.index,
+        dimension=representative.dimension,
+        is_source=False,
+    )
+    signed_root = AmplitudeRoot(
+        id=len(base.amplitude_roots),
+        kind="direct-contraction",
+        left_id=duplicate.id,
+        right_id=base.sources[0],
+        color_weight=(1.0, 0.0),
+        contraction="scalar",
+    )
+    dag = GenericDAG(
+        process=base.process,
+        color_plan=base.color_plan,
+        currents=base.currents + (duplicate,),
+        sources=base.sources,
+        interactions=base.interactions,
+        amplitude_roots=base.amplitude_roots + (signed_root,),
+        truncated=base.truncated,
+    )
+
+    merged = _merge_currents_in_dag(
+        dag,
+        {
+            current.id: (current.id, 1.0) for current in base.currents
+        }
+        | {duplicate.id: (representative.id, -1.0)},
+    )
+
+    assert len(merged.currents) == len(base.currents)
+    assert any(root.color_weight == (-1.0, -0.0) for root in merged.amplitude_roots)
 
 
 def test_generic_artifact_can_filter_amplitude_stage_to_one_lc_sector(
@@ -178,21 +284,45 @@ def test_low_n_pruning_policy_distinguishes_massless_qcd_and_massive_top() -> No
         "g g > g g g g g",
         selected_color_sector_ids={0},
     ).to_json_dict()
+    pure_gluon_unfiltered = build_generic_process_manifest(
+        "g g > g g g g g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    ).to_json_dict()
     top_pair = build_generic_process_manifest(
         "g g > t t~ g g g",
         selected_color_sector_ids={0},
+        numerical_current_merging=False,
+    ).to_json_dict()
+    top_pair_unfiltered = build_generic_process_manifest(
+        "g g > t t~ g g g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
     ).to_json_dict()
 
-    assert len(pure_gluon["currents"]) == 310
-    assert len(pure_gluon["interactions"]) == 1665
+    assert len(pure_gluon_unfiltered["currents"]) == 310
+    assert len(pure_gluon_unfiltered["interactions"]) == 1665
+    assert len(pure_gluon["currents"]) == 308
+    assert len(pure_gluon["interactions"]) == 1561
     assert len(pure_gluon["amplitude_roots"]) == 56
+    assert pure_gluon["generation_filters"]["zero_current"][
+        "removed_current_count"
+    ] == 2
     assert {
         root["helicity_weight"]
         for root in pure_gluon["runtime_schema"]["amplitude_stage"]["roots"]
     } == {2.0}
 
+    assert len(top_pair_unfiltered["currents"]) == 314
+    assert len(top_pair_unfiltered["interactions"]) == 1332
+    assert len(top_pair["currents"]) == 310
+    assert len(top_pair["interactions"]) == 1232
     assert len(top_pair["amplitude_roots"]) == 128
-    assert len(top_pair["interactions"]) <= 1332
+    assert top_pair["generation_filters"]["zero_current"][
+        "removed_current_count"
+    ] == 4
     assert {
         root["helicity_weight"]
         for root in top_pair["runtime_schema"]["amplitude_stage"]["roots"]
@@ -237,6 +367,8 @@ def test_selected_sector_manifest_uses_filtered_color_plan_for_large_line_counts
         selected_color_sector_ids={0},
         max_coupling_orders={"QCD": 8},
         max_quark_pairs=5,
+        numerical_filter_current=False,
+        numerical_current_merging=False,
     ).to_json_dict()
 
     assert payload["color_plan"]["sector_count"] == 1
@@ -349,6 +481,8 @@ def test_generic_dag_artifact_records_generic_pruning_options(
         "species_reachability_pruning": True,
         "ignored_particle_ids": [25],
         "ignored_vertex_kinds": [16],
+        "zero_current_filter": artifact["generation_filters"]["zero_current"],
+        "current_merging": artifact["generation_filters"]["current_merging"],
         "reference_color_order": None,
     }
 

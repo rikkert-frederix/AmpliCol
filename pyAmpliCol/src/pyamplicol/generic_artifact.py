@@ -15,8 +15,11 @@ from .color_plan import (
 )
 from .core_types import ExternalMomentum, NativeEvaluationError
 from .generic_dag import (
+    AmplitudeRoot,
+    CurrentNode,
     GenericDAG,
     GenericDAGCompiler,
+    InteractionNode,
     contributing_color_sector_ids,
     filter_dag_to_color_sectors,
     prune_global_helicity_flip_equivalent_roots,
@@ -44,6 +47,8 @@ class GenericProcessManifest:
     dag: GenericDAG
     model: Model
     color_plan: GenericColorPlan
+    zero_current_filter: Mapping[str, object] | None = None
+    current_merging: Mapping[str, object] | None = None
 
     @property
     def process(self) -> str:
@@ -93,6 +98,22 @@ class GenericProcessManifest:
             "process_ir": self.dag.process.to_json_dict(),
             "color_plan": self.color_plan.to_json_dict(),
             "lc_topology_reuse": _lc_topology_reuse_payload(self),
+            "generation_filters": {
+                "zero_current": dict(
+                    self.zero_current_filter
+                    or {
+                        "enabled": False,
+                        "reason": "zero-current warmup filter was not requested",
+                    }
+                ),
+                "current_merging": dict(
+                    self.current_merging
+                    or {
+                        "enabled": False,
+                        "reason": "numerical current merging was not requested",
+                    }
+                ),
+            },
             "currents": [
                 current.to_json_dict() for current in self.dag.currents
             ],
@@ -199,6 +220,12 @@ def build_generic_process_manifest(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
 ) -> GenericProcessManifest:
     model = model or AmplicolSMLeadingColorModel()
     dag = (
@@ -233,6 +260,36 @@ def build_generic_process_manifest(
         )
     )
     dag = prune_global_helicity_flip_equivalent_roots(dag, model)
+    zero_current_filter: Mapping[str, object] | None = None
+    if numerical_filter_current:
+        dag, zero_current_filter = _filter_zero_currents_by_warmup(
+            dag,
+            model,
+            sample_count=numerical_current_samples,
+            seed=numerical_current_seed,
+            relative_tolerance=numerical_current_relative_tolerance,
+            zero_tolerance=numerical_current_zero_tolerance,
+        )
+    else:
+        zero_current_filter = {
+            "enabled": False,
+            "reason": "disabled by --no-numerical-filter-current",
+        }
+    current_merging: Mapping[str, object] | None = None
+    if numerical_current_merging:
+        dag, current_merging = _merge_identical_currents_by_warmup(
+            dag,
+            model,
+            sample_count=numerical_current_samples,
+            seed=numerical_current_seed,
+            relative_tolerance=numerical_current_relative_tolerance,
+            zero_tolerance=numerical_current_zero_tolerance,
+        )
+    else:
+        current_merging = {
+            "enabled": False,
+            "reason": "disabled by --no-numerical-current-merging",
+        }
     full_color_plan = build_color_plan(
         dag.process,
         color_accuracy=dag.process.color_accuracy,
@@ -251,7 +308,13 @@ def build_generic_process_manifest(
         color_plan = dag.color_plan
     else:
         color_plan = full_color_plan
-    return GenericProcessManifest(dag=dag, model=model, color_plan=color_plan)
+    return GenericProcessManifest(
+        dag=dag,
+        model=model,
+        color_plan=color_plan,
+        zero_current_filter=zero_current_filter,
+        current_merging=current_merging,
+    )
 
 
 def build_generic_process_set_manifest(
@@ -271,6 +334,12 @@ def build_generic_process_set_manifest(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
 ) -> GenericProcessSetManifest:
     model = model or AmplicolSMLeadingColorModel()
     process_set = build_process_set_ir(
@@ -296,6 +365,12 @@ def build_generic_process_set_manifest(
             species_reachability_pruning=species_reachability_pruning,
             ignored_particle_ids=ignored_particle_ids,
             ignored_vertex_kinds=ignored_vertex_kinds,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
         )
         for entry in process_set.entries
     )
@@ -311,6 +386,12 @@ def build_generic_process_set_manifest(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        numerical_filter_current=numerical_filter_current,
+        numerical_current_merging=numerical_current_merging,
+        numerical_current_samples=numerical_current_samples,
+        numerical_current_seed=numerical_current_seed,
+        numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+        numerical_current_zero_tolerance=numerical_current_zero_tolerance,
     )
     return GenericProcessSetManifest(
         process_set=process_set,
@@ -557,6 +638,12 @@ def write_generic_dag_process_artifact(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
 ) -> tuple[Path, dict[str, object]]:
     """Write a schema-v2 generic DAG process artifact.
 
@@ -586,6 +673,12 @@ def write_generic_dag_process_artifact(
             species_reachability_pruning=species_reachability_pruning,
             ignored_particle_ids=ignored_particle_ids,
             ignored_vertex_kinds=ignored_vertex_kinds,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
         )
     )
     output_path = Path(output_dir).expanduser()
@@ -617,6 +710,12 @@ def write_generic_dag_process_artifact(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        numerical_filter_current=numerical_filter_current,
+        numerical_current_merging=numerical_current_merging,
+        numerical_current_samples=numerical_current_samples,
+        numerical_current_seed=numerical_current_seed,
+        numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+        numerical_current_zero_tolerance=numerical_current_zero_tolerance,
     )
     manifest_path = output_path / "process_manifest.json"
     manifest_path.write_text(
@@ -874,6 +973,12 @@ def write_generic_dag_process_set_artifact(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
 ) -> tuple[Path, dict[str, object]]:
     output_path = Path(output_dir).expanduser()
     output_path.mkdir(parents=True, exist_ok=True)
@@ -889,6 +994,12 @@ def write_generic_dag_process_set_artifact(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        numerical_filter_current=numerical_filter_current,
+        numerical_current_merging=numerical_current_merging,
+        numerical_current_samples=numerical_current_samples,
+        numerical_current_seed=numerical_current_seed,
+        numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+        numerical_current_zero_tolerance=numerical_current_zero_tolerance,
     )
     processes = []
     for entry in process_set.entries:
@@ -921,6 +1032,12 @@ def write_generic_dag_process_set_artifact(
             species_reachability_pruning=species_reachability_pruning,
             ignored_particle_ids=ignored_particle_ids,
             ignored_vertex_kinds=ignored_vertex_kinds,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
         )
         compiled_payload = cast(dict[str, Any], payload["compiled"])
         processes.append(
@@ -982,6 +1099,12 @@ def _generic_process_set_generation_metadata(
     species_reachability_pruning: bool,
     ignored_particle_ids: Sequence[int] | None,
     ignored_vertex_kinds: Sequence[int] | None,
+    numerical_filter_current: bool,
+    numerical_current_merging: bool,
+    numerical_current_samples: int,
+    numerical_current_seed: int,
+    numerical_current_relative_tolerance: float,
+    numerical_current_zero_tolerance: float,
 ) -> dict[str, object]:
     process_options = options or ProcessOptions()
     return {
@@ -1013,9 +1136,1115 @@ def _generic_process_set_generation_metadata(
                 if selected_color_sector_ids is None
                 else sorted(int(sector_id) for sector_id in selected_color_sector_ids)
             ),
+            "zero_current_filter": {
+                "enabled": bool(numerical_filter_current),
+                "sample_count": int(numerical_current_samples),
+                "seed": int(numerical_current_seed),
+                "relative_tolerance": float(numerical_current_relative_tolerance),
+                "zero_tolerance": float(numerical_current_zero_tolerance),
+            },
+            "current_merging": {
+                "enabled": bool(numerical_current_merging),
+                "sample_count": int(numerical_current_samples),
+                "seed": int(numerical_current_seed),
+                "relative_tolerance": float(numerical_current_relative_tolerance),
+                "zero_tolerance": float(numerical_current_zero_tolerance),
+            },
         },
         "lc_topology_replay": bool(lc_topology_replay),
     }
+
+
+def _filter_zero_currents_by_warmup(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    sample_count: int,
+    seed: int,
+    relative_tolerance: float,
+    zero_tolerance: float,
+) -> tuple[GenericDAG, dict[str, object]]:
+    before = _dag_count_payload(dag)
+    report: dict[str, object] = {
+        "enabled": True,
+        "mode": "numeric-current-warmup",
+        "sample_count": int(sample_count),
+        "seed": int(seed),
+        "relative_tolerance": float(relative_tolerance),
+        "zero_tolerance": float(zero_tolerance),
+        "before": before,
+    }
+    if sample_count <= 0:
+        report.update(
+            {
+                "skipped": True,
+                "reason": "sample_count must be positive",
+                "after": before,
+            }
+        )
+        return dag, report
+    if not dag.interactions:
+        report.update(
+            {
+                "skipped": False,
+                "zero_current_ids": [],
+                "removed_current_count": 0,
+                "removed_interaction_count": 0,
+                "removed_amplitude_root_count": 0,
+                "after": before,
+            }
+        )
+        return dag, report
+
+    try:
+        points = tuple(
+            _generic_warmup_phase_space_point(dag, model, seed=seed + offset)
+            for offset in range(sample_count)
+        )
+        maxima = _evaluate_current_component_maxima(dag, model, points)
+    except Exception as error:  # noqa: BLE001 - filtering must be conservative.
+        report.update(
+            {
+                "skipped": True,
+                "reason": f"numeric warmup evaluation failed: {error}",
+                "after": before,
+            }
+        )
+        return dag, report
+
+    source_ids = set(dag.sources)
+    global_max = max(maxima.values(), default=0.0)
+    threshold = max(float(zero_tolerance), abs(float(relative_tolerance)) * global_max)
+    zero_ids = tuple(
+        current.id
+        for current in dag.currents
+        if current.id not in source_ids and maxima.get(current.id, 0.0) <= threshold
+    )
+    if not zero_ids:
+        report.update(
+            {
+                "skipped": False,
+                "threshold": threshold,
+                "global_max_abs": global_max,
+                "zero_current_ids": [],
+                "removed_current_count": 0,
+                "removed_interaction_count": 0,
+                "removed_amplitude_root_count": 0,
+                "after": before,
+            }
+        )
+        return dag, report
+
+    filtered = _drop_currents_from_dag(dag, zero_ids)
+    if not filtered.amplitude_roots:
+        report.update(
+            {
+                "skipped": True,
+                "reason": (
+                    "zero-current candidates would remove every amplitude root; "
+                    "leaving DAG unchanged"
+                ),
+                "threshold": threshold,
+                "global_max_abs": global_max,
+                "zero_current_ids": list(zero_ids),
+                "after": before,
+            }
+        )
+        return dag, report
+
+    after = _dag_count_payload(filtered)
+    report.update(
+        {
+            "skipped": False,
+            "threshold": threshold,
+            "global_max_abs": global_max,
+            "zero_current_ids": list(zero_ids),
+            "zero_current_count": len(zero_ids),
+            "removed_current_count": before["current_count"] - after["current_count"],
+            "removed_interaction_count": (
+                before["interaction_count"] - after["interaction_count"]
+            ),
+            "removed_amplitude_root_count": (
+                before["amplitude_root_count"] - after["amplitude_root_count"]
+            ),
+            "after": after,
+        }
+    )
+    return filtered, report
+
+
+def _merge_identical_currents_by_warmup(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    sample_count: int,
+    seed: int,
+    relative_tolerance: float,
+    zero_tolerance: float,
+) -> tuple[GenericDAG, dict[str, object]]:
+    before = _dag_count_payload(dag)
+    report: dict[str, object] = {
+        "enabled": True,
+        "mode": "numeric-current-signature-warmup",
+        "sample_count": int(sample_count),
+        "seed": int(seed),
+        "relative_tolerance": float(relative_tolerance),
+        "zero_tolerance": float(zero_tolerance),
+        "before": before,
+    }
+    if sample_count <= 0:
+        report.update(
+            {
+                "skipped": True,
+                "reason": "sample_count must be positive",
+                "after": before,
+            }
+        )
+        return dag, report
+    if not dag.interactions:
+        report.update(
+            {
+                "skipped": False,
+                "merged_current_ids": [],
+                "merged_current_count": 0,
+                "merged_group_count": 0,
+                "removed_current_count": 0,
+                "removed_interaction_count": 0,
+                "removed_amplitude_root_count": 0,
+                "after": before,
+            }
+        )
+        return dag, report
+
+    try:
+        points = tuple(
+            _generic_warmup_phase_space_point(dag, model, seed=seed + offset)
+            for offset in range(sample_count)
+        )
+        maxima, signatures = _evaluate_current_warmup(dag, model, points)
+    except Exception as error:  # noqa: BLE001 - merging must be conservative.
+        report.update(
+            {
+                "skipped": True,
+                "reason": f"numeric warmup evaluation failed: {error}",
+                "after": before,
+            }
+        )
+        return dag, report
+
+    global_max = max(maxima.values(), default=0.0)
+    threshold = max(float(zero_tolerance), abs(float(relative_tolerance)) * global_max)
+    current_map, groups = _equivalent_current_representatives(
+        dag,
+        maxima=maxima,
+        signatures=signatures,
+        absolute_tolerance=threshold,
+        relative_tolerance=abs(float(relative_tolerance)),
+    )
+    merged_ids = tuple(
+        current_id
+        for current_id, (representative_id, _sign) in sorted(current_map.items())
+        if current_id != representative_id
+    )
+    if not merged_ids:
+        report.update(
+            {
+                "skipped": False,
+                "threshold": threshold,
+                "global_max_abs": global_max,
+                "merged_current_ids": [],
+                "merged_current_count": 0,
+                "merged_group_count": 0,
+                "removed_current_count": 0,
+                "removed_interaction_count": 0,
+                "removed_amplitude_root_count": 0,
+                "after": before,
+            }
+        )
+        return dag, report
+
+    merged = _merge_currents_in_dag(dag, current_map)
+    if not merged.amplitude_roots:
+        report.update(
+            {
+                "skipped": True,
+                "reason": (
+                    "current-merging candidates would remove every amplitude "
+                    "root; leaving DAG unchanged"
+                ),
+                "threshold": threshold,
+                "global_max_abs": global_max,
+                "merged_current_ids": list(merged_ids),
+                "after": before,
+            }
+        )
+        return dag, report
+
+    after = _dag_count_payload(merged)
+    report.update(
+        {
+            "skipped": False,
+            "threshold": threshold,
+            "global_max_abs": global_max,
+            "merged_current_ids": list(merged_ids),
+            "merged_current_count": len(merged_ids),
+            "merged_group_count": len(groups),
+            "merged_groups": [
+                {
+                    "representative_current_id": representative_id,
+                    "member_current_ids": [member_id for member_id, _sign in member_ids],
+                    "member_signs": [
+                        {
+                            "current_id": member_id,
+                            "sign": sign,
+                        }
+                        for member_id, sign in member_ids
+                    ],
+                }
+                for representative_id, member_ids in groups
+            ],
+            "removed_current_count": before["current_count"] - after["current_count"],
+            "removed_interaction_count": (
+                before["interaction_count"] - after["interaction_count"]
+            ),
+            "removed_amplitude_root_count": (
+                before["amplitude_root_count"] - after["amplitude_root_count"]
+            ),
+            "after": after,
+        }
+    )
+    return merged, report
+
+
+def _dag_count_payload(dag: GenericDAG) -> dict[str, int]:
+    return {
+        "current_count": len(dag.currents),
+        "source_count": len(dag.sources),
+        "interaction_count": len(dag.interactions),
+        "amplitude_root_count": len(dag.amplitude_roots),
+    }
+
+
+def _generic_warmup_phase_space_point(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    seed: int,
+) -> tuple[ExternalMomentum, ...]:
+    initial_pdgs = tuple(int(pdg) for pdg in dag.process.initial_pdgs)
+    final_pdgs = tuple(int(pdg) for pdg in dag.process.final_pdgs)
+    if len(initial_pdgs) != 2:
+        raise NativeEvaluationError(
+            "zero-current filter currently requires a two-body initial state"
+        )
+    if not final_pdgs:
+        raise NativeEvaluationError(
+            "zero-current filter requires at least one final-state particle"
+        )
+    final_masses = tuple(float(_model_mass(model, pdg)) for pdg in final_pdgs)
+    threshold = sum(final_masses)
+    final_momenta: tuple[tuple[float, float, float, float], ...]
+    if len(final_pdgs) == 1:
+        if threshold <= 0.0:
+            raise NativeEvaluationError(
+                "no finite centre-of-mass warmup point exists for one massless final state"
+            )
+        sqrt_s = threshold
+        final_momenta = ((float(sqrt_s), 0.0, 0.0, 0.0),)
+    else:
+        sqrt_s = max(1000.0, threshold + 100.0)
+        final_momenta = massive_rambo_final_state(
+            len(final_pdgs),
+            sqrt_s=float(sqrt_s),
+            masses=final_masses,
+            seed=int(seed),
+        )
+    beam_energy = 0.5 * float(sqrt_s)
+    return (
+        ExternalMomentum(initial_pdgs[0], (beam_energy, 0.0, 0.0, beam_energy)),
+        ExternalMomentum(initial_pdgs[1], (beam_energy, 0.0, 0.0, -beam_energy)),
+        *(
+            ExternalMomentum(pdg, momentum)
+            for pdg, momentum in zip(final_pdgs, final_momenta, strict=True)
+        ),
+    )
+
+
+def _evaluate_current_component_maxima(
+    dag: GenericDAG,
+    model: Model,
+    points: Sequence[Sequence[ExternalMomentum]],
+) -> dict[int, float]:
+    maxima, _ = _evaluate_current_warmup(dag, model, points)
+    return maxima
+
+
+def _evaluate_current_warmup(
+    dag: GenericDAG,
+    model: Model,
+    points: Sequence[Sequence[ExternalMomentum]],
+) -> tuple[
+    dict[int, float],
+    dict[int, tuple[tuple[complex, ...], ...]],
+]:
+    from .generic_stage_compiler import (
+        _interaction_contribution,
+        _momentum_components,
+        _sum_components,
+    )
+
+    schema = cast(dict[str, Any], _generic_runtime_schema_payload(dag, model))
+    value_slots = _schema_value_slots_by_id(schema)
+    momentum_slots = _schema_momentum_slots_by_id(schema)
+    current_slots = _schema_current_slots_by_id(schema)
+    stages = cast(list[Any], schema["stages"])
+    layout = cast(dict[str, Any], schema["parameter_layout"])
+    value_count = int(layout["value_component_count"])
+    momentum_count = int(layout["momentum_parameter_count"])
+    maxima = {current.id: 0.0 for current in dag.currents}
+    signature_parts: dict[int, list[tuple[complex, ...]]] = {
+        current.id: [] for current in dag.currents
+    }
+    for point in points:
+        values = [0j for _ in range(value_count)]
+        momenta = [0j for _ in range(momentum_count)]
+        _fill_warmup_sources(schema, model, values, point)
+        _fill_warmup_momenta(schema, momenta, point)
+        for stage_obj in stages:
+            stage = cast(dict[str, Any], stage_obj)
+            interactions_by_result: dict[int, list[dict[str, Any]]] = {}
+            for raw in cast(list[Any], stage["interactions"]):
+                interaction = cast(dict[str, Any], raw)
+                interactions_by_result.setdefault(
+                    int(interaction["result_current_id"]),
+                    [],
+                ).append(interaction)
+            for current_id in sorted(interactions_by_result):
+                current_slot = current_slots[current_id]
+                dimension = int(current_slot["dimension"])
+                total = tuple(0j for _ in range(dimension))
+                for interaction in interactions_by_result[current_id]:
+                    contribution = _interaction_contribution(
+                        dag,
+                        model,
+                        interaction,
+                        value_symbols=values,
+                        momentum_symbols=momenta,
+                        value_slots=value_slots,
+                        momentum_slots=momentum_slots,
+                    )
+                    total = _sum_components(total, contribution)
+                total_signature = tuple(complex(component) for component in total)
+                signature_parts[current_id].append(total_signature)
+                for slot_id in cast(list[Any], stage["output_value_slot_ids"]):
+                    slot = value_slots[int(slot_id)]
+                    if int(slot["current_id"]) != current_id:
+                        continue
+                    components = (
+                        model.propagator_component_expression(
+                            int(current_slot["particle_id"]),
+                            total,
+                            _momentum_components(
+                                int(current_slot["momentum_mask"]),
+                                momenta,
+                                momentum_slots,
+                            ),
+                            chirality=int(current_slot["chirality"]),
+                        )
+                        if str(slot["variant"]) == "propagated"
+                        else total
+                    )
+                    start = int(slot["component_start"])
+                    for offset, component in enumerate(components):
+                        value = complex(component)
+                        values[start + offset] = value
+                        maxima[current_id] = max(maxima[current_id], abs(value))
+    return maxima, {
+        current_id: tuple(parts)
+        for current_id, parts in signature_parts.items()
+    }
+
+
+def _fill_warmup_sources(
+    schema: Mapping[str, Any],
+    model: Model,
+    values: list[complex],
+    point: Sequence[ExternalMomentum],
+) -> None:
+    source_fill = cast(dict[str, Any], schema["source_fill"])
+    for raw_source in cast(list[Any], source_fill["sources"]):
+        source = cast(dict[str, Any], raw_source)
+        slot = cast(dict[str, Any], source["value_slot"])
+        wave = _warmup_source_wavefunction(source, model, point)
+        start = int(slot["component_start"])
+        stop = int(slot["component_stop"])
+        if stop - start != len(wave):
+            raise NativeEvaluationError(
+                f"source {source['source_id']} produced {len(wave)} components "
+                f"for slot length {stop - start}"
+            )
+        values[start:stop] = [complex(component) for component in wave]
+
+
+def _fill_warmup_momenta(
+    schema: Mapping[str, Any],
+    momenta: list[complex],
+    point: Sequence[ExternalMomentum],
+) -> None:
+    conventions = cast(dict[str, Any], schema["momentum_conventions"])
+    incoming = {int(label) for label in cast(list[Any], conventions["incoming_labels"])}
+    for raw_slot in cast(list[Any], schema["momentum_slots"]):
+        slot = cast(dict[str, Any], raw_slot)
+        total = [0.0, 0.0, 0.0, 0.0]
+        for raw_label in cast(list[Any], slot["external_labels"]):
+            label = int(raw_label)
+            try:
+                physical = point[label - 1].momentum
+            except IndexError as error:
+                raise NativeEvaluationError(
+                    f"momentum slot refers to unknown external label {label}"
+                ) from error
+            sign = -1.0 if label in incoming else 1.0
+            for component in range(4):
+                total[component] += sign * float(physical[component])
+        start = int(slot["component_start"])
+        for component in range(4):
+            momenta[start + component] = complex(total[component], 0.0)
+
+
+def _warmup_source_wavefunction(
+    source: Mapping[str, Any],
+    model: Model,
+    point: Sequence[ExternalMomentum],
+) -> tuple[complex, ...]:
+    leg_label = int(source["leg_label"])
+    try:
+        momentum = tuple(float(component) for component in point[leg_label - 1].momentum)
+    except IndexError as error:
+        raise NativeEvaluationError(
+            f"source refers to unknown external label {leg_label}"
+        ) from error
+    if str(source["crossing"]) == "negate-incoming-momentum":
+        momentum = tuple(-component for component in momentum)
+    dimension = int(source["dimension"])
+    particle_id = int(source["particle_id"])
+    helicity = int(source["source_helicity"])
+    chirality = int(source["chirality"])
+    if dimension == 1:
+        return (1.0 + 0.0j,)
+    if dimension == 2:
+        return (
+            _ext_antiquark_weyl_filter(momentum, helicity, chirality)
+            if particle_id < 0
+            else _ext_quark_weyl_filter(momentum, helicity, chirality)
+        )
+    if dimension == 4:
+        if _is_fermion_pdg(particle_id):
+            mass = _model_mass(model, particle_id)
+            return (
+                _ext_antiquark_dirac_massive(momentum, helicity, mass)
+                if particle_id < 0
+                else _ext_quark_dirac_massive(momentum, helicity, mass)
+            )
+        if abs(particle_id) == 21 or particle_id == 22:
+            return _ext_gluon_filter(momentum, helicity)
+        return _ext_massive_vector_filter(
+            momentum,
+            helicity,
+            _model_mass(model, particle_id),
+        )
+    raise NativeEvaluationError(
+        f"source dimension {dimension} is not implemented by zero-current filter"
+    )
+
+
+def _ext_quark_weyl_filter(
+    momentum: Sequence[float],
+    helicity: int,
+    chirality: int,
+) -> tuple[complex, complex]:
+    energy, px, py, pz = (float(component) for component in momentum)
+    if energy > 0.0:
+        sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz < 0.0 else math.sqrt(max(energy + pz, 0.0))
+        chi1 = complex(sqp0p3)
+        chi2 = (
+            complex(-helicity) * math.sqrt(2.0 * energy)
+            if sqp0p3 == 0.0
+            else complex(helicity * px, -py) / sqp0p3
+        )
+        if helicity == 1 and chirality == 1:
+            return chi1, chi2
+        if helicity == -1 and chirality == -1:
+            return chi2, chi1
+        return 0j, 0j
+    sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz > 0.0 else -math.sqrt(max(-(energy + pz), 0.0))
+    chi1 = complex(sqp0p3)
+    chi2 = (
+        complex(-helicity) * math.sqrt(2.0 * abs(energy))
+        if sqp0p3 == 0.0
+        else complex(-helicity * (-px), py) / sqp0p3
+    )
+    if helicity == -1 and chirality == 1:
+        return chi1, chi2
+    if helicity == 1 and chirality == -1:
+        return chi2, chi1
+    return 0j, 0j
+
+
+def _ext_antiquark_weyl_filter(
+    momentum: Sequence[float],
+    helicity: int,
+    chirality: int,
+) -> tuple[complex, complex]:
+    energy, px, py, pz = (float(component) for component in momentum)
+    if energy > 0.0:
+        sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz < 0.0 else -math.sqrt(max(energy + pz, 0.0))
+        chi1 = complex(sqp0p3)
+        chi2 = (
+            complex(-helicity) * math.sqrt(2.0 * energy)
+            if sqp0p3 == 0.0
+            else complex(-helicity * px, py) / sqp0p3
+        )
+        if helicity == 1 and chirality == 1:
+            return chi2, chi1
+        if helicity == -1 and chirality == -1:
+            return chi1, chi2
+        return 0j, 0j
+    sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz > 0.0 else math.sqrt(max(-(energy + pz), 0.0))
+    chi1 = complex(sqp0p3)
+    chi2 = (
+        complex(-helicity) * math.sqrt(2.0 * abs(energy))
+        if sqp0p3 == 0.0
+        else complex(helicity * (-px), -py) / sqp0p3
+    )
+    if helicity == -1 and chirality == 1:
+        return chi2, chi1
+    if helicity == 1 and chirality == -1:
+        return chi1, chi2
+    return 0j, 0j
+
+
+def _ext_quark_dirac_filter(
+    momentum: Sequence[float],
+    helicity: int,
+) -> tuple[complex, complex, complex, complex]:
+    energy, px, py, pz = (float(component) for component in momentum)
+    if energy > 0.0:
+        sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz < 0.0 else math.sqrt(max(energy + pz, 0.0))
+        chi1 = complex(sqp0p3)
+        chi2 = (
+            complex(-helicity) * math.sqrt(2.0 * energy)
+            if sqp0p3 == 0.0
+            else complex(helicity * px, -py) / sqp0p3
+        )
+        if helicity == 1:
+            return chi1, chi2, 0j, 0j
+        return 0j, 0j, chi2, chi1
+    sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz > 0.0 else -math.sqrt(max(-(energy + pz), 0.0))
+    chi1 = complex(sqp0p3)
+    chi2 = (
+        complex(-helicity) * math.sqrt(2.0 * abs(energy))
+        if sqp0p3 == 0.0
+        else complex(-helicity * (-px), py) / sqp0p3
+    )
+    if -helicity == 1:
+        return chi1, chi2, 0j, 0j
+    return 0j, 0j, chi2, chi1
+
+
+def _ext_antiquark_dirac_filter(
+    momentum: Sequence[float],
+    helicity: int,
+) -> tuple[complex, complex, complex, complex]:
+    energy, px, py, pz = (float(component) for component in momentum)
+    if energy > 0.0:
+        sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz < 0.0 else -math.sqrt(max(energy + pz, 0.0))
+        chi1 = complex(sqp0p3)
+        chi2 = (
+            complex(-helicity) * math.sqrt(2.0 * energy)
+            if sqp0p3 == 0.0
+            else complex(-helicity * px, py) / sqp0p3
+        )
+        if -helicity == 1:
+            return 0j, 0j, chi1, chi2
+        return chi2, chi1, 0j, 0j
+    sqp0p3 = 0.0 if px == 0.0 and py == 0.0 and pz > 0.0 else math.sqrt(max(-(energy + pz), 0.0))
+    chi1 = complex(sqp0p3)
+    chi2 = (
+        complex(-helicity) * math.sqrt(2.0 * abs(energy))
+        if sqp0p3 == 0.0
+        else complex(helicity * (-px), -py) / sqp0p3
+    )
+    if helicity == 1:
+        return 0j, 0j, chi1, chi2
+    return chi2, chi1, 0j, 0j
+
+
+def _ext_gluon_filter(
+    momentum: Sequence[float],
+    helicity: int,
+) -> tuple[complex, complex, complex, complex]:
+    energy, px, py, pz = (float(component) for component in momentum)
+    if energy == 0.0:
+        raise NativeEvaluationError("cannot generate external gluon with zero energy")
+    sqh = math.sqrt(0.5)
+    if energy > 0.0:
+        hel = float(helicity)
+        pp = energy
+        pt = math.sqrt(px * px + py * py)
+        wf3 = complex(hel * pt / pp * sqh)
+        if pt != 0.0:
+            pzpt = pz / (pp * pt) * sqh * hel
+            wf1 = complex(-px * pzpt, -py / pt * sqh)
+            wf2 = complex(-py * pzpt, px / pt * sqh)
+        else:
+            wf1 = complex(-hel * sqh)
+            wf2 = complex(0.0, _fortran_sign(sqh, pz))
+        return 0j, wf1, wf2, wf3
+    hel = float(-helicity)
+    pp = -energy
+    pt = math.sqrt(px * px + py * py)
+    wf3 = complex(hel * pt / pp * sqh)
+    if pt != 0.0:
+        pzpt = -pz / (pp * pt) * sqh * hel
+        wf1 = complex(px * pzpt, py / pt * sqh)
+        wf2 = complex(py * pzpt, -px / pt * sqh)
+    else:
+        wf1 = complex(-hel * sqh)
+        wf2 = complex(0.0, -_fortran_sign(sqh, pz))
+    return 0j, wf1, wf2, wf3
+
+
+def _ext_massive_vector_filter(
+    momentum: Sequence[float],
+    helicity: int,
+    mass: float,
+) -> tuple[complex, complex, complex, complex]:
+    energy, px, py, pz = (float(component) for component in momentum)
+    if mass == 0.0:
+        raise NativeEvaluationError("massless massive-vector source is invalid")
+    sqh = math.sqrt(0.5)
+    hel = float(helicity)
+    nsvahl = abs(helicity)
+    pt2 = px * px + py * py
+    pp = min(energy, math.sqrt(pt2 + pz * pz))
+    pt = min(pp, math.sqrt(pt2))
+    hel0 = 1.0 - abs(hel)
+    if pp == 0.0:
+        return 0j, complex(-hel * sqh), complex(0.0, nsvahl * sqh), complex(hel0)
+    emp = energy / (mass * pp)
+    wf0 = complex(hel0 * pp / mass)
+    wf3 = complex(hel0 * pz * emp + hel * pt / pp * sqh)
+    if pt != 0.0:
+        pzpt = pz / (pp * pt) * sqh * hel
+        wf1 = complex(hel0 * px * emp - px * pzpt, -nsvahl * py / pt * sqh)
+        wf2 = complex(hel0 * py * emp - py * pzpt, nsvahl * px / pt * sqh)
+    else:
+        wf1 = complex(-hel * sqh)
+        wf2 = complex(0.0, nsvahl * _fortran_sign(sqh, pz))
+    return wf0, wf1, wf2, wf3
+
+
+def _ext_quark_dirac_massive(
+    momentum: Sequence[float],
+    helicity: int,
+    mass: float,
+) -> tuple[complex, complex, complex, complex]:
+    if abs(mass) < 1.0e-8:
+        return _ext_quark_dirac_filter(momentum, helicity)
+    energy, px, py, pz = (float(component) for component in momentum)
+    nsf = 1 if energy > 0.0 else -1
+    nh = nsf * int(helicity)
+    pp = math.sqrt(px * px + py * py + pz * pz)
+    omega1 = math.sqrt(abs(energy) + pp)
+    omega2 = mass / omega1
+    omega = (omega1, omega2)
+    sf1 = (1 + nsf + (1 - nsf) * nh) * 0.5
+    sf2 = (1 + nsf - (1 - nsf) * nh) * 0.5
+    ip = (3 + nh) // 2 - 1
+    im = (3 - nh) // 2 - 1
+    sfomeg = (sf1 * omega[ip], sf2 * omega[im])
+    signed_px, signed_py, signed_pz = (
+        (px, py, pz) if energy > 0.0 else (-px, -py, -pz)
+    )
+    pp3 = max(pp + signed_pz, 0.0)
+    chi1 = complex(1.0 if pp == 0.0 else math.sqrt(pp3 * 0.5 / pp), 0.0)
+    if pp3 == 0.0 or pp == 0.0:
+        chi2 = complex(-nh, 0.0)
+    else:
+        denom = math.sqrt(2.0 * pp * pp3)
+        chi2 = complex(nh * signed_px / denom, -signed_py / denom)
+    chi = (chi1, chi2)
+    return (
+        chi[im] * sfomeg[1],
+        chi[ip] * sfomeg[1],
+        chi[im] * sfomeg[0],
+        chi[ip] * sfomeg[0],
+    )
+
+
+def _ext_antiquark_dirac_massive(
+    momentum: Sequence[float],
+    helicity: int,
+    mass: float,
+) -> tuple[complex, complex, complex, complex]:
+    if abs(mass) < 1.0e-8:
+        return _ext_antiquark_dirac_filter(momentum, helicity)
+    energy, px, py, pz = (float(component) for component in momentum)
+    nsf = -1 if energy > 0.0 else 1
+    nh = nsf * int(helicity)
+    pp = math.sqrt(px * px + py * py + pz * pz)
+    omega1 = math.sqrt(abs(energy) + pp)
+    omega2 = mass / omega1
+    omega = (omega1, omega2)
+    sf1 = (1 + nsf + (1 - nsf) * nh) * 0.5
+    sf2 = (1 + nsf - (1 - nsf) * nh) * 0.5
+    ip = (3 + nh) // 2 - 1
+    im = (3 - nh) // 2 - 1
+    sfomeg = (sf1 * omega[ip], sf2 * omega[im])
+    signed_px, signed_py, signed_pz = (
+        (px, py, pz) if energy > 0.0 else (-px, -py, -pz)
+    )
+    pp3 = max(pp + signed_pz, 0.0)
+    chi1 = complex(1.0 if pp == 0.0 else math.sqrt(pp3 * 0.5 / pp), 0.0)
+    if pp3 == 0.0 or pp == 0.0:
+        chi2 = complex(-nh, 0.0)
+    else:
+        denom = math.sqrt(2.0 * pp * pp3)
+        chi2 = complex(nh * signed_px / denom, signed_py / denom)
+    chi = (chi1, chi2)
+    return (
+        chi[im] * sfomeg[0],
+        chi[ip] * sfomeg[0],
+        chi[im] * sfomeg[1],
+        chi[ip] * sfomeg[1],
+    )
+
+
+def _drop_currents_from_dag(
+    dag: GenericDAG,
+    current_ids: Sequence[int],
+) -> GenericDAG:
+    removed = set(int(current_id) for current_id in current_ids)
+    source_ids = set(dag.sources)
+    removed -= source_ids
+    kept_ids = {current.id for current in dag.currents if current.id not in removed}
+    current_id_map = {
+        old_id: new_id
+        for new_id, old_id in enumerate(sorted(kept_ids))
+    }
+    currents = tuple(
+        CurrentNode(
+            id=current_id_map[current.id],
+            index=current.index,
+            dimension=current.dimension,
+            is_source=current.is_source,
+            source_leg_label=current.source_leg_label,
+            source_helicity=current.source_helicity,
+        )
+        for current in dag.currents
+        if current.id in kept_ids
+    )
+    interactions: list[InteractionNode] = []
+    for interaction in dag.interactions:
+        if (
+            interaction.left_id not in current_id_map
+            or interaction.right_id not in current_id_map
+            or interaction.result_id not in current_id_map
+        ):
+            continue
+        interactions.append(
+            InteractionNode(
+                id=len(interactions),
+                vertex_kind=interaction.vertex_kind,
+                vertex_particles=interaction.vertex_particles,
+                left_id=current_id_map[interaction.left_id],
+                right_id=current_id_map[interaction.right_id],
+                result_id=current_id_map[interaction.result_id],
+                coupling=interaction.coupling,
+                color_weight=interaction.color_weight,
+                lowering_backend=interaction.lowering_backend,
+                full_tensor_network_ready=interaction.full_tensor_network_ready,
+            )
+        )
+    roots: list[AmplitudeRoot] = []
+    for root in dag.amplitude_roots:
+        if root.left_id not in current_id_map or root.right_id not in current_id_map:
+            continue
+        roots.append(
+            AmplitudeRoot(
+                id=len(roots),
+                kind=root.kind,
+                left_id=current_id_map[root.left_id],
+                right_id=current_id_map[root.right_id],
+                color_weight=root.color_weight,
+                vertex_kind=root.vertex_kind,
+                vertex_particles=root.vertex_particles,
+                coupling=root.coupling,
+                contraction=root.contraction,
+                helicity_weight=root.helicity_weight,
+            )
+        )
+    sources = tuple(
+        current_id_map[source_id]
+        for source_id in dag.sources
+        if source_id in current_id_map
+    )
+    return prune_dag_to_amplitude_roots(
+        GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=currents,
+            sources=sources,
+            interactions=tuple(interactions),
+            amplitude_roots=tuple(roots),
+            truncated=dag.truncated,
+        )
+    )
+
+
+def _equivalent_current_representatives(
+    dag: GenericDAG,
+    *,
+    maxima: Mapping[int, float],
+    signatures: Mapping[int, tuple[tuple[complex, ...], ...]],
+    absolute_tolerance: float,
+    relative_tolerance: float,
+) -> tuple[
+    dict[int, tuple[int, float]],
+    tuple[tuple[int, tuple[tuple[int, float], ...]], ...],
+]:
+    source_ids = set(dag.sources)
+    representative_by_current = {
+        current.id: (current.id, 1.0) for current in dag.currents
+    }
+    representatives_by_key: dict[tuple[object, ...], list[int]] = {}
+    group_members: dict[int, list[tuple[int, float]]] = {}
+    for current in dag.currents:
+        if current.id in source_ids:
+            continue
+        if maxima.get(current.id, 0.0) <= absolute_tolerance:
+            continue
+        signature = signatures.get(current.id, ())
+        if not signature:
+            continue
+        key = _current_merge_key(current)
+        matched: int | None = None
+        relation_sign = 1.0
+        for candidate_id in representatives_by_key.get(key, ()):
+            relation = _current_signature_relation(
+                signature,
+                signatures.get(candidate_id, ()),
+                absolute_tolerance=absolute_tolerance,
+                relative_tolerance=relative_tolerance,
+            )
+            if relation is not None:
+                matched = candidate_id
+                relation_sign = relation
+                break
+        if matched is None:
+            representatives_by_key.setdefault(key, []).append(current.id)
+            continue
+        representative_by_current[current.id] = (matched, relation_sign)
+        group_members.setdefault(matched, []).append((current.id, relation_sign))
+    groups = tuple(
+        (representative_id, tuple(member_ids))
+        for representative_id, member_ids in sorted(group_members.items())
+    )
+    return representative_by_current, groups
+
+
+def _current_merge_key(current: CurrentNode) -> tuple[object, ...]:
+    index = current.index
+    return (
+        index.particle_id,
+        current.dimension,
+        index.helicity_ancestry,
+        index.chirality,
+        index.spin_state,
+        index.flavour_flow,
+        index.charge_flow,
+        index.color_state,
+        index.momentum_mask,
+        index.coupling_orders,
+        index.auxiliary_kind,
+    )
+
+
+def _current_signature_relation(
+    left: Sequence[Sequence[complex]],
+    right: Sequence[Sequence[complex]],
+    *,
+    absolute_tolerance: float,
+    relative_tolerance: float,
+) -> float | None:
+    if len(left) != len(right):
+        return None
+    relation: float | None = None
+    for left_sample, right_sample in zip(left, right, strict=True):
+        if len(left_sample) != len(right_sample):
+            return None
+        for left_value, right_value in zip(left_sample, right_sample, strict=True):
+            scale = max(abs(left_value), abs(right_value))
+            tolerance = max(absolute_tolerance, relative_tolerance * scale)
+            if scale <= tolerance:
+                continue
+            if abs(left_value - right_value) <= tolerance:
+                component_relation = 1.0
+            elif abs(left_value + right_value) <= tolerance:
+                component_relation = -1.0
+            else:
+                return None
+            if relation is None:
+                relation = component_relation
+            elif relation != component_relation:
+                return None
+    return 1.0 if relation is None else relation
+
+
+def _merge_currents_in_dag(
+    dag: GenericDAG,
+    representative_by_current: Mapping[int, tuple[int, float]],
+) -> GenericDAG:
+    representative = {
+        current.id: int(representative_by_current.get(current.id, (current.id, 1.0))[0])
+        for current in dag.currents
+    }
+    current_sign = {
+        current.id: float(
+            representative_by_current.get(current.id, (current.id, 1.0))[1]
+        )
+        for current in dag.currents
+    }
+    kept_old_ids = {
+        current_id for current_id, representative_id in representative.items()
+        if current_id == representative_id
+    }
+    current_id_map = {
+        old_id: new_id
+        for new_id, old_id in enumerate(sorted(kept_old_ids))
+    }
+    currents = tuple(
+        CurrentNode(
+            id=current_id_map[current.id],
+            index=current.index,
+            dimension=current.dimension,
+            is_source=current.is_source,
+            source_leg_label=current.source_leg_label,
+            source_helicity=current.source_helicity,
+        )
+        for current in dag.currents
+        if current.id in kept_old_ids
+    )
+    interactions: list[InteractionNode] = []
+    for interaction in dag.interactions:
+        result_representative = representative[interaction.result_id]
+        if result_representative != interaction.result_id:
+            continue
+        left_id = representative[interaction.left_id]
+        right_id = representative[interaction.right_id]
+        result_id = result_representative
+        if (
+            left_id not in current_id_map
+            or right_id not in current_id_map
+            or result_id not in current_id_map
+        ):
+            continue
+        input_sign = current_sign[interaction.left_id] * current_sign[interaction.right_id]
+        interactions.append(
+            InteractionNode(
+                id=len(interactions),
+                vertex_kind=interaction.vertex_kind,
+                vertex_particles=interaction.vertex_particles,
+                left_id=current_id_map[left_id],
+                right_id=current_id_map[right_id],
+                result_id=current_id_map[result_id],
+                coupling=_scale_complex_tuple(interaction.coupling, input_sign),
+                color_weight=interaction.color_weight,
+                lowering_backend=interaction.lowering_backend,
+                full_tensor_network_ready=interaction.full_tensor_network_ready,
+            )
+        )
+    roots: list[AmplitudeRoot] = []
+    for root in dag.amplitude_roots:
+        left_id = representative[root.left_id]
+        right_id = representative[root.right_id]
+        if left_id not in current_id_map or right_id not in current_id_map:
+            continue
+        input_sign = current_sign[root.left_id] * current_sign[root.right_id]
+        roots.append(
+            AmplitudeRoot(
+                id=len(roots),
+                kind=root.kind,
+                left_id=current_id_map[left_id],
+                right_id=current_id_map[right_id],
+                color_weight=_scale_complex_tuple(root.color_weight, input_sign),
+                vertex_kind=root.vertex_kind,
+                vertex_particles=root.vertex_particles,
+                coupling=root.coupling,
+                contraction=root.contraction,
+                helicity_weight=root.helicity_weight,
+            )
+        )
+    sources = tuple(
+        current_id_map[source_id]
+        for source_id in dag.sources
+        if source_id in current_id_map
+    )
+    return prune_dag_to_amplitude_roots(
+        GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=currents,
+            sources=sources,
+            interactions=tuple(interactions),
+            amplitude_roots=tuple(roots),
+            truncated=dag.truncated,
+        )
+    )
+
+
+def _scale_complex_tuple(value: tuple[float, float], factor: float) -> tuple[float, float]:
+    return (float(value[0]) * float(factor), float(value[1]) * float(factor))
+
+
+def _schema_value_slots_by_id(schema: Mapping[str, Any]) -> dict[int, dict[str, Any]]:
+    storage = cast(dict[str, Any], schema["value_storage"])
+    return {
+        int(slot["value_slot_id"]): cast(dict[str, Any], slot)
+        for slot in cast(list[Any], storage["value_slots"])
+    }
+
+
+def _schema_current_slots_by_id(schema: Mapping[str, Any]) -> dict[int, dict[str, Any]]:
+    storage = cast(dict[str, Any], schema["current_storage"])
+    return {
+        int(slot["current_id"]): cast(dict[str, Any], slot)
+        for slot in cast(list[Any], storage["current_slots"])
+    }
+
+
+def _schema_momentum_slots_by_id(schema: Mapping[str, Any]) -> dict[int, dict[str, Any]]:
+    return {
+        int(slot["momentum_slot_id"]): cast(dict[str, Any], slot)
+        for slot in cast(list[Any], schema["momentum_slots"])
+    }
+
+
+def _is_fermion_pdg(particle_id: int) -> bool:
+    abs_id = abs(int(particle_id))
+    return 1 <= abs_id <= 6 or 11 <= abs_id <= 16
+
+
+def _fortran_sign(value: float, sign_source: float) -> float:
+    return abs(value) if sign_source >= 0.0 else -abs(value)
+
+
+def _model_mass(model: Model, particle_id: int) -> float:
+    try:
+        return float(model.mass(particle_id))
+    except KeyError:
+        return float(model.mass(-particle_id))
 
 
 def _write_generic_validation_momenta(
@@ -1133,6 +2362,12 @@ def _generic_dag_process_artifact_payload(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
 ) -> dict[str, object]:
     from .generic_stage_compiler import (
         build_generic_stage_compiler_blueprint,
@@ -1174,6 +2409,26 @@ def _generic_dag_process_artifact_payload(
             "species_reachability_pruning": species_reachability_pruning,
             "ignored_particle_ids": list(ignored_particle_ids or ()),
             "ignored_vertex_kinds": list(ignored_vertex_kinds or ()),
+            "zero_current_filter": dict(
+                manifest.zero_current_filter
+                or {
+                    "enabled": bool(numerical_filter_current),
+                    "sample_count": int(numerical_current_samples),
+                    "seed": int(numerical_current_seed),
+                    "relative_tolerance": float(numerical_current_relative_tolerance),
+                    "zero_tolerance": float(numerical_current_zero_tolerance),
+                }
+            ),
+            "current_merging": dict(
+                manifest.current_merging
+                or {
+                    "enabled": bool(numerical_current_merging),
+                    "sample_count": int(numerical_current_samples),
+                    "seed": int(numerical_current_seed),
+                    "relative_tolerance": float(numerical_current_relative_tolerance),
+                    "zero_tolerance": float(numerical_current_zero_tolerance),
+                }
+            ),
             "reference_color_order": (
                 None
                 if reference_color_order is None
@@ -1223,6 +2478,7 @@ def _generic_dag_process_artifact_payload(
         "outgoing_pdg_order": list(manifest.outgoing_pdg_order),
         "process_ir": plan_payload["process_ir"],
         "generic_plan_path": plan_path,
+        "generation_filters": plan_payload["generation_filters"],
         "lc_topology_reuse": full_plan_payload["lc_topology_reuse"],
         "runtime_lc_topology_reuse": plan_payload["lc_topology_reuse"],
         "runtime_lc_topology_replay": topology_replay_payload,
@@ -1275,6 +2531,8 @@ def _runtime_manifest_for_color_sectors(
         dag=filtered,
         model=manifest.model,
         color_plan=manifest.color_plan,
+        zero_current_filter=manifest.zero_current_filter,
+        current_merging=manifest.current_merging,
     )
 
 

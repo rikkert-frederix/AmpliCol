@@ -639,6 +639,60 @@ def _add_generic_dag_pruning_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--no-numerical-filter-current",
+        dest="numerical_filter_current",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable generation-time numerical warmup pruning of currents "
+            "that are zero on deterministic random phase-space points."
+        ),
+    )
+    parser.add_argument(
+        "--no-numerical-current-merging",
+        dest="numerical_current_merging",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable generation-time numerical detection and merging of "
+            "identical current values on deterministic random phase-space "
+            "points."
+        ),
+    )
+    parser.add_argument(
+        "--numerical-current-samples",
+        type=int,
+        default=10,
+        help=(
+            "Number of deterministic random phase-space points used by the "
+            "generation-time numerical current filter and merger."
+        ),
+    )
+    parser.add_argument(
+        "--numerical-current-seed",
+        type=int,
+        default=12345,
+        help="Base seed for the generation-time numerical current warmup.",
+    )
+    parser.add_argument(
+        "--numerical-current-relative-tolerance",
+        type=float,
+        default=1.0e-12,
+        help=(
+            "Relative threshold used by generation-time numerical current "
+            "zero filtering and identical-current merging."
+        ),
+    )
+    parser.add_argument(
+        "--numerical-current-zero-tolerance",
+        type=float,
+        default=1.0e-300,
+        help=(
+            "Absolute floor used by generation-time numerical current zero "
+            "filtering and identical-current merging."
+        ),
+    )
+    parser.add_argument(
         "--lc-sector-strategy",
         choices=(
             "all",
@@ -1328,6 +1382,24 @@ def _generic_dag_pruning_kwargs(
         "ignored_vertex_kinds": _parse_int_list(
             str(getattr(args, "ignore_vertex_kinds", "")),
             option="--ignore-vertex-kinds",
+        ),
+        "numerical_filter_current": bool(
+            getattr(args, "numerical_filter_current", True)
+        ),
+        "numerical_current_merging": bool(
+            getattr(args, "numerical_current_merging", True)
+        ),
+        "numerical_current_samples": int(
+            getattr(args, "numerical_current_samples", 10)
+        ),
+        "numerical_current_seed": int(
+            getattr(args, "numerical_current_seed", 12345)
+        ),
+        "numerical_current_relative_tolerance": float(
+            getattr(args, "numerical_current_relative_tolerance", 1.0e-12)
+        ),
+        "numerical_current_zero_tolerance": float(
+            getattr(args, "numerical_current_zero_tolerance", 1.0e-300)
         ),
     }
     explicit_sector_ids = _parse_int_list(
@@ -3002,6 +3074,52 @@ def _generate_process_child_command(
         command.append("--no-color-order-mask-pruning")
     if not bool(getattr(args, "species_reachability_pruning", True)):
         command.append("--no-species-reachability-pruning")
+    if not bool(getattr(args, "numerical_filter_current", True)):
+        command.append("--no-numerical-filter-current")
+    if not bool(getattr(args, "numerical_current_merging", True)):
+        command.append("--no-numerical-current-merging")
+    if int(getattr(args, "numerical_current_samples", 10)) != 10:
+        command.extend(
+            [
+                "--numerical-current-samples",
+                str(int(getattr(args, "numerical_current_samples", 10))),
+            ]
+        )
+    if int(getattr(args, "numerical_current_seed", 12345)) != 12345:
+        command.extend(
+            [
+                "--numerical-current-seed",
+                str(int(getattr(args, "numerical_current_seed", 12345))),
+            ]
+        )
+    if (
+        float(getattr(args, "numerical_current_relative_tolerance", 1.0e-12))
+        != 1.0e-12
+    ):
+        command.extend(
+            [
+                "--numerical-current-relative-tolerance",
+                str(
+                    float(
+                        getattr(
+                            args,
+                            "numerical_current_relative_tolerance",
+                            1.0e-12,
+                        )
+                    )
+                ),
+            ]
+        )
+    if (
+        float(getattr(args, "numerical_current_zero_tolerance", 1.0e-300))
+        != 1.0e-300
+    ):
+        command.extend(
+            [
+                "--numerical-current-zero-tolerance",
+                str(float(getattr(args, "numerical_current_zero_tolerance", 1.0e-300))),
+            ]
+        )
     ignore_particles = str(getattr(args, "ignore_particles", ""))
     if ignore_particles:
         command.extend(["--ignore-particles", ignore_particles])

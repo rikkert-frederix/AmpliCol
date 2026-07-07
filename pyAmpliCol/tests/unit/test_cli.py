@@ -596,6 +596,31 @@ def test_cli_generate_process_minimal_command_uses_fast_rusticol_defaults(
     assert args.color_accuracy == "lc"
     assert args.append is False
     assert args.replace is False
+    assert args.numerical_filter_current is True
+    assert args.numerical_current_merging is True
+    assert args.numerical_current_samples == 10
+    assert args.numerical_current_seed == 12345
+
+
+def test_cli_generate_process_can_disable_numerical_current_passes(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(
+        [
+            "generate-process",
+            "--no-numerical-filter-current",
+            "--no-numerical-current-merging",
+            "--numerical-current-samples",
+            "3",
+            "d d~ > z g",
+            str(output_dir),
+        ]
+    )
+
+    assert args.numerical_filter_current is False
+    assert args.numerical_current_merging is False
+    assert args.numerical_current_samples == 3
 
 
 def test_cli_generate_process_runtime_o3_resolves_to_plain_cpp_o3(
@@ -1293,6 +1318,16 @@ def test_generate_process_child_command_forwards_process_options(tmp_path: Path)
             "16,20",
             "--no-color-order-mask-pruning",
             "--no-species-reachability-pruning",
+            "--no-numerical-filter-current",
+            "--no-numerical-current-merging",
+            "--numerical-current-samples",
+            "6",
+            "--numerical-current-seed",
+            "321",
+            "--numerical-current-relative-tolerance",
+            "1e-13",
+            "--numerical-current-zero-tolerance",
+            "1e-250",
             "--lc-sector-strategy",
             "topology-representatives",
             "--lc-sector-ids",
@@ -1325,6 +1360,12 @@ def test_generate_process_child_command_forwards_process_options(tmp_path: Path)
     assert command[command.index("--ignore-vertex-kinds") + 1] == "16,20"
     assert "--no-color-order-mask-pruning" in command
     assert "--no-species-reachability-pruning" in command
+    assert "--no-numerical-filter-current" in command
+    assert "--no-numerical-current-merging" in command
+    assert command[command.index("--numerical-current-samples") + 1] == "6"
+    assert command[command.index("--numerical-current-seed") + 1] == "321"
+    assert command[command.index("--numerical-current-relative-tolerance") + 1] == "1e-13"
+    assert command[command.index("--numerical-current-zero-tolerance") + 1] == "1e-250"
     assert (
         command[command.index("--lc-sector-strategy") + 1]
         == "topology-representatives"

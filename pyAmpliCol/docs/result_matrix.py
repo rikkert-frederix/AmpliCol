@@ -1941,6 +1941,20 @@ def _pyamplicol_matrix_settings(
         "max_color_sectors": base.max_color_sectors,
         "max_quark_pairs": base.max_quark_pairs,
         "lc_sector_strategy": base.lc_sector_strategy,
+        "zero_current_filter": {
+            "enabled": True,
+            "sample_count": 10,
+            "seed": 12345,
+            "relative_tolerance": 1.0e-12,
+            "zero_tolerance": 1.0e-300,
+        },
+        "current_merging": {
+            "enabled": True,
+            "sample_count": 10,
+            "seed": 12345,
+            "relative_tolerance": 1.0e-12,
+            "zero_tolerance": 1.0e-300,
+        },
     }
     if backend_key == "jit":
         settings.update(
