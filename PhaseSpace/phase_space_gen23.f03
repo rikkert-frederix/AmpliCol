@@ -23,6 +23,8 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
+  ! If true, the cut-aware bounds are used as the actual integration limits.
+  logical,parameter :: use_soft_bounds_as_actual_limits=.false.
 
 contains
   subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
@@ -261,6 +263,7 @@ contains
        endif
     enddo
     call setup_ETmin(this)
+    call apply_bound_mode(this)
   end subroutine setup_PS_cuts
 
   subroutine setup_ETmin(this)
@@ -277,9 +280,32 @@ contains
           if (btest(i,j)) this%ETmin(i,1)=this%ETmin(i,1)+sqrt(this%invm(ibset(0,j)))
           if (btest(i,j)) this%ETmin(i,2)=this%ETmin(i,2)+sqrt(this%invm(ibset(0,j))+this%ptcut(j+1)**2)
        enddo
-       this%ETmin(i,1:2)=max(this%ETmin(i,1:2),sqrt(this%invm_min(i,1:2)))
+      this%ETmin(i,1:2)=max(this%ETmin(i,1:2),sqrt(this%invm_min(i,1:2)))
     enddo
   end subroutine setup_ETmin
+
+  subroutine apply_bound_mode(this)
+    implicit none
+    class(phase_space_gen23),intent(inout) :: this
+    if (.not.use_soft_bounds_as_actual_limits) return
+    this%invm_min(:,1)=this%invm_min(:,2)
+    this%invm_max(:,1)=this%invm_max(:,2)
+    this%ETmin(:,1)=this%ETmin(:,2)
+  end subroutine apply_bound_mode
+
+  subroutine select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff)
+    implicit none
+    real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
+    real(kind=8),dimension(1:2),intent(out) :: var_min_eff,var_max_eff
+    var_min_eff=var_min
+    var_max_eff=var_max
+    if (.not.use_soft_bounds_as_actual_limits) return
+    var_min_eff(1)=var_min(2)
+    var_max_eff(1)=var_max(2)
+    if (var_min_eff(1).gt.var_max_eff(1)) var_min_eff(1)=var_max_eff(1)
+    var_min_eff(2)=var_min_eff(1)
+    var_max_eff(2)=var_max_eff(1)
+  end subroutine select_integration_bounds
 
 
   
@@ -1282,8 +1308,7 @@ contains
       real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
       real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
       real(kind=8),parameter :: epsilon=1d-8
-      var_min_loc=var_min
-      var_max_loc=var_max
+      call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc)
       if (var_min_loc(1).gt.var_max_loc(1)) then
          write (*,*) 'Incorrect hard range in random_to_var_inputs'
          write (*,*) var_min, var_max
@@ -2052,16 +2077,22 @@ contains
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: i,k
       real(kind=8),dimension(3) :: vmin,vmax,power,q
+      real(kind=8),dimension(1:2) :: var_min_eff,var_max_eff
       real(kind=8) :: var,xloc
       logical :: found
-      if (variable.lt.var_min(1) .or. variable.gt.var_max(1)) then
-         write (99,*) 'Warning: variable not between varmin and varmax',var_min(1),variable,var_max(1)
+      call select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff)
+      if (var_min_eff(1).gt.var_max_eff(1)) then
          jac=-1d0
          return
       endif
-      call random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+      if (variable.lt.var_min_eff(1) .or. variable.gt.var_max_eff(1)) then
+         write (99,*) 'Warning: variable not between varmin and varmax',var_min_eff(1),variable,var_max_eff(1)
+         jac=-1d0
+         return
+      endif
+      call random_to_var_inputs(power_in,var_min_eff,var_max_eff,power,vmin,vmax)
       call random_to_var_weights(power,vmin,vmax,q)
-      if (var_min(1).lt.0d0 .and. var_max(1).le.0d0) then
+      if (var_min_eff(1).lt.0d0 .and. var_max_eff(1).le.0d0) then
          var=-variable
       else
          var=variable
@@ -2077,7 +2108,7 @@ contains
          endif
       enddo
       if (.not.found) then
-         write (99,*) 'Warning: variable not in any active random-to-var range',variable,var_min,var_max
+         write (99,*) 'Warning: variable not in any active random-to-var range',variable,var_min_eff,var_max_eff
          jac=-1d0
          return
       endif
@@ -2128,8 +2159,7 @@ contains
       real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
       real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
       real(kind=8),parameter :: epsilon=1d-8
-      var_min_loc=var_min
-      var_max_loc=var_max
+      call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc)
       if (var_min_loc(1).gt.var_max_loc(1)) then
          write (*,*) 'Incorrect hard range in random_to_var_inputs'
          write (*,*) var_min, var_max
