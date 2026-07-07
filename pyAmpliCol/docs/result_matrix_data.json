@@ -534,7 +534,92 @@
           "wall_us_per_point": 0.3960667054690223
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:37:26.136871+00:00"
+        "updated_at": "2026-07-07T22:53:22.940441+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 5.169878828456423e-25,
+            "pyamplicol_jit": 8.271806125530277e-25
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "make",
+                "cleanlib"
+              ],
+              "elapsed_s": 0.17796775000169873,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate"
+              ],
+              "elapsed_s": 1.6646081249928102,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--library=create",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--amplicol_momenta_probe=10",
+                "--amplicol_probe_quiet"
+              ],
+              "elapsed_s": 0.0651567499153316,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate_library"
+              ],
+              "elapsed_s": 0.5243541669333354,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.022796708974055946,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:22.940409+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 8.271806125530277e-25,
+          "max_relative_difference": 1.305528603718773e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,-2,2,-3,3",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_3q_lines/n4/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": true,
+          "reference": 6.33598230017189e-10,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 8.159553773242335e-16,
+            "pyamplicol_jit": 1.305528603718773e-15
+          },
+          "started_at": "2026-07-07T22:53:20.480861+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 6.335982300171895e-10,
+            "pyamplicol_jit": 6.335982300171898e-10
+          }
+        }
       },
       "5": {
         "amplicol": {
@@ -818,7 +903,7 @@
           "wall_us_per_point": 1.4735683952254772
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:25:06.104733+00:00",
+        "updated_at": "2026-07-07T22:53:48.696840+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 7.888609052210118e-30,
@@ -1930,16 +2015,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.15140908304601908,
+              "elapsed_s": 0.1624225419946015,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.6336711250478402,
+              "elapsed_s": 1.6665904578985646,
               "returncode": 0
             },
             {
@@ -1950,57 +2035,64 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.17681016598362476,
+              "elapsed_s": 0.15283279097639024,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 1.8221201250562444,
+              "elapsed_s": 2.9424019169528037,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.1442151670344174,
+              "elapsed_s": 0.14979054196737707,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.02251579100266099,
+              "elapsed_s": 0.03385704196989536,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.15140908304601908,
-            1.6336711250478402,
-            0.17681016598362476,
-            1.8221201250562444,
-            0.1442151670344174,
-            0.02251579100266099
+            0.1624225419946015,
+            1.6665904578985646,
+            0.15283279097639024,
+            2.9424019169528037,
+            0.14979054196737707,
+            0.03385704196989536
           ],
-          "finished_at": "2026-07-07T00:05:25.095532+00:00",
-          "generation_s": 3.7840104991337284,
+          "finished_at": "2026-07-07T22:53:20.465261+00:00",
+          "generation_s": 4.92424770782236,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             1,
             3,
-            4,
             5,
+            4,
             6
           ],
           "reference_color_order_process_file": [
@@ -2012,24 +2104,24 @@
             6
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 1.4316666666666669,
-          "started_at": "2026-07-07T00:05:21.057233+00:00",
+          "runtime_us_per_point": 1.4459,
+          "started_at": "2026-07-07T22:53:15.349586+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.004295
+              "seconds": 0.014459
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 2.8e-05
+              "seconds": 0.000156
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.004323
+              "seconds": 0.014615
             }
           ]
         },
@@ -2121,7 +2213,7 @@
           "wall_us_per_point": 2.3186117288905894
         },
         "status": "done",
-        "updated_at": "2026-07-07T00:05:29.771450+00:00",
+        "updated_at": "2026-07-07T22:53:20.465416+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 3.944304526105059e-31,
@@ -2164,16 +2256,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.15333587501663715,
+              "elapsed_s": 0.1698774159885943,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.60640562500339,
+              "elapsed_s": 1.6563138329656795,
               "returncode": 0
             },
             {
@@ -2184,58 +2276,65 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.33664416696410626,
+              "elapsed_s": 0.30817504203878343,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 2.2734255410032347,
+              "elapsed_s": 3.4479951249668375,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.14477891603019089,
+              "elapsed_s": 0.15147008397616446,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.027722583967261016,
+              "elapsed_s": 0.04927199997473508,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.15333587501663715,
-            1.60640562500339,
-            0.33664416696410626,
-            2.2734255410032347,
-            0.14477891603019089,
-            0.027722583967261016
+            0.1698774159885943,
+            1.6563138329656795,
+            0.30817504203878343,
+            3.4479951249668375,
+            0.15147008397616446,
+            0.04927199997473508
           ],
-          "finished_at": "2026-07-07T00:07:45.320124+00:00",
-          "generation_s": 4.369811207987368,
+          "finished_at": "2026-07-07T22:53:48.653462+00:00",
+          "generation_s": 5.582361415959895,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             7,
             1,
             3,
-            4,
             5,
+            4,
             6
           ],
           "reference_color_order_process_file": [
@@ -2248,24 +2347,24 @@
             7
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 2.8236666666666665,
-          "started_at": "2026-07-07T00:07:40.685119+00:00",
+          "runtime_us_per_point": 2.8445,
+          "started_at": "2026-07-07T22:53:42.862203+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.008471
+              "seconds": 0.028445
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 5.3e-05
+              "seconds": 0.000176
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.008524
+              "seconds": 0.028621
             }
           ]
         },
@@ -2390,7 +2489,55 @@
           "wall_us_per_point": 3.8987433558444047
         },
         "status": "done",
-        "updated_at": "2026-07-07T17:26:17.499391+00:00"
+        "updated_at": "2026-07-07T22:53:48.683130+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 7.703719777548943e-34,
+            "pyamplicol_jit": 2.6963019221421302e-33
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.026877624914050102,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:48.683100+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 2.6963019221421302e-33,
+          "max_relative_difference": 1.135096518664418e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,21,-11,-11,11,11",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_4l_jets/n5/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 2.375394407265614e-18,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 3.243132910469768e-16,
+            "pyamplicol_jit": 1.135096518664418e-15
+          },
+          "started_at": "2026-07-07T22:53:48.653609+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 2.3753944072656147e-18,
+            "pyamplicol_jit": 2.3753944072656166e-18
+          }
+        }
       },
       "6": {
         "amplicol": {
@@ -6053,16 +6200,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.16441687510814518,
+              "elapsed_s": 0.16411870799493045,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.6434942909982055,
+              "elapsed_s": 1.6373392919776961,
               "returncode": 0
             },
             {
@@ -6073,57 +6220,64 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.11937058402691036,
+              "elapsed_s": 0.12039520801045,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 1.7924880409846082,
+              "elapsed_s": 2.588463625055738,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.17627637507393956,
+              "elapsed_s": 0.15169025002978742,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.021133249974809587,
+              "elapsed_s": 0.026099042035639286,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.16441687510814518,
-            1.6434942909982055,
-            0.11937058402691036,
-            1.7924880409846082,
-            0.17627637507393956,
-            0.021133249974809587
+            0.16411870799493045,
+            1.6373392919776961,
+            0.12039520801045,
+            2.588463625055738,
+            0.15169025002978742,
+            0.026099042035639286
           ],
-          "finished_at": "2026-07-07T00:05:07.988399+00:00",
-          "generation_s": 3.7197697911178693,
+          "finished_at": "2026-07-07T22:53:11.569831+00:00",
+          "generation_s": 4.510316833038814,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             1,
+            5,
             3,
             4,
-            5,
             6
           ],
           "reference_color_order_process_file": [
@@ -6135,24 +6289,24 @@
             6
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 0.7763333333333333,
-          "started_at": "2026-07-07T00:05:03.985267+00:00",
+          "runtime_us_per_point": 0.7604,
+          "started_at": "2026-07-07T22:53:06.872912+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.002329
+              "seconds": 0.007604
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 2.7e-05
+              "seconds": 9.6e-05
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.002356
+              "seconds": 0.0077
             }
           ]
         },
@@ -6244,7 +6398,7 @@
           "wall_us_per_point": 2.4592236685456776
         },
         "status": "done",
-        "updated_at": "2026-07-07T00:05:12.382514+00:00",
+        "updated_at": "2026-07-07T22:53:11.569964+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 7.099748146989106e-30,
@@ -6287,16 +6441,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.1511936669703573,
+              "elapsed_s": 0.16689791693352163,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.665573582984507,
+              "elapsed_s": 1.629023874993436,
               "returncode": 0
             },
             {
@@ -6307,58 +6461,65 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.2564174580620602,
+              "elapsed_s": 0.2489879159256816,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 2.412177333026193,
+              "elapsed_s": 3.4367396669695154,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.1463040419621393,
+              "elapsed_s": 0.1507602499332279,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.023989374982193112,
+              "elapsed_s": 0.03652137494646013,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.1511936669703573,
-            1.665573582984507,
-            0.2564174580620602,
-            2.412177333026193,
-            0.1463040419621393,
-            0.023989374982193112
+            0.16689791693352163,
+            1.629023874993436,
+            0.2489879159256816,
+            3.4367396669695154,
+            0.1507602499332279,
+            0.03652137494646013
           ],
-          "finished_at": "2026-07-07T00:07:34.528062+00:00",
-          "generation_s": 4.485362041043118,
+          "finished_at": "2026-07-07T22:53:36.525468+00:00",
+          "generation_s": 5.481649374822155,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             7,
             1,
+            5,
             3,
             4,
-            5,
             6
           ],
           "reference_color_order_process_file": [
@@ -6371,24 +6532,24 @@
             7
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 1.6193333333333335,
-          "started_at": "2026-07-07T00:07:29.777075+00:00",
+          "runtime_us_per_point": 1.6188999999999998,
+          "started_at": "2026-07-07T22:53:30.848574+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.004858
+              "seconds": 0.016189
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 5.4e-05
+              "seconds": 0.000177
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.004912
+              "seconds": 0.016366
             }
           ]
         },
@@ -6513,7 +6674,55 @@
           "wall_us_per_point": 4.041686702997318
         },
         "status": "done",
-        "updated_at": "2026-07-07T17:25:50.060445+00:00"
+        "updated_at": "2026-07-07T22:53:36.554150+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 7.703719777548943e-33,
+            "pyamplicol_jit": 1.0785207688568521e-32
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.025801667012274265,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:36.554124+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 1.0785207688568521e-32,
+          "max_relative_difference": 1.4516009964975063e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,21,23,-11,11,25",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_epemzh_jets/n5/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 7.429870683880475e-18,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 1.0368578546410762e-15,
+            "pyamplicol_jit": 1.4516009964975063e-15
+          },
+          "started_at": "2026-07-07T22:53:36.525616+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 7.429870683880482e-18,
+            "pyamplicol_jit": 7.429870683880485e-18
+          }
+        }
       },
       "6": {
         "amplicol": {
@@ -8139,7 +8348,92 @@
           "wall_us_per_point": 2.6037340040259664
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:36:44.214725+00:00"
+        "updated_at": "2026-07-07T22:53:00.706811+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 9.098986738083304e-24,
+            "pyamplicol_jit": 5.790264287871194e-24
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "make",
+                "cleanlib"
+              ],
+              "elapsed_s": 0.16140537499450147,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate"
+              ],
+              "elapsed_s": 1.600913165952079,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--library=create",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--amplicol_momenta_probe=10",
+                "--amplicol_probe_quiet"
+              ],
+              "elapsed_s": 0.037956499960273504,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate_library"
+              ],
+              "elapsed_s": 0.7231352919479832,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.022855916991829872,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:00.706772+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 9.098986738083304e-24,
+          "max_relative_difference": 1.6344235196263838e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,6,-6,21,21",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_tt_jets/n4/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": true,
+          "reference": 5.56709238995977e-09,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 1.6344235196263838e-15,
+            "pyamplicol_jit": 1.0400876943076988e-15
+          },
+          "started_at": "2026-07-07T22:52:58.157492+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 5.567092389959761e-09,
+            "pyamplicol_jit": 5.5670923899597644e-09
+          }
+        }
       },
       "5": {
         "amplicol": {
@@ -8423,7 +8717,7 @@
           "wall_us_per_point": 9.008725580906475
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:28:25.964112+00:00",
+        "updated_at": "2026-07-07T22:53:25.423639+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 1.262177448353619e-29,
@@ -9321,16 +9615,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.15172195807099342,
+              "elapsed_s": 0.1650279168970883,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.5869801249355078,
+              "elapsed_s": 1.827348874998279,
               "returncode": 0
             },
             {
@@ -9341,51 +9635,58 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.06187920900993049,
+              "elapsed_s": 0.06583604193292558,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 1.1044470419874415,
+              "elapsed_s": 1.4844235830241814,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.14342833391856402,
+              "elapsed_s": 0.15236012497916818,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.02090133400633931,
+              "elapsed_s": 0.028253583004698157,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.15172195807099342,
-            1.5869801249355078,
-            0.06187920900993049,
-            1.1044470419874415,
-            0.14342833391856402,
-            0.02090133400633931
+            0.1650279168970883,
+            1.827348874998279,
+            0.06583604193292558,
+            1.4844235830241814,
+            0.15236012497916818,
+            0.028253583004698157
           ],
-          "finished_at": "2026-07-07T00:05:15.545579+00:00",
-          "generation_s": 2.905028334003873,
+          "finished_at": "2026-07-07T22:53:15.311178+00:00",
+          "generation_s": 3.542636416852474,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             3,
             1,
@@ -9403,24 +9704,24 @@
             6
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 1.0773333333333335,
-          "started_at": "2026-07-07T00:05:12.386806+00:00",
+          "runtime_us_per_point": 1.0564,
+          "started_at": "2026-07-07T22:53:11.583633+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.003232
+              "seconds": 0.010564
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 0.000136
+              "seconds": 0.000437
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.003368
+              "seconds": 0.011001
             }
           ]
         },
@@ -9577,7 +9878,55 @@
           "wall_us_per_point": 2.6081090918803125
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:37:23.118885+00:00"
+        "updated_at": "2026-07-07T22:53:15.336204+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 1.137373342260413e-24,
+            "pyamplicol_jit": 9.305781891221561e-25
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.023143791942857206,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:15.336182+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 1.137373342260413e-24,
+          "max_relative_difference": 1.510737943933367e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,6,-6,23,25",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n4/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 7.528594531088168e-10,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 1.510737943933367e-15,
+            "pyamplicol_jit": 1.2360583177636639e-15
+          },
+          "started_at": "2026-07-07T22:53:15.311341+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 7.528594531088157e-10,
+            "pyamplicol_jit": 7.528594531088159e-10
+          }
+        }
       },
       "5": {
         "amplicol": {
@@ -9587,16 +9936,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.17310333298519254,
+              "elapsed_s": 0.2947727079736069,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.6195890830131248,
+              "elapsed_s": 1.8976009999169037,
               "returncode": 0
             },
             {
@@ -9607,88 +9956,95 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.23420125001575798,
+              "elapsed_s": 0.26484816591255367,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 2.550658540916629,
+              "elapsed_s": 4.220710084075108,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.15892641700338572,
+              "elapsed_s": 0.16044958296697587,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.02792783302720636,
+              "elapsed_s": 0.054315000073984265,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.17310333298519254,
-            1.6195890830131248,
-            0.23420125001575798,
-            2.550658540916629,
-            0.15892641700338572,
-            0.02792783302720636
+            0.2947727079736069,
+            1.8976009999169037,
+            0.26484816591255367,
+            4.220710084075108,
+            0.16044958296697587,
+            0.054315000073984265
           ],
-          "finished_at": "2026-07-07T00:07:39.956411+00:00",
-          "generation_s": 4.577552206930704,
+          "finished_at": "2026-07-07T22:55:45.421882+00:00",
+          "generation_s": 6.677931957878172,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             3,
+            7,
             1,
             2,
-            7,
             4,
             5,
             6
           ],
           "reference_color_order_process_file": [
-            4,
-            1,
-            2,
             3,
             5,
+            1,
+            2,
+            4,
             6,
             7
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 3.2226666666666666,
-          "started_at": "2026-07-07T00:07:35.106130+00:00",
+          "runtime_us_per_point": 3.4735000000000005,
+          "started_at": "2026-07-07T22:55:38.496887+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.009668
+              "seconds": 0.034735
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 0.000116
+              "seconds": 0.000356
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.009784
+              "seconds": 0.035091
             }
           ]
         },
@@ -9696,11 +10052,11 @@
         "n_final": 5,
         "process": "d d~ > t t~ z h g",
         "pyamplicol_cpp_o3": {
-          "finished_at": "2026-07-07T17:26:08.253003+00:00",
+          "finished_at": "2026-07-07T22:56:09.904568+00:00",
           "generate_payload": {
             "artifact_class": "generic-dag-schema-v2",
             "available": true,
-            "generation_s": 16.86308329203166,
+            "generation_s": 21.399242665967904,
             "key": "d_dbar_to_t_tbar_z_h_g",
             "kind": "pyamplicol-generic-dag-process",
             "manifest": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/cpp_o3/process_manifest.json",
@@ -9709,7 +10065,8 @@
             "runtime_backend": "rusticol",
             "runtime_unavailable_message": null
           },
-          "generation_s": 16.86308329203166,
+          "generation_s": 21.534037333913147,
+          "internal_generation_s": 21.399242665967904,
           "matrix_settings": {
             "lc_sector_strategy": null,
             "max_color_sectors": null,
@@ -9719,9 +10076,9 @@
             "precision": 16,
             "reference_color_order": [
               3,
+              7,
               1,
               2,
-              7,
               4,
               5,
               6
@@ -9740,19 +10097,19 @@
           "output_dir": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/cpp_o3",
           "reference_color_order": [
             3,
+            7,
             1,
             2,
-            7,
             4,
             5,
             6
           ],
-          "runtime_us_per_point": 5.3117777100571315,
-          "samples": 162432,
+          "runtime_us_per_point": 5.668131448100336,
+          "samples": 152448,
           "selected_lc_sector_ids": [
             0
           ],
-          "started_at": "2026-07-07T17:25:50.071238+00:00",
+          "started_at": "2026-07-07T22:55:47.147708+00:00",
           "status": "ok",
           "time_payload": {
             "artifact_class": "generic-dag-schema-v2",
@@ -9760,26 +10117,26 @@
             "process": "d d~ > t t~ z h g",
             "process_dir": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/cpp_o3",
             "profile": {
-              "core_evaluator_us_per_point": 5.3117777100571315,
-              "core_evaluator_us_per_point_error": 0.005238321167155303,
-              "samples": 162432,
-              "wall_us_per_point": 6.1609710509443625,
-              "wall_us_per_point_error": 0.006547122210880098
+              "core_evaluator_us_per_point": 5.668131448100336,
+              "core_evaluator_us_per_point_error": 0.022694981935740998,
+              "samples": 152448,
+              "wall_us_per_point": 6.563969363740842,
+              "wall_us_per_point_error": 0.02603895531527605
             },
             "schema_version": 2,
             "target_runtime_s": 1.0,
             "values": [
-              1.7979190024674927e-13
+              2.2238537511471577e-14
             ]
           },
-          "wall_us_per_point": 6.1609710509443625
+          "wall_us_per_point": 6.563969363740842
         },
         "pyamplicol_jit": {
-          "finished_at": "2026-07-07T12:51:59.479235+00:00",
+          "finished_at": "2026-07-07T22:55:47.147616+00:00",
           "generate_payload": {
             "artifact_class": "generic-dag-schema-v2",
             "available": true,
-            "generation_s": 0.3402147919405252,
+            "generation_s": 0.3743300000205636,
             "key": "d_dbar_to_t_tbar_z_h_g",
             "kind": "pyamplicol-generic-dag-process",
             "manifest": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/jit/process_manifest.json",
@@ -9788,15 +10145,20 @@
             "runtime_backend": "rusticol",
             "runtime_unavailable_message": null
           },
-          "generation_s": 0.3402147919405252,
+          "generation_s": 0.5571186250308529,
+          "internal_generation_s": 0.3743300000205636,
           "matrix_settings": {
+            "lc_sector_strategy": null,
+            "max_color_sectors": null,
+            "max_currents": null,
+            "max_quark_pairs": null,
             "n_cores": 4,
             "precision": 16,
             "reference_color_order": [
               3,
+              7,
               1,
               2,
-              7,
               4,
               5,
               6
@@ -9813,19 +10175,19 @@
           "output_dir": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/jit",
           "reference_color_order": [
             3,
+            7,
             1,
             2,
-            7,
             4,
             5,
             6
           ],
-          "runtime_us_per_point": 23.21952778846154,
-          "samples": 41600,
+          "runtime_us_per_point": 22.544230316253753,
+          "samples": 42624,
           "selected_lc_sector_ids": [
             0
           ],
-          "started_at": "2026-07-07T12:51:57.865645+00:00",
+          "started_at": "2026-07-07T22:55:45.422104+00:00",
           "status": "ok",
           "time_payload": {
             "artifact_class": "generic-dag-schema-v2",
@@ -9833,22 +10195,70 @@
             "process": "d d~ > t t~ z h g",
             "process_dir": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/jit",
             "profile": {
-              "core_evaluator_us_per_point": 23.21952778846154,
-              "core_evaluator_us_per_point_error": 0.02100684846926301,
-              "samples": 41600,
-              "wall_us_per_point": 24.05464509278178,
-              "wall_us_per_point_error": 0.022887186739472914
+              "core_evaluator_us_per_point": 22.544230316253753,
+              "core_evaluator_us_per_point_error": 0.04939152586804902,
+              "samples": 42624,
+              "wall_us_per_point": 23.4877141736832,
+              "wall_us_per_point_error": 0.05377226803286699
             },
             "schema_version": 2,
             "target_runtime_s": 1.0,
             "values": [
-              1.7979190024674927e-13
+              2.2238537511471568e-14
             ]
           },
-          "wall_us_per_point": 24.05464509278178
+          "wall_us_per_point": 23.4877141736832
         },
         "status": "done",
-        "updated_at": "2026-07-07T17:26:08.253037+00:00"
+        "updated_at": "2026-07-07T22:56:09.970989+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 2.524354896707238e-29,
+            "pyamplicol_jit": 1.5777218104420236e-29
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.06296983396168798,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:56:09.970940+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 2.524354896707238e-29,
+          "max_relative_difference": 1.1351263073864766e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,6,-6,21,23,25",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n5/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 2.2238537511471552e-14,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 1.1351263073864766e-15,
+            "pyamplicol_jit": 7.094539421165482e-16
+          },
+          "started_at": "2026-07-07T22:56:09.904664+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 2.2238537511471577e-14,
+            "pyamplicol_jit": 2.2238537511471568e-14
+          }
+        }
       },
       "6": {
         "amplicol": {
@@ -15087,16 +15497,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.1677654579980299,
+              "elapsed_s": 0.1604054169729352,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.6557248750468716,
+              "elapsed_s": 1.6876639160327613,
               "returncode": 0
             },
             {
@@ -15107,51 +15517,58 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.11192125000525266,
+              "elapsed_s": 0.12942245800513774,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 0.8471447080373764,
+              "elapsed_s": 1.3092571250163019,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.137363791000098,
+              "elapsed_s": 0.14254274999257177,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.063938417006284,
+              "elapsed_s": 0.0671746670268476,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.1677654579980299,
-            1.6557248750468716,
-            0.11192125000525266,
-            0.8471447080373764,
-            0.137363791000098,
-            0.063938417006284
+            0.1604054169729352,
+            1.6876639160327613,
+            0.12942245800513774,
+            1.3092571250163019,
+            0.14254274999257177,
+            0.0671746670268476
           ],
-          "finished_at": "2026-07-07T00:04:47.685221+00:00",
-          "generation_s": 2.7825562910875306,
+          "finished_at": "2026-07-07T22:53:06.835403+00:00",
+          "generation_s": 3.286748916027136,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             6,
@@ -15169,24 +15586,24 @@
             6
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 6.867666666666667,
-          "started_at": "2026-07-07T00:04:44.622223+00:00",
+          "runtime_us_per_point": 4.8324,
+          "started_at": "2026-07-07T22:53:03.335673+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.020603
+              "seconds": 0.048324
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 0.000841
+              "seconds": 0.000828
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.021444
+              "seconds": 0.049152
             }
           ]
         },
@@ -15310,7 +15727,55 @@
           "wall_us_per_point": 20.898883169712988
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:37:16.970811+00:00"
+        "updated_at": "2026-07-07T22:53:06.859501+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 6.462348535570529e-26,
+            "pyamplicol_jit": 5.169878828456423e-26
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.02263370796572417,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:06.859471+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 6.462348535570529e-26,
+          "max_relative_difference": 8.149491216983742e-16,
+          "point_order_source": "process-file-pdg-order:1,-1,21,23,23,23",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zzz_jets/n4/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 7.929757040663882e-11,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 8.149491216983742e-16,
+            "pyamplicol_jit": 6.519592973586993e-16
+          },
+          "started_at": "2026-07-07T22:53:06.835550+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 7.929757040663875e-11,
+            "pyamplicol_jit": 7.929757040663876e-11
+          }
+        }
       },
       "5": {
         "amplicol": {
@@ -15320,16 +15785,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.15315754199400544,
+              "elapsed_s": 0.15765412501059473,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.5503576669143513,
+              "elapsed_s": 1.6541454169200733,
               "returncode": 0
             },
             {
@@ -15340,51 +15805,58 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.28209287498611957,
+              "elapsed_s": 0.30829579196870327,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 1.7205324169481173,
+              "elapsed_s": 2.941638167016208,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.14873895910568535,
+              "elapsed_s": 0.13956087501719594,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.0580020829802379,
+              "elapsed_s": 0.15104300004895777,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.15315754199400544,
-            1.5503576669143513,
-            0.28209287498611957,
-            1.7205324169481173,
-            0.14873895910568535,
-            0.0580020829802379
+            0.15765412501059473,
+            1.6541454169200733,
+            0.30829579196870327,
+            2.941638167016208,
+            0.13956087501719594,
+            0.15104300004895777
           ],
-          "finished_at": "2026-07-07T00:07:28.056463+00:00",
-          "generation_s": 3.7061405008425936,
+          "finished_at": "2026-07-07T22:53:30.808239+00:00",
+          "generation_s": 5.0617335009155795,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             6,
@@ -15404,24 +15876,24 @@
             7
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 13.169,
-          "started_at": "2026-07-07T00:07:23.984454+00:00",
+          "runtime_us_per_point": 13.206599999999998,
+          "started_at": "2026-07-07T22:53:25.452559+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.039507
+              "seconds": 0.132066
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 0.000477
+              "seconds": 0.001684
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.039984
+              "seconds": 0.13375
             }
           ]
         },
@@ -15552,7 +16024,55 @@
           "wall_us_per_point": 69.41137587546109
         },
         "status": "done",
-        "updated_at": "2026-07-07T17:25:40.740667+00:00"
+        "updated_at": "2026-07-07T22:53:30.836025+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 2.0510383535746307e-29,
+            "pyamplicol_jit": 2.524354896707238e-29
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.025839500012807548,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:30.835999+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 2.524354896707238e-29,
+          "max_relative_difference": 2.150639792350607e-15,
+          "point_order_source": "process-file-pdg-order:1,-1,21,21,23,23,23",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zzz_jets/n5/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 1.1737692688872681e-14,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 1.747394831284868e-15,
+            "pyamplicol_jit": 2.150639792350607e-15
+          },
+          "started_at": "2026-07-07T22:53:30.808424+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 1.173769268887266e-14,
+            "pyamplicol_jit": 1.1737692688872656e-14
+          }
+        }
       },
       "6": {
         "amplicol": {
@@ -17125,7 +17645,92 @@
           "wall_us_per_point": 8.419083583483935
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:36:59.869360+00:00"
+        "updated_at": "2026-07-07T22:53:03.323219+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 4.1359030627651384e-25,
+            "pyamplicol_jit": 2.0679515313825692e-25
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "make",
+                "cleanlib"
+              ],
+              "elapsed_s": 0.16189966700039804,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate"
+              ],
+              "elapsed_s": 1.644434041925706,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--library=create",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--amplicol_momenta_probe=10",
+                "--amplicol_probe_quiet"
+              ],
+              "elapsed_s": 0.04728554200846702,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate_library"
+              ],
+              "elapsed_s": 0.7240147499833256,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.022970666992478073,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:03.323190+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 4.1359030627651384e-25,
+          "max_relative_difference": 3.08737255023936e-16,
+          "point_order_source": "process-file-pdg-order:21,21,21,21,21,21",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/gg_gluons/n4/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": true,
+          "reference": 1.3396190435276385e-09,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 3.08737255023936e-16,
+            "pyamplicol_jit": 1.5436862751196804e-16
+          },
+          "started_at": "2026-07-07T22:53:00.718927+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 1.339619043527639e-09,
+            "pyamplicol_jit": 1.3396190435276383e-09
+          }
+        }
       },
       "5": {
         "amplicol": {
@@ -17408,7 +18013,7 @@
           "wall_us_per_point": 33.94038859680214
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:25:01.002168+00:00",
+        "updated_at": "2026-07-07T22:53:25.438459+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 6.740027574208325e-27,
@@ -19111,7 +19716,92 @@
           "wall_us_per_point": 6.376827240293284
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:36:44.202509+00:00"
+        "updated_at": "2026-07-07T22:52:58.145475+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 3.143286327701505e-23,
+            "pyamplicol_jit": 2.481541837659083e-23
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "make",
+                "cleanlib"
+              ],
+              "elapsed_s": 0.17155762505717576,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate"
+              ],
+              "elapsed_s": 1.6171932499855757,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--library=create",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--amplicol_momenta_probe=10",
+                "--amplicol_probe_quiet"
+              ],
+              "elapsed_s": 0.12652812502346933,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "make",
+                "-j4",
+                "amplicol_generate_library"
+              ],
+              "elapsed_s": 1.7225155420601368,
+              "returncode": 0
+            },
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.023701375001110137,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:52:58.145445+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 3.143286327701505e-23,
+          "max_relative_difference": 3.137892723326676e-15,
+          "point_order_source": "process-file-pdg-order:21,21,6,-6,21,21",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/gg_tt_jets/n4/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": true,
+          "reference": 1.0017188619402868e-08,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 3.137892723326676e-15,
+            "pyamplicol_jit": 2.4772837289421127e-15
+          },
+          "started_at": "2026-07-07T22:52:54.479128+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 1.0017188619402837e-08,
+            "pyamplicol_jit": 1.0017188619402843e-08
+          }
+        }
       },
       "5": {
         "amplicol": {
@@ -19395,7 +20085,7 @@
           "wall_us_per_point": 18.918608856334867
         },
         "status": "done",
-        "updated_at": "2026-07-07T21:28:04.725563+00:00",
+        "updated_at": "2026-07-07T22:53:25.410534+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 5.048709793414476e-29,
@@ -20834,16 +21524,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.14720029197633266,
+              "elapsed_s": 0.4291354169836268,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.590673541999422,
+              "elapsed_s": 1.720260416972451,
               "returncode": 0
             },
             {
@@ -20854,51 +21544,58 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.02472854091320187,
+              "elapsed_s": 0.03996379196178168,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 0.3408875830937177,
+              "elapsed_s": 0.3505740000400692,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.13656808307860047,
+              "elapsed_s": 0.13799541699700058,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.01676704199053347,
+              "elapsed_s": 0.017428832943551242,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.14720029197633266,
-            1.590673541999422,
-            0.02472854091320187,
-            0.3408875830937177,
-            0.13656808307860047,
-            0.01676704199053347
+            0.4291354169836268,
+            1.720260416972451,
+            0.03996379196178168,
+            0.3505740000400692,
+            0.13799541699700058,
+            0.017428832943551242
           ],
-          "finished_at": "2026-07-07T00:03:44.767345+00:00",
-          "generation_s": 2.1034899579826742,
+          "finished_at": "2026-07-07T22:52:54.467055+00:00",
+          "generation_s": 2.5399336259579286,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             5,
@@ -20916,24 +21613,24 @@
             6
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 0.159,
-          "started_at": "2026-07-07T00:03:42.369913+00:00",
+          "runtime_us_per_point": 0.14700000000000002,
+          "started_at": "2026-07-07T22:52:51.743990+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.000477
+              "seconds": 0.00147
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 1.6e-05
+              "seconds": 4.5e-05
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.000493
+              "seconds": 0.001515
             }
           ]
         },
@@ -21029,7 +21726,7 @@
           "wall_us_per_point": 0.5747362017834402
         },
         "status": "done",
-        "updated_at": "2026-07-07T00:03:47.183296+00:00",
+        "updated_at": "2026-07-07T22:52:54.467244+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_cpp_o3": 5.0487097934144756e-27,
@@ -21072,16 +21769,16 @@
                 "make",
                 "cleanlib"
               ],
-              "elapsed_s": 0.27596037508919835,
+              "elapsed_s": 0.16176183405332267,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate"
               ],
-              "elapsed_s": 1.652249666978605,
+              "elapsed_s": 1.6166889580199495,
               "returncode": 0
             },
             {
@@ -21092,51 +21789,58 @@
                 "--amplicol_momenta_probe=10",
                 "--amplicol_probe_quiet"
               ],
-              "elapsed_s": 0.029230625019408762,
+              "elapsed_s": 0.028525332920253277,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_generate_library"
               ],
-              "elapsed_s": 0.3877305838977918,
+              "elapsed_s": 0.44663000002037734,
               "returncode": 0
             },
             {
               "args": [
                 "make",
-                "-j8",
+                "-j4",
                 "amplicol_library_benchmark"
               ],
-              "elapsed_s": 0.1308880829019472,
+              "elapsed_s": 0.1396296670427546,
               "returncode": 0
             },
             {
               "args": [
                 "./amplicol_library_benchmark",
-                "3000",
+                "10000",
                 "1",
                 "1"
               ],
-              "elapsed_s": 0.018230582936666906,
+              "elapsed_s": 0.022724624956026673,
               "returncode": 0
             }
           ],
           "commands_s": [
-            0.27596037508919835,
-            1.652249666978605,
-            0.029230625019408762,
-            0.3877305838977918,
-            0.1308880829019472,
-            0.018230582936666906
+            0.16176183405332267,
+            1.6166889580199495,
+            0.028525332920253277,
+            0.44663000002037734,
+            0.1396296670427546,
+            0.022724624956026673
           ],
-          "finished_at": "2026-07-07T00:07:03.623034+00:00",
-          "generation_s": 2.345171250985004,
+          "finished_at": "2026-07-07T22:53:25.373589+00:00",
+          "generation_s": 2.253606125013903,
+          "matrix_settings": {
+            "amplicol_points": 10000,
+            "jobs": 4,
+            "process_list_backend": "python",
+            "runtime_probe": "direct_generated_library_benchmark",
+            "workflow": "library_create_make_library_use"
+          },
           "mode": "AmpliCol - using-library",
           "process_file": "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
-          "process_list_backend": "legacy",
+          "process_list_backend": "python",
           "reference_color_order": [
             2,
             5,
@@ -21156,24 +21860,24 @@
             7
           ],
           "reference_probe": "direct_generated_library_benchmark",
-          "runtime_us_per_point": 0.6243333333333334,
-          "started_at": "2026-07-07T00:07:00.972218+00:00",
+          "runtime_us_per_point": 0.6207999999999999,
+          "started_at": "2026-07-07T22:53:22.954454+00:00",
           "status": "ok",
           "timing_rows": [
             {
               "label": "amplitude evaluation",
               "note": "direct-library",
-              "seconds": 0.001873
+              "seconds": 0.006208
             },
             {
               "label": "squaring amplitudes",
               "note": "direct-library",
-              "seconds": 2.2e-05
+              "seconds": 6.9e-05
             },
             {
               "label": "total",
               "note": "",
-              "seconds": 0.001895
+              "seconds": 0.006277
             }
           ]
         },
@@ -21304,7 +22008,55 @@
           "wall_us_per_point": 1.6098680067376268
         },
         "status": "done",
-        "updated_at": "2026-07-07T17:22:01.664933+00:00"
+        "updated_at": "2026-07-07T22:53:25.396756+00:00",
+        "validation": {
+          "absolute_differences": {
+            "pyamplicol_cpp_o3": 1.67632942359465e-30,
+            "pyamplicol_jit": 2.267975102510409e-30
+          },
+          "absolute_tolerance": 1e-16,
+          "amplicol_command": [
+            "./amplicol_generate",
+            "--amplicol_momenta_probe=1",
+            "--nevents=1",
+            "--timing=1",
+            "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+            "--library=use"
+          ],
+          "commands": [
+            {
+              "args": [
+                "./amplicol_generate",
+                "--amplicol_momenta_probe=1",
+                "--nevents=1",
+                "--timing=1",
+                "--process=/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
+                "--library=use"
+              ],
+              "elapsed_s": 0.021440457901917398,
+              "returncode": 0
+            }
+          ],
+          "finished_at": "2026-07-07T22:53:25.396732+00:00",
+          "kind": "same-deterministic-point",
+          "max_absolute_difference": 2.267975102510409e-30,
+          "max_relative_difference": 3.4742368171926208e-15,
+          "point_order_source": "process-file-pdg-order:2,-1,21,21,21,-11,12",
+          "point_source": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/ud_epve_jets/n5/cpp_o3/validation_momenta.json",
+          "prepared_library_for_validation": false,
+          "reference": 6.527980738926867e-16,
+          "relative_differences": {
+            "pyamplicol_cpp_o3": 2.5679141692293306e-15,
+            "pyamplicol_jit": 3.4742368171926208e-15
+          },
+          "started_at": "2026-07-07T22:53:25.373757+00:00",
+          "status": "ok",
+          "tolerance": 1e-08,
+          "values": {
+            "pyamplicol_cpp_o3": 6.527980738926884e-16,
+            "pyamplicol_jit": 6.52798073892689e-16
+          }
+        }
       },
       "6": {
         "amplicol": {
@@ -24303,5 +25055,5 @@
     }
   },
   "schema_version": 1,
-  "updated_at": "2026-07-07T21:45:23.342993+00:00"
+  "updated_at": "2026-07-07T22:58:42.996358+00:00"
 }

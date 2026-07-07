@@ -312,7 +312,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     data = _load_data(args.data)
-    _refresh_data_metadata(data)
     generate_ns = _parse_n_values(args.generate_data)
     show_ns = _parse_n_values(args.show_data)
     selected_base_keys = {str(key) for key in args.base_process}
@@ -320,6 +319,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         selected_process_ids = set(_parse_process_ids(args.process_ids))
     except ValueError as exc:
         parser.error(str(exc))
+    if args.dry_run and not generate_ns:
+        print("[dry-run] no --generate-data values supplied; no writes performed")
+        return 0
+    if not args.dry_run:
+        _refresh_data_metadata(data)
 
     if generate_ns:
         work_items: list[tuple[BaseProcess, int, str]] = []
@@ -331,6 +335,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     continue
                 process = base.process_for_n(n_final)
                 if process is None:
+                    if args.dry_run:
+                        print(
+                            f"[dry-run] id={process_id} n={n_final} "
+                            f"{base.key}: not applicable"
+                        )
+                        continue
                     _record_not_applicable(data, base, n_final)
                     _write_data(args.data, data)
                     continue
@@ -341,6 +351,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                     continue
                 work_items.append((base, n_final, process))
+        if args.dry_run:
+            return 0
         process_workers = max(1, int(args.process_workers))
         if process_workers > 1 and not args.skip_amplicol:
             print(
@@ -480,6 +492,7 @@ def _generate_case(
         flush=True,
     )
 
+    amplicol_refreshed = False
     amplicol_settings = _amplicol_matrix_settings(
         amplicol_points=amplicol_points,
         jobs=jobs,
@@ -499,6 +512,7 @@ def _generate_case(
             jobs=jobs,
             matrix_settings=amplicol_settings,
         )
+        amplicol_refreshed = _ok(_mode(case, "amplicol"))
     try:
         reference_color_order = _reference_color_order_for_case(case)
         selected_lc_sector_ids = _selected_lc_sector_ids_for_case(
@@ -606,7 +620,10 @@ def _generate_case(
             reference_color_order=reference_color_order,
             matrix_settings=cpp_o3_settings,
         )
-    if validate and not skip_amplicol and _ok(_mode(case, "amplicol")):
+    should_validate = validate and not skip_amplicol and _ok(_mode(case, "amplicol"))
+    if should_validate and only_missing and _validation_record_ok(case.get("validation")):
+        should_validate = False
+    if should_validate:
         case["validation"] = _run_validation_case(
             process,
             base=base,
@@ -614,6 +631,7 @@ def _generate_case(
             deadline_started=started,
             time_limit=None,
             jobs=jobs,
+            library_current=amplicol_refreshed,
         )
     elif not validate:
         case.pop("validation", None)
@@ -822,6 +840,7 @@ def _run_validation_case(
     deadline_started: float,
     time_limit: float | None,
     jobs: int,
+    library_current: bool,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "running",
@@ -842,6 +861,22 @@ def _run_validation_case(
             jobs=jobs,
             timeout=_remaining(deadline_started, time_limit),
         )
+        setup_commands: tuple[Any, ...] = ()
+        if not library_current:
+            build = adapter.prepare_library(
+                process,
+                process_file=process_file,
+                options=base.process_options(),
+                process_list_backend=backend,  # type: ignore[arg-type]
+                warmup_particles=point,
+            )
+            process_file = str(build.process_file)
+            setup_commands = build.commands
+            adapter = AmplicolAdapter(
+                REPO_ROOT,
+                jobs=jobs,
+                timeout=_remaining(deadline_started, time_limit),
+            )
         point, point_order_source = _reorder_validation_particles_for_fortran(
             adapter,
             process,
@@ -910,29 +945,20 @@ def _run_validation_case(
                 "point_source": point_source,
                 "point_order_source": point_order_source,
                 "amplicol_command": run.commands[0].args if run.commands else (),
+                "prepared_library_for_validation": not library_current,
+                "commands": [
+                    {
+                        "args": command.args,
+                        "elapsed_s": command.elapsed_s,
+                        "returncode": command.returncode,
+                    }
+                    for command in (*setup_commands, *run.commands)
+                ],
                 "finished_at": _now(),
             }
         )
     except Exception as exc:  # noqa: BLE001 - benchmark harness records failures.
-        error_payload = _error_payload(exc)
-        payload.update(error_payload)
-        backend_limitation = _documented_backend_limitation_from_error(
-            str(error_payload.get("error", "")),
-            backend_key=backend_key,
-        )
-        if backend_limitation is not None:
-            payload.update(
-                {
-                    "status": "backend_unsupported",
-                    "backend_limitation": backend_limitation,
-                    "note": (
-                        "SymJIT 2.19.2 still aborts while materializing this "
-                        "large JIT evaluator on AArch64; the entry is rendered "
-                        "as a localized backend N/A rather than as a physics "
-                        "validation or generated-library comparison failure."
-                    ),
-                }
-            )
+        payload.update(_error_payload(exc))
     return payload
 
 
@@ -1860,6 +1886,14 @@ def _should_run_mode(
     if not _ok(mode):
         return True
     return not _settings_match(mode.get("matrix_settings"), expected_settings)
+
+
+def _validation_record_ok(validation: object) -> bool:
+    if not isinstance(validation, dict):
+        return False
+    tolerance = _optional_float(validation.get("tolerance")) or VALIDATION_REL_TOL
+    rel = _optional_float(validation.get("max_relative_difference"))
+    return validation.get("status") == "ok" and (rel is None or rel <= tolerance)
 
 
 def _settings_match(actual: object, expected: dict[str, Any]) -> bool:
