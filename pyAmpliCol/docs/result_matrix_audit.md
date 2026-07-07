@@ -6,7 +6,7 @@ unresolved statuses in `result_matrix_data.json`.
 
 Matrix updated at: `2026-07-07T21:45:23.342993+00:00`
 
-Gate status: **PASS**.
+Gate status: **PASS_WITH_LIMITATIONS**.
 
 Gate counts: `errors`=0, `validation_failures`=0, `missing_amplicol`=0, `missing_jit`=0, `amplicol_unsupported`=4, `jit_backend_unsupported`=3, `missing_cpp_o3`=31.
 

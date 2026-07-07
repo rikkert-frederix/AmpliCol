@@ -36,7 +36,7 @@ def test_result_matrix_gate_passes_with_documented_unsupported_cells() -> None:
 
     report = audit.render_report(data, [])
 
-    assert "Gate status: **PASS**." in report
+    assert "Gate status: **PASS_WITH_LIMITATIONS**." in report
     assert "`amplicol_unsupported`=1" in report
     assert "`jit_backend_unsupported`=1" in report
     assert "`missing_cpp_o3`=1" in report

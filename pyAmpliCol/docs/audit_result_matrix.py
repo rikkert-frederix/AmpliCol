@@ -349,16 +349,23 @@ def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, in
                 cpp = _mode(case, "pyamplicol_cpp_o3")
                 if not cpp or cpp.get("status") == "missing":
                     missing_cpp_o3 += 1
-    status = (
-        "PASS"
-        if (
-            error_findings == 0
-            and validation_failures == 0
-            and missing_amplicol == 0
-            and missing_jit == 0
-        )
-        else "FAIL"
+    hard_failures = (
+        error_findings
+        + validation_failures
+        + missing_amplicol
+        + missing_jit
     )
+    documented_limitations = (
+        amplicol_unsupported
+        + jit_backend_unsupported
+        + missing_cpp_o3
+    )
+    if hard_failures:
+        status = "FAIL"
+    elif documented_limitations:
+        status = "PASS_WITH_LIMITATIONS"
+    else:
+        status = "PASS"
     return {
         "status": status,
         "error_findings": error_findings,
