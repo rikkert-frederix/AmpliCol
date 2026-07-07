@@ -897,7 +897,6 @@ def _run_validation_case(
                 "status": (
                     "ok"
                     if max_rel_diff <= VALIDATION_REL_TOL
-                    or max_abs_diff <= VALIDATION_ABS_TOL
                     else "failed"
                 ),
                 "reference": reference,
@@ -1570,8 +1569,7 @@ def _validation_summary(
 def _validation_summary_latex(summary: dict[str, Any]) -> str:
     return (
         r"\noindent\footnotesize A red \textbf{VALIDATION FAILED} marker is shown "
-        r"next to any validated entry whose relative difference exceeds \(10^{-8}\) "
-        r"outside the \(10^{-16}\) absolute floor."
+        r"next to any validated entry whose relative difference exceeds \(10^{-8}\)."
     )
 
 

@@ -19,6 +19,7 @@ from .generic_dag import (
     GenericDAGCompiler,
     contributing_color_sector_ids,
     filter_dag_to_color_sectors,
+    prune_global_helicity_flip_equivalent_roots,
     prune_dag_to_amplitude_roots,
 )
 from .model import AmplicolSMLeadingColorModel, Model
@@ -231,6 +232,7 @@ def build_generic_process_manifest(
             ).compile(process)
         )
     )
+    dag = prune_global_helicity_flip_equivalent_roots(dag, model)
     full_color_plan = build_color_plan(
         dag.process,
         color_accuracy=dag.process.color_accuracy,
@@ -664,6 +666,8 @@ def select_leading_color_sector_ids(
                 if sector.id not in root_sectors:
                     continue
                 if tuple(getattr(sector, "word_labels", ())) == wanted_coloured:
+                    if wanted_coloured == wanted:
+                        return {int(sector.id)}
                     return _lc_colored_word_sibling_sector_ids(
                         manifest.color_plan,
                         sector,
@@ -674,6 +678,8 @@ def select_leading_color_sector_ids(
             if sector.id not in root_sectors:
                 continue
             if wanted in sector.color_words:
+                if wanted_coloured == wanted:
+                    return {int(sector.id)}
                 return _lc_colored_word_sibling_sector_ids(
                     manifest.color_plan,
                     sector,
@@ -682,6 +688,8 @@ def select_leading_color_sector_ids(
                 )
             legacy_order_words = getattr(sector, "legacy_order_words", ())
             if wanted in legacy_order_words:
+                if wanted_coloured == wanted:
+                    return {int(sector.id)}
                 return _lc_colored_word_sibling_sector_ids(
                     manifest.color_plan,
                     sector,
@@ -719,6 +727,8 @@ def select_leading_color_sector_ids_from_plan(
         if wanted_coloured:
             for sector in color_plan.sectors:
                 if tuple(getattr(sector, "word_labels", ())) == wanted_coloured:
+                    if wanted_coloured == wanted:
+                        return {int(sector.id)}
                     return _lc_colored_word_sibling_sector_ids(
                         color_plan,
                         sector,
@@ -726,6 +736,8 @@ def select_leading_color_sector_ids_from_plan(
                     )
         for sector in color_plan.sectors:
             if wanted in sector.color_words:
+                if wanted_coloured == wanted:
+                    return {int(sector.id)}
                 return _lc_colored_word_sibling_sector_ids(
                     color_plan,
                     sector,
@@ -733,6 +745,8 @@ def select_leading_color_sector_ids_from_plan(
                 )
             legacy_order_words = getattr(sector, "legacy_order_words", ())
             if wanted in legacy_order_words:
+                if wanted_coloured == wanted:
+                    return {int(sector.id)}
                 return _lc_colored_word_sibling_sector_ids(
                     color_plan,
                     sector,
@@ -1934,7 +1948,7 @@ def _runtime_amplitude_stage_payload(
                 "color_weight": list(root.color_weight),
                 "contraction": root.contraction,
                 "coherent_group_id": coherent_group_ids[root.id],
-                "helicity_weight": 1.0,
+                "helicity_weight": root.helicity_weight,
             }
         )
     return {

@@ -146,15 +146,19 @@ def test_generic_artifact_can_filter_amplitude_stage_to_one_lc_sector(
     filtered_payload = manifest.to_json_dict(selected_color_sector_ids={0})
 
     assert full_payload["color_plan"]["sector_count"] == 3
-    assert full_payload["runtime_schema"]["amplitude_stage"]["output_count"] == 48
-    assert filtered_payload["runtime_schema"]["amplitude_stage"]["output_count"] == 16
+    assert full_payload["runtime_schema"]["amplitude_stage"]["output_count"] == 9
+    assert filtered_payload["runtime_schema"]["amplitude_stage"]["output_count"] == 3
     assert filtered_payload["runtime_schema"]["amplitude_stage"][
         "selected_color_sector_ids"
     ] == [0]
     assert [
         root["root_id"]
         for root in filtered_payload["runtime_schema"]["amplitude_stage"]["roots"]
-    ] == list(range(16))
+    ] == list(range(3))
+    assert {
+        root["helicity_weight"]
+        for root in filtered_payload["runtime_schema"]["amplitude_stage"]["roots"]
+    } == {2.0}
     assert all(
         root["dag_root_id"] >= 0
         for root in filtered_payload["runtime_schema"]["amplitude_stage"]["roots"]
@@ -165,7 +169,7 @@ def test_generic_artifact_can_filter_amplitude_stage_to_one_lc_sector(
         tmp_path / "sector0",
         selected_color_sector_ids={0},
     )
-    assert artifact["dag_summary"]["amplitude_root_count"] == 16
+    assert artifact["dag_summary"]["amplitude_root_count"] == 3
     assert artifact["compiled"]["selected_color_sector_ids"] == [0]
 
 
@@ -214,7 +218,11 @@ def test_selected_sector_manifest_uses_filtered_color_plan_for_large_line_counts
     assert payload["planning_status"]["color_ready"] is True
     assert payload["planning_status"]["generic_evaluator_ready"] is True
     assert payload["lowering_status"]["full_tensor_network_ready"] is True
-    assert payload["runtime_schema"]["amplitude_stage"]["output_count"] == 32
+    assert payload["runtime_schema"]["amplitude_stage"]["output_count"] == 16
+    assert {
+        root["helicity_weight"]
+        for root in payload["runtime_schema"]["amplitude_stage"]["roots"]
+    } == {2.0}
 
 
 def test_reference_color_sector_can_be_selected_before_dag_construction() -> None:
@@ -369,7 +377,7 @@ def test_generic_stage_blueprint_keeps_four_quark_line_amplitude_outputs() -> No
 
     assert blueprint.expression_ready is True
     assert blueprint.blockers == ()
-    assert blueprint.amplitude_stage.output_length == 64
+    assert blueprint.amplitude_stage.output_length == 32
     assert blueprint.amplitude_stage.blockers == ()
     assert blueprint.amplitude_stage.output_expressions
 
@@ -383,17 +391,21 @@ def test_generic_artifact_defaults_to_contributing_lc_sectors(
     )
 
     assert artifact["compiled"]["selected_color_sector_ids"] == list(range(8))
-    assert artifact["dag_summary"]["amplitude_root_count"] == 64
-    assert artifact["dag_summary"]["current_count"] == 260
-    assert artifact["dag_summary"]["interaction_count"] == 268
-    assert artifact["dag_summary"]["source_count"] == 80
-    assert artifact["full_dag_summary"]["current_count"] == 260
-    assert artifact["full_dag_summary"]["interaction_count"] == 268
-    assert artifact["full_dag_summary"]["source_count"] == 80
+    assert artifact["dag_summary"]["amplitude_root_count"] == 32
+    assert artifact["dag_summary"]["current_count"] == 179
+    assert artifact["dag_summary"]["interaction_count"] == 161
+    assert artifact["dag_summary"]["source_count"] == 64
+    assert artifact["full_dag_summary"]["current_count"] == 179
+    assert artifact["full_dag_summary"]["interaction_count"] == 161
+    assert artifact["full_dag_summary"]["source_count"] == 64
     assert artifact["lowering_status"]["current_color_sectors"] == list(range(8))
     runtime_schema = artifact["runtime_schema"]
-    assert runtime_schema["source_fill"]["source_count"] == 80
-    assert runtime_schema["amplitude_stage"]["output_count"] == 64
+    assert runtime_schema["source_fill"]["source_count"] == 64
+    assert runtime_schema["amplitude_stage"]["output_count"] == 32
+    assert {
+        root["helicity_weight"]
+        for root in runtime_schema["amplitude_stage"]["roots"]
+    } == {2.0}
 
 
 def test_generic_runtime_schema_keeps_auxiliary_tensor_inputs_unpropagated() -> None:
@@ -864,9 +876,9 @@ def test_generic_stage_evaluator_writer_accepts_four_quark_line_amplitude_stage(
     assert payload["amplitude_stage"]["evaluator"]["label"] == (
         "generic_amplitude_stage"
     )
-    assert payload["amplitude_stage"]["evaluator"]["output_len"] == 64
+    assert payload["amplitude_stage"]["evaluator"]["output_len"] == 32
     assert [call["label"] for call in calls][-1] == "generic_amplitude_stage"
-    assert [call["output_count"] for call in calls][-1] == 64
+    assert [call["output_count"] for call in calls][-1] == 32
     assert all(call["output_count"] > 0 for call in calls)
     assert all(call["real_count"] <= call["param_count"] for call in calls)
     assert calls[-1]["real_count"] == 0

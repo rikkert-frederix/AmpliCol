@@ -239,7 +239,7 @@ def test_cli_process_plan_defaults_to_safe_topology_representatives(
     unsafe = json.loads(capsys.readouterr().out)
 
     assert unsafe["lowering_status"]["current_color_sector_count"] == 3
-    assert unsafe["lowering_status"]["amplitude_root_count"] == 48
+    assert unsafe["lowering_status"]["amplitude_root_count"] == 9
 
 
 def test_cli_process_plan_writes_process_set_with_unsupported_diagnostics(

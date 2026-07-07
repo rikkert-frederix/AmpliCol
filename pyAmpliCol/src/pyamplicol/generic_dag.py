@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Literal, Mapping, Sequence
+from typing import Iterable, Literal, Mapping, Sequence, cast
 
 from .color_plan import GenericColorPlan, LCColorSector, build_color_plan
 from .model import (
@@ -240,6 +240,7 @@ class AmplitudeRoot:
     vertex_particles: tuple[int, int, int] | None = None
     coupling: tuple[float, float] = (1.0, 0.0)
     contraction: str = ""
+    helicity_weight: float = 1.0
 
     def to_json_dict(self) -> dict[str, object]:
         return {
@@ -254,6 +255,7 @@ class AmplitudeRoot:
             ),
             "coupling": list(self.coupling),
             "contraction": self.contraction,
+            "helicity_weight": self.helicity_weight,
         }
 
 
@@ -1557,6 +1559,7 @@ def prune_dag_to_amplitude_roots(dag: GenericDAG) -> GenericDAG:
             vertex_particles=root.vertex_particles,
             coupling=root.coupling,
             contraction=root.contraction,
+            helicity_weight=root.helicity_weight,
         )
         for new_id, root in enumerate(dag.amplitude_roots)
     )
@@ -1573,6 +1576,203 @@ def prune_dag_to_amplitude_roots(dag: GenericDAG) -> GenericDAG:
         interactions=pruned_interactions,
         amplitude_roots=pruned_roots,
         truncated=dag.truncated,
+    )
+
+
+def prune_global_helicity_flip_equivalent_roots(
+    dag: GenericDAG,
+    model: Model,
+) -> GenericDAG:
+    """Group global-helicity-flip equivalent roots for parity-symmetric QCD.
+
+    This is the safe, structural subset of AmpliCol's numerical helicity
+    filtering.  For pure-QCD LC amplitudes, flipping all external helicities is
+    a parity-equivalent contribution to the helicity-summed squared matrix
+    element.  Keeping one representative with doubled helicity weight reduces
+    amplitude roots and then dead-tree pruning removes currents that fed only
+    the discarded partner roots.
+    """
+
+    if not _global_helicity_flip_equivalence_safe(dag, model):
+        return dag
+    if not dag.amplitude_roots:
+        return dag
+
+    source_by_bit = _source_helicity_signature_by_bit(dag)
+    pure_gluon = _pure_gluon_tree_helicity_pruning_safe(dag, model)
+    initial_leg_labels = {
+        int(leg.label) for leg in dag.process.legs if leg.side == "initial"
+    }
+    roots_by_signature: dict[tuple[object, ...], list[AmplitudeRoot]] = {}
+    zero_pruned = False
+    for root in dag.amplitude_roots:
+        signature = _root_physical_helicity_signature(dag, root, source_by_bit)
+        if pure_gluon and _pure_gluon_tree_helicity_signature_is_zero(
+            signature,
+            initial_leg_labels,
+        ):
+            zero_pruned = True
+            continue
+        roots_by_signature.setdefault(
+            signature,
+            [],
+        ).append(root)
+    if not roots_by_signature:
+        return dag
+
+    handled: set[tuple[object, ...]] = set()
+    retained: list[AmplitudeRoot] = []
+    changed = False
+    for signature in sorted(roots_by_signature):
+        if signature in handled:
+            continue
+        flipped = _flip_root_physical_helicity_signature(signature)
+        partner = roots_by_signature.get(flipped)
+        handled.add(signature)
+        if partner is not None:
+            handled.add(flipped)
+        weight = 1.0
+        if partner is not None and flipped != signature:
+            weight = 2.0
+            changed = True
+        for root in roots_by_signature[signature]:
+            retained.append(
+                AmplitudeRoot(
+                    id=len(retained),
+                    kind=root.kind,
+                    left_id=root.left_id,
+                    right_id=root.right_id,
+                    color_weight=root.color_weight,
+                    vertex_kind=root.vertex_kind,
+                    vertex_particles=root.vertex_particles,
+                    coupling=root.coupling,
+                    contraction=root.contraction,
+                    helicity_weight=root.helicity_weight * weight,
+                )
+            )
+
+    if not changed and not zero_pruned:
+        return dag
+    return prune_dag_to_amplitude_roots(
+        GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=dag.currents,
+            sources=dag.sources,
+            interactions=dag.interactions,
+            amplitude_roots=tuple(retained),
+            truncated=dag.truncated,
+        )
+    )
+
+
+def _global_helicity_flip_equivalence_safe(
+    dag: GenericDAG,
+    model: Model,
+) -> bool:
+    if dag.process.color_accuracy != "lc":
+        return False
+    for leg in dag.process.legs:
+        if leg.outgoing_pdg is None:
+            return False
+        pdg = int(leg.outgoing_pdg)
+        if not (model.is_gluon(pdg) or model.is_quark(abs(pdg))):
+            return False
+        if model.mass(pdg) != 0.0:
+            return False
+    for interaction in dag.interactions:
+        orders = model.vertex_coupling_orders(
+            Vertex(interaction.vertex_kind, interaction.vertex_particles)
+        )
+        if not orders or any(name != "QCD" for name, _value in orders):
+            return False
+    for root in dag.amplitude_roots:
+        if root.vertex_kind is None or root.vertex_particles is None:
+            continue
+        orders = model.vertex_coupling_orders(
+            Vertex(root.vertex_kind, root.vertex_particles)
+        )
+        if not orders or any(name != "QCD" for name, _value in orders):
+            return False
+    return True
+
+
+def _pure_gluon_tree_helicity_pruning_safe(
+    dag: GenericDAG,
+    model: Model,
+) -> bool:
+    return all(
+        leg.outgoing_pdg is not None and model.is_gluon(int(leg.outgoing_pdg))
+        for leg in dag.process.legs
+    )
+
+
+def _pure_gluon_tree_helicity_signature_is_zero(
+    signature: tuple[object, ...],
+    initial_leg_labels: set[int],
+) -> bool:
+    _sector_id, source_helicities = signature
+    helicities = []
+    for label, helicity in cast(Sequence[tuple[int, int]], source_helicities):
+        value = int(helicity)
+        if int(label) in initial_leg_labels:
+            value = -value
+        helicities.append(value)
+    return helicities.count(1) < 2 or helicities.count(-1) < 2
+
+
+def _root_physical_helicity_signature(
+    dag: GenericDAG,
+    root: AmplitudeRoot,
+    source_by_bit: Mapping[int, tuple[int, int]],
+) -> tuple[object, ...]:
+    left = dag.currents[root.left_id].index
+    right = dag.currents[root.right_id].index
+    ancestry = int(left.helicity_ancestry | right.helicity_ancestry)
+    source_helicities = tuple(
+        sorted(
+            source
+            for bit, source in source_by_bit.items()
+            if ancestry & bit
+        )
+    )
+    sector_id = (
+        int(left.color_state.sector_id)
+        if left.color_state.accuracy == "lc"
+        else 0
+    )
+    return (sector_id, source_helicities)
+
+
+def _source_helicity_signature_by_bit(
+    dag: GenericDAG,
+) -> dict[int, tuple[int, int]]:
+    source_by_bit: dict[int, tuple[int, int]] = {}
+    for current in dag.currents:
+        if not current.is_source:
+            continue
+        source_by_bit[int(current.index.helicity_ancestry)] = (
+            int(current.source_leg_label or 0),
+            int(current.source_helicity or 0),
+        )
+    return source_by_bit
+
+
+def _flip_root_physical_helicity_signature(
+    signature: tuple[object, ...],
+) -> tuple[object, ...]:
+    sector_id, source_helicities = signature
+    return (
+        sector_id,
+        tuple(
+            sorted(
+                (int(label), -int(helicity))
+                for label, helicity in cast(
+                    Sequence[tuple[int, int]],
+                    source_helicities,
+                )
+            )
+        ),
     )
 
 
@@ -1729,6 +1929,7 @@ def filter_dag_to_color_sectors(
                 vertex_particles=root.vertex_particles,
                 coupling=root.coupling,
                 contraction=root.contraction,
+                helicity_weight=root.helicity_weight,
             )
         )
 
@@ -2661,4 +2862,5 @@ __all__ = [
     "contributing_color_sector_ids",
     "filter_dag_to_color_sectors",
     "infer_minimal_coupling_order_limits",
+    "prune_global_helicity_flip_equivalent_roots",
 ]
