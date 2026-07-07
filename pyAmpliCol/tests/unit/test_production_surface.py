@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -66,3 +70,34 @@ def test_package_root_does_not_export_retired_runtime_symbols() -> None:
 
     assert exported.isdisjoint(retired_symbols)
     assert {name for name in retired_symbols if hasattr(pyamplicol, name)} == set()
+
+
+def test_package_root_import_does_not_load_retired_runtime_modules() -> None:
+    retired_modules = (
+        "pyamplicol.native",
+        "pyamplicol.evaluation",
+        "pyamplicol.dag_runtime",
+        "pyamplicol.tensor_runtime",
+        "pyamplicol.compiled_dag_runtime",
+        "pyamplicol.legacy_matrix",
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(PROJECT_ROOT / "src"),
+    }
+    script = (
+        "import json, sys; import pyamplicol; "
+        f"mods={retired_modules!r}; "
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    loaded = json.loads(result.stdout)
+    assert loaded == {module: False for module in retired_modules}
