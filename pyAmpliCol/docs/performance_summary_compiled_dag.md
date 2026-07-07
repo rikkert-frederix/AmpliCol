@@ -1,5 +1,13 @@
 # pyAmpliCol Compiled DAG Performance Summary
 
+> **Historical note:** this document records the exploratory alias-backed
+> monolithic compiled-DAG route. That route is deprecated for production after
+> the schema-v2 generic staged DAG and Rusticol runtime became the supported
+> implementation. The data below is retained for design provenance and backend
+> comparison only; current results and reproduction commands live in
+> `performance_summary.md`, `process_coverage.md`, and the result-matrix
+> documentation.
+
 This document tracks the `--compiled-dag-evaluator` mode. The intended final
 table mirrors `performance_summary.md`, but for the alias-backed single
 multi-output evaluator route.

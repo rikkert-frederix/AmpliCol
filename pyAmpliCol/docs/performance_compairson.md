@@ -1,5 +1,13 @@
 # pyamplicol Performance Comparison
 
+> **Historical note:** this misspelled duplicate records the pre-Rusticol
+> staged-DAG performance exploration for the original `d d~ -> Z + n g`
+> milestone. It is kept for provenance only and is not the current
+> reproduction guide. Current production generation uses schema-v2 generic DAG
+> process artifacts with the Rusticol runtime; use `performance_summary.md`,
+> `process_coverage.md`, and the result-matrix documentation for the supported
+> workflow.
+
 Process family: `d d~ -> Z + n g`.
 
 All heavy runs for this table were launched under `pyAmpliCol/scripts/run_with_memory_watch.py --limit-gb 30`.
