@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+import pyamplicol
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,3 +46,23 @@ def test_schema_v2_production_modules_do_not_reference_family_runtimes(
     assert {
         token for token in forbidden_tokens if token in source
     } == set()
+
+
+def test_package_root_does_not_export_retired_runtime_symbols() -> None:
+    retired_symbols = {
+        "LeadingColorZJetsNativeEvaluator",
+        "NativeRuntimeEvaluator",
+        "NativeMatrixElementGenerator",
+        "ZGluonCompiledDAGEvaluator",
+        "ZGluonDAGEvaluator",
+        "ZGluonNumericTensorNetworkEvaluator",
+        "ZGluonTensorNetworkEvaluator",
+        "benchmark_z_gluon_modes",
+        "profile_z_gluon_dag_evaluator",
+        "profile_z_gluon_tensor_evaluator",
+    }
+
+    exported = set(pyamplicol.__all__)
+
+    assert exported.isdisjoint(retired_symbols)
+    assert {name for name in retired_symbols if hasattr(pyamplicol, name)} == set()
