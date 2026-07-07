@@ -19,18 +19,22 @@ from pyamplicol.model import AmplicolSMLeadingColorModel
 
 def test_current_index_is_full_physics_state_identity() -> None:
     color = ColorState(accuracy="lc", sector_id=3, line_groups=(1,))
-    index = CurrentIndex(
-        particle_id=1,
-        external_mask=0b101,
-        external_labels=(1, 3),
-        helicity_ancestry=0b10010,
-        chirality=-1,
-        spin_state=-1,
-        flavour_flow=(1, 21, 1),
-        charge_flow=-1,
-        color_state=color,
-        momentum_mask=0b101,
-    )
+    kwargs = {
+        "particle_id": 1,
+        "external_mask": 0b101,
+        "external_labels": (1, 3),
+        "ordered_external_labels": (3, 1),
+        "helicity_ancestry": 0b10010,
+        "chirality": -1,
+        "spin_state": -1,
+        "flavour_flow": (1, 21, 1),
+        "charge_flow": -1,
+        "color_state": color,
+        "momentum_mask": 0b101,
+        "coupling_orders": (("qed", 1), ("QCD", 2)),
+        "auxiliary_kind": "test-auxiliary",
+    }
+    index = CurrentIndex(**kwargs)
 
     assert index.overlaps(
         CurrentIndex(
@@ -47,10 +51,63 @@ def test_current_index_is_full_physics_state_identity() -> None:
         )
     )
     payload = index.to_json_dict()
-    assert payload["particle_id"] == 1
+    assert set(payload).issuperset(
+        {
+            "particle_id",
+            "external_mask",
+            "external_labels",
+            "ordered_external_labels",
+            "helicity_ancestry",
+            "chirality",
+            "spin_state",
+            "flavour_flow",
+            "charge_flow",
+            "color_state",
+            "momentum_mask",
+            "coupling_orders",
+            "auxiliary_kind",
+        }
+    )
+    assert payload["particle_id"] == kwargs["particle_id"]
     assert payload["external_labels"] == [1, 3]
-    assert payload["helicity_ancestry"] == 0b10010
+    assert payload["ordered_external_labels"] == [3, 1]
+    assert payload["helicity_ancestry"] == kwargs["helicity_ancestry"]
     assert payload["color_state"]["sector_id"] == 3
+    assert payload["coupling_orders"] == [["QCD", 2], ["QED", 1]]
+    assert payload["auxiliary_kind"] == "test-auxiliary"
+
+    variants = [
+        {**kwargs, "particle_id": 21},
+        {
+            **kwargs,
+            "external_labels": (1, 2),
+            "ordered_external_labels": (2, 1),
+            "external_mask": 0b011,
+            "momentum_mask": 0b011,
+        },
+        {**kwargs, "helicity_ancestry": 0b10011},
+        {**kwargs, "chirality": 1},
+        {**kwargs, "spin_state": (1, -1)},
+        {**kwargs, "flavour_flow": (1, 22, 1)},
+        {**kwargs, "charge_flow": 0},
+        {
+            **kwargs,
+            "color_state": ColorState(
+                accuracy="lc",
+                sector_id=4,
+                line_groups=(1,),
+            ),
+        },
+        {**kwargs, "momentum_mask": 0b111},
+        {**kwargs, "coupling_orders": (("QED", 2),)},
+        {**kwargs, "auxiliary_kind": "other-auxiliary"},
+        {**kwargs, "ordered_external_labels": (1, 3)},
+    ]
+    variant_indices = [CurrentIndex(**variant) for variant in variants]
+
+    assert all(index != variant for variant in variant_indices)
+    assert len({index, *variant_indices}) == 1 + len(variant_indices)
+    assert "family" not in str(payload).lower()
 
 
 def test_current_index_rejects_inconsistent_mask() -> None:
