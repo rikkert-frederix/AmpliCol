@@ -16,6 +16,7 @@ contains
        wf(1:4)=-dble(wf1(1:4)-wf0(1:4))*sqh
     endif
   end subroutine ext_gluon_real
+  
   subroutine ext_gluon_cmplx(p,ihel,idum,wf)
     ! External gluon wavefunction. From HELAS.
     implicit none
@@ -133,6 +134,9 @@ contains
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
              sqp0p3 = 0d0
+          else if (p(3).lt.0d0) then
+             ! more stable when E and pz nearly cancel (E-pz large, no cancellation)
+             sqp0p3 = dsqrt(max((p(1)**2+p(2)**2)/(p(0)-p(3)),rZero))
           else
              sqp0p3 = dsqrt(max(p(0)+p(3),rZero))
           end if
@@ -165,7 +169,11 @@ contains
           im = (3-nh)/2
           sfomeg(1) = sf(1)*omega(ip)
           sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+p(3),rZero)
+          if (p(3).lt.0d0) then
+             pp3 = max((p(1)**2+p(2)**2)/(pp-p(3)),rZero)
+          else
+             pp3 = max(pp+p(3),rZero)
+          end if
           chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
           if ( pp3.eq.rZero ) then
              chi(2) = dcmplx(-nh )
@@ -182,6 +190,8 @@ contains
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
              sqp0p3 = 0d0
+          else if (p(3).gt.0d0) then
+             sqp0p3 = -dsqrt(max((p(1)**2+p(2)**2)/(p(3)-p(0)),rZero))
           else
              sqp0p3 = -dsqrt(max(-(p(0)+p(3)),rZero))
           end if
@@ -214,7 +224,11 @@ contains
           im = (3-nh)/2
           sfomeg(1) = sf(1)*omega(ip)
           sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+(-p(3)),rZero)
+          if (p(3).gt.0d0) then
+             pp3 = max((p(1)**2+p(2)**2)/(pp+p(3)),rZero)
+          else
+             pp3 = max(pp-p(3),rZero)
+          end if
           chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
           if ( pp3.eq.rZero ) then
              chi(2) = dcmplx(-nh )
@@ -253,6 +267,8 @@ contains
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).lt.0d0) then
              sqp0p3 = 0d0
+          else if (p(3).lt.0d0) then
+             sqp0p3 = -dsqrt(max((p(1)**2+p(2)**2)/(p(0)-p(3)),rZero))
           else
              sqp0p3 = -dsqrt(max(p(0)+p(3),rZero))
           end if
@@ -285,7 +301,11 @@ contains
           im = (3-nh)/2
           sfomeg(1) = sf(1)*omega(ip)
           sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+p(3),rZero)
+          if (p(3).lt.0d0) then
+             pp3 = max((p(1)**2+p(2)**2)/(pp-p(3)),rZero)
+          else
+             pp3 = max(pp+p(3),rZero)
+          end if
           chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
           if ( pp3.eq.rZero ) then
              chi(2) = dcmplx(-nh )
@@ -302,6 +322,8 @@ contains
        if (abs(fmass).lt.lim) then
           if(p(1).eq.0d0.and.p(2).eq.0d0.and.p(3).gt.0d0) then
              sqp0p3 = 0d0
+          else if (p(3).gt.0d0) then
+             sqp0p3 = dsqrt(max((p(1)**2+p(2)**2)/(p(3)-p(0)),rZero))
           else
              sqp0p3 = dsqrt(max(-(p(0)+p(3)),rZero))
           end if
@@ -334,7 +356,11 @@ contains
           im = (3-nh)/2
           sfomeg(1) = sf(1)*omega(ip)
           sfomeg(2) = sf(2)*omega(im)
-          pp3 = max(pp+(-p(3)),rZero)
+          if (p(3).gt.0d0) then
+             pp3 = max((p(1)**2+p(2)**2)/(pp+p(3)),rZero)
+          else
+             pp3 = max(pp-p(3),rZero)
+          end if
           chi(1) = dcmplx( dsqrt(pp3*0.5d0/pp) )
           if ( pp3.eq.rZero ) then
              chi(2) = dcmplx(-nh )

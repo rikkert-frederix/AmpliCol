@@ -1,13 +1,13 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,&
-       read_momenta,me_points,keep_processes_separate)
+  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,lib_type,&
+       tag,read_momenta,me_points,keep_processes_separate)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
     logical :: verbose, show_help
-    character(len=80) :: filename,library,tag
+    character(len=80) :: filename,library,tag,lib_type
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
     logical :: read_momenta,keep_processes_separate
@@ -21,6 +21,7 @@ contains
     seed=0
     itmax=128
     library='none'
+    lib_type='f'
     tag=''
     read_momenta=.false.
     keep_processes_separate=.true.
@@ -74,6 +75,8 @@ contains
        write (*,'(a)') "  --library=[X],    -l=[X]  : To create or use a library for the amplitudes, "// &
             "set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make "// &
             "amplicol_generate_library' after a library has been created). Default is 'none'."
+       write(*,'(30x,a)') "To generate a library for a specific language, set [X] to 'f', 'c', or 'cu' "// &
+            "for Fortran, C, or CUDA, respectively. To generate a library for all three languages, set [X] to 'all'."
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
        write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
             "with [X] points tested (single PS kinematics)"
@@ -82,6 +85,11 @@ contains
        write (*,'(a)') ""
        stop
     end if
+
+    if(library.eq.'all' .or. library.eq.'f' .or. library.eq.'c' .or. library.eq.'cu') then
+      lib_type=library
+      library='create'
+    endif
 
     if (library.ne.'use' .and. library.ne.'create' .and. library.ne.'none') then
        write (*,'(a)') "ERROR: unknown option for 'library'"

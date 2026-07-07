@@ -36,7 +36,7 @@ program amplicol_generate
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library,read_momenta
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta,create_lib_f,create_lib_c,create_lib_cu
   call cpu_time(tTot_B)
 
   call amplicol_init()
@@ -67,7 +67,13 @@ program amplicol_generate
         do igroup=1,ngroups
            done=done.and.all(pgl(igroup)%amps%lib_created)
         enddo
-        if (done) call create_amplitude_lib()
+        if (done) then
+             if (create_lib_f) call create_amplitude_lib_f()
+             if (create_lib_c) call create_amplitude_lib_c()
+             if (create_lib_cu) call create_amplitude_lib_cu()
+        endif
+      !   if (done) call create_amplitude_lib_f()
+      !   if (done) call create_amplitude_lib_c()
      endif
      if (to_write(1)) then
         call unwgt_process(pgl(ichan),iint) ! pick a random process
@@ -412,8 +418,12 @@ contains
        endif
        deallocate(amp2_save)
        if (create_amplitude_library) then
-          call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,&
-               ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
+          if(create_lib_f) call pgl(ichan)%amps(iint)%create_library_f(pgl(ichan)%next,&
+               pgl(ichan)%hel,ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
+          if(create_lib_c) call pgl(ichan)%amps(iint)%create_library_c(pgl(ichan)%next,&
+               pgl(ichan)%hel,ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
+          if(create_lib_cu) call pgl(ichan)%amps(iint)%create_library_cu(pgl(ichan)%next,&
+               pgl(ichan)%hel,ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
           pgl(ichan)%amps(iint)%lib_created=.true.
           done=.true.
        endif
@@ -568,10 +578,10 @@ contains
     integer :: argc
     integer :: i
     character(len=256) :: argv
-    character(len=80) :: library
+    character(len=80) :: library,lib_type
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag, &
+    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,lib_type,tag, &
          read_momenta,me_points,keep_processes_separate)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
@@ -583,6 +593,15 @@ contains
     elseif (library.eq.'create') then
        create_amplitude_library=.true.
        use_amplitude_library=.false.
+       if(lib_type.eq.'all') then
+          create_lib_f=.true.
+          create_lib_c=.true.
+          create_lib_cu=.true.
+       else
+          create_lib_c=(lib_type.eq.'c')
+          create_lib_f=(lib_type.eq.'f')
+          create_lib_cu=(lib_type.eq.'cu')
+       endif
     elseif (library.eq.'use') then
        create_amplitude_library=.false.
        use_amplitude_library=.true.

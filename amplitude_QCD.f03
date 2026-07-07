@@ -53,7 +53,7 @@ module amplitude_QCD_mod
      logical :: lib_created=.false.
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
-          ,create_library,optimise_evaluation
+          ,create_library_f,create_library_c,create_library_cu,optimise_evaluation
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
@@ -2927,7 +2927,7 @@ contains
     write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
   end subroutine optimise_evaluation
 
-  subroutine create_library(this,n,hel,igroup,iint,pm,p)
+  subroutine create_library_f(this,n,hel,igroup,iint,pm,p)
     use particles
     implicit none
     class(amplitude_QCD) :: this
@@ -3644,9 +3644,1430 @@ contains
     write(line,*) iint
     write(iunit,'(a)') 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
     close(iunit)
-  end subroutine create_library
+  end subroutine create_library_f
 
 
+  subroutine create_library_c(this,n,hel,igroup,iint,pm,p)
+    use particles
+    implicit none
+    class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
+    integer,intent(in) :: n,igroup,iint
+    real(kind=8),dimension(0:3,n),intent(in) :: p
+    integer,parameter :: iunit=14, iiunit=15
+    integer,dimension(n),intent(in)::hel
+    character(len=170) :: line,tmp,tmp2,tmp3,tmp4,lline
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,k
+    integer,dimension(0:24) :: icount
+    integer,dimension(150,7) :: icount_type
+    integer,dimension(:,:),allocatable :: curs
+    integer,dimension(:),allocatable :: pp
+    real(kind=8),dimension(:),allocatable :: m,w
+    integer,dimension(this%n_vert,0:24) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:24) :: coupl
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_libc.data'
+    open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
+    write(iunit) p
+    write(iunit) this%amps
+    close(iunit)
+    
+    write(tmp,*) igroup
+    write(line,*) iint
+    lline='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.h'
+    line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_libc.c'
+    open(file=line,unit=iunit,status='unknown')
+    open(file=lline,unit=iiunit,status='unknown')
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iiunit,'(a)') '#pragma once'
+    write(iiunit,'(a)') '#include "AmpliColTypes.h"'
+    write(iiunit,'(a)') '#include "FeynmanRules.h"'
+    write(iiunit,'(a)') ''
+    write(iunit,'(a)') '#include "amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.h"'
+    write(iunit,'(a)') '#include <stdlib.h>'
+    write(iunit,'(a)') ''
+   !  write(iunit,'(a)') 'namespace amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' {'
+    write(iunit,'(a)') ''
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(tmp2,*) n
+    write(tmp3,*) this%n_amps
+    write(iunit,'(2x,a)') 'static void evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))// &
+    '(const AC_D_FP p['//trim(adjustl(tmp2))//'][4], AC_D_CX amps['//trim(adjustl(tmp3))//']) {'
+    write(iiunit,'(2x,a)') 'static void evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))// &
+    '(const AC_D_FP p['//trim(adjustl(tmp2))//'][4], AC_D_CX amps['//trim(adjustl(tmp3))//']);'
+    write(iiunit,'(a)') ''
+    write(tmp,*) this%max_pp
+    write(iunit,'(4x,a)') 'AC_D_FP pp['//trim(adjustl(tmp))//'][4];'
+    write(tmp,*) this%n_cur
+    write(iunit,'(4x,a)') 'AC_CX (*val_c)[6] = malloc(sizeof(AC_CX['//trim(adjustl(tmp))//'][6]));'
+    write(tmp,*) this%n_vert
+    write(iunit,'(4x,a)') 'AC_CX (*int_c)[6] = malloc(sizeof(AC_CX['//trim(adjustl(tmp))//'][6]));'
+   write(iunit,'(4x,a)') 'fill_momentum_array(p,pp);'
+   write(iunit,'(4x,a)') 'compute_external_currents(pp,val_c);'
+    do isize=2,n-1
+       write(tmp,*) isize
+      write(iunit,'(4x,a)') 'compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+      write(iunit,'(4x,a)') 'compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+    enddo
+   write(iunit,'(4x,a)') 'compute_amps(amps,val_c);'
+   write(iunit,'(4x,a)') 'free(val_c);'
+   write(iunit,'(4x,a)') 'free(int_c);'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,'(2x,a)') '}'
+    write(iunit,'(a)') ''
+    write(tmp,*) n
+    write(tmp2,*) this%max_pp
+   write(iiunit,'(2x,a)') 'static void fill_momentum_array(const AC_D_FP p['//trim(adjustl(tmp))// &
+   '][4], AC_D_FP pp['//trim(adjustl(tmp2))//'][4]);'
+   write(iunit,'(2x,a)') 'static void fill_momentum_array(const AC_D_FP p['//trim(adjustl(tmp))// &
+   '][4], AC_D_FP pp['//trim(adjustl(tmp2))//'][4]){'
+    write(iunit,'(4x,a)') 'for (int i=0; i<4; ++i) {'
+    do ip=1,this%max_pp
+       ibin=this%pp_i_to_bin(ip)
+       write(tmp,*) ip - 1
+      line = 'pp['//trim(adjustl(tmp))//'][i] = '
+       do i=1,n
+          write(tmp,*) i - 1
+          if (btest(ibin,i-1) .and. i.le.2) &
+               line=trim(adjustl(line))//'-p['//trim(adjustl(tmp))//'][i]'
+          if (btest(ibin,i-1) .and. i.ge.3) &
+               line=trim(adjustl(line))//'+p['//trim(adjustl(tmp))//'][i]'
+       enddo
+       write (iunit,'(6x,a)') trim(adjustl(line))//';'
+    enddo
+    write(iunit,'(4x,a)') '}'
+    write(iunit,'(2x,a)') '}'
+    write(iunit,'(a)') ''
+    do isize=1,n-1
+       if (isize.eq.1) then
+          write(tmp,*) this%max_pp
+          write(tmp2,*) this%n_cur
+          write(iiunit,'(2x,a)') 'static void compute_external_currents(const AC_D_FP pp['//trim(adjustl(tmp))// &
+          '][4], AC_CX val_c['//trim(adjustl(tmp2))//'][6]);'
+          write(iunit,'(2x,a)') 'static void compute_external_currents(const AC_D_FP pp['//trim(adjustl(tmp))// &
+          '][4], AC_CX val_c['//trim(adjustl(tmp2))//'][6]) {'
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+             ifinal=1
+             if (this%current_list(ic)%spin(1).eq.-9) then
+                ih_in=hel(this%current_list(ic)%order(1))
+             else
+                ih_in=this%current_list(ic)%spin(1)
+             endif
+             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_gluon_cmplx(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//']);'
+             elseif (pm%is_quark(this%current_list(ic)%type).or. &
+                  pm%is_lepton(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_quark(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//'],'
+                write(tmp,'(e20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//');'
+             elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+                  pm%is_antilepton(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_antiquark(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//'],'
+                write(tmp,'(e20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//');'
+             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_vector_mass(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//'],'
+                write(tmp,'(e20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//');'
+             elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_scalar(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//']);'
+             else
+                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
+                stop 1
+             endif
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          enddo
+          write(iunit,'(2x,a)') '}'
+          write(iunit,'(a)') ''
+          cycle
+       endif
+
+       if (use_real_gluons) then
+          write (*,*) 'create library not implemented for use_real_gluons'
+          stop 1
+       endif
+       
+       ! interactions
+       ! loop over the vertices required to create all the currents with isize
+       ! number of external particles combined
+       write(tmp,*) isize
+       write(tmp2,*) this%max_pp
+       write(tmp3,*) this%n_cur
+       write(tmp4,*) this%n_vert
+      write(iiunit,'(2x,a)') 'static void compute_vertices'//trim(adjustl(tmp))// &
+      '(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX val_c['//trim(adjustl(tmp3))// &
+      '][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6]);'
+      write(iunit,'(2x,a)') 'static void compute_vertices'//trim(adjustl(tmp))// &
+      '(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX val_c['//trim(adjustl(tmp3))// &
+      '][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6]) {'
+
+       icount(0:24)=0
+       do itype=0,24 ! vertex type
+          do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+             if (this%interaction_list(iv)%type.eq.itype) then
+                icount(itype)=icount(itype)+1
+                cur1(icount(itype),itype)=this%interaction_list(iv)%currents(1)
+                cur2(icount(itype),itype)=this%interaction_list(iv)%currents(2)
+                pp1(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+                pp2(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                int1(icount(itype),itype)=iv
+                coupl(1:2,icount(itype),itype)=this%interaction_list(iv)%coupl(1:2)
+             endif
+          enddo
+       enddo
+       do itype=0,24
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+          write(iunit,'(4x,a)') trim(adjustl(line))
+       enddo
+      !  write(tmp,*) isize
+       write(iunit,'(2x,a)') '}'
+       write(iunit,'(a)') ''
+
+       do itype=0,24
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='static void vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          write(tmp2,*) this%max_pp
+          write(tmp3,*) this%n_cur
+          write(tmp4,*) this%n_vert
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(const AC_D_FP pp['//trim(adjustl(tmp2))// &
+          '][4], AC_CX val_c['//trim(adjustl(tmp3))//'][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6])'
+          write(iiunit,'(2x,a)') trim(adjustl(line))//';'
+          write(iunit,'(2x,a)') trim(adjustl(line))//'{'
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)') 'static const int cur1['//trim(adjustl(tmp))//']={ '
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur1(i,itype) - 1
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                write(iunit,'(6x,a)') trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)') 'static const int cur2['//trim(adjustl(tmp))//']={ '
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur2(i,itype) - 1
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                write(iunit,'(6x,a)') trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)') 'static const int int1['//trim(adjustl(tmp))//']={ '
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) int1(i,itype) - 1
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                write(iunit,'(6x,a)') trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          if (itype.eq.0 .or. itype.eq.12) then
+             write(tmp,*) icount(itype)
+             write(iunit,'(4x,a)') 'static const int pp1['//trim(adjustl(tmp))//']={ '
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp1(i,itype) - 1
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+             write(tmp,*) icount(itype)
+             write(iunit,'(4x,a)') 'static const int pp2['//trim(adjustl(tmp))//']={ '
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp2(i,itype) - 1
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          endif
+          if (itype.eq.8 .or. itype.ge.10) then
+             write(tmp,*) icount(itype)*2
+             write(iunit,'(4x,a)') 'static const AC_FP coupl['//trim(adjustl(tmp))//']={'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,'(E24.16)') coupl(1,i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                   write(tmp,'(E24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   write(tmp,'(E24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,2).eq.0 .and. i.ne.icount(itype)) then
+                  !  line=trim(adjustl(line))//' &'
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          endif
+
+
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)')'for(int i=0; i<'//trim(adjustl(tmp))//'; i++) {'
+          if (itype.eq.0) then
+             line='ThreeGluon(val_c[cur1[i]],pp[pp1[i]],val_c[cur2[i]],pp[pp2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.1) then
+             line='TwoGluontoTensor(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.2) then
+             line='TensorGluontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.3) then
+             line='GluonTensortoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.4) then
+             line='GluonQuarktoQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.5) then
+             line='GluonAQuarktoAQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.6) then
+             line='QuarkGluontoQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.7) then
+             line='AQuarkGluontoAQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.8) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='QuarkAQuarktoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.9) then
+             line='AQuarkQuarktoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.10) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='QuarkGluontoQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.11) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='AQuarkGluontoAQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.12) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ThreeGluon_coupl(val_c[cur1[i]],pp[pp1[i]],val_c[cur2[i]],'//&
+                  'pp[pp2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.13) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='TwoGluontoTensor_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.14) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='TensorGluontoGluon_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.15) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonTensortoGluon_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.16) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='QuarkScalartoQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.17) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonGluontoScalar(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.18) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ScalarGluontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.19) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonScalartoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.20) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ScalarScalartoScalar(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.21) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='LeptonALeptontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.22) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ALeptonLeptontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.23) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonQuarktoQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.24) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonAQuarktoAQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          endif
+          write(iunit,'(6x,a)')trim(adjustl(line))
+          write(iunit,'(4x,a)')'}'
+
+         !  write(tmp,*) isize
+          line='}'
+          write(iunit,'(2x,a)') trim(adjustl(line))
+          write(iunit,'(a)') ''
+
+       enddo
+
+       write(tmp,*) isize
+       write(tmp2,*) this%max_pp
+       write(tmp3,*) this%n_cur
+       write(tmp4,*) this%n_vert
+      write(iiunit,'(2x,a)') 'static void compute_currents'//trim(adjustl(tmp)) &
+      //'(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX ' &
+      //'val_c['//trim(adjustl(tmp3))//'][6], AC_CX ' &
+      //'int_c['//trim(adjustl(tmp4))//'][6]);'
+      write(iunit,'(2x,a)') 'static void compute_currents'//trim(adjustl(tmp)) &
+      //'(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX ' &
+      //'val_c['//trim(adjustl(tmp3))//'][6], AC_CX ' &
+      //'int_c['//trim(adjustl(tmp4))//'][6]){'
+
+       icount_type=0
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          if (pm%is_gluon(this%current_list(ic)%type).or. &
+               pm%is_photon(this%current_list(ic)%type)) then
+             itype=1
+          elseif (pm%is_quark(this%current_list(ic)%type).or. &
+               pm%is_lepton(this%current_list(ic)%type)) then
+             itype=2
+          elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+               pm%is_antilepton(this%current_list(ic)%type)) then
+             itype=3
+          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+             itype=4
+          elseif (pm%is_higgs(this%current_list(ic)%type)) then
+             itype=5
+          elseif (pm%is_tensor(this%current_list(ic)%type)) then
+             itype=6
+          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+             itype=7
+          else
+             write (*,*) 'not found:',this%current_list(ic)%type
+             stop 1
+          endif
+          if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
+             write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
+             stop 1
+          endif
+          icount_type(this%current_list(ic)%n_vert,itype)=icount_type(this%current_list(ic)%n_vert,itype)+1
+       enddo
+
+       do i=1,150
+          do j=1,7
+             if (icount_type(i,j).eq.0) cycle
+             write(tmp,*) isize
+             line='combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          enddo
+       enddo
+      !  write(tmp,*) isize
+       write(iunit,'(2x,a)') '}'
+       write(iunit,'(a)') ''
+
+       
+       do i=1,150
+          do j=1,7
+             if (icount_type(i,j).eq.0) cycle
+
+             allocate(curs(0:i,icount_type(i,j)))
+             allocate(pp(icount_type(i,j)))
+             allocate(m(icount_type(i,j)))
+             allocate(w(icount_type(i,j)))
+             curs=0
+             ii=0
+             do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+                if (pm%is_gluon(this%current_list(ic)%type).or. &
+                     pm%is_photon(this%current_list(ic)%type)) then
+                   itype=1
+                elseif (pm%is_quark(this%current_list(ic)%type).or.&
+                     pm%is_lepton(this%current_list(ic)%type)) then
+                   itype=2
+                elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+                     pm%is_antilepton(this%current_list(ic)%type)) then
+                   itype=3
+                elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                   itype=4
+                elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                   itype=5
+                elseif (pm%is_tensor(this%current_list(ic)%type)) then
+                   itype=6
+                elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+                   itype=7
+                else
+                   write (*,*) 'not found',this%current_list(ic)%type
+                   stop 1
+                endif
+                if (itype.ne.j) cycle
+                if (this%current_list(ic)%n_vert.ne.i) cycle
+                ii=ii+1
+                curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
+                curs(0,ii)=ic
+                pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
+                m(ii)=this%current_list(ic)%mass
+                w(ii)=this%current_list(ic)%width
+             enddo
+             write(tmp,*) isize
+             line='static void combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             write(tmp2,*) this%max_pp
+             write(tmp3,*) this%n_cur
+             write(tmp4,*) this%n_vert
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(const AC_D_FP pp[' &
+             //trim(adjustl(tmp2))//'][4], AC_CX val_c['//trim(adjustl(tmp3))// &
+             '][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6])'
+             write(iiunit,'(2x,a)') trim(adjustl(line))//';'
+             write(iunit,'(2x,a)') trim(adjustl(line))//' {'
+             write(tmp,*) i + 1
+             write(tmp2,*) icount_type(i,j)
+             write(tmp3,*) (i+1) * icount_type(i,j)
+             write(tmp,*) icount_type(i,j)
+            line='static const int int1['//trim(adjustl(tmp))//']['
+            write(tmp,*) i+1
+            line=trim(adjustl(line))//trim(adjustl(tmp))//'] = {'
+            write(iunit,'(4x,a)') trim(adjustl(line))
+            line=''
+            do ii=1,icount_type(i,j)
+               do jj=0,i
+                  write(tmp,*) curs(jj,ii) - 1
+                  if (ii.eq.1.and.jj.eq.0) then
+                     line=trim(adjustl(tmp))
+                  else
+                     line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                  endif
+                  if (mod(jj+1+(ii-1)*(i+1),12).eq.0 .and. .not.(ii.eq.icount_type(i,j) .and. jj.eq.i)) then
+                     write(iunit,'(6x,a)') trim(adjustl(line))
+                     line=''
+                  endif
+               enddo
+            enddo
+            line=trim(adjustl(line))//'};'
+            write(iunit,'(6x,a)') trim(adjustl(line))
+
+             if (j.ne.6 .and. j.ne.7) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,'(4x,a)') 'static const int pp1['//trim(adjustl(tmp))//']={'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,*) pp(ii) - 1
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,12).eq.0 .and. ii.ne.icount_type(i,j)) then
+                     !  line=trim(adjustl(line))//' &'
+                      write(iunit,'(6x,a)') trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+             endif
+
+             if (j.ge.2 .and. j.le.5) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,'(4x,a)') 'const AC_D_FP m['//trim(adjustl(tmp))//']={'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,'(E24.16)') m(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      write(iunit,'(6x,a)') trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+                write(tmp,*) icount_type(i,j)
+                write(iunit,'(4x,a)') 'const AC_D_FP w['//trim(adjustl(tmp))//']={'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,'(E24.16)') w(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      write(iunit,'(6x,a)') trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+             endif
+
+             write(tmp,*) icount_type(i,j)
+             write(iunit,'(4x,a)') 'for(int i=0; i<'//trim(adjustl(tmp))//'; i++){'
+             write(tmp,*) i
+             write(tmp4,*) this%n_vert
+             write(tmp2,*) i + 1
+             write(iunit,'(6x,a)') 'ordered_sum_cx6(int_c,int1[i],1,'//trim(adjustl(tmp))//',val_c[int1[i][0]]);'
+             if (j.eq.1 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'GluonPropagator(val_c[int1[i][0]],pp[pp1[i]]);'
+             elseif(j.eq.2 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'QuarkPropagator(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             elseif(j.eq.3 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'AQuarkPropagator(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             elseif(j.eq.4 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'GluonPropagator_mass(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             elseif(j.eq.5 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'ScalarPropagator(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             endif
+             write(iunit,'(4x,a)') '}'
+             write(tmp,*) isize
+             line='}'
+             write(iunit,'(2x,a)') trim(adjustl(line))
+             write(iunit,'(a)') ''
+             deallocate(curs)
+             deallocate(pp)
+             deallocate(m)
+             deallocate(w)
+          enddo
+       enddo
+    enddo
+
+    write(tmp,*) this%n_amps
+    write(tmp2,*) this%n_cur
+       write(iiunit,'(2x,a)') 'static void compute_amps(AC_D_CX amps['//trim(adjustl(tmp))// &
+       '], const AC_CX val_c['//trim(adjustl(tmp2))//'][6]);'
+       write(iunit,'(2x,a)') 'static void compute_amps(AC_D_CX amps['//trim(adjustl(tmp))// &
+       '], const AC_CX val_c['//trim(adjustl(tmp2))//'][6]){'
+
+    ! first the 'non-same-flavour' ones
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//']);'
+          if (.not.this%same_flav(iproc)) then
+             write(tmp,*) iamp - 1
+             write(tmp2,*) this%curr2amp(1,iamp) - 1
+             line='amps['//trim(adjustl(tmp))//'] = (AC_D_CX)inprod_wf(val_c['//trim(adjustl(tmp2))//'],val_c['
+             write(tmp,*) this%curr2amp(2,iamp) - 1
+             line=trim(adjustl(line))//trim(adjustl(tmp))//']);'
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          endif
+       enddo
+    enddo
+    ! now the same-flavour ones. They are the "sum" of two non-same-flavour ones.
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          if (this%same_flav(iproc)) then
+             ! same-flavour amps are build from two different-flavour amps
+             write(tmp,*) iamp - 1
+             line='amps['//trim(adjustl(tmp))//'] ='
+             do idau=1,2
+                if (this%same_flavour_sum(iamp,idau).gt.0) then
+                   write(tmp,*) this%same_flavour_sum(iamp,idau) - 1
+                   if (this%same_flavour_sum_operation(iamp,idau) .eq. 0) then
+                      line=trim(adjustl(line))//'+amps['//trim(adjustl(tmp))//']'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
+                      line=trim(adjustl(line))//'-conj(amps['//trim(adjustl(tmp))//'])'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
+                      line=trim(adjustl(line))//'+conj(amps['//trim(adjustl(tmp))//'])'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
+                      line=trim(adjustl(line))//'-amps['//trim(adjustl(tmp))//']'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
+                        line=trim(adjustl(line))//'+AC_D_CX(cimag(amps['//trim(adjustl(tmp))// &
+                          ']),creal(amps['//trim(adjustl(tmp))//']))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
+                      line=trim(adjustl(line))//'+AC_D_CX(-cimag(amps['//trim(adjustl(tmp))// &
+                      ']),creal(amps['//trim(adjustl(tmp))//']))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
+                      line=trim(adjustl(line))//'+AC_D_CX(cimag(amps['//trim(adjustl(tmp))// &
+                      ']),-creal(amps['//trim(adjustl(tmp))//']))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
+                      line=trim(adjustl(line))//'+AC_D_CX(-cimag(amps['// &
+                      trim(adjustl(tmp))//']),-creal(amps['//trim(adjustl(tmp))//']))'
+                   else
+                      write (*,*) 'ERROR: unknown operation in creating library', &
+                           this%same_flavour_sum_operation(iamp,idau)
+                      stop 1
+                   endif
+                endif
+             enddo
+             write(iunit,'(4x,a)') trim(adjustl(line))//';'
+          endif
+       enddo
+    enddo
+    write(iunit,'(2x,a)') '}'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,'(a)') 'const struct AC_AMP amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' = {'
+    write(iunit,'(2x,a)') '.eval=evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(a)') '};'
+    close(iunit)
+    write(iiunit,'(2x,a)') 'extern const struct AC_AMP amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//';'
+    close(iiunit)
+  end subroutine create_library_c
+
+  subroutine create_library_cu(this,n,hel,igroup,iint,pm,p)
+    use particles
+    implicit none
+    class(amplitude_QCD) :: this
+    type(physics_model),intent(in) :: pm
+    integer,intent(in) :: n,igroup,iint
+    real(kind=8),dimension(0:3,n),intent(in) :: p
+    integer,parameter :: iunit=14, iiunit=15
+    integer,dimension(n),intent(in)::hel
+    character(len=170) :: line,tmp,tmp2,tmp3,tmp4,lline
+    integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,k
+    integer,dimension(0:24) :: icount
+    integer,dimension(150,7) :: icount_type
+    integer,dimension(:,:),allocatable :: curs
+    integer,dimension(:),allocatable :: pp
+    real(kind=8),dimension(:),allocatable :: m,w
+    integer,dimension(this%n_vert,0:24) :: cur1,cur2,int1,pp1,pp2
+    real(kind=8),dimension(2,this%n_vert,0:24) :: coupl
+    write(tmp,*) igroup
+    write(line,*) iint
+    line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_libc.data'
+    open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
+    write(iunit) p
+    write(iunit) this%amps
+    close(iunit)
+    
+    write(tmp,*) igroup
+    write(line,*) iint
+    lline='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.cuh'
+    line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_libcu.cu'
+    open(file=line,unit=iunit,status='unknown')
+    open(file=lline,unit=iiunit,status='unknown')
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iiunit,'(a)') '#pragma once'
+    write(iiunit,'(a)') '#include "AmpliColTypes.h"'
+    write(iiunit,'(a)') '#include "FeynmanRules_device.cuh"'
+    write(iiunit,'(a)') ''
+    write(tmp2,*) this%n_amps
+    write(iiunit,'(a)') '#define NAMP'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' '//trim(adjustl(tmp2))
+    write(tmp2,*) this%max_pp
+    write(iiunit,'(a)') '#define NPMOM'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' '//trim(adjustl(tmp2))
+    write(tmp2,*) this%n_cur
+    write(iiunit,'(a)') '#define NCURR'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' '//trim(adjustl(tmp2))
+    write(tmp2,*) this%n_vert
+    write(iiunit,'(a)') '#define NVERT'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' '//trim(adjustl(tmp2))
+    write(iiunit,'(a)') ''
+    write(iunit,'(a)') '#include "amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.cuh"'
+    write(iunit,'(a)') ''
+    write(iunit,'(a)') 'namespace amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' {'
+    write(iiunit,'(a)') 'namespace amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' {'
+    write(iunit,'(a)') ''
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(tmp2,*) n
+    write(tmp3,*) this%n_amps
+    write(iunit,'(2x,a)') 'extern "C" __device__ void evaluate_amp'//trim(adjustl(tmp))// &
+    '_'//trim(adjustl(line))//'(const AC_D_FP p['//trim(adjustl(tmp2))//'][4], AC_D_CX amps['//trim(adjustl(tmp3))// &
+     '], AC_D_FP pp[][4], AC_CX val_c[][6], AC_CX int_c[][6]) {'
+    write(iiunit,'(2x,a)') 'extern "C" __device__ void evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))// &
+    '(const AC_FP p['//trim(adjustl(tmp2))//'][4], AC_CX amps['//trim(adjustl(tmp3))//'],'// &
+      'AC_D_FP pp[][4], AC_CX val_c[][6], AC_CX int_c[][6]);'
+    write(iiunit,'(a)') ''
+   !  write(tmp,*) this%max_pp
+   !  write(iunit,'(4x,a)') 'AC_FP pp['//trim(adjustl(tmp))//'][4];'
+   !  write(tmp,*) this%n_cur
+   !  write(iunit,'(4x,a)') 'AC_CX val_c['//trim(adjustl(tmp))//'][6];'
+   !  write(tmp,*) this%n_vert
+   !  write(iunit,'(4x,a)') 'AC_CX int_c['//trim(adjustl(tmp))//'][6];'
+   write(iunit,'(4x,a)') 'fill_momentum_array(p,pp);'
+   write(iunit,'(4x,a)') 'compute_external_currents(pp,val_c);'
+    do isize=2,n-1
+       write(tmp,*) isize
+      write(iunit,'(4x,a)') 'compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+      write(iunit,'(4x,a)') 'compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+    enddo
+   write(iunit,'(4x,a)') 'compute_amps(amps,val_c);'
+    write(tmp,*) igroup
+    write(line,*) iint
+    write(iunit,'(2x,a)') '}'
+    write(iunit,'(a)') ''
+    write(tmp,*) n
+    write(tmp2,*) this%max_pp
+   write(iiunit,'(2x,a)') '__device__ void fill_momentum_array(const AC_D_FP p['//trim(adjustl(tmp))// &
+   '][4], AC_D_FP pp['//trim(adjustl(tmp2))//'][4]);'
+   write(iunit,'(2x,a)') '__device__ void fill_momentum_array(const AC_D_FP p[' &
+   //trim(adjustl(tmp))//'][4], AC_D_FP pp['//trim(adjustl(tmp2))//'][4]){'
+    write(iunit,'(4x,a)') 'for (int i=0; i<4; ++i) {'
+    do ip=1,this%max_pp
+       ibin=this%pp_i_to_bin(ip)
+       write(tmp,*) ip - 1
+      line = 'pp['//trim(adjustl(tmp))//'][i] = '
+       do i=1,n
+          write(tmp,*) i - 1
+          if (btest(ibin,i-1) .and. i.le.2) &
+               line=trim(adjustl(line))//'-p['//trim(adjustl(tmp))//'][i]'
+          if (btest(ibin,i-1) .and. i.ge.3) &
+               line=trim(adjustl(line))//'+p['//trim(adjustl(tmp))//'][i]'
+       enddo
+       write (iunit,'(6x,a)') trim(adjustl(line))//';'
+    enddo
+    write(iunit,'(4x,a)') '}'
+    write(iunit,'(2x,a)') '}'
+    write(iunit,'(a)') ''
+    do isize=1,n-1
+       if (isize.eq.1) then
+          write(tmp,*) this%max_pp
+          write(tmp2,*) this%n_cur
+          write(iiunit,'(2x,a)') '__device__ void compute_external_currents(const AC_D_FP pp['//trim(adjustl(tmp))// &
+          '][4], AC_CX val_c['//trim(adjustl(tmp2))//'][6]);'
+          write(iunit,'(2x,a)') '__device__ void compute_external_currents(const AC_D_FP pp[' &
+          //trim(adjustl(tmp))//'][4], AC_CX val_c['//trim(adjustl(tmp2))//'][6]) {'
+          do ic=this%n_cur_start(isize),this%n_cur_end(isize) 
+             ifinal=1
+             if (this%current_list(ic)%spin(1).eq.-9) then
+                ih_in=hel(this%current_list(ic)%order(1))
+             else
+                ih_in=this%current_list(ic)%spin(1)
+             endif
+             if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_gluon_cmplx(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//']);'
+             elseif (pm%is_quark(this%current_list(ic)%type).or. &
+                  pm%is_lepton(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_quark(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//'],'
+                write(tmp,'(e20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//');'
+             elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+                  pm%is_antilepton(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_antiquark(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//'],'
+                write(tmp,'(e20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//');'
+             elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_vector_mass(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ih_in
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ifinal
+                line=trim(adjustl(line))//trim(adjustl(tmp))//','
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//'],'
+                write(tmp,'(e20.12)') this%current_list(ic)%mass
+                line=trim(adjustl(line))//trim(adjustl(tmp))//');'
+             elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin) - 1
+                line='ext_scalar(pp['//trim(adjustl(tmp))//'],'
+                write(tmp,*) ic - 1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//']);'
+             else
+                write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
+                stop 1
+             endif
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          enddo
+          write(iunit,'(2x,a)') '}'
+          write(iunit,'(a)') ''
+          cycle
+       endif
+
+       if (use_real_gluons) then
+          write (*,*) 'create library not implemented for use_real_gluons'
+          stop 1
+       endif
+       
+       ! interactions
+       ! loop over the vertices required to create all the currents with isize
+       ! number of external particles combined
+       write(tmp,*) isize
+       write(tmp2,*) this%max_pp
+       write(tmp3,*) this%n_cur
+       write(tmp4,*) this%n_vert
+      write(iiunit,'(2x,a)') '__device__ void compute_vertices'//trim(adjustl(tmp))// &
+      '(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX val_c['//trim(adjustl(tmp3))// &
+      '][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6]);'
+      write(iunit,'(2x,a)') '__device__ void compute_vertices'//trim(adjustl(tmp))// &
+      '(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX val_c['//trim(adjustl(tmp3))// &
+      '][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6]) {'
+
+       icount(0:24)=0
+       do itype=0,24 ! vertex type
+          do iv=this%n_vert_start(isize),this%n_vert_end(isize)
+             if (this%interaction_list(iv)%type.eq.itype) then
+                icount(itype)=icount(itype)+1
+                cur1(icount(itype),itype)=this%interaction_list(iv)%currents(1)
+                cur2(icount(itype),itype)=this%interaction_list(iv)%currents(2)
+                pp1(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)
+                pp2(icount(itype),itype)=this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)
+                int1(icount(itype),itype)=iv
+                coupl(1:2,icount(itype),itype)=this%interaction_list(iv)%coupl(1:2)
+             endif
+          enddo
+       enddo
+       do itype=0,24
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+          write(iunit,'(4x,a)') trim(adjustl(line))
+       enddo
+      !  write(tmp,*) isize
+       write(iunit,'(2x,a)') '}'
+       write(iunit,'(a)') ''
+
+       do itype=0,24
+          if (icount(itype).eq.0) cycle
+          write(tmp,*) isize
+          line='void vertex_type'//trim(adjustl(tmp))//'_'
+          write(tmp,*) itype
+          write(tmp2,*) this%max_pp
+          write(tmp3,*) this%n_cur
+          write(tmp4,*) this%n_vert
+          line=trim(adjustl(line))//trim(adjustl(tmp))//'(const AC_D_FP pp['//trim(adjustl(tmp2))// &
+          '][4], AC_CX val_c['//trim(adjustl(tmp3))//'][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6])'
+          write(iiunit,'(2x,a)') '__device__ '//trim(adjustl(line))//';'
+          write(iunit,'(2x,a)') '__device__ '//trim(adjustl(line))//'{'
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)') 'static const int cur1['//trim(adjustl(tmp))//']={ '
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur1(i,itype) - 1
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                write(iunit,'(6x,a)') trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)') 'static const int cur2['//trim(adjustl(tmp))//']={ '
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) cur2(i,itype) - 1
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                write(iunit,'(6x,a)') trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)') 'static const int int1['//trim(adjustl(tmp))//']={ '
+          line=''
+          do i=1,icount(itype)
+             write(tmp,*) int1(i,itype) - 1
+             if (i.eq.1) then
+                line=trim(adjustl(tmp))
+             else
+                line=trim(adjustl(line))//','//trim(adjustl(tmp))
+             endif
+             if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                write(iunit,'(6x,a)') trim(adjustl(line))
+                line=''
+             endif
+          enddo
+          write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          if (itype.eq.0 .or. itype.eq.12) then
+             write(tmp,*) icount(itype)
+             write(iunit,'(4x,a)') 'static const int pp1['//trim(adjustl(tmp))//']={ '
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp1(i,itype) - 1
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+             write(tmp,*) icount(itype)
+             write(iunit,'(4x,a)') 'static const int pp2['//trim(adjustl(tmp))//']={ '
+             line=''
+             do i=1,icount(itype)
+                write(tmp,*) pp2(i,itype) - 1
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,12).eq.0 .and. i.ne.icount(itype)) then
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          endif
+          if (itype.eq.8 .or. itype.ge.10) then
+             write(tmp,*) icount(itype)*2
+             write(iunit,'(4x,a)') 'static const AC_FP coupl['//trim(adjustl(tmp))//']={'
+             line=''
+             do i=1,icount(itype)
+                write(tmp,'(E24.16)') coupl(1,i,itype)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                   write(tmp,'(E24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   write(tmp,'(E24.16)') coupl(2,i,itype)
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,2).eq.0 .and. i.ne.icount(itype)) then
+                  !  line=trim(adjustl(line))//' &'
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+          endif
+
+
+          write(tmp,*) icount(itype)
+          write(iunit,'(4x,a)')'for(int i=0; i<'//trim(adjustl(tmp))//'; i++) {'
+          if (itype.eq.0) then
+             line='ThreeGluon(val_c[cur1[i]],pp[pp1[i]],val_c[cur2[i]],pp[pp2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.1) then
+             line='TwoGluontoTensor(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.2) then
+             line='TensorGluontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.3) then
+             line='GluonTensortoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.4) then
+             line='GluonQuarktoQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.5) then
+             line='GluonAQuarktoAQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.6) then
+             line='QuarkGluontoQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.7) then
+             line='AQuarkGluontoAQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.8) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='QuarkAQuarktoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.9) then
+             line='AQuarkQuarktoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]]);'
+          elseif(itype.eq.10) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='QuarkGluontoQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.11) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='AQuarkGluontoAQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.12) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ThreeGluon_coupl(val_c[cur1[i]],pp[pp1[i]],val_c[cur2[i]],'//&
+                  'pp[pp2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.13) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='TwoGluontoTensor_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.14) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='TensorGluontoGluon_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.15) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonTensortoGluon_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.16) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='QuarkScalartoQuark(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.17) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonGluontoScalar(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.18) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ScalarGluontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.19) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonScalartoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.20) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ScalarScalartoScalar(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.21) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='LeptonALeptontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.22) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='ALeptonLeptontoGluon(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.23) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonQuarktoQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          elseif(itype.eq.24) then
+             write(iunit,'(6x,a)') 'const AC_FP _c_[2]={coupl[2*i],coupl[2*i+1]};'
+             line='GluonAQuarktoAQuark_coupl(val_c[cur1[i]],val_c[cur2[i]],int_c[int1[i]],_c_);'
+          endif
+          write(iunit,'(6x,a)')trim(adjustl(line))
+          write(iunit,'(4x,a)')'}'
+
+         !  write(tmp,*) isize
+          line='}'
+          write(iunit,'(2x,a)') trim(adjustl(line))
+          write(iunit,'(a)') ''
+
+       enddo
+
+       write(tmp,*) isize
+       write(tmp2,*) this%max_pp
+       write(tmp3,*) this%n_cur
+       write(tmp4,*) this%n_vert
+      write(iiunit,'(2x,a)') '__device__ void compute_currents'//trim(adjustl(tmp)) &
+      //'(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX ' &
+      //'val_c['//trim(adjustl(tmp3))//'][6], AC_CX ' &
+      //'int_c['//trim(adjustl(tmp4))//'][6]);'
+      write(iunit,'(2x,a)') '__device__ void compute_currents'//trim(adjustl(tmp)) &
+      //'(const AC_D_FP pp['//trim(adjustl(tmp2))//'][4], AC_CX ' &
+      //'val_c['//trim(adjustl(tmp3))//'][6], AC_CX ' &
+      //'int_c['//trim(adjustl(tmp4))//'][6]){'
+
+       icount_type=0
+       do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+          if (pm%is_gluon(this%current_list(ic)%type).or. &
+               pm%is_photon(this%current_list(ic)%type)) then
+             itype=1
+          elseif (pm%is_quark(this%current_list(ic)%type).or. &
+               pm%is_lepton(this%current_list(ic)%type)) then
+             itype=2
+          elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+               pm%is_antilepton(this%current_list(ic)%type)) then
+             itype=3
+          elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+             itype=4
+          elseif (pm%is_higgs(this%current_list(ic)%type)) then
+             itype=5
+          elseif (pm%is_tensor(this%current_list(ic)%type)) then
+             itype=6
+          elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+             itype=7
+          else
+             write (*,*) 'not found:',this%current_list(ic)%type
+             stop 1
+          endif
+          if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
+             write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
+             stop 1
+          endif
+          icount_type(this%current_list(ic)%n_vert,itype)=icount_type(this%current_list(ic)%n_vert,itype)+1
+       enddo
+
+       do i=1,150
+          do j=1,7
+             if (icount_type(i,j).eq.0) cycle
+             write(tmp,*) isize
+             line='combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(pp,val_c,int_c);'
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          enddo
+       enddo
+      !  write(tmp,*) isize
+       write(iunit,'(2x,a)') '}'
+       write(iunit,'(a)') ''
+
+       
+       do i=1,150
+          do j=1,7
+             if (icount_type(i,j).eq.0) cycle
+
+             allocate(curs(0:i,icount_type(i,j)))
+             allocate(pp(icount_type(i,j)))
+             allocate(m(icount_type(i,j)))
+             allocate(w(icount_type(i,j)))
+             curs=0
+             ii=0
+             do ic=this%n_cur_start(isize),this%n_cur_end(isize)
+                if (pm%is_gluon(this%current_list(ic)%type).or. &
+                     pm%is_photon(this%current_list(ic)%type)) then
+                   itype=1
+                elseif (pm%is_quark(this%current_list(ic)%type).or.&
+                     pm%is_lepton(this%current_list(ic)%type)) then
+                   itype=2
+                elseif (pm%is_antiquark(this%current_list(ic)%type).or. &
+                     pm%is_antilepton(this%current_list(ic)%type)) then
+                   itype=3
+                elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
+                   itype=4
+                elseif (pm%is_higgs(this%current_list(ic)%type)) then
+                   itype=5
+                elseif (pm%is_tensor(this%current_list(ic)%type)) then
+                   itype=6
+                elseif (pm%is_higgsor(this%current_list(ic)%type)) then
+                   itype=7
+                else
+                   write (*,*) 'not found',this%current_list(ic)%type
+                   stop 1
+                endif
+                if (itype.ne.j) cycle
+                if (this%current_list(ic)%n_vert.ne.i) cycle
+                ii=ii+1
+                curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
+                curs(0,ii)=ic
+                pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
+                m(ii)=this%current_list(ic)%mass
+                w(ii)=this%current_list(ic)%width
+             enddo
+             write(tmp,*) isize
+             line='void combine_currents_'//trim(adjustl(tmp))
+             write(tmp,*) i
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))
+             write(tmp,*) j
+             write(tmp2,*) this%max_pp
+             write(tmp3,*) this%n_cur
+             write(tmp4,*) this%n_vert
+             line=trim(adjustl(line))//'_'//trim(adjustl(tmp))//'(const AC_D_FP pp[' &
+             //trim(adjustl(tmp2))//'][4], AC_CX val_c['//trim(adjustl(tmp3))// &
+             '][6], AC_CX int_c['//trim(adjustl(tmp4))//'][6])'
+             write(iiunit,'(2x,a)') '__device__ '//trim(adjustl(line))//';'
+             write(iunit,'(2x,a)') '__device__ '//trim(adjustl(line))//' {'
+             write(tmp,*) i + 1
+             write(tmp2,*) icount_type(i,j)
+             write(tmp3,*) (i+1) * icount_type(i,j)
+             write(tmp,*) icount_type(i,j)
+            line='static const int int1['//trim(adjustl(tmp))//']['
+            write(tmp,*) i+1
+            line=trim(adjustl(line))//trim(adjustl(tmp))//'] = {'
+            write(iunit,'(4x,a)') trim(adjustl(line))
+            line=''
+            do ii=1,icount_type(i,j)
+               do jj=0,i
+                  write(tmp,*) curs(jj,ii) - 1
+                  if (ii.eq.1.and.jj.eq.0) then
+                     line=trim(adjustl(tmp))
+                  else
+                     line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                  endif
+                  if (mod(jj+1+(ii-1)*(i+1),12).eq.0 .and. .not.(ii.eq.icount_type(i,j) .and. jj.eq.i)) then
+                     write(iunit,'(6x,a)') trim(adjustl(line))
+                     line=''
+                  endif
+               enddo
+            enddo
+            line=trim(adjustl(line))//'};'
+            write(iunit,'(6x,a)') trim(adjustl(line))
+
+             if (j.ne.6 .and. j.ne.7) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,'(4x,a)') 'static const int pp1['//trim(adjustl(tmp))//']={'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,*) pp(ii) - 1
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,12).eq.0 .and. ii.ne.icount_type(i,j)) then
+                     !  line=trim(adjustl(line))//' &'
+                      write(iunit,'(6x,a)') trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+             endif
+
+             if (j.ge.2 .and. j.le.5) then
+                write(tmp,*) icount_type(i,j)
+                write(iunit,'(4x,a)') 'const AC_D_FP m['//trim(adjustl(tmp))//']={'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,'(E24.16)') m(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      write(iunit,'(6x,a)') trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+                write(tmp,*) icount_type(i,j)
+                write(iunit,'(4x,a)') 'const AC_D_FP w['//trim(adjustl(tmp))//']={'
+                line=''
+                do ii=1,icount_type(i,j)
+                   write(tmp,'(E24.16)') w(ii)
+                   if (ii.eq.1) then
+                      line=trim(adjustl(tmp))
+                   else
+                      line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                   endif
+                   if (mod(ii,5).eq.0 .and. ii.ne.icount_type(i,j)) then
+                      write(iunit,'(6x,a)') trim(adjustl(line))
+                      line=''
+                   endif
+                enddo
+                write(iunit,'(6x,a)') trim(adjustl(line))//'};'
+             endif
+
+             write(tmp,*) icount_type(i,j)
+             write(iunit,'(4x,a)') 'for(int i=0; i<'//trim(adjustl(tmp))//'; i++){'
+             write(tmp,*) i
+             write(tmp4,*) this%n_vert
+             write(tmp2,*) i + 1
+             write(iunit,'(6x,a)') 'ordered_sum_cx6(int_c,int1[i],1,'//trim(adjustl(tmp))//',val_c[int1[i][0]]);'
+             if (j.eq.1 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'GluonPropagator(val_c[int1[i][0]],pp[pp1[i]]);'
+             elseif(j.eq.2 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'QuarkPropagator(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             elseif(j.eq.3 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'AQuarkPropagator(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             elseif(j.eq.4 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'GluonPropagator_mass(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             elseif(j.eq.5 .and. isize.ne.n-1) then
+                write(iunit,'(6x,a)') 'ScalarPropagator(val_c[int1[i][0]],pp[pp1[i]],m[i],w[i]);'
+             endif
+             write(iunit,'(4x,a)') '}'
+             write(tmp,*) isize
+             line='}'
+             write(iunit,'(2x,a)') trim(adjustl(line))
+             write(iunit,'(a)') ''
+             deallocate(curs)
+             deallocate(pp)
+             deallocate(m)
+             deallocate(w)
+          enddo
+       enddo
+    enddo
+
+    write(tmp,*) this%n_amps
+    write(tmp2,*) this%n_cur
+       write(iiunit,'(2x,a)') '__device__ void compute_amps(AC_D_CX amps['//trim(adjustl(tmp))// &
+       '], const AC_CX val_c['//trim(adjustl(tmp2))//'][6]);'
+       write(iunit,'(2x,a)') '__device__ void compute_amps(AC_D_CX amps['//trim(adjustl(tmp))// &
+       '], const AC_CX val_c['//trim(adjustl(tmp2))//'][6]){'
+
+    ! first the 'non-same-flavour' ones
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+                line=trim(adjustl(line))//'val_c['//trim(adjustl(tmp))//']);'
+          if (.not.this%same_flav(iproc)) then
+             write(tmp,*) iamp - 1
+             write(tmp2,*) this%curr2amp(1,iamp) - 1
+             line='amps['//trim(adjustl(tmp))//'] = (AC_D_CX)inprod_wf(val_c['//trim(adjustl(tmp2))//'],val_c['
+             write(tmp,*) this%curr2amp(2,iamp) - 1
+             line=trim(adjustl(line))//trim(adjustl(tmp))//']);'
+             write(iunit,'(4x,a)') trim(adjustl(line))
+          endif
+       enddo
+    enddo
+    ! now the same-flavour ones. They are the "sum" of two non-same-flavour ones.
+    do iproc=1,this%nprocs
+       do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
+          if (this%same_flav(iproc)) then
+             ! same-flavour amps are build from two different-flavour amps
+             write(tmp,*) iamp - 1
+             line='amps['//trim(adjustl(tmp))//'] ='
+             do idau=1,2
+                if (this%same_flavour_sum(iamp,idau).gt.0) then
+                   write(tmp,*) this%same_flavour_sum(iamp,idau) - 1
+                   if (this%same_flavour_sum_operation(iamp,idau) .eq. 0) then
+                      line=trim(adjustl(line))//'+amps['//trim(adjustl(tmp))//']'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 1) then
+                      line=trim(adjustl(line))//'-conj(amps['//trim(adjustl(tmp))//'])'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 2) then
+                      line=trim(adjustl(line))//'+conj(amps['//trim(adjustl(tmp))//'])'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 3) then
+                      line=trim(adjustl(line))//'-amps['//trim(adjustl(tmp))//']'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 4) then
+                        line=trim(adjustl(line))//'+AC_D_CX(cimag(amps['//trim(adjustl(tmp))// &
+                          ']),creal(amps['//trim(adjustl(tmp))//']))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 5) then
+                      line=trim(adjustl(line))//'+AC_D_CX(-cimag(amps['//trim(adjustl(tmp))// &
+                      ']),creal(amps['//trim(adjustl(tmp))//']))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 6) then
+                      line=trim(adjustl(line))//'+AC_D_CX(cimag(amps['//trim(adjustl(tmp))// &
+                      ']),-creal(amps['//trim(adjustl(tmp))//']))'
+                   elseif (this%same_flavour_sum_operation(iamp,idau) .eq. 7) then
+                      line=trim(adjustl(line))//'+AC_D_CX(-cimag(amps['// &
+                      trim(adjustl(tmp))//']),-creal(amps['//trim(adjustl(tmp))//']))'
+                   else
+                      write (*,*) 'ERROR: unknown operation in creating library', &
+                           this%same_flavour_sum_operation(iamp,idau)
+                      stop 1
+                   endif
+                endif
+             enddo
+             write(iunit,'(4x,a)') trim(adjustl(line))//';'
+          endif
+       enddo
+    enddo
+    write(iunit,'(2x,a)') '}'
+    write(tmp,*) igroup
+    write(line,*) iint
+   !  write(iunit,'(a)') 'const struct AC_AMP amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//' = {'
+   !  write(iunit,'(2x,a)') '.eval=evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iunit,'(a)') '} // namespace amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    write(iiunit,'(a)') '} // namespace amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
+    close(iunit)
+   !  write(iiunit,'(2x,a)') 'extern const struct AC_AMP amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//';'
+    close(iiunit)
+  end subroutine create_library_cu
 
   subroutine filter_helicity(this,n,nhel,include_hel)
     implicit none
