@@ -17,7 +17,8 @@ module phase_space_gen23_mod
   logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8) :: ip,ip_shat
+  real(kind=8),dimension(-1:1) :: ip,ip_shat,ip_mass
+  real(kind=8),dimension(-1:1),parameter :: ip_flat=[0d0,0d0,0d0]
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
   real(kind=8),parameter :: pi=3.1415926535897932d0
@@ -70,9 +71,9 @@ contains
     if (includePDF) this%ndim=this%ndim+2 ! the two Bjorken x's
     allocate(this%order(this%next))
     allocate(this%invm(maskr(this%next)))
-    allocate(this%invm_min(maskr(this%next)))
-    allocate(this%ETmin(maskr(this%next)))
-    allocate(this%invm_max(maskr(this%next)))
+    allocate(this%invm_min(maskr(this%next),1:2))
+    allocate(this%ETmin(maskr(this%next),1:2))
+    allocate(this%invm_max(maskr(this%next),1:2))
     allocate(this%pp(0:3,0:maskr(this%next)))
     this%pp(0:3,0:maskr(this%next))=0d0
     allocate(this%p(0:3,this%next))
@@ -187,15 +188,18 @@ contains
     endif
     if (present(flat)) then
        if (flat) then
-          ip=0d0
-          ip_shat=0d0
+          ip=ip_flat
+          ip_shat=ip_flat
+          ip_mass=ip_flat
        else
-          ip=-1d0
-          ip_shat=-1.2d0
+          ip=[2d0,-1d0,-1d0]
+          ip_shat=[2d0,-1.2d0,-1d0]
+          ip_mass=[2d0,-0.5d0,-1d0]
        endif
     else
-       ip=-1d0
-       ip_shat=-1.2d0
+       ip=[2d0,-1d0,-1d0]
+       ip_shat=[2d0,-1.2d0,-1d0]
+       ip_mass=[2d0,-0.5d0,-1d0]
     endif
     if (verbose) then
        write (99,*) "Power in importance sampling:",ip
@@ -218,15 +222,15 @@ contains
     do k=1,maskr(this%next)
        npart=popcnt(k)
        if (btest(k,0).and.btest(k,1)) then ! both initial state particles are part of 'k'
-          this%invm_min(k)=0d0 ! no cuts
+          this%invm_min(k,1:2)=0d0 ! no cuts
        elseif (btest(k,0).or.btest(k,1)) then ! one of the initial state particles is part of 'k'
           if (npart.eq.2) then ! exaclty two particles in 'k'
              do i=1,this%next
                 if (.not.btest(k,i-1)) cycle ! particle 'i' is not in combined particle 'k'
                 do j=1,this%next
                    if (.not.btest(k,j-1)) cycle ! particle 'j' is not in combined particle 'k'
-                   this%invm_max(k)=-max(this%sqrt_s_min(i,j)**2,this%ptcut(i)**2,this%ptcut(j)**2)
-                   this%invm_max(maskr(this%next)-k)=this%invm_max(k) ! all but the two particles
+                   this%invm_max(k,2)=-max(this%sqrt_s_min(i,j)**2,this%ptcut(i)**2,this%ptcut(j)**2)
+                   this%invm_max(maskr(this%next)-k,2)=this%invm_max(k,2) ! all but the two particles
                 enddo
              enddo
           endif
@@ -248,9 +252,11 @@ contains
              enddo
           enddo
           if (npart.eq.this%next-2) then ! all final state particles are in 'k'
-             this%invm_min(k)=max(cut*dble(npart)/dble(npart-1),mass**2)
+             this%invm_min(k,1)=mass**2
+             this%invm_min(k,2)=max(cut*dble(npart)/dble(npart-1),mass**2)
           else
-             this%invm_min(k)=max(cut/2d0,mass**2)
+             this%invm_min(k,1)=mass**2
+             this%invm_min(k,2)=max(cut/2d0,mass**2)
           endif
        endif
     enddo
@@ -264,13 +270,14 @@ contains
     ! masses and the ptcut (i.e., assumes that all pz=0 and pT=pTcut)
     class(phase_space_gen23),intent(inout) :: this
     integer :: i,j
-    this%ETmin(1:maskr(this%next))=0d0
+    this%ETmin=0d0
     do i=1,maskr(this%next)
        if (btest(i,0).or.btest(i,1)) cycle ! skip the ones that include incoming particles
        do j=0,this%next-1
-          if (btest(i,j)) this%ETmin(i)=this%ETmin(i)+sqrt(this%invm(ibset(0,j))+this%ptcut(j+1)**2)
+          if (btest(i,j)) this%ETmin(i,1)=this%ETmin(i,1)+sqrt(this%invm(ibset(0,j)))
+          if (btest(i,j)) this%ETmin(i,2)=this%ETmin(i,2)+sqrt(this%invm(ibset(0,j))+this%ptcut(j+1)**2)
        enddo
-       this%ETmin(i)=max(this%ETmin(i),sqrt(this%invm_min(i)))
+       this%ETmin(i,1:2)=max(this%ETmin(i,1:2),sqrt(this%invm_min(i,1:2)))
     enddo
   end subroutine setup_ETmin
 
@@ -321,10 +328,12 @@ contains
     invm=this%invm
     if (includePDF) then
        call generate_initial_state
+       if (ps%jac.le.0d0) return
     else
        sqrtshat=this%sqrts
     endif
     call generate_momenta
+    if (ps%jac.le.0d0) return
 !!$       this%next=this%next+1
 !!$    if (ps%jac.lt.0d0) return
 !!$
@@ -346,7 +355,8 @@ contains
     subroutine generate_bw_mass(ires)
       implicit none
       integer,intent(in) :: ires
-      real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
+      real(kind=8) :: smin,smax,qmass,qwidth,y
+      real(kind=8),dimension(1:2) :: A,B
       smin=50d0**2
       smax=this%sqrts**2
       qmass=91.188d0
@@ -354,7 +364,8 @@ contains
       A=atan((qmass-smin/qmass)/qwidth)
       B=atan((qmass-smax/qmass)/qwidth)
       ix=ix+1
-      call random_to_var(ps%x(ix),0d0,B,A,y,ps%jac)
+      call random_to_var(ps%x(ix),ip_flat,B,A,y,ps%jac)
+      if (ps%jac.le.0d0) return
       this%invm(ibset(0,ires-1))=qmass*(qmass-qwidth*tan(y))
       ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
     end subroutine generate_bw_mass
@@ -393,7 +404,9 @@ contains
       implicit none
       real(kind=8) :: tau
       call generate_tau(tau)
+      if (ps%jac.le.0d0) return
       call generate_y(tau)
+      if (ps%jac.le.0d0) return
       sqrtshat=sqrt(tau)*this%sqrts
       ps%xbjrk(1)=sqrt(tau)*exp(ycm)
       ps%xbjrk(2)=sqrt(tau)*exp(-ycm)
@@ -403,23 +416,26 @@ contains
     subroutine generate_tau(tau)
       implicit none
       real(kind=8),intent(out) :: tau
-      real(kind=8) :: smin,smax,shat
-      smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
-      smax=this%sqrts**2
+      real(kind=8) :: shat
+      real(kind=8),dimension(1:2) :: smin,smax
+      smin(1:2)=max(this%invm_min(maskr(this%next)-3,1:2),this%ETmin(maskr(this%next)-3,1:2)**2)
+      smax(1:2)=this%sqrts**2
       ix=ix+1
       call random_to_var(ps%x(ix),ip_shat,smin,smax,shat,ps%jac)
-      tau=shat/smax
-      ps%jac=ps%jac/smax
+      if (ps%jac.le.0d0) return
+      tau=shat/smax(1)
+      ps%jac=ps%jac/smax(1)
     end subroutine generate_tau
 
     subroutine generate_y(tau)
       implicit none
       real(kind=8),intent(in) :: tau
-      real(kind=8) ::  ymin,ymax
-      ymin= log(tau)/2d0
-      ymax=-log(tau)/2d0
+      real(kind=8),dimension(1:2) ::  ymin,ymax
+      ymin(1:2)= log(tau)/2d0
+      ymax(1:2)=-log(tau)/2d0
       ix=ix+1
-      call random_to_var(ps%x(ix),0d0,ymin,ymax,ycm,ps%jac)
+      call random_to_var(ps%x(ix),ip_flat,ymin,ymax,ycm,ps%jac)
+      if (ps%jac.le.0d0) return
     end subroutine generate_y
 
     subroutine generate_momenta
@@ -589,53 +605,96 @@ contains
       ! back-to-back incoming particles. The mass of i is fixed.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
-      real(kind=8) :: tmin,tmax,phi,pt2,yr,Eimax,pzmax
+      real(kind=8) :: phi,pt2,mass_tol
+      real(kind=8),dimension(1:2) :: tmin,tmax,pzmax,Eimax,yr
+      logical :: soft_ok
       if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
          stop 1
       endif
-      yr=sqrt(lambda(invm(ia+ib),invm(i),this%invm_min(ir)))
-      tmin=(-invm(ia+ib)+invm(i)+this%invm_min(ir)-yr)/2d0
-      tmax=(-invm(ia+ib)+invm(i)+this%invm_min(ir)+yr)/2d0
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      soft_ok=.true.
+      yr(1:2)=lambda(invm(ia+ib),invm(i),this%invm_min(ir,1:2))
+      if (yr(1).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      if (yr(2).lt.0d0) soft_ok=.false.
+      yr(1)=sqrt(yr(1))
+      if (soft_ok) yr(2)=sqrt(yr(2))
+      tmin(1)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,1)-yr(1))/2d0
+      tmax(1)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,1)+yr(1))/2d0
+      if (soft_ok) then
+         tmin(2)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,2)-yr(2))/2d0
+         tmax(2)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,2)+yr(2))/2d0
+      else
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      endif
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2) = min(tmax(1:2), this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin(1:2),this%invm_min(ir+ib,1:2))
+      end where
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      pzmax=sqrt(lambda(sqrtshat**2,this%ETmin(i)**2,this%ETmin(ir)**2))/(2d0*sqrtshat)
-      Eimax=sqrtshat-sqrt(this%ETmin(ir)**2+pzmax**2)
-      tmin=max(tmin,invm(i)-sqrtshat*(Eimax+pzmax))
-      tmax=min(tmax,invm(i)-sqrtshat*(Eimax-pzmax))
-      if (tmin.ge.tmax) then
+      pzmax(1:2)=lambda(sqrtshat**2,this%ETmin(i,1:2)**2,this%ETmin(ir,1:2)**2)
+      if (pzmax(1).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      if (pzmax(2).lt.0d0) soft_ok=.false.
+      pzmax(1)=sqrt(pzmax(1))/(2d0*sqrtshat)
+      Eimax(1)=sqrtshat-sqrt(this%ETmin(ir,1)**2+pzmax(1)**2)
+      tmin(1)=max(tmin(1),invm(i)-sqrtshat*(Eimax(1)+pzmax(1)))
+      tmax(1)=min(tmax(1),invm(i)-sqrtshat*(Eimax(1)-pzmax(1)))
+      if (soft_ok) then
+         pzmax(2)=sqrt(pzmax(2))/(2d0*sqrtshat)
+         Eimax(2)=sqrtshat-sqrt(this%ETmin(ir,2)**2+pzmax(2)**2)
+         tmin(2)=max(tmin(2),invm(i)-sqrtshat*(Eimax(2)+pzmax(2)))
+         tmax(2)=min(tmax(2),invm(i)-sqrtshat*(Eimax(2)-pzmax(2)))
+      else
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      endif
+      if (tmin(1).ge.tmax(1)) then
          ps%jac=-1d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip,tmin,tmax,invm(i+ia),ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
       endif
-      tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir)
-      tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      tmin(1:2)=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir,1:2)
+      tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2) = min(tmax(1:2), this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin(1:2),this%invm_min(ir+ib,1:2))
+      end where
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      tmin=max(tmin,invm(i)-sqrtshat**2*(1-this%ETmin(ir)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
-      tmax=min(tmax,invm(i)-sqrtshat**2*(this%ETmin(i)**2/(invm(i)-invm(i+ia))))
-      if (tmin.ge.tmax) then
+      tmin(1:2)=max(tmin(1:2),invm(i)-sqrtshat**2*(1-this%ETmin(ir,1:2)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
+      tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/(invm(i)-invm(i+ia))))
+      if (tmin(1).ge.tmax(1)) then
          ps%jac=-2d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip,tmin,tmax,invm(i+ib),ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,invm(i+ib),tmin,tmax
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),0d0,0d0,2d0*pi,phi,ps%jac)
+      call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 'dt- phi',phi
       endif
@@ -657,12 +716,15 @@ contains
       pp(0,ir)=sqrtshat-pp(0,i)
       pp(1:3,ir)=-pp(1:3,i)
       invm(ir)=dot(pp(0,ir),pp(0,ir))
-      if (invm(ir).le.0d0) then
+      mass_tol=vtiny*max(1d0,abs(invm(ia+ib)),abs(invm(i+ia)),abs(invm(i+ib)),abs(invm(i)))
+      if (invm(ir).lt.-mass_tol) then
          write (*,*) "ERROR in double_t: invariant mass of system", &
-              & " must be larger than zero",ir,invm(ir),i
+              & " must be non-negative",ir,invm(ir),i
          write (*,*) invm(ir),invm(ia+ib)+invm(i+ia)+invm(i+ib)-invm(i)&
               &,invm(ia+ib),invm(i +ia),invm(i+ib),invm(i)
          stop
+      elseif (invm(ir).lt.0d0) then
+         invm(ir)=0d0
       endif
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t
@@ -675,8 +737,8 @@ contains
       ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
-      real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
-           etminir,etmini
+      real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot
+      real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -692,9 +754,15 @@ contains
          write (*,*) '23- i    ',i,invm(i)
          write (*,*) '23- ir   ',ir,invm(ir)
       endif
-      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin_S,tmax_S)
+      tmin(1:2)=tmin_S
+      tmax(1:2)=tmax_S
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2)=min(tmax_S,this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin_S,this%invm_min(ir+ib,1:2))
+      end where
       ! Make sure that the t-range is compatible with the pT cut. Since t is an
       ! invariant we can compute it in any frame. Let's use the frame in which
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
@@ -703,42 +771,62 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
-      else
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)))
-      endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-         etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
-      else
-         etmini=max(this%ETmin(i),sqrt(invm(i)))
-      endif
-      base=piir(0)**2-ETmini**2+ETminir**2
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+
+      elsewhere
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+      end where
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+      elsewhere
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+      end where
+      base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
       ! following is more stable:
-      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
-           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
-      if (root.lt.0d0) then
+      root(1:2)=(piir(0)-ETmini(1:2)-ETminir(1:2))*(piir(0)+ETmini(1:2)-ETminir(1:2))*&
+           (piir(0)-ETmini(1:2)+ETminir(1:2))*(piir(0)+ETmini(1:2)+ETminir(1:2))
+      if (root(1).lt.0d0) then
          ps%jac=-33d0
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
-      tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
-      tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
-      if (tmin.ge.tmax) then
+      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+         ps%jac=-33d0
+         if (debug) write (*,*) 'zero-energy system in gen23_one_step',piir(0)
+         return
+      endif
+      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
+      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt(root(1))))
+      if (root(2).lt.0d0) then
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      else
+         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt(root(2))))
+         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt(root(2))))
+      endif
+      if (tmin(1).ge.tmax(1)) then
          ps%jac=-3d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip,tmin,tmax,invm(ir+ib),ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) '23- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
       endif
       call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
-           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
-      if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
-      if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
+           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin_S,smax_S,V,sqrtGG)
+      smin(1:2)=smin_S
+      smax(1:2)=smax_S
+      where (this%invm_min(i+im1,1:2).ne.0d0)
+         smin(1:2)=max(smin_S,this%invm_min(i+im1,1:2))
+      end where
+      where (this%invm_max(i+im1,1:2).ne.0d0)
+         smax(1:2)=min(smax_S,this%invm_max(i+im1,1:2))
+      end where
       if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
          y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
@@ -750,23 +838,25 @@ contains
          call rotz(piirr,-phi_rot,piir)
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
-         etminir=max(pib(0)*this%ETmin(ir)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
-              this%ETmin(ir))
-         smax=min(smax,&
-              invm(i)+invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-invm(i))*pim1(1))
+         etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
+              this%ETmin(ir,1:2))
+         smax(1:2)=min(smax(1:2),&
+              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt((piir(0)-etminir(1:2))**2-invm(i))*pim1(1))
 
          if(invm(i).eq.0d0) then
-            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
+            smin(1)=max(smin(1),2d0*this%ETmin(i,1)*(pim1(0)-pim1(1)))
+            smin(2)=max(smin(2),2d0*this%ETmin(i,2)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
 
       endif
-      if (smin.ge.smax) then
+      if (smin(1).ge.smax(1)) then
          ps%jac=-4d0
          if (debug) write (*,*) 'smin.ge.smax',smin,smax
          return
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip,smin,smax,invm(i+im1),ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) '23- i+im1',i+im1,invm(i+im1),smin,smax
       endif
@@ -784,8 +874,8 @@ contains
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
            &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
-      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
-           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
+      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2 .and. &
+           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2 ) then
          ix_e=ix_e+1
          if(ps%x(ix_e).gt.0.5d0) then
             pp(0:3,i)=pi1(0:3)
@@ -796,12 +886,12 @@ contains
             pp(0:3,ir)=pr2(0:3)
             pp(0:3,ib+ir)=ppibir2(0:3)
          endif
-      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2) then
+      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2) then
          pp(0:3,i)=pi1(0:3)
          pp(0:3,ir)=pr1(0:3)
          pp(0:3,ib+ir)=ppibir1(0:3)
          ps%jac=ps%jac/2d0
-      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
+      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2) then
          pp(0:3,i)=pi2(0:3)
          pp(0:3,ir)=pr2(0:3)
          pp(0:3,ib+ir)=ppibir2(0:3)
@@ -812,11 +902,11 @@ contains
             write (*,*) 'piir',pp(0:3,i+ir)
             write (*,*) 'pim1',pp(0:3,im1)
             write (*,*) '1:',phi1,(phi1+phi2)/(2d0*pi)
-            write (*,*) 'i',i,this%ETmin(i),':',pi1(0:3)
-            write (*,*) 'ir',ir,this%ETmin(ir),':',pr1(0:3)
+            write (*,*) 'i',i,this%ETmin(i,1:2),':',pi1(0:3)
+            write (*,*) 'ir',ir,this%ETmin(ir,1:2),':',pr1(0:3)
             write (*,*) '2:',phi2
-            write (*,*) 'i',i,this%ETmin(i),':',pi2(0:3)
-            write (*,*) 'ir',ir,this%ETmin(ir),':',pr2(0:3)
+            write (*,*) 'i',i,this%ETmin(i,1:2),':',pi2(0:3)
+            write (*,*) 'ir',ir,this%ETmin(ir,1:2),':',pr2(0:3)
             write (*,*) ''
          endif
          return
@@ -841,7 +931,8 @@ contains
       ! One step in the usual MadGraph t-channel phase-space generation.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
-      real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini
+      real(kind=8) :: tmin_S,tmax_S,phi,y
+      real(kind=8),dimension(1:2) :: shatmin,shatmax,Eimax,tmin,tmax,etminir,base,root,etmini
       real(kind=8),dimension(0:3) :: piir,pib
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -850,12 +941,12 @@ contains
             ! The energy of i will be
             ! Ei=(sqrtshat+(invm(i)-invm(ir))/sqrtshat)/2d0. This gives a
             ! constraint on the allowed value of invm(i), since Ei>ETmin(i)
-            shatmin=max(shatmin,max(invm(ir),this%invm_min(ir))+sqrtshat*(2d0*this%ETmin(i)-sqrtshat))
-            Eimax=sqrtshat-this%ETmin(ir) ! maximum energy for i
+            shatmin(1:2)=max(shatmin(1:2),max(invm(ir),this%invm_min(ir,1:2))+sqrtshat*(2d0*this%ETmin(i,1:2)-sqrtshat))
+            Eimax(1:2)=sqrtshat-this%ETmin(ir,1:2) ! maximum energy for i
             if (popcnt(ir).eq.1) then
-               shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Eimax-sqrtshat))
+               shatmax(1:2)=min(shatmax(1:2),invm(ir)+sqrtshat*(2d0*Eimax(1:2)-sqrtshat))
             else
-               shatmax=min(shatmax,Eimax**2)
+               shatmax(1:2)=min(shatmax,Eimax(1:2)**2)
             endif
          endif
          call generate_mass(i,shatmin,shatmax)
@@ -869,8 +960,8 @@ contains
             ! The energy of ir will be
             ! Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0. This gives a
             ! constraint on the allowed value of invm(ir), since Eir>ETmin(ir)
-            shatmin=max(shatmin,invm(i)+sqrtshat*(2d0*this%ETmin(ir)-sqrtshat))
-            shatmax=min(shatmax,invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i))))
+            shatmin(1:2)=max(shatmin(1:2),invm(i)+sqrtshat*(2d0*this%ETmin(ir,1:2)-sqrtshat))
+            shatmax(1:2)=min(shatmax(1:2),invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i,1:2))))
          endif
          call generate_mass(ir,shatmin,shatmax)
          if (debug) then
@@ -878,9 +969,15 @@ contains
          endif
       endif
       if (ps%jac.le.0d0) return
-      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin_S,tmax_S)
+      tmin(1:2)=tmin_S
+      tmax(1:2)=tmax_S
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2)=min(tmax_S,this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin_S,this%invm_min(ir+ib,1:2))
+      end where
       ! Make sure that the t-range is compatible with the pT cut. Since t is an
       ! invariant we can compute it in any frame. Let's use the frame in which
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
@@ -889,40 +986,54 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
-      else
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)))
-      endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-         etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
-      else
-         etmini=max(this%ETmin(i),sqrt(invm(i)))
-      endif
-      base=piir(0)**2-ETmini**2+ETminir**2
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+      elsewhere
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+      end where
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+      elsewhere
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+      end where
+      base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
       ! following is more stable:
-      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
-           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
-      if (root.lt.0d0) then
+      root(1:2)=(piir(0)-ETmini(1:2)-ETminir(1:2))*(piir(0)+ETmini(1:2)-ETminir(1:2))*&
+           (piir(0)-ETmini(1:2)+ETminir(1:2))*(piir(0)+ETmini(1:2)+ETminir(1:2))
+      if (root(1).lt.0d0) then
          ps%jac=-33d0
          if (debug) write (*,*) 'root.lt.0d0',root
          return
       endif
-      tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
-      tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
-      if (tmin.ge.tmax) then
+      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+         ps%jac=-33d0
+         if (debug) write (*,*) 'zero-energy system in gent_one_step',piir(0)
+         return
+      endif
+      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
+      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt(root(1))))
+      if (root(2).lt.0d0) then
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      else
+         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt(root(2))))
+         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt(root(2))))
+      endif
+      if (tmin(1).ge.tmax(1)) then
          ps%jac=-3d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
          return
       endif
       ix=ix+1
       call random_to_var(ps%x(ix),ip,tmin,tmax,invm(ir+ib),ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 't- ir+ib',ir+ib,invm(ir+ib),tmin,tmax
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),0d0,0d0,2d0*pi,phi,ps%jac)
+      call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
+      if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 't - phi  ',i,phi,0d0,2d0*pi
       endif
@@ -935,7 +1046,8 @@ contains
     subroutine gens_one_step(i,ir)
       implicit none
       integer(kind=4),intent(in) :: i,ir
-      real(kind=8) :: esum,costh,phi,shatmin,shatmax
+      real(kind=8) :: esum,costh,phi
+      real(kind=8),dimension(1:2) :: shatmin,shatmax
       real(kind=8),dimension(0:3) :: p_i,p_ir
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -949,9 +1061,11 @@ contains
       if (ps%jac.le.0d0) return
       esum=sqrt(invm(i+ir))
       ix=ix+1
-      call random_to_var(ps%x(ix),0d0,-1d0,1d0,costh,ps%jac)
+      call random_to_var(ps%x(ix),ip_flat,[-1d0,-1d0],[1d0,1d0],costh,ps%jac)
+      if (ps%jac.le.0d0) return
       ix=ix+1
-      call random_to_var(ps%x(ix),0d0,0d0,2d0*pi,phi,ps%jac)
+      call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
+      if (ps%jac.le.0d0) return
       call mom2cx(esum,sqrt(invm(i)),sqrt(invm(ir)),costh,phi,p_i,p_ir)
       call boostm(p_i,pp(0:3,i+ir),esum,pp(0:3,i))
       call boostm(p_ir,pp(0:3,i+ir),esum,pp(0:3,ir))
@@ -970,16 +1084,21 @@ contains
     subroutine generate_mass(i,shatmin,shatmax)
       implicit none
       integer :: i
-      real(kind=8) :: shatmin,shatmax
-      if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
-      if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
-      if (shatmin.ge.shatmax) then
+      real(kind=8),dimension(1:2) :: shatmin,shatmax
+      where (this%invm_min(i,1:2).ne.0d0)
+         shatmin(1:2)=max(shatmin(1:2),this%invm_min(i,1:2))
+      end where
+      where (this%invm_max(i,1:2).ne.0d0)
+         shatmax(1:2)=min(shatmax(1:2),this%invm_max(i,1:2))
+      end where
+      if (shatmin(1).ge.shatmax(1)) then
          ps%jac=-7d0
          if (debug) write (*,*) 'shatmin.ge.shatmax',i,shatmin,shatmax
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),-0.5d0,shatmin,shatmax,invm(i),ps%jac)
+      call random_to_var(ps%x(ix),ip_mass,shatmin,shatmax,invm(i),ps%jac)
+      if (ps%jac.le.0d0) return
     end subroutine generate_mass
 
     subroutine mom2cx(esum,mass1,mass2,costh1,phi1,p1,p2)
@@ -1024,9 +1143,9 @@ contains
       real(kind=8),intent(in) :: t,phi,m1,m2
       real(kind=8),intent(in),dimension(0:3) :: pa,pb
       real(kind=8),intent(out),dimension(0:3) :: p1,pr
-      real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,ma2,pt,pt2
+      real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,ma2,pt,pt2,pt2_tol
       real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,p1_rot
-      real(kind=8),parameter :: tiny=1d-8
+      real(kind=8),parameter :: tiny=1d-5
       ptot(0:3)=pa(0:3)+pb(0:3)
       ptotm(0)=ptot(0)
       ptotm(1:3)=-ptot(1:3)
@@ -1067,7 +1186,8 @@ contains
       endif
       p1(3) = -(m1**2+ma2-t-2d0*p1(0)*E_acms)/(2d0*p_acms)
       pt2=pp2-p1(3)**2
-      if (pt2/esum2.lt.-tiny) then
+      pt2_tol=tiny*max(abs(esum2),abs(pp2),abs(p1(3)**2))
+      if (pt2.lt.-pt2_tol) then
          write (*,*) 'Error #13 in genps_fks.f: relative pt^2 smaller than 0',pt2,esum2
          stop 1
       elseif (pt2.lt.0d0) then
@@ -1085,26 +1205,151 @@ contains
       ! Given a random number x, it generates var in the range var_min
       ! <= var <= var_max according to var^(power)
       implicit none
-      real(kind=8),intent(in) :: x,power_in,var_min,var_max
+      real(kind=8),intent(in) :: x
+      real(kind=8),dimension(-1:1),intent(in) :: power_in
+      real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
+      real(kind=8),intent(out) :: var
+      real(kind=8),intent(inout) :: jac
+      integer(kind=4) :: k
+      real(kind=8),dimension(3) :: vmin,vmax,power,q
+      real(kind=8) :: xloc
+      call random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+      call random_to_var_weights(power,vmin,vmax,q)
+      if (sum(q(1:3)).le.0d0) then
+         var=vmin(2)
+         jac=-1d0
+         return
+      endif
+      if (q(1).gt.0d0 .and. x .le. q(1)) then
+         k = 1
+         xloc = x / q(1)
+      elseif (q(2).gt.0d0 .and. x .le. q(1) + q(2)) then
+         k = 2
+         xloc = (x - q(1)) / q(2)
+      else
+         k = 3
+         if (q(3).le.0d0) then
+            var=vmax(3)
+            jac=-1d0
+            return
+         endif
+         xloc = (x - q(1) - q(2)) / q(3)
+      endif
+      call random_to_var_map(xloc,power(k),vmin(k),vmax(k),var,jac)
+      if (var_min(1).lt.0d0 .and. var_max(1).le.0d0) then
+         var=-var
+      endif
+      jac=jac/q(k)
+    end subroutine random_to_var
+
+    subroutine random_to_var_weights(power,vmin,vmax,q)
+      implicit none
+      real(kind=8),dimension(3),intent(in) :: power,vmin,vmax
+      real(kind=8),dimension(3),intent(out) :: q
+      integer(kind=4) :: i
+      real(kind=8),dimension(3) :: inte,coef
+      real(kind=8) :: total
+      coef=1d0
+      if (vmax(1).gt.vmin(1) .and. vmin(2).gt.0d0) coef(1)=vmin(2)**(power(2)-power(1))
+      if (vmax(3).gt.vmin(3) .and. vmin(3).gt.0d0) coef(3)=vmin(3)**(power(2)-power(3))
+      do i=1,3
+         inte(i)=coef(i)*power_integral(vmin(i),vmax(i),power(i))
+      enddo
+      total=sum(inte(1:3))
+      if (total.le.0d0) then
+         q=0d0
+         return
+      endif
+      q(1:3)=inte(1:3)/total
+    end subroutine random_to_var_weights
+
+    real(kind=8) function power_integral(lo,hi,p)
+      implicit none
+      real(kind=8), intent(in) :: lo, hi, p
+      if (hi.le.lo) then
+         power_integral = 0d0
+      elseif (abs(p + 1d0) .lt. 1d-12) then
+         power_integral = log(hi/lo)
+      else
+         power_integral = (hi**(p+1d0) - lo**(p+1d0))/(p+1d0)
+      endif
+    end function power_integral
+
+    subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+      implicit none
+      real(kind=8),dimension(-1:1),intent(in) :: power_in
+      real(kind=8),dimension(1:2) :: var_min,var_max
+      real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
+      real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
+      real(kind=8),parameter :: epsilon=1d-8
+      var_min_loc=var_min
+      var_max_loc=var_max
+      if (var_min_loc(1).gt.var_max_loc(1)) then
+         write (*,*) 'Incorrect hard range in random_to_var_inputs'
+         write (*,*) var_min, var_max
+         stop 1
+      endif
+      var_min_loc(2)=max(var_min_loc(2),var_min_loc(1))
+      var_max_loc(2)=min(var_max_loc(2),var_max_loc(1))
+      if (var_min_loc(2).gt.var_max_loc(2)) then
+         var_min_loc(2)=var_max_loc(2)
+      endif
+      if (var_min_loc(1).lt.0d0 .and. var_max_loc(1).le.0d0) then
+         ! invert order
+         power(1:3)=power_in(1:-1:-1)
+         varmin=-var_max_loc
+         varmax=-var_min_loc
+      elseif (var_min_loc(1).ge.0d0 .and. var_max_loc(1).gt.0d0) then
+         ! normal order
+         power(1:3)=power_in(-1:1)
+         varmin=var_min_loc
+         varmax=var_max_loc
+      else
+         ! positive and negative limits. Use flat transformation for all
+         power(1:3)=0d0
+         varmin=var_min_loc
+         varmax=var_max_loc
+      endif
+      if (varmin(1).gt.varmax(1)) then
+         write (*,*) 'Incorrect transformed hard range in random_to_var_inputs'
+         write (*,*) var_min, var_max, varmin, varmax
+         stop 1
+      endif
+      if (varmin(2).lt.varmin(1)) varmin(2)=varmin(1)
+      if (varmax(2).gt.varmax(1)) varmax(2)=varmax(1)
+      vmin(1)=varmin(1)
+      if (varmin(2)-vmin(1).lt.epsilon) then
+         vmax(1)=vmin(1)
+      else
+         vmax(1)=min(varmin(2),varmax(1))
+      endif
+      vmin(2)=vmax(1)
+      if (varmax(2)-vmin(2).lt.epsilon) then
+         vmax(2)=vmin(2)
+      else
+         vmax(2)=varmax(2)
+      endif
+      vmin(3)=vmax(2)
+      if (varmax(1)-vmin(3).lt.epsilon) then
+         vmax(3)=vmin(3)
+      else
+         vmax(3)=varmax(1)
+      endif
+      where (vmin(1:3).le.epsilon .and. power(1:3).le.-1d0)
+         power(1:3)=0d0
+      end where
+    end subroutine random_to_var_inputs
+
+    subroutine random_to_var_map(x,power,varmin,varmax,var,jac)
+      implicit none
+      real(kind=8),intent(in) :: x,power,varmin,varmax
       real(kind=8),intent(out) :: var
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: ip
-      real(kind=8) :: varmin,varmax,power
-      if (var_min.lt.0d0 .and. var_max.le.0d0) then
-         power=power_in
-         varmin=-var_max
-         varmax=-var_min
-      elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (99,*) 'ERROR: in random_to_var one of the two limits '/&
-              &/'is negative',var_min,var_max,power_in,jac,x
-         write (99,*) 'using flat transformation'
-         power=0d0
-         varmin=var_min
-         varmax=var_max
-      else
-         power=power_in
-         varmin=var_min
-         varmax=var_max
+      if (varmax-varmin.le.tiny*max(1d0,max(abs(varmin),abs(varmax)))) then
+         var=varmin
+         jac=-1d0
+         return
       endif
       ip=nint(power)
       if (dble(ip).eq.power) then
@@ -1130,10 +1375,7 @@ contains
               (varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(-power/(1d0+power))/&
               (1d0+power)
       endif
-      if (var_min.le.0d0 .and. var_max.le.0d0) then
-         var=-var
-      endif
-    end subroutine random_to_var
+    end subroutine random_to_var_map
   end subroutine gen23_generate_momenta
 
   subroutine gen23_compute_x_from_momenta(this,ps)
@@ -1164,11 +1406,13 @@ contains
     ! get the two random number corresponding to the initial state
     if (includePDF) then
        call compute_x_initial_state
+       if (bad_inverse_jac()) return
     else
       sqrtshat=this%sqrts
     endif
     ! The final-state momenta configuration gives all the other random numbers
     call compute_x_final_state
+    if (bad_inverse_jac()) return
 
 !!$       this%next=this%next+1
 !!$       pp(0:3,ibset(0,this%next-2))=p_tmp(0:3,1)
@@ -1184,10 +1428,17 @@ contains
 !!$       ps%p(0:3,this%next)=p_tmp(0:3,2)
     
   contains
+    logical function bad_inverse_jac()
+      implicit none
+      bad_inverse_jac=ps%jac.le.0d0
+      if (bad_inverse_jac) ps%jac=-1d0
+    end function bad_inverse_jac
+
     subroutine generate_bw_mass_inverse(ires)
       implicit none
       integer,intent(in) :: ires
-      real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
+      real(kind=8) :: smin,smax,qmass,qwidth,y
+      real(kind=8),dimension(1:2) :: A,B
       smin=50d0**2
       smax=this%sqrts**2
       qmass=91.188d0
@@ -1197,7 +1448,8 @@ contains
       ix=ix+1
       this%invm(ibset(0,ires-1))=dot(ps%p(0:3,ires),ps%p(0:3,ires))
       y=atan((qmass-this%invm(ibset(0,ires-1))/qmass)/qwidth)
-      call var_to_random(y,0d0,B,A,ps%x(ix),ps%jac)
+      call var_to_random(y,ip_flat,B,A,ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       ps%jac=ps%jac*qmass*qwidth/(cos(y))**2
     end subroutine generate_bw_mass_inverse
     subroutine decay_bw_inverse(ires,id1,id2)
@@ -1215,29 +1467,34 @@ contains
       implicit none
       real(kind=8) :: tau
       call compute_x_from_tau(tau)
+      if (bad_inverse_jac()) return
       call compute_x_from_y(tau)
+      if (bad_inverse_jac()) return
     end subroutine compute_x_initial_state
     subroutine compute_x_from_tau(tau)
       implicit none
       real(kind=8),intent(out) :: tau
-      real(kind=8) :: smin,smax,shat
-      smin=max(this%invm_min(maskr(this%next)-3),this%ETmin(maskr(this%next)-3)**2)
-      smax=this%sqrts**2
+      real(kind=8) :: shat
+      real(kind=8),dimension(1:2) :: smin,smax
+      smin(1:2)=max(this%invm_min(maskr(this%next)-3,1:2),this%ETmin(maskr(this%next)-3,1:2)**2)
+      smax(1:2)=this%sqrts**2
       shat=dot(pp(0:3,3),pp(0:3,3))
       sqrtshat=sqrt(shat)
       ix=ix+1
       call var_to_random(shat,ip_shat,smin,smax,ps%x(ix),ps%jac)
-      tau=shat/smax
-      ps%jac=ps%jac/smax
+      if (bad_inverse_jac()) return
+      tau=shat/smax(1)
+      ps%jac=ps%jac/smax(1)
     end subroutine compute_x_from_tau
     subroutine compute_x_from_y(tau)
       implicit none
       real(kind=8),intent(in) :: tau
-      real(kind=8) ::  ymin,ymax
-      ymin= log(tau)/2d0
-      ymax=-log(tau)/2d0
+      real(kind=8),dimension(1:2) ::  ymin,ymax
+      ymin(1:2)= log(tau)/2d0
+      ymax(1:2)=-log(tau)/2d0
       ix=ix+1
-      call var_to_random(ycm,0d0,ymin,ymax,ps%x(ix),ps%jac)
+      call var_to_random(ycm,ip_flat,ymin,ymax,ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
     end subroutine compute_x_from_y
     subroutine compute_x_final_state
       implicit none
@@ -1257,21 +1514,25 @@ contains
          else
             call gens_one_step_inverse(set(2),set(1))
          endif
+         if (bad_inverse_jac()) return
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).gt.1) then
          if (debug) write (*,*) 'special double t-channel (1)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t_inverse(set(1),set(2),1,2)
+         if (bad_inverse_jac()) return
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       elseif (popcnt(set(1)).gt.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) 'special double t-channel (2)'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call double_t_inverse(set(2),set(1),1,2)
+         if (bad_inverse_jac()) return
          invm(set(1)+1)=dot(pp(0:3,set(1)+1),pp(0:3,set(1)+1))
       elseif (popcnt(set(1)).eq.1 .and. popcnt(set(2)).eq.1) then
          if (debug) write (*,*) '2->2 scattering with one particle in each set'&
               &,popcnt(this%sets(0,1)),popcnt(this%sets(0,2))
          call gent_one_step_inverse(set(2),set(1),1)
+         if (bad_inverse_jac()) return
          invm(set(2)+2)=dot(pp(0:3,set(2)+2),pp(0:3,set(2)+2))
       endif
 
@@ -1284,6 +1545,7 @@ contains
             if (debug) write (*,*) 'At least 3 particles in a set',&
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step_inverse(set(i),inext,i)
+            if (bad_inverse_jac()) return
             invm((3-i)+set(i)+inext)=dot(pp(0:3,(3-i)+set(i)+inext),pp(0:3,(3-i)+set(i)+inext))
             invm((3-i)+set(i))=dot(pp(0:3,(3-i)+set(i)),pp(0:3,(3-i)+set(i)))
             do j=2,popcnt(set(i))-1
@@ -1296,6 +1558,7 @@ contains
                else
                   call gen23_one_step_inverse(inext,set(i),3-i,im1)
                endif
+               if (bad_inverse_jac()) return
             enddo
             inext=ibset(0,this%sets(j,i)-1)
             im1=ibset(0,this%sets(j-1,i)-1)
@@ -1305,6 +1568,7 @@ contains
             else
                call gen23_one_step_inverse(inext,set(i),3-i,im1)
             endif
+            if (bad_inverse_jac()) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).ne.0) then
             ! Exactly 2 particles in a set (and the other set contains at least one)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
@@ -1318,12 +1582,14 @@ contains
             else
                call gen23_one_step_inverse(set(i),inext,i,im1)
             endif
+            if (bad_inverse_jac()) return
          elseif (popcnt(set(i)).eq.1 .and. popcnt(this%sets(0,3-i)).eq.0) then
             ! Exactly 2 particles in a set (and the other set contains none)
             if (debug) write (*,*) 'Exactly 2 particles in a set (and ', &
                  & 'the other set contains none)', &
                  & popcnt(this%sets(0,i)),popcnt(this%sets(0,3-i))
             call gent_one_step_inverse(set(i),inext,i)
+            if (bad_inverse_jac()) return
          else
             write (*,*) 'Inconsistent sets'
             write (*,*) i,':',this%sets(:,i)
@@ -1341,35 +1607,44 @@ contains
     subroutine gent_one_step_inverse(i,ir,ib)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ib
-      real(kind=8) :: tmin,tmax,phi,Eimax,shatmin,shatmax,base,etminir,root,y,etmini,esum
+      real(kind=8) :: tmin_S,tmax_S,phi,y,esum
+      real(kind=8),dimension(1:2) :: shatmin,shatmax,Eimax,tmin,tmax,etminir,base,root,etmini
       real(kind=8),dimension(0:3) :: piir,pib,p_boost,pi_rot,pa_cms
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (popcnt(i+ir).eq.this%next-2) then
-            shatmin=max(shatmin,max(invm(ir),this%invm_min(ir))+sqrtshat*(2d0*this%ETmin(i)-sqrtshat))
-            Eimax=sqrtshat-this%ETmin(ir) ! maximum energy for i
+            shatmin(1:2)=max(shatmin(1:2),max(invm(ir),this%invm_min(ir,1:2))+sqrtshat*(2d0*this%ETmin(i,1:2)-sqrtshat))
+            Eimax(1:2)=sqrtshat-this%ETmin(ir,1:2) ! maximum energy for i
             if (popcnt(ir).eq.1) then
-               shatmax=min(shatmax,invm(ir)+sqrtshat*(2d0*Eimax-sqrtshat))
+               shatmax(1:2)=min(shatmax(1:2),invm(ir)+sqrtshat*(2d0*Eimax(1:2)-sqrtshat))
             else
-               shatmax=min(shatmax,Eimax**2)
+               shatmax(1:2)=min(shatmax(1:2),Eimax(1:2)**2)
             endif
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 1',i,ir
          call generate_mass_inverse(i,shatmin,shatmax)
+         if (bad_inverse_jac()) return
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (popcnt(i+ir).eq.this%next-2) then
-            shatmin=max(shatmin,invm(i)+sqrtshat*(2d0*this%ETmin(ir)-sqrtshat))
-            shatmax=min(shatmax,invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i))))
+            shatmin(1:2)=max(shatmin(1:2),invm(i)+sqrtshat*(2d0*this%ETmin(ir,1:2)-sqrtshat))
+            shatmax(1:2)=min(shatmax(1:2),invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i,1:2))))
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
+         if (bad_inverse_jac()) return
       endif
-      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin_S,tmax_S)
+      tmin(1:2)=tmin_S
+      tmax(1:2)=tmax_S
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2)=min(tmax_S,this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin_S,this%invm_min(ir+ib,1:2))
+      end where
       ! Make sure that the t-range is compatible with the pT cut. Since t is an
       ! invariant we can compute it in any frame. Let's use the frame in which
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
@@ -1377,29 +1652,40 @@ contains
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
-      else
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)))
-      endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-         etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
-      else
-         etmini=max(this%ETmin(i),sqrt(invm(i)))
-      endif
-      base=piir(0)**2-ETmini**2+ETminir**2
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+      elsewhere
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+      end where
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+      elsewhere
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+      end where
+      base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
       ! following is more stable:
-      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
-           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
-      if (root.lt.0d0) then
+      root(1:2)=(piir(0)-ETmini(1:2)-ETminir(1:2))*(piir(0)+ETmini(1:2)-ETminir(1:2))*&
+           (piir(0)-ETmini(1:2)+ETminir(1:2))*(piir(0)+ETmini(1:2)+ETminir(1:2))
+      if (root(1).lt.0d0) then
          write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
          stop 1
       endif
-      tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
-      tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
+      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+         ps%jac=-33d0
+         return
+      endif
+      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
+      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt(root(1))))
+      if (root(2).lt.0d0) then
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      else
+         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt(root(2))))
+         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt(root(2))))
+      endif
       invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
-      if (tmin.ge.tmax) then
+      if (tmin(1).ge.tmax(1)) then
          write (*,*) 'tmin.ge.tmax in gent_one_step_inverse',tmin,tmax,invm(ir+ib)
          stop 1
       endif
@@ -1408,6 +1694,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       ! inverse of boosts and rotation from gentcms()
       esum=sqrt(invm(i+ir))
       p_boost(0)=pp(0,i+ir)
@@ -1422,24 +1709,28 @@ contains
          write (*,*) 'ti - phi',0d0,2d0*pi,phi
       endif
       ix=ix+1
-      call var_to_random(phi,0d0,0d0,2d0*pi,ps%x(ix),ps%jac)
+      call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
     end subroutine gent_one_step_inverse
     subroutine gens_one_step_inverse(i,ir)
       implicit none
       integer(kind=4),intent(in) :: i,ir
-      real(kind=8) :: esum,costh,phi,shatmin,shatmax
+      real(kind=8) :: esum,costh,phi
+      real(kind=8),dimension(1:2) :: shatmin,shatmax
       real(kind=8),dimension(0:3) :: p_i,p_boost
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gens 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
+         if (bad_inverse_jac()) return
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
+         if (bad_inverse_jac()) return
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
       esum=sqrt(invm(i+ir))
@@ -1452,7 +1743,8 @@ contains
          write (*,*) 'si - i',i,-1d0,1d0,costh
       endif
       ix=ix+1
-      call var_to_random(costh,0d0,-1d0,1d0,ps%x(ix),ps%jac)
+      call var_to_random(costh,ip_flat,[-1d0,-1d0],[1d0,1d0],ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       phi=atan(p_i(2)/p_i(1))
       if(p_i(1).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
@@ -1460,7 +1752,8 @@ contains
          write (*,*) 'si - phi i',i,0d0,2d0*pi,phi
       endif
       ix=ix+1
-      call var_to_random(phi,0d0,0d0,2d0*pi,ps%x(ix),ps%jac)
+      call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       ! update the Jacobian
       ps%jac=ps%jac*sqrt(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
       ! compute some t-channel invariants just to make sure they are filled. 
@@ -1472,22 +1765,58 @@ contains
     subroutine double_t_inverse(i,ir,ia,ib)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
-      real(kind=8) :: tmin,tmax,phi,yr,Eimax,pzmax
+      real(kind=8) :: phi,mass_tol
+      real(kind=8),dimension(1:2) :: tmin,tmax,yr,Eimax,pzmax
+      logical :: soft_ok
       if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
          stop 1
       endif
-      yr=sqrt(lambda(invm(ia+ib),invm(i),this%invm_min(ir)))
-      tmin=(-invm(ia+ib)+invm(i)+this%invm_min(ir)-yr)/2d0
-      tmax=(-invm(ia+ib)+invm(i)+this%invm_min(ir)+yr)/2d0
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
-      pzmax=sqrt(lambda(sqrtshat**2,this%ETmin(i)**2,this%ETmin(ir)**2))/(2d0*sqrtshat)
-      Eimax=sqrtshat-sqrt(this%ETmin(ir)**2+pzmax**2)
-      tmin=max(tmin,invm(i)-sqrtshat*(Eimax+pzmax))
-      tmax=min(tmax,invm(i)-sqrtshat*(Eimax-pzmax))
-      if (tmin.ge.tmax) then
+      soft_ok=.true.
+      yr(1:2)=lambda(invm(ia+ib),invm(i),this%invm_min(ir,1:2))
+      if (yr(1).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      if (yr(2).lt.0d0) soft_ok=.false.
+      yr(1)=sqrt(yr(1))
+      if (soft_ok) yr(2)=sqrt(yr(2))
+      tmin(1)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,1)-yr(1))/2d0
+      tmax(1)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,1)+yr(1))/2d0
+      if (soft_ok) then
+         tmin(2)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,2)-yr(2))/2d0
+         tmax(2)=(-invm(ia+ib)+invm(i)+this%invm_min(ir,2)+yr(2))/2d0
+      else
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      endif
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2) = min(tmax(1:2), this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin(1:2),this%invm_min(ir+ib,1:2))
+      end where
+      pzmax(1:2)=lambda(sqrtshat**2,this%ETmin(i,1:2)**2,this%ETmin(ir,1:2)**2)
+      if (pzmax(1).lt.0d0) then
+         ps%jac=-1d0
+         return
+      endif
+      if (pzmax(2).lt.0d0) soft_ok=.false.
+      pzmax(1)=sqrt(pzmax(1))/(2d0*sqrtshat)
+      Eimax(1)=sqrtshat-sqrt(this%ETmin(ir,1)**2+pzmax(1)**2)
+      tmin(1)=max(tmin(1),invm(i)-sqrtshat*(Eimax(1)+pzmax(1)))
+      tmax(1)=min(tmax(1),invm(i)-sqrtshat*(Eimax(1)-pzmax(1)))
+      if (soft_ok) then
+         pzmax(2)=sqrt(pzmax(2))/(2d0*sqrtshat)
+         Eimax(2)=sqrtshat-sqrt(this%ETmin(ir,2)**2+pzmax(2)**2)
+         tmin(2)=max(tmin(2),invm(i)-sqrtshat*(Eimax(2)+pzmax(2)))
+         tmax(2)=min(tmax(2),invm(i)-sqrtshat*(Eimax(2)-pzmax(2)))
+      else
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      endif
+      if (tmin(1).ge.tmax(1)) then
          write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
          stop 1
       endif
@@ -1497,15 +1826,20 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i+ia),ip,tmin,tmax,ps%x(ix),ps%jac)
-      tmin=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir)
-      tmax=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      if (bad_inverse_jac()) return
+      tmin(1:2)=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir,1:2)
+      tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2) = min(tmax(1:2), this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin(1:2),this%invm_min(ir+ib,1:2))
+      end where
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      tmin=max(tmin,invm(i)-sqrtshat**2*(1-this%ETmin(ir)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
-      tmax=min(tmax,invm(i)-sqrtshat**2*(this%ETmin(i)**2/(invm(i)-invm(i+ia))))
-      if (tmin.ge.tmax) then
+      tmin(1:2)=max(tmin(1:2),invm(i)-sqrtshat**2*(1-this%ETmin(ir,1:2)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
+      tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/(invm(i)-invm(i+ia))))
+      if (tmin(1).ge.tmax(1)) then
          write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
          stop 1
       endif
@@ -1515,6 +1849,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       phi=atan(pp(2,i)/pp(1,i))
       if(pp(1,i).lt.0d0) phi=phi+pi
       if(phi.lt.0d0) phi=phi+2d0*pi
@@ -1522,63 +1857,86 @@ contains
          write (*,*) 'dti- phi',i,0d0,2d0*pi,phi
       endif
       ix=ix+1
-      call var_to_random(phi,0d0,0d0,2d0*pi,ps%x(ix),ps%jac)
+      call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       invm(ir)=dot(pp(0,ir),pp(0,ir))
-      if (invm(ir).le.0d0) then
+      mass_tol=vtiny*max(1d0,abs(invm(ia+ib)),abs(invm(i+ia)),abs(invm(i+ib)),abs(invm(i)))
+      if (invm(ir).lt.-mass_tol) then
          write (*,*) "ERROR in double_t: invariant mass of system", &
-              & " must be larger than zero",ir,invm(ir),i
+              & " must be non-negative",ir,invm(ir),i
          write (*,*) invm(ir),invm(ia+ib)+invm(i+ia)+invm(i+ib)-invm(i)&
               &,invm(ia+ib),invm(i +ia),invm(i+ib),invm(i)
          stop
+      elseif (invm(ir).lt.0d0) then
+         invm(ir)=0d0
       endif
       ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t_inverse
     subroutine gen23_one_step_inverse(i,ir,ib,im1)
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
-      real(kind=8) :: tmin,tmax,smin,smax,phi1,phi2,gram4,V,sqrtGG,shatmin,shatmax,y,base,root,phi_rot,&
-           etminir,etmini
+      real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot
+      real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
          call shatminmax(this,i,ir,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 1',i
          call generate_mass_inverse(i,shatmin,shatmax)
+         if (bad_inverse_jac()) return
       endif
       if (popcnt(ir).gt.1) then
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (debug) write (*,*) 'generate_mass_inverse gen23 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
+         if (bad_inverse_jac()) return
       endif
-      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin,tmax)
-      if (this%invm_max(ir+ib).ne.0d0) tmax=min(tmax,this%invm_max(ir+ib))
-      if (this%invm_min(ir+ib).ne.0d0) tmin=max(tmin,this%invm_min(ir+ib))
+      call tminmax(invm(ir+i),invm(ir+i+ib),invm(ir),invm(i),0d0,tmin_S,tmax_S)
+      tmin(1:2)=tmin_S
+      tmax(1:2)=tmax_S
+      where (this%invm_max(ir+ib,1:2).ne.0d0)
+         tmax(1:2)=min(tmax_S,this%invm_max(ir+ib,1:2))
+      end where
+      where (this%invm_min(ir+ib,1:2).ne.0d0)
+         tmin(1:2)=max(tmin_S,this%invm_min(ir+ib,1:2))
+      end where
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(i)**2-invm(i) .and. popcnt(i).eq.1 ) then
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i)**2-invm(i)))**2) )
-      else
-         etminir=max(this%ETmin(ir),sqrt(invm(ir)))
-      endif
-      if ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir)**2-invm(ir) .and. popcnt(ir).eq.1 ) then
-         etmini=max(this%ETmin(i),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir)**2-invm(ir)))**2) )
-      else
-         etmini=max(this%ETmin(i),sqrt(invm(i)))
-      endif
-      base=piir(0)**2-ETmini**2+ETminir**2
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+      elsewhere
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+      end where
+      where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+      elsewhere
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+      end where
+      base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
       ! following is more stable:
-      root=(piir(0)-ETmini-ETminir)*(piir(0)+ETmini-ETminir)*&
-           (piir(0)-ETmini+ETminir)*(piir(0)+ETmini+ETminir)
-      if (root.lt.0d0) then
+      root(1:2)=(piir(0)-ETmini(1:2)-ETminir(1:2))*(piir(0)+ETmini(1:2)-ETminir(1:2))*&
+           (piir(0)-ETmini(1:2)+ETminir(1:2))*(piir(0)+ETmini(1:2)+ETminir(1:2))
+      if (root(1).lt.0d0) then
          write (*,*) 'root.lt.0d0 in gen23_one_step_inverse',root
          stop 1
       endif
-      tmin=max(tmin,invm(ir)-pib(0)/piir(0)*(base+sqrt(root)))
-      tmax=min(tmax,invm(ir)-pib(0)/piir(0)*(base-sqrt(root)))
-      if (tmin.ge.tmax) then
+      if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
+         ps%jac=-33d0
+         return
+      endif
+      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
+      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt(root(1))))
+      if (root(2).lt.0d0) then
+         tmin(2)=tmin(1)
+         tmax(2)=tmin(1)
+      else
+         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt(root(2))))
+         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt(root(2))))
+      endif
+      if (tmin(1).ge.tmax(1)) then
          if (debug) write (*,*) 'tmin.ge.tmax in gen23_one_step_inverse',tmin,tmax
          stop 1
       endif
@@ -1588,10 +1946,17 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       call sminmax(invm(ir+i),invm(ir),invm(ir+i+im1),invm(ir+i+ib)&
-           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin,smax,V,sqrtGG)
-      if (this%invm_min(i+im1).ne.0d0) smin=max(smin,this%invm_min(i+im1))
-      if (this%invm_max(i+im1).ne.0d0) smax=min(smax,this%invm_max(i+im1))
+           &,invm(ir+ib),invm(ir+ib+i+im1),invm(i),invm(im1),smin_S,smax_S,V,sqrtGG)
+      smin(1:2)=smin_S
+      smax(1:2)=smax_S
+      where (this%invm_min(i+im1,1:2).ne.0d0)
+         smin(1:2)=max(smin_S,this%invm_min(i+im1,1:2))
+      end where
+      where (this%invm_max(i+im1,1:2).ne.0d0)
+         smax(1:2)=min(smax_S,this%invm_max(i+im1,1:2))
+      end where
       if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
          y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
@@ -1603,17 +1968,18 @@ contains
          call rotz(piirr,-phi_rot,piir)
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
-         etminir=max(pib(0)*this%ETmin(ir)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
-              this%ETmin(ir))
-         smax=min(smax,&
-              invm(i)+invm(im1)+2d0*(piir(0)-etminir)*pim1(0)+2d0*sqrt((piir(0)-etminir)**2-invm(i))*pim1(1))
+         etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
+              this%ETmin(ir,1:2))
+         smax(1:2)=min(smax(1:2),&
+              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt((piir(0)-etminir(1:2))**2-invm(i))*pim1(1))
          if(invm(i).eq.0d0) then
-            smin=max(smin,2d0*this%ETmin(i)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
+            smin(1)=max(smin(1),2d0*this%ETmin(i,1)*(pim1(0)-pim1(1)))
+            smin(2)=max(smin(2),2d0*this%ETmin(i,2)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
       endif
-      if (smin.ge.smax) then
+      if (smin(1).ge.smax(1)) then
          write (*,*) 'smin.ge.smax in gen23_one_step_inverse',smin,smax
-         write (*,*) ir,ib,i,im1,this%invm_min(i+im1)
+         write (*,*) ir,ib,i,im1,this%invm_min(i+im1,1:2)
          stop 1
       endif
       invm(i+im1)=dot(pp(0:3,i+im1),pp(0:3,i+im1))
@@ -1622,6 +1988,7 @@ contains
       endif
       ix=ix+1
       call var_to_random(invm(i+im1),ip,smin,smax,ps%x(ix),ps%jac)
+      if (bad_inverse_jac()) return
       ! Generate the momenta from the integration variables. Since there is an
       ! ambiguity in phi, get both of them and pick the one that passes the cuts
       ! (if it's only one). If both pass, simply pick one of the two at random
@@ -1636,12 +2003,12 @@ contains
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
            &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
-      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2 .and. &
-           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2 ) then
+      if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2 .and. &
+           pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2 ) then
          continue
-      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir)**2) then
+      elseif (pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2) then
          ps%jac=ps%jac/2d0
-      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir)**2) then
+      elseif (pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2) then
          ps%jac=ps%jac/2d0
       endif
       ! Compute the Jacobian
@@ -1678,38 +2045,154 @@ contains
       ! Given a random variable var between varmin and varmax, compute
       ! the corresponding value of x between 0 and 1.
       implicit none
-      real(kind=8),intent(in) :: variable,power_in,var_min,var_max
+      real(kind=8),intent(in) :: variable
+      real(kind=8),dimension(-1:1),intent(in) :: power_in
+      real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
       real(kind=8),intent(out) :: x
       real(kind=8),intent(inout) :: jac
-      integer(kind=4) :: ip
-      real(kind=8) :: varmin,varmax,power,var
-      if (variable.lt.var_min) then
-         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
-         jac=-1d0
-         return
-      elseif (variable.gt.var_max) then
-         write (99,*) 'Warning: variable not between varmin and varmax',var_min,variable,var_max
+      integer(kind=4) :: i,k
+      real(kind=8),dimension(3) :: vmin,vmax,power,q
+      real(kind=8) :: var,xloc
+      logical :: found
+      if (variable.lt.var_min(1) .or. variable.gt.var_max(1)) then
+         write (99,*) 'Warning: variable not between varmin and varmax',var_min(1),variable,var_max(1)
          jac=-1d0
          return
       endif
-      if (var_min.lt.0d0 .and. var_max.le.0d0) then
-         power=power_in
-         varmin=-var_max
-         varmax=-var_min
+      call random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+      call random_to_var_weights(power,vmin,vmax,q)
+      if (var_min(1).lt.0d0 .and. var_max(1).le.0d0) then
          var=-variable
-      elseif (var_min.lt.0d0 .and. var_max.gt.0d0 .and. (abs(power_in).gt.vtiny)) then
-         write (99,*) 'ERROR: in var_to_random one of the two limits '/&
-              &/'is negative',var_min,var_max,power_in,jac,x
-         write (99,*) 'using flat transformation'
-         power=0d0
-         varmin=var_min
-         varmax=var_max
-         var=variable
       else
-         power=power_in
-         varmin=var_min
-         varmax=var_max
          var=variable
+      endif
+      found=.false.
+      k=0
+      do i=1,3
+         if (q(i).le.0d0) cycle
+         if (var.ge.vmin(i)-tiny .and. var.le.vmax(i)+tiny) then
+            k=i
+            found=.true.
+            exit
+         endif
+      enddo
+      if (.not.found) then
+         write (99,*) 'Warning: variable not in any active random-to-var range',variable,var_min,var_max
+         jac=-1d0
+         return
+      endif
+      call var_to_random_map(var,power(k),vmin(k),vmax(k),xloc,jac)
+      x=q(k)*xloc
+      if (k.gt.1) x=x+sum(q(1:k-1))
+      jac=jac/q(k)
+    end subroutine var_to_random
+
+    subroutine random_to_var_weights(power,vmin,vmax,q)
+      implicit none
+      real(kind=8),dimension(3),intent(in) :: power,vmin,vmax
+      real(kind=8),dimension(3),intent(out) :: q
+      integer(kind=4) :: i
+      real(kind=8),dimension(3) :: inte,coef
+      real(kind=8) :: total
+      coef=1d0
+      if (vmax(1).gt.vmin(1) .and. vmin(2).gt.0d0) coef(1)=vmin(2)**(power(2)-power(1))
+      if (vmax(3).gt.vmin(3) .and. vmin(3).gt.0d0) coef(3)=vmin(3)**(power(2)-power(3))
+      do i=1,3
+         inte(i)=coef(i)*power_integral(vmin(i),vmax(i),power(i))
+      enddo
+      total=sum(inte(1:3))
+      if (total.le.0d0) then
+         q=0d0
+         q(2)=1d0
+         return
+      endif
+      q(1:3)=inte(1:3)/total
+    end subroutine random_to_var_weights
+
+    real(kind=8) function power_integral(lo,hi,p)
+      implicit none
+      real(kind=8), intent(in) :: lo, hi, p
+      if (hi.le.lo) then
+         power_integral = 0d0
+      elseif (abs(p + 1d0) .lt. 1d-12) then
+         power_integral = log(hi/lo)
+      else
+         power_integral = (hi**(p+1d0) - lo**(p+1d0))/(p+1d0)
+      endif
+    end function power_integral
+
+    subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+      implicit none
+      real(kind=8),dimension(-1:1),intent(in) :: power_in
+      real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
+      real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
+      real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
+      real(kind=8),parameter :: epsilon=1d-8
+      var_min_loc=var_min
+      var_max_loc=var_max
+      if (var_min_loc(1).gt.var_max_loc(1)) then
+         write (*,*) 'Incorrect hard range in random_to_var_inputs'
+         write (*,*) var_min, var_max
+         stop 1
+      endif
+      var_min_loc(2)=max(var_min_loc(2),var_min_loc(1))
+      var_max_loc(2)=min(var_max_loc(2),var_max_loc(1))
+      if (var_min_loc(2).gt.var_max_loc(2)) then
+         var_min_loc(2)=var_max_loc(2)
+      endif
+      if (var_min_loc(1).lt.0d0 .and. var_max_loc(1).le.0d0) then
+         power(1:3)=power_in(1:-1:-1)
+         varmin=-var_max_loc
+         varmax=-var_min_loc
+      elseif (var_min_loc(1).ge.0d0 .and. var_max_loc(1).gt.0d0) then
+         power(1:3)=power_in(-1:1)
+         varmin=var_min_loc
+         varmax=var_max_loc
+      else
+         power(1:3)=0d0
+         varmin=var_min_loc
+         varmax=var_max_loc
+      endif
+      if (varmin(1).gt.varmax(1)) then
+         write (*,*) 'Incorrect transformed hard range in random_to_var_inputs'
+         write (*,*) var_min, var_max, varmin, varmax
+         stop 1
+      endif
+      if (varmin(2).lt.varmin(1)) varmin(2)=varmin(1)
+      if (varmax(2).gt.varmax(1)) varmax(2)=varmax(1)
+      vmin(1)=varmin(1)
+      if (varmin(2)-vmin(1).lt.epsilon) then
+         vmax(1)=vmin(1)
+      else
+         vmax(1)=min(varmin(2),varmax(1))
+      endif
+      vmin(2)=vmax(1)
+      if (varmax(2)-vmin(2).lt.epsilon) then
+         vmax(2)=vmin(2)
+      else
+         vmax(2)=varmax(2)
+      endif
+      vmin(3)=vmax(2)
+      if (varmax(1)-vmin(3).lt.epsilon) then
+         vmax(3)=vmin(3)
+      else
+         vmax(3)=varmax(1)
+      endif
+      where (vmin(1:3).le.epsilon .and. power(1:3).le.-1d0)
+         power(1:3)=0d0
+      end where
+    end subroutine random_to_var_inputs
+
+    subroutine var_to_random_map(var,power,varmin,varmax,x,jac)
+      implicit none
+      real(kind=8),intent(in) :: var,power,varmin,varmax
+      real(kind=8),intent(out) :: x
+      real(kind=8),intent(inout) :: jac
+      integer(kind=4) :: ip
+      if (varmax-varmin.le.tiny*max(1d0,max(abs(varmin),abs(varmax)))) then
+         x=0d0
+         jac=-1d0
+         return
       endif
       ip=nint(power)
       if (dble(ip).eq.power) then
@@ -1735,22 +2218,26 @@ contains
               (varmin**(1d0+power)*(1d0-x)+varmax**(1d0+power)*x)**(-power/(1d0+power))/&
               (1d0+power)
       endif
-    end subroutine var_to_random
+    end subroutine var_to_random_map
     subroutine generate_mass_inverse(i,shatmin,shatmax)
       implicit none
       integer :: i
-      real(kind=8) :: shatmin,shatmax
-      if (this%invm_min(i).ne.0d0) shatmin=max(shatmin,this%invm_min(i))
-      if (this%invm_max(i).ne.0d0) shatmax=min(shatmax,this%invm_max(i))
+      real(kind=8),dimension(1:2) :: shatmin,shatmax
+      where (this%invm_min(i,1:2).ne.0d0)
+         shatmin(1:2)=max(shatmin(1:2),this%invm_min(i,1:2))
+      end where
+      where (this%invm_max(i,1:2).ne.0d0)
+         shatmax(1:2)=min(shatmax(1:2),this%invm_max(i,1:2))
+      end where
       invm(i)=dot(pp(0:3,i),pp(0:3,i))
       if (debug) then
          write (*,*) 'mi- i',i,shatmin,shatmax,invm(i)
       endif
       ix=ix+1
-      call var_to_random(invm(i),-0.5d0,shatmin,shatmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i),ip_mass,shatmin,shatmax,ps%x(ix),ps%jac)
     end subroutine generate_mass_inverse
-
   end subroutine gen23_compute_x_from_momenta
+
   real(kind=8) function dot(p1,p2)
     ! Inner product between two 4-vectors
     implicit none
@@ -1765,7 +2252,7 @@ contains
     class(phase_space_gen23),intent(in) :: this
     integer(kind=4),intent(in) :: j1,j2
     real(kind=8),dimension(*),intent(in) :: invm
-    real(kind=8),intent(out) :: shatmin,shatmax
+    real(kind=8),dimension(1:2),intent(out) :: shatmin,shatmax
     integer(kind=4) :: j
     shatmin=0d0
     do j=0,this%next-1
@@ -1774,15 +2261,15 @@ contains
        endif
     enddo
     shatmin=shatmin**2
-    shatmax=(sqrt(invm(j1+j2))-sqrt(max(invm(j2),this%invm_min(j2))))**2
+    shatmax(1:2)=(sqrt(invm(j1+j2))-sqrt(max(invm(j2),this%invm_min(j2,1:2))))**2
   end subroutine shatminmax
-  real(kind=8) function lambda(s,xa2,xb2)
+  elemental real(kind=8) function lambda(s,xa2,xb2)
     ! The usual two dimensional phase-space volume factor. See, e.g.,
     ! Eq.(A2) of E.~Byckling and K.~Kajantie, ``Reductions of the
     ! phase-space integral in terms of simpler processes,'' Phys. Rev. 187
     ! (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
-    real(kind=8) :: xa2,xb2,S
+    real(kind=8),intent(in) :: xa2,xb2,S
     lambda=s**2-2d0*(xa2+xb2)*s+(xa2-xb2)**2
   end function lambda
 
@@ -2012,9 +2499,9 @@ contains
     real(kind=8),intent(in) :: t,phi,m1,m2
     real(kind=8),intent(in),dimension(0:3) :: pa,pb,pc
     real(kind=8),intent(out),dimension(0:3) :: p1,pr
-    real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,phi_off
+    real(kind=8) :: E_acms,p_acms,esum,esum2,ed,pp2,md2,pt,pt2,pt2_tol,phi_off
     real(kind=8),dimension(0:3) :: ptot,pa_cms,ptotm,Pii,pc_cms,pc_rot,pii_rot
-    real(kind=8),parameter :: tiny=1d-8
+    real(kind=8),parameter :: tiny=1d-5
     ptot(0:3)=pa(0:3)+pb(0:3)
     ptotm(0)=ptot(0)
     ptotm(1:3)=-ptot(1:3)
@@ -2063,7 +2550,8 @@ contains
     endif
     Pii(3) = -(m2**2-t-2d0*Pii(0)*E_acms)/(2d0*p_acms)
     pt2=pp2-Pii(3)**2
-    if (pt2/esum2.lt.-tiny) then
+    pt2_tol=tiny*max(abs(esum2),abs(pp2),abs(Pii(3)**2))
+    if (pt2.lt.-pt2_tol) then
        write (*,*) 'Error #16 in genps_fks.f: relative pt^2 smaller than 0',pt2
        stop 1
     elseif (pt2.lt.0d0) then

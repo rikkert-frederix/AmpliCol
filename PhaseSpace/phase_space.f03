@@ -18,7 +18,8 @@ module phase_space_base
      integer(kind=4) :: ndim,next,ndim_extra
      integer(kind=4),dimension(:,:),allocatable :: sets
      real(kind=8),dimension(:,:),allocatable :: pp,sqrt_s_min
-     real(kind=8),dimension(:),allocatable :: x,invm,invm_min,invm_max,ETmin
+     real(kind=8),dimension(:),allocatable :: x,invm
+     real(kind=8),dimension(:,:),allocatable :: invm_min,invm_max,ETmin
      integer(kind=4),dimension(:),allocatable :: order
      logical :: t_channel
    contains
