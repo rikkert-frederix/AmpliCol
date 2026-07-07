@@ -12,6 +12,10 @@ Gate counts: `errors`=0, `validation_failures`=0, `missing_amplicol`=0, `missing
 
 `missing_cpp_o3` is informational: C++ O3 cells are intentionally filled only where generation was feasible within the matrix-run time budget. `amplicol_unsupported` records processes outside Fortran AmpliCol's supported quark-line range; pyAmpliCol entries for those cells are still shown as absolute timings.
 
+Low-multiplicity coverage (`n <= 5`): `cases`=45, `amplicol_ok`=45, `jit_ok`=45, `mode_failures`=0, `validation_records`=34, `validation_clean`=34, `missing_validation_records`=11, `validation_failures`=0.
+
+Low-`n` mode coverage checks that the Fortran AmpliCol and pyAmpliCol JIT rows both completed for every applicable matrix cell. Validation records are reported separately because some performance refreshes intentionally skip same-point validation and only update timings.
+
 Summary: `info`=151, `warning`=9.
 
 | Severity | ID | Process | n | Mode | Finding |

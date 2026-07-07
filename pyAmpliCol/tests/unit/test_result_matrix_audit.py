@@ -59,3 +59,43 @@ def test_result_matrix_gate_fails_on_missing_required_jit_cell() -> None:
 
     assert "Gate status: **FAIL**." in report
     assert "`missing_jit`=1" in report
+
+
+def test_result_matrix_report_separates_low_n_mode_and_validation_coverage() -> None:
+    audit = _load_audit_module()
+    data = {
+        "entries": {
+            "proc": {
+                "2": {
+                    "amplicol": {"status": "ok"},
+                    "pyamplicol_jit": {"status": "ok"},
+                    "validation": {
+                        "status": "ok",
+                        "max_relative_difference": 1.0e-12,
+                        "tolerance": 1.0e-8,
+                    },
+                },
+                "3": {
+                    "amplicol": {"status": "ok"},
+                    "pyamplicol_jit": {"status": "ok"},
+                },
+                "6": {
+                    "amplicol": {"status": "ok"},
+                    "pyamplicol_jit": {"status": "failed"},
+                    "validation": {"status": "failed"},
+                },
+            }
+        }
+    }
+
+    report = audit.render_report(data, [])
+
+    assert "Low-multiplicity coverage (`n <= 5`):" in report
+    assert "`cases`=2" in report
+    assert "`amplicol_ok`=2" in report
+    assert "`jit_ok`=2" in report
+    assert "`mode_failures`=0" in report
+    assert "`validation_records`=1" in report
+    assert "`validation_clean`=1" in report
+    assert "`missing_validation_records`=1" in report
+    assert "`validation_failures`=0" in report

@@ -259,6 +259,7 @@ def _audit_row_statuses(
 
 def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
     gate = _gate_summary(data, findings)
+    low_n = _low_n_summary(data, max_n=5)
     lines = [
         "# Result Matrix Audit",
         "",
@@ -287,6 +288,26 @@ def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
             "time budget. `amplicol_unsupported` records processes outside "
             "Fortran AmpliCol's supported quark-line range; pyAmpliCol entries "
             "for those cells are still shown as absolute timings."
+        ),
+        "",
+        (
+            "Low-multiplicity coverage (`n <= 5`): "
+            f"`cases`={low_n['cases']}, "
+            f"`amplicol_ok`={low_n['amplicol_ok']}, "
+            f"`jit_ok`={low_n['jit_ok']}, "
+            f"`mode_failures`={low_n['mode_failures']}, "
+            f"`validation_records`={low_n['validation_records']}, "
+            f"`validation_clean`={low_n['validation_clean']}, "
+            f"`missing_validation_records`={low_n['missing_validation_records']}, "
+            f"`validation_failures`={low_n['validation_failures']}."
+        ),
+        "",
+        (
+            "Low-`n` mode coverage checks that the Fortran AmpliCol and "
+            "pyAmpliCol JIT rows both completed for every applicable matrix "
+            "cell. Validation records are reported separately because some "
+            "performance refreshes intentionally skip same-point validation "
+            "and only update timings."
         ),
         "",
     ]
@@ -376,6 +397,51 @@ def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, in
         "jit_backend_unsupported": jit_backend_unsupported,
         "missing_cpp_o3": missing_cpp_o3,
     }
+
+
+def _low_n_summary(data: dict[str, Any], *, max_n: int) -> dict[str, int]:
+    entries = data.get("entries", {})
+    summary = {
+        "cases": 0,
+        "amplicol_ok": 0,
+        "jit_ok": 0,
+        "mode_failures": 0,
+        "validation_records": 0,
+        "validation_clean": 0,
+        "missing_validation_records": 0,
+        "validation_failures": 0,
+    }
+    if not isinstance(entries, dict):
+        return summary
+    for row in entries.values():
+        if not isinstance(row, dict):
+            continue
+        for n_final, case in _iter_cases(row):
+            if n_final > max_n or case.get("status") == "not_applicable":
+                continue
+            summary["cases"] += 1
+            amplicol_ok = _mode(case, "amplicol").get("status") == "ok"
+            jit_ok = _mode(case, "pyamplicol_jit").get("status") == "ok"
+            if amplicol_ok:
+                summary["amplicol_ok"] += 1
+            if jit_ok:
+                summary["jit_ok"] += 1
+            if not (amplicol_ok and jit_ok):
+                summary["mode_failures"] += 1
+            validation = _mode(case, "validation")
+            if not validation:
+                summary["missing_validation_records"] += 1
+                continue
+            summary["validation_records"] += 1
+            tolerance = _float(validation.get("tolerance")) or 1.0e-8
+            rel = _float(validation.get("max_relative_difference"))
+            if validation.get("status") == "ok" and (
+                rel is None or rel <= tolerance
+            ):
+                summary["validation_clean"] += 1
+            else:
+                summary["validation_failures"] += 1
+    return summary
 
 
 def _iter_cases(row: dict[str, Any]) -> Iterable[tuple[int, dict[str, Any]]]:
