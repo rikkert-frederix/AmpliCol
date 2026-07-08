@@ -194,14 +194,14 @@ contains
           ip_shat=ip_flat
           ip_mass=ip_flat
        else
-          ip=[2d0,-1d0,-1d0]
-          ip_shat=[2d0,-1.2d0,-1d0]
-          ip_mass=[2d0,-0.5d0,-1d0]
+          ip=[2d0,-1d0,-2d0]
+          ip_shat=[2d0,-1.2d0,-2d0]
+          ip_mass=[2d0,-0.5d0,-2d0]
        endif
     else
-       ip=[2d0,-1d0,-1d0]
-       ip_shat=[2d0,-1.2d0,-1d0]
-       ip_mass=[2d0,-0.5d0,-1d0]
+       ip=[2d0,-1d0,-2d0]
+       ip_shat=[2d0,-1.2d0,-2d0]
+       ip_mass=[2d0,-0.5d0,-2d0]
     endif
     if (verbose) then
        write (99,*) "Power in importance sampling:",ip
@@ -306,6 +306,100 @@ contains
     var_min_eff(2)=var_min_eff(1)
     var_max_eff(2)=var_max_eff(1)
   end subroutine select_integration_bounds
+
+  subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+    implicit none
+    real(kind=8),dimension(-1:1),intent(in) :: power_in
+    real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
+    real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
+    real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
+    real(kind=8),parameter :: epsilon=1d-8
+    call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc)
+    if (var_min_loc(1).gt.var_max_loc(1)) then
+       write (*,*) 'Incorrect hard range in random_to_var_inputs'
+       write (*,*) var_min, var_max
+       stop 1
+    endif
+    var_min_loc(2)=max(var_min_loc(2),var_min_loc(1))
+    var_max_loc(2)=min(var_max_loc(2),var_max_loc(1))
+    if (var_min_loc(2).gt.var_max_loc(2)) then
+       var_min_loc(2)=var_max_loc(2)
+    endif
+    if (var_min_loc(1).lt.0d0 .and. var_max_loc(1).le.0d0) then
+       power(1:3)=power_in(1:-1:-1)
+       varmin=-var_max_loc
+       varmax=-var_min_loc
+    elseif (var_min_loc(1).ge.0d0 .and. var_max_loc(1).gt.0d0) then
+       power(1:3)=power_in(-1:1)
+       varmin=var_min_loc
+       varmax=var_max_loc
+    else
+       power(1:3)=0d0
+       varmin=var_min_loc
+       varmax=var_max_loc
+    endif
+    if (varmin(1).gt.varmax(1)) then
+       write (*,*) 'Incorrect transformed hard range in random_to_var_inputs'
+       write (*,*) var_min, var_max, varmin, varmax
+       stop 1
+    endif
+    if (varmin(2).lt.varmin(1)) varmin(2)=varmin(1)
+    if (varmax(2).gt.varmax(1)) varmax(2)=varmax(1)
+    vmin(1)=varmin(1)
+    if (varmin(2)-vmin(1).lt.epsilon) then
+       vmax(1)=vmin(1)
+    else
+       vmax(1)=min(varmin(2),varmax(1))
+    endif
+    vmin(2)=vmax(1)
+    if (varmax(2)-vmin(2).lt.epsilon) then
+       vmax(2)=vmin(2)
+    else
+       vmax(2)=varmax(2)
+    endif
+    vmin(3)=vmax(2)
+    if (varmax(1)-vmin(3).lt.epsilon) then
+       vmax(3)=vmin(3)
+    else
+       vmax(3)=varmax(1)
+    endif
+    where (vmin(1:3).le.epsilon .and. power(1:3).le.-1d0)
+       power(1:3)=0d0
+    end where
+  end subroutine random_to_var_inputs
+
+  subroutine random_to_var_weights(power,vmin,vmax,q)
+    implicit none
+    real(kind=8),dimension(3),intent(in) :: power,vmin,vmax
+    real(kind=8),dimension(3),intent(out) :: q
+    integer(kind=4) :: i
+    real(kind=8),dimension(3) :: inte,coef
+    real(kind=8) :: total
+    coef=1d0
+    if (vmax(1).gt.vmin(1) .and. vmin(2).gt.0d0) coef(1)=vmin(2)**(power(2)-power(1))
+    if (vmax(3).gt.vmin(3) .and. vmin(3).gt.0d0) coef(3)=vmin(3)**(power(2)-power(3))
+    do i=1,3
+       inte(i)=coef(i)*power_integral(vmin(i),vmax(i),power(i))
+    enddo
+    total=sum(inte(1:3))
+    if (total.le.0d0) then
+       q=0d0
+       return
+    endif
+    q(1:3)=inte(1:3)/total
+  end subroutine random_to_var_weights
+
+  real(kind=8) function power_integral(lo,hi,p)
+    implicit none
+    real(kind=8),intent(in) :: lo,hi,p
+    if (hi.le.lo) then
+       power_integral=0d0
+    elseif (abs(p+1d0).lt.1d-12) then
+       power_integral=log(hi/lo)
+    else
+       power_integral=(hi**(p+1d0)-lo**(p+1d0))/(p+1d0)
+    endif
+  end function power_integral
 
 
   
@@ -1268,103 +1362,6 @@ contains
       jac=jac/q(k)
     end subroutine random_to_var
 
-    subroutine random_to_var_weights(power,vmin,vmax,q)
-      implicit none
-      real(kind=8),dimension(3),intent(in) :: power,vmin,vmax
-      real(kind=8),dimension(3),intent(out) :: q
-      integer(kind=4) :: i
-      real(kind=8),dimension(3) :: inte,coef
-      real(kind=8) :: total
-      coef=1d0
-      if (vmax(1).gt.vmin(1) .and. vmin(2).gt.0d0) coef(1)=vmin(2)**(power(2)-power(1))
-      if (vmax(3).gt.vmin(3) .and. vmin(3).gt.0d0) coef(3)=vmin(3)**(power(2)-power(3))
-      do i=1,3
-         inte(i)=coef(i)*power_integral(vmin(i),vmax(i),power(i))
-      enddo
-      total=sum(inte(1:3))
-      if (total.le.0d0) then
-         q=0d0
-         return
-      endif
-      q(1:3)=inte(1:3)/total
-    end subroutine random_to_var_weights
-
-    real(kind=8) function power_integral(lo,hi,p)
-      implicit none
-      real(kind=8), intent(in) :: lo, hi, p
-      if (hi.le.lo) then
-         power_integral = 0d0
-      elseif (abs(p + 1d0) .lt. 1d-12) then
-         power_integral = log(hi/lo)
-      else
-         power_integral = (hi**(p+1d0) - lo**(p+1d0))/(p+1d0)
-      endif
-    end function power_integral
-
-    subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
-      implicit none
-      real(kind=8),dimension(-1:1),intent(in) :: power_in
-      real(kind=8),dimension(1:2) :: var_min,var_max
-      real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
-      real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
-      real(kind=8),parameter :: epsilon=1d-8
-      call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc)
-      if (var_min_loc(1).gt.var_max_loc(1)) then
-         write (*,*) 'Incorrect hard range in random_to_var_inputs'
-         write (*,*) var_min, var_max
-         stop 1
-      endif
-      var_min_loc(2)=max(var_min_loc(2),var_min_loc(1))
-      var_max_loc(2)=min(var_max_loc(2),var_max_loc(1))
-      if (var_min_loc(2).gt.var_max_loc(2)) then
-         var_min_loc(2)=var_max_loc(2)
-      endif
-      if (var_min_loc(1).lt.0d0 .and. var_max_loc(1).le.0d0) then
-         ! invert order
-         power(1:3)=power_in(1:-1:-1)
-         varmin=-var_max_loc
-         varmax=-var_min_loc
-      elseif (var_min_loc(1).ge.0d0 .and. var_max_loc(1).gt.0d0) then
-         ! normal order
-         power(1:3)=power_in(-1:1)
-         varmin=var_min_loc
-         varmax=var_max_loc
-      else
-         ! positive and negative limits. Use flat transformation for all
-         power(1:3)=0d0
-         varmin=var_min_loc
-         varmax=var_max_loc
-      endif
-      if (varmin(1).gt.varmax(1)) then
-         write (*,*) 'Incorrect transformed hard range in random_to_var_inputs'
-         write (*,*) var_min, var_max, varmin, varmax
-         stop 1
-      endif
-      if (varmin(2).lt.varmin(1)) varmin(2)=varmin(1)
-      if (varmax(2).gt.varmax(1)) varmax(2)=varmax(1)
-      vmin(1)=varmin(1)
-      if (varmin(2)-vmin(1).lt.epsilon) then
-         vmax(1)=vmin(1)
-      else
-         vmax(1)=min(varmin(2),varmax(1))
-      endif
-      vmin(2)=vmax(1)
-      if (varmax(2)-vmin(2).lt.epsilon) then
-         vmax(2)=vmin(2)
-      else
-         vmax(2)=varmax(2)
-      endif
-      vmin(3)=vmax(2)
-      if (varmax(1)-vmin(3).lt.epsilon) then
-         vmax(3)=vmin(3)
-      else
-         vmax(3)=varmax(1)
-      endif
-      where (vmin(1:3).le.epsilon .and. power(1:3).le.-1d0)
-         power(1:3)=0d0
-      end where
-    end subroutine random_to_var_inputs
-
     subroutine random_to_var_map(x,power,varmin,varmax,var,jac)
       implicit none
       real(kind=8),intent(in) :: x,power,varmin,varmax
@@ -2117,101 +2114,6 @@ contains
       if (k.gt.1) x=x+sum(q(1:k-1))
       jac=jac/q(k)
     end subroutine var_to_random
-
-    subroutine random_to_var_weights(power,vmin,vmax,q)
-      implicit none
-      real(kind=8),dimension(3),intent(in) :: power,vmin,vmax
-      real(kind=8),dimension(3),intent(out) :: q
-      integer(kind=4) :: i
-      real(kind=8),dimension(3) :: inte,coef
-      real(kind=8) :: total
-      coef=1d0
-      if (vmax(1).gt.vmin(1) .and. vmin(2).gt.0d0) coef(1)=vmin(2)**(power(2)-power(1))
-      if (vmax(3).gt.vmin(3) .and. vmin(3).gt.0d0) coef(3)=vmin(3)**(power(2)-power(3))
-      do i=1,3
-         inte(i)=coef(i)*power_integral(vmin(i),vmax(i),power(i))
-      enddo
-      total=sum(inte(1:3))
-      if (total.le.0d0) then
-         q=0d0
-         q(2)=1d0
-         return
-      endif
-      q(1:3)=inte(1:3)/total
-    end subroutine random_to_var_weights
-
-    real(kind=8) function power_integral(lo,hi,p)
-      implicit none
-      real(kind=8), intent(in) :: lo, hi, p
-      if (hi.le.lo) then
-         power_integral = 0d0
-      elseif (abs(p + 1d0) .lt. 1d-12) then
-         power_integral = log(hi/lo)
-      else
-         power_integral = (hi**(p+1d0) - lo**(p+1d0))/(p+1d0)
-      endif
-    end function power_integral
-
-    subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
-      implicit none
-      real(kind=8),dimension(-1:1),intent(in) :: power_in
-      real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
-      real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
-      real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
-      real(kind=8),parameter :: epsilon=1d-8
-      call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc)
-      if (var_min_loc(1).gt.var_max_loc(1)) then
-         write (*,*) 'Incorrect hard range in random_to_var_inputs'
-         write (*,*) var_min, var_max
-         stop 1
-      endif
-      var_min_loc(2)=max(var_min_loc(2),var_min_loc(1))
-      var_max_loc(2)=min(var_max_loc(2),var_max_loc(1))
-      if (var_min_loc(2).gt.var_max_loc(2)) then
-         var_min_loc(2)=var_max_loc(2)
-      endif
-      if (var_min_loc(1).lt.0d0 .and. var_max_loc(1).le.0d0) then
-         power(1:3)=power_in(1:-1:-1)
-         varmin=-var_max_loc
-         varmax=-var_min_loc
-      elseif (var_min_loc(1).ge.0d0 .and. var_max_loc(1).gt.0d0) then
-         power(1:3)=power_in(-1:1)
-         varmin=var_min_loc
-         varmax=var_max_loc
-      else
-         power(1:3)=0d0
-         varmin=var_min_loc
-         varmax=var_max_loc
-      endif
-      if (varmin(1).gt.varmax(1)) then
-         write (*,*) 'Incorrect transformed hard range in random_to_var_inputs'
-         write (*,*) var_min, var_max, varmin, varmax
-         stop 1
-      endif
-      if (varmin(2).lt.varmin(1)) varmin(2)=varmin(1)
-      if (varmax(2).gt.varmax(1)) varmax(2)=varmax(1)
-      vmin(1)=varmin(1)
-      if (varmin(2)-vmin(1).lt.epsilon) then
-         vmax(1)=vmin(1)
-      else
-         vmax(1)=min(varmin(2),varmax(1))
-      endif
-      vmin(2)=vmax(1)
-      if (varmax(2)-vmin(2).lt.epsilon) then
-         vmax(2)=vmin(2)
-      else
-         vmax(2)=varmax(2)
-      endif
-      vmin(3)=vmax(2)
-      if (varmax(1)-vmin(3).lt.epsilon) then
-         vmax(3)=vmin(3)
-      else
-         vmax(3)=varmax(1)
-      endif
-      where (vmin(1:3).le.epsilon .and. power(1:3).le.-1d0)
-         power(1:3)=0d0
-      end where
-    end subroutine random_to_var_inputs
 
     subroutine var_to_random_map(var,power,varmin,varmax,x,jac)
       implicit none
