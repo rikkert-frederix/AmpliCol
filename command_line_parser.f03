@@ -2,7 +2,7 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       timing,timing_sample)
+       timing,timing_sample,accuracy)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -12,6 +12,7 @@ contains
     integer(kind=8) :: seed
     logical :: read_momenta 
     integer :: me_points,timing_sample
+    real(kind=8) :: accuracy
 
     ! Default values:
     show_help=.false.
@@ -25,6 +26,7 @@ contains
     read_momenta=.false.
     timing='basic'
     timing_sample=100
+    accuracy=0d0
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -58,6 +60,13 @@ contains
        elseif (index(arg, "--timing-sample=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) timing_sample
+       elseif (index(arg, "--accuracy=").eq.1 .or. index(arg, "-a=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) accuracy
+          if (accuracy.le.0d0 .or. accuracy.ge.1d0) then
+             write (*,*) 'Accuracy must be between 0 and 1: ',accuracy
+             stop 1
+          endif
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -83,6 +92,8 @@ contains
             "with [X] points tested (single PS kinematics)"
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
+       write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&
+            "the relative error is below [X] (0 < X < 1)."
        write (*,'(a)') ""
        stop
     end if

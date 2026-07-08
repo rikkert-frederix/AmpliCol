@@ -40,6 +40,7 @@ program amplicol_generate
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
+  real(kind=8) :: accuracy
 
   call get_run_arguments()
   timing_enabled=timing_mode.ne.timing_none
@@ -216,7 +217,13 @@ program amplicol_generate
   else
      nintegrals(1:ngroups)=1
   endif
-  call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax))
+  if (accuracy.gt.0d0) then
+     call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
+          pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax),accuracy)
+  else
+     call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
+          pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax))
+  endif
   if (timing_mode.eq.timing_detailed) then
      call cpu_time(tAfter)
      t_Int_init=t_Int_init+tAfter-tBefore
@@ -729,7 +736,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         timing_arg,timing_sample_arg)
+         timing_arg,timing_sample_arg,accuracy)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')

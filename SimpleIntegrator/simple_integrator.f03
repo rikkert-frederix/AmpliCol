@@ -200,7 +200,8 @@ module simple_integrator_mod
   real(kind=8),parameter :: write_evnt_fraction=0.05d0
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
-  logical,parameter :: turn_off_evnt_generation=.false.
+  logical :: turn_off_evnt_generation=.false.
+  real(kind=8) :: requested_accuracy=0d0
   real(kind=8),parameter :: required_accuracy_factor=10d0
   integer,parameter :: min_grid_size=8
   integer,parameter :: max_grid_size=2048
@@ -209,11 +210,12 @@ module simple_integrator_mod
 contains
 
   ! Initialise the public integrator object and all channel/integral state.
-  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters)
+  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters,accuracy)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: nchannel,nevts_unw_req,niters
     integer,dimension(nchannel),intent(in) :: ndim,nintegral,ndim_extra
+    real(kind=8),intent(in),optional :: accuracy
     integer :: i
     if (nchannel.lt.1) then
        write (*,*) 'ERROR: nchannel must be at least 1'
@@ -226,6 +228,16 @@ contains
     if (nevts_unw_req.lt.1) then
        write (*,*) 'ERROR: nevts_unw_req must be at least 1'
        stop 1
+    endif
+    turn_off_evnt_generation=.false.
+    requested_accuracy=0d0
+    if (present(accuracy)) then
+       if (accuracy.le.0d0 .or. accuracy.ge.1d0) then
+          write (*,*) 'ERROR: requested accuracy must be between 0 and 1'
+          stop 1
+       endif
+       turn_off_evnt_generation=.true.
+       requested_accuracy=accuracy
     endif
     if (any(ndim.lt.1)) then
        write (*,*) 'ERROR: all channels must have at least one adapted dimension'
@@ -522,7 +534,7 @@ contains
     call this%init_next_iter()
     if (all(this%channels%evgen_done)) done=.true.
     if (turn_off_evnt_generation .and. this%res(1).gt.0d0 .and. &
-         this%unc(1)/this%res(1).lt.1d0/(sqrt(dble(this%nevts_unw_req))*required_accuracy_factor)) done=.true.
+         this%unc(1)/this%res(1).lt.requested_accuracy) done=.true.
     if (all(this%channels%done)) done=.true.
     call flush(99)
   end subroutine finalise_iter
@@ -687,9 +699,15 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     real(kind=8) :: total,total_channel
+    real(kind=8) :: rel_unc
     integer :: i,j
     integer(kind=8) :: npoints,npoints_channel
-    this%npoints_requested=this%npoints_requested*2
+    if (turn_off_evnt_generation .and. this%res(1).gt.0d0) then
+       rel_unc=this%unc(1)/this%res(1)
+       if (rel_unc.gt.2d0*requested_accuracy) this%npoints_requested=this%npoints_requested*2
+    else
+       this%npoints_requested=this%npoints_requested*2
+    endif
     npoints=0_8
     total=sum(this%channels%res(1),mask=.not.this%channels%evgen_done)
     if (total.le.0d0) then
