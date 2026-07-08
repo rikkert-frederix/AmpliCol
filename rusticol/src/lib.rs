@@ -16,6 +16,7 @@ use symbolica::prelude::{
     BatchEvaluator, CompiledComplexEvaluator, Complex, DoubleFloat, EvaluationDomain,
     ExpressionEvaluator, Float, JITCompilationSettings, Rational, Real, RealLike,
 };
+use toml::Value as TomlValue;
 
 const MAX_LC_TOPOLOGY_REPLAY_EXPANDED_POINTS: usize = 8192;
 
@@ -128,6 +129,8 @@ struct GenericStageEvaluatorArtifactsManifestV2 {
     parameter_count: usize,
     value_parameter_count: usize,
     momentum_parameter_count: usize,
+    #[serde(default)]
+    model_parameter_count: usize,
     real_valued_inputs: Vec<usize>,
     parameter_layout: String,
     stage_count: usize,
@@ -155,6 +158,8 @@ struct GenericSerializedStageEvaluatorManifestV2 {
     value_parameter_count: usize,
     #[serde(default)]
     momentum_parameter_count: usize,
+    #[serde(default)]
+    model_parameter_count: usize,
     #[serde(default)]
     real_valued_inputs: Vec<usize>,
     expression_ready: bool,
@@ -203,6 +208,8 @@ struct GenericRuntimeSchemaManifestV2 {
     #[serde(default)]
     model: Option<GenericRuntimeModelManifestV2>,
     #[serde(default)]
+    model_parameters: Vec<GenericRuntimeModelParameterManifestV2>,
+    #[serde(default)]
     normalization: Option<GenericRuntimeNormalizationManifestV2>,
     parameter_layout: GenericParameterLayoutManifestV2,
     current_storage: GenericCurrentStorageManifestV2,
@@ -230,6 +237,17 @@ struct GenericRuntimeModelManifestV2 {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct GenericRuntimeModelParameterManifestV2 {
+    name: String,
+    kind: String,
+    parameter_index: usize,
+    #[serde(default)]
+    default: f64,
+    #[serde(default)]
+    pdg: Option<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct GenericRuntimeParticleManifestV2 {
     pdg: i32,
     #[serde(default)]
@@ -246,6 +264,10 @@ struct GenericRuntimeNormalizationManifestV2 {
     average_factor: f64,
     #[serde(default = "default_one_f64")]
     identical_factor: f64,
+    #[serde(default)]
+    qcd_coupling_power: usize,
+    #[serde(default)]
+    electroweak_coupling_power: usize,
 }
 
 fn default_one_f64() -> f64 {
@@ -256,6 +278,8 @@ fn default_one_f64() -> f64 {
 struct GenericParameterLayoutManifestV2 {
     source_component_parameter_count: usize,
     momentum_parameter_count: usize,
+    #[serde(default)]
+    model_parameter_count: usize,
     parameter_count_if_flattened: usize,
     value_component_count: usize,
     source_components_complex: bool,
@@ -857,7 +881,9 @@ fn validate_generic_parameter_layout(schema: &GenericRuntimeSchemaManifestV2) ->
         ));
     }
     if layout.parameter_count_if_flattened
-        != layout.source_component_parameter_count + layout.momentum_parameter_count
+        != layout.source_component_parameter_count
+            + layout.momentum_parameter_count
+            + layout.model_parameter_count
     {
         return Err(PyValueError::new_err(
             "generic runtime schema flattened parameter count is inconsistent",
@@ -875,6 +901,23 @@ fn validate_generic_parameter_layout(schema: &GenericRuntimeSchemaManifestV2) ->
         return Err(PyValueError::new_err(
             "generic runtime schema real-valued input indices are inconsistent",
         ));
+    }
+    if schema.model_parameters.len() != layout.model_parameter_count {
+        return Err(PyValueError::new_err(
+            "generic runtime schema model-parameter count is inconsistent",
+        ));
+    }
+    let mut seen_model_parameters = BTreeSet::new();
+    for parameter in &schema.model_parameters {
+        if parameter.name.is_empty()
+            || parameter.parameter_index >= layout.model_parameter_count
+            || !parameter.default.is_finite()
+            || !seen_model_parameters.insert(parameter.parameter_index)
+        {
+            return Err(PyValueError::new_err(
+                "generic runtime schema contains invalid model-parameter metadata",
+            ));
+        }
     }
     Ok(())
 }
@@ -1492,7 +1535,8 @@ fn validate_generic_stage_evaluators(manifest: &GenericProcessManifestV2) -> PyR
     };
     let schema = &manifest.runtime_schema;
     let expected_parameter_count = schema.parameter_layout.value_component_count
-        + schema.parameter_layout.momentum_parameter_count;
+        + schema.parameter_layout.momentum_parameter_count
+        + schema.parameter_layout.model_parameter_count;
     let expected_real_inputs = (schema.parameter_layout.value_component_count
         ..expected_parameter_count)
         .collect::<Vec<_>>();
@@ -1501,11 +1545,13 @@ fn validate_generic_stage_evaluators(manifest: &GenericProcessManifestV2) -> PyR
         && stage_evaluators.value_parameter_count == schema.parameter_layout.value_component_count
         && stage_evaluators.momentum_parameter_count
             == schema.parameter_layout.momentum_parameter_count
+        && stage_evaluators.model_parameter_count == schema.parameter_layout.model_parameter_count
         && stage_evaluators.real_valued_inputs == expected_real_inputs;
     let header_is_stage_local = stage_evaluators.parameter_layout == "stage-local-value-momentum"
         && stage_evaluators.parameter_count == 0
         && stage_evaluators.value_parameter_count == 0
         && stage_evaluators.momentum_parameter_count == 0
+        && stage_evaluators.model_parameter_count == 0
         && stage_evaluators.real_valued_inputs.is_empty();
     if stage_evaluators.kind != "generic-dag-stage-evaluator-artifacts"
         || (!header_is_global && !header_is_stage_local)
@@ -1582,7 +1628,10 @@ fn validate_generic_serialized_stage_evaluator(
         validate_generic_stage_input_components(stage, expected_parameter_count)?;
         if input_len != stage.parameter_count
             || stage.parameter_count != stage.input_components.len()
-            || stage.value_parameter_count + stage.momentum_parameter_count != stage.parameter_count
+            || stage.value_parameter_count
+                + stage.momentum_parameter_count
+                + stage.model_parameter_count
+                != stage.parameter_count
             || stage
                 .real_valued_inputs
                 .iter()
@@ -1687,7 +1736,10 @@ fn validate_generic_stage_input_components(
     }
     let mut seen_parameters = BTreeSet::new();
     for component in &stage.input_components {
-        if component.kind != "value" && component.kind != "momentum" {
+        if component.kind != "value"
+            && component.kind != "momentum"
+            && component.kind != "model_parameter"
+        {
             return Err(PyValueError::new_err(format!(
                 "generic serialized stage evaluator {} has invalid local input kind {:?}",
                 stage.evaluator_label, component.kind
@@ -1704,9 +1756,12 @@ fn validate_generic_stage_input_components(
                 stage.evaluator_label
             )));
         }
-        if component.real_valued && component.kind != "momentum" {
+        if component.real_valued
+            && component.kind != "momentum"
+            && component.kind != "model_parameter"
+        {
             return Err(PyValueError::new_err(format!(
-                "generic serialized stage evaluator {} marks a non-momentum input as real",
+                "generic serialized stage evaluator {} marks a complex local input as real",
                 stage.evaluator_label
             )));
         }
@@ -2079,7 +2134,7 @@ struct ZeroGluonStage {
     z_right: f64,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct RuntimeProfile {
     source_fill_s: f64,
     momentum_setup_s: f64,
@@ -2087,9 +2142,50 @@ struct RuntimeProfile {
     stage_evaluator_call_s: f64,
     stage_evaluator_s: f64,
     output_assign_s: f64,
+    amplitude_input_pack_s: f64,
+    amplitude_evaluator_call_s: f64,
     amplitude_evaluator_s: f64,
     reduction_s: f64,
     total_s: f64,
+    stage_input_pack_by_stage_s: Vec<f64>,
+    stage_evaluator_call_by_stage_s: Vec<f64>,
+    stage_output_assign_by_stage_s: Vec<f64>,
+}
+
+impl RuntimeProfile {
+    fn add_sector(&mut self, sector: &RuntimeProfile) {
+        self.source_fill_s += sector.source_fill_s;
+        self.momentum_setup_s += sector.momentum_setup_s;
+        self.stage_input_pack_s += sector.stage_input_pack_s;
+        self.stage_evaluator_call_s += sector.stage_evaluator_call_s;
+        self.stage_evaluator_s += sector.stage_evaluator_s;
+        self.output_assign_s += sector.output_assign_s;
+        self.amplitude_input_pack_s += sector.amplitude_input_pack_s;
+        self.amplitude_evaluator_call_s += sector.amplitude_evaluator_call_s;
+        self.amplitude_evaluator_s += sector.amplitude_evaluator_s;
+        self.reduction_s += sector.reduction_s;
+        add_profile_vector(
+            &mut self.stage_input_pack_by_stage_s,
+            &sector.stage_input_pack_by_stage_s,
+        );
+        add_profile_vector(
+            &mut self.stage_evaluator_call_by_stage_s,
+            &sector.stage_evaluator_call_by_stage_s,
+        );
+        add_profile_vector(
+            &mut self.stage_output_assign_by_stage_s,
+            &sector.stage_output_assign_by_stage_s,
+        );
+    }
+}
+
+fn add_profile_vector(target: &mut Vec<f64>, source: &[f64]) {
+    if target.len() < source.len() {
+        target.resize(source.len(), 0.0);
+    }
+    for (index, value) in source.iter().enumerate() {
+        target[index] += value;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -2116,6 +2212,7 @@ struct GenericRuntimeV2 {
     parameter_count: usize,
     value_parameter_count: usize,
     momentum_parameter_count: usize,
+    model_parameter_count: usize,
     current_count: usize,
     source_count: usize,
     interaction_count: usize,
@@ -2136,6 +2233,14 @@ struct GenericRuntimeV2 {
     external_is_initial: Vec<bool>,
     particle_masses: BTreeMap<i32, f64>,
     normalization_factor: f64,
+    normalization_color_factor: f64,
+    normalization_average_factor: f64,
+    normalization_identical_factor: f64,
+    normalization_qcd_coupling_power: usize,
+    normalization_electroweak_coupling_power: usize,
+    model_parameters: Vec<GenericRuntimeModelParameterManifestV2>,
+    model_parameter_name_to_index: BTreeMap<String, usize>,
+    model_parameter_values_f64: Vec<f64>,
     stages: Option<Vec<GenericStageRuntimeV2>>,
     amplitude_stage: Option<GenericAmplitudeRuntimeV2>,
     state_scratch_f64: Vec<Complex<f64>>,
@@ -2146,6 +2251,7 @@ struct GenericStageRuntimeV2 {
     outputs: Vec<(usize, usize)>,
     output_spans: Vec<(usize, usize, usize)>,
     input_components: Option<Vec<usize>>,
+    input_spans: Vec<(usize, usize, usize)>,
     parameter_scratch_f64: Vec<Complex<f64>>,
     output_scratch_f64: Vec<Complex<f64>>,
     evaluator: EvaluatorGroup,
@@ -2158,6 +2264,7 @@ struct GenericAmplitudeRuntimeV2 {
     has_coherent_groups: bool,
     color_contraction: Option<ColorContractionRuntime>,
     input_components: Option<Vec<usize>>,
+    input_spans: Vec<(usize, usize, usize)>,
     parameter_scratch_f64: Vec<Complex<f64>>,
     output_scratch_f64: Vec<Complex<f64>>,
     evaluator: EvaluatorGroup,
@@ -2244,6 +2351,40 @@ fn build_lc_topology_replay_mappings(
     Ok(mappings)
 }
 
+fn collect_toml_numeric_overrides(
+    prefix: &str,
+    value: &TomlValue,
+    out: &mut BTreeMap<String, f64>,
+) -> PyResult<()> {
+    match value {
+        TomlValue::Table(table) => {
+            for (key, child) in table {
+                let child_prefix = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                collect_toml_numeric_overrides(&child_prefix, child, out)?;
+            }
+            Ok(())
+        }
+        TomlValue::Integer(value) => {
+            out.insert(prefix.to_owned(), *value as f64);
+            Ok(())
+        }
+        TomlValue::Float(value) => {
+            out.insert(prefix.to_owned(), *value);
+            Ok(())
+        }
+        TomlValue::String(_)
+        | TomlValue::Boolean(_)
+        | TomlValue::Datetime(_)
+        | TomlValue::Array(_) => Err(PyValueError::new_err(format!(
+            "model-parameter TOML key {prefix:?} must be a numeric value"
+        ))),
+    }
+}
+
 impl GenericRuntimeV2 {
     fn from_manifest(manifest: GenericProcessManifestV2) -> PyResult<Self> {
         let stage_evaluators = manifest.compiled.stage_evaluators.as_ref();
@@ -2268,6 +2409,16 @@ impl GenericRuntimeV2 {
                     .collect::<BTreeMap<_, _>>()
             })
             .unwrap_or_default();
+        let mut model_parameters = manifest.runtime_schema.model_parameters.clone();
+        model_parameters.sort_by_key(|parameter| parameter.parameter_index);
+        let model_parameter_values_f64 = model_parameters
+            .iter()
+            .map(|parameter| parameter.default)
+            .collect::<Vec<_>>();
+        let model_parameter_name_to_index = model_parameters
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.parameter_index))
+            .collect::<BTreeMap<_, _>>();
         let color_factor_in_contraction = manifest
             .runtime_schema
             .amplitude_stage
@@ -2275,7 +2426,14 @@ impl GenericRuntimeV2 {
             .as_ref()
             .map(|contraction| contraction.supported && contraction.includes_color_factor)
             .unwrap_or(false);
-        let normalization_factor = manifest
+        let (
+            normalization_factor,
+            normalization_color_factor,
+            normalization_average_factor,
+            normalization_identical_factor,
+            normalization_qcd_coupling_power,
+            normalization_electroweak_coupling_power,
+        ) = manifest
             .runtime_schema
             .normalization
             .as_ref()
@@ -2285,10 +2443,17 @@ impl GenericRuntimeV2 {
                 } else {
                     normalization.color_factor
                 };
-                color_factor * normalization.global_coupling_factor
-                    / (normalization.average_factor * normalization.identical_factor)
+                (
+                    color_factor * normalization.global_coupling_factor
+                        / (normalization.average_factor * normalization.identical_factor),
+                    color_factor,
+                    normalization.average_factor,
+                    normalization.identical_factor,
+                    normalization.qcd_coupling_power,
+                    normalization.electroweak_coupling_power,
+                )
             })
-            .unwrap_or(1.0);
+            .unwrap_or((1.0, 1.0, 1.0, 1.0, 0, 0));
         Ok(Self {
             process: manifest.process,
             key: manifest.key,
@@ -2302,7 +2467,11 @@ impl GenericRuntimeV2 {
                 + manifest
                     .runtime_schema
                     .parameter_layout
-                    .momentum_parameter_count,
+                    .momentum_parameter_count
+                + manifest
+                    .runtime_schema
+                    .parameter_layout
+                    .model_parameter_count,
             value_parameter_count: manifest
                 .runtime_schema
                 .parameter_layout
@@ -2311,6 +2480,10 @@ impl GenericRuntimeV2 {
                 .runtime_schema
                 .parameter_layout
                 .momentum_parameter_count,
+            model_parameter_count: manifest
+                .runtime_schema
+                .parameter_layout
+                .model_parameter_count,
             current_count: manifest.dag_summary.current_count,
             source_count: manifest.dag_summary.source_count,
             interaction_count: manifest.dag_summary.interaction_count,
@@ -2352,6 +2525,14 @@ impl GenericRuntimeV2 {
             external_is_initial,
             particle_masses,
             normalization_factor,
+            normalization_color_factor,
+            normalization_average_factor,
+            normalization_identical_factor,
+            normalization_qcd_coupling_power,
+            normalization_electroweak_coupling_power,
+            model_parameters,
+            model_parameter_name_to_index,
+            model_parameter_values_f64,
             stages: None,
             amplitude_stage: None,
             state_scratch_f64: Vec::new(),
@@ -2395,6 +2576,103 @@ impl GenericRuntimeV2 {
              execution is not wired yet; {detail}",
             self.process,
         ))
+    }
+
+    fn apply_model_parameter_toml_path(&mut self, path: &Path) -> PyResult<()> {
+        let text = fs::read_to_string(path).map_err(|err| {
+            PyValueError::new_err(format!(
+                "could not read model-parameter TOML {}: {err}",
+                path.display()
+            ))
+        })?;
+        let value = toml::from_str::<TomlValue>(&text).map_err(|err| {
+            PyValueError::new_err(format!(
+                "could not parse model-parameter TOML {}: {err}",
+                path.display()
+            ))
+        })?;
+        let mut overrides = BTreeMap::new();
+        collect_toml_numeric_overrides("", &value, &mut overrides)?;
+        let stripped_parameter_overrides = overrides
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix("parameters.")
+                    .map(|stripped| (stripped.to_owned(), *value))
+            })
+            .collect::<Vec<_>>();
+        overrides.retain(|key, _| !key.starts_with("parameters."));
+        for (key, value) in stripped_parameter_overrides {
+            overrides.insert(key, value);
+        }
+        self.apply_model_parameter_overrides(&overrides)
+    }
+
+    fn apply_model_parameter_overrides(
+        &mut self,
+        overrides: &BTreeMap<String, f64>,
+    ) -> PyResult<()> {
+        for (name, value) in overrides {
+            let Some(index) = self.model_parameter_name_to_index.get(name).copied() else {
+                return Err(PyValueError::new_err(format!(
+                    "model-parameter override {name:?} is not used by process {}",
+                    self.process
+                )));
+            };
+            if index >= self.model_parameter_values_f64.len() || !value.is_finite() {
+                return Err(PyValueError::new_err(format!(
+                    "model-parameter override {name:?} has invalid value {value}",
+                )));
+            }
+            self.model_parameter_values_f64[index] = *value;
+        }
+        self.refresh_particle_mass_parameters();
+        self.refresh_normalization_factor();
+        Ok(())
+    }
+
+    fn refresh_particle_mass_parameters(&mut self) {
+        for parameter in &self.model_parameters {
+            if parameter.kind == "particle_mass" {
+                if let Some(pdg) = parameter.pdg {
+                    if let Some(value) = self
+                        .model_parameter_values_f64
+                        .get(parameter.parameter_index)
+                    {
+                        self.particle_masses.insert(pdg, *value);
+                    }
+                }
+            }
+        }
+    }
+
+    fn refresh_normalization_factor(&mut self) {
+        let alpha_s = self
+            .model_parameter_name_to_index
+            .get("normalization.alpha_s_me_check")
+            .and_then(|index| self.model_parameter_values_f64.get(*index))
+            .copied();
+        let alpha_ew = self
+            .model_parameter_name_to_index
+            .get("normalization.alpha_ew")
+            .and_then(|index| self.model_parameter_values_f64.get(*index))
+            .copied();
+        let mut global_coupling_factor = 1.0;
+        if self.normalization_qcd_coupling_power > 0 {
+            let Some(alpha_s) = alpha_s else {
+                return;
+            };
+            global_coupling_factor *= (4.0 * std::f64::consts::PI * alpha_s)
+                .powi(self.normalization_qcd_coupling_power as i32);
+        }
+        if self.normalization_electroweak_coupling_power > 0 {
+            let Some(alpha_ew) = alpha_ew else {
+                return;
+            };
+            global_coupling_factor *= (2.0 * 4.0 * std::f64::consts::PI * alpha_ew)
+                .powi(self.normalization_electroweak_coupling_power as i32);
+        }
+        self.normalization_factor = self.normalization_color_factor * global_coupling_factor
+            / (self.normalization_average_factor * self.normalization_identical_factor);
     }
 
     fn run_f64(&mut self, batch: &[Vec<[f64; 4]>]) -> PyResult<(Vec<f64>, RuntimeProfile)> {
@@ -2445,14 +2723,7 @@ impl GenericRuntimeV2 {
                     values[point_index] += expanded_values[offset + point_index];
                 }
             }
-            profile.source_fill_s += sector_profile.source_fill_s;
-            profile.momentum_setup_s += sector_profile.momentum_setup_s;
-            profile.stage_input_pack_s += sector_profile.stage_input_pack_s;
-            profile.stage_evaluator_call_s += sector_profile.stage_evaluator_call_s;
-            profile.stage_evaluator_s += sector_profile.stage_evaluator_s;
-            profile.output_assign_s += sector_profile.output_assign_s;
-            profile.amplitude_evaluator_s += sector_profile.amplitude_evaluator_s;
-            profile.reduction_s += sector_profile.reduction_s;
+            profile.add_sector(&sector_profile);
         }
         profile.total_s = total_start.elapsed().as_secs_f64();
         Ok((values, profile))
@@ -2480,6 +2751,8 @@ impl GenericRuntimeV2 {
         let external_is_initial = &self.external_is_initial;
         let particle_masses = &self.particle_masses;
         let value_parameter_count = self.value_parameter_count;
+        let model_parameter_start = self.value_parameter_count + self.momentum_parameter_count;
+        let model_parameter_values = &self.model_parameter_values_f64;
 
         let source_start = Instant::now();
         for (row, point) in batch.iter().enumerate() {
@@ -2504,10 +2777,25 @@ impl GenericRuntimeV2 {
         }
         let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
 
+        let model_parameter_start_time = Instant::now();
+        for row in 0..n_points {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_model_parameters_row(
+                model_parameter_start,
+                model_parameter_values,
+                row_state,
+            )?;
+        }
+        let model_parameter_setup_s = model_parameter_start_time.elapsed().as_secs_f64();
+
         let mut stage_input_pack_s = 0.0;
         let mut stage_evaluator_call_s = 0.0;
         let mut stage_evaluator_s = 0.0;
         let mut output_assign_s = 0.0;
+        let mut stage_input_pack_by_stage_s = Vec::new();
+        let mut stage_evaluator_call_by_stage_s = Vec::new();
+        let mut stage_output_assign_by_stage_s = Vec::new();
         for stage in self.stages.as_mut().expect("generic stages checked") {
             let (pack_s, eval_s, assign_s) = stage.evaluate_f64_into_state(
                 n_points,
@@ -2518,14 +2806,17 @@ impl GenericRuntimeV2 {
             stage_evaluator_call_s += eval_s;
             stage_evaluator_s += pack_s + eval_s;
             output_assign_s += assign_s;
+            stage_input_pack_by_stage_s.push(pack_s);
+            stage_evaluator_call_by_stage_s.push(eval_s);
+            stage_output_assign_by_stage_s.push(assign_s);
         }
 
-        let amplitude_start = Instant::now();
-        self.amplitude_stage
+        let (amplitude_input_pack_s, amplitude_evaluator_call_s) = self
+            .amplitude_stage
             .as_mut()
             .expect("generic amplitude stage checked")
             .evaluate_f64_into_scratch(n_points, state.as_slice())?;
-        let amplitude_evaluator_s = amplitude_start.elapsed().as_secs_f64();
+        let amplitude_evaluator_s = amplitude_input_pack_s + amplitude_evaluator_call_s;
 
         let reduction_start = Instant::now();
         self.amplitude_stage
@@ -2540,14 +2831,19 @@ impl GenericRuntimeV2 {
             self.values_scratch_f64.clone(),
             RuntimeProfile {
                 source_fill_s,
-                momentum_setup_s,
+                momentum_setup_s: momentum_setup_s + model_parameter_setup_s,
                 stage_input_pack_s,
                 stage_evaluator_call_s,
                 stage_evaluator_s,
                 output_assign_s,
+                amplitude_input_pack_s,
+                amplitude_evaluator_call_s,
                 amplitude_evaluator_s,
                 reduction_s,
                 total_s: total_start.elapsed().as_secs_f64(),
+                stage_input_pack_by_stage_s,
+                stage_evaluator_call_by_stage_s,
+                stage_output_assign_by_stage_s,
             },
         ))
     }
@@ -2581,12 +2877,7 @@ impl GenericRuntimeV2 {
                     values[point_index] += expanded_values[offset + point_index].clone();
                 }
             }
-            profile.source_fill_s += sector_profile.source_fill_s;
-            profile.momentum_setup_s += sector_profile.momentum_setup_s;
-            profile.stage_evaluator_s += sector_profile.stage_evaluator_s;
-            profile.output_assign_s += sector_profile.output_assign_s;
-            profile.amplitude_evaluator_s += sector_profile.amplitude_evaluator_s;
-            profile.reduction_s += sector_profile.reduction_s;
+            profile.add_sector(&sector_profile);
         }
         profile.total_s = total_start.elapsed().as_secs_f64();
         Ok((values, profile))
@@ -2613,6 +2904,8 @@ impl GenericRuntimeV2 {
         let external_is_initial = &self.external_is_initial;
         let particle_masses = &self.particle_masses;
         let value_parameter_count = self.value_parameter_count;
+        let model_parameter_start = self.value_parameter_count + self.momentum_parameter_count;
+        let model_parameter_values = &self.model_parameter_values_f64;
 
         let source_start = Instant::now();
         for (row, point) in batch.iter().enumerate() {
@@ -2643,10 +2936,25 @@ impl GenericRuntimeV2 {
         }
         let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
 
+        let model_parameter_start_time = Instant::now();
+        for row in 0..n_points {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_model_parameters_row_generic(
+                model_parameter_start,
+                model_parameter_values,
+                row_state,
+            )?;
+        }
+        let model_parameter_setup_s = model_parameter_start_time.elapsed().as_secs_f64();
+
         let mut stage_input_pack_s = 0.0;
         let mut stage_evaluator_call_s = 0.0;
         let mut stage_evaluator_s = 0.0;
         let mut output_assign_s = 0.0;
+        let mut stage_input_pack_by_stage_s = Vec::new();
+        let mut stage_evaluator_call_by_stage_s = Vec::new();
+        let mut stage_output_assign_by_stage_s = Vec::new();
         for stage in self.stages.as_mut().expect("generic stages checked") {
             let (pack_s, eval_s, assign_s) = stage.evaluate_generic_into_state(
                 n_points,
@@ -2658,15 +2966,17 @@ impl GenericRuntimeV2 {
             stage_evaluator_call_s += eval_s;
             stage_evaluator_s += pack_s + eval_s;
             output_assign_s += assign_s;
+            stage_input_pack_by_stage_s.push(pack_s);
+            stage_evaluator_call_by_stage_s.push(eval_s);
+            stage_output_assign_by_stage_s.push(assign_s);
         }
 
-        let amplitude_start = Instant::now();
-        let raw_sums = self
+        let (raw_sums, amplitude_input_pack_s, amplitude_evaluator_call_s) = self
             .amplitude_stage
             .as_mut()
             .expect("generic amplitude stage checked")
             .evaluate_raw_sums_generic(n_points, state.as_slice(), binary_precision)?;
-        let amplitude_evaluator_s = amplitude_start.elapsed().as_secs_f64();
+        let amplitude_evaluator_s = amplitude_input_pack_s + amplitude_evaluator_call_s;
 
         let reduction_start = Instant::now();
         let factor = T::from(self.normalization_factor);
@@ -2679,14 +2989,19 @@ impl GenericRuntimeV2 {
             values,
             RuntimeProfile {
                 source_fill_s,
-                momentum_setup_s,
+                momentum_setup_s: momentum_setup_s + model_parameter_setup_s,
                 stage_input_pack_s,
                 stage_evaluator_call_s,
                 stage_evaluator_s,
                 output_assign_s,
+                amplitude_input_pack_s,
+                amplitude_evaluator_call_s,
                 amplitude_evaluator_s,
                 reduction_s,
                 total_s: total_start.elapsed().as_secs_f64(),
+                stage_input_pack_by_stage_s,
+                stage_evaluator_call_by_stage_s,
+                stage_output_assign_by_stage_s,
             },
         ))
     }
@@ -2726,6 +3041,8 @@ impl GenericRuntimeV2 {
         let external_is_initial = &self.external_is_initial;
         let particle_masses = &self.particle_masses;
         let value_parameter_count = self.value_parameter_count;
+        let model_parameter_start = self.value_parameter_count + self.momentum_parameter_count;
+        let model_parameter_values = &self.model_parameter_values_f64;
 
         for (row, point) in batch.iter().enumerate() {
             let row_state =
@@ -2742,6 +3059,15 @@ impl GenericRuntimeV2 {
                 external_is_initial,
                 row_state,
                 point,
+            )?;
+        }
+        for row in 0..n_points {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_model_parameters_row(
+                model_parameter_start,
+                model_parameter_values,
+                row_state,
             )?;
         }
         for stage in self.stages.as_mut().expect("generic stages checked") {
@@ -2902,9 +3228,46 @@ impl GenericRuntimeV2 {
                 }
             }
             for component in 0..4 {
-                row[start + component] =
-                    c_generic(momentum[component].clone(), T::new_zero());
+                row[start + component] = c_generic(momentum[component].clone(), T::new_zero());
             }
+        }
+        Ok(())
+    }
+
+    fn fill_model_parameters_row(
+        model_parameter_start: usize,
+        model_parameter_values: &[f64],
+        row: &mut [Complex<f64>],
+    ) -> PyResult<()> {
+        let stop = model_parameter_start + model_parameter_values.len();
+        if stop > row.len() {
+            return Err(PyValueError::new_err(
+                "generic model-parameter block exceeds runtime row length",
+            ));
+        }
+        for (index, value) in model_parameter_values.iter().enumerate() {
+            row[model_parameter_start + index] = c64(*value, 0.0);
+        }
+        Ok(())
+    }
+
+    fn fill_model_parameters_row_generic<T>(
+        model_parameter_start: usize,
+        model_parameter_values: &[f64],
+        row: &mut [Complex<T>],
+    ) -> PyResult<()>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        let stop = model_parameter_start + model_parameter_values.len();
+        if stop > row.len() {
+            return Err(PyValueError::new_err(
+                "generic model-parameter block exceeds runtime row length",
+            ));
+        }
+        for (index, value) in model_parameter_values.iter().enumerate() {
+            row[model_parameter_start + index] = c_generic(T::from(*value), T::new_zero());
         }
         Ok(())
     }
@@ -3137,6 +3500,7 @@ fn load_rusticol_runtime(
     process_dir: &str,
     process_key: Option<&str>,
     allow_legacy_schema_v1: bool,
+    model_parameters_path: Option<&str>,
 ) -> PyResult<Runtime> {
     let process_dir = PathBuf::from(process_dir);
     let requested_root = process_dir.canonicalize().map_err(|err| {
@@ -3160,7 +3524,10 @@ fn load_rusticol_runtime(
             manifest_path.display()
         ))
     })?;
-    if let Some(generic_runtime) = load_generic_schema_v2_manifest(&manifest_value, &root)? {
+    if let Some(mut generic_runtime) = load_generic_schema_v2_manifest(&manifest_value, &root)? {
+        if let Some(path) = model_parameters_path {
+            generic_runtime.apply_model_parameter_toml_path(&PathBuf::from(path))?;
+        }
         return Ok(Runtime {
             root,
             manifest: None,
@@ -3224,6 +3591,11 @@ fn load_rusticol_runtime(
         )));
     }
     if manifest.compiled.kind == "zero-gluon-symbolic-scalar" {
+        if model_parameters_path.is_some() {
+            return Err(PyValueError::new_err(
+                "model-parameter TOML overrides are only supported for schema-v2 generic DAG artifacts",
+            ));
+        }
         if manifest.gluon_count != 0 || manifest.external_pdg_order.len() != 3 {
             return Err(PyValueError::new_err(
                 "zero-gluon process artifacts must have exactly three external legs",
@@ -3326,6 +3698,11 @@ fn load_rusticol_runtime(
             "model normalization constants are not finite",
         ));
     }
+    if model_parameters_path.is_some() {
+        return Err(PyValueError::new_err(
+            "model-parameter TOML overrides are only supported for schema-v2 generic DAG artifacts",
+        ));
+    }
     let stages = manifest
         .compiled
         .stages
@@ -3351,23 +3728,25 @@ fn load_rusticol_runtime(
 #[pymethods]
 impl Runtime {
     #[classmethod]
-    #[pyo3(signature = (process_dir, process_key=None))]
+    #[pyo3(signature = (process_dir, process_key=None, model_parameters=None))]
     fn load(
         _cls: &Bound<'_, pyo3::types::PyType>,
         process_dir: &str,
         process_key: Option<&str>,
+        model_parameters: Option<&str>,
     ) -> PyResult<Self> {
-        load_rusticol_runtime(process_dir, process_key, false)
+        load_rusticol_runtime(process_dir, process_key, false, model_parameters)
     }
 
     #[classmethod]
-    #[pyo3(signature = (process_dir, process_key=None))]
+    #[pyo3(signature = (process_dir, process_key=None, model_parameters=None))]
     fn load_legacy(
         _cls: &Bound<'_, pyo3::types::PyType>,
         process_dir: &str,
         process_key: Option<&str>,
+        model_parameters: Option<&str>,
     ) -> PyResult<Self> {
-        load_rusticol_runtime(process_dir, process_key, true)
+        load_rusticol_runtime(process_dir, process_key, true, model_parameters)
     }
 
     #[getter]
@@ -3420,6 +3799,15 @@ impl Runtime {
             dict.set_item("parameter_count", generic.parameter_count)?;
             dict.set_item("value_parameter_count", generic.value_parameter_count)?;
             dict.set_item("momentum_parameter_count", generic.momentum_parameter_count)?;
+            dict.set_item("model_parameter_count", generic.model_parameter_count)?;
+            dict.set_item(
+                "model_parameter_names",
+                generic
+                    .model_parameters
+                    .iter()
+                    .map(|parameter| parameter.name.clone())
+                    .collect::<Vec<_>>(),
+            )?;
             dict.set_item("current_count", generic.current_count)?;
             dict.set_item("source_count", generic.source_count)?;
             dict.set_item("interaction_count", generic.interaction_count)?;
@@ -3710,9 +4098,29 @@ impl Runtime {
         dict.set_item("stage_evaluator_time_s", profile.stage_evaluator_s)?;
         dict.set_item("output_transfer_time_s", profile.output_assign_s)?;
         dict.set_item("output_assign_time_s", profile.output_assign_s)?;
+        dict.set_item(
+            "amplitude_input_pack_time_s",
+            profile.amplitude_input_pack_s,
+        )?;
+        dict.set_item(
+            "amplitude_evaluator_call_time_s",
+            profile.amplitude_evaluator_call_s,
+        )?;
         dict.set_item("amplitude_evaluator_time_s", profile.amplitude_evaluator_s)?;
         dict.set_item("result_reduction_time_s", profile.reduction_s)?;
         dict.set_item("total_time_s", profile.total_s)?;
+        dict.set_item(
+            "stage_input_pack_by_stage_time_s",
+            profile.stage_input_pack_by_stage_s.clone(),
+        )?;
+        dict.set_item(
+            "stage_evaluator_call_by_stage_time_s",
+            profile.stage_evaluator_call_by_stage_s.clone(),
+        )?;
+        dict.set_item(
+            "stage_output_assign_by_stage_time_s",
+            profile.stage_output_assign_by_stage_s.clone(),
+        )?;
         dict.set_item("current_rss_bytes", memory.current_rss_bytes)?;
         dict.set_item("peak_rss_bytes", memory.peak_rss_bytes)?;
         dict.set_item(
@@ -3829,11 +4237,7 @@ impl Runtime {
         expected_legs: usize,
     ) -> PyResult<Vec<Vec<[DoubleFloat; 4]>>> {
         let batch = batch_momenta_double(momenta, expected_legs)?;
-        apply_input_crossing_map_generic(
-            &batch,
-            expected_legs,
-            self.input_crossing_map.as_deref(),
-        )
+        apply_input_crossing_map_generic(&batch, expected_legs, self.input_crossing_map.as_deref())
     }
 
     fn generic_batch_float_from_python(
@@ -3843,11 +4247,7 @@ impl Runtime {
         expected_legs: usize,
     ) -> PyResult<Vec<Vec<[Float; 4]>>> {
         let batch = batch_momenta_float(momenta, binary_precision, expected_legs)?;
-        apply_input_crossing_map_generic(
-            &batch,
-            expected_legs,
-            self.input_crossing_map.as_deref(),
-        )
+        apply_input_crossing_map_generic(&batch, expected_legs, self.input_crossing_map.as_deref())
     }
 
     fn legacy_manifest(&self) -> &ProcessManifest {
@@ -3948,11 +4348,17 @@ impl Runtime {
 
         let mut stage_evaluator_s = 0.0;
         let mut output_assign_s = 0.0;
+        let mut stage_input_pack_by_stage_s = Vec::new();
+        let mut stage_evaluator_call_by_stage_s = Vec::new();
+        let mut stage_output_assign_by_stage_s = Vec::new();
         for stage in self.stages_mut() {
             let (eval_s, assign_s) =
                 stage.evaluate_f64_into_state(n_points, parameter_count, &mut state)?;
             stage_evaluator_s += eval_s;
             output_assign_s += assign_s;
+            stage_input_pack_by_stage_s.push(0.0);
+            stage_evaluator_call_by_stage_s.push(eval_s);
+            stage_output_assign_by_stage_s.push(assign_s);
         }
 
         let amp_start = Instant::now();
@@ -3982,9 +4388,14 @@ impl Runtime {
                 stage_evaluator_call_s: stage_evaluator_s,
                 stage_evaluator_s,
                 output_assign_s,
+                amplitude_input_pack_s: 0.0,
+                amplitude_evaluator_call_s: amplitude_evaluator_s,
                 amplitude_evaluator_s,
                 reduction_s,
                 total_s,
+                stage_input_pack_by_stage_s,
+                stage_evaluator_call_by_stage_s,
+                stage_output_assign_by_stage_s,
             },
         ))
     }
@@ -4041,13 +4452,17 @@ impl Runtime {
 
         let mut stage_evaluator_s = 0.0;
         let mut output_assign_s = 0.0;
+        let mut stage_input_pack_by_stage_s = Vec::new();
+        let mut stage_evaluator_call_by_stage_s = Vec::new();
+        let mut stage_output_assign_by_stage_s = Vec::new();
         for stage in self.stages_mut() {
             let eval_start = Instant::now();
             let evaluated =
                 stage
                     .evaluator
                     .evaluate_batch_generic(n_points, &state, binary_precision)?;
-            stage_evaluator_s += eval_start.elapsed().as_secs_f64();
+            let eval_s = eval_start.elapsed().as_secs_f64();
+            stage_evaluator_s += eval_s;
             let assign_start = Instant::now();
             for row in 0..n_points {
                 let row_state = &mut state[row * parameter_count..(row + 1) * parameter_count];
@@ -4056,7 +4471,11 @@ impl Runtime {
                         evaluated[row * stage.evaluator.output_len + *column].clone();
                 }
             }
-            output_assign_s += assign_start.elapsed().as_secs_f64();
+            let assign_s = assign_start.elapsed().as_secs_f64();
+            output_assign_s += assign_s;
+            stage_input_pack_by_stage_s.push(0.0);
+            stage_evaluator_call_by_stage_s.push(eval_s);
+            stage_output_assign_by_stage_s.push(assign_s);
         }
 
         let amp_start = Instant::now();
@@ -4090,9 +4509,14 @@ impl Runtime {
                 stage_evaluator_call_s: stage_evaluator_s,
                 stage_evaluator_s,
                 output_assign_s,
+                amplitude_input_pack_s: 0.0,
+                amplitude_evaluator_call_s: amplitude_evaluator_s,
                 amplitude_evaluator_s,
                 reduction_s,
                 total_s,
+                stage_input_pack_by_stage_s,
+                stage_evaluator_call_by_stage_s,
+                stage_output_assign_by_stage_s,
             },
         ))
     }
@@ -4137,9 +4561,14 @@ impl Runtime {
                 stage_evaluator_call_s: 0.0,
                 stage_evaluator_s: 0.0,
                 output_assign_s: 0.0,
+                amplitude_input_pack_s: 0.0,
+                amplitude_evaluator_call_s: amplitude_evaluator_s,
                 amplitude_evaluator_s,
                 reduction_s,
                 total_s: total_start.elapsed().as_secs_f64(),
+                stage_input_pack_by_stage_s: Vec::new(),
+                stage_evaluator_call_by_stage_s: Vec::new(),
+                stage_output_assign_by_stage_s: Vec::new(),
             },
         ))
     }
@@ -4199,9 +4628,14 @@ impl Runtime {
                 stage_evaluator_call_s: 0.0,
                 stage_evaluator_s: 0.0,
                 output_assign_s: 0.0,
+                amplitude_input_pack_s: 0.0,
+                amplitude_evaluator_call_s: amplitude_evaluator_s,
                 amplitude_evaluator_s,
                 reduction_s,
                 total_s: total_start.elapsed().as_secs_f64(),
+                stage_input_pack_by_stage_s: Vec::new(),
+                stage_evaluator_call_by_stage_s: Vec::new(),
+                stage_output_assign_by_stage_s: Vec::new(),
             },
         ))
     }
@@ -4539,20 +4973,23 @@ impl GenericStageRuntimeV2 {
                 ));
             }
         }
-        let input_components = if stage.parameter_layout == "stage-local-value-momentum" {
-            let mut map = vec![0usize; stage.parameter_count];
-            for component in &stage.input_components {
-                map[component.parameter_index] = component.global_component;
-            }
-            Some(map)
-        } else {
-            None
-        };
+        let (input_components, input_spans) =
+            if stage.parameter_layout == "stage-local-value-momentum" {
+                let mut map = vec![0usize; stage.parameter_count];
+                for component in &stage.input_components {
+                    map[component.parameter_index] = component.global_component;
+                }
+                let spans = contiguous_input_spans(&map);
+                (Some(map), spans)
+            } else {
+                (None, Vec::new())
+            };
         let output_spans = contiguous_output_spans(&outputs);
         Ok(Self {
             outputs,
             output_spans,
             input_components,
+            input_spans,
             parameter_scratch_f64: Vec::new(),
             output_scratch_f64: Vec::new(),
             evaluator,
@@ -4575,9 +5012,18 @@ impl GenericStageRuntimeV2 {
             for row in 0..batch_size {
                 let row_state = row * parameter_count;
                 let row_params = row * local_parameter_count;
-                for (local_index, global_index) in input_components.iter().enumerate() {
-                    self.parameter_scratch_f64[row_params + local_index] =
-                        state[row_state + *global_index];
+                if self.input_spans.is_empty() {
+                    for (local_index, global_index) in input_components.iter().enumerate() {
+                        self.parameter_scratch_f64[row_params + local_index] =
+                            state[row_state + *global_index];
+                    }
+                } else {
+                    for (local_start, global_start, len) in &self.input_spans {
+                        let target_start = row_params + *local_start;
+                        let source_start = row_state + *global_start;
+                        self.parameter_scratch_f64[target_start..target_start + *len]
+                            .copy_from_slice(&state[source_start..source_start + *len]);
+                    }
                 }
             }
             input_pack_s = pack_start.elapsed().as_secs_f64();
@@ -4631,35 +5077,44 @@ impl GenericStageRuntimeV2 {
         Complex<T>: Real + EvaluationDomain,
     {
         let mut input_pack_s = 0.0;
-        let (evaluated, evaluator_s) = if let Some(input_components) = self.input_components.as_ref()
-        {
-            let local_parameter_count = input_components.len();
-            let pack_start = Instant::now();
-            let mut parameter_scratch =
-                vec![complex_zero::<T>(); batch_size * local_parameter_count];
-            for row in 0..batch_size {
-                let row_state = row * parameter_count;
-                let row_params = row * local_parameter_count;
-                for (local_index, global_index) in input_components.iter().enumerate() {
-                    parameter_scratch[row_params + local_index] =
-                        state[row_state + *global_index].clone();
+        let (evaluated, evaluator_s) =
+            if let Some(input_components) = self.input_components.as_ref() {
+                let local_parameter_count = input_components.len();
+                let pack_start = Instant::now();
+                let mut parameter_scratch =
+                    vec![complex_zero::<T>(); batch_size * local_parameter_count];
+                for row in 0..batch_size {
+                    let row_state = row * parameter_count;
+                    let row_params = row * local_parameter_count;
+                    if self.input_spans.is_empty() {
+                        for (local_index, global_index) in input_components.iter().enumerate() {
+                            parameter_scratch[row_params + local_index] =
+                                state[row_state + *global_index].clone();
+                        }
+                    } else {
+                        for (local_start, global_start, len) in &self.input_spans {
+                            let target_start = row_params + *local_start;
+                            let source_start = row_state + *global_start;
+                            parameter_scratch[target_start..target_start + *len]
+                                .clone_from_slice(&state[source_start..source_start + *len]);
+                        }
+                    }
                 }
-            }
-            input_pack_s = pack_start.elapsed().as_secs_f64();
-            let eval_start = Instant::now();
-            let evaluated = self.evaluator.evaluate_batch_generic(
-                batch_size,
-                &parameter_scratch,
-                binary_precision,
-            )?;
-            (evaluated, eval_start.elapsed().as_secs_f64())
-        } else {
-            let eval_start = Instant::now();
-            let evaluated = self
-                .evaluator
-                .evaluate_batch_generic(batch_size, state, binary_precision)?;
-            (evaluated, eval_start.elapsed().as_secs_f64())
-        };
+                input_pack_s = pack_start.elapsed().as_secs_f64();
+                let eval_start = Instant::now();
+                let evaluated = self.evaluator.evaluate_batch_generic(
+                    batch_size,
+                    &parameter_scratch,
+                    binary_precision,
+                )?;
+                (evaluated, eval_start.elapsed().as_secs_f64())
+            } else {
+                let eval_start = Instant::now();
+                let evaluated =
+                    self.evaluator
+                        .evaluate_batch_generic(batch_size, state, binary_precision)?;
+                (evaluated, eval_start.elapsed().as_secs_f64())
+            };
 
         self.assign_generic_outputs(
             batch_size,
@@ -4706,6 +5161,38 @@ impl GenericStageRuntimeV2 {
             evaluator_s,
             assign_start.elapsed().as_secs_f64(),
         ))
+    }
+}
+
+fn contiguous_input_spans(input_components: &[usize]) -> Vec<(usize, usize, usize)> {
+    if input_components.is_empty() {
+        return Vec::new();
+    }
+    let mut spans = Vec::new();
+    let mut local_start = 0usize;
+    let mut global_start = input_components[0];
+    let mut previous_local = local_start;
+    let mut previous_global = global_start;
+    let mut len = 1usize;
+    for (local, global) in input_components.iter().copied().enumerate().skip(1) {
+        if local == previous_local + 1 && global == previous_global + 1 {
+            previous_local = local;
+            previous_global = global;
+            len += 1;
+            continue;
+        }
+        spans.push((local_start, global_start, len));
+        local_start = local;
+        global_start = global;
+        previous_local = local;
+        previous_global = global;
+        len = 1;
+    }
+    spans.push((local_start, global_start, len));
+    if spans.len() >= input_components.len() {
+        Vec::new()
+    } else {
+        spans
     }
 }
 
@@ -4775,21 +5262,25 @@ impl GenericAmplitudeRuntimeV2 {
             amplitude_stage.color_contraction.as_ref(),
             &raw_sum_groups,
         )?;
+        let (input_components, input_spans) =
+            if stage.parameter_layout == "stage-local-value-momentum" {
+                let mut map = vec![0usize; stage.parameter_count];
+                for component in &stage.input_components {
+                    map[component.parameter_index] = component.global_component;
+                }
+                let spans = contiguous_input_spans(&map);
+                (Some(map), spans)
+            } else {
+                (None, Vec::new())
+            };
         Ok(Self {
             output_length: amplitude_stage.output_count,
             raw_sum_weights,
             raw_sum_groups,
             has_coherent_groups,
             color_contraction,
-            input_components: if stage.parameter_layout == "stage-local-value-momentum" {
-                let mut map = vec![0usize; stage.parameter_count];
-                for component in &stage.input_components {
-                    map[component.parameter_index] = component.global_component;
-                }
-                Some(map)
-            } else {
-                None
-            },
+            input_components,
+            input_spans,
             parameter_scratch_f64: Vec::new(),
             output_scratch_f64: Vec::new(),
             evaluator: EvaluatorGroup::load(&stage.evaluator, root)?,
@@ -4800,31 +5291,46 @@ impl GenericAmplitudeRuntimeV2 {
         &mut self,
         batch_size: usize,
         state: &[Complex<f64>],
-    ) -> PyResult<()> {
+    ) -> PyResult<(f64, f64)> {
         if let Some(input_components) = self.input_components.as_ref() {
             let local_parameter_count = input_components.len();
             let global_parameter_count = state
                 .len()
                 .checked_div(batch_size)
                 .ok_or_else(|| PyValueError::new_err("generic amplitude batch size is zero"))?;
+            let pack_start = Instant::now();
             self.parameter_scratch_f64
                 .resize(batch_size * local_parameter_count, c64(0.0, 0.0));
             for row in 0..batch_size {
                 let row_state = row * global_parameter_count;
                 let row_params = row * local_parameter_count;
-                for (local_index, global_index) in input_components.iter().enumerate() {
-                    self.parameter_scratch_f64[row_params + local_index] =
-                        state[row_state + *global_index];
+                if self.input_spans.is_empty() {
+                    for (local_index, global_index) in input_components.iter().enumerate() {
+                        self.parameter_scratch_f64[row_params + local_index] =
+                            state[row_state + *global_index];
+                    }
+                } else {
+                    for (local_start, global_start, len) in &self.input_spans {
+                        let target_start = row_params + *local_start;
+                        let source_start = row_state + *global_start;
+                        self.parameter_scratch_f64[target_start..target_start + *len]
+                            .copy_from_slice(&state[source_start..source_start + *len]);
+                    }
                 }
             }
-            return self.evaluator.evaluate_batch_into(
+            let input_pack_s = pack_start.elapsed().as_secs_f64();
+            let eval_start = Instant::now();
+            self.evaluator.evaluate_batch_into(
                 batch_size,
                 &self.parameter_scratch_f64,
                 &mut self.output_scratch_f64,
-            );
+            )?;
+            return Ok((input_pack_s, eval_start.elapsed().as_secs_f64()));
         }
+        let eval_start = Instant::now();
         self.evaluator
-            .evaluate_batch_into(batch_size, state, &mut self.output_scratch_f64)
+            .evaluate_batch_into(batch_size, state, &mut self.output_scratch_f64)?;
+        Ok((0.0, eval_start.elapsed().as_secs_f64()))
     }
 
     fn reduce_scratch_f64_into(
@@ -4897,33 +5403,54 @@ impl GenericAmplitudeRuntimeV2 {
         batch_size: usize,
         state: &[Complex<T>],
         binary_precision: Option<u32>,
-    ) -> PyResult<Vec<T>>
+    ) -> PyResult<(Vec<T>, f64, f64)>
     where
         T: RusticolHighPrecisionNumber,
         Complex<T>: Real + EvaluationDomain,
     {
-        let evaluated = if let Some(input_components) = self.input_components.as_ref() {
-            let local_parameter_count = input_components.len();
-            let global_parameter_count = state
-                .len()
-                .checked_div(batch_size)
-                .ok_or_else(|| PyValueError::new_err("generic amplitude batch size is zero"))?;
-            let mut parameter_scratch =
-                vec![complex_zero::<T>(); batch_size * local_parameter_count];
-            for row in 0..batch_size {
-                let row_state = row * global_parameter_count;
-                let row_params = row * local_parameter_count;
-                for (local_index, global_index) in input_components.iter().enumerate() {
-                    parameter_scratch[row_params + local_index] =
-                        state[row_state + *global_index].clone();
+        let mut input_pack_s = 0.0;
+        let (evaluated, evaluator_call_s) =
+            if let Some(input_components) = self.input_components.as_ref() {
+                let local_parameter_count = input_components.len();
+                let global_parameter_count = state
+                    .len()
+                    .checked_div(batch_size)
+                    .ok_or_else(|| PyValueError::new_err("generic amplitude batch size is zero"))?;
+                let pack_start = Instant::now();
+                let mut parameter_scratch =
+                    vec![complex_zero::<T>(); batch_size * local_parameter_count];
+                for row in 0..batch_size {
+                    let row_state = row * global_parameter_count;
+                    let row_params = row * local_parameter_count;
+                    if self.input_spans.is_empty() {
+                        for (local_index, global_index) in input_components.iter().enumerate() {
+                            parameter_scratch[row_params + local_index] =
+                                state[row_state + *global_index].clone();
+                        }
+                    } else {
+                        for (local_start, global_start, len) in &self.input_spans {
+                            let target_start = row_params + *local_start;
+                            let source_start = row_state + *global_start;
+                            parameter_scratch[target_start..target_start + *len]
+                                .clone_from_slice(&state[source_start..source_start + *len]);
+                        }
+                    }
                 }
-            }
-            self.evaluator
-                .evaluate_batch_generic(batch_size, &parameter_scratch, binary_precision)?
-        } else {
-            self.evaluator
-                .evaluate_batch_generic(batch_size, state, binary_precision)?
-        };
+                input_pack_s = pack_start.elapsed().as_secs_f64();
+                let eval_start = Instant::now();
+                let evaluated = self.evaluator.evaluate_batch_generic(
+                    batch_size,
+                    &parameter_scratch,
+                    binary_precision,
+                )?;
+                (evaluated, eval_start.elapsed().as_secs_f64())
+            } else {
+                let eval_start = Instant::now();
+                let evaluated =
+                    self.evaluator
+                        .evaluate_batch_generic(batch_size, state, binary_precision)?;
+                (evaluated, eval_start.elapsed().as_secs_f64())
+            };
         if evaluated.len() != batch_size * self.output_length {
             return Err(PyValueError::new_err(format!(
                 "generic amplitude output buffer has length {}, expected {}",
@@ -4951,11 +5478,10 @@ impl GenericAmplitudeRuntimeV2 {
             for index in 0..self.output_length {
                 let value = &evaluated[row_offset + index];
                 raw_sums[row] += T::from(self.raw_sum_weights[index])
-                    * (value.re.clone() * value.re.clone()
-                        + value.im.clone() * value.im.clone());
+                    * (value.re.clone() * value.re.clone() + value.im.clone() * value.im.clone());
             }
         }
-        Ok(raw_sums)
+        Ok((raw_sums, input_pack_s, evaluator_call_s))
     }
 }
 

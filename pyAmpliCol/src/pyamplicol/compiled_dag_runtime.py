@@ -231,7 +231,7 @@ class ZGluonCompiledDAGEvaluator:
         cross_check_lowering: bool = False,
         verbose_evaluator_build: bool = False,
         symbolica_evaluator_backend: str = "jit",
-        symbolica_iterations: int = 50,
+        symbolica_iterations: int = 10,
         symbolica_cpe_iterations: int | None = None,
         symbolica_n_cores: int = 4,
         symbolica_direct_translation: bool = True,

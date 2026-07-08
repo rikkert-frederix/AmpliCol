@@ -34,6 +34,9 @@ DEFAULT_JOBS = 4
 DEFAULT_N_CORES = 4
 DEFAULT_PROCESS_WORKERS = 1
 DEFAULT_COLUMNS_PER_TABLE = 3
+DEFAULT_SYMBOLICA_ITERATIONS = 10
+DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE = 128
+DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT = True
 VALIDATION_REL_TOL = 1.0e-8
 COMMAND_HEARTBEAT_S = 30.0
 VALIDATION_ABS_TOL = 1.0e-16
@@ -1388,7 +1391,13 @@ def _run_pyamplicol_case(
         str(n_cores),
         "--json",
         "--monitor",
+        "--symbolica-output-chunk-size",
+        str(DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE),
     ]
+    if DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT:
+        generate.append("--symbolica-stage-local-parameter-layout")
+    else:
+        generate.append("--no-symbolica-stage-local-parameter-layout")
     if selected_lc_sector_ids:
         generate.extend(
             [
@@ -1406,7 +1415,7 @@ def _run_pyamplicol_case(
     if backend_key == "jit":
         generate.extend(["--symbolica-evaluator-backend", "jit"])
         generate.extend(["--symbolica-jit-optimization-level", "3"])
-        generate.extend(["--symbolica-iterations", "50"])
+        generate.extend(["--symbolica-iterations", str(DEFAULT_SYMBOLICA_ITERATIONS)])
         generate.extend(["--symbolica-max-horner-scheme-variables", "1000"])
         generate.extend(["--symbolica-max-common-pair-cache-entries", "5000000"])
         generate.extend(["--symbolica-max-common-pair-distance", "1000"])
@@ -2592,6 +2601,10 @@ def _pyamplicol_matrix_settings(
         "target_runtime_s": float(target_runtime),
         "n_cores": int(n_cores),
         "symbolica_n_cores": int(n_cores),
+        "symbolica_stage_local_parameter_layout": (
+            DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT
+        ),
+        "symbolica_output_chunk_size": DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE,
         "selected_lc_sector_ids": (
             None
             if selected_lc_sector_ids is None
@@ -2626,7 +2639,7 @@ def _pyamplicol_matrix_settings(
             {
                 "symbolica_evaluator_backend": "jit",
                 "symbolica_jit_optimization_level": 3,
-                "symbolica_iterations": 50,
+                "symbolica_iterations": DEFAULT_SYMBOLICA_ITERATIONS,
                 "symbolica_cpe_iterations": None,
                 "symbolica_max_horner_scheme_variables": 1000,
                 "symbolica_max_common_pair_cache_entries": 5000000,

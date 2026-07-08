@@ -101,7 +101,7 @@ def generation_progress_total(*, gluon_count: int, split_vertex_current_stages: 
 @dataclass(frozen=True)
 class SymbolicaEvaluatorSettings:
     backend: str = "jit"
-    iterations: int = 50
+    iterations: int = 10
     cpe_iterations: int | None = None
     n_cores: int = 4
     direct_translation: bool = True
@@ -446,7 +446,7 @@ class ZGluonDAGEvaluator:
         split_vertex_current_stages: bool = False,
         verbose_evaluator_build: bool = False,
         symbolica_evaluator_backend: str = "jit",
-        symbolica_iterations: int = 50,
+        symbolica_iterations: int = 10,
         symbolica_cpe_iterations: int | None = None,
         symbolica_n_cores: int = 4,
         symbolica_direct_translation: bool = True,

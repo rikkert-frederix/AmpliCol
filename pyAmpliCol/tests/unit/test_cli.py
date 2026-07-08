@@ -647,7 +647,7 @@ def test_cli_generate_process_can_disable_numerical_current_passes(
     assert args.numerical_current_samples == 3
 
 
-def test_cli_generate_process_runtime_o3_resolves_to_plain_cpp_o3(
+def test_cli_generate_process_runtime_o3_uses_default_chunking(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "process"
@@ -660,7 +660,8 @@ def test_cli_generate_process_runtime_o3_resolves_to_plain_cpp_o3(
 
     assert settings.compiled_inline_asm == "none"
     assert settings.compiled_optimization_level == 3
-    assert settings.compiled_output_chunk_size == 64
+    assert settings.compiled_output_chunk_size == 128
+    assert kwargs["stage_local_parameter_layout"] is True
 
 
 def test_cli_generate_process_explicit_jit_backend_overrides_fast_default(
@@ -1872,7 +1873,7 @@ def test_cli_time_process_preserves_crossing_alias_selection(
         encoding="utf-8",
     )
 
-    load_calls: list[tuple[str, str | None]] = []
+    load_calls: list[tuple[str, str | None, str | None]] = []
     evaluated_points: list[object] = []
 
     class FakeRuntime:
@@ -1889,8 +1890,8 @@ def test_cli_time_process_preserves_crossing_alias_selection(
 
     class FakeRuntimeFactory:
         @staticmethod
-        def load(process_dir, process_key=None):
-            load_calls.append((process_dir, process_key))
+        def load(process_dir, process_key=None, model_parameters=None):
+            load_calls.append((process_dir, process_key, model_parameters))
             return FakeRuntime()
 
     class FakeRusticolModule:
@@ -1932,7 +1933,7 @@ def test_cli_time_process_preserves_crossing_alias_selection(
     assert cli._cmd_time_process(args) == 0
 
     payload = json.loads(capsys.readouterr().out)
-    assert load_calls == [(str(root), "u_ubar_to_dbar_d_g")]
+    assert load_calls == [(str(root), "u_ubar_to_dbar_d_g", None)]
     assert payload["process"] == "u u~ > d~ d g"
     assert evaluated_points == [
         [

@@ -60,6 +60,8 @@ RuntimeBackend = Literal[
 
 _CHILD_PROGRESS_ENV = "PYAMPLICOL_CHILD_PROGRESS"
 _CHILD_PROGRESS_PREFIX = "::pyamplicol-progress::"
+_DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE = 128
+_DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT = True
 
 
 _PROCESS_SET_STANDALONE_CHECK_SCRIPT = r'''#!/usr/bin/env python3
@@ -461,6 +463,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "performance-summary benchmark setup."
         ),
     )
+    time_process.add_argument(
+        "--model-parameters",
+        type=Path,
+        help=(
+            "TOML file with runtime model-parameter overrides consumed by "
+            "Rusticol. Keys must match the artifact model_parameter_names metadata."
+        ),
+    )
     time_process.add_argument("--json", action="store_true")
 
     profile = subparsers.add_parser(
@@ -840,6 +850,19 @@ def _add_evaluator_build_options(
             "generic Rusticol eager-DAG stage layout."
         ),
     )
+    parser.add_argument(
+        "--symbolica-stage-local-parameter-layout",
+        action=argparse.BooleanOptionalAction,
+        default=_DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT,
+        help=(
+            "Compile generic Rusticol stage evaluators with only the value, "
+            "momentum, and model-parameter inputs required by that stage. This "
+            "can reduce Symbolica evaluator input pressure at the cost of "
+            "runtime stage-input packing. Enabled by default; use "
+            "--no-symbolica-stage-local-parameter-layout to build global-input "
+            "stage evaluators."
+        ),
+    )
     parser.set_defaults(compiled_dag_inline_external_wavefunctions=True)
     parser.set_defaults(compiled_dag_helicity_filter=True)
     parser.set_defaults(
@@ -962,7 +985,7 @@ def _add_evaluator_build_options(
         "--symbolica-n-iterations",
         dest="symbolica_iterations",
         type=int,
-        default=50,
+        default=10,
         help="Number of Horner-scheme optimization iterations.",
     )
     parser.add_argument(
@@ -1100,12 +1123,16 @@ def _add_evaluator_build_options(
         ),
     )
     parser.add_argument(
+        "--symbolica-output-chunk-size",
         "--symbolica-compiled-output-chunk-size",
+        dest="symbolica_compiled_output_chunk_size",
         type=int,
+        default=_DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE,
         help=(
-            "Compile Symbolica block outputs in chunks of this size. "
-            "Use 1 as a conservative workaround for the current AArch64 "
-            "multi-output inline-assembly exporter issue."
+            "Build Symbolica block outputs in chunks of this size. Applies to "
+            "JIT and generated-code evaluators; the longer "
+            "--symbolica-compiled-output-chunk-size spelling is kept as a "
+            "compatibility alias. Defaults to 128."
         ),
     )
     parser.add_argument(
@@ -1161,6 +1188,10 @@ def _set_fast_rusticol_dag_defaults(parser: argparse.ArgumentParser) -> None:
         symbolica_n_cores=10,
         symbolica_compiled_chunk_compile_workers=10,
         batch_size=64,
+        symbolica_stage_local_parameter_layout=(
+            _DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT
+        ),
+        symbolica_compiled_output_chunk_size=_DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE,
     )
 
 
@@ -1283,13 +1314,20 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "split_vertex_current_stages": bool(
             getattr(args, "symbolica_split_vertex_current_stages", False)
         ),
+        "stage_local_parameter_layout": bool(
+            getattr(
+                args,
+                "symbolica_stage_local_parameter_layout",
+                _DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT,
+            )
+        ),
         "verbose_evaluator_build": bool(
             getattr(args, "verbose_evaluator_build", False)
         ),
         "symbolica_evaluator_backend": str(
             getattr(args, "symbolica_evaluator_backend", "jit")
         ),
-        "symbolica_iterations": int(getattr(args, "symbolica_iterations", 50)),
+        "symbolica_iterations": int(getattr(args, "symbolica_iterations", 10)),
         "symbolica_cpe_iterations": cpe_iterations,
         "symbolica_n_cores": int(getattr(args, "symbolica_n_cores", 4)),
         "symbolica_direct_translation": bool(
@@ -1374,7 +1412,11 @@ def _compiled_output_chunk_size(args: argparse.Namespace) -> int | None:
     compiled_dag_chunk_size = getattr(args, "compiled_dag_output_chunk_size", None)
     if compiled_dag_chunk_size is not None:
         return int(compiled_dag_chunk_size)
-    value = getattr(args, "symbolica_compiled_output_chunk_size", None)
+    value = getattr(
+        args,
+        "symbolica_compiled_output_chunk_size",
+        _DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE,
+    )
     return None if value is None else int(value)
 
 
@@ -2541,6 +2583,9 @@ def _cmd_generate_generic_dag_artifact(
             emit_stage_evaluator_artifacts=True,
             symbolica_settings=symbolica_settings,
             merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
+            stage_local_parameter_layout=bool(
+                build_kwargs["stage_local_parameter_layout"]
+            ),
             verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
             progress_callback=progress_callback,
             lc_topology_replay=bool(getattr(args, "lc_topology_replay", False)),
@@ -3054,7 +3099,7 @@ def _generate_process_child_command(
         "--symbolica-evaluator-backend",
         str(getattr(args, "symbolica_evaluator_backend", "compiled-complex")),
         "--symbolica-iterations",
-        str(int(getattr(args, "symbolica_iterations", 50))),
+        str(int(getattr(args, "symbolica_iterations", 10))),
         "--symbolica-compiled-preset",
         str(getattr(args, "symbolica_compiled_preset", "runtime-o3")),
         "--symbolica-compiled-inline-asm",
@@ -3202,6 +3247,16 @@ def _generate_process_child_command(
         command.append("--symbolica-collect-factors")
     if bool(getattr(args, "symbolica_split_vertex_current_stages", False)):
         command.append("--symbolica-split-vertex-current-stages")
+    if bool(
+        getattr(
+            args,
+            "symbolica_stage_local_parameter_layout",
+            _DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT,
+        )
+    ):
+        command.append("--symbolica-stage-local-parameter-layout")
+    else:
+        command.append("--no-symbolica-stage-local-parameter-layout")
     if bool(getattr(args, "merge_evaluators_strategy", False)):
         command.append("--merge-evaluators-strategy")
     else:
@@ -3752,6 +3807,11 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
             runtime = getattr(rusticol, "Runtime").load(
                 str(requested_root if process_set_manifest is not None else root),
                 args.process_key if process_set_manifest is not None else None,
+                (
+                    None
+                    if args.model_parameters is None
+                    else str(Path(args.model_parameters).expanduser())
+                ),
             )
             runtime_metadata = dict(runtime.metadata())
             points = _load_rusticol_validation_momenta(root, int(args.precision), np)
@@ -3804,6 +3864,11 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
         "schema_version": runtime_metadata.get("schema_version"),
         "precision": int(args.precision),
         "target_runtime_s": float(args.target_runtime),
+        "model_parameters": (
+            None
+            if args.model_parameters is None
+            else str(Path(args.model_parameters).expanduser())
+        ),
         "rusticol_build": rusticol_build,
         "values": [float(value) for value in values],
         "profile": profile_payload,
@@ -3855,7 +3920,7 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
                 ),
                 DisplayRow(
                     {
-                        "metric": "Core evaluator",
+                        "metric": "Evaluator + input pack",
                         "value": format_measurement(
                             float(profile_payload["core_evaluator_us_per_point"]),
                             _float_or_none(
@@ -3868,6 +3933,55 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
                     },
                     "cyan",
                 ),
+                DisplayRow(
+                    {
+                        "metric": "Pure evaluator calls",
+                        "value": format_measurement(
+                            float(profile_payload["pure_evaluator_us_per_point"]),
+                            _float_or_none(
+                                profile_payload.get(
+                                    "pure_evaluator_us_per_point_error"
+                                )
+                            ),
+                            unit="us/point",
+                        ),
+                    },
+                    "cyan",
+                ),
+                {
+                    "metric": "Input pack",
+                    "value": format_measurement(
+                        float(profile_payload["input_pack_us_per_point"]),
+                        _float_or_none(
+                            profile_payload.get("input_pack_us_per_point_error")
+                        ),
+                        unit="us/point",
+                    ),
+                },
+                {
+                    "metric": "Stage input pack",
+                    "value": format_measurement(
+                        float(profile_payload["stage_input_pack_us_per_point"]),
+                        _float_or_none(
+                            profile_payload.get(
+                                "stage_input_pack_us_per_point_error"
+                            )
+                        ),
+                        unit="us/point",
+                    ),
+                },
+                {
+                    "metric": "Amplitude input pack",
+                    "value": format_measurement(
+                        float(profile_payload["amplitude_input_pack_us_per_point"]),
+                        _float_or_none(
+                            profile_payload.get(
+                                "amplitude_input_pack_us_per_point_error"
+                            )
+                        ),
+                        unit="us/point",
+                    ),
+                },
                 {
                     "metric": "Batch size",
                     "value": profile_payload["block_size"],
@@ -4104,6 +4218,10 @@ def _profile_rusticol_process(
     target_elapsed_s = max(float(target_s), 0.0)
     samples: list[float] = []
     core_samples: list[float] = []
+    pure_evaluator_samples: list[float] = []
+    stage_input_pack_samples: list[float] = []
+    amplitude_input_pack_samples: list[float] = []
+    input_pack_samples: list[float] = []
     elapsed_total_s = 0.0
     while len(samples) < min_block_count or elapsed_total_s < target_elapsed_s:
         batch = _repeat_rusticol_points(points, block_size, np_module)
@@ -4121,8 +4239,38 @@ def _profile_rusticol_process(
             )
             / max(int(last_profile.get("points", block_size)), 1)
         )
+        pure_evaluator_samples.append(
+            (
+                float(last_profile.get("stage_evaluator_call_time_s", 0.0))
+                + float(
+                    last_profile.get(
+                        "amplitude_evaluator_call_time_s",
+                        last_profile.get("amplitude_evaluator_time_s", 0.0),
+                    )
+                )
+            )
+            / max(int(last_profile.get("points", block_size)), 1)
+        )
+        points_in_profile = max(int(last_profile.get("points", block_size)), 1)
+        stage_input_pack_s = float(last_profile.get("stage_input_pack_time_s", 0.0))
+        amplitude_input_pack_s = float(
+            last_profile.get("amplitude_input_pack_time_s", 0.0)
+        )
+        stage_input_pack_samples.append(stage_input_pack_s / points_in_profile)
+        amplitude_input_pack_samples.append(
+            amplitude_input_pack_s / points_in_profile
+        )
+        input_pack_samples.append(
+            (stage_input_pack_s + amplitude_input_pack_s) / points_in_profile
+        )
     wall_s, wall_error_s = _mean_and_error(samples)
     core_s, core_error_s = _mean_and_error(core_samples)
+    pure_s, pure_error_s = _mean_and_error(pure_evaluator_samples)
+    pack_s, pack_error_s = _mean_and_error(stage_input_pack_samples)
+    amplitude_pack_s, amplitude_pack_error_s = _mean_and_error(
+        amplitude_input_pack_samples
+    )
+    input_pack_s, input_pack_error_s = _mean_and_error(input_pack_samples)
     return {
         "samples": len(samples) * block_size,
         "block_count": len(samples),
@@ -4131,6 +4279,14 @@ def _profile_rusticol_process(
         "wall_us_per_point_error": wall_error_s * 1.0e6,
         "core_evaluator_us_per_point": core_s * 1.0e6,
         "core_evaluator_us_per_point_error": core_error_s * 1.0e6,
+        "pure_evaluator_us_per_point": pure_s * 1.0e6,
+        "pure_evaluator_us_per_point_error": pure_error_s * 1.0e6,
+        "input_pack_us_per_point": input_pack_s * 1.0e6,
+        "input_pack_us_per_point_error": input_pack_error_s * 1.0e6,
+        "stage_input_pack_us_per_point": pack_s * 1.0e6,
+        "stage_input_pack_us_per_point_error": pack_error_s * 1.0e6,
+        "amplitude_input_pack_us_per_point": amplitude_pack_s * 1.0e6,
+        "amplitude_input_pack_us_per_point_error": amplitude_pack_error_s * 1.0e6,
         "last_profile": _compact_rusticol_profile(last_profile),
     }
 
@@ -5063,6 +5219,9 @@ def _rusticol_generation_profile(
         emit_stage_evaluator_artifacts=True,
         symbolica_settings=settings,
         merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
+        stage_local_parameter_layout=bool(
+            build_kwargs["stage_local_parameter_layout"]
+        ),
         verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
         selected_color_sector_ids=selected_color_sector_ids,
         **pruning_kwargs,

@@ -984,9 +984,10 @@ def test_generic_dag_process_artifact_writes_schema_v2_stage_blueprint_runtime(
     assert stage_compiler["real_valued_inputs"][0] == stage_compiler[
         "value_parameter_count"
     ]
-    assert len(stage_compiler["real_valued_inputs"]) == stage_compiler[
-        "momentum_parameter_count"
-    ]
+    assert len(stage_compiler["real_valued_inputs"]) == (
+        stage_compiler["momentum_parameter_count"]
+        + stage_compiler["model_parameter_count"]
+    )
     assert raw["planning_status"]["generic_evaluator_ready"] is True
     assert raw["dag_summary"]["current_count"] > 0
     assert raw["runtime_schema"]["kind"] == "pyamplicol-generic-dag-runtime-schema"
@@ -1194,7 +1195,8 @@ def test_generic_stage_evaluator_artifact_writer_uses_stage_expressions(
     ]
     assert all(call["param_count"] == blueprint.parameter_count for call in calls)
     assert all(
-        call["real_count"] == blueprint.momentum_parameter_count
+        call["real_count"]
+        == blueprint.momentum_parameter_count + blueprint.model_parameter_count
         for call in calls
     )
 

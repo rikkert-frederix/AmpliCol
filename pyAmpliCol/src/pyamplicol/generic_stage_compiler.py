@@ -70,6 +70,7 @@ class GenericCompiledStageBlueprint:
     parameter_count: int
     value_parameter_count: int
     momentum_parameter_count: int
+    model_parameter_count: int
     real_valued_inputs: tuple[int, ...]
     expression_ready: bool
     blockers: tuple[str, ...]
@@ -103,6 +104,7 @@ class GenericCompiledStageBlueprint:
             "parameter_count": self.parameter_count,
             "value_parameter_count": self.value_parameter_count,
             "momentum_parameter_count": self.momentum_parameter_count,
+            "model_parameter_count": self.model_parameter_count,
             "real_valued_inputs": list(self.real_valued_inputs),
             "expression_ready": self.expression_ready,
             "blockers": list(self.blockers),
@@ -117,6 +119,7 @@ class GenericStageCompilerBlueprint:
     parameter_count: int
     value_parameter_count: int
     momentum_parameter_count: int
+    model_parameter_count: int
     real_valued_inputs: tuple[int, ...]
     stage_count: int
     stages: tuple[GenericCompiledStageBlueprint, ...]
@@ -136,6 +139,7 @@ class GenericStageCompilerBlueprint:
             "parameter_count": self.parameter_count,
             "value_parameter_count": self.value_parameter_count,
             "momentum_parameter_count": self.momentum_parameter_count,
+            "model_parameter_count": self.model_parameter_count,
             "real_valued_inputs": list(self.real_valued_inputs),
             "stage_count": self.stage_count,
             "stages": [stage.to_json_dict() for stage in self.stages],
@@ -151,8 +155,10 @@ class _StageLocalInputs:
     input_components: tuple[GenericStageInputComponent, ...]
     value_symbols: Mapping[int, tuple[Any, ...]]
     momentum_symbols: Mapping[int, tuple[Any, ...]]
+    model_parameter_symbols: Mapping[str, Any]
     value_parameter_count: int
     momentum_parameter_count: int
+    model_parameter_count: int
     real_valued_inputs: tuple[int, ...]
 
 
@@ -160,6 +166,48 @@ StageEvaluatorCompiler = Callable[
     [GenericCompiledStageBlueprint, tuple[Any, ...], tuple[int, ...]],
     dict[str, object],
 ]
+
+
+class _RuntimeParameterizedModel(AmplicolSMLeadingColorModel):
+    """Use runtime symbols for numeric model constants without changing topology."""
+
+    def __init__(self, base: Model, parameters: Mapping[str, Any]) -> None:
+        self._base_model = base
+        self._runtime_parameters = parameters
+        self.name = base.name
+        self.particles = base.particles
+        self.vertices = base.vertices
+        for attribute in (
+            "alpha_s_mz",
+            "alpha_s_me_check",
+            "alpha_ew",
+            "sin_weak",
+            "sqrt_s",
+        ):
+            if hasattr(base, attribute):
+                setattr(self, attribute, getattr(base, attribute))
+
+    def mass(self, pdg: int) -> Any:
+        particle = self._base_model.particle(pdg)
+        name = f"particle.{int(particle.pdg)}.mass"
+        return self._runtime_parameters.get(name, self._base_model.mass(pdg))
+
+    def width(self, pdg: int) -> Any:
+        particle = self._base_model.particle(pdg)
+        name = f"particle.{int(particle.pdg)}.width"
+        return self._runtime_parameters.get(name, self._base_model.width(pdg))
+
+    def propagator_lowering_rule(self, particle_id: int, chirality: int = 0) -> Any:
+        return self._base_model.propagator_lowering_rule(particle_id, chirality)
+
+    def is_chiral_eligible(self, pdg: int) -> bool:
+        return self._base_model.is_chiral_eligible(pdg)
+
+    def with_runtime_parameters(
+        self,
+        parameters: Mapping[str, Any],
+    ) -> "_RuntimeParameterizedModel":
+        return _RuntimeParameterizedModel(self._base_model, parameters)
 
 
 def build_generic_stage_compiler_blueprint(
@@ -198,8 +246,28 @@ def build_generic_stage_compiler_blueprint(
     global_value_component_count = int(
         schema["parameter_layout"]["value_component_count"]
     )
+    global_momentum_parameter_count = int(
+        schema["parameter_layout"]["momentum_parameter_count"]
+    )
+    global_model_parameter_count = int(
+        schema["parameter_layout"].get("model_parameter_count", 0)
+    )
     value_symbols = parameter_symbols[:global_value_component_count]
-    momentum_symbols = parameter_symbols[global_value_component_count:]
+    momentum_start = global_value_component_count
+    momentum_stop = momentum_start + global_momentum_parameter_count
+    momentum_symbols = parameter_symbols[momentum_start:momentum_stop]
+    model_parameter_symbols = parameter_symbols[momentum_stop:]
+    model_parameter_records = tuple(
+        _dict(item) for item in _list(schema.get("model_parameters", []))
+    )
+    model_parameter_symbols_by_name = {
+        str(record["name"]): model_parameter_symbols[int(record["parameter_index"])]
+        for record in model_parameter_records
+    }
+    expression_model = _RuntimeParameterizedModel(
+        selected_model,
+        model_parameter_symbols_by_name,
+    )
     global_real_valued_inputs = tuple(int(index) for index in builder.real_valued_inputs)
     value_slots = _value_slots_by_id(schema)
     current_slots = _current_slots_by_id(schema)
@@ -207,27 +275,33 @@ def build_generic_stage_compiler_blueprint(
     stages = tuple(
         _compile_current_stage_blueprint(
             generic_manifest.dag,
-            selected_model,
+            expression_model,
             _dict(stage),
             value_slots=value_slots,
             current_slots=current_slots,
             momentum_slots=momentum_slots,
             global_value_component_count=global_value_component_count,
+            global_momentum_parameter_count=global_momentum_parameter_count,
+            model_parameter_records=model_parameter_records,
             global_parameter_symbols=parameter_symbols,
             global_value_symbols=value_symbols,
             global_momentum_symbols=momentum_symbols,
+            global_model_parameter_symbols=model_parameter_symbols_by_name,
             global_real_valued_inputs=global_real_valued_inputs,
             stage_local_parameter_layout=stage_local_parameter_layout,
         )
         for stage in _list(schema["stages"])
     )
     amplitude_stage = _compile_amplitude_stage_blueprint(
-        selected_model,
+        expression_model,
         _dict(schema["amplitude_stage"]),
         value_slots=value_slots,
         global_value_component_count=global_value_component_count,
+        global_momentum_parameter_count=global_momentum_parameter_count,
+        model_parameter_records=model_parameter_records,
         global_parameter_symbols=parameter_symbols,
         global_value_symbols=value_symbols,
+        global_model_parameter_symbols=model_parameter_symbols_by_name,
         global_real_valued_inputs=global_real_valued_inputs,
         stage_local_parameter_layout=stage_local_parameter_layout,
     )
@@ -241,7 +315,8 @@ def build_generic_stage_compiler_blueprint(
         runtime_available=False,
         parameter_count=len(parameter_symbols),
         value_parameter_count=int(schema["parameter_layout"]["value_component_count"]),
-        momentum_parameter_count=int(schema["parameter_layout"]["momentum_parameter_count"]),
+        momentum_parameter_count=global_momentum_parameter_count,
+        model_parameter_count=global_model_parameter_count,
         real_valued_inputs=global_real_valued_inputs,
         stage_count=len(stages) + 1,
         stages=stages,
@@ -360,6 +435,9 @@ def write_generic_stage_evaluator_artifacts(
         "momentum_parameter_count": (
             0 if stage_local_layout else blueprint.momentum_parameter_count
         ),
+        "model_parameter_count": (
+            0 if stage_local_layout else blueprint.model_parameter_count
+        ),
         "real_valued_inputs": (
             [] if stage_local_layout else list(blueprint.real_valued_inputs)
         ),
@@ -415,9 +493,12 @@ def _compile_current_stage_blueprint(
     current_slots: dict[int, dict[str, Any]],
     momentum_slots: dict[int, dict[str, Any]],
     global_value_component_count: int,
+    global_momentum_parameter_count: int,
+    model_parameter_records: Sequence[dict[str, Any]],
     global_parameter_symbols: Sequence[Any],
     global_value_symbols: Sequence[Any],
     global_momentum_symbols: Sequence[Any],
+    global_model_parameter_symbols: Mapping[str, Any],
     global_real_valued_inputs: Sequence[int],
     stage_local_parameter_layout: bool,
 ) -> GenericCompiledStageBlueprint:
@@ -429,6 +510,22 @@ def _compile_current_stage_blueprint(
         int(value) for value in _list(stage["input_value_slot_ids"])
     )
     input_momentum_slot_ids = _stage_input_momentum_slot_ids(interactions)
+    output_slot_ids = tuple(int(value) for value in _list(stage["output_value_slot_ids"]))
+    output_slots_by_current: dict[int, list[dict[str, Any]]] = {}
+    for slot_id in output_slot_ids:
+        slot = value_slots[int(slot_id)]
+        output_slots_by_current.setdefault(int(slot["current_id"]), []).append(slot)
+    stage_model_parameter_records = (
+        _current_stage_model_parameter_records(
+            model,
+            model_parameter_records,
+            interactions=interactions,
+            output_slots_by_current=output_slots_by_current,
+            current_slots=current_slots,
+        )
+        if stage_local_parameter_layout
+        else model_parameter_records
+    )
     local_inputs = (
         _stage_local_inputs(
             value_slot_ids=input_value_slot_ids,
@@ -436,16 +533,25 @@ def _compile_current_stage_blueprint(
             value_slots=value_slots,
             momentum_slots=momentum_slots,
             global_value_component_count=global_value_component_count,
+            global_momentum_parameter_count=global_momentum_parameter_count,
+            model_parameter_records=stage_model_parameter_records,
         )
         if stage_local_parameter_layout
         else _global_stage_inputs(
             parameter_symbols=global_parameter_symbols,
             value_symbols=global_value_symbols,
             momentum_symbols=global_momentum_symbols,
+            model_parameter_symbols=global_model_parameter_symbols,
             value_parameter_count=global_value_component_count,
             momentum_parameter_count=len(global_momentum_symbols),
+            model_parameter_count=len(global_model_parameter_symbols),
             real_valued_inputs=global_real_valued_inputs,
         )
+    )
+    stage_model = (
+        model.with_runtime_parameters(local_inputs.model_parameter_symbols)
+        if isinstance(model, _RuntimeParameterizedModel)
+        else _RuntimeParameterizedModel(model, local_inputs.model_parameter_symbols)
     )
     interactions_by_result: dict[int, list[dict[str, Any]]] = {}
     for interaction in interactions:
@@ -453,10 +559,6 @@ def _compile_current_stage_blueprint(
             int(interaction["result_current_id"]),
             [],
         ).append(interaction)
-    output_slots_by_current: dict[int, list[dict[str, Any]]] = {}
-    for slot_id in _list(stage["output_value_slot_ids"]):
-        slot = value_slots[int(slot_id)]
-        output_slots_by_current.setdefault(int(slot["current_id"]), []).append(slot)
 
     for current_id in sorted(interactions_by_result):
         current_slot = current_slots[current_id]
@@ -466,10 +568,11 @@ def _compile_current_stage_blueprint(
             try:
                 contribution = _interaction_contribution(
                     dag,
-                    model,
+                    stage_model,
                     interaction,
                     value_symbols=local_inputs.value_symbols,
                     momentum_symbols=local_inputs.momentum_symbols,
+                    model_parameter_symbols=local_inputs.model_parameter_symbols,
                     value_slots=value_slots,
                     momentum_slots=momentum_slots,
                 )
@@ -484,7 +587,7 @@ def _compile_current_stage_blueprint(
             variant = str(slot["variant"])
             try:
                 components = (
-                    model.propagator_component_expression(
+                    stage_model.propagator_component_expression(
                         int(current_slot["particle_id"]),
                         total,
                         _momentum_components(
@@ -529,12 +632,13 @@ def _compile_current_stage_blueprint(
         output_length=len(outputs),
         output_slots=tuple(output_slots),
         input_value_slot_ids=input_value_slot_ids,
-        output_value_slot_ids=tuple(int(value) for value in _list(stage["output_value_slot_ids"])),
+        output_value_slot_ids=output_slot_ids,
         interaction_ids=tuple(int(interaction["interaction_id"]) for interaction in interactions),
         input_components=local_inputs.input_components,
         parameter_count=len(local_inputs.parameter_symbols),
         value_parameter_count=local_inputs.value_parameter_count,
         momentum_parameter_count=local_inputs.momentum_parameter_count,
+        model_parameter_count=local_inputs.model_parameter_count,
         real_valued_inputs=local_inputs.real_valued_inputs,
         expression_ready=not blockers,
         blockers=tuple(blockers),
@@ -550,8 +654,11 @@ def _compile_amplitude_stage_blueprint(
     *,
     value_slots: dict[int, dict[str, Any]],
     global_value_component_count: int,
+    global_momentum_parameter_count: int,
+    model_parameter_records: Sequence[dict[str, Any]],
     global_parameter_symbols: Sequence[Any],
     global_value_symbols: Sequence[Any],
+    global_model_parameter_symbols: Mapping[str, Any],
     global_real_valued_inputs: Sequence[int],
     stage_local_parameter_layout: bool,
 ) -> GenericCompiledStageBlueprint:
@@ -574,23 +681,40 @@ def _compile_amplitude_stage_blueprint(
             value_slots=value_slots,
             momentum_slots={},
             global_value_component_count=global_value_component_count,
+            global_momentum_parameter_count=global_momentum_parameter_count,
+            model_parameter_records=(
+                _amplitude_stage_model_parameter_records(
+                    model_parameter_records,
+                    roots=tuple(_dict(item) for item in _list(stage["roots"])),
+                )
+                if stage_local_parameter_layout
+                else model_parameter_records
+            ),
         )
         if stage_local_parameter_layout
         else _global_stage_inputs(
             parameter_symbols=global_parameter_symbols,
             value_symbols=global_value_symbols,
             momentum_symbols=(),
+            model_parameter_symbols=global_model_parameter_symbols,
             value_parameter_count=global_value_component_count,
             momentum_parameter_count=0,
+            model_parameter_count=len(global_model_parameter_symbols),
             real_valued_inputs=global_real_valued_inputs,
         )
+    )
+    stage_model = (
+        model.with_runtime_parameters(local_inputs.model_parameter_symbols)
+        if isinstance(model, _RuntimeParameterizedModel)
+        else _RuntimeParameterizedModel(model, local_inputs.model_parameter_symbols)
     )
     for root in (_dict(item) for item in _list(stage["roots"])):
         try:
             output = _amplitude_root_expression(
-                model,
+                stage_model,
                 root,
                 value_symbols=local_inputs.value_symbols,
+                model_parameter_symbols=local_inputs.model_parameter_symbols,
                 value_slots=value_slots,
             )
         except ValueError as error:
@@ -628,6 +752,7 @@ def _compile_amplitude_stage_blueprint(
         parameter_count=len(local_inputs.parameter_symbols),
         value_parameter_count=local_inputs.value_parameter_count,
         momentum_parameter_count=local_inputs.momentum_parameter_count,
+        model_parameter_count=local_inputs.model_parameter_count,
         real_valued_inputs=local_inputs.real_valued_inputs,
         expression_ready=not blockers,
         blockers=tuple(blockers),
@@ -644,6 +769,7 @@ def _interaction_contribution(
     *,
     value_symbols: Sequence[Any],
     momentum_symbols: Sequence[Any],
+    model_parameter_symbols: Mapping[str, Any],
     value_slots: dict[int, dict[str, Any]],
     momentum_slots: dict[int, dict[str, Any]],
 ) -> tuple[Any, ...]:
@@ -663,7 +789,7 @@ def _interaction_contribution(
         result_chirality=int(result_current.index.chirality),
         left_chirality=int(left_current.index.chirality),
         right_chirality=int(right_current.index.chirality),
-        coupling=_coupling(interaction.get("coupling")),
+        coupling=_runtime_coupling(interaction, model_parameter_symbols),
         left_momentum=_momentum_components(
             int(momenta["left"]),
             momentum_symbols,
@@ -684,13 +810,14 @@ def _amplitude_root_expression(
     root: dict[str, Any],
     *,
     value_symbols: Sequence[Any],
+    model_parameter_symbols: Mapping[str, Any],
     value_slots: dict[int, dict[str, Any]],
 ) -> Any:
     left = _value_components(_dict(root["left_value_slot"]), value_symbols)
     right = _value_components(_dict(root["right_value_slot"]), value_symbols)
     kind = str(root["kind"])
     contraction = str(root.get("contraction", ""))
-    coupling = _coupling(root.get("coupling"))
+    coupling = _runtime_coupling(root, model_parameter_symbols)
     color_weight = _coupling(root.get("color_weight"))
     weight = color_weight[0]
     if color_weight[1] != 0.0:
@@ -743,6 +870,78 @@ def _stage_input_momentum_slot_ids(
     return tuple(sorted(slot_ids))
 
 
+def _current_stage_model_parameter_records(
+    model: Model,
+    model_parameter_records: Sequence[dict[str, Any]],
+    *,
+    interactions: Sequence[dict[str, Any]],
+    output_slots_by_current: Mapping[int, Sequence[dict[str, Any]]],
+    current_slots: Mapping[int, dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    used_names = _coupling_parameter_names_used_by_records(interactions)
+    for current_id, slots in output_slots_by_current.items():
+        if not any(str(slot["variant"]) == "propagated" for slot in slots):
+            continue
+        current_slot = current_slots[int(current_id)]
+        used_names.update(
+            _particle_model_parameter_names(
+                model,
+                int(current_slot["particle_id"]),
+            )
+        )
+    return _filter_model_parameter_records(model_parameter_records, used_names)
+
+
+def _amplitude_stage_model_parameter_records(
+    model_parameter_records: Sequence[dict[str, Any]],
+    *,
+    roots: Sequence[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    return _filter_model_parameter_records(
+        model_parameter_records,
+        _coupling_parameter_names_used_by_records(roots),
+    )
+
+
+def _coupling_parameter_names_used_by_records(
+    records: Sequence[dict[str, Any]],
+) -> set[str]:
+    used_names: set[str] = set()
+    for record in records:
+        names = record.get("coupling_parameter_names")
+        if not isinstance(names, list):
+            continue
+        for name in names:
+            if isinstance(name, str):
+                used_names.add(name)
+    return used_names
+
+
+def _particle_model_parameter_names(model: Model, pdg: int) -> tuple[str, ...]:
+    try:
+        particle = model.particle(pdg)
+    except KeyError:
+        return ()
+    return (
+        f"particle.{int(particle.pdg)}.mass",
+        f"particle.{int(particle.pdg)}.width",
+    )
+
+
+def _filter_model_parameter_records(
+    model_parameter_records: Sequence[dict[str, Any]],
+    used_names: set[str],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        record
+        for record in sorted(
+            model_parameter_records,
+            key=lambda item: int(item["parameter_index"]),
+        )
+        if str(record["name"]) in used_names
+    )
+
+
 def _stage_local_inputs(
     *,
     value_slot_ids: Sequence[int],
@@ -750,11 +949,14 @@ def _stage_local_inputs(
     value_slots: Mapping[int, dict[str, Any]],
     momentum_slots: Mapping[int, dict[str, Any]],
     global_value_component_count: int,
+    global_momentum_parameter_count: int,
+    model_parameter_records: Sequence[dict[str, Any]],
 ) -> _StageLocalInputs:
     builder = ParamBuilder()
     input_components: list[GenericStageInputComponent] = []
     value_symbols: dict[int, tuple[Any, ...]] = {}
     momentum_symbols: dict[int, tuple[Any, ...]] = {}
+    model_parameter_symbols: dict[str, Any] = {}
 
     for value_slot_id in value_slot_ids:
         slot = value_slots[int(value_slot_id)]
@@ -803,11 +1005,39 @@ def _stage_local_inputs(
                 )
             )
 
+    model_parameter_global_start = (
+        global_value_component_count + global_momentum_parameter_count
+    )
+    for record in sorted(
+        model_parameter_records,
+        key=lambda item: int(item["parameter_index"]),
+    ):
+        name = str(record["name"])
+        parameter_index = int(record["parameter_index"])
+        symbol = builder.add_parameter_list(
+            ("generic_schema_v2_stage", "model_parameter", name),
+            1,
+            role="generic_stage_model_parameter",
+            real_valued=True,
+        )[0]
+        model_parameter_symbols[name] = symbol
+        input_components.append(
+            GenericStageInputComponent(
+                kind="model_parameter",
+                source_id=parameter_index,
+                component=0,
+                global_component=model_parameter_global_start + parameter_index,
+                parameter_index=len(input_components),
+                real_valued=True,
+            )
+        )
+
     return _StageLocalInputs(
         parameter_symbols=tuple(builder.parameter_symbols()),
         input_components=tuple(input_components),
         value_symbols=value_symbols,
         momentum_symbols=momentum_symbols,
+        model_parameter_symbols=model_parameter_symbols,
         value_parameter_count=sum(
             int(value_slots[int(value_slot_id)]["component_stop"])
             - int(value_slots[int(value_slot_id)]["component_start"])
@@ -818,6 +1048,7 @@ def _stage_local_inputs(
             - int(momentum_slots[int(momentum_slot_id)]["component_start"])
             for momentum_slot_id in momentum_slot_ids
         ),
+        model_parameter_count=len(model_parameter_records),
         real_valued_inputs=tuple(int(index) for index in builder.real_valued_inputs),
     )
 
@@ -827,8 +1058,10 @@ def _global_stage_inputs(
     parameter_symbols: Sequence[Any],
     value_symbols: Sequence[Any],
     momentum_symbols: Sequence[Any],
+    model_parameter_symbols: Mapping[str, Any],
     value_parameter_count: int,
     momentum_parameter_count: int,
+    model_parameter_count: int,
     real_valued_inputs: Sequence[int],
 ) -> _StageLocalInputs:
     return _StageLocalInputs(
@@ -836,8 +1069,10 @@ def _global_stage_inputs(
         input_components=(),
         value_symbols=tuple(value_symbols),
         momentum_symbols=tuple(momentum_symbols),
+        model_parameter_symbols=dict(model_parameter_symbols),
         value_parameter_count=int(value_parameter_count),
         momentum_parameter_count=int(momentum_parameter_count),
+        model_parameter_count=int(model_parameter_count),
         real_valued_inputs=tuple(int(index) for index in real_valued_inputs),
     )
 
@@ -856,6 +1091,14 @@ def _parameter_builder(schema: dict[str, Any]) -> ParamBuilder:
         role="generic_momentum_storage",
         real_valued=True,
     )
+    model_parameter_count = int(layout.get("model_parameter_count", 0))
+    if model_parameter_count:
+        builder.add_parameter_list(
+            ("generic_schema_v2", "model_parameters"),
+            model_parameter_count,
+            role="generic_model_parameters",
+            real_valued=True,
+        )
     return builder
 
 
@@ -934,6 +1177,19 @@ def _coupling(value: object) -> tuple[Any, Any]:
     if not isinstance(value, list | tuple) or len(value) != 2:
         raise ValueError("coupling metadata must have two entries")
     return value[0], value[1]
+
+
+def _runtime_coupling(
+    record: Mapping[str, Any],
+    model_parameter_symbols: Mapping[str, Any],
+) -> tuple[Any, Any]:
+    values = list(_coupling(record.get("coupling")))
+    names = record.get("coupling_parameter_names")
+    if isinstance(names, list):
+        for index, name in enumerate(names[: len(values)]):
+            if isinstance(name, str) and name in model_parameter_symbols:
+                values[index] = model_parameter_symbols[name]
+    return values[0], values[1]
 
 
 def _expression_previews(expressions: Sequence[Any]) -> tuple[str, ...]:

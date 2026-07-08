@@ -647,6 +647,7 @@ def write_generic_dag_process_artifact(
     stage_evaluator_compiler: Any | None = None,
     symbolica_settings: Any | None = None,
     merge_evaluators_strategy: bool = False,
+    stage_local_parameter_layout: bool = False,
     verbose_evaluator_build: bool = False,
     jit_compile: bool = True,
     progress_callback: Any | None = None,
@@ -719,6 +720,7 @@ def write_generic_dag_process_artifact(
         stage_evaluator_compiler=stage_evaluator_compiler,
         symbolica_settings=symbolica_settings,
         merge_evaluators_strategy=merge_evaluators_strategy,
+        stage_local_parameter_layout=stage_local_parameter_layout,
         verbose_evaluator_build=verbose_evaluator_build,
         jit_compile=jit_compile,
         progress_callback=progress_callback,
@@ -982,6 +984,7 @@ def write_generic_dag_process_set_artifact(
     stage_evaluator_compiler: Any | None = None,
     symbolica_settings: Any | None = None,
     merge_evaluators_strategy: bool = False,
+    stage_local_parameter_layout: bool = False,
     verbose_evaluator_build: bool = False,
     jit_compile: bool = True,
     progress_callback: Any | None = None,
@@ -1042,6 +1045,7 @@ def write_generic_dag_process_set_artifact(
             stage_evaluator_compiler=stage_evaluator_compiler,
             symbolica_settings=symbolica_settings,
             merge_evaluators_strategy=merge_evaluators_strategy,
+            stage_local_parameter_layout=stage_local_parameter_layout,
             verbose_evaluator_build=verbose_evaluator_build,
             jit_compile=jit_compile,
             progress_callback=progress_callback,
@@ -1811,6 +1815,7 @@ def _evaluate_current_warmup(
                         interaction,
                         value_symbols=values,
                         momentum_symbols=momenta,
+                        model_parameter_symbols={},
                         value_slots=value_slots,
                         momentum_slots=momentum_slots,
                     )
@@ -1988,6 +1993,7 @@ def _evaluate_dag_raw_sums_by_warmup(
                         interaction,
                         value_symbols=values,
                         momentum_symbols=momenta,
+                        model_parameter_symbols={},
                         value_slots=value_slots,
                         momentum_slots=momentum_slots,
                     )
@@ -2019,6 +2025,7 @@ def _evaluate_dag_raw_sums_by_warmup(
                     model,
                     root,
                     value_symbols=values,
+                    model_parameter_symbols={},
                     value_slots=value_slots,
                 )
             )
@@ -2848,6 +2855,12 @@ def _schema_int(value: object) -> int:
     return int(cast(Any, value))
 
 
+def _schema_list(value: object) -> list[Any]:
+    if not isinstance(value, list):
+        raise TypeError("expected JSON array")
+    return value
+
+
 def _generic_dag_process_artifact_payload(
     manifest: GenericProcessManifest,
     *,
@@ -2859,6 +2872,7 @@ def _generic_dag_process_artifact_payload(
     stage_evaluator_compiler: Any | None = None,
     symbolica_settings: Any | None = None,
     merge_evaluators_strategy: bool = False,
+    stage_local_parameter_layout: bool = False,
     verbose_evaluator_build: bool = False,
     jit_compile: bool = True,
     progress_callback: Any | None = None,
@@ -2901,6 +2915,7 @@ def _generic_dag_process_artifact_payload(
     )
     stage_blueprint = build_generic_stage_compiler_blueprint(
         runtime_manifest,
+        stage_local_parameter_layout=stage_local_parameter_layout,
     )
     compiled_payload: dict[str, object] = {
         "kind": "generic-dag-stage-blueprint",
@@ -2913,6 +2928,7 @@ def _generic_dag_process_artifact_payload(
         "requested_evaluator_backend": evaluator_backend,
         "requested_compiled_preset": compiled_preset,
         "batch_size": batch_size,
+        "stage_local_parameter_layout": stage_local_parameter_layout,
         "stage_compiler": stage_blueprint.to_json_dict(),
         "generic_pruning": {
             "max_coupling_orders": dict(max_coupling_orders or {}),
@@ -3112,10 +3128,29 @@ def _generic_runtime_schema_payload(
         _schema_int(slot["momentum_mask"]): _schema_int(slot["momentum_slot_id"])
         for slot in momentum_slots
     }
+    stage_payloads = _runtime_stage_payloads(
+        dag,
+        model,
+        slot_by_current_id=slot_by_current_id,
+        value_slot_by_current_variant=value_slot_by_current_variant,
+        momentum_slot_by_mask=momentum_slot_by_mask,
+    )
+    amplitude_stage_payload = _runtime_amplitude_stage_payload(
+        dag,
+        slot_by_current_id=slot_by_current_id,
+        value_slot_by_current_variant=value_slot_by_current_variant,
+        selected_color_sector_ids=selected_color_sector_ids,
+    )
+    model_parameters = _runtime_model_parameter_records(
+        model,
+        stage_payloads=stage_payloads,
+        amplitude_stage_payload=amplitude_stage_payload,
+    )
     source_component_count = sum(
         _schema_int(slot_by_current_id[source_id]["dimension"])
         for source_id in dag.sources
     )
+    model_parameter_count = len(model_parameters)
     return {
         "schema_version": GENERIC_PROCESS_SCHEMA_VERSION,
         "kind": "pyamplicol-generic-dag-runtime-schema",
@@ -3129,8 +3164,11 @@ def _generic_runtime_schema_payload(
         "parameter_layout": {
             "source_component_parameter_count": source_component_count,
             "momentum_parameter_count": 4 * len(momentum_slots),
+            "model_parameter_count": model_parameter_count,
             "parameter_count_if_flattened": (
-                source_component_count + 4 * len(momentum_slots)
+                source_component_count
+                + 4 * len(momentum_slots)
+                + model_parameter_count
             ),
             "value_component_count": (
                 value_slots[-1]["component_stop"] if value_slots else 0
@@ -3140,10 +3178,13 @@ def _generic_runtime_schema_payload(
             "real_valued_inputs": list(
                 range(
                     source_component_count,
-                    source_component_count + 4 * len(momentum_slots),
+                    source_component_count
+                    + 4 * len(momentum_slots)
+                    + model_parameter_count,
                 )
             ),
         },
+        "model_parameters": model_parameters,
         "current_storage": {
             "component_count": (
                 current_slots[-1]["component_stop"] if current_slots else 0
@@ -3177,19 +3218,8 @@ def _generic_runtime_schema_payload(
             ],
         },
         "momentum_slots": momentum_slots,
-        "stages": _runtime_stage_payloads(
-            dag,
-            model,
-            slot_by_current_id=slot_by_current_id,
-            value_slot_by_current_variant=value_slot_by_current_variant,
-            momentum_slot_by_mask=momentum_slot_by_mask,
-        ),
-        "amplitude_stage": _runtime_amplitude_stage_payload(
-            dag,
-            slot_by_current_id=slot_by_current_id,
-            value_slot_by_current_variant=value_slot_by_current_variant,
-            selected_color_sector_ids=selected_color_sector_ids,
-        ),
+        "stages": stage_payloads,
+        "amplitude_stage": amplitude_stage_payload,
     }
 
 
@@ -3278,6 +3308,135 @@ def _runtime_model_payload(model: Model) -> dict[str, object]:
             for vertex in model.vertices
         ],
     }
+
+
+def _runtime_model_parameter_records(
+    model: Model,
+    *,
+    stage_payloads: Sequence[Mapping[str, object]],
+    amplitude_stage_payload: Mapping[str, object],
+) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    def add_record(
+        name: str,
+        kind: str,
+        default: float,
+        **metadata: object,
+    ) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        records.append(
+            {
+                "name": name,
+                "kind": kind,
+                "parameter_index": len(records),
+                "default": float(default),
+                **metadata,
+            }
+        )
+
+    alpha_s = getattr(model, "alpha_s_me_check", None)
+    if alpha_s is not None:
+        add_record(
+            "normalization.alpha_s_me_check",
+            "normalization",
+            float(alpha_s),
+        )
+    alpha_ew = getattr(model, "alpha_ew", None)
+    if alpha_ew is not None:
+        add_record(
+            "normalization.alpha_ew",
+            "normalization",
+            float(alpha_ew),
+        )
+
+    for particle in sorted(model.particles.values(), key=lambda item: item.pdg):
+        if float(particle.mass) != 0.0:
+            add_record(
+                _runtime_particle_parameter_name(particle.pdg, "mass"),
+                "particle_mass",
+                float(particle.mass),
+                pdg=int(particle.pdg),
+            )
+        if float(particle.width) != 0.0:
+            add_record(
+                _runtime_particle_parameter_name(particle.pdg, "width"),
+                "particle_width",
+                float(particle.width),
+                pdg=int(particle.pdg),
+            )
+
+    for stage in stage_payloads:
+        for interaction in _schema_list(stage["interactions"]):
+            names = interaction.get("coupling_parameter_names")
+            values = interaction.get("coupling")
+            if not isinstance(names, list) or not isinstance(values, list):
+                continue
+            particles = tuple(int(pdg) for pdg in _schema_list(interaction["vertex_particles"]))
+            for component, name in enumerate(names):
+                if not isinstance(name, str):
+                    continue
+                add_record(
+                    name,
+                    "coupling_component",
+                    float(values[component]),
+                    vertex_kind=int(interaction["vertex_kind"]),
+                    vertex_particles=list(particles),
+                    component=component,
+                )
+
+    for root in _schema_list(amplitude_stage_payload["roots"]):
+        names = root.get("coupling_parameter_names")
+        values = root.get("coupling")
+        particles = root.get("vertex_particles")
+        if not isinstance(names, list) or not isinstance(values, list) or not isinstance(particles, list):
+            continue
+        for component, name in enumerate(names):
+            if not isinstance(name, str):
+                continue
+            add_record(
+                name,
+                "coupling_component",
+                float(values[component]),
+                vertex_kind=int(root["vertex_kind"]),
+                vertex_particles=[int(pdg) for pdg in particles],
+                component=component,
+            )
+
+    return records
+
+
+def _runtime_particle_parameter_name(pdg: int, field: str) -> str:
+    return f"particle.{int(pdg)}.{field}"
+
+
+def _runtime_coupling_parameter_names(
+    vertex_kind: int,
+    vertex_particles: Sequence[int],
+    coupling: Sequence[object],
+) -> list[str | None]:
+    base = _runtime_coupling_parameter_base(vertex_kind, vertex_particles)
+    names: list[str | None] = []
+    for component, value in enumerate(coupling):
+        numeric_value = float(value)
+        if component == 1 and numeric_value == -10.0:
+            # AmpliCol uses this sentinel as a structural phase flag in the
+            # scalar kernel, not as a continuously variable model parameter.
+            names.append(None)
+        else:
+            names.append(f"{base}.component_{component}")
+    return names
+
+
+def _runtime_coupling_parameter_base(
+    vertex_kind: int,
+    vertex_particles: Sequence[int],
+) -> str:
+    particles = "_".join(str(int(pdg)) for pdg in vertex_particles)
+    return f"coupling.{int(vertex_kind)}.{particles}"
 
 
 def _runtime_normalization_payload(
@@ -3699,6 +3858,11 @@ def _runtime_interaction_record(
             "result": momentum_slot_by_mask[result.index.momentum_mask],
         },
         "coupling": list(interaction.coupling),
+        "coupling_parameter_names": _runtime_coupling_parameter_names(
+            interaction.vertex_kind,
+            interaction.vertex_particles,
+            interaction.coupling,
+        ),
         "color_weight": list(interaction.color_weight),
         "accumulation": "sum-into-result-current",
         "lowering": _lowering_rule_payload(rule),
@@ -3750,6 +3914,15 @@ def _runtime_amplitude_stage_payload(
                     else None
                 ),
                 "coupling": list(root.coupling),
+                "coupling_parameter_names": (
+                    None
+                    if root.vertex_kind is None or root.vertex_particles is None
+                    else _runtime_coupling_parameter_names(
+                        int(root.vertex_kind),
+                        tuple(int(pdg) for pdg in root.vertex_particles),
+                        root.coupling,
+                    )
+                ),
                 "color_weight": list(root.color_weight),
                 "color_sector_id": _root_color_sector_id(dag, root),
                 "contraction": root.contraction,

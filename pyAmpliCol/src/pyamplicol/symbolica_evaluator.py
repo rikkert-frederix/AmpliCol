@@ -44,7 +44,7 @@ def _report_progress(
 @dataclass(frozen=True)
 class SymbolicaEvaluatorSettings:
     backend: str = "jit"
-    iterations: int = 50
+    iterations: int = 10
     cpe_iterations: int | None = None
     n_cores: int = 4
     direct_translation: bool = True
