@@ -99,7 +99,7 @@
 \rowcolor{refblue}
 \texttt{7} & $d\bar d\to t\bar t+(n-2)g$ & \matrixcell{\texttt{0.151 s}}{\matrixratio{speedred}{11.7}}{\matrixratio{speedred}{841}}{\texttt{179 us}}{\matrixratiopair{speedgreen}{x0.432}{speedgreen}{x0.398}}{\matrixratiopair{speedgreen}{x0.421}{speedgreen}{x0.39}} \\
 \addlinespace[0.22em]
-\texttt{8} & $gg\to gg+(n-2)g$ & \matrixcell{\texttt{0.151 s}}{\matrixratio{speedred}{299}}{\matrixnaratio{speedred}}{\texttt{1.07e+03 us}}{\matrixratiopair{speedgreen}{x0.853}{speedgreen}{x0.783}}{\matrixratiopair{speedred}{N/A}{speedred}{N/A}} \\
+\texttt{8} & $gg\to gg+(n-2)g$ & \matrixcell{\texttt{0.151 s}}{\matrixratio{speedred}{299}}{\textcolor{speedred}{\texttt{timeout}}}{\texttt{1.07e+03 us}}{\matrixratiopair{speedgreen}{x0.853}{speedgreen}{x0.783}}{\matrixratiopair{speedred}{N/A}{speedred}{N/A}} \\
 \addlinespace[0.22em]
 \rowcolor{refblue}
 \texttt{9} & $d\bar d\to ZZZ+(n-3)g$ & \matrixcell{\texttt{0.158 s}}{\matrixratio{speedred}{4.32}}{\matrixratio{speedred}{114}}{\texttt{368 us}}{\matrixratiopair{speedgreen}{x0.024}{speedgreen}{x0.02}}{\matrixratiopair{speedgreen}{x0.019}{speedgreen}{x0.015}} \\
@@ -129,5 +129,5 @@ pyAmpliCol/dependencies/.venv/bin/python pyAmpliCol/docs/result_matrix.py --colo
 \noindent\footnotesize Partial refreshes use the same settings with \texttt{--base-process}, \texttt{--skip-jit}, \texttt{--skip-cpp-o3}, \texttt{--process-ids}, or \texttt{--skip-amplicol} added only to restrict which cells are updated.  PyAmpliCol-only refreshes may additionally use \texttt{--process-workers 5}; this is intentionally disabled when the \AC\ reference is refreshed because that path uses shared top-level generated-library files.  \AC\ reference timings for this colour table currently use the dedicated \texttt{amplicol\_color\_probe} imode-2 colour-matrix driver, not integration-driver timings.  The driver exposes the same absolute \AC\ NLC/full-colour matrix element and splits amplitude-evaluation from colour-contraction time, but it is not yet a generated-library driver.  \PAC\ rows use the generic staged-DAG artifact, Rusticol double precision, JIT or C++ O3 Symbolica evaluators as labelled, and \texttt{time-process} with a one-second target runtime.  The \texttt{--time-limit} setting applies only to C++ O3 generation; \AC\ and JIT rows are left uncapped.
 \par\smallskip
 \paragraph{C++ O3 compile-budget gaps.}
-The following cells have validated \AC\ and \PAC\ JIT rows but no completed C++ O3 row; their C++ slot is a localized performance-generation compile-budget gap, not a physics-validation failure: $gg\to gg+(n-2)g$, \(n=4\): not run; $gg\to t\bar t+(n-2)g$, \(n=4\): timed out.
+The following cells have validated \AC\ and \PAC\ JIT rows but no completed C++ O3 row; their C++ slot is a localized performance-generation compile-budget gap, not a physics-validation failure: $gg\to t\bar t+(n-2)g$, \(n=4\): timed out; $gg\to gg+(n-2)g$, \(n=4\): timed out.
 \par\smallskip

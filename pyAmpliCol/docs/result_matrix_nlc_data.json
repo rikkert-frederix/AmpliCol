@@ -6497,6 +6497,45 @@
         "base_key": "gg_gluons",
         "n_final": 4,
         "process": "g g > g g g g",
+        "pyamplicol_cpp_o3": {
+          "error": "Command '['/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/dependencies/.venv/bin/python', '-m', 'pyamplicol', 'generate-process', '--replace', '--n_cores', '4', '--color-accuracy', 'nlc', '--symbolica-n-cores', '4', '--json', '--monitor', '--symbolica-evaluator-backend', 'compiled-complex', '--symbolica-compiled-preset', 'runtime-o3', '--symbolica-compiled-chunk-compile-workers', '4', 'g g > g g g g', '/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_gluons/n4/cpp_o3']' timed out after 899.9999889580067 seconds",
+          "finished_at": "2026-07-08T09:56:18.087107+00:00",
+          "matrix_settings": {
+            "color_accuracy": "nlc",
+            "current_merging": {
+              "enabled": false,
+              "relative_tolerance": 1e-12,
+              "sample_count": 10,
+              "seed": 12345,
+              "zero_tolerance": 1e-300
+            },
+            "lc_sector_strategy": null,
+            "max_color_sectors": null,
+            "max_currents": null,
+            "max_quark_pairs": null,
+            "n_cores": 4,
+            "precision": 16,
+            "reference_color_order": null,
+            "runtime": "rusticol",
+            "selected_lc_sector_ids": null,
+            "symbolica_compiled_chunk_compile_workers": 4,
+            "symbolica_compiled_preset": "runtime-o3",
+            "symbolica_evaluator_backend": "compiled-complex",
+            "symbolica_n_cores": 4,
+            "target_runtime_s": 1.0,
+            "zero_current_filter": {
+              "enabled": false,
+              "relative_tolerance": 1e-12,
+              "sample_count": 10,
+              "seed": 12345,
+              "zero_tolerance": 1e-300
+            }
+          },
+          "mode": "pyAmpliCol - staged-DAG | C++ O3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_gluons/n4/cpp_o3",
+          "started_at": "2026-07-08T09:41:17.998114+00:00",
+          "status": "timeout"
+        },
         "pyamplicol_jit": {
           "finished_at": "2026-07-08T09:23:01.842122+00:00",
           "generate_log": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_gluons/n4/jit.generate.log",
@@ -6575,7 +6614,7 @@
           "wall_us_per_point": 910.8862848532024
         },
         "status": "done",
-        "updated_at": "2026-07-08T09:23:02.034526+00:00",
+        "updated_at": "2026-07-08T09:56:18.087267+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_jit": 1.4365678785432934e-18
@@ -7320,8 +7359,8 @@
         "n_final": 4,
         "process": "g g > t t~ g g",
         "pyamplicol_cpp_o3": {
-          "error": "Command '['/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/dependencies/.venv/bin/python', '-m', 'pyamplicol', 'generate-process', '--replace', '--n_cores', '5', '--color-accuracy', 'nlc', '--symbolica-n-cores', '5', '--json', '--monitor', '--symbolica-evaluator-backend', 'compiled-complex', '--symbolica-compiled-preset', 'runtime-o3', '--symbolica-compiled-chunk-compile-workers', '5', 'g g > t t~ g g', '/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_tt_jets/n4/cpp_o3']' timed out after 899.999923166004 seconds",
-          "finished_at": "2026-07-08T08:12:41.676439+00:00",
+          "error": "Command '['/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/dependencies/.venv/bin/python', '-m', 'pyamplicol', 'generate-process', '--replace', '--n_cores', '4', '--color-accuracy', 'nlc', '--symbolica-n-cores', '4', '--json', '--monitor', '--symbolica-evaluator-backend', 'compiled-complex', '--symbolica-compiled-preset', 'runtime-o3', '--symbolica-compiled-chunk-compile-workers', '4', 'g g > t t~ g g', '/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_tt_jets/n4/cpp_o3']' timed out after 899.999982459005 seconds",
+          "finished_at": "2026-07-08T09:56:18.087457+00:00",
           "matrix_settings": {
             "color_accuracy": "nlc",
             "current_merging": {
@@ -7335,15 +7374,15 @@
             "max_color_sectors": null,
             "max_currents": null,
             "max_quark_pairs": null,
-            "n_cores": 5,
+            "n_cores": 4,
             "precision": 16,
             "reference_color_order": null,
             "runtime": "rusticol",
             "selected_lc_sector_ids": null,
-            "symbolica_compiled_chunk_compile_workers": 5,
+            "symbolica_compiled_chunk_compile_workers": 4,
             "symbolica_compiled_preset": "runtime-o3",
             "symbolica_evaluator_backend": "compiled-complex",
-            "symbolica_n_cores": 5,
+            "symbolica_n_cores": 4,
             "target_runtime_s": 1.0,
             "zero_current_filter": {
               "enabled": false,
@@ -7355,7 +7394,7 @@
           },
           "mode": "pyAmpliCol - staged-DAG | C++ O3",
           "output_dir": "/Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_tt_jets/n4/cpp_o3",
-          "started_at": "2026-07-08T07:57:41.646260+00:00",
+          "started_at": "2026-07-08T09:41:17.997950+00:00",
           "status": "timeout"
         },
         "pyamplicol_jit": {
@@ -7436,7 +7475,7 @@
           "wall_us_per_point": 407.06534878154343
         },
         "status": "done",
-        "updated_at": "2026-07-08T09:21:55.734340+00:00",
+        "updated_at": "2026-07-08T09:56:18.087512+00:00",
         "validation": {
           "absolute_differences": {
             "pyamplicol_jit": 5.929230630780102e-21
@@ -9599,5 +9638,5 @@
     }
   },
   "schema_version": 1,
-  "updated_at": "2026-07-08T09:23:16.985438+00:00"
+  "updated_at": "2026-07-08T09:41:17.998016+00:00"
 }

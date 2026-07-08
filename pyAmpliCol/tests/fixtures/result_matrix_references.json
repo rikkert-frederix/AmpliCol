@@ -8720,12 +8720,12 @@
       }
     }
   ],
-  "created_at": "2026-07-08T09:28:49.333307+00:00",
+  "created_at": "2026-07-08T10:12:29.062980+00:00",
   "created_by": "pyAmpliCol/scripts/refresh_result_matrix_fixtures.py",
   "git": {
     "branch": "pyamplicol_nlc_full_color",
     "dirty": true,
-    "head": "9a3af982cab1167bf621d9043c99233794d764a7"
+    "head": "830ff368fdcd9ec66a127d2f92e7ace06e3dd017"
   },
   "kind": "pyamplicol-result-matrix-reference-fixture",
   "max_n": 4,
@@ -8741,13 +8741,13 @@
       "color_accuracy": "nlc",
       "path": "pyAmpliCol/docs/result_matrix_nlc_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T09:23:16.985438+00:00"
+      "updated_at": "2026-07-08T09:41:17.998016+00:00"
     },
     {
       "color_accuracy": "full",
       "path": "pyAmpliCol/docs/result_matrix_full_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T09:26:06.091859+00:00"
+      "updated_at": "2026-07-08T09:56:58.993228+00:00"
     }
   ],
   "summary": {

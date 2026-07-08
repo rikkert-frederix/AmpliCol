@@ -94,12 +94,12 @@
 \rowcolor{refblue}
 \texttt{5} & $d\bar d\to ZZ+(n-2)g$ & \matrixcell{\texttt{0.16 s}}{\matrixratio{speedred}{4.22}}{\matrixratio{speedred}{111}}{\texttt{254 us}}{\matrixratiopair{speedgreen}{x0.032}{speedgreen}{x0.025}}{\matrixratiopair{speedgreen}{x0.031}{speedgreen}{x0.024}} \\
 \addlinespace[0.22em]
-\texttt{6} & $gg\to t\bar t+(n-2)g$ & \matrixcell{\texttt{0.147 s}}{\matrixratio{speedred}{56.5}}{\matrixnaratio{speedred}}{\texttt{379 us}}{\matrixratiopair{speedorange}{x1.09}{speedorange}{x1.00}}{\matrixratiopair{speedred}{N/A}{speedred}{N/A}} \\
+\texttt{6} & $gg\to t\bar t+(n-2)g$ & \matrixcell{\texttt{0.147 s}}{\matrixratio{speedred}{56.5}}{\textcolor{speedred}{\texttt{timeout}}}{\texttt{379 us}}{\matrixratiopair{speedorange}{x1.09}{speedorange}{x1.00}}{\matrixratiopair{speedred}{N/A}{speedred}{N/A}} \\
 \addlinespace[0.22em]
 \rowcolor{refblue}
 \texttt{7} & $d\bar d\to t\bar t+(n-2)g$ & \matrixcell{\texttt{0.168 s}}{\matrixratio{speedred}{10.6}}{\matrixratio{speedred}{803}}{\texttt{188 us}}{\matrixratiopair{speedgreen}{x0.412}{speedgreen}{x0.37}}{\matrixratiopair{speedgreen}{x0.419}{speedgreen}{x0.385}} \\
 \addlinespace[0.22em]
-\texttt{8} & $gg\to gg+(n-2)g$ & \matrixcell{\texttt{0.149 s}}{\matrixratio{speedred}{389}}{\matrixnaratio{speedred}}{\texttt{1.71e+03 us}}{\matrixratiopair{speedgreen}{x0.594}{speedgreen}{x0.468}}{\matrixratiopair{speedred}{N/A}{speedred}{N/A}} \\
+\texttt{8} & $gg\to gg+(n-2)g$ & \matrixcell{\texttt{0.149 s}}{\matrixratio{speedred}{389}}{\textcolor{speedred}{\texttt{timeout}}}{\texttt{1.71e+03 us}}{\matrixratiopair{speedgreen}{x0.594}{speedgreen}{x0.468}}{\matrixratiopair{speedred}{N/A}{speedred}{N/A}} \\
 \addlinespace[0.22em]
 \rowcolor{refblue}
 \texttt{9} & $d\bar d\to ZZZ+(n-3)g$ & \matrixcell{\texttt{0.153 s}}{\matrixratio{speedred}{4.48}}{\matrixratio{speedred}{119}}{\texttt{365 us}}{\matrixratiopair{speedgreen}{x0.022}{speedgreen}{x0.018}}{\matrixratiopair{speedgreen}{x0.021}{speedgreen}{x0.017}} \\
@@ -129,5 +129,5 @@ pyAmpliCol/dependencies/.venv/bin/python pyAmpliCol/docs/result_matrix.py --colo
 \noindent\footnotesize Partial refreshes use the same settings with \texttt{--base-process}, \texttt{--skip-jit}, \texttt{--skip-cpp-o3}, \texttt{--process-ids}, or \texttt{--skip-amplicol} added only to restrict which cells are updated.  PyAmpliCol-only refreshes may additionally use \texttt{--process-workers 5}; this is intentionally disabled when the \AC\ reference is refreshed because that path uses shared top-level generated-library files.  \AC\ reference timings for this colour table currently use the dedicated \texttt{amplicol\_color\_probe} imode-2 colour-matrix driver, not integration-driver timings.  The driver exposes the same absolute \AC\ NLC/full-colour matrix element and splits amplitude-evaluation from colour-contraction time, but it is not yet a generated-library driver.  \PAC\ rows use the generic staged-DAG artifact, Rusticol double precision, JIT or C++ O3 Symbolica evaluators as labelled, and \texttt{time-process} with a one-second target runtime.  The \texttt{--time-limit} setting applies only to C++ O3 generation; \AC\ and JIT rows are left uncapped.
 \par\smallskip
 \paragraph{C++ O3 compile-budget gaps.}
-The following cells have validated \AC\ and \PAC\ JIT rows but no completed C++ O3 row; their C++ slot is a localized performance-generation compile-budget gap, not a physics-validation failure: $gg\to t\bar t+(n-2)g$, \(n=4\): not run; $gg\to gg+(n-2)g$, \(n=4\): not run.
+The following cells have validated \AC\ and \PAC\ JIT rows but no completed C++ O3 row; their C++ slot is a localized performance-generation compile-budget gap, not a physics-validation failure: $gg\to t\bar t+(n-2)g$, \(n=4\): timed out; $gg\to gg+(n-2)g$, \(n=4\): timed out.
 \par\smallskip
