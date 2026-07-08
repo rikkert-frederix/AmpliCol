@@ -5468,20 +5468,8 @@ impl LoadedEvaluator {
                         batch_size * self.output_len
                     )));
                 }
-                // SymJIT's matrix-evaluation entry point is still brittle for a
-                // few large complex AArch64 kernels. The scalar entry point is
-                // stable on the same serialized evaluators and JIT rows are not
-                // the production fast path, so keep C++ evaluators batched and
-                // run JIT evaluators row-by-row.
-                for row in 0..batch_size {
-                    let in_start = row * self.input_len;
-                    let out_start = row * self.output_len;
-                    eval.evaluate(
-                        &params[in_start..in_start + self.input_len],
-                        &mut out[out_start..out_start + self.output_len],
-                    );
-                }
-                Ok(())
+                eval.evaluate_batch(batch_size, params, out)
+                    .map_err(PyRuntimeError::new_err)
             }
             F64Evaluator::Interpreted(eval) => {
                 if params.len() != batch_size * self.input_len {
