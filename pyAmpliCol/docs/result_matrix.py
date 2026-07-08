@@ -5,6 +5,8 @@ import argparse
 import json
 import math
 import os
+import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -308,6 +310,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "the script also recompiles description.tex and refreshes pyAmpliCol.pdf."
         ),
     )
+    parser.add_argument(
+        "--clean-output-artifacts",
+        action="store_true",
+        help=(
+            "Remove per-cell .result_matrix_outputs artifacts after their timings "
+            "have been recorded in result_matrix_data.json."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -388,6 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         skip_cpp_o3=args.skip_cpp_o3,
                         only_missing=args.only_missing,
                         validate=args.validate,
+                        clean_output_artifacts=args.clean_output_artifacts,
                     )
                     for base, n_final, process in work_items
                 ]
@@ -412,6 +423,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     skip_cpp_o3=args.skip_cpp_o3,
                     only_missing=args.only_missing,
                     validate=args.validate,
+                    clean_output_artifacts=args.clean_output_artifacts,
                 )
                 _write_data(args.data, data)
 
@@ -480,6 +492,7 @@ def _generate_case(
     skip_cpp_o3: bool,
     only_missing: bool,
     validate: bool,
+    clean_output_artifacts: bool,
 ) -> None:
     case = _case_payload(data, base, n_final)
     case["process"] = process
@@ -578,12 +591,13 @@ def _generate_case(
         only_missing=only_missing,
         expected_settings=jit_settings,
     ):
+        jit_output_dir = output_root / base.key / f"n{n_final}" / "jit"
         case["pyamplicol_jit"] = _run_pyamplicol_case(
             process,
             base=base,
             n_final=n_final,
             backend_key="jit",
-            output_dir=output_root / base.key / f"n{n_final}" / "jit",
+            output_dir=jit_output_dir,
             deadline_started=time.monotonic(),
             time_limit=None,
             target_runtime=target_runtime,
@@ -592,6 +606,8 @@ def _generate_case(
             reference_color_order=reference_color_order,
             matrix_settings=jit_settings,
         )
+        if clean_output_artifacts:
+            shutil.rmtree(jit_output_dir, ignore_errors=True)
     cpp_o3_settings = _pyamplicol_matrix_settings(
         backend_key="cpp_o3",
         target_runtime=target_runtime,
@@ -606,12 +622,13 @@ def _generate_case(
         only_missing=only_missing,
         expected_settings=cpp_o3_settings,
     ):
+        cpp_o3_output_dir = output_root / base.key / f"n{n_final}" / "cpp_o3"
         case["pyamplicol_cpp_o3"] = _run_pyamplicol_case(
             process,
             base=base,
             n_final=n_final,
             backend_key="cpp_o3",
-            output_dir=output_root / base.key / f"n{n_final}" / "cpp_o3",
+            output_dir=cpp_o3_output_dir,
             deadline_started=time.monotonic(),
             time_limit=time_limit,
             target_runtime=target_runtime,
@@ -620,6 +637,8 @@ def _generate_case(
             reference_color_order=reference_color_order,
             matrix_settings=cpp_o3_settings,
         )
+        if clean_output_artifacts:
+            shutil.rmtree(cpp_o3_output_dir, ignore_errors=True)
     should_validate = validate and not skip_amplicol and _ok(_mode(case, "amplicol"))
     if should_validate and only_missing and _validation_record_ok(case.get("validation")):
         should_validate = False
@@ -1226,27 +1245,44 @@ def _run_json_command(args: Sequence[str], *, timeout: float | None) -> dict[str
         else str(SRC_DIR)
     )
     start = time.perf_counter()
-    completed = subprocess.run(
+    process = subprocess.Popen(
         list(args),
         cwd=REPO_ROOT,
         env=env,
         text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(process.pid, signal.SIGTERM)
+        try:
+            stdout, stderr = process.communicate(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            _terminate_process_group(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(list(args), timeout, output=stdout, stderr=stderr)
     elapsed_s = time.perf_counter() - start
-    if completed.returncode != 0:
+    if process.returncode != 0:
         raise RuntimeError(
             "command failed with exit code "
-            f"{completed.returncode}: {' '.join(args)}\n"
-            f"stdout:\n{completed.stdout[-4000:]}\n"
-            f"stderr:\n{completed.stderr[-4000:]}"
+            f"{process.returncode}: {' '.join(args)}\n"
+            f"stdout:\n{stdout[-4000:]}\n"
+            f"stderr:\n{stderr[-4000:]}"
         )
-    payload = _parse_json_output(completed.stdout)
+    payload = _parse_json_output(stdout)
     payload["_command_elapsed_s"] = elapsed_s
     payload["_command_args"] = list(args)
     return payload
+
+
+def _terminate_process_group(pid: int, sig: signal.Signals) -> None:
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        return
 
 
 def render_latex_table(
@@ -1445,14 +1481,20 @@ def _matrix_status_notes_latex(
                 ("pyamplicol_jit", r"\PAC\ JIT"),
                 ("pyamplicol_cpp_o3", r"\PAC\ C++ O3"),
             ):
-                mode = _mode(case, key)
+                raw_mode = case.get(key)
+                mode = raw_mode if isinstance(raw_mode, dict) else {}
+                missing_mode = not isinstance(raw_mode, dict)
+                if missing_mode and case.get("status") == "not_applicable":
+                    continue
                 status = str(mode.get("status", ""))
                 if _is_documented_backend_limitation(mode):
                     documented_backend_limits.append(
                         rf"{base.label}, \(n={n_final}\), {label}"
                     )
                     continue
-                if status in {"", "ok", "missing", "not_applicable", "unsupported"}:
+                if missing_mode:
+                    status = "missing"
+                if status in {"", "ok", "not_applicable", "unsupported"}:
                     continue
                 entry = (
                     rf"{base.label}, \(n={n_final}\), {label}: "
@@ -2133,6 +2175,7 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _error_payload(exc: Exception) -> dict[str, Any]:
     error = str(exc)[-4000:]
     timeout_markers = (
+        "exit code -15",
         "timed out",
         "time limit",
         "Terminated: 15",
