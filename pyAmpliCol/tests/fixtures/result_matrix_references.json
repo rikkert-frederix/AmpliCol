@@ -81,7 +81,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 25.9142,
+        "runtime_us_per_point": 26.3879,
         "status": "ok",
         "value": 0.36154106787336965
       },
@@ -141,12 +141,12 @@
       "process": "d d~ > z g",
       "process_id": 1,
       "pyamplicol": {
-        "core_us_per_point": 0.2104406956070007,
-        "generation_s": 0.2576091659720987,
+        "core_us_per_point": 0.17653119198294645,
+        "generation_s": 0.40118783293291926,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.3615410678733697,
-        "wall_us_per_point": 0.3658567716464605
+        "wall_us_per_point": 0.34741638876300074
       },
       "validation": {
         "absolute_difference": 5.551115123125783e-17,
@@ -435,7 +435,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 26.0824,
+        "runtime_us_per_point": 26.8044,
         "status": "ok",
         "value": 0.7484009453876564
       },
@@ -495,12 +495,12 @@
       "process": "u d~ > w+ g",
       "process_id": 2,
       "pyamplicol": {
-        "core_us_per_point": 0.11966548497510668,
-        "generation_s": 0.19154033402446657,
+        "core_us_per_point": 0.09625684155344,
+        "generation_s": 0.21267566597089171,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.748400945387657,
-        "wall_us_per_point": 0.24697306489424953
+        "wall_us_per_point": 0.23278950655892744
       },
       "validation": {
         "absolute_difference": 5.551115123125783e-16,
@@ -714,7 +714,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 17.008699999999997,
+        "runtime_us_per_point": 18.2053,
         "status": "ok",
         "value": 0.00029643287702105003
       },
@@ -774,12 +774,12 @@
       "process": "d d~ > e+ e-",
       "process_id": 3,
       "pyamplicol": {
-        "core_us_per_point": 0.12435326973105672,
-        "generation_s": 0.18086320802103728,
+        "core_us_per_point": 0.07108332937878131,
+        "generation_s": 0.22498758300207555,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.00029643287702105003,
-        "wall_us_per_point": 0.22902780463583258
+        "wall_us_per_point": 0.18831447193878578
       },
       "validation": {
         "absolute_difference": 0.0,
@@ -993,7 +993,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 16.7152,
+        "runtime_us_per_point": 16.9261,
         "status": "ok",
         "value": 0.0004229008731816369
       },
@@ -1053,12 +1053,12 @@
       "process": "u d~ > e+ ve",
       "process_id": 4,
       "pyamplicol": {
-        "core_us_per_point": 0.0249873509321622,
-        "generation_s": 0.16975070803891867,
+        "core_us_per_point": 0.024548850570676194,
+        "generation_s": 0.20374566596001387,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.000422900873181637,
-        "wall_us_per_point": 0.1084991921612899
+        "wall_us_per_point": 0.11705787398084375
       },
       "validation": {
         "absolute_difference": 1.0842021724855044e-19,
@@ -1272,7 +1272,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 37.2666,
+        "runtime_us_per_point": 38.1235,
         "status": "ok",
         "value": 0.009042417037052044
       },
@@ -1332,12 +1332,12 @@
       "process": "d d~ > z z",
       "process_id": 5,
       "pyamplicol": {
-        "core_us_per_point": 0.2742713770088615,
-        "generation_s": 0.20267354196403176,
+        "core_us_per_point": 0.21901973347284023,
+        "generation_s": 0.21971391700208187,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.009042417037052042,
-        "wall_us_per_point": 0.4693805370751539
+        "wall_us_per_point": 0.42395676814052863
       },
       "validation": {
         "absolute_difference": 1.734723475976807e-18,
@@ -1551,7 +1551,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 20.5969,
+        "runtime_us_per_point": 19.0072,
         "status": "ok",
         "value": 1.2610084500232892
       },
@@ -1611,12 +1611,12 @@
       "process": "g g > t t~",
       "process_id": 6,
       "pyamplicol": {
-        "core_us_per_point": 0.6151919219896088,
-        "generation_s": 0.22139600000809878,
+        "core_us_per_point": 0.526298024369856,
+        "generation_s": 0.26260949997231364,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.261008450023289,
-        "wall_us_per_point": 0.9552205808148043
+        "wall_us_per_point": 0.8930817519328733
       },
       "validation": {
         "absolute_difference": 2.220446049250313e-16,
@@ -1830,7 +1830,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 17.3326,
+        "runtime_us_per_point": 18.0598,
         "status": "ok",
         "value": 0.7392020761524873
       },
@@ -1890,20 +1890,20 @@
       "process": "d d~ > t t~",
       "process_id": 7,
       "pyamplicol": {
-        "core_us_per_point": 0.19459321214203068,
-        "generation_s": 0.19786666694562882,
+        "core_us_per_point": 0.17867672706546642,
+        "generation_s": 0.2460179169429466,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 0.7392020761524873,
-        "wall_us_per_point": 0.45203907087576994
+        "value": 0.7392020761524872,
+        "wall_us_per_point": 0.4589501794344712
       },
       "validation": {
-        "absolute_difference": 0.0,
+        "absolute_difference": 1.1102230246251565e-16,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
         "max_relative_difference": 3.003841738117988e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 0.0,
+        "relative_difference": 1.501920869058994e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -2109,7 +2109,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 21.3396,
+        "runtime_us_per_point": 21.7064,
         "status": "ok",
         "value": 165.3364278744662
       },
@@ -2169,20 +2169,20 @@
       "process": "g g > g g",
       "process_id": 8,
       "pyamplicol": {
-        "core_us_per_point": 4.319118458044983,
-        "generation_s": 0.526632042019628,
+        "core_us_per_point": 1.4294704109690846,
+        "generation_s": 0.2734585829311982,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 165.33642787446624,
-        "wall_us_per_point": 5.4150652060066475
+        "value": 165.33642787446627,
+        "wall_us_per_point": 1.8581166931373476
       },
       "validation": {
-        "absolute_difference": 2.842170943040401e-14,
+        "absolute_difference": 5.684341886080802e-14,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 5.157068492852078e-16,
+        "max_relative_difference": 8.595114154753461e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 1.7190228309506934e-16,
+        "relative_difference": 3.438045661901386e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -2963,7 +2963,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.12420000000000002,
+        "runtime_us_per_point": 0.1268,
         "status": "ok",
         "value": 0.4067337013575408
       },
@@ -3022,12 +3022,12 @@
       "process": "d d~ > z g",
       "process_id": 1,
       "pyamplicol": {
-        "core_us_per_point": 0.20811308973902867,
-        "generation_s": 0.23590716696344316,
+        "core_us_per_point": 0.17417803336772372,
+        "generation_s": 0.2798322499729693,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.40673370135754094,
-        "wall_us_per_point": 0.3586351038906363
+        "wall_us_per_point": 0.3393824784907622
       },
       "validation": {
         "absolute_difference": 1.6653345369377348e-16,
@@ -3313,7 +3313,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.0689,
+        "runtime_us_per_point": 0.07569999999999999,
         "status": "ok",
         "value": 0.8419510635611083
       },
@@ -3372,12 +3372,12 @@
       "process": "u d~ > w+ g",
       "process_id": 2,
       "pyamplicol": {
-        "core_us_per_point": 0.11968655761445576,
-        "generation_s": 0.17338987509720027,
+        "core_us_per_point": 0.0943389525945771,
+        "generation_s": 0.25402654195204377,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.8419510635611143,
-        "wall_us_per_point": 0.24282335027975557
+        "wall_us_per_point": 0.22475736141791433
       },
       "validation": {
         "absolute_difference": 5.995204332975845e-15,
@@ -3589,7 +3589,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.0674,
+        "runtime_us_per_point": 0.0699,
         "status": "ok",
         "value": 0.00029643287702104987
       },
@@ -3648,12 +3648,12 @@
       "process": "d d~ > e+ e-",
       "process_id": 3,
       "pyamplicol": {
-        "core_us_per_point": 0.12360509286215428,
-        "generation_s": 0.20143225009087473,
+        "core_us_per_point": 0.08203906421873282,
+        "generation_s": 0.22585170797538012,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.00029643287702105,
-        "wall_us_per_point": 0.2260339554875361
+        "wall_us_per_point": 0.21484523626135849
       },
       "validation": {
         "absolute_difference": 1.0842021724855044e-19,
@@ -3865,7 +3865,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.032,
+        "runtime_us_per_point": 0.03269999999999999,
         "status": "ok",
         "value": 0.0004229008731816364
       },
@@ -3924,12 +3924,12 @@
       "process": "u d~ > e+ ve",
       "process_id": 4,
       "pyamplicol": {
-        "core_us_per_point": 0.053568684221877154,
-        "generation_s": 0.036284292000345886,
+        "core_us_per_point": 0.02689391295766407,
+        "generation_s": 0.21582720789592713,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.000422900873181637,
-        "wall_us_per_point": 0.1348326626614617
+        "wall_us_per_point": 0.12523755137209375
       },
       "validation": {
         "absolute_difference": 5.963111948670274e-19,
@@ -4141,7 +4141,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.15560000000000002,
+        "runtime_us_per_point": 0.1661,
         "status": "ok",
         "value": 0.00904241703705203
       },
@@ -4200,12 +4200,12 @@
       "process": "d d~ > z z",
       "process_id": 5,
       "pyamplicol": {
-        "core_us_per_point": 0.2769222971583089,
-        "generation_s": 0.1848624999402091,
+        "core_us_per_point": 0.23483463798786153,
+        "generation_s": 0.290150124928914,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.00904241703705204,
-        "wall_us_per_point": 0.46751005453985006
+        "wall_us_per_point": 0.45376234239997426
       },
       "validation": {
         "absolute_difference": 1.0408340855860843e-17,
@@ -4417,7 +4417,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.1013,
+        "runtime_us_per_point": 0.1253,
         "status": "ok",
         "value": 1.6035879763289989
       },
@@ -4476,20 +4476,20 @@
       "process": "g g > t t~",
       "process_id": 6,
       "pyamplicol": {
-        "core_us_per_point": 0.16869678844919297,
-        "generation_s": 0.2058085419703275,
+        "core_us_per_point": 0.2207817120885525,
+        "generation_s": 0.2763721249066293,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 1.6035879763289975,
-        "wall_us_per_point": 0.31843575106630284
+        "value": 1.603587976328998,
+        "wall_us_per_point": 0.43884068503554163
       },
       "validation": {
-        "absolute_difference": 1.3322676295501878e-15,
+        "absolute_difference": 8.881784197001252e-16,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 8.308042023363577e-16,
+        "max_relative_difference": 5.538694682242385e-16,
         "point_order_source": "process-file-pdg-order:21,21,6,-6",
-        "relative_difference": 8.308042023363577e-16,
+        "relative_difference": 5.538694682242385e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -4693,7 +4693,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.0504,
+        "runtime_us_per_point": 0.053899999999999997,
         "status": "ok",
         "value": 0.8316023356715487
       },
@@ -4752,12 +4752,12 @@
       "process": "d d~ > t t~",
       "process_id": 7,
       "pyamplicol": {
-        "core_us_per_point": 0.03775605595066999,
-        "generation_s": 0.17511941690463573,
+        "core_us_per_point": 0.05825507776433228,
+        "generation_s": 0.25657375005539507,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.8316023356715488,
-        "wall_us_per_point": 0.16512303145005122
+        "wall_us_per_point": 0.21859042588148173
       },
       "validation": {
         "absolute_difference": 1.1102230246251565e-16,
@@ -4969,7 +4969,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.1727,
+        "runtime_us_per_point": 0.18489999999999998,
         "status": "ok",
         "value": 1.484718869069219
       },
@@ -5028,12 +5028,12 @@
       "process": "g g > g g",
       "process_id": 8,
       "pyamplicol": {
-        "core_us_per_point": 0.332494035323664,
-        "generation_s": 0.20557670900598168,
+        "core_us_per_point": 0.2006823808652628,
+        "generation_s": 0.28298262506723404,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.4847188690692197,
-        "wall_us_per_point": 0.4644140391005235
+        "wall_us_per_point": 0.34133266414644003
       },
       "validation": {
         "absolute_difference": 6.661338147750939e-16,
@@ -5917,7 +5917,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 28.008899999999997,
+        "runtime_us_per_point": 27.5538,
         "status": "ok",
         "value": 0.36154106787336965
       },
@@ -5977,12 +5977,12 @@
       "process": "d d~ > z g",
       "process_id": 1,
       "pyamplicol": {
-        "core_us_per_point": 0.1698884467248438,
-        "generation_s": 0.24061850004363805,
+        "core_us_per_point": 0.1995822711388634,
+        "generation_s": 0.2191661250544712,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.3615410678733697,
-        "wall_us_per_point": 0.33673956889861695
+        "wall_us_per_point": 0.39784200922847685
       },
       "validation": {
         "absolute_difference": 5.551115123125783e-17,
@@ -6271,7 +6271,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 24.822200000000002,
+        "runtime_us_per_point": 26.393800000000002,
         "status": "ok",
         "value": 0.7484009453876564
       },
@@ -6331,12 +6331,12 @@
       "process": "u d~ > w+ g",
       "process_id": 2,
       "pyamplicol": {
-        "core_us_per_point": 0.08972009928716904,
-        "generation_s": 0.1752100830199197,
+        "core_us_per_point": 0.09581730612456646,
+        "generation_s": 0.20863862498663366,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.748400945387657,
-        "wall_us_per_point": 0.21217665037462544
+        "wall_us_per_point": 0.23160089050485183
       },
       "validation": {
         "absolute_difference": 5.551115123125783e-16,
@@ -6550,7 +6550,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 17.2288,
+        "runtime_us_per_point": 17.582,
         "status": "ok",
         "value": 0.00029643287702105003
       },
@@ -6610,12 +6610,12 @@
       "process": "d d~ > e+ e-",
       "process_id": 3,
       "pyamplicol": {
-        "core_us_per_point": 0.06816452844374787,
-        "generation_s": 0.18881029193289578,
+        "core_us_per_point": 0.07133215006841519,
+        "generation_s": 0.21776933304499835,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.00029643287702105003,
-        "wall_us_per_point": 0.17650813379986777
+        "wall_us_per_point": 0.1892017551763912
       },
       "validation": {
         "absolute_difference": 0.0,
@@ -6829,7 +6829,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 16.1267,
+        "runtime_us_per_point": 17.2759,
         "status": "ok",
         "value": 0.0004229008731816369
       },
@@ -6889,12 +6889,12 @@
       "process": "u d~ > e+ ve",
       "process_id": 4,
       "pyamplicol": {
-        "core_us_per_point": 0.02273499634565411,
-        "generation_s": 0.16921024990733713,
+        "core_us_per_point": 0.024284504081302404,
+        "generation_s": 0.2038615409983322,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.000422900873181637,
-        "wall_us_per_point": 0.10685477354120895
+        "wall_us_per_point": 0.11760418831261217
       },
       "validation": {
         "absolute_difference": 1.0842021724855044e-19,
@@ -7108,7 +7108,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 36.7599,
+        "runtime_us_per_point": 40.0263,
         "status": "ok",
         "value": 0.009042417037052044
       },
@@ -7168,12 +7168,12 @@
       "process": "d d~ > z z",
       "process_id": 5,
       "pyamplicol": {
-        "core_us_per_point": 0.2068972551216389,
-        "generation_s": 0.18911512498743832,
+        "core_us_per_point": 0.2220377463942308,
+        "generation_s": 0.22548100003041327,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.009042417037052042,
-        "wall_us_per_point": 0.4001817136442333
+        "wall_us_per_point": 0.4292591943290113
       },
       "validation": {
         "absolute_difference": 1.734723475976807e-18,
@@ -7387,7 +7387,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 17.932000000000002,
+        "runtime_us_per_point": 18.499,
         "status": "ok",
         "value": 1.2610084500232892
       },
@@ -7447,12 +7447,12 @@
       "process": "g g > t t~",
       "process_id": 6,
       "pyamplicol": {
-        "core_us_per_point": 0.4956327596579084,
-        "generation_s": 0.19758991699200124,
+        "core_us_per_point": 0.5247995107855536,
+        "generation_s": 0.23487579193897545,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.261008450023289,
-        "wall_us_per_point": 0.8131779820561535
+        "wall_us_per_point": 0.878332105367468
       },
       "validation": {
         "absolute_difference": 2.220446049250313e-16,
@@ -7666,7 +7666,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 17.4366,
+        "runtime_us_per_point": 18.2006,
         "status": "ok",
         "value": 0.7392020761524873
       },
@@ -7726,12 +7726,12 @@
       "process": "d d~ > t t~",
       "process_id": 7,
       "pyamplicol": {
-        "core_us_per_point": 0.1688335322934352,
-        "generation_s": 0.18325687502510846,
+        "core_us_per_point": 0.180254432379163,
+        "generation_s": 0.23002504196483642,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.7392020761524872,
-        "wall_us_per_point": 0.4421993134446847
+        "wall_us_per_point": 0.46052807406781376
       },
       "validation": {
         "absolute_difference": 1.1102230246251565e-16,
@@ -7945,7 +7945,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 19.6988,
+        "runtime_us_per_point": 20.4072,
         "status": "ok",
         "value": 165.3364278744662
       },
@@ -8005,18 +8005,18 @@
       "process": "g g > g g",
       "process_id": 8,
       "pyamplicol": {
-        "core_us_per_point": 1.735778864767699,
-        "generation_s": 0.2595447499770671,
+        "core_us_per_point": 1.5258641326121796,
+        "generation_s": 0.29212070791982114,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 165.33642787446644,
-        "wall_us_per_point": 2.3064462994386723
+        "wall_us_per_point": 2.0035191440771225
       },
       "validation": {
         "absolute_difference": 2.2737367544323206e-13,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 1.547120547855622e-15,
+        "max_relative_difference": 1.7190228309506907e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 1.375218264760553e-15,
         "status": "ok",
@@ -8720,12 +8720,12 @@
       }
     }
   ],
-  "created_at": "2026-07-08T08:40:52.568003+00:00",
+  "created_at": "2026-07-08T08:54:54.736052+00:00",
   "created_by": "pyAmpliCol/scripts/refresh_result_matrix_fixtures.py",
   "git": {
     "branch": "pyamplicol_nlc_full_color",
     "dirty": true,
-    "head": "03aa0a982eb796a80fd86606719a972e7fcae989"
+    "head": "9af66950337add2dfb528caa9652a55641711b07"
   },
   "kind": "pyamplicol-result-matrix-reference-fixture",
   "max_n": 4,
@@ -8735,19 +8735,19 @@
       "color_accuracy": "lc",
       "path": "pyAmpliCol/docs/result_matrix_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T08:40:07.878887+00:00"
+      "updated_at": "2026-07-08T08:54:37.715041+00:00"
     },
     {
       "color_accuracy": "nlc",
       "path": "pyAmpliCol/docs/result_matrix_nlc_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T08:40:22.709402+00:00"
+      "updated_at": "2026-07-08T08:44:51.511459+00:00"
     },
     {
       "color_accuracy": "full",
       "path": "pyAmpliCol/docs/result_matrix_full_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T08:40:33.881603+00:00"
+      "updated_at": "2026-07-08T08:45:44.463837+00:00"
     }
   ],
   "summary": {

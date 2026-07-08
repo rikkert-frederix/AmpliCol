@@ -665,6 +665,12 @@ def test_generic_process_manifest_handles_multi_quark_line_plan() -> None:
     assert payload["stage_plan"]["amplitude_stage"]["closure_count"] > 0
 
 
+def test_pure_gluon_lc_normalization_uses_model_leading_color_factor_once() -> None:
+    payload = build_generic_process_manifest("g g > g g").to_json_dict()
+
+    assert payload["runtime_schema"]["normalization"]["color_factor"] == 81
+
+
 @pytest.mark.parametrize("color_accuracy", ["nlc", "full"])
 def test_pure_gluon_subleading_colour_shares_currents_but_keeps_root_sectors(
     color_accuracy: str,

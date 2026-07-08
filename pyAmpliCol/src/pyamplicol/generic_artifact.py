@@ -2779,14 +2779,6 @@ def _runtime_normalization_payload(
         color_factor: int | None = int(leading_color_factor(external_pdgs))
     except Exception:
         color_factor = None
-    if (
-        color_factor is not None
-        and dag.process.color_accuracy == "lc"
-        and not dag.process.quark_labels
-        and not dag.process.antiquark_labels
-        and len(dag.process.gluon_labels) >= 3
-    ):
-        color_factor *= 2
     initial_pdgs = [int(pdg) for pdg in dag.process.initial_pdgs]
     final_pdgs = [int(pdg) for pdg in dag.process.final_pdgs]
     final_state_identical_factor = _final_state_identical_factor(final_pdgs)
