@@ -127,6 +127,85 @@ def test_reference_adapter_can_warm_library_creation_with_supplied_momenta(
     ).exists()
 
 
+def test_reference_adapter_can_create_raw_library_for_colour_probe(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def runner(
+        args: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> CommandResult:
+        calls.append(tuple(args))
+        return CommandResult(tuple(args), cwd, 0, "", "", 0.01)
+
+    particles = (
+        ExternalMomentum(1, (500.0, 0.0, 0.0, 500.0)),
+        ExternalMomentum(-1, (500.0, 0.0, 0.0, -500.0)),
+        ExternalMomentum(23, (1000.0, 0.0, 0.0, 0.0)),
+    )
+    adapter = AmplicolAdapter(tmp_path, runner=runner, jobs=3)
+
+    adapter.prepare_library(
+        "d d~ > z",
+        warmup_particles=particles,
+        warmup_points=1,
+        raw=True,
+    )
+
+    assert calls[2] == (
+        "./amplicol_generate",
+        "--library=create-raw",
+        f"--process={tmp_path / 'processes.txt'}",
+        "--amplicol_momenta_probe=1",
+        "--amplicol_probe_quiet",
+    )
+
+
+def test_reference_adapter_can_create_raw_colour_complete_library(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def runner(
+        args: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> CommandResult:
+        calls.append(tuple(args))
+        return CommandResult(tuple(args), cwd, 0, "", "", 0.01)
+
+    particles = (
+        ExternalMomentum(1, (500.0, 0.0, 0.0, 500.0)),
+        ExternalMomentum(-1, (500.0, 0.0, 0.0, -500.0)),
+        ExternalMomentum(6, (500.0, 300.0, 0.0, 400.0)),
+        ExternalMomentum(-6, (500.0, -300.0, 0.0, -400.0)),
+    )
+    adapter = AmplicolAdapter(tmp_path, runner=runner, jobs=3)
+
+    adapter.prepare_library(
+        "d d~ > t t~",
+        warmup_particles=particles,
+        warmup_points=1,
+        raw=True,
+        color_complete=True,
+    )
+
+    assert calls[2] == (
+        "./amplicol_generate",
+        "--library=create-raw",
+        f"--process={tmp_path / 'processes.txt'}",
+        "--amplicol_momenta_probe=1",
+        "--amplicol_probe_quiet",
+    )
+    assert "2 4 3 1" in (tmp_path / "processes.txt").read_text(encoding="utf-8")
+
+
 def test_process_file_integral_parser_lists_group_rows(tmp_path: Path) -> None:
     path = tmp_path / "processes.txt"
     path.write_text(
@@ -621,6 +700,62 @@ total                                   0.000025    100.00%
         "1",
         "full",
         str(tmp_path / "processes.txt"),
+        str(tmp_path / "Utilities" / "ME_checks" / "momenta_1_1.txt"),
+    )
+    assert result.first_point_matrix_element == 0.8
+    assert result.color_probe_components == (1.0, 0.8, 0.8)
+    assert result.color_probe_raw_components == (9.0, 7.2, 7.2)
+
+
+def test_reference_adapter_runs_color_library_probe_with_supplied_momenta(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def runner(
+        args: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> CommandResult:
+        calls.append(tuple(args))
+        stdout = ""
+        if tuple(args[:1]) == ("./amplicol_color_library_probe",):
+            stdout = """
+AMPICOL_COLOR_PROBE_COMPONENTS   1.0E+00   8.0E-01   8.0E-01
+AMPICOL_COLOR_PROBE_RAW_COMPONENTS   9.0E+00   7.2E+00   7.2E+00
+AMPICOL_COLOR_PROBE_VALUE full 1 1   8.0E-01
+------------------------------------------------------------------------------
+Timing summary                           seconds    percent  note
+------------------------------------------------------------------------------
+total                                   0.000025    100.00%
+------------------------------------------------------------------------------
+"""
+        return CommandResult(tuple(args), cwd, 0, stdout, "", 0.01)
+
+    particles = (
+        ExternalMomentum(1, (500.0, 0.0, 0.0, 500.0)),
+        ExternalMomentum(-1, (500.0, 0.0, 0.0, -500.0)),
+        ExternalMomentum(21, (500.0, 300.0, 0.0, 400.0)),
+        ExternalMomentum(23, (500.0, -300.0, 0.0, -400.0)),
+    )
+    adapter = AmplicolAdapter(tmp_path, runner=runner, jobs=2)
+
+    result = adapter.run_color_library_probe(
+        "d d~ > z g",
+        color_accuracy="full",
+        particles=particles,
+        points=3,
+    )
+
+    assert calls[-2] == ("make", "-j2", "amplicol_color_library_probe")
+    assert calls[-1] == (
+        "./amplicol_color_library_probe",
+        "3",
+        "1",
+        "1",
+        "full",
         str(tmp_path / "Utilities" / "ME_checks" / "momenta_1_1.txt"),
     )
     assert result.first_point_matrix_element == 0.8

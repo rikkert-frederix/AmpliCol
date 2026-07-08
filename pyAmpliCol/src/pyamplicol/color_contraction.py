@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Iterable, Mapping, Sequence
 
-from .color_plan import GenericColorPlan, LCColorSector
+from .color_plan import GenericColorPlan, LCColorSector, LCQuarkLine
 
 NC = 3
 
@@ -78,18 +78,6 @@ def build_color_contraction_plan(
             color_accuracy=accuracy,
             supported=False,
             reason=f"unknown colour accuracy {accuracy!r}",
-            group_count=len(groups),
-            entries=(),
-        )
-    quark_pairs = color_plan.process.quark_lines.quark_pair_count
-    if quark_pairs > 2:
-        return ColorContractionPlan(
-            color_accuracy=accuracy,
-            supported=False,
-            reason=(
-                f"{accuracy} colour is currently matched to Fortran AmpliCol "
-                "only for zero, one, or two quark pairs"
-            ),
             group_count=len(groups),
             entries=(),
         )
@@ -174,6 +162,8 @@ def amplicol_color_factors(
         return _one_quark_line_color_factors(left, right, n_ord)
     if n_quark_pairs == 2:
         return _two_quark_line_color_factors(color_plan, left, right, n_ord)
+    if n_quark_pairs >= 3 and _is_open_line_pair(left, right):
+        return _multi_quark_line_color_factors(color_plan, left, right)
     return (0.0, 0.0, 0.0)
 
 
@@ -384,6 +374,82 @@ def _two_quark_line_full_factor(
     else:
         return 0.0
     return _eval_trace(traces, coeff=coeff)
+
+
+def _is_open_line_pair(
+    left: LCColorSector,
+    right: LCColorSector,
+) -> bool:
+    if left.kind != "open-lines" or right.kind != "open-lines":
+        return False
+    if len(left.quark_lines) != len(right.quark_lines):
+        return False
+    return True
+
+
+def _multi_quark_line_color_factors(
+    color_plan: GenericColorPlan,
+    left: LCColorSector,
+    right: LCColorSector,
+) -> tuple[float, float, float]:
+    """Generic overlap of multi-open-line colour-flow tensors.
+
+    Each sector is a product of open strings
+    ``(T...T)_{q_i,\bar q_j}``.  The right sector is conjugated, so its gluon
+    string is traversed in reverse order, and the fundamental colour indices
+    form closed alternating left/right cycles.  The resulting traces are reduced
+    with the same Fierz machinery used for pure traces, but we keep powers of
+    ``Nc`` symbolic so that NLC can be obtained by dropping terms beyond the
+    first ``1/Nc**2`` suppression.
+    """
+
+    terms = _open_line_nc_power_terms(left.quark_lines, right.quark_lines)
+    if not terms:
+        return (0.0, 0.0, 0.0)
+    leading_power = (
+        color_plan.process.quark_lines.quark_pair_count
+        + len(color_plan.process.gluon_labels)
+    )
+    lc = _eval_nc_terms(terms, min_power=leading_power)
+    nlc = _eval_nc_terms(terms, min_power=max(leading_power - 2, 0))
+    full = _eval_nc_terms(terms)
+    return (lc, nlc, full)
+
+
+def _open_line_nc_power_terms(
+    left_lines: tuple[LCQuarkLine, ...],
+    right_lines: tuple[LCQuarkLine, ...],
+) -> Mapping[int, Fraction]:
+    left_by_quark = {line.quark_label: line for line in left_lines}
+    right_by_antiquark = {
+        line.antiquark_label: line for line in right_lines
+    }
+    if set(left_by_quark) != {line.quark_label for line in right_lines}:
+        return {}
+    if {line.antiquark_label for line in left_lines} != set(right_by_antiquark):
+        return {}
+
+    visited: set[int] = set()
+    traces: list[tuple[int, ...]] = []
+    for start in sorted(left_by_quark):
+        if start in visited:
+            continue
+        current = start
+        trace: list[int] = []
+        while current not in visited:
+            visited.add(current)
+            left_line = left_by_quark.get(current)
+            if left_line is None:
+                return {}
+            trace.extend(left_line.gluon_labels)
+            right_line = right_by_antiquark.get(left_line.antiquark_label)
+            if right_line is None:
+                return {}
+            trace.extend(reversed(right_line.gluon_labels))
+            current = right_line.quark_label
+        traces.append(tuple(trace))
+    permutation_sign = -1 if (len(left_lines) - len(traces)) % 2 else 1
+    return _simplify_trace_terms_nc_power(((Fraction(permutation_sign), 0, tuple(traces)),))
 
 
 def _coloured_word(sector: LCColorSector) -> tuple[int, ...]:
@@ -722,6 +788,148 @@ def _simplify_trace_terms(
         terms = next_terms
         if not changed and not changed_dup and any(traces for _coeff, traces in terms):
             raise RuntimeError(f"cannot simplify colour traces: {terms[:3]}")
+
+
+def _simplify_trace_terms_nc_power(
+    initial: Iterable[tuple[Fraction, int, tuple[tuple[int, ...], ...]]],
+) -> Mapping[int, Fraction]:
+    terms: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]] = [
+        (coeff, power, tuple(tuple(trace) for trace in traces))
+        for coeff, power, traces in initial
+        if coeff
+    ]
+    guard = 0
+    while True:
+        guard += 1
+        if guard > 100000:
+            raise RuntimeError("colour trace simplification did not converge")
+        terms = _simplify_tr1_tr0_nc_power(terms)
+        if not terms:
+            return {}
+        if all(not traces for _coeff, _power, traces in terms):
+            result: dict[int, Fraction] = {}
+            for coeff, power, _traces in terms:
+                result[power] = result.get(power, Fraction(0)) + coeff
+            return {power: coeff for power, coeff in result.items() if coeff}
+        next_terms, changed = _trace_pair_simplify_nc_power(terms)
+        terms = _simplify_tr1_tr0_nc_power(next_terms)
+        next_terms, changed_dup = _trace_duplicate_simplify_nc_power(terms)
+        terms = _combine_nc_power_terms(next_terms)
+        if not changed and not changed_dup and any(
+            traces for _coeff, _power, traces in terms
+        ):
+            raise RuntimeError(f"cannot simplify colour traces: {terms[:3]}")
+
+
+def _simplify_tr1_tr0_nc_power(
+    terms: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]],
+) -> list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]]:
+    result: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]] = []
+    for coeff, power, traces in terms:
+        if any(len(trace) == 1 for trace in traces):
+            continue
+        extra_power = sum(1 for trace in traces if len(trace) == 0)
+        remaining = tuple(trace for trace in traces if len(trace) != 0)
+        result.append((coeff, power + extra_power, remaining))
+    return _combine_nc_power_terms(result)
+
+
+def _trace_pair_simplify_nc_power(
+    terms: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]],
+) -> tuple[list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]], bool]:
+    result: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]] = []
+    changed = False
+    for coeff, power, traces in terms:
+        replaced = False
+        for first_index, first in enumerate(traces):
+            for second_index in range(first_index + 1, len(traces)):
+                second = traces[second_index]
+                found = _first_common_position(first, second)
+                if found is None:
+                    continue
+                first_pos, second_pos = found
+                combined = (
+                    first[:first_pos]
+                    + second[second_pos + 1 :]
+                    + second[:second_pos]
+                    + first[first_pos + 1 :]
+                )
+                rest = tuple(
+                    trace
+                    for index, trace in enumerate(traces)
+                    if index not in {first_index, second_index}
+                )
+                result.append((coeff, power, (combined, *rest)))
+                reduced_first = first[:first_pos] + first[first_pos + 1 :]
+                reduced_second = second[:second_pos] + second[second_pos + 1 :]
+                result.append(
+                    (
+                        -coeff,
+                        power - 1,
+                        tuple(
+                            trace
+                            if index not in {first_index, second_index}
+                            else (
+                                reduced_first
+                                if index == first_index
+                                else reduced_second
+                            )
+                            for index, trace in enumerate(traces)
+                        ),
+                    )
+                )
+                changed = True
+                replaced = True
+                break
+            if replaced:
+                break
+        if not replaced:
+            result.append((coeff, power, traces))
+    return result, changed
+
+
+def _trace_duplicate_simplify_nc_power(
+    terms: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]],
+) -> tuple[list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]], bool]:
+    result: list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]] = []
+    changed = False
+    for coeff, power, traces in terms:
+        replaced = False
+        for trace_index, trace in enumerate(traces):
+            positions = _first_duplicate_positions(trace)
+            if positions is None:
+                continue
+            first_pos, second_pos = positions
+            a = trace[:first_pos]
+            b = trace[first_pos + 1 : second_pos]
+            c = trace[second_pos + 1 :]
+            rest = tuple(
+                item for index, item in enumerate(traces) if index != trace_index
+            )
+            result.append((coeff, power, (a + c, b, *rest)))
+            result.append((-coeff, power - 1, (a + b + c, *rest)))
+            changed = True
+            replaced = True
+            break
+        if not replaced:
+            result.append((coeff, power, traces))
+    return result, changed
+
+
+def _combine_nc_power_terms(
+    terms: Iterable[tuple[Fraction, int, tuple[tuple[int, ...], ...]]],
+) -> list[tuple[Fraction, int, tuple[tuple[int, ...], ...]]]:
+    combined: dict[tuple[int, tuple[tuple[int, ...], ...]], Fraction] = {}
+    for coeff, power, traces in terms:
+        if not coeff:
+            continue
+        key = (power, tuple(sorted(tuple(trace) for trace in traces)))
+        combined[key] = combined.get(key, Fraction(0)) + coeff
+    return [
+        (coeff, power, traces)
+        for (power, traces), coeff in combined.items()
+        if coeff
+    ]
 
 
 def _simplify_tr1_tr0(

@@ -533,7 +533,7 @@ def _generate_case(
             mode=(
                 "AmpliCol - using-library"
                 if color_accuracy == "lc"
-                else f"AmpliCol - color probe | {color_accuracy}"
+                else f"AmpliCol - raw color library | {color_accuracy}"
             ),
         )
         case["pyamplicol_jit"] = dict(
@@ -726,6 +726,21 @@ def _generate_case(
             library_current=amplicol_refreshed,
             color_accuracy=color_accuracy,
         )
+    elif validate and color_accuracy != "lc":
+        unavailable_reason = _fortran_color_reference_unavailable_reason(
+            _mode(case, "amplicol"),
+            _mode(case, "pyamplicol_jit"),
+        )
+        if unavailable_reason is not None:
+            case["validation"] = {
+                "status": "unsupported",
+                "kind": "same-deterministic-point",
+                "reason": unavailable_reason,
+                "tolerance": VALIDATION_REL_TOL,
+                "relative_tolerance": VALIDATION_REL_TOL,
+                "absolute_tolerance": VALIDATION_ABS_TOL,
+                "finished_at": _now(),
+            }
     case["status"] = "done"
     case["updated_at"] = _now()
 
@@ -745,7 +760,7 @@ def _run_amplicol_case(
         "mode": (
             "AmpliCol - using-library"
             if color_accuracy == "lc"
-            else f"AmpliCol - color probe | {color_accuracy}"
+            else f"AmpliCol - raw color library | {color_accuracy}"
         ),
         "status": "running",
         "started_at": _now(),
@@ -762,16 +777,29 @@ def _run_amplicol_case(
         if color_accuracy != "lc":
             if point is None:
                 raise RuntimeError(
-                    "NLC/full AmpliCol colour probe requires a deterministic "
+                    "NLC/full AmpliCol colour-library probe requires a deterministic "
                     "validation point"
                 )
-            run = adapter.run_color_probe(
+            build = adapter.prepare_library(
+                process,
+                options=base.process_options(),
+                process_list_backend="python",
+                warmup_particles=point,
+                warmup_points=1,
+                raw=True,
+                color_complete=True,
+            )
+            remaining = _remaining(deadline_started, time_limit)
+            adapter = AmplicolAdapter(REPO_ROOT, jobs=jobs, timeout=remaining)
+            run = adapter.run_color_library_probe(
                 process,
                 color_accuracy=color_accuracy,
                 particles=point,
                 points=max(1, amplicol_points),
+                process_file=build.process_file,
                 options=base.process_options(),
                 process_list_backend="python",
+                color_complete=True,
             )
             runtime_s = _color_probe_runtime_per_point(
                 run,
@@ -780,8 +808,8 @@ def _run_amplicol_case(
             payload.update(
                 {
                     "status": "ok",
-                    "generation_s": run.commands[0].elapsed_s if run.commands else None,
-                    "reference_probe": "direct_color_probe_imode2",
+                    "generation_s": build.total_command_time_s,
+                    "reference_probe": "generated_library_color_probe_raw",
                     "process_file": str(run.process_file),
                     "process_list_backend": "python",
                     "reference_color_order": None,
@@ -806,9 +834,11 @@ def _run_amplicol_case(
                             "elapsed_s": command.elapsed_s,
                             "returncode": command.returncode,
                         }
-                        for command in run.commands
+                        for command in (*build.commands, *run.commands)
                     ],
-                    "commands_s": [command.elapsed_s for command in run.commands],
+                    "commands_s": [
+                        command.elapsed_s for command in (*build.commands, *run.commands)
+                    ],
                     "timing_rows": [
                         {
                             "label": row.label,
@@ -886,6 +916,11 @@ def _run_amplicol_case(
         )
     except Exception as exc:  # noqa: BLE001 - benchmark harness records failures.
         payload.update(_error_payload(exc))
+        if color_accuracy != "lc":
+            reference_gap = _fortran_color_reference_error_reason(str(exc))
+            if reference_gap is not None:
+                payload["status"] = "fortran_reference_unavailable"
+                payload["reason"] = reference_gap
         if _amplicol_error_is_unsupported(str(exc)):
             payload["status"] = "unsupported"
     return payload
@@ -1033,7 +1068,25 @@ def _run_validation_case(
         )
         setup_commands: tuple[Any, ...] = ()
         if color_accuracy != "lc":
-            run = adapter.run_color_probe(
+            if not library_current:
+                build = adapter.prepare_library(
+                    process,
+                    process_file=process_file,
+                    options=base.process_options(),
+                    process_list_backend=backend,  # type: ignore[arg-type]
+                    warmup_particles=point,
+                    warmup_points=1,
+                    raw=True,
+                    color_complete=True,
+                )
+                process_file = str(build.process_file)
+                setup_commands = build.commands
+                adapter = AmplicolAdapter(
+                    REPO_ROOT,
+                    jobs=jobs,
+                    timeout=_remaining(deadline_started, time_limit),
+                )
+            run = adapter.run_color_library_probe(
                 process,
                 color_accuracy=color_accuracy,
                 particles=point,
@@ -1041,11 +1094,12 @@ def _run_validation_case(
                 process_file=process_file,
                 options=base.process_options(),
                 process_list_backend=backend,  # type: ignore[arg-type]
+                color_complete=True,
             )
             if run.first_point_matrix_element is None:
                 raise RuntimeError("AmpliCol colour validation probe did not report a value")
             reference = float(run.first_point_matrix_element)
-            point_order_source = "amplicol-color-probe-pdg-order"
+            point_order_source = "amplicol-color-library-probe-pdg-order"
         else:
             if not library_current:
                 build = adapter.prepare_library(
@@ -1698,7 +1752,7 @@ def _matrix_title(color_accuracy: str) -> str:
 def _matrix_intro_sentence(color_accuracy: str) -> str:
     if color_accuracy == "lc":
         return r"\noindent\footnotesize Each cell compares generated-library \AC\ against "
-    return r"\noindent\footnotesize Each cell compares colour-matrix \AC\ probes against "
+    return r"\noindent\footnotesize Each cell compares raw generated-library \AC\ colour probes against "
 
 
 def _reference_mode_latex(color_accuracy: str) -> str:
@@ -1706,8 +1760,8 @@ def _reference_mode_latex(color_accuracy: str) -> str:
         return ""
     return (
         r"For NLC/full-colour tables, \AC\ reference values come from the "
-        r"dedicated \texttt{amplicol\_color\_probe} imode-2 colour-matrix "
-        r"driver rather than the LC generated-library timing driver. "
+        r"dedicated raw generated-library colour driver "
+        r"\texttt{amplicol\_color\_library\_probe}. "
     )
 
 
@@ -1730,14 +1784,15 @@ def _matrix_run_settings_latex(color_accuracy: str) -> list[str]:
     else:
         reference_text = (
             r"top-level generated-library files.  \AC\ reference timings for this "
-            r"colour table currently use the dedicated "
-            r"\texttt{amplicol\_color\_probe} imode-2 colour-matrix driver, not "
-            r"integration-driver timings.  The driver exposes the same absolute "
-            r"\AC\ NLC/full-colour matrix element and splits amplitude-evaluation "
-            r"from colour-contraction time, but it is not yet a generated-library "
-            r"driver.  \PAC\ rows use the generic staged-DAG artifact, Rusticol "
-            r"double precision, JIT or C++ O3 Symbolica evaluators as labelled, "
-            r"and \texttt{time-process} with a one-second target runtime.  The "
+            r"colour table use the raw generated-library sequence "
+            r"\texttt{amplicol\_generate --library=create-raw}, "
+            r"\texttt{make -j4 amplicol\_generate\_library}, and the dedicated "
+            r"\texttt{amplicol\_color\_library\_probe}.  The raw library is "
+            r"created before LC helicity merging so that NLC/full colour-order "
+            r"interferences are preserved.  \PAC\ rows use the generic staged-DAG "
+            r"artifact, Rusticol double precision, JIT or C++ O3 Symbolica "
+            r"evaluators as labelled, and \texttt{time-process} with a one-second "
+            r"target runtime.  The "
             r"\texttt{--time-limit} setting applies only to C++ O3 generation; "
             r"\AC\ and JIT rows are left uncapped."
         )
@@ -1779,6 +1834,7 @@ def _matrix_status_notes_latex(
     n_values: Sequence[int],
 ) -> list[str]:
     unsupported_four_quark_line = False
+    fortran_color_reference_gaps: list[str] = []
     documented_backend_limits: list[str] = []
     non_structural: list[str] = []
     cxx_not_run: list[str] = []
@@ -1794,6 +1850,14 @@ def _matrix_status_notes_latex(
             ref = _mode(case, "amplicol")
             if ref.get("status") == "unsupported" and base.key == "dd_4q_lines":
                 unsupported_four_quark_line = True
+            reference_gap = _fortran_color_reference_unavailable_reason(
+                ref,
+                _mode(case, "pyamplicol_jit"),
+            )
+            if reference_gap is not None:
+                fortran_color_reference_gaps.append(
+                    rf"{base.label}, \(n={n_final}\)"
+                )
             for key, label in (
                 ("amplicol", r"\AC"),
                 ("pyamplicol_jit", r"\PAC\ JIT"),
@@ -1844,6 +1908,26 @@ def _matrix_status_notes_latex(
                     r"\AC\ stops with \texttt{Unknown number of quarks and "
                     r"anti-quarks}.  The \PAC\ cells are therefore shown as "
                     r"absolute generation/runtime timings when they are available."
+                ),
+                r"\par\smallskip",
+            ]
+        )
+    if fortran_color_reference_gaps:
+        shown = "; ".join(fortran_color_reference_gaps[:8])
+        if len(fortran_color_reference_gaps) > 8:
+            shown += (
+                rf"; plus {len(fortran_color_reference_gaps) - 8} more localized entries"
+            )
+        lines.extend(
+            [
+                r"\paragraph{Fortran colour-reference limitations.}",
+                (
+                    r"The following cells are generated and evaluated by \PAC, "
+                    r"but have no direct \AC\ NLC/full-colour matrix reference "
+                    r"because the current Fortran \texttt{init\_col} reference "
+                    r"path stops above two quark lines: "
+                    + shown
+                    + r".  Their \PAC\ slots are shown as absolute timings."
                 ),
                 r"\par\smallskip",
             ]
@@ -2145,9 +2229,12 @@ def _validation_cell_marker(case: dict[str, Any]) -> str:
     validation = case.get("validation")
     if not isinstance(validation, dict):
         return ""
+    status = str(validation.get("status", "")).lower()
+    if status in {"", "missing", "not_applicable", "unsupported", "skipped"}:
+        return ""
     tolerance = _optional_float(validation.get("tolerance")) or 1.0e-8
     rel = _optional_float(validation.get("max_relative_difference"))
-    if validation.get("status") == "ok" and (rel is None or rel <= tolerance):
+    if status == "ok" and (rel is None or rel <= tolerance):
         return ""
     rel_text = "N/A" if rel is None else _format_sig(rel, unit="")
     return rf"\textcolor{{speedred}}{{\scriptsize\textbf{{VALIDATION FAILED}} \texttt{{rel={rel_text}}}}}"
@@ -2250,6 +2337,8 @@ def _latex_failure(mode: dict[str, Any]) -> str:
         return _missing_na()
     if _is_documented_backend_limitation(mode):
         return _structural_na()
+    if str(mode.get("status", "")).lower() == "fortran_reference_unavailable":
+        return _structural_na()
     if (
         mode.get("status") == "unsupported"
         or _amplicol_error_is_unsupported(error)
@@ -2277,6 +2366,35 @@ def _color_accuracy_error_is_structural_unsupported(error: str) -> bool:
     return any(marker in error for marker in unsupported_markers)
 
 
+def _fortran_color_reference_unavailable_reason(
+    amplicol: dict[str, Any],
+    pyamplicol_jit: dict[str, Any],
+) -> str | None:
+    """Classify colour-reference gaps caused by Fortran AmpliCol limits.
+
+    The generic pyAmpliCol colour contraction can handle multi-open-line
+    sectors, but the current Fortran ``init_col`` reference matrix stops at
+    more than two quark lines.  When the pyAmpliCol row itself ran, represent
+    this as an unavailable reference rather than as a pyAmpliCol validation
+    failure or unsupported process.
+    """
+
+    if not _ok(pyamplicol_jit):
+        return None
+    return _fortran_color_reference_error_reason(str(amplicol.get("error", "")))
+
+
+def _fortran_color_reference_error_reason(error: str) -> str | None:
+    if "more than two quarks" not in error:
+        return None
+    return (
+        "Fortran AmpliCol init_col does not expose a direct NLC/full colour "
+        "matrix for more than two quark lines; pyAmpliCol generated and "
+        "evaluated the generic colour contraction, but this cell has no "
+        "direct Fortran colour-contraction reference."
+    )
+
+
 def _structural_color_accuracy_unsupported_reason(
     process: str,
     *,
@@ -2285,17 +2403,6 @@ def _structural_color_accuracy_unsupported_reason(
 ) -> str | None:
     if color_accuracy == "lc":
         return None
-    process_ir = build_process_ir(
-        process,
-        color_accuracy=color_accuracy,
-        options=base.process_options(),
-    )
-    if process_ir.quark_lines.quark_pair_count > 2:
-        return (
-            f"{color_accuracy.upper()} colour is currently supported for "
-            "zero, one, or two quark-pair lines; this process has "
-            f"{process_ir.quark_lines.quark_pair_count}."
-        )
     return None
 
 
@@ -2387,12 +2494,12 @@ def _amplicol_matrix_settings(
         "workflow": (
             "library_create_make_library_use"
             if color_accuracy == "lc"
-            else "direct_color_probe_imode2"
+            else "library_create_raw_make_library_color_probe"
         ),
         "runtime_probe": (
             "direct_generated_library_benchmark"
             if color_accuracy == "lc"
-            else "amplicol_color_probe"
+            else "amplicol_color_library_probe"
         ),
     }
 

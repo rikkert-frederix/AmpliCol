@@ -447,20 +447,6 @@ def _generic_preflight_report(
             color_plan=color_plan,
             current_plan=current_plan,
         )
-    if content.ir.color_accuracy in {"nlc", "full"} and content.quark_pair_count > 2:
-        return _unsupported_report(
-            process,
-            content,
-            support_class="generic-dag-colour-contraction-preflight",
-            missing_feature="colour-contraction",
-            generic_dag_runtime_supported=False,
-            message=(
-                f"{content.ir.color_accuracy} colour is currently matched to "
-                "Fortran AmpliCol only for zero, one, or two quark pairs"
-            ),
-            color_plan=color_plan,
-            current_plan=current_plan,
-        )
     if current_plan is None:
         return _unsupported_report(
             process,

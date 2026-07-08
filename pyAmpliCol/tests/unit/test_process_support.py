@@ -232,12 +232,21 @@ def test_process_support_accepts_full_colour_for_fortran_supported_colour_class(
     assert report.color_plan.ready_for_requested_colour is True
 
 
-def test_process_support_rejects_nlc_for_more_than_two_quark_pairs() -> None:
+def test_process_support_accepts_nlc_for_no_gluon_three_quark_pairs() -> None:
     report = classify_process_support("d d~ > u u~ s s~", color_accuracy="nlc")
 
-    assert report.runtime_artifact_supported is False
+    assert report.runtime_artifact_supported is True
     assert report.color_accuracy == "nlc"
-    assert report.support_class == "generic-dag-colour-contraction-preflight"
-    assert report.missing_feature == "colour-contraction"
-    assert report.artifact_unavailable_message is not None
-    assert "zero, one, or two quark pairs" in report.artifact_unavailable_message
+    assert report.support_class == "generic-dag-schema-v2"
+    assert report.missing_feature is None
+    assert report.artifact_unavailable_message is None
+
+
+def test_process_support_accepts_nlc_for_three_quark_pairs_with_gluons() -> None:
+    report = classify_process_support("d d~ > u u~ s s~ g", color_accuracy="nlc")
+
+    assert report.runtime_artifact_supported is True
+    assert report.color_accuracy == "nlc"
+    assert report.support_class == "generic-dag-schema-v2"
+    assert report.missing_feature is None
+    assert report.artifact_unavailable_message is None

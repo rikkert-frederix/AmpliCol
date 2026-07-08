@@ -101,8 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
     print(
-        f"wrote {args.output} with {len(fixture['cases'])} validated cases "
-        f"and {len(fixture['unsupported'])} structural unsupported cases"
+        f"wrote {args.output} with {len(fixture['cases'])} validated cases, "
+        f"{len(fixture['unsupported'])} structural unsupported cases, and "
+        f"{len(fixture['unvalidated'])} unvalidated pyAmpliCol-supported cases"
     )
     return 0
 
@@ -141,6 +142,7 @@ def _refresh_cache(
 def _build_fixture(colors: Iterable[str], *, max_n: int) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
     unsupported: list[dict[str, Any]] = []
+    unvalidated: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
     for color in colors:
         path = MATRIX_CACHES[color]
@@ -180,26 +182,34 @@ def _build_fixture(colors: Iterable[str], *, max_n: int) -> dict[str, Any]:
                         )
                     )
                 elif _is_structural_unsupported(amplicol, jit):
-                    unsupported.append(
-                        {
-                            "id": f"{color}:{base_key}:n{n_final}",
-                            "base_key": base_key,
-                            "process_id": process_ids.get(base_key),
-                            "n_final": n_final,
-                            "process": entry.get("process"),
-                            "color_accuracy": color,
-                            "amplicol_status": amplicol.get("status"),
-                            "pyamplicol_jit_status": jit.get("status"),
-                            "reason": _structural_reason(amplicol, jit),
-                            "source_cache": _repo_relative(path),
-                        }
-                    )
+                    payload = {
+                        "id": f"{color}:{base_key}:n{n_final}",
+                        "base_key": base_key,
+                        "process_id": process_ids.get(base_key),
+                        "n_final": n_final,
+                        "process": entry.get("process"),
+                        "color_accuracy": color,
+                        "amplicol_status": amplicol.get("status"),
+                        "pyamplicol_jit_status": jit.get("status"),
+                        "reason": _structural_reason(amplicol, jit),
+                        "source_cache": _repo_relative(path),
+                    }
+                    if _jit_supported_but_fortran_reference_missing(amplicol, jit):
+                        payload["kind"] = "fortran-reference-unavailable"
+                        payload["reason"] = _fortran_reference_missing_reason()
+                        unvalidated.append(payload)
+                    else:
+                        payload["kind"] = "structural-unsupported"
+                        unsupported.append(payload)
 
     cases.sort(key=lambda item: (item["color_accuracy"], item["process_id"], item["n_final"]))
     unsupported.sort(
         key=lambda item: (item["color_accuracy"], item.get("process_id") or 0, item["n_final"])
     )
-    summary = _summary(cases, unsupported)
+    unvalidated.sort(
+        key=lambda item: (item["color_accuracy"], item.get("process_id") or 0, item["n_final"])
+    )
+    summary = _summary(cases, unsupported, unvalidated)
     return {
         "schema_version": 1,
         "kind": "pyamplicol-result-matrix-reference-fixture",
@@ -211,6 +221,7 @@ def _build_fixture(colors: Iterable[str], *, max_n: int) -> dict[str, Any]:
         "summary": summary,
         "cases": cases,
         "unsupported": unsupported,
+        "unvalidated": unvalidated,
     }
 
 
@@ -291,7 +302,11 @@ def _read_validation_point(path_value: object) -> list[dict[str, Any]]:
     ]
 
 
-def _summary(cases: list[dict[str, Any]], unsupported: list[dict[str, Any]]) -> dict[str, Any]:
+def _summary(
+    cases: list[dict[str, Any]],
+    unsupported: list[dict[str, Any]],
+    unvalidated: list[dict[str, Any]],
+) -> dict[str, Any]:
     by_color: dict[str, dict[str, Any]] = {}
     for case in cases:
         bucket = by_color.setdefault(
@@ -323,11 +338,49 @@ def _summary(cases: list[dict[str, Any]], unsupported: list[dict[str, Any]]) -> 
         bucket["structural_unsupported_cases"] = (
             int(bucket.get("structural_unsupported_cases", 0)) + 1
         )
+    for item in unvalidated:
+        bucket = by_color.setdefault(
+            item["color_accuracy"],
+            {
+                "validated_cases": 0,
+                "max_relative_difference": 0.0,
+                "max_absolute_difference": 0.0,
+            },
+        )
+        bucket["unvalidated_pyamplicol_cases"] = (
+            int(bucket.get("unvalidated_pyamplicol_cases", 0)) + 1
+        )
     return {
         "validated_cases": len(cases),
         "structural_unsupported_cases": len(unsupported),
+        "unvalidated_pyamplicol_cases": len(unvalidated),
         "by_color_accuracy": by_color,
     }
+
+
+def _jit_supported_but_fortran_reference_missing(
+    amplicol: dict[str, Any],
+    jit: dict[str, Any],
+) -> bool:
+    if jit.get("status") != "ok":
+        return False
+    text = " ".join(
+        str(value)
+        for value in (
+            amplicol.get("status"),
+            amplicol.get("error"),
+        )
+    ).lower()
+    return "more than two quarks" in text
+
+
+def _fortran_reference_missing_reason() -> str:
+    return (
+        "Fortran AmpliCol init_col does not expose a direct NLC/full colour "
+        "matrix for more than two quark lines; pyAmpliCol generated and "
+        "evaluated the generic colour contraction, but this cell has no "
+        "direct Fortran colour-contraction reference."
+    )
 
 
 def _is_structural_unsupported(amplicol: dict[str, Any], jit: dict[str, Any]) -> bool:

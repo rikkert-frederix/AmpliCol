@@ -2764,7 +2764,7 @@ def test_cli_generate_process_accepts_supported_full_colour_json(
     assert contraction["includes_color_factor"] is True
 
 
-def test_cli_generate_process_reports_unsupported_nlc_colour_class_locally(
+def test_cli_generate_process_accepts_multi_quark_nlc_colour_class_locally(
     capsys,
     tmp_path: Path,
 ) -> None:
@@ -2786,9 +2786,11 @@ def test_cli_generate_process_reports_unsupported_nlc_colour_class_locally(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["available"] is True
-    assert payload["runtime_available"] is False
-    assert payload["runtime_unavailable_message"] is not None
-    assert "zero, one, or two quark pairs" in payload["runtime_unavailable_message"]
+    assert payload["runtime_available"] is True
+    assert payload["runtime_unavailable_message"] is None
+    manifest = json.loads((tmp_path / "process" / "process_manifest.json").read_text())
+    contraction = manifest["runtime_schema"]["amplitude_stage"]["color_contraction"]
+    assert contraction["supported"] is True
 
 
 def test_cli_rusticol_generate_only_supports_zero_gluon_process(

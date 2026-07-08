@@ -39,7 +39,7 @@ This document separates three layers that are easy to conflate:
 | Production ME lowering | Implemented and validated for broad generic LC; NLC/full validation started | The schema-v2 generic DAG path reaches model-owned kernels for multi-boson, scalar/Higgs, pure-gluon, and multi-quark-line processes, builds evaluator-stage expressions, serializes evaluator artifacts, and records explicit blockers when a requested process or colour accuracy is not yet implemented. |
 | Python artifact loader | Implemented for schema-v2 generic DAG artifacts | `load_process(..., runtime="python")` resolves process sets, subprocess keys, generic external layouts, and stage-plan metadata without depending on process-family labels. Schema-v1 execution is rejected by default and requires the explicit `allow_legacy_schema_v1=True` reference-only opt-in. |
 | Rusticol runtime | Implemented for schema-v2 generic DAG artifacts | `rusticol.Runtime.load()` is the production loader and accepts only schema-v2 generic DAG artifacts.  Schema-v1 family artifacts are reference-only and require the explicit `rusticol.Runtime.load_legacy()` entry point. |
-| NLC/full-colour | Initial production support for Fortran-supported colour classes | `--color-accuracy nlc` and `--color-accuracy full` build the same colour-ordered DAG and replace the final LC diagonal contraction by a sparse colour metric.  The implemented classes are pure gluon, one quark line, and two quark lines; more than two quark lines reports an explicit unsupported diagnostic instead of falling back to LC. |
+| NLC/full-colour | Initial production support, direct Fortran colour-matrix validation through two quark lines | `--color-accuracy nlc` and `--color-accuracy full` build the same colour-ordered DAG and replace the final LC diagonal contraction by a sparse colour metric.  Pure-gluon, one-quark-line, and two-quark-line classes are matched directly to Fortran AmpliCol colour matrices.  Higher quark-line counts use the generic open-line trace-overlap metric, including gluons on the open lines; those cases require raw-amplitude probes rather than Fortran's built-in colour matrix for validation. |
 | Production CLI surface | Generic DAG only | `processes`, `process-plan`, `generate-process`, `time-process`, and `compare-amplicol --runtime-backend rusticol` are the visible workflow. `compare-amplicol` defaults to the generated-library supplied-momenta probe (`--library=create`, `make amplicol_generate_library`, `--library=use`). Legacy native/tensor/Z-family commands remain compatibility stubs only and are hidden from help output. |
 
 ## Fast-Path Invariant
@@ -357,9 +357,10 @@ amplitude library.
 | two quark lines | `d d~ > u u~` | full | `1e-16` level |
 
 The broader result-matrix campaign for NLC/full colour is still in progress.
-For unsupported colour classes, such as more than two quark lines at NLC/full,
-the process support layer reports a structural unsupported diagnostic rather
-than silently using the LC contraction.
+For more than two quark lines at NLC/full, pyAmpliCol now builds and runs the
+generic sparse open-line colour metric.  Fortran AmpliCol's built-in colour
+matrix still stops there, so those result-matrix reference slots are N/A until
+the raw-amplitude validation probe is used for that comparison.
 
 The current validation command for the default matrix is:
 
@@ -393,8 +394,10 @@ all-outgoing process IR.  The colour planner enumerates leading-colour open
 quark-line sectors, including arbitrary balanced quark-pair counts and ordered
 gluon allocations, plus pure-gluon single-trace sectors.  For NLC/full colour,
 the same planner retains the additional non-folded pure-gluon trace orderings
-and open-line block permutations needed for sparse colour contractions in the
-Fortran-supported 0/1/2 quark-line classes.  The generic DAG
+and open-line block permutations needed for sparse colour contractions.  The
+current sparse metric contracts generic products of open fundamental strings,
+so arbitrary balanced quark-line sectors with gluons are represented by the
+same colour-flow trace-overlap rule.  The generic DAG
 compiler uses those LC sector ids in `CurrentIndex`, duplicates source/current
 tables per sector, rejects cross-sector current combinations, and lets coloured
 currents span several open line groups inside one LC sector when model vertices
@@ -406,10 +409,11 @@ The normal unit suite also checks a selected leading-colour sector for the
 four-quark-line process `d d~ > u u~ s s~ c c~`; the colour planner enumerates
 24 canonical LC line-pairing sectors, and the selected-sector DAG finds
 amplitude closures without truncation.  This is a planning/scalability
-invariant rather than a Fortran validation gate.  NLC/full-colour requests with
-more than two quark lines currently stop with an explicit unsupported-colour
-diagnostic because Fortran-parity validation for those colour contractions is
-outside the current milestone.
+invariant rather than a direct Fortran colour-matrix validation gate.  NLC/full
+colour for more than two quark lines is therefore a pyAmpliCol generic-colour
+capability, while independent Fortran comparison for those cases requires the
+raw colour-order amplitude probe because Fortran AmpliCol's own `init_col`
+matrix only covers zero, one and two quark-line sectors.
 The planner also filters out the `99` QCD singlet helper in leading-colour mode
 and answers whether a concrete process is reachable through model vertices and
 which vertex lowerings block a complete generic evaluator.  These layers now

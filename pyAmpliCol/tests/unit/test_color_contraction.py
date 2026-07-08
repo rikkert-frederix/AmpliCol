@@ -163,7 +163,7 @@ def test_two_quark_line_nlc_prunes_nncl_entries_like_amplicol() -> None:
         assert py_value == fortran_entries.get((0, j), 0.0)
 
 
-def test_nlc_full_colour_reports_more_than_two_quark_lines_as_unsupported() -> None:
+def test_nlc_full_colour_supports_no_gluon_three_quark_lines() -> None:
     plan = build_color_plan("d d~ > u u~ s s~", color_accuracy="nlc")
     contraction = build_color_contraction_plan(
         plan,
@@ -171,5 +171,48 @@ def test_nlc_full_colour_reports_more_than_two_quark_lines_as_unsupported() -> N
     )
 
     assert contraction is not None
-    assert contraction.supported is False
-    assert "zero, one, or two quark pairs" in str(contraction.reason)
+    assert contraction.supported is True
+    assert contraction.reason is None
+    assert plan.sector_count == 36
+    assert {entry.weight_re for entry in contraction.entries} == {-9.0, 3.0, 27.0}
+
+    full_plan = build_color_plan("d d~ > u u~ s s~", color_accuracy="full")
+    full_contraction = build_color_contraction_plan(
+        full_plan,
+        _groups_for_plan("d d~ > u u~ s s~", color_accuracy="full"),
+    )
+
+    assert full_contraction is not None
+    assert full_contraction.supported is True
+    assert {entry.weight_re for entry in full_contraction.entries} == {
+        -9.0,
+        3.0,
+        27.0,
+    }
+
+
+def test_nlc_full_colour_supports_multi_quark_lines_with_gluons() -> None:
+    plan = build_color_plan("d d~ > u u~ s s~ g", color_accuracy="nlc")
+    contraction = build_color_contraction_plan(
+        plan,
+        _groups_for_plan("d d~ > u u~ s s~ g", color_accuracy="nlc"),
+    )
+
+    assert contraction is not None
+    assert contraction.supported is True
+    assert contraction.reason is None
+    assert {entry.weight_re for entry in contraction.entries} == {-27.0, 9.0, 72.0}
+
+    full_plan = build_color_plan("d d~ > u u~ s s~ g", color_accuracy="full")
+    full_contraction = build_color_contraction_plan(
+        full_plan,
+        _groups_for_plan("d d~ > u u~ s s~ g", color_accuracy="full"),
+    )
+
+    assert full_contraction is not None
+    assert full_contraction.supported is True
+    assert {entry.weight_re for entry in full_contraction.entries} == {
+        -24.0,
+        8.0,
+        72.0,
+    }

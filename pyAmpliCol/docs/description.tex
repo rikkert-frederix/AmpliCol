@@ -161,7 +161,7 @@ the process is ``$Z$ plus jets'' or any other family.
 \texttt{helicity\_ancestry} & Bitwise union of the source-current helicity bits feeding this current.  This is how helicity configurations are woven into one shared DAG. \\
 \texttt{chirality} and \texttt{spin\_state} & Local spin information, especially for Weyl fermions and massive-vector sources. \\
 \texttt{flavour\_flow} and \texttt{charge\_flow} & Quantum-number flow checked locally by model vertices, e.g. $u\to d W^+$ or $e^+e^-\to\gamma/Z$. \\
-\texttt{color\_state} & Leading-color open-line or trace state now; later the hook for Idenso-backed NLC/full-color basis data. \\
+\texttt{color\_state} & Colour-ordered open-line or trace state used to build the amplitude vector.  LC, NLC and full colour differ in the final sparse colour contraction over this vector. \\
 \texttt{momentum\_mask} & Which all-outgoing momenta are summed for propagators and momentum-dependent vertices. \\
 \texttt{auxiliary\_kind} & Optional tag distinguishing auxiliary tensor currents from ordinary particles. \\
 \bottomrule
@@ -275,15 +275,27 @@ back into the current table and becomes an input parameter for later blocks.
 This avoids one giant scalar expression and keeps the DAG close to \AC's
 execution model.
 
-If explicit color tensors are introduced in future full-color modes, color
-simplification belongs before Spenso execution:
+The current NLC/full-colour implementation keeps the kinematic DAG
+colour-ordered and applies a sparse colour matrix to the amplitude vector.  For
+open-line sectors, including arbitrary many quark lines with gluons distributed
+on the lines, \PAC\ contracts the product of left colour strings with the
+conjugated right strings into closed fundamental traces.  Those small colour
+trace expressions are simplified separately from the kinematic DAG; NLC is
+obtained by keeping the leading and first \(1/N_c^2\)-suppressed powers, while
+full colour keeps the complete sparse metric.  If a later implementation puts
+explicit colour tensors inside a Spenso block, colour simplification still
+belongs before Spenso execution:
 \[
   \texttt{raw} \leftarrow \texttt{idenso.simplify\_color(raw)} ,
   \qquad
   \text{then build } \texttt{TensorNetwork(raw, hep\_lib)}.
 \]
-For the current leading-color milestone, color is already reduced to scalar
-factors associated with the ordered amplitude.
+For the present NLC/full-colour milestone, colour algebra is confined to the
+small colour-basis overlap problem and the Rusticol final contraction, not to
+expanded kinematic expressions.  Fortran AmpliCol is the direct reference for
+zero, one and two quark-line colour matrices; beyond that, pyAmpliCol's generic
+open-line metric is validated through raw-amplitude probes and internal colour
+consistency checks.
 
 \section{Example: \texorpdfstring{$d\bar d\to Zgg$}{d dbar -> Z g g}}
 

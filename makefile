@@ -138,6 +138,11 @@ amplicol_library_benchmark: $(filter-out amplicol_generate.o,$(FILES_M_INT_QCD))
 	$(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) \
 	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
 
+amplicol_color_library_probe: $(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) amplicol_color_library_probe.o
+	$(FC) $(FFLAGS) -o $@ amplicol_color_library_probe.o \
+	$(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) \
+	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
+
 amplicol_color_probe: $(FILES_M_COLOR_PROBE) amplicol_color_probe.o
 	$(FC) $(FFLAGS) -o $@ amplicol_color_probe.o $(FILES_M_COLOR_PROBE) \
 	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS)
@@ -172,6 +177,7 @@ update_matrix_goldens: matrix_element_regression update_matrix_cases
 
 amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o
 amplicol_color_probe.o : amplitude_QCD.o math_functions.o particles.o read_process_file.o handling_processes.o
+amplicol_color_library_probe.o : amplitude_QCD.o math_functions.o particles.o amplitude_library.o handling_processes.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
@@ -200,7 +206,7 @@ amplib.o: $(notdir $(AMPSRC:.f03=.o))
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so amplicol_library_benchmark amplicol_color_probe
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so amplicol_library_benchmark amplicol_color_probe amplicol_color_library_probe
 
 cleanlib:
 	rm -f libamp*.so amp*lib.o amp*lib.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin

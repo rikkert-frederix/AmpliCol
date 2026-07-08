@@ -346,10 +346,13 @@ class AmplicolAdapter:
         *,
         options: ProcessOptions | None = None,
         process_list_backend: ProcessListBackend = "python",
+        color_complete: bool = False,
     ) -> Path:
         output = self.repo_root / "processes.txt" if path is None else Path(path)
         if not output.is_absolute():
             output = self.repo_root / output
+        if color_complete and process_list_backend != "python":
+            raise ValueError("color_complete process files require the python backend")
         if process_list_backend == "legacy":
             self.run_legacy_process_list(
                 process,
@@ -363,7 +366,11 @@ class AmplicolAdapter:
                 f"got {process_list_backend!r}"
             )
         enumerator = ProcessEnumerator(options)
-        enumeration = enumerator.enumerate(process)
+        enumeration = (
+            enumerator.enumerate_color_complete(process)
+            if color_complete
+            else enumerator.enumerate(process)
+        )
         enumerator.write_legacy_file(enumeration, output)
         return output
 
@@ -376,6 +383,8 @@ class AmplicolAdapter:
         process_list_backend: ProcessListBackend = "python",
         warmup_particles: Sequence[ExternalMomentum] | None = None,
         warmup_points: int = 10,
+        raw: bool = False,
+        color_complete: bool = False,
     ) -> AmplicolWorkflowResult:
         """Create and compile the generated Fortran amplitude library.
 
@@ -384,6 +393,10 @@ class AmplicolAdapter:
         integrator.  This still exercises the intended create/compile/use
         library chain, but avoids reference-side phase-space failures in
         point-by-point validation jobs.
+
+        ``raw=True`` uses the dedicated ``--library=create-raw`` mode.  That
+        writes unfiltered colour-order libraries before LC helicity merging,
+        which is required for NLC/full-colour reference contractions.
         """
 
         path = self.write_process_file(
@@ -391,8 +404,14 @@ class AmplicolAdapter:
             process_file,
             options=options,
             process_list_backend=process_list_backend,
+            color_complete=color_complete,
         )
-        create_args = ["./amplicol_generate", "--library=create", f"--process={path}"]
+        library_mode = "create-raw" if raw else "create"
+        create_args = [
+            "./amplicol_generate",
+            f"--library={library_mode}",
+            f"--process={path}",
+        ]
         if warmup_particles is not None:
             entries = amplicol_process_file_integrals(path) or ((1, 1),)
             for group, integral in entries:
@@ -437,6 +456,7 @@ class AmplicolAdapter:
         process_file: str | Path | None = None,
         options: ProcessOptions | None = None,
         process_list_backend: ProcessListBackend = "python",
+        color_complete: bool = False,
     ) -> AmplicolWorkflowResult:
         path = self.write_process_file(
             process,
@@ -555,6 +575,7 @@ class AmplicolAdapter:
         process_file: str | Path | None = None,
         options: ProcessOptions | None = None,
         process_list_backend: ProcessListBackend = "python",
+        color_complete: bool = False,
     ) -> AmplicolWorkflowResult:
         """Run the direct generated-library timing driver.
 
@@ -570,6 +591,7 @@ class AmplicolAdapter:
             process_file,
             options=options,
             process_list_backend=process_list_backend,
+            color_complete=color_complete,
         )
         build = self._run(["make", f"-j{self.jobs}", "amplicol_library_benchmark"])
         build.check_returncode()
@@ -638,6 +660,71 @@ class AmplicolAdapter:
                 str(integral),
                 color_accuracy,
                 str(path),
+                str(momenta_path),
+            ]
+        )
+        command.check_returncode()
+        output = "\n".join([command.stdout, command.stderr])
+        return AmplicolWorkflowResult(
+            commands=(build, command),
+            process_file=path,
+            timing_rows=parse_timing_rows(output),
+            first_point_matrix_element=parse_color_probe_value(output),
+            color_probe_components=parse_color_probe_components(output),
+            color_probe_raw_components=parse_color_probe_raw_components(output),
+        )
+
+    def run_color_library_probe(
+        self,
+        process: str,
+        *,
+        color_accuracy: str,
+        particles: Sequence[ExternalMomentum],
+        points: int = 1,
+        group: int = 1,
+        integral: int = 1,
+        process_file: str | Path | None = None,
+        options: ProcessOptions | None = None,
+        process_list_backend: ProcessListBackend = "python",
+        color_complete: bool = False,
+    ) -> AmplicolWorkflowResult:
+        """Run the generated-library LC/NLC/full colour reference probe.
+
+        This driver uses the generated ``amp_lib:evaluate_amp`` dispatcher for
+        the colour-order amplitudes and applies AmpliCol's sparse colour
+        contraction in a small standalone probe.  NLC/full references should
+        prepare the library with ``raw=True`` so that helicity information has
+        not already been LC-merged away.
+        """
+
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+            color_complete=color_complete,
+        )
+        entry = amplicol_process_file_entry(path, group=group, integral=integral)
+        ordered_particles: Sequence[ExternalMomentum] = particles
+        if entry is not None:
+            ordered_particles = reorder_external_momenta_by_pdg(
+                particles,
+                entry["process"],
+            )
+        momenta_path = self.write_momenta_probe_file(
+            ordered_particles,
+            group=group,
+            integral=integral,
+        )
+        build = self._run(["make", f"-j{self.jobs}", "amplicol_color_library_probe"])
+        build.check_returncode()
+        command = self._run(
+            [
+                "./amplicol_color_library_probe",
+                str(max(1, points)),
+                str(group),
+                str(integral),
+                color_accuracy,
                 str(momenta_path),
             ]
         )
