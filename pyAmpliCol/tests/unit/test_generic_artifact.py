@@ -27,7 +27,12 @@ from pyamplicol.generic_artifact import (
     _validate_numerical_rewrite_preserves_raw_sums,
     _json_safe_bigints,
 )
-from pyamplicol.generic_dag import AmplitudeRoot, CurrentNode, GenericDAG
+from pyamplicol.generic_dag import (
+    AmplitudeRoot,
+    CurrentNode,
+    GenericDAG,
+    prune_dag_to_amplitude_roots,
+)
 from pyamplicol.color_plan import build_color_plan
 from pyamplicol.generic_stage_compiler import (
     build_generic_stage_compiler_blueprint,
@@ -168,6 +173,84 @@ def test_raw_sum_validation_rejects_wrong_current_merge() -> None:
 
     assert validation["accepted"] is False
     assert validation["max_relative_difference"] > 1.0e-12
+
+
+def test_raw_sum_validation_rejects_weighted_single_initial_helicity() -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > t t~ g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    dag = manifest.dag
+    kept_bits: dict[int, int] = {}
+    dropped_mask = 0
+    for source_id in dag.sources:
+        source = dag.currents[source_id]
+        label = int(source.source_leg_label or 0)
+        state = (
+            int(source.source_helicity or 0),
+            int(source.index.chirality),
+        )
+        bit = int(source.index.helicity_ancestry)
+        if label == 1 and source.index.particle_id == -1:
+            if state == (1, -1):
+                kept_bits[label] = bit
+            else:
+                dropped_mask |= bit
+        if label == 2 and source.index.particle_id == 1:
+            if state == (-1, 1):
+                kept_bits[label] = bit
+            else:
+                dropped_mask |= bit
+
+    roots: list[AmplitudeRoot] = []
+    for root in dag.amplitude_roots:
+        left = dag.currents[root.left_id].index
+        right = dag.currents[root.right_id].index
+        ancestry = int(left.helicity_ancestry | right.helicity_ancestry)
+        if ancestry & dropped_mask:
+            continue
+        if any(not (ancestry & bit) for bit in kept_bits.values()):
+            continue
+        roots.append(
+            AmplitudeRoot(
+                id=len(roots),
+                kind=root.kind,
+                left_id=root.left_id,
+                right_id=root.right_id,
+                color_weight=root.color_weight,
+                color_sector_id=root.color_sector_id,
+                vertex_kind=root.vertex_kind,
+                vertex_particles=root.vertex_particles,
+                coupling=root.coupling,
+                contraction=root.contraction,
+                helicity_weight=root.helicity_weight * 2.0,
+            )
+        )
+    candidate = prune_dag_to_amplitude_roots(
+        GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=dag.currents,
+            sources=dag.sources,
+            interactions=dag.interactions,
+            amplitude_roots=tuple(roots),
+            truncated=dag.truncated,
+        )
+    )
+
+    validation = _validate_numerical_rewrite_preserves_raw_sums(
+        dag,
+        candidate,
+        manifest.model,
+        sample_count=3,
+        seed=12345,
+    )
+
+    assert len(candidate.currents) == 19
+    assert validation["accepted"] is False
+    assert validation["max_relative_difference"] > 1.0e-6
 
 
 def test_zero_current_filter_can_be_disabled_in_artifact(tmp_path: Path) -> None:

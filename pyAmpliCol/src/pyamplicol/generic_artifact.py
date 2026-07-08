@@ -1694,9 +1694,10 @@ def _validate_numerical_rewrite_preserves_raw_sums(
         for difference, scale in zip(differences, scales, strict=True)
     ]
     tolerances = [
-        max(
-            _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE,
-            _NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE * scale,
+        (
+            _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE
+            if scale <= _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE
+            else _NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE * scale
         )
         for scale in scales
     ]
