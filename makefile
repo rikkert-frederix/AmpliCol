@@ -102,7 +102,7 @@ feynmanrules.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
 helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
-pdf_lhapdf62.o
+pdf_lhapdf62.o subtraction.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o
@@ -158,7 +158,7 @@ amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o parti
 amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
-	command_line_parser.o mg_checks.o scales.o
+	command_line_parser.o mg_checks.o scales.o subtraction.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
@@ -170,7 +170,8 @@ simple_integrator.o : helper_modules.o
 amplitude_library.o : handling_processes.o read_process_file.o
 mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.o
 scales.o : common.o particles.o cuts.o
-amplib.o: $(notdir $(AMPSRC:.f03=.o))
+amplib.o : $(notdir $(AMPSRC:.f03=.o))
+subtraction.o : particles.o handling_processes.o
 
 # ----------------------------------------------------------------------
 # 7. Cleanup

@@ -17,6 +17,7 @@ program amplicol_generate
   use multichannel
   use amplitude_library
   use mg_checks
+  use subtraction
   implicit none
   integer :: iproc
   real(kind=8) :: weight
@@ -147,12 +148,13 @@ program amplicol_generate
            if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
+           call initialise_subtraction(igroup,iamp)
            if (read_momenta) then
-                   if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
-                   call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
-                   do i=1,pgl(igroup)%next
-                         pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
-                   enddo
+              if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
+              call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
+              do i=1,pgl(igroup)%next
+                 pgl(igroup)%ps(1)%p(:,i)=p_read(i,:)
+              enddo
            endif
         enddo
      else
@@ -484,7 +486,8 @@ contains
        t_mat=t_mat+(tAfter-tBefore)*dble(timing_sample)
     endif
     if ((.not. use_amplitude_library) &
-         .and. pgl(ichan)%passed(iint).le.nevent_hel_filter) then
+         .and. pgl(ichan)%passed(iint).le.nevent_hel_filter &
+         .and. optimise_amplitudes) then
        if (time_physics) tBefore=tAfter
        call optimise_the_amplitudes(iint,ichan,done)
        if (time_physics) then
