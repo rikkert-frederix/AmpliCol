@@ -198,7 +198,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="lc",
         help=(
             "Colour treatment to record in the planning manifest. LC is the "
-            "production target; NLC/full are accepted as scaffolded metadata."
+            "default; NLC/full attach sparse colour-contraction metadata when "
+            "supported."
         ),
     )
     process_plan.add_argument(
@@ -393,8 +394,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=("lc", "nlc", "full"),
         default="lc",
         help=(
-            "Colour treatment requested for process generation. Only lc is "
-            "implemented for production artifacts in this milestone."
+            "Colour treatment requested for process generation. LC is the "
+            "default; NLC/full use the same generic DAG with a sparse final "
+            "colour contraction when supported."
         ),
     )
     generate_process.add_argument(
@@ -418,6 +420,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=20000,
         help="Safety cap for generic colour-flow sector enumeration.",
+    )
+    generate_process.add_argument(
+        "--monitor",
+        action="store_true",
+        help=(
+            "Emit fixed-width generation progress updates to stderr. This is "
+            "safe to combine with --json because stdout remains machine JSON."
+        ),
     )
     _add_evaluator_build_options(generate_process)
     _add_generic_dag_pruning_options(generate_process)
@@ -639,20 +649,42 @@ def _add_generic_dag_pruning_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--numerical-filter-current",
+        dest="numerical_filter_current",
+        action="store_true",
+        default=None,
+        help=(
+            "Force generation-time numerical warmup pruning of currents. "
+            "By default this is enabled for LC and disabled for NLC/full "
+            "all-sector colour contractions."
+        ),
+    )
+    parser.add_argument(
         "--no-numerical-filter-current",
         dest="numerical_filter_current",
         action="store_false",
-        default=True,
+        default=None,
         help=(
             "Disable generation-time numerical warmup pruning of currents "
             "that are zero on deterministic random phase-space points."
         ),
     )
     parser.add_argument(
+        "--numerical-current-merging",
+        dest="numerical_current_merging",
+        action="store_true",
+        default=None,
+        help=(
+            "Force generation-time numerical detection and merging of "
+            "identical currents. By default this is enabled for LC and "
+            "disabled for NLC/full all-sector colour contractions."
+        ),
+    )
+    parser.add_argument(
         "--no-numerical-current-merging",
         dest="numerical_current_merging",
         action="store_false",
-        default=True,
+        default=None,
         help=(
             "Disable generation-time numerical detection and merging of "
             "identical current values on deterministic random phase-space "
@@ -1361,6 +1393,13 @@ def _generic_dag_pruning_kwargs(
     *,
     process: str | None = None,
 ) -> dict[str, Any]:
+    color_accuracy = str(getattr(args, "color_accuracy", "lc")).lower()
+    numerical_filter_current = getattr(args, "numerical_filter_current", None)
+    if numerical_filter_current is None:
+        numerical_filter_current = color_accuracy == "lc"
+    numerical_current_merging = getattr(args, "numerical_current_merging", None)
+    if numerical_current_merging is None:
+        numerical_current_merging = color_accuracy == "lc"
     kwargs: dict[str, Any] = {
         "max_coupling_orders": _parse_max_coupling_orders(args),
         "max_lc_current_line_groups": getattr(
@@ -1385,12 +1424,8 @@ def _generic_dag_pruning_kwargs(
             str(getattr(args, "ignore_vertex_kinds", "")),
             option="--ignore-vertex-kinds",
         ),
-        "numerical_filter_current": bool(
-            getattr(args, "numerical_filter_current", True)
-        ),
-        "numerical_current_merging": bool(
-            getattr(args, "numerical_current_merging", True)
-        ),
+        "numerical_filter_current": bool(numerical_filter_current),
+        "numerical_current_merging": bool(numerical_current_merging),
         "numerical_current_samples": int(
             getattr(args, "numerical_current_samples", 10)
         ),
@@ -2431,24 +2466,6 @@ def _cmd_generate_process(args: argparse.Namespace) -> int:
         else:
             print(str(exc), file=sys.stderr)
         return 1
-    color_accuracy = str(getattr(args, "color_accuracy", "lc"))
-    if color_accuracy != "lc":
-        message = (
-            f"--color-accuracy={color_accuracy} process artifacts require Idenso "
-            "basis/metric generation and are not implemented yet"
-        )
-        payload = {
-            "available": False,
-            "error": message,
-            "process": args.process,
-            "runtime_backend": "rusticol",
-            "color_accuracy": color_accuracy,
-        }
-        if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
-        else:
-            print(message, file=sys.stderr)
-        return 1
     if len(process_set.entries) == 1 and not any(
         marker in args.process for marker in ("|", "[")
     ):
@@ -2532,7 +2549,7 @@ def _cmd_generate_generic_dag_artifact(
         progress.update(stage="done", item=entry.key, increment=1)
     compiled = cast(dict[str, Any], manifest["compiled"])
     generation_s = time.perf_counter() - generation_start
-    runtime_available = bool(compiled.get("stage_evaluators"))
+    runtime_available = bool(compiled.get("runtime_available"))
     payload = {
         "available": True,
         "runtime_available": runtime_available,
@@ -3087,9 +3104,20 @@ def _generate_process_child_command(
         command.append("--no-color-order-mask-pruning")
     if not bool(getattr(args, "species_reachability_pruning", True)):
         command.append("--no-species-reachability-pruning")
-    if not bool(getattr(args, "numerical_filter_current", True)):
+    color_accuracy = str(getattr(args, "color_accuracy", "lc")).lower()
+    numerical_filter_current = getattr(args, "numerical_filter_current", None)
+    if numerical_filter_current is None:
+        numerical_filter_current = color_accuracy == "lc"
+    numerical_current_merging = getattr(args, "numerical_current_merging", None)
+    if numerical_current_merging is None:
+        numerical_current_merging = color_accuracy == "lc"
+    if bool(numerical_filter_current) and color_accuracy != "lc":
+        command.append("--numerical-filter-current")
+    elif not bool(numerical_filter_current):
         command.append("--no-numerical-filter-current")
-    if not bool(getattr(args, "numerical_current_merging", True)):
+    if bool(numerical_current_merging) and color_accuracy != "lc":
+        command.append("--numerical-current-merging")
+    elif not bool(numerical_current_merging):
         command.append("--no-numerical-current-merging")
     if int(getattr(args, "numerical_current_samples", 10)) != 10:
         command.extend(
@@ -3284,6 +3312,19 @@ def _child_generation_environment() -> dict[str, str]:
     return env
 
 
+def _generation_progress_callback(args: argparse.Namespace, process: str):
+    child_callback = _child_generation_progress_callback(process)
+    monitor_callback = (
+        _stderr_generation_monitor_callback(process)
+        if bool(getattr(args, "monitor", False))
+        or os.environ.get("PYAMPLICOL_MONITOR") == "1"
+        else None
+    )
+    if monitor_callback is not None and child_callback is not None:
+        return _combined_progress_callback(monitor_callback, child_callback)
+    return monitor_callback or child_callback
+
+
 def _child_generation_progress_callback(process: str):
     if os.environ.get(_CHILD_PROGRESS_ENV) != "1":
         return None
@@ -3299,6 +3340,44 @@ def _child_generation_progress_callback(process: str):
                 payload[key] = event[key]
         print(
             _CHILD_PROGRESS_PREFIX + json.dumps(payload, sort_keys=True),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    return callback
+
+
+def _stderr_generation_monitor_callback(process: str):
+    started = time.perf_counter()
+    last_seen: tuple[str, str] | None = None
+    last_emitted = 0.0
+
+    def callback(event: dict[str, object]) -> None:
+        nonlocal last_seen, last_emitted
+        stage = str(event.get("stage", ""))[:26]
+        item = str(event.get("item", ""))[:66]
+        now = time.perf_counter()
+        signature = (stage, item)
+        if signature == last_seen and now - last_emitted < 2.0:
+            return
+        last_seen = signature
+        last_emitted = now
+        wall = time.time()
+        millis = int((wall - int(wall)) * 1000.0)
+        stamp = time.strftime("%H:%M:%S", time.localtime(wall)) + f".{millis:03d}"
+        elapsed = now - started
+        extras: list[str] = []
+        if "increment" in event:
+            extras.append(f"inc={event['increment']}")
+        if "total" in event:
+            extras.append(f"total={event['total']}")
+        if "ram" in event:
+            extras.append(f"ram={event['ram']}")
+        suffix = "" if not extras else " " + " ".join(str(item) for item in extras)
+        print(
+            f"[{stamp}] generate-process "
+            f"stage={stage:<26} item={item:<66} elapsed={elapsed:8.1f}s"
+            f"{suffix} process={process}",
             file=sys.stderr,
             flush=True,
         )

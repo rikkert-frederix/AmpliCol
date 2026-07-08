@@ -574,6 +574,67 @@ class ProcessEnumerator:
             groups=groups,
         )
 
+    def enumerate_color_complete(self, process_string: str) -> ProcessEnumeration:
+        """Enumerate a reference-only colour-complete legacy process file.
+
+        The production LC process list deliberately removes colour-order
+        representatives related by legacy symmetries.  That is correct for
+        ordinary integration and LC library timing, but NLC/full-colour
+        generated-library validation needs raw amplitudes for every colour
+        basis row used by AmpliCol's colour matrix.  This reference path keeps
+        all model-compatible candidate colour words in a single phase-space
+        group and avoids process-family assumptions.
+        """
+
+        request = self.parse(process_string)
+        unique_processes = self._generate_all_unique_processes(request)
+        subprocesses = self._generate_all_processes(unique_processes, request)
+        records: list[SubprocessRecord] = []
+        seen: set[tuple[ProcessTuple, OrderTuple]] = set()
+        for proc in sorted(subprocesses, key=self._sort_process):
+            for perm in self._candidate_color_orders(proc):
+                order = tuple(perm)
+                key = (proc, order)
+                if key in seen:
+                    continue
+                seen.add(key)
+                records.append(
+                    SubprocessRecord(
+                        process=proc,
+                        color_order=order,
+                        multichannel_partners=(0,),
+                        identical_factor=self._identical_particle_symmetry_factor(proc),
+                    )
+                )
+        if not records:
+            return ProcessEnumeration(
+                request=request,
+                options=self.options,
+                unique_processes=(),
+                groups=(),
+            )
+        return ProcessEnumeration(
+            request=request,
+            options=self.options,
+            unique_processes=tuple(
+                tuple(proc)
+                for proc in sorted(
+                    (
+                        tuple(sorted(p, key=lambda x: SORT_PARTICLES[x]))
+                        for p in unique_processes
+                    ),
+                    key=self._sort_process,
+                )
+            ),
+            groups=(
+                PhaseSpaceGroup(
+                    group_id=1,
+                    phase_space_order=tuple(range(len(records[0].process))),
+                    records=tuple(records),
+                ),
+            ),
+        )
+
     def to_legacy_lines(self, enumeration: ProcessEnumeration) -> list[str]:
         unique_lines = self._unique_process_lines(enumeration)
         group_lines = self._phase_space_group_lines(enumeration)
@@ -1327,6 +1388,15 @@ def write_legacy_process_file(
     return enumeration
 
 
+def write_color_complete_legacy_process_file(
+    process_string: str, path: str | Path, options: ProcessOptions | None = None
+) -> ProcessEnumeration:
+    enumerator = ProcessEnumerator(options)
+    enumeration = enumerator.enumerate_color_complete(process_string)
+    enumerator.write_legacy_file(enumeration, path)
+    return enumeration
+
+
 __all__ = [
     "ANTI_PARTICLE",
     "PDGS",
@@ -1344,5 +1414,6 @@ __all__ = [
     "enumerate_process_set",
     "expand_process_variants",
     "split_process_set",
+    "write_color_complete_legacy_process_file",
     "write_legacy_process_file",
 ]

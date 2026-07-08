@@ -453,6 +453,10 @@ def _compile_current_stage_blueprint(
             int(interaction["result_current_id"]),
             [],
         ).append(interaction)
+    output_slots_by_current: dict[int, list[dict[str, Any]]] = {}
+    for slot_id in _list(stage["output_value_slot_ids"]):
+        slot = value_slots[int(slot_id)]
+        output_slots_by_current.setdefault(int(slot["current_id"]), []).append(slot)
 
     for current_id in sorted(interactions_by_result):
         current_slot = current_slots[current_id]
@@ -475,11 +479,7 @@ def _compile_current_stage_blueprint(
                 )
                 continue
             total = _sum_components(total, contribution)
-        result_slots = [
-            value_slots[int(slot_id)]
-            for slot_id in _list(stage["output_value_slot_ids"])
-            if int(value_slots[int(slot_id)]["current_id"]) == current_id
-        ]
+        result_slots = output_slots_by_current.get(current_id, ())
         for slot in result_slots:
             variant = str(slot["variant"])
             try:

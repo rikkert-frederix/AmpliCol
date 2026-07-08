@@ -116,10 +116,23 @@ artifact route supports both beam orders for these concrete entries.  Entries
 whose current lowering is not implemented yet fail with explicit diagnostics
 instead of being silently folded into a parent inclusive artifact.
 
-The production artifact colour mode is leading colour:
+The production artifact defaults to leading colour:
 
 ```sh
 ./pyamplicol.sh generate-process --color-accuracy lc 'd d~ > Z 4*g' outputs/dd_z_4g
+```
+
+NLC and full-colour matrix elements are available through the same generic
+staged-DAG/Rusticol route.  They reuse the same colour-ordered amplitude vector
+and change only the final sparse colour contraction.  Pure-gluon, one-quark-line
+and two-quark-line contractions are matched directly against Fortran AmpliCol;
+multi-quark-line contractions use the same open-line trace-overlap rule
+generically, including gluon strings on the open lines:
+
+```sh
+./pyamplicol.sh generate-process --color-accuracy nlc 'g g > g g g' outputs/gg_3g_nlc
+./pyamplicol.sh generate-process --color-accuracy full 'd d~ > t t~ g' outputs/dd_tt_g_full
+./pyamplicol.sh generate-process --color-accuracy nlc 'd d~ > u u~ s s~ g' outputs/dd_3q_g_nlc
 ```
 
 Large inclusive or many-quark-line requests can be controlled with generic
@@ -133,9 +146,10 @@ external quark-pair count:
 ./pyamplicol.sh generate-process --max-quark-pairs 2 'p p > Z 2j' outputs/pp_z_2j_qcap2
 ```
 
-`--color-accuracy nlc` and `--color-accuracy full` are reserved for the
-Idenso-backed colour-expansion scaffold and currently return explicit
-unsupported diagnostics for production artifacts.
+For more than two quark-pair lines, Fortran AmpliCol's built-in colour matrix
+is not the validation reference.  pyAmpliCol still generates the NLC/full sparse
+metric; dedicated raw-amplitude probes are used where a direct Fortran
+comparison is needed.
 
 Long validation and benchmark jobs should be run behind the bundled RAM
 watchdog so the process is stopped before exceeding the repository guideline of

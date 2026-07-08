@@ -149,6 +149,7 @@ class ColorPlanSupportSummary:
     sector_count: int
     truncated: bool
     ready_for_leading_colour: bool
+    ready_for_requested_colour: bool
     idenso_required: bool
     diagnostics: tuple[str, ...]
     sector_kind_counts: tuple[tuple[str, int], ...]
@@ -160,8 +161,8 @@ class ColorPlanSupportSummary:
             return f"colour planning truncated at {self.sector_count} sectors"
         if not self.sector_count:
             return "colour planning found no leading-colour sectors"
-        if not self.ready_for_leading_colour:
-            return "colour planning is not ready for leading colour"
+        if not self.ready_for_requested_colour:
+            return "colour planning is not ready for requested colour accuracy"
         return None
 
     def to_json_dict(self) -> dict[str, object]:
@@ -169,6 +170,7 @@ class ColorPlanSupportSummary:
             "sector_count": self.sector_count,
             "truncated": self.truncated,
             "ready_for_leading_colour": self.ready_for_leading_colour,
+            "ready_for_requested_colour": self.ready_for_requested_colour,
             "idenso_required": self.idenso_required,
             "diagnostics": list(self.diagnostics),
             "sector_kind_counts": [
@@ -563,6 +565,7 @@ def _color_plan_summary_from_plan(
         sector_count=plan.sector_count,
         truncated=plan.truncated,
         ready_for_leading_colour=plan.ready_for_leading_colour,
+        ready_for_requested_colour=plan.ready_for_requested_colour,
         idenso_required=plan.idenso_required,
         diagnostics=plan.diagnostics,
         sector_kind_counts=sector_kind_counts,

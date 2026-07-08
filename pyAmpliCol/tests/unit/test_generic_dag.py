@@ -414,6 +414,7 @@ def test_generic_dag_carries_arbitrary_quark_line_colour_sectors() -> None:
         dag.currents[source_id].index.color_state.sector_id
         for source_id in dag.sources
     } == set(range(6))
+    assert all(sector.compatibility_words for sector in dag.color_plan.sectors)
     assert any(
         current.index.ordered_external_labels != current.index.external_labels
         for current in dag.currents

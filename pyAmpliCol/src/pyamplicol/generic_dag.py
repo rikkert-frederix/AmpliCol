@@ -236,6 +236,7 @@ class AmplitudeRoot:
     left_id: int
     right_id: int
     color_weight: tuple[float, float]
+    color_sector_id: int | None = None
     vertex_kind: int | None = None
     vertex_particles: tuple[int, int, int] | None = None
     coupling: tuple[float, float] = (1.0, 0.0)
@@ -249,6 +250,7 @@ class AmplitudeRoot:
             "left_id": self.left_id,
             "right_id": self.right_id,
             "color_weight": list(self.color_weight),
+            "color_sector_id": self.color_sector_id,
             "vertex_kind": self.vertex_kind,
             "vertex_particles": (
                 list(self.vertex_particles) if self.vertex_particles is not None else None
@@ -343,17 +345,31 @@ class ColorEngine:
             tuple[int, tuple[int, ...], tuple[int, ...], int, int, int, int],
             tuple[int, ...] | None,
         ] = {}
+        self._shared_single_trace = (
+            color_plan.color_accuracy in {"nlc", "full"}
+            and bool(color_plan.sectors)
+            and not color_plan.process.quark_labels
+            and not color_plan.process.antiquark_labels
+            and not color_plan.process.singlet_labels
+            and all(sector.kind == "single-trace" for sector in color_plan.sectors)
+        )
+        self._shared_single_trace_words = tuple(
+            word
+            for sector in color_plan.sectors
+            for word in (sector.color_words or ())
+        )
 
     def source_states_for_leg(self, leg: ProcessLegIR) -> tuple[ColorState, ...]:
-        if self.color_plan.color_accuracy != "lc":
+        if self._shared_single_trace:
             return (
                 ColorState(
                     accuracy=self.color_plan.color_accuracy,
-                    basis_key=("idenso-basis-placeholder",),
+                    sector_id=0,
+                    line_groups=(0,),
                 ),
             )
         if not self.color_plan.sectors:
-            return (ColorState(accuracy="lc"),)
+            return (ColorState(accuracy=self.color_plan.color_accuracy),)
         states = []
         leg_is_singlet = self._label_is_color_singlet.get(leg.label, False)
         for sector in self.color_plan.sectors:
@@ -365,7 +381,7 @@ class ColorEngine:
             if groups or leg_is_singlet or not sector.line_label_groups:
                 states.append(
                     ColorState(
-                        accuracy="lc",
+                        accuracy=self.color_plan.color_accuracy,
                         sector_id=sector.id,
                         line_groups=groups,
                     )
@@ -380,7 +396,7 @@ class ColorEngine:
     ) -> tuple[ColorFlow, ...]:
         if left.accuracy != right.accuracy:
             return ()
-        if left.accuracy != "lc":
+        if not self.color_plan.sectors:
             return (
                 ColorFlow(
                     state=ColorState(
@@ -388,6 +404,17 @@ class ColorEngine:
                         basis_key=tuple(
                             sorted(set(left.basis_key) | set(right.basis_key))
                         ),
+                    )
+                ),
+            )
+        if self._shared_single_trace:
+            groups = tuple(sorted(set(left.line_groups) | set(right.line_groups)))
+            return (
+                ColorFlow(
+                    state=ColorState(
+                        accuracy=left.accuracy,
+                        sector_id=0,
+                        line_groups=groups or (0,),
                     )
                 ),
             )
@@ -399,7 +426,7 @@ class ColorEngine:
         return (
             ColorFlow(
                 state=ColorState(
-                    accuracy="lc",
+                    accuracy=left.accuracy,
                     sector_id=left.sector_id,
                     line_groups=groups,
                 )
@@ -453,7 +480,7 @@ class ColorEngine:
     ) -> tuple[ColorFlow, ...]:
         if left.accuracy != right.accuracy:
             return ()
-        if left.accuracy != "lc":
+        if not self.color_plan.sectors:
             return (
                 ColorFlow(
                     state=ColorState(
@@ -464,6 +491,11 @@ class ColorEngine:
                     )
                 ),
             )
+        if self._shared_single_trace:
+            # Shared single-trace closure needs the endpoint order labels, not
+            # just the state.  _build_amplitude_roots therefore calls
+            # shared_single_trace_closure_flows() with full CurrentIndex data.
+            return ()
         if left.sector_id != right.sector_id:
             return ()
         groups = tuple(sorted(set(left.line_groups) | set(right.line_groups)))
@@ -479,7 +511,7 @@ class ColorEngine:
         return (
             ColorFlow(
                 state=ColorState(
-                    accuracy="lc",
+                    accuracy=left.accuracy,
                     sector_id=left.sector_id,
                     line_groups=groups,
                 )
@@ -503,8 +535,6 @@ class ColorEngine:
         return False
 
     def vertex_allowed(self, vertex: Vertex) -> bool:
-        if self.color_plan.color_accuracy != "lc":
-            return True
         if 99 not in vertex.particles:
             return True
         return self.color_plan.process.quark_lines.quark_pair_count >= 2
@@ -515,8 +545,6 @@ class ColorEngine:
         right_index: CurrentIndex,
         vertex: Vertex,
     ) -> bool:
-        if self.color_plan.color_accuracy != "lc":
-            return True
         if not self._vertex_has_colour(vertex):
             return True
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
@@ -558,9 +586,18 @@ class ColorEngine:
         if not singlet_order:
             self._ordered_combination_labels_cache[cache_key] = None
             return None
-        if self.color_plan.color_accuracy != "lc":
-            self._ordered_combination_labels_cache[cache_key] = proposed
-            return proposed
+        if self._shared_single_trace:
+            for word in self._shared_single_trace_words:
+                segment = _ordered_combination_segment(
+                    left_index.ordered_external_labels,
+                    right_index.ordered_external_labels,
+                    word,
+                )
+                if segment is not None:
+                    self._ordered_combination_labels_cache[cache_key] = segment
+                    return segment
+            self._ordered_combination_labels_cache[cache_key] = None
+            return None
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
         if sector is None:
             self._ordered_combination_labels_cache[cache_key] = proposed
@@ -615,8 +652,15 @@ class ColorEngine:
         left_index: CurrentIndex,
         right_index: CurrentIndex,
     ) -> bool:
-        if self.color_plan.color_accuracy != "lc":
-            return True
+        if self._shared_single_trace:
+            return any(
+                _shared_single_trace_closure_matches_word(
+                    left_index.ordered_external_labels,
+                    right_index.ordered_external_labels,
+                    word,
+                )
+                for word in self._shared_single_trace_words
+            )
         if left_index.color_state.sector_id != right_index.color_state.sector_id:
             return False
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
@@ -630,6 +674,42 @@ class ColorEngine:
             )
             for word in sector.compatibility_words
         )
+
+    def shared_single_trace_closure_flows(
+        self,
+        left_index: CurrentIndex,
+        right_index: CurrentIndex,
+    ) -> tuple[ColorFlow, ...]:
+        if not self._shared_single_trace:
+            return ()
+        flows: list[ColorFlow] = []
+        seen: set[int] = set()
+        for sector in self.color_plan.sectors:
+            if sector.id in seen:
+                continue
+            if any(
+                _shared_single_trace_closure_matches_word(
+                    left_index.ordered_external_labels,
+                    right_index.ordered_external_labels,
+                    word,
+                )
+                for word in sector.compatibility_words
+            ):
+                seen.add(sector.id)
+                flows.append(
+                    ColorFlow(
+                        state=ColorState(
+                            accuracy=self.color_plan.color_accuracy,
+                            sector_id=sector.id,
+                            line_groups=(0,),
+                        )
+                    )
+                )
+        return tuple(flows)
+
+    @property
+    def shared_single_trace(self) -> bool:
+        return self._shared_single_trace
 
 
 class GenericDAGCompiler:
@@ -764,6 +844,14 @@ class GenericDAGCompiler:
         )
         vertex_allowed_cache: dict[tuple[int, int, int, int], bool] = {}
         quantum_flow_cache: dict[tuple[object, ...], tuple[QuantumFlow, ...]] = {}
+        coupling_order_cache: dict[
+            tuple[CouplingOrders, CouplingOrders, int, tuple[int, int, int]],
+            CouplingOrders,
+        ] = {}
+        state_allowed_cache: dict[
+            tuple[int, int, CouplingOrders],
+            bool,
+        ] = {}
         full_mask = _labels_mask(leg.label for leg in process_ir.legs)
         closure_candidate_splits = _closure_candidate_splits(
             process_ir,
@@ -818,6 +906,48 @@ class GenericDAGCompiler:
                 truncated=False,
             )
 
+        def state_allowed(
+            mask: int,
+            particle_id: int,
+            coupling_orders: CouplingOrders,
+        ) -> bool:
+            if useful_states_by_mask is None:
+                return True
+            key = (mask, particle_id, coupling_orders)
+            cached = state_allowed_cache.get(key)
+            if cached is not None:
+                return cached
+            allowed = _state_allowed_by_reachability(
+                useful_states_by_mask,
+                mask,
+                particle_id,
+                coupling_orders,
+            )
+            state_allowed_cache[key] = allowed
+            return allowed
+
+        def combined_coupling_orders(
+            left_index: CurrentIndex,
+            right_index: CurrentIndex,
+            vertex: Vertex,
+        ) -> CouplingOrders:
+            key = (
+                left_index.coupling_orders,
+                right_index.coupling_orders,
+                vertex.kind,
+                vertex.particles,
+            )
+            cached = coupling_order_cache.get(key)
+            if cached is not None:
+                return cached
+            orders = self.model.combine_coupling_orders(
+                left_index,
+                right_index,
+                vertex,
+            )
+            coupling_order_cache[key] = orders
+            return orders
+
         for mask in _masks_by_size(full_mask):
             if mask & (mask - 1) == 0:
                 continue
@@ -856,14 +986,10 @@ class GenericDAGCompiler:
                     continue
                 for left_id in left_ids:
                     left = table.current(left_id)
-                    if (
-                        useful_states_by_mask is not None
-                        and not _state_allowed_by_reachability(
-                            useful_states_by_mask,
-                            left_mask,
-                            left.index.particle_id,
-                            left.index.coupling_orders,
-                        )
+                    if not state_allowed(
+                        left_mask,
+                        left.index.particle_id,
+                        left.index.coupling_orders,
                     ):
                         continue
                     possible_right_particles = right_particles_by_left.get(
@@ -874,6 +1000,7 @@ class GenericDAGCompiler:
                     candidate_right_ids = table.ids_by_mask_and_particles(
                         right_mask,
                         possible_right_particles,
+                        color_sector_id=left.index.color_state.sector_id,
                     )
                     if not candidate_right_ids:
                         continue
@@ -881,14 +1008,10 @@ class GenericDAGCompiler:
                         right = table.current(right_id)
                         if left.index.overlaps(right.index):
                             continue
-                        if (
-                            useful_states_by_mask is not None
-                            and not _state_allowed_by_reachability(
-                                useful_states_by_mask,
-                                right_mask,
-                                right.index.particle_id,
-                                right.index.coupling_orders,
-                            )
+                        if not state_allowed(
+                            right_mask,
+                            right.index.particle_id,
+                            right.index.coupling_orders,
                         ):
                             continue
                         vertex_lookup_key = (
@@ -926,14 +1049,7 @@ class GenericDAGCompiler:
                                 continue
                             if self.model.skip_duplicate_vertex_orientation(vertex):
                                 continue
-                            ordered_external_labels = color_engine.ordered_combination_labels(
-                                left.index,
-                                right.index,
-                                vertex,
-                            )
-                            if ordered_external_labels is None:
-                                continue
-                            coupling_orders = self.model.combine_coupling_orders(
+                            coupling_orders = combined_coupling_orders(
                                 left.index,
                                 right.index,
                                 vertex,
@@ -943,15 +1059,18 @@ class GenericDAGCompiler:
                                 self.max_coupling_orders,
                             ):
                                 continue
-                            if (
-                                useful_states_by_mask is not None
-                                and not _state_allowed_by_reachability(
-                                    useful_states_by_mask,
-                                    mask,
-                                    vertex.particles[2],
-                                    coupling_orders,
-                                )
+                            if not state_allowed(
+                                mask,
+                                vertex.particles[2],
+                                coupling_orders,
                             ):
+                                continue
+                            ordered_external_labels = color_engine.ordered_combination_labels(
+                                left.index,
+                                right.index,
+                                vertex,
+                            )
+                            if ordered_external_labels is None:
                                 continue
                             quantum_flow_key = (
                                 vertex.kind,
@@ -1184,10 +1303,17 @@ class GenericDAGCompiler:
                             )
                         ):
                             continue
-                    color_flows = color_engine.closure_compatible(
-                        left.index.color_state,
-                        right.index.color_state,
-                        full_mask=full_mask,
+                    color_flows = (
+                        color_engine.shared_single_trace_closure_flows(
+                            left.index,
+                            right.index,
+                        )
+                        if color_engine.shared_single_trace
+                        else color_engine.closure_compatible(
+                            left.index.color_state,
+                            right.index.color_state,
+                            full_mask=full_mask,
+                        )
                     )
                     if not color_flows:
                         continue
@@ -1210,13 +1336,14 @@ class GenericDAGCompiler:
                                 roots.append(
                                     AmplitudeRoot(
                                         id=len(roots),
-                                        kind="direct-contraction",
-                                        left_id=left_id,
-                                        right_id=right_id,
-                                        color_weight=color_flow.weight,
-                                        contraction=direct,
-                                    )
+                                    kind="direct-contraction",
+                                    left_id=left_id,
+                                    right_id=right_id,
+                                    color_weight=color_flow.weight,
+                                    color_sector_id=color_flow.state.sector_id,
+                                    contraction=direct,
                                 )
+                            )
                         for vertex in self.model.vertices_accepting(
                             left.index.particle_id,
                             right.index.particle_id,
@@ -1269,6 +1396,7 @@ class GenericDAGCompiler:
                                     left_id=left_id,
                                     right_id=right_id,
                                     color_weight=color_flow.weight,
+                                    color_sector_id=color_flow.state.sector_id,
                                     vertex_kind=vertex.kind,
                                     vertex_particles=vertex.particles,
                                     coupling=vertex.coupling,
@@ -1285,6 +1413,7 @@ class _CurrentTable:
         self._ids: dict[CurrentIndex, int] = {}
         self._ids_by_mask: dict[int, list[int]] = {}
         self._ids_by_mask_particle: dict[tuple[int, int], list[int]] = {}
+        self._ids_by_mask_particle_sector: dict[tuple[int, int, int], list[int]] = {}
 
     def add_or_get(
         self,
@@ -1316,6 +1445,14 @@ class _CurrentTable:
             (index.external_mask, index.particle_id),
             [],
         ).append(current_id)
+        self._ids_by_mask_particle_sector.setdefault(
+            (
+                index.external_mask,
+                index.particle_id,
+                index.color_state.sector_id,
+            ),
+            [],
+        ).append(current_id)
         return node
 
     def current(self, current_id: int) -> CurrentNode:
@@ -1331,10 +1468,20 @@ class _CurrentTable:
         self,
         mask: int,
         particle_ids: Iterable[int],
+        *,
+        color_sector_id: int | None = None,
     ) -> Sequence[int]:
         ids: list[int] = []
         for particle_id in particle_ids:
-            ids.extend(self._ids_by_mask_particle.get((mask, particle_id), ()))
+            if color_sector_id is None:
+                ids.extend(self._ids_by_mask_particle.get((mask, particle_id), ()))
+            else:
+                ids.extend(
+                    self._ids_by_mask_particle_sector.get(
+                        (mask, particle_id, color_sector_id),
+                        (),
+                    )
+                )
         return ids
 
 
@@ -1555,6 +1702,7 @@ def prune_dag_to_amplitude_roots(dag: GenericDAG) -> GenericDAG:
             left_id=current_id_map[root.left_id],
             right_id=current_id_map[root.right_id],
             color_weight=root.color_weight,
+            color_sector_id=root.color_sector_id,
             vertex_kind=root.vertex_kind,
             vertex_particles=root.vertex_particles,
             coupling=root.coupling,
@@ -1643,6 +1791,7 @@ def prune_global_helicity_flip_equivalent_roots(
                     left_id=root.left_id,
                     right_id=root.right_id,
                     color_weight=root.color_weight,
+                    color_sector_id=root.color_sector_id,
                     vertex_kind=root.vertex_kind,
                     vertex_particles=root.vertex_particles,
                     coupling=root.coupling,
@@ -1670,7 +1819,7 @@ def _global_helicity_flip_equivalence_safe(
     dag: GenericDAG,
     model: Model,
 ) -> bool:
-    if dag.process.color_accuracy != "lc":
+    if dag.process.color_accuracy not in {"lc", "nlc", "full"}:
         return False
     for leg in dag.process.legs:
         if leg.outgoing_pdg is None:
@@ -1736,11 +1885,7 @@ def _root_physical_helicity_signature(
             if ancestry & bit
         )
     )
-    sector_id = (
-        int(left.color_state.sector_id)
-        if left.color_state.accuracy == "lc"
-        else 0
-    )
+    sector_id = _amplitude_root_color_sector_id(dag, root)
     return (sector_id, source_helicities)
 
 
@@ -1837,11 +1982,20 @@ def contributing_color_sector_ids(dag: GenericDAG) -> tuple[int, ...]:
     return tuple(
         sorted(
             {
-                dag.currents[root.left_id].index.color_state.sector_id
+                _amplitude_root_color_sector_id(dag, root)
                 for root in dag.amplitude_roots
             }
         )
     )
+
+
+def _amplitude_root_color_sector_id(dag: GenericDAG, root: AmplitudeRoot) -> int:
+    if root.color_sector_id is not None:
+        return int(root.color_sector_id)
+    left = dag.currents[root.left_id].index
+    if left.color_state.accuracy in {"lc", "nlc", "full"}:
+        return int(left.color_state.sector_id)
+    return 0
 
 
 def filter_dag_to_color_sectors(
@@ -1925,6 +2079,7 @@ def filter_dag_to_color_sectors(
                 left_id=current_id_map[root.left_id],
                 right_id=current_id_map[root.right_id],
                 color_weight=root.color_weight,
+                color_sector_id=root.color_sector_id,
                 vertex_kind=root.vertex_kind,
                 vertex_particles=root.vertex_particles,
                 coupling=root.coupling,
@@ -2050,6 +2205,16 @@ def _closure_combination_matches_word(
     ):
         return True
     return False
+
+
+def _shared_single_trace_closure_matches_word(
+    left_labels: Iterable[int],
+    right_labels: Iterable[int],
+    word: tuple[int, ...],
+) -> bool:
+    left_projected = _labels_projected_to_word(left_labels, word)
+    right_projected = _labels_projected_to_word(right_labels, word)
+    return (*left_projected, *right_projected) == word
 
 
 def _ordered_combination_segment(
@@ -2201,7 +2366,13 @@ def _closure_candidate_splits(
             sink_labels.append(colored_reference_labels[-1])
         elif ordered_reference_labels:
             sink_labels.append(ordered_reference_labels[-1])
-    if not sink_labels and color_engine.color_plan.color_accuracy == "lc":
+    if (
+        not sink_labels
+        and (
+            color_engine.color_plan.color_accuracy == "lc"
+            or color_engine.shared_single_trace
+        )
+    ):
         for sector in color_engine.color_plan.sectors:
             # Compatibility words are used while building intermediate currents:
             # complete open-line blocks may be traversed in several orders
@@ -2270,7 +2441,7 @@ def _lc_color_order_reachable_masks(
     by ordinary model vertices and the existing singlet-order rule.
     """
 
-    if color_plan.color_accuracy != "lc" or not color_plan.sectors:
+    if not color_plan.sectors:
         return None
 
     full_mask = _labels_mask(leg.label for leg in process_ir.legs)

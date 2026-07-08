@@ -33,7 +33,7 @@ def test_generic_current_plan_uses_model_owned_colour_filtering() -> None:
     lc_kinds = {kind for kind, _ in lc_plan.required_vertex_kind_counts}
     full_kinds = {kind for kind, _ in full_plan.required_vertex_kind_counts}
     assert 4 not in lc_kinds
-    assert 4 in full_kinds
+    assert full_kinds == lc_kinds
     assert full_plan.color_sectors == (0,)
 
 
@@ -219,7 +219,7 @@ def test_generic_stage_plan_handles_many_quark_line_stage_metadata() -> None:
     assert stage_plan.amplitude_stage.full_tensor_network_ready is True
     stage_summaries = payload["current_stages"][0]["color_sector_summaries"]
     assert {summary["color_sector"] for summary in stage_summaries}.issubset(
-        set(range(36))
+        set(range(6))
     )
     assert len(stage_summaries) >= 1
     assert payload["amplitude_stage"]["color_sector_summaries"]

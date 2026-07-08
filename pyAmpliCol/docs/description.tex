@@ -70,6 +70,22 @@ Spenso, compiles the resulting parametric scalar/vector expressions with
 Symbolica evaluators, and can now execute the staged sweep from Rust through
 the PyO3 runtime \texttt{rusticol}.
 
+\paragraph{Merge-readiness status.}
+The \texttt{pyamplicol\_nlc\_full\_color} branch is ready to merge into
+\texttt{pyAmpliCol}.  It is based on the latest pushed \texttt{pyAmpliCol}
+branch and contains the generic LC/NLC/full-colour staged-DAG implementation,
+Fortran generated-library colour probe, documented result matrices, and
+integration fixtures.  LC, NLC and full-colour process-matrix entries through
+\(n\le4\) have been validated against generated-library \AC\ wherever the
+Fortran colour-reference path supports the colour class.  The only documented
+reference gap is the \(d\bar d\to u\bar u\,s\bar s\) NLC/full-colour cell,
+where \PAC\ generates and evaluates the generic multi-open-line colour
+contraction but the current Fortran \texttt{init\_col} reference probe stops
+above two quark lines.  The exact first milestone result state is archived in
+\texttt{docs/results\_archive/db0173e7}; subsequent post-archive refresh
+commits updated the low-multiplicity matrix caches through \(n=3\) for all
+colour accuracies and through \(n=4\) for LC before this merge-ready snapshot.
+
 \section{The AmpliCol Current Recursion}
 
 For a fixed leading-color ordering, a current is labelled by the external
@@ -161,7 +177,7 @@ the process is ``$Z$ plus jets'' or any other family.
 \texttt{helicity\_ancestry} & Bitwise union of the source-current helicity bits feeding this current.  This is how helicity configurations are woven into one shared DAG. \\
 \texttt{chirality} and \texttt{spin\_state} & Local spin information, especially for Weyl fermions and massive-vector sources. \\
 \texttt{flavour\_flow} and \texttt{charge\_flow} & Quantum-number flow checked locally by model vertices, e.g. $u\to d W^+$ or $e^+e^-\to\gamma/Z$. \\
-\texttt{color\_state} & Leading-color open-line or trace state now; later the hook for Idenso-backed NLC/full-color basis data. \\
+\texttt{color\_state} & Colour-ordered open-line or trace state used to build the amplitude vector.  LC, NLC and full colour differ in the final sparse colour contraction over this vector. \\
 \texttt{momentum\_mask} & Which all-outgoing momenta are summed for propagators and momentum-dependent vertices. \\
 \texttt{auxiliary\_kind} & Optional tag distinguishing auxiliary tensor currents from ordinary particles. \\
 \bottomrule
@@ -275,15 +291,27 @@ back into the current table and becomes an input parameter for later blocks.
 This avoids one giant scalar expression and keeps the DAG close to \AC's
 execution model.
 
-If explicit color tensors are introduced in future full-color modes, color
-simplification belongs before Spenso execution:
+The current NLC/full-colour implementation keeps the kinematic DAG
+colour-ordered and applies a sparse colour matrix to the amplitude vector.  For
+open-line sectors, including arbitrary many quark lines with gluons distributed
+on the lines, \PAC\ contracts the product of left colour strings with the
+conjugated right strings into closed fundamental traces.  Those small colour
+trace expressions are simplified separately from the kinematic DAG; NLC is
+obtained by keeping the leading and first \(1/N_c^2\)-suppressed powers, while
+full colour keeps the complete sparse metric.  If a later implementation puts
+explicit colour tensors inside a Spenso block, colour simplification still
+belongs before Spenso execution:
 \[
   \texttt{raw} \leftarrow \texttt{idenso.simplify\_color(raw)} ,
   \qquad
   \text{then build } \texttt{TensorNetwork(raw, hep\_lib)}.
 \]
-For the current leading-color milestone, color is already reduced to scalar
-factors associated with the ordered amplitude.
+For the present NLC/full-colour milestone, colour algebra is confined to the
+small colour-basis overlap problem and the Rusticol final contraction, not to
+expanded kinematic expressions.  Fortran AmpliCol is the direct reference for
+zero, one and two quark-line colour matrices; beyond that, pyAmpliCol's generic
+open-line metric is validated through raw-amplitude probes and internal colour
+consistency checks.
 
 \section{Example: \texorpdfstring{$d\bar d\to Zgg$}{d dbar -> Z g g}}
 
@@ -565,6 +593,21 @@ diagnostic rather than falling back to a hidden family path.
 
 
 \input{result_matrix_table.tex}
+\IfFileExists{result_matrix_nlc_table.tex}{\input{result_matrix_nlc_table.tex}}{}
+\IfFileExists{result_matrix_full_table.tex}{\input{result_matrix_full_table.tex}}{}
+
+\paragraph{Archived low-multiplicity validation fixture.}
+The \(n\le4\) entries of the LC, NLC and full-colour process matrices are also
+stored as a compact integration-test fixture in
+\texttt{tests/fixtures/result\_matrix\_references.json}.  The fixture contains
+the process string, colour accuracy, deterministic phase-space point, Fortran
+\AC\ reference value, \PAC\ JIT value, tolerance and relative difference for
+each validated cell.  It is checked by
+\texttt{tests/integration/test\_result\_matrix\_references.py} without requiring
+a local Fortran \AC\ run.  To refresh the fixture from the matrix caches, run
+\texttt{scripts/refresh\_result\_matrix\_fixtures.py}; with
+\texttt{--refresh-caches}, the script first reruns the documented
+\texttt{result\_matrix.py} validation workflow against Fortran \AC.
 
 
 \begin{landscape}
@@ -585,9 +628,11 @@ the current \PAC\ production route, \texttt{rusticol} with C++ O3 staged
 evaluators.
 The dependency installer currently uses upstream Symbolica \texttt{dev} with
 the pyAmpliCol local patches and pins SymJIT to \texttt{2.19.3} at commit
-\texttt{7fb09d1cb2a943c25a6fd71a208af44fcc6d813d}.  The \PAC\ JIT rows below
-are generated with SymJIT \texttt{opt\_level=3}; staged-DAG JIT rows refreshed
-after this dependency update are noted in the tables below.
+\texttt{7fb09d1cb2a943c25a6fd71a208af44fcc6d813d}.  This includes the
+historical AArch64 complex-JIT fix captured by
+\texttt{MRE\_symjit\_bug\_new.py}.  The \PAC\ JIT rows below are generated
+with SymJIT \texttt{opt\_level=3}; staged-DAG JIT rows refreshed after this
+dependency update are noted in the tables below.
 
 \scriptsize
 \setlength{\tabcolsep}{1.55pt}

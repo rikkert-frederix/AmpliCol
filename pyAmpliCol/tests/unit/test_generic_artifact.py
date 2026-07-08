@@ -414,7 +414,7 @@ def test_generic_process_manifest_records_line_pairing_representatives() -> None
     ]
 
 
-def test_selected_sector_manifest_uses_filtered_color_plan_for_large_line_counts() -> None:
+def test_selected_sector_manifest_keeps_full_plan_and_filters_runtime_dag() -> None:
     payload = build_generic_process_manifest(
         "d d~ > u u~ s s~ c c~ b b~",
         selected_color_sector_ids={0},
@@ -427,6 +427,8 @@ def test_selected_sector_manifest_uses_filtered_color_plan_for_large_line_counts
     assert payload["color_plan"]["sector_count"] == 120
     assert payload["color_plan"]["truncated"] is False
     assert payload["planning_status"]["color_ready"] is True
+    assert payload["lowering_status"]["current_color_sector_count"] == 1
+    assert payload["lowering_status"]["current_color_sectors"] == [0]
     assert payload["planning_status"]["generic_evaluator_ready"] is True
     assert payload["lowering_status"]["full_tensor_network_ready"] is True
     assert payload["runtime_schema"]["amplitude_stage"]["output_count"] == 16
@@ -714,6 +716,35 @@ def test_generic_process_manifest_handles_multi_quark_line_plan() -> None:
     assert source_sectors == {0, 1}
     assert payload["stage_plan"]["current_stages"][-1]["subset_size"] == 3
     assert payload["stage_plan"]["amplitude_stage"]["closure_count"] > 0
+
+
+def test_pure_gluon_lc_normalization_uses_model_leading_color_factor_once() -> None:
+    payload = build_generic_process_manifest("g g > g g").to_json_dict()
+
+    assert payload["runtime_schema"]["normalization"]["color_factor"] == 81
+
+
+@pytest.mark.parametrize("color_accuracy", ["nlc", "full"])
+def test_pure_gluon_subleading_colour_shares_currents_but_keeps_root_sectors(
+    color_accuracy: str,
+) -> None:
+    payload = build_generic_process_manifest(
+        "g g > g g g",
+        color_accuracy=color_accuracy,
+    ).to_json_dict()
+
+    amplitude_stage = payload["runtime_schema"]["amplitude_stage"]
+    color_contraction = amplitude_stage["color_contraction"]
+
+    assert payload["color_plan"]["sector_count"] == 24
+    assert payload["lowering_status"]["current_color_sectors"] == [0]
+    assert {
+        root["color_sector_id"]
+        for root in amplitude_stage["roots"]
+    } == set(range(24))
+    assert color_contraction["supported"] is True
+    assert color_contraction["group_count"] == amplitude_stage["output_count"]
+    assert color_contraction["entry_count"] > color_contraction["group_count"]
 
 
 def test_generic_process_manifest_does_not_divide_me_by_quark_line_partners() -> None:

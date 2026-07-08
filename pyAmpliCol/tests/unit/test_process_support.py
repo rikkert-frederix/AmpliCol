@@ -220,13 +220,33 @@ def test_process_support_can_skip_generic_current_plan_for_fast_diagnostics() ->
     assert "vertex kinds" not in report.artifact_unavailable_message
 
 
-def test_process_support_rejects_colour_expansion_without_lc_fallback() -> None:
+def test_process_support_accepts_full_colour_for_fortran_supported_colour_class() -> None:
     report = classify_process_support("d d~ > z g", color_accuracy="full")
 
-    assert report.runtime_artifact_supported is False
+    assert report.runtime_artifact_supported is True
     assert report.color_accuracy == "full"
-    assert report.support_class == "generic-dag-colour-preflight"
-    assert report.missing_feature == "colour-expansion"
-    assert report.artifact_unavailable_message is not None
-    assert "--color-accuracy=full" in report.artifact_unavailable_message
-    assert "Idenso basis/metric" in report.artifact_unavailable_message
+    assert report.support_class == "generic-dag-schema-v2"
+    assert report.missing_feature is None
+    assert report.artifact_unavailable_message is None
+    assert report.color_plan is not None
+    assert report.color_plan.ready_for_requested_colour is True
+
+
+def test_process_support_accepts_nlc_for_no_gluon_three_quark_pairs() -> None:
+    report = classify_process_support("d d~ > u u~ s s~", color_accuracy="nlc")
+
+    assert report.runtime_artifact_supported is True
+    assert report.color_accuracy == "nlc"
+    assert report.support_class == "generic-dag-schema-v2"
+    assert report.missing_feature is None
+    assert report.artifact_unavailable_message is None
+
+
+def test_process_support_accepts_nlc_for_three_quark_pairs_with_gluons() -> None:
+    report = classify_process_support("d d~ > u u~ s s~ g", color_accuracy="nlc")
+
+    assert report.runtime_artifact_supported is True
+    assert report.color_accuracy == "nlc"
+    assert report.support_class == "generic-dag-schema-v2"
+    assert report.missing_feature is None
+    assert report.artifact_unavailable_message is None

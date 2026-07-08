@@ -37,6 +37,7 @@ program amplicol_generate
   character(len=5) :: zone
   character(len=19) :: formatted
   logical :: create_amplitude_library,use_amplitude_library,read_momenta
+  logical :: create_raw_amplitude_library
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
@@ -755,6 +756,14 @@ contains
     logical,intent(out) :: done
     real(kind=8), dimension(:),allocatable :: amp2_save
     done=.false.
+    if (create_raw_amplitude_library) then
+       call pgl(ichan)%amps(iint)%create_library(pgl(ichan)%next,pgl(ichan)%hel,&
+            ichan,iint,phys_model,pgl(ichan)%ps(1)%p)
+       pgl(ichan)%amps(iint)%lib_created=.true.
+       done=.true.
+       call flush(99)
+       return
+    endif
     call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
     call setup_helicity_filter(pgl(ichan),iint)
     if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
@@ -979,15 +988,22 @@ contains
     if (library.eq.'none') then
        create_amplitude_library=.false.
        use_amplitude_library=.false.
+       create_raw_amplitude_library=.false.
     elseif (library.eq.'create') then
        create_amplitude_library=.true.
        use_amplitude_library=.false.
+       create_raw_amplitude_library=.false.
+    elseif (library.eq.'create-raw') then
+       create_amplitude_library=.true.
+       use_amplitude_library=.false.
+       create_raw_amplitude_library=.true.
     elseif (library.eq.'use') then
        create_amplitude_library=.false.
        use_amplitude_library=.true.
+       create_raw_amplitude_library=.false.
        return
     else
-       write (*,*) 'library must be none, create or use: ',trim(library)
+       write (*,*) 'library must be none, create, create-raw or use: ',trim(library)
        stop 1
     endif
 

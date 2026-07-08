@@ -10,7 +10,7 @@ For C++ and ASM rows with multiple measured chunking options, this table reports
 
 The compiled pyAmplicCol DAG marks all known-real momentum-sum parameters as real with Symbolica `set_real_params(...)` before evaluator generation/compilation. In this hot path the couplings are embedded constants, so the relevant runtime input realness is the momentum sector. The refreshed low-multiplicity AmpliCol reference rows use the direct generated-library benchmark: `./amplicol_generate --library=create --amplicol_momenta_probe=10`, `make amplicol_generate_library`, `make amplicol_library_benchmark`, then `./amplicol_library_benchmark N 1 1`, which calls `amp_lib:evaluate_amp` directly and bypasses integration/probe bookkeeping.
 
-The dependency installer now uses upstream Symbolica `dev` plus the local pyAmplicCol patches and pins SymJIT to `2.19.3` at commit `7fb09d1cb2a943c25a6fd71a208af44fcc6d813d`. The refreshed staged-DAG JIT rows pass SymJIT `opt_level=3` through Symbolica's JIT evaluator.
+The dependency installer now uses upstream Symbolica `dev` plus the local pyAmplicCol patches and pins SymJIT to `2.19.3` at commit `7fb09d1cb2a943c25a6fd71a208af44fcc6d813d`. This includes the historical AArch64 complex-JIT fix captured in `MRE_symjit_bug_new.py`. The refreshed staged-DAG JIT rows pass SymJIT `opt_level=3` through Symbolica's JIT evaluator.
 
 | n | Setup | Gen [s] | Wall [us/pt] | Eval [us/pt] | Notes |
 |---:|---|---:|---:|---:|---|

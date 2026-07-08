@@ -200,6 +200,31 @@ def test_process_enumerator_uses_generic_three_quark_line_orders() -> None:
     assert enumeration.n_records == 12
 
 
+def test_color_complete_reference_enumeration_keeps_crossed_quark_pairings() -> None:
+    enumeration = ProcessEnumerator().enumerate_color_complete("d d~ > t t~")
+
+    assert len(enumeration.groups) == 1
+    assert enumeration.n_records == 4
+    color_orders = {
+        tuple(label + 1 for label in record.color_order)
+        for record in enumeration.groups[0].records
+    }
+    assert color_orders == {
+        (2, 1, 3, 4),
+        (2, 4, 3, 1),
+        (3, 1, 2, 4),
+        (3, 4, 2, 1),
+    }
+
+
+def test_color_complete_reference_enumeration_keeps_all_gluon_words() -> None:
+    enumeration = ProcessEnumerator().enumerate_color_complete("g g > g g")
+
+    assert len(enumeration.groups) == 1
+    assert enumeration.n_records == 6
+    assert all(record.identical_factor == 2.0 for record in enumeration.groups[0].records)
+
+
 def test_process_export_matches_legacy_process_list_for_small_qcd_case(
     tmp_path: Path,
 ) -> None:

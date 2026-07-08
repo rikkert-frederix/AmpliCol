@@ -192,6 +192,10 @@ class GenericColorPlan:
         return self.color_accuracy == "lc" and bool(self.sectors) and not self.truncated
 
     @property
+    def ready_for_requested_colour(self) -> bool:
+        return bool(self.sectors) and not self.truncated and not self.idenso_required
+
+    @property
     def coloured_labels(self) -> tuple[int, ...]:
         return tuple(
             sorted(
@@ -221,6 +225,7 @@ class GenericColorPlan:
             "truncated": self.truncated,
             "idenso_required": self.idenso_required,
             "ready_for_leading_colour": self.ready_for_leading_colour,
+            "ready_for_requested_colour": self.ready_for_requested_colour,
             "coloured_labels": list(self.coloured_labels),
             "diagnostics": list(self.diagnostics),
             "sectors": [sector.to_json_dict() for sector in self.sectors],
@@ -249,18 +254,6 @@ def build_color_plan(
             color_accuracy=color_accuracy,
             options=options,
         )
-    if color_accuracy != "lc":
-        return GenericColorPlan(
-            process=process_ir,
-            color_accuracy=color_accuracy,
-            sectors=(),
-            diagnostics=(
-                f"{color_accuracy} colour planning is scaffolded and requires "
-                "Idenso basis/metric generation",
-            ),
-            idenso_required=True,
-        )
-
     quark_legs = _legs_by_labels(process_ir, process_ir.quark_labels)
     antiquark_legs = _legs_by_labels(process_ir, process_ir.antiquark_labels)
     gluon_labels = process_ir.gluon_labels
@@ -353,7 +346,7 @@ def _build_no_quark_color_plan(
     if not gluon_labels:
         return GenericColorPlan(
             process=process,
-            color_accuracy="lc",
+            color_accuracy=process.color_accuracy,
             sectors=(
                 LCColorSector(
                     id=0,
@@ -370,12 +363,14 @@ def _build_no_quark_color_plan(
     )
     seen_sector_keys = {_sector_dedup_key(sector) for sector in sectors}
     truncated = False
+    fold_reflections = process.color_accuracy == "lc"
     seen_reversal_classes: set[tuple[int, ...]] = set()
     for ordered_rest in permutations(rest):
-        canonical = min(ordered_rest, tuple(reversed(ordered_rest)))
-        if canonical in seen_reversal_classes:
-            continue
-        seen_reversal_classes.add(canonical)
+        if fold_reflections:
+            canonical = min(ordered_rest, tuple(reversed(ordered_rest)))
+            if canonical in seen_reversal_classes:
+                continue
+            seen_reversal_classes.add(canonical)
         candidate = LCColorSector(
             id=len(sectors),
             kind="single-trace",
@@ -397,7 +392,7 @@ def _build_no_quark_color_plan(
         )
     return GenericColorPlan(
         process=process,
-        color_accuracy="lc",
+        color_accuracy=process.color_accuracy,
         sectors=tuple(sectors),
         diagnostics=diagnostics,
         truncated=truncated,
@@ -529,17 +524,19 @@ def _sector_dedup_key(sector: LCColorSector) -> tuple[object, ...]:
 def _iter_open_line_color_words(
     lines: tuple[LCQuarkLine, ...],
     *,
-    include_block_permutations: bool = True,
+    include_block_permutations: bool = False,
 ) -> tuple[tuple[int, ...], ...]:
     """Return explicit colour words for one open-line pairing/allocation."""
 
-    if not include_block_permutations or len(lines) <= 1:
+    if not include_block_permutations or len(lines) < 2:
         return (tuple(label for line in lines for label in line.coloured_labels),)
     words: list[tuple[int, ...]] = []
     seen: set[tuple[int, ...]] = set()
     for line_permutation in permutations(lines):
         word = tuple(
-            label for line in line_permutation for label in line.coloured_labels
+            label
+            for line in line_permutation
+            for label in line.coloured_labels
         )
         if word in seen:
             continue
