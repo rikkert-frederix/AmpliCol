@@ -197,13 +197,13 @@ contains
        else
           ip=[2d0,-1d0,-2d0]
           ip_shat=[2d0,-1.2d0,-2d0]
-          ip_dt=[-1d0,-1d0,-1d0]
+          ip_dt=[2d0,-1d0,-2d0]
           ip_mass=[2d0,-0.5d0,-2d0]
        endif
     else
        ip=[2d0,-1d0,-2d0]
        ip_shat=[2d0,-1.2d0,-2d0]
-       ip_dt=[-1d0,-1d0,-1d0]
+       ip_dt=[2d0,-1d0,-2d0]
        ip_mass=[2d0,-0.5d0,-2d0]
     endif
     if (verbose) then
