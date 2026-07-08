@@ -70,6 +70,22 @@ Spenso, compiles the resulting parametric scalar/vector expressions with
 Symbolica evaluators, and can now execute the staged sweep from Rust through
 the PyO3 runtime \texttt{rusticol}.
 
+\paragraph{Merge-readiness status.}
+The \texttt{pyamplicol\_nlc\_full\_color} branch is ready to merge into
+\texttt{pyAmpliCol}.  It is based on the latest pushed \texttt{pyAmpliCol}
+branch and contains the generic LC/NLC/full-colour staged-DAG implementation,
+Fortran generated-library colour probe, documented result matrices, and
+integration fixtures.  LC, NLC and full-colour process-matrix entries through
+\(n\le4\) have been validated against generated-library \AC\ wherever the
+Fortran colour-reference path supports the colour class.  The only documented
+reference gap is the \(d\bar d\to u\bar u\,s\bar s\) NLC/full-colour cell,
+where \PAC\ generates and evaluates the generic multi-open-line colour
+contraction but the current Fortran \texttt{init\_col} reference probe stops
+above two quark lines.  The exact first milestone result state is archived in
+\texttt{docs/results\_archive/db0173e7}; subsequent post-archive refresh
+commits updated the low-multiplicity matrix caches through \(n=3\) for all
+colour accuracies and through \(n=4\) for LC before this merge-ready snapshot.
+
 \section{The AmpliCol Current Recursion}
 
 For a fixed leading-color ordering, a current is labelled by the external
