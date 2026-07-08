@@ -409,11 +409,11 @@ def test_generic_dag_carries_arbitrary_quark_line_colour_sectors() -> None:
     )
 
     assert dag.process.quark_lines.quark_pair_count == 3
-    assert dag.color_plan.sector_count == 36
+    assert dag.color_plan.sector_count == 6
     assert {
         dag.currents[source_id].index.color_state.sector_id
         for source_id in dag.sources
-    } == set(range(36))
+    } == set(range(6))
     assert any(
         current.index.ordered_external_labels != current.index.external_labels
         for current in dag.currents
@@ -444,7 +444,7 @@ def test_generic_dag_builds_four_quark_line_selected_sector() -> None:
     )
 
     assert dag.process.quark_lines.quark_pair_count == 4
-    assert color_plan.sector_count == 576
+    assert color_plan.sector_count == 24
     assert len(representative_ids) == 24
     assert dag.color_plan.sector_count == 1
     assert dag.has_amplitudes is True

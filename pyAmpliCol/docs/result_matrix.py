@@ -1276,6 +1276,14 @@ def _run_json_command(args: Sequence[str], *, timeout: float | None) -> dict[str
                     f"{_command_label(args)}",
                     flush=True,
                 )
+    except KeyboardInterrupt:
+        _terminate_process_group(process.pid, signal.SIGTERM)
+        try:
+            process.communicate(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            _terminate_process_group(process.pid, signal.SIGKILL)
+            process.communicate()
+        raise
     except subprocess.TimeoutExpired:
         _terminate_process_group(process.pid, signal.SIGTERM)
         try:

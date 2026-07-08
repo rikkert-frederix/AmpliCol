@@ -29,7 +29,7 @@ def test_color_plan_builds_open_line_gluon_orderings() -> None:
 def test_color_plan_generates_arbitrary_quark_line_pairings() -> None:
     plan = build_color_plan("d d~ > u u~ s s~")
 
-    assert plan.sector_count == 36
+    assert plan.sector_count == 6
     assert all(sector.kind == "open-lines" for sector in plan.sectors)
     assert all(len(sector.quark_lines) == 3 for sector in plan.sectors)
     assert all(len(sector.coloured_label_groups) == 3 for sector in plan.sectors)
@@ -37,7 +37,9 @@ def test_color_plan_generates_arbitrary_quark_line_pairings() -> None:
     assert all(sector.word_labels for sector in plan.sectors)
     direct_plan = build_color_plan("s s~ > u u~ d~ d")
     assert (6, 1, 3, 4, 2, 5) in {
-        sector.color_words[0] for sector in direct_plan.sectors
+        word
+        for sector in direct_plan.sectors
+        for word in sector.compatibility_words
     }
 
 
@@ -45,18 +47,18 @@ def test_color_plan_line_pairing_representatives_drop_only_block_orderings() -> 
     three_line = build_color_plan("d d~ > u u~ s s~")
     four_line = build_color_plan("d d~ > u u~ s s~ c c~")
 
-    assert three_line.sector_count == 36
+    assert three_line.sector_count == 6
     assert lc_line_pairing_representative_ids(three_line) == (
         0,
-        6,
-        12,
-        18,
-        24,
-        30,
+        1,
+        2,
+        3,
+        4,
+        5,
     )
-    assert four_line.sector_count == 576
+    assert four_line.sector_count == 24
     assert len(lc_line_pairing_representative_ids(four_line)) == 24
-    assert lc_line_pairing_representative_ids(four_line)[:4] == (0, 24, 48, 72)
+    assert lc_line_pairing_representative_ids(four_line)[:4] == (0, 1, 2, 3)
 
 
 def test_open_line_compatibility_includes_complete_block_permutations() -> None:
@@ -85,7 +87,7 @@ def test_open_line_legacy_orders_include_antiquark_first_orientation() -> None:
 def test_color_plan_keeps_singlets_global_to_open_colour_sectors() -> None:
     plan = build_color_plan("d d~ > u u~ z")
 
-    assert plan.sector_count == 4
+    assert plan.sector_count == 2
     assert all(sector.kind == "open-lines" for sector in plan.sectors)
     assert {(5 in group) for sector in plan.sectors for group in sector.line_label_groups} == {
         False,

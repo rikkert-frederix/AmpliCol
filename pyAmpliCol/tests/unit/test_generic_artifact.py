@@ -351,13 +351,13 @@ def test_generic_process_manifest_records_line_pairing_representatives() -> None
     ).to_json_dict()
     reuse = payload["lc_topology_reuse"]
 
-    assert reuse["full_color_sector_count"] == 576
+    assert reuse["full_color_sector_count"] == 24
     assert reuse["line_pairing_representative_sector_count"] == 24
     assert reuse["line_pairing_representative_sector_ids"][:4] == [
         0,
-        24,
-        48,
-        72,
+        1,
+        2,
+        3,
     ]
 
 
@@ -371,7 +371,7 @@ def test_selected_sector_manifest_uses_filtered_color_plan_for_large_line_counts
         numerical_current_merging=False,
     ).to_json_dict()
 
-    assert payload["color_plan"]["sector_count"] == 1
+    assert payload["color_plan"]["sector_count"] == 120
     assert payload["color_plan"]["truncated"] is False
     assert payload["planning_status"]["color_ready"] is True
     assert payload["planning_status"]["generic_evaluator_ready"] is True
@@ -389,7 +389,7 @@ def test_reference_color_sector_can_be_selected_before_dag_construction() -> Non
     assert select_leading_color_sector_ids_from_plan(
         plan,
         reference_color_order=(2, 4, 3, 6, 5, 1),
-    ) == {18}
+    ) == {3}
     assert select_leading_color_sector_ids_from_plan(plan) == {0}
 
 
@@ -550,18 +550,18 @@ def test_generic_artifact_defaults_to_contributing_lc_sectors(
         tmp_path / "runtime",
     )
 
-    assert artifact["compiled"]["selected_color_sector_ids"] == list(range(8))
-    assert artifact["dag_summary"]["amplitude_root_count"] == 32
-    assert artifact["dag_summary"]["current_count"] == 179
-    assert artifact["dag_summary"]["interaction_count"] == 161
-    assert artifact["dag_summary"]["source_count"] == 64
-    assert artifact["full_dag_summary"]["current_count"] == 179
-    assert artifact["full_dag_summary"]["interaction_count"] == 161
-    assert artifact["full_dag_summary"]["source_count"] == 64
-    assert artifact["lowering_status"]["current_color_sectors"] == list(range(8))
+    assert artifact["compiled"]["selected_color_sector_ids"] == list(range(4))
+    assert artifact["dag_summary"]["amplitude_root_count"] == 16
+    assert artifact["dag_summary"]["current_count"] == 93
+    assert artifact["dag_summary"]["interaction_count"] == 83
+    assert artifact["dag_summary"]["source_count"] == 32
+    assert artifact["full_dag_summary"]["current_count"] == 93
+    assert artifact["full_dag_summary"]["interaction_count"] == 83
+    assert artifact["full_dag_summary"]["source_count"] == 32
+    assert artifact["lowering_status"]["current_color_sectors"] == list(range(4))
     runtime_schema = artifact["runtime_schema"]
-    assert runtime_schema["source_fill"]["source_count"] == 64
-    assert runtime_schema["amplitude_stage"]["output_count"] == 32
+    assert runtime_schema["source_fill"]["source_count"] == 32
+    assert runtime_schema["amplitude_stage"]["output_count"] == 16
     assert {
         root["helicity_weight"]
         for root in runtime_schema["amplitude_stage"]["roots"]
@@ -635,11 +635,11 @@ def test_generic_process_manifest_handles_multi_quark_line_plan() -> None:
     payload = build_generic_process_manifest("d d~ > u u~").to_json_dict()
 
     assert payload["process_ir"]["quark_lines"]["quark_pair_count"] == 2
-    assert payload["planning_status"]["color_sector_count"] == 4
+    assert payload["planning_status"]["color_sector_count"] == 2
     assert payload["planning_status"]["color_ready"] is True
-    assert payload["lowering_status"]["current_color_sector_count"] == 4
-    assert payload["lowering_status"]["current_color_sectors"] == [0, 1, 2, 3]
-    assert len(payload["lowering_status"]["color_sector_summaries"]) == 4
+    assert payload["lowering_status"]["current_color_sector_count"] == 2
+    assert payload["lowering_status"]["current_color_sectors"] == [0, 1]
+    assert len(payload["lowering_status"]["color_sector_summaries"]) == 2
     assert payload["lowering_status"]["color_sector_summaries"][0][
         "pending_vertex_kinds"
     ] == []
@@ -658,7 +658,7 @@ def test_generic_process_manifest_handles_multi_quark_line_plan() -> None:
         source["color_state"]["sector_id"]
         for source in runtime_schema["source_fill"]["sources"]
     }
-    assert source_sectors == {0, 1, 2, 3}
+    assert source_sectors == {0, 1}
     assert payload["stage_plan"]["current_stages"][-1]["subset_size"] == 3
     assert payload["stage_plan"]["amplitude_stage"]["closure_count"] > 0
 

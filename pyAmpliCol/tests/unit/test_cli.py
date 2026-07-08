@@ -136,19 +136,19 @@ def test_cli_process_plan_supports_line_pairing_sector_strategy(
     assert status["current_color_sector_count"] == 14
     assert status["current_color_sectors"] == [
         0,
-        24,
-        48,
-        72,
-        120,
-        144,
-        168,
-        192,
-        216,
-        264,
-        336,
-        360,
-        504,
-        552,
+        1,
+        2,
+        3,
+        5,
+        6,
+        7,
+        8,
+        9,
+        11,
+        14,
+        15,
+        21,
+        23,
     ]
     assert status["closure_count"] > 0
     assert status["truncated"] is False

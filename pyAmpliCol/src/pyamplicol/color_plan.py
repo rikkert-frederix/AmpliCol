@@ -304,7 +304,10 @@ def build_color_plan(
                     zip(quark_legs, antiquark_permutation, strict=True)
                 )
             )
-            for word_labels in _iter_open_line_color_words(lines):
+            for word_labels in _iter_open_line_color_words(
+                lines,
+                include_block_permutations=color_accuracy != "lc",
+            ):
                 candidate = LCColorSector(
                     id=len(sectors),
                     kind="open-lines",
@@ -525,10 +528,12 @@ def _sector_dedup_key(sector: LCColorSector) -> tuple[object, ...]:
 
 def _iter_open_line_color_words(
     lines: tuple[LCQuarkLine, ...],
+    *,
+    include_block_permutations: bool = True,
 ) -> tuple[tuple[int, ...], ...]:
     """Return explicit colour words for one open-line pairing/allocation."""
 
-    if len(lines) <= 1:
+    if not include_block_permutations or len(lines) <= 1:
         return (tuple(label for line in lines for label in line.coloured_labels),)
     words: list[tuple[int, ...]] = []
     seen: set[tuple[int, ...]] = set()
