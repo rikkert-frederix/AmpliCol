@@ -19308,8 +19308,21 @@
         "n_final": 7,
         "process": "d d~ > z z g g g g g",
         "pyamplicol_cpp_o3": {
-          "error": "pyAmpliCol/src/pyamplicol/__main__.py\", line 2514, in _cmd_generate_generic_dag_artifact\n    manifest_path, manifest = write_generic_dag_process_artifact(\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/generic_artifact.py\", line 687, in write_generic_dag_process_artifact\n    payload = _generic_dag_process_artifact_payload(\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/generic_artifact.py\", line 2455, in _generic_dag_process_artifact_payload\n    stage_evaluator_payload = write_generic_stage_evaluator_artifacts(\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/generic_stage_compiler.py\", line 324, in write_generic_stage_evaluator_artifacts\n    payload[\"evaluator\"] = compile_stage(stage)\n                           ^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/generic_stage_compiler.py\", line 304, in compile_stage\n    manifest = _compile_default_stage_evaluator(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/generic_stage_compiler.py\", line 395, in _compile_default_stage_evaluator\n    evaluator = _compile_symbolica_outputs(\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/symbolica_evaluator.py\", line 229, in _compile_symbolica_outputs\n    chunks = [future.result() for future in futures]\n              ^^^^^^^^^^^^^^^\n  File \"/opt/local/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/concurrent/futures/_base.py\", line 456, in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/opt/local/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/concurrent/futures/_base.py\", line 401, in __get_result\n    raise self._exception\n  File \"/opt/local/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/concurrent/futures/thread.py\", line 58, in run\n    result = self.fn(*self.args, **self.kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/symbolica_evaluator.py\", line 204, in compile_chunk\n    return _compile_symbolica_outputs(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/symbolica_evaluator.py\", line 387, in _compile_symbolica_outputs\n    return _finalize_symbolica_evaluator(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/symbolica_evaluator.py\", line 597, in _finalize_symbolica_evaluator\n    return _CompiledComplexEvaluatorAdapter(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/src/pyamplicol/symbolica_evaluator.py\", line 728, in __init__\n    self._compiled = evaluator.compile(\n                     ^^^^^^^^^^^^^^^^^^\nValueError: Compilation error: Could not compile code: g++ -shared -O3 -fPIC -ffast-math -funsafe-math-optimizations -march=native -o /Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n7/cpp_o3/compiled/generic_stage_3_subset_4/libpyamplicol_generic_stage_3_subset_4_chunk_3_eff4f71eb04445779399b02198b257fb /Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n7/cpp_o3/compiled/generic_stage_3_subset_4/pyamplicol_generic_stage_3_subset_4_chunk_3_eff4f71eb04445779399b02198b257fb.cpp\nld: open() failed, errno=2 for '/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n7/cpp_o3/compiled/generic_stage_3_subset_4/libpyamplicol_generic_stage_3_subset_4_chunk_3_eff4f71eb04445779399b02198b257fb'\ncollect2: error: ld returned 1 exit status\n\n",
-          "finished_at": "2026-07-08T09:39:14.228613+00:00",
+          "finished_at": "2026-07-08T10:56:27.452655+00:00",
+          "generate_payload": {
+            "artifact_class": "generic-dag-schema-v2",
+            "available": true,
+            "generation_s": 130.86800716700964,
+            "key": "d_dbar_to_z_z_g_g_g_g_g",
+            "kind": "pyamplicol-generic-dag-process",
+            "manifest": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n7/cpp_o3/process_manifest.json",
+            "process": "d d~ > z z g g g g g",
+            "runtime_available": true,
+            "runtime_backend": "rusticol",
+            "runtime_unavailable_message": null
+          },
+          "generation_s": 131.02500062482432,
+          "internal_generation_s": 130.86800716700964,
           "matrix_settings": {
             "current_merging": {
               "enabled": true,
@@ -19354,8 +19367,43 @@
           },
           "mode": "pyAmpliCol - staged-DAG | C++ O3",
           "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n7/cpp_o3",
-          "started_at": "2026-07-08T09:38:48.336305+00:00",
-          "status": "failed"
+          "reference_color_order": [
+            2,
+            5,
+            6,
+            7,
+            8,
+            9,
+            1,
+            3,
+            4
+          ],
+          "runtime_us_per_point": 49.66416778017241,
+          "samples": 18560,
+          "selected_lc_sector_ids": [
+            0
+          ],
+          "started_at": "2026-07-08T10:54:14.951050+00:00",
+          "status": "ok",
+          "time_payload": {
+            "artifact_class": "generic-dag-schema-v2",
+            "available": true,
+            "process": "d d~ > z z g g g g g",
+            "process_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n7/cpp_o3",
+            "profile": {
+              "core_evaluator_us_per_point": 49.66416778017241,
+              "core_evaluator_us_per_point_error": 0.12022942840645921,
+              "samples": 18560,
+              "wall_us_per_point": 54.16890673022235,
+              "wall_us_per_point_error": 0.15963080113438607
+            },
+            "schema_version": 2,
+            "target_runtime_s": 1.0,
+            "values": [
+              1.8887181322917596e-20
+            ]
+          },
+          "wall_us_per_point": 54.16890673022235
         },
         "pyamplicol_jit": {
           "finished_at": "2026-07-08T08:04:20.474503+00:00",
@@ -19455,7 +19503,7 @@
           "wall_us_per_point": 86.86962910360307
         },
         "status": "done",
-        "updated_at": "2026-07-08T09:39:14.228699+00:00"
+        "updated_at": "2026-07-08T10:56:27.464912+00:00"
       },
       "8": {
         "amplicol": {
@@ -31277,5 +31325,5 @@
     }
   },
   "schema_version": 1,
-  "updated_at": "2026-07-08T10:51:30.181233+00:00"
+  "updated_at": "2026-07-08T11:08:31.841305+00:00"
 }
