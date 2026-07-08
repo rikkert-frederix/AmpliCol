@@ -22,7 +22,9 @@ from pyamplicol.generic_artifact import (
     write_generic_process_manifest,
     select_leading_color_sector_ids_from_plan,
     _current_signature_relation,
+    _drop_currents_from_dag,
     _merge_currents_in_dag,
+    _validate_numerical_rewrite_preserves_raw_sums,
     _json_safe_bigints,
 )
 from pyamplicol.generic_dag import AmplitudeRoot, CurrentNode, GenericDAG
@@ -110,11 +112,62 @@ def test_zero_current_filter_prunes_massive_top_chirality_currents() -> None:
 
     assert report["enabled"] is True
     assert report["skipped"] is False
+    assert report["validation"]["accepted"] is True
     assert report["zero_current_ids"] == [12, 13, 14, 15]
     assert report["removed_current_count"] == 4
     assert len(filtered.dag.currents) == len(unfiltered.dag.currents) - 4
     assert len(filtered.dag.interactions) == len(unfiltered.dag.interactions) - 16
     assert len(filtered.dag.amplitude_roots) == len(unfiltered.dag.amplitude_roots)
+
+
+def test_raw_sum_validation_rejects_contributing_current_drop() -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > z g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    candidate = _drop_currents_from_dag(
+        manifest.dag,
+        (manifest.dag.amplitude_roots[0].left_id,),
+    )
+
+    validation = _validate_numerical_rewrite_preserves_raw_sums(
+        manifest.dag,
+        candidate,
+        manifest.model,
+        sample_count=3,
+        seed=12345,
+    )
+
+    assert validation["accepted"] is False
+    assert validation["max_relative_difference"] > 1.0e-12
+
+
+def test_raw_sum_validation_rejects_wrong_current_merge() -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > z g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    current_map = {current.id: (current.id, 1.0) for current in manifest.dag.currents}
+    current_map[manifest.dag.amplitude_roots[0].left_id] = (
+        manifest.dag.amplitude_roots[1].left_id,
+        1.0,
+    )
+    candidate = _merge_currents_in_dag(manifest.dag, current_map)
+
+    validation = _validate_numerical_rewrite_preserves_raw_sums(
+        manifest.dag,
+        candidate,
+        manifest.model,
+        sample_count=3,
+        seed=12345,
+    )
+
+    assert validation["accepted"] is False
+    assert validation["max_relative_difference"] > 1.0e-12
 
 
 def test_zero_current_filter_can_be_disabled_in_artifact(tmp_path: Path) -> None:

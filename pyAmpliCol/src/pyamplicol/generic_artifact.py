@@ -38,6 +38,10 @@ GENERIC_DAG_PROCESS_ARTIFACT_KIND = "pyamplicol-generic-dag-process"
 GENERIC_DAG_PROCESS_SET_ARTIFACT_KIND = "pyamplicol-generic-dag-process-set"
 
 _FULL_COLOR_PLAN_SERIALIZATION_SECTOR_LIMIT = 1000
+_NUMERICAL_REWRITE_VALIDATION_SAMPLE_LIMIT = 3
+_NUMERICAL_REWRITE_VALIDATION_SEED_OFFSET = 1_000_003
+_NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE = 1.0e-10
+_NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE = 1.0e-24
 
 
 @dataclass(frozen=True)
@@ -1253,6 +1257,32 @@ def _filter_zero_currents_by_warmup(
         return dag, report
 
     after = _dag_count_payload(filtered)
+    validation = _validate_numerical_rewrite_preserves_raw_sums(
+        dag,
+        filtered,
+        model,
+        sample_count=sample_count,
+        seed=seed,
+    )
+    if not bool(validation["accepted"]):
+        report.update(
+            {
+                "skipped": True,
+                "reason": (
+                    "zero-current candidates failed raw-sum validation; "
+                    "leaving DAG unchanged"
+                ),
+                "threshold": threshold,
+                "global_max_abs": global_max,
+                "zero_current_ids": list(zero_ids),
+                "zero_current_count": len(zero_ids),
+                "candidate_after": after,
+                "validation": validation,
+                "after": before,
+            }
+        )
+        return dag, report
+
     report.update(
         {
             "skipped": False,
@@ -1267,6 +1297,7 @@ def _filter_zero_currents_by_warmup(
             "removed_amplitude_root_count": (
                 before["amplitude_root_count"] - after["amplitude_root_count"]
             ),
+            "validation": validation,
             "after": after,
         }
     )
@@ -1381,6 +1412,33 @@ def _merge_identical_currents_by_warmup(
         return dag, report
 
     after = _dag_count_payload(merged)
+    validation = _validate_numerical_rewrite_preserves_raw_sums(
+        dag,
+        merged,
+        model,
+        sample_count=sample_count,
+        seed=seed,
+    )
+    if not bool(validation["accepted"]):
+        report.update(
+            {
+                "skipped": True,
+                "reason": (
+                    "current-merging candidates failed raw-sum validation; "
+                    "leaving DAG unchanged"
+                ),
+                "threshold": threshold,
+                "global_max_abs": global_max,
+                "merged_current_ids": list(merged_ids),
+                "merged_current_count": len(merged_ids),
+                "merged_group_count": len(groups),
+                "candidate_after": after,
+                "validation": validation,
+                "after": before,
+            }
+        )
+        return dag, report
+
     report.update(
         {
             "skipped": False,
@@ -1410,6 +1468,7 @@ def _merge_identical_currents_by_warmup(
             "removed_amplitude_root_count": (
                 before["amplitude_root_count"] - after["amplitude_root_count"]
             ),
+            "validation": validation,
             "after": after,
         }
     )
@@ -1563,6 +1622,233 @@ def _evaluate_current_warmup(
         current_id: tuple(parts)
         for current_id, parts in signature_parts.items()
     }
+
+
+def _validate_numerical_rewrite_preserves_raw_sums(
+    reference_dag: GenericDAG,
+    candidate_dag: GenericDAG,
+    model: Model,
+    *,
+    sample_count: int,
+    seed: int,
+) -> dict[str, object]:
+    validation_count = max(
+        1,
+        min(
+            int(sample_count),
+            _NUMERICAL_REWRITE_VALIDATION_SAMPLE_LIMIT,
+        ),
+    )
+    validation_seed = int(seed) + _NUMERICAL_REWRITE_VALIDATION_SEED_OFFSET
+    report: dict[str, object] = {
+        "mode": "independent-raw-sum-warmup",
+        "accepted": False,
+        "sample_count": validation_count,
+        "seed": validation_seed,
+        "relative_tolerance": _NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE,
+        "zero_tolerance": _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE,
+    }
+    try:
+        points = tuple(
+            _generic_warmup_phase_space_point(
+                reference_dag,
+                model,
+                seed=validation_seed + offset,
+            )
+            for offset in range(validation_count)
+        )
+        reference_sums = _evaluate_dag_raw_sums_by_warmup(
+            reference_dag,
+            model,
+            points,
+        )
+        candidate_sums = _evaluate_dag_raw_sums_by_warmup(
+            candidate_dag,
+            model,
+            points,
+        )
+    except Exception as error:  # noqa: BLE001 - pruning must be conservative.
+        report.update(
+            {
+                "reason": f"raw-sum validation failed: {error}",
+                "reference_raw_sums": [],
+                "candidate_raw_sums": [],
+            }
+        )
+        return report
+
+    differences = [
+        abs(float(reference) - float(candidate))
+        for reference, candidate in zip(reference_sums, candidate_sums, strict=True)
+    ]
+    scales = [
+        max(abs(float(reference)), abs(float(candidate)), 1.0e-300)
+        for reference, candidate in zip(reference_sums, candidate_sums, strict=True)
+    ]
+    relative_differences = [
+        difference / scale
+        for difference, scale in zip(differences, scales, strict=True)
+    ]
+    tolerances = [
+        max(
+            _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE,
+            _NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE * scale,
+        )
+        for scale in scales
+    ]
+    accepted = all(
+        difference <= tolerance
+        for difference, tolerance in zip(differences, tolerances, strict=True)
+    )
+    report.update(
+        {
+            "accepted": accepted,
+            "max_abs_difference": max(differences, default=0.0),
+            "max_relative_difference": max(relative_differences, default=0.0),
+            "reference_raw_sums": [float(value) for value in reference_sums],
+            "candidate_raw_sums": [float(value) for value in candidate_sums],
+        }
+    )
+    if not accepted:
+        report["reason"] = "candidate raw sums differ from unmodified DAG"
+    return report
+
+
+def _evaluate_dag_raw_sums_by_warmup(
+    dag: GenericDAG,
+    model: Model,
+    points: Sequence[Sequence[ExternalMomentum]],
+) -> tuple[float, ...]:
+    from .generic_stage_compiler import (
+        _amplitude_root_expression,
+        _interaction_contribution,
+        _momentum_components,
+        _sum_components,
+    )
+
+    schema = cast(dict[str, Any], _generic_runtime_schema_payload(dag, model))
+    value_slots = _schema_value_slots_by_id(schema)
+    momentum_slots = _schema_momentum_slots_by_id(schema)
+    current_slots = _schema_current_slots_by_id(schema)
+    stages = cast(list[Any], schema["stages"])
+    amplitude_stage = cast(dict[str, Any], schema["amplitude_stage"])
+    roots = [
+        cast(dict[str, Any], raw)
+        for raw in cast(list[Any], amplitude_stage["roots"])
+    ]
+    layout = cast(dict[str, Any], schema["parameter_layout"])
+    value_count = int(layout["value_component_count"])
+    momentum_count = int(layout["momentum_parameter_count"])
+    raw_sums: list[float] = []
+    for point in points:
+        values = [0j for _ in range(value_count)]
+        momenta = [0j for _ in range(momentum_count)]
+        _fill_warmup_sources(schema, model, values, point)
+        _fill_warmup_momenta(schema, momenta, point)
+        for stage_obj in stages:
+            stage = cast(dict[str, Any], stage_obj)
+            interactions_by_result: dict[int, list[dict[str, Any]]] = {}
+            for raw in cast(list[Any], stage["interactions"]):
+                interaction = cast(dict[str, Any], raw)
+                interactions_by_result.setdefault(
+                    int(interaction["result_current_id"]),
+                    [],
+                ).append(interaction)
+            for current_id in sorted(interactions_by_result):
+                current_slot = current_slots[current_id]
+                dimension = int(current_slot["dimension"])
+                total = tuple(0j for _ in range(dimension))
+                for interaction in interactions_by_result[current_id]:
+                    contribution = _interaction_contribution(
+                        dag,
+                        model,
+                        interaction,
+                        value_symbols=values,
+                        momentum_symbols=momenta,
+                        value_slots=value_slots,
+                        momentum_slots=momentum_slots,
+                    )
+                    total = _sum_components(total, contribution)
+                for slot_id in cast(list[Any], stage["output_value_slot_ids"]):
+                    slot = value_slots[int(slot_id)]
+                    if int(slot["current_id"]) != current_id:
+                        continue
+                    components = (
+                        model.propagator_component_expression(
+                            int(current_slot["particle_id"]),
+                            total,
+                            _momentum_components(
+                                int(current_slot["momentum_mask"]),
+                                momenta,
+                                momentum_slots,
+                            ),
+                            chirality=int(current_slot["chirality"]),
+                        )
+                        if str(slot["variant"]) == "propagated"
+                        else total
+                    )
+                    start = int(slot["component_start"])
+                    for offset, component in enumerate(components):
+                        values[start + offset] = complex(component)
+        amplitudes = tuple(
+            complex(
+                _amplitude_root_expression(
+                    model,
+                    root,
+                    value_symbols=values,
+                    value_slots=value_slots,
+                )
+            )
+            for root in roots
+        )
+        weights = tuple(float(root["helicity_weight"]) for root in roots)
+        group_ids = tuple(
+            None
+            if root.get("coherent_group_id") is None
+            else int(root["coherent_group_id"])
+            for root in roots
+        )
+        raw_sums.append(
+            _coherent_weighted_abs2_sum(
+                amplitudes,
+                weights,
+                group_ids,
+            )
+        )
+    return tuple(raw_sums)
+
+
+def _coherent_weighted_abs2_sum(
+    amplitudes: Sequence[complex],
+    weights: Sequence[float],
+    group_ids: Sequence[int | None],
+) -> float:
+    if len(amplitudes) != len(weights) or len(amplitudes) != len(group_ids):
+        raise NativeEvaluationError(
+            "raw-sum validation metadata length does not match amplitude outputs"
+        )
+    raw_sum = 0.0
+    grouped: dict[int, list[int]] = {}
+    for index, group_id in enumerate(group_ids):
+        if group_id is None:
+            amplitude = amplitudes[index]
+            raw_sum += float(weights[index]) * (
+                amplitude.real * amplitude.real + amplitude.imag * amplitude.imag
+            )
+        else:
+            grouped.setdefault(int(group_id), []).append(index)
+    for group_id in sorted(grouped):
+        indices = grouped[group_id]
+        group_weights = {float(weights[index]) for index in indices}
+        if len(group_weights) != 1:
+            raise NativeEvaluationError(
+                f"coherent amplitude group {group_id} has inconsistent raw-sum weights"
+            )
+        coherent = sum((amplitudes[index] for index in indices), start=0j)
+        raw_sum += group_weights.pop() * (
+            coherent.real * coherent.real + coherent.imag * coherent.imag
+        )
+    return float(raw_sum)
 
 
 def _fill_warmup_sources(
