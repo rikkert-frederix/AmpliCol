@@ -6,6 +6,8 @@
 *.a
 /amplicol_generate
 /amplicol_library_benchmark
+/amplicol_color_probe
+/amplicol_color_probe.output
 /libamp*.so
 /z
 

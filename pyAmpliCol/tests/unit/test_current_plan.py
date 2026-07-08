@@ -33,7 +33,7 @@ def test_generic_current_plan_uses_model_owned_colour_filtering() -> None:
     lc_kinds = {kind for kind, _ in lc_plan.required_vertex_kind_counts}
     full_kinds = {kind for kind, _ in full_plan.required_vertex_kind_counts}
     assert 4 not in lc_kinds
-    assert 4 in full_kinds
+    assert full_kinds == lc_kinds
     assert full_plan.color_sectors == (0,)
 
 
@@ -65,7 +65,7 @@ def test_generic_current_plan_keeps_singlet_currents_in_colour_sector_support() 
     color_plan = build_color_plan("d d~ > u u~ z")
     current_plan = build_generic_current_plan("d d~ > u u~ z")
 
-    assert color_plan.sector_count == 4
+    assert color_plan.sector_count == 2
     assert len(current_plan.currents) > 0
     assert len(current_plan.interactions) > 0
     assert len(current_plan.closures) > 0
@@ -122,8 +122,8 @@ def test_generic_current_plan_handles_more_than_three_quark_pair_candidates() ->
     payload = plan.to_json_dict()
 
     assert plan.process.quark_lines.quark_pair_count == 3
-    assert plan.color_sectors == tuple(range(36))
-    assert len(plan.sources) == 432
+    assert plan.color_sectors == tuple(range(6))
+    assert len(plan.sources) == 72
     assert plan.has_closure is True
     assert plan.unimplemented_vertex_kinds == ()
     assert plan.pending_vertex_kinds == ()
@@ -132,10 +132,10 @@ def test_generic_current_plan_handles_more_than_three_quark_pair_candidates() ->
         for current in plan.currents
         if not current.is_source
     )
-    assert len(payload["color_sector_summaries"]) == 36
+    assert len(payload["color_sector_summaries"]) == 6
     assert {
         summary["color_sector"] for summary in payload["color_sector_summaries"]
-    } == set(range(36))
+    } == set(range(6))
     assert sum(summary["closure_count"] for summary in payload["color_sector_summaries"]) == len(plan.closures)
 
 
@@ -219,7 +219,7 @@ def test_generic_stage_plan_handles_many_quark_line_stage_metadata() -> None:
     assert stage_plan.amplitude_stage.full_tensor_network_ready is True
     stage_summaries = payload["current_stages"][0]["color_sector_summaries"]
     assert {summary["color_sector"] for summary in stage_summaries}.issubset(
-        set(range(36))
+        set(range(6))
     )
     assert len(stage_summaries) >= 1
     assert payload["amplitude_stage"]["color_sector_summaries"]

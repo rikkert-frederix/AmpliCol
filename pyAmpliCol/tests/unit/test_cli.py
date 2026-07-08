@@ -136,19 +136,19 @@ def test_cli_process_plan_supports_line_pairing_sector_strategy(
     assert status["current_color_sector_count"] == 14
     assert status["current_color_sectors"] == [
         0,
-        24,
-        48,
-        72,
-        120,
-        144,
-        168,
-        192,
-        216,
-        264,
-        336,
-        360,
-        504,
-        552,
+        1,
+        2,
+        3,
+        5,
+        6,
+        7,
+        8,
+        9,
+        11,
+        14,
+        15,
+        21,
+        23,
     ]
     assert status["closure_count"] > 0
     assert status["truncated"] is False
@@ -277,11 +277,11 @@ def test_cli_process_plan_writes_process_set_with_unsupported_diagnostics(
     assert payload["processes"][1]["lowering_status"][
         "unimplemented_vertex_kinds"
     ] == []
-    assert payload["processes"][0]["planning_status"]["color_ready"] is False
-    assert payload["processes"][0]["planning_status"]["idenso_required"] is True
+    assert payload["processes"][0]["planning_status"]["color_ready"] is True
+    assert payload["processes"][0]["planning_status"]["idenso_required"] is False
     assert (
         payload["processes"][0]["planning_status"]["generic_evaluator_ready"]
-        is False
+        is True
     )
     assert root_manifest_path.exists()
     root_payload = json.loads(root_manifest_path.read_text(encoding="utf-8"))
@@ -596,10 +596,34 @@ def test_cli_generate_process_minimal_command_uses_fast_rusticol_defaults(
     assert args.color_accuracy == "lc"
     assert args.append is False
     assert args.replace is False
-    assert args.numerical_filter_current is True
-    assert args.numerical_current_merging is True
+    pruning = cli._generic_dag_pruning_kwargs(args)
+    assert args.numerical_filter_current is None
+    assert args.numerical_current_merging is None
+    assert pruning["numerical_filter_current"] is True
+    assert pruning["numerical_current_merging"] is True
     assert args.numerical_current_samples == 10
     assert args.numerical_current_seed == 12345
+
+
+def test_cli_generate_process_disables_numerical_current_passes_for_nlc_default(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(
+        [
+            "generate-process",
+            "--color-accuracy",
+            "nlc",
+            "g g > g g",
+            str(output_dir),
+        ]
+    )
+    pruning = cli._generic_dag_pruning_kwargs(args)
+
+    assert args.numerical_filter_current is None
+    assert args.numerical_current_merging is None
+    assert pruning["numerical_filter_current"] is False
+    assert pruning["numerical_current_merging"] is False
 
 
 def test_cli_generate_process_can_disable_numerical_current_passes(
@@ -2710,7 +2734,7 @@ def test_cli_generate_process_set_writes_non_family_schema_v2_json(
     )
 
 
-def test_cli_generate_process_rejects_unimplemented_color_accuracy_json(
+def test_cli_generate_process_accepts_supported_full_colour_json(
     capsys,
     tmp_path: Path,
 ) -> None:
@@ -2720,47 +2744,51 @@ def test_cli_generate_process_rejects_unimplemented_color_accuracy_json(
                 "generate-process",
                 "--color-accuracy",
                 "full",
+                "--symbolica-evaluator-backend",
+                "jit",
                 "d d~ > z g",
                 str(tmp_path / "process"),
                 "--json",
             ]
         )
-        == 1
+        == 0
     )
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload["available"] is False
-    assert "Idenso basis/metric" in payload["error"]
-    assert "--color-accuracy=full" in payload["error"]
+    assert payload["available"] is True
+    assert payload["runtime_available"] is True
+    assert payload["planning_status"]["color_ready"] is True
+    manifest = json.loads((tmp_path / "process" / "process_manifest.json").read_text())
+    contraction = manifest["runtime_schema"]["amplitude_stage"]["color_contraction"]
+    assert contraction["supported"] is True
+    assert contraction["includes_color_factor"] is True
 
 
-def test_cli_generate_process_set_rejects_unimplemented_color_accuracy_before_work(
+def test_cli_generate_process_reports_unsupported_nlc_colour_class_locally(
     capsys,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("process-set workers should not be spawned for NLC/full")
-
-    monkeypatch.setattr(subprocess, "Popen", fail_if_called)
-
     assert (
         main(
             [
                 "generate-process",
                 "--color-accuracy",
                 "nlc",
-                "d d~ > z g | u u~ > z g",
-                str(tmp_path / "process-set"),
+                "--symbolica-evaluator-backend",
+                "jit",
+                "d d~ > u u~ s s~",
+                str(tmp_path / "process"),
+                "--json",
             ]
         )
-        == 1
+        == 0
     )
 
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "Idenso basis/metric" in captured.err
-    assert "--color-accuracy=nlc" in captured.err
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["available"] is True
+    assert payload["runtime_available"] is False
+    assert payload["runtime_unavailable_message"] is not None
+    assert "zero, one, or two quark pairs" in payload["runtime_unavailable_message"]
 
 
 def test_cli_rusticol_generate_only_supports_zero_gluon_process(

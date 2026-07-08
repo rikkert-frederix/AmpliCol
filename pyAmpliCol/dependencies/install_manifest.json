@@ -17,7 +17,7 @@
     "installed": true,
     "requested": true,
     "source_path": "../rusticol",
-    "source_rev": "92ac9e60932a2a0cf15a72b8f7d1e08e7fd5dccf",
+    "source_rev": "814017438c059515fe6fcc078bdb82c6bec888a5",
     "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts"
   },
   "schema_version": 1,
@@ -29,10 +29,10 @@
     "source_rev": "e4167e767147ab8f3b4f039057c396c8fa961f6a",
     "source_url": "https://github.com/symbolica-dev/symbolica.git",
     "symjit_source_path": "dependencies/symjit",
-    "symjit_source_ref": "54d6c6171f05b39505d18d1932f0972bfac9e4da",
-    "symjit_source_rev": "54d6c6171f05b39505d18d1932f0972bfac9e4da",
+    "symjit_source_ref": "dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4",
+    "symjit_source_rev": "dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4",
     "symjit_source_url": "https://github.com/siravan/symjit.git",
-    "symjit_version": "2.19.2"
+    "symjit_version": "2.19.3"
   },
   "symbolica_community": {
     "installed": true,

@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -20,6 +21,10 @@ REPO_ROOT = PYAMPLICOL_DIR.parent
 SRC_DIR = PYAMPLICOL_DIR / "src"
 DEFAULT_DATA = DOCS_DIR / "result_matrix_data.json"
 DEFAULT_TABLE = DOCS_DIR / "result_matrix_table.tex"
+DEFAULT_NLC_DATA = DOCS_DIR / "result_matrix_nlc_data.json"
+DEFAULT_NLC_TABLE = DOCS_DIR / "result_matrix_nlc_table.tex"
+DEFAULT_FULL_DATA = DOCS_DIR / "result_matrix_full_data.json"
+DEFAULT_FULL_TABLE = DOCS_DIR / "result_matrix_full_table.tex"
 DEFAULT_OUTPUT_ROOT = DOCS_DIR / ".result_matrix_outputs"
 DEFAULT_TIME_LIMIT_S = 900.0
 DEFAULT_TARGET_RUNTIME_S = 1.0
@@ -212,8 +217,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "description.tex."
         )
     )
-    parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
-    parser.add_argument("--table", type=Path, default=DEFAULT_TABLE)
+    parser.add_argument(
+        "--color-accuracy",
+        choices=("lc", "nlc", "full"),
+        default="lc",
+        help="Colour accuracy represented by the generated matrix table.",
+    )
+    parser.add_argument("--data", type=Path, default=None)
+    parser.add_argument("--table", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument(
         "--generate-data",
@@ -310,8 +321,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    color_accuracy = str(args.color_accuracy).lower()
+    data_path = args.data or _default_data_path(color_accuracy)
+    table_path = args.table or _default_table_path(color_accuracy)
 
-    data = _load_data(args.data)
+    data = _load_data(data_path)
     generate_ns = _parse_n_values(args.generate_data)
     show_ns = _parse_n_values(args.show_data)
     selected_base_keys = {str(key) for key in args.base_process}
@@ -323,7 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("[dry-run] no --generate-data values supplied; no writes performed")
         return 0
     if not args.dry_run:
-        _refresh_data_metadata(data)
+        _refresh_data_metadata(data, color_accuracy=color_accuracy)
 
     if generate_ns:
         work_items: list[tuple[BaseProcess, int, str]] = []
@@ -342,7 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         )
                         continue
                     _record_not_applicable(data, base, n_final)
-                    _write_data(args.data, data)
+                    _write_data(data_path, data)
                     continue
                 if args.dry_run:
                     print(
@@ -388,12 +402,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         skip_cpp_o3=args.skip_cpp_o3,
                         only_missing=args.only_missing,
                         validate=args.validate,
+                        color_accuracy=color_accuracy,
                     )
                     for base, n_final, process in work_items
                 ]
                 for future in as_completed(futures):
                     future.result()
-            _write_data(args.data, data)
+            _write_data(data_path, data)
         elif work_items:
             for base, n_final, process in work_items:
                 _generate_case(
@@ -412,25 +427,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                     skip_cpp_o3=args.skip_cpp_o3,
                     only_missing=args.only_missing,
                     validate=args.validate,
+                    color_accuracy=color_accuracy,
                 )
-                _write_data(args.data, data)
+                _write_data(data_path, data)
 
-    table = render_latex_table(data, show_ns, columns_per_table=args.columns_per_table)
-    args.table.parent.mkdir(parents=True, exist_ok=True)
-    args.table.write_text(table, encoding="utf-8")
-    _write_data(args.data, data)
-    print(f"wrote {args.table}")
-    print(f"wrote {args.data}")
+    table = render_latex_table(
+        data,
+        show_ns,
+        columns_per_table=args.columns_per_table,
+        color_accuracy=color_accuracy,
+    )
+    table_path.parent.mkdir(parents=True, exist_ok=True)
+    table_path.write_text(table, encoding="utf-8")
+    _write_data(data_path, data)
+    print(f"wrote {table_path}")
+    print(f"wrote {data_path}")
     if not args.no_recompile:
-        _recompile_description_pdf(args.table)
+        _recompile_description_pdf(table_path)
     return 0
 
 
 def _recompile_description_pdf(table_path: Path) -> None:
-    if table_path.resolve() != DEFAULT_TABLE.resolve():
+    known_tables = {
+        DEFAULT_TABLE.resolve(),
+        DEFAULT_NLC_TABLE.resolve(),
+        DEFAULT_FULL_TABLE.resolve(),
+    }
+    if table_path.resolve() not in known_tables:
         print(
-            "skipped PDF recompilation: --table does not point to "
-            f"{DEFAULT_TABLE}",
+            "skipped PDF recompilation: --table does not point to one of "
+            f"{sorted(str(path) for path in known_tables)}",
             flush=True,
         )
         return
@@ -480,6 +506,7 @@ def _generate_case(
     skip_cpp_o3: bool,
     only_missing: bool,
     validate: bool,
+    color_accuracy: str,
 ) -> None:
     case = _case_payload(data, base, n_final)
     case["process"] = process
@@ -491,11 +518,50 @@ def _generate_case(
         f"[matrix] id={process_id} n={n_final} {base.key}: {process}",
         flush=True,
     )
+    structural_reason = _structural_color_accuracy_unsupported_reason(
+        process,
+        base=base,
+        color_accuracy=color_accuracy,
+    )
+    if structural_reason is not None:
+        unsupported = _unsupported_mode_payload(
+            structural_reason,
+            color_accuracy=color_accuracy,
+        )
+        case["amplicol"] = dict(
+            unsupported,
+            mode=(
+                "AmpliCol - using-library"
+                if color_accuracy == "lc"
+                else f"AmpliCol - color probe | {color_accuracy}"
+            ),
+        )
+        case["pyamplicol_jit"] = dict(
+            unsupported,
+            mode="pyAmpliCol - staged-DAG | JIT",
+        )
+        case["pyamplicol_cpp_o3"] = dict(
+            unsupported,
+            mode="pyAmpliCol - staged-DAG | C++ O3",
+        )
+        case["validation"] = {
+            "status": "unsupported",
+            "kind": "same-deterministic-point",
+            "reason": structural_reason,
+            "tolerance": VALIDATION_REL_TOL,
+            "relative_tolerance": VALIDATION_REL_TOL,
+            "absolute_tolerance": VALIDATION_ABS_TOL,
+            "finished_at": _now(),
+        }
+        case["status"] = "unsupported"
+        case["updated_at"] = _now()
+        return
 
     amplicol_refreshed = False
     amplicol_settings = _amplicol_matrix_settings(
         amplicol_points=amplicol_points,
         jobs=jobs,
+        color_accuracy=color_accuracy,
     )
     if not skip_amplicol and _should_run_mode(
         case,
@@ -511,14 +577,23 @@ def _generate_case(
             amplicol_points=amplicol_points,
             jobs=jobs,
             matrix_settings=amplicol_settings,
+            color_accuracy=color_accuracy,
         )
         amplicol_refreshed = _ok(_mode(case, "amplicol"))
     try:
-        reference_color_order = _reference_color_order_for_case(case)
-        selected_lc_sector_ids = _selected_lc_sector_ids_for_case(
-            process,
-            base,
-            case,
+        reference_color_order = (
+            _reference_color_order_for_case(case)
+            if color_accuracy == "lc"
+            else None
+        )
+        selected_lc_sector_ids = (
+            _selected_lc_sector_ids_for_case(
+                process,
+                base,
+                case,
+            )
+            if color_accuracy == "lc"
+            else None
         )
         sector_selection_error: Exception | None = None
     except Exception as exc:  # noqa: BLE001 - render as localized setup failure.
@@ -532,6 +607,7 @@ def _generate_case(
         selected_lc_sector_ids=selected_lc_sector_ids,
         reference_color_order=reference_color_order,
         base=base,
+        color_accuracy=color_accuracy,
     )
     if sector_selection_error is not None and _ok(_mode(case, "amplicol")):
         sector_error_payload = _error_payload(
@@ -556,6 +632,7 @@ def _generate_case(
                 selected_lc_sector_ids=selected_lc_sector_ids,
                 reference_color_order=reference_color_order,
                 base=base,
+                color_accuracy=color_accuracy,
             )
             if _should_run_mode(
                 case,
@@ -583,7 +660,13 @@ def _generate_case(
             base=base,
             n_final=n_final,
             backend_key="jit",
-            output_dir=output_root / base.key / f"n{n_final}" / "jit",
+            output_dir=_pyamplicol_output_dir(
+                output_root,
+                color_accuracy=color_accuracy,
+                base=base,
+                n_final=n_final,
+                backend_key="jit",
+            ),
             deadline_started=time.monotonic(),
             time_limit=None,
             target_runtime=target_runtime,
@@ -591,6 +674,7 @@ def _generate_case(
             selected_lc_sector_ids=selected_lc_sector_ids,
             reference_color_order=reference_color_order,
             matrix_settings=jit_settings,
+            color_accuracy=color_accuracy,
         )
     cpp_o3_settings = _pyamplicol_matrix_settings(
         backend_key="cpp_o3",
@@ -599,6 +683,7 @@ def _generate_case(
         selected_lc_sector_ids=selected_lc_sector_ids,
         reference_color_order=reference_color_order,
         base=base,
+        color_accuracy=color_accuracy,
     )
     if not skip_cpp_o3 and _should_run_mode(
         case,
@@ -611,7 +696,13 @@ def _generate_case(
             base=base,
             n_final=n_final,
             backend_key="cpp_o3",
-            output_dir=output_root / base.key / f"n{n_final}" / "cpp_o3",
+            output_dir=_pyamplicol_output_dir(
+                output_root,
+                color_accuracy=color_accuracy,
+                base=base,
+                n_final=n_final,
+                backend_key="cpp_o3",
+            ),
             deadline_started=time.monotonic(),
             time_limit=time_limit,
             target_runtime=target_runtime,
@@ -619,6 +710,7 @@ def _generate_case(
             selected_lc_sector_ids=selected_lc_sector_ids,
             reference_color_order=reference_color_order,
             matrix_settings=cpp_o3_settings,
+            color_accuracy=color_accuracy,
         )
     should_validate = validate and not skip_amplicol and _ok(_mode(case, "amplicol"))
     if should_validate and only_missing and _validation_record_ok(case.get("validation")):
@@ -632,9 +724,8 @@ def _generate_case(
             time_limit=None,
             jobs=jobs,
             library_current=amplicol_refreshed,
+            color_accuracy=color_accuracy,
         )
-    elif not validate:
-        case.pop("validation", None)
     case["status"] = "done"
     case["updated_at"] = _now()
 
@@ -648,9 +739,14 @@ def _run_amplicol_case(
     amplicol_points: int,
     jobs: int,
     matrix_settings: dict[str, Any],
+    color_accuracy: str,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "mode": "AmpliCol - using-library",
+        "mode": (
+            "AmpliCol - using-library"
+            if color_accuracy == "lc"
+            else f"AmpliCol - color probe | {color_accuracy}"
+        ),
         "status": "running",
         "started_at": _now(),
     }
@@ -663,6 +759,69 @@ def _run_amplicol_case(
             )
         except Exception:  # noqa: BLE001 - benchmark harness records failures later.
             point = None
+        if color_accuracy != "lc":
+            if point is None:
+                raise RuntimeError(
+                    "NLC/full AmpliCol colour probe requires a deterministic "
+                    "validation point"
+                )
+            run = adapter.run_color_probe(
+                process,
+                color_accuracy=color_accuracy,
+                particles=point,
+                points=max(1, amplicol_points),
+                options=base.process_options(),
+                process_list_backend="python",
+            )
+            runtime_s = _color_probe_runtime_per_point(
+                run,
+                max(1, amplicol_points),
+            )
+            payload.update(
+                {
+                    "status": "ok",
+                    "generation_s": run.commands[0].elapsed_s if run.commands else None,
+                    "reference_probe": "direct_color_probe_imode2",
+                    "process_file": str(run.process_file),
+                    "process_list_backend": "python",
+                    "reference_color_order": None,
+                    "reference_color_order_process_file": None,
+                    "runtime_us_per_point": (
+                        None if runtime_s is None else 1.0e6 * runtime_s
+                    ),
+                    "reference_value": run.first_point_matrix_element,
+                    "color_probe_components": (
+                        None
+                        if run.color_probe_components is None
+                        else list(run.color_probe_components)
+                    ),
+                    "color_probe_raw_components": (
+                        None
+                        if run.color_probe_raw_components is None
+                        else list(run.color_probe_raw_components)
+                    ),
+                    "commands": [
+                        {
+                            "args": command.args,
+                            "elapsed_s": command.elapsed_s,
+                            "returncode": command.returncode,
+                        }
+                        for command in run.commands
+                    ],
+                    "commands_s": [command.elapsed_s for command in run.commands],
+                    "timing_rows": [
+                        {
+                            "label": row.label,
+                            "seconds": row.seconds,
+                            "note": row.note,
+                        }
+                        for row in run.timing_rows
+                    ],
+                    "matrix_settings": matrix_settings,
+                    "finished_at": _now(),
+                }
+            )
+            return payload
         process_list_backend = "python"
         build = adapter.prepare_library(
             process,
@@ -741,6 +900,16 @@ def _first_process_file_color_order(process_file: str | Path) -> list[int] | Non
     if entry is None:
         return None
     return [int(label) for label in entry["color_order"]]
+
+
+def _color_probe_runtime_per_point(run: Any, points: int) -> float | None:
+    for row in getattr(run, "timing_rows", ()):
+        if str(getattr(row, "label", "")).strip().lower() == "total":
+            return float(getattr(row, "seconds")) / max(1, int(points))
+    commands = getattr(run, "commands", ())
+    if commands:
+        return float(commands[-1].elapsed_s) / max(1, int(points))
+    return None
 
 
 def _first_process_file_pdgs(process_file: str | Path) -> tuple[int, ...] | None:
@@ -841,6 +1010,7 @@ def _run_validation_case(
     time_limit: float | None,
     jobs: int,
     library_current: bool,
+    color_accuracy: str,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "running",
@@ -862,43 +1032,58 @@ def _run_validation_case(
             timeout=_remaining(deadline_started, time_limit),
         )
         setup_commands: tuple[Any, ...] = ()
-        if not library_current:
-            build = adapter.prepare_library(
+        if color_accuracy != "lc":
+            run = adapter.run_color_probe(
                 process,
+                color_accuracy=color_accuracy,
+                particles=point,
+                points=1,
                 process_file=process_file,
                 options=base.process_options(),
                 process_list_backend=backend,  # type: ignore[arg-type]
-                warmup_particles=point,
             )
-            process_file = str(build.process_file)
-            setup_commands = build.commands
-            adapter = AmplicolAdapter(
-                REPO_ROOT,
-                jobs=jobs,
-                timeout=_remaining(deadline_started, time_limit),
+            if run.first_point_matrix_element is None:
+                raise RuntimeError("AmpliCol colour validation probe did not report a value")
+            reference = float(run.first_point_matrix_element)
+            point_order_source = "amplicol-color-probe-pdg-order"
+        else:
+            if not library_current:
+                build = adapter.prepare_library(
+                    process,
+                    process_file=process_file,
+                    options=base.process_options(),
+                    process_list_backend=backend,  # type: ignore[arg-type]
+                    warmup_particles=point,
+                )
+                process_file = str(build.process_file)
+                setup_commands = build.commands
+                adapter = AmplicolAdapter(
+                    REPO_ROOT,
+                    jobs=jobs,
+                    timeout=_remaining(deadline_started, time_limit),
+                )
+            point, point_order_source = _reorder_validation_particles_for_fortran(
+                adapter,
+                process,
+                particles=point,
+                process_file=process_file,
+                options=base.process_options(),
+                backend=backend,
             )
-        point, point_order_source = _reorder_validation_particles_for_fortran(
-            adapter,
-            process,
-            particles=point,
-            process_file=process_file,
-            options=base.process_options(),
-            backend=backend,
-        )
-        run = adapter.run_amplicol_momenta_probe(
-            process,
-            particles=point,
-            points=1,
-            process_file=process_file,
-            options=base.process_options(),
-            timing_sample=1,
-            quiet=False,
-            use_library=True,
-            process_list_backend=backend,  # type: ignore[arg-type]
-        )
-        if not run.probe_points:
-            raise RuntimeError("AmpliCol validation probe did not report a value")
-        reference = float(run.probe_points[0].matrix_element)
+            run = adapter.run_amplicol_momenta_probe(
+                process,
+                particles=point,
+                points=1,
+                process_file=process_file,
+                options=base.process_options(),
+                timing_sample=1,
+                quiet=False,
+                use_library=True,
+                process_list_backend=backend,  # type: ignore[arg-type]
+            )
+            if not run.probe_points:
+                raise RuntimeError("AmpliCol validation probe did not report a value")
+            reference = float(run.probe_points[0].matrix_element)
         values: dict[str, float] = {}
         for key in ("pyamplicol_jit", "pyamplicol_cpp_o3"):
             value = _first_payload_value(_mode(case, key))
@@ -915,7 +1100,7 @@ def _run_validation_case(
                     "tolerance": VALIDATION_REL_TOL,
                     "absolute_tolerance": VALIDATION_ABS_TOL,
                     "reason": "No pyAmpliCol validation values available",
-                    "amplicol_command": run.commands[0].args if run.commands else (),
+                    "amplicol_command": run.commands[-1].args if run.commands else (),
                     "finished_at": _now(),
                 }
             )
@@ -944,7 +1129,7 @@ def _run_validation_case(
                 "absolute_tolerance": VALIDATION_ABS_TOL,
                 "point_source": point_source,
                 "point_order_source": point_order_source,
-                "amplicol_command": run.commands[0].args if run.commands else (),
+                "amplicol_command": run.commands[-1].args if run.commands else (),
                 "prepared_library_for_validation": not library_current,
                 "commands": [
                     {
@@ -1102,6 +1287,7 @@ def _run_pyamplicol_case(
     selected_lc_sector_ids: set[int] | None,
     reference_color_order: Sequence[int] | None,
     matrix_settings: dict[str, Any],
+    color_accuracy: str,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "mode": (
@@ -1123,9 +1309,12 @@ def _run_pyamplicol_case(
         "--replace",
         "--n_cores",
         str(n_cores),
+        "--color-accuracy",
+        color_accuracy,
         "--symbolica-n-cores",
         str(n_cores),
         "--json",
+        "--monitor",
     ]
     if selected_lc_sector_ids:
         generate.extend(
@@ -1160,6 +1349,7 @@ def _run_pyamplicol_case(
         gen = _run_json_command(
             generate,
             timeout=_remaining(deadline_started, time_limit),
+            log_path=_progress_log_path(output_dir, "generate"),
         )
         timed = _run_json_command(
             [
@@ -1173,6 +1363,7 @@ def _run_pyamplicol_case(
                 str(output_dir),
             ],
             timeout=_remaining(deadline_started, time_limit),
+            log_path=_progress_log_path(output_dir, "time"),
         )
         profile = timed.get("profile", {})
         payload.update(
@@ -1201,12 +1392,16 @@ def _run_pyamplicol_case(
                 ),
                 "generate_payload": _compact_payload(gen),
                 "time_payload": _compact_payload(timed),
+                "generate_log": gen.get("_progress_log"),
+                "time_log": timed.get("_progress_log"),
                 "matrix_settings": matrix_settings,
                 "finished_at": _now(),
             }
         )
     except Exception as exc:  # noqa: BLE001 - benchmark harness records failures.
         payload.update(_error_payload(exc))
+        if _color_accuracy_error_is_structural_unsupported(str(payload.get("error", ""))):
+            payload["status"] = "unsupported"
         limitation = _documented_backend_limitation_from_error(
             str(payload.get("error", "")),
             backend_key=backend_key,
@@ -1217,7 +1412,29 @@ def _run_pyamplicol_case(
     return payload
 
 
-def _run_json_command(args: Sequence[str], *, timeout: float | None) -> dict[str, Any]:
+def _pyamplicol_output_dir(
+    output_root: Path,
+    *,
+    color_accuracy: str,
+    base: BaseProcess,
+    n_final: int,
+    backend_key: str,
+) -> Path:
+    color = color_accuracy.lower()
+    root = output_root if color == "lc" else output_root / color
+    return root / base.key / f"n{n_final}" / backend_key
+
+
+def _progress_log_path(output_dir: Path, phase: str) -> Path:
+    return output_dir.with_name(f"{output_dir.name}.{phase}.log")
+
+
+def _run_json_command(
+    args: Sequence[str],
+    *,
+    timeout: float | None,
+    log_path: Path | None = None,
+) -> dict[str, Any]:
     env = dict(os.environ)
     env["PYTHONPATH"] = (
         f"{SRC_DIR}{os.pathsep}{env['PYTHONPATH']}"
@@ -1225,27 +1442,113 @@ def _run_json_command(args: Sequence[str], *, timeout: float | None) -> dict[str
         else str(SRC_DIR)
     )
     start = time.perf_counter()
-    completed = subprocess.run(
-        list(args),
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
-    )
+    stdout_text = ""
+    stderr_text = ""
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[matrix] progress log: {log_path}", flush=True)
+        with log_path.open("w", encoding="utf-8") as log_file:
+            log_file.write(f"# started: {_now()}\n")
+            log_file.write("# command: " + " ".join(str(arg) for arg in args) + "\n")
+            log_file.flush()
+            completed, stdout_text, stderr_text = _run_process_group_command(
+                list(args),
+                timeout=timeout,
+                env=env,
+                stderr=log_file,
+            )
+        stderr_text = stderr_text or _read_tail(log_path)
+    else:
+        completed, stdout_text, stderr_text = _run_process_group_command(
+            list(args),
+            timeout=timeout,
+            env=env,
+            stderr=subprocess.PIPE,
+        )
     elapsed_s = time.perf_counter() - start
     if completed.returncode != 0:
         raise RuntimeError(
             "command failed with exit code "
             f"{completed.returncode}: {' '.join(args)}\n"
-            f"stdout:\n{completed.stdout[-4000:]}\n"
-            f"stderr:\n{completed.stderr[-4000:]}"
+            f"stdout:\n{stdout_text[-4000:]}\n"
+            f"stderr:\n{stderr_text[-4000:]}"
         )
-    payload = _parse_json_output(completed.stdout)
+    payload = _parse_json_output(stdout_text)
     payload["_command_elapsed_s"] = elapsed_s
     payload["_command_args"] = list(args)
+    if log_path is not None:
+        payload["_progress_log"] = str(log_path)
     return payload
+
+
+def _run_process_group_command(
+    args: list[str],
+    *,
+    timeout: float | None,
+    env: dict[str, str],
+    stderr: Any,
+) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    process = subprocess.Popen(
+        args,
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=stderr,
+        start_new_session=True,
+    )
+    try:
+        stdout_text, stderr_text = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _terminate_process_group(process.pid)
+        stdout_text, stderr_text = process.communicate()
+        raise subprocess.TimeoutExpired(
+            cmd=args,
+            timeout=timeout,
+            output=stdout_text,
+            stderr=stderr_text if isinstance(stderr_text, str) else None,
+        ) from exc
+    return (
+        subprocess.CompletedProcess(
+            args,
+            process.returncode,
+            stdout_text or "",
+            stderr_text or "",
+        ),
+        stdout_text or "",
+        stderr_text or "",
+    )
+
+
+def _terminate_process_group(pid: int) -> None:
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            finished, _status = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if finished:
+            return
+        time.sleep(0.1)
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def _read_tail(path: Path, *, max_bytes: int = 16000) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(size - max_bytes, 0), os.SEEK_SET)
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 def render_latex_table(
@@ -1253,6 +1556,7 @@ def render_latex_table(
     n_values: Sequence[int],
     *,
     columns_per_table: int = 3,
+    color_accuracy: str = "lc",
 ) -> str:
     shown = tuple(sorted(dict.fromkeys(int(n) for n in n_values)))
     chunks = tuple(_chunks(shown, max(1, int(columns_per_table))))
@@ -1288,6 +1592,7 @@ def render_latex_table(
     if not isinstance(entries, dict):
         entries = {}
     validation_summary = _validation_summary(entries, shown)
+    title = _matrix_title(color_accuracy)
     for chunk_index, chunk in enumerate(chunks):
         multiplicity_columns = (
             r"@{\hspace{0.055in}}".join("L{2.56in}" for _ in chunk)
@@ -1301,9 +1606,9 @@ def render_latex_table(
             [
                 r"\begin{landscape}",
                 (
-                    r"\section{Generic LC Performance Matrix}"
+                    rf"\section{{{title}}}"
                     if chunk_index == 0
-                    else r"\subsection*{Generic LC Performance Matrix (continued)}"
+                    else rf"\subsection*{{{title} (continued)}}"
                 ),
                 r"\begingroup",
                 r"\scriptsize",
@@ -1314,7 +1619,8 @@ def render_latex_table(
         if chunk_index == 0:
             lines.extend(
                 [
-                    r"\noindent\footnotesize Each cell compares generated-library \AC\ against "
+                    _matrix_intro_sentence(color_accuracy)
+                    +
                     r"\PAC\ staged-DAG JIT and staged-DAG C++ O3 for the same final-state "
                     r"multiplicity \(n\).  In each cell, the upper line is generation time; the lower "
                     r"line is wall runtime per phase-space point.  The left slot is the "
@@ -1324,11 +1630,12 @@ def render_latex_table(
                     r"When no \AC\ reference exists but \PAC\ ran, the \PAC\ slots show "
                     r"absolute generation time and parenthesized \texttt{wall|core} "
                     r"runtime in microseconds. "
-                    r"Colored "
+                    + _reference_mode_latex(color_accuracy)
+                    + r"Colored "
                     r"ratios are \PAC/\AC: green below one, orange below two, red otherwise.  "
                     r"When rows are generated with \texttt{--validate}, \PAC\ JIT and "
-                    r"C++ O3 values are compared to the same-point generated-library "
-                    r"\AC\ value with a relative tolerance of \(10^{-8}\).",
+                    r"C++ O3 values are compared to the same-point \AC\ value "
+                    r"with a relative tolerance of \(10^{-8}\).",
                     r"\par\smallskip",
                     _validation_summary_latex(validation_summary),
                     r"\par\smallskip",
@@ -1375,12 +1682,65 @@ def render_latex_table(
                 "",
             ]
         )
-    lines.extend(_matrix_run_settings_latex())
+    lines.extend(_matrix_run_settings_latex(color_accuracy))
     lines.extend(_matrix_status_notes_latex(entries, shown))
     return "\n".join(lines)
 
 
-def _matrix_run_settings_latex() -> list[str]:
+def _matrix_title(color_accuracy: str) -> str:
+    if color_accuracy == "nlc":
+        return "Generic NLC Performance Matrix"
+    if color_accuracy == "full":
+        return "Generic Full-Colour Performance Matrix"
+    return "Generic LC Performance Matrix"
+
+
+def _matrix_intro_sentence(color_accuracy: str) -> str:
+    if color_accuracy == "lc":
+        return r"\noindent\footnotesize Each cell compares generated-library \AC\ against "
+    return r"\noindent\footnotesize Each cell compares colour-matrix \AC\ probes against "
+
+
+def _reference_mode_latex(color_accuracy: str) -> str:
+    if color_accuracy == "lc":
+        return ""
+    return (
+        r"For NLC/full-colour tables, \AC\ reference values come from the "
+        r"dedicated \texttt{amplicol\_color\_probe} imode-2 colour-matrix "
+        r"driver rather than the LC generated-library timing driver. "
+    )
+
+
+def _matrix_run_settings_latex(color_accuracy: str) -> list[str]:
+    data_path = _default_data_path(color_accuracy)
+    table_path = _default_table_path(color_accuracy)
+    if color_accuracy == "lc":
+        reference_text = (
+            r"top-level generated-library files.  \AC\ reference timings use the "
+            r"generated-library sequence "
+            r"\texttt{amplicol\_generate --library=create}, "
+            r"\texttt{make -j4 amplicol\_generate\_library}, and a direct "
+            r"generated-library benchmark using \texttt{--library=use}; they do not "
+            r"use integration-driver timings.  \PAC\ rows use the generic LC "
+            r"staged-DAG artifact, Rusticol double precision, JIT or C++ O3 "
+            r"Symbolica evaluators as labelled, and \texttt{time-process} with a "
+            r"one-second target runtime.  The \texttt{--time-limit} setting applies "
+            r"only to C++ O3 generation; \AC\ and JIT rows are left uncapped."
+        )
+    else:
+        reference_text = (
+            r"top-level generated-library files.  \AC\ reference timings for this "
+            r"colour table currently use the dedicated "
+            r"\texttt{amplicol\_color\_probe} imode-2 colour-matrix driver, not "
+            r"integration-driver timings.  The driver exposes the same absolute "
+            r"\AC\ NLC/full-colour matrix element and splits amplitude-evaluation "
+            r"from colour-contraction time, but it is not yet a generated-library "
+            r"driver.  \PAC\ rows use the generic staged-DAG artifact, Rusticol "
+            r"double precision, JIT or C++ O3 Symbolica evaluators as labelled, "
+            r"and \texttt{time-process} with a one-second target runtime.  The "
+            r"\texttt{--time-limit} setting applies only to C++ O3 generation; "
+            r"\AC\ and JIT rows are left uncapped."
+        )
     return [
         r"\paragraph{Matrix run settings.}",
         (
@@ -1390,6 +1750,8 @@ def _matrix_run_settings_latex() -> list[str]:
         r"\begin{lstlisting}[language=bash,breaklines=true,breakatwhitespace=true]",
         (
             "pyAmpliCol/dependencies/.venv/bin/python pyAmpliCol/docs/result_matrix.py "
+            f"--color-accuracy {color_accuracy} "
+            f"--data {data_path} --table {table_path} "
             "--generate-data 1-9 --show-data 1-9 "
             f"--time-limit {DEFAULT_TIME_LIMIT_S:g} "
             f"--target-runtime {DEFAULT_TARGET_RUNTIME_S:g} "
@@ -1406,16 +1768,7 @@ def _matrix_run_settings_latex() -> list[str]:
             r"updated.  PyAmpliCol-only refreshes may additionally use "
             r"\texttt{--process-workers 5}; this is intentionally disabled when "
             r"the \AC\ reference is refreshed because that path uses shared "
-            r"top-level generated-library files.  \AC\ reference timings use the "
-            r"generated-library sequence "
-            r"\texttt{amplicol\_generate --library=create}, "
-            r"\texttt{make -j4 amplicol\_generate\_library}, and a direct "
-            r"generated-library benchmark using \texttt{--library=use}; they do not "
-            r"use integration-driver timings.  \PAC\ rows use the generic LC "
-            r"staged-DAG artifact, Rusticol double precision, JIT or C++ O3 "
-            r"Symbolica evaluators as labelled, and \texttt{time-process} with a "
-            r"one-second target runtime.  The \texttt{--time-limit} setting applies "
-            r"only to C++ O3 generation; \AC\ and JIT rows are left uncapped."
+            + reference_text
         ),
         r"\par\smallskip",
     ]
@@ -1428,6 +1781,8 @@ def _matrix_status_notes_latex(
     unsupported_four_quark_line = False
     documented_backend_limits: list[str] = []
     non_structural: list[str] = []
+    cxx_not_run: list[str] = []
+    cxx_over_budget: list[str] = []
     for base in BASE_PROCESSES:
         row_entries = entries.get(base.key, {})
         if not isinstance(row_entries, dict):
@@ -1446,10 +1801,27 @@ def _matrix_status_notes_latex(
             ):
                 mode = _mode(case, key)
                 status = str(mode.get("status", ""))
+                error = str(mode.get("error", ""))
+                if (
+                    key == "pyamplicol_cpp_o3"
+                    and not mode
+                    and _ok(ref)
+                    and _ok(_mode(case, "pyamplicol_jit"))
+                ):
+                    cxx_not_run.append(rf"{base.label}, \(n={n_final}\)")
+                    continue
+                if key == "pyamplicol_cpp_o3" and status == "timeout":
+                    cxx_over_budget.append(rf"{base.label}, \(n={n_final}\)")
+                    continue
                 if _is_documented_backend_limitation(mode):
                     documented_backend_limits.append(
                         rf"{base.label}, \(n={n_final}\), {label}"
                     )
+                    continue
+                if (
+                    _amplicol_error_is_unsupported(error)
+                    or _color_accuracy_error_is_structural_unsupported(error)
+                ):
                     continue
                 if status in {"", "ok", "missing", "not_applicable", "unsupported"}:
                     continue
@@ -1493,6 +1865,28 @@ def _matrix_status_notes_latex(
                 r"\par\smallskip",
             ]
         )
+    cxx_compile_budget = [
+        *(rf"{entry}: not run" for entry in cxx_not_run),
+        *(rf"{entry}: timed out" for entry in cxx_over_budget),
+    ]
+    if cxx_compile_budget:
+        shown = "; ".join(cxx_compile_budget[:8])
+        if len(cxx_compile_budget) > 8:
+            shown += rf"; plus {len(cxx_compile_budget) - 8} more localized entries"
+        lines.extend(
+            [
+                r"\paragraph{C++ O3 compile-budget gaps.}",
+                (
+                    r"The following cells have validated \AC\ and \PAC\ JIT rows "
+                    r"but no completed C++ O3 row; their C++ slot is a localized "
+                    r"performance-generation compile-budget gap, not a "
+                    r"physics-validation failure: "
+                    + shown
+                    + "."
+                ),
+                r"\par\smallskip",
+            ]
+        )
     if documented_backend_limits:
         shown = "; ".join(documented_backend_limits[:8])
         if len(documented_backend_limits) > 8:
@@ -1510,11 +1904,12 @@ def _matrix_status_notes_latex(
                     + shown
                     + r".  The raw assertion is retained in "
                     r"\texttt{result\_matrix\_data.json}. The "
-                    r"current managed dependency set uses SymJIT \texttt{2.19.2}, "
+                    r"current managed dependency set uses SymJIT \texttt{2.19.3}, "
                     r"which fixes the smaller historical \texttt{v220} AArch64 "
-                    r"JIT segfault reproduced by \texttt{MRE\_symjit\_bug\_new.py}; "
-                    r"the remaining listed AArch64 vector-offset assertions still "
-                    r"require an upstream SymJIT fix."
+                    r"JIT segfault reproduced by \texttt{MRE\_symjit\_bug\_new.py} "
+                    r"and the pure-gluon \(n=4\) NLC/full JIT materialization "
+                    r"case.  Cached LC backend-limit entries should be refreshed "
+                    r"before being interpreted under this newer SymJIT version."
                 ),
                 r"\par\smallskip",
             ]
@@ -1618,6 +2013,8 @@ def _latex_cell(case: dict[str, Any]) -> str:
     ref = _mode(case, "amplicol")
     jit = _mode(case, "pyamplicol_jit")
     cpp = _mode(case, "pyamplicol_cpp_o3")
+    if _case_is_structural_unsupported(ref, jit, cpp):
+        return _structural_na()
     if _ok(ref):
         gen = _metric_parts(
             ref,
@@ -1654,6 +2051,28 @@ def _latex_cell(case: dict[str, Any]) -> str:
     if marker:
         return rf"\begin{{tabular}}[t]{{@{{}}l@{{}}}}{cell}\\[-0.1em]{marker}\end{{tabular}}"
     return cell
+
+
+def _case_is_structural_unsupported(
+    ref: dict[str, Any],
+    jit: dict[str, Any],
+    cpp: dict[str, Any],
+) -> bool:
+    if _ok(ref) or _ok(jit) or _ok(cpp):
+        return False
+    return any(_mode_is_structural_unsupported(mode) for mode in (ref, jit, cpp))
+
+
+def _mode_is_structural_unsupported(mode: dict[str, Any]) -> bool:
+    if not mode:
+        return False
+    error = str(mode.get("error", ""))
+    status = str(mode.get("status", "")).lower()
+    return (
+        status == "unsupported"
+        or _amplicol_error_is_unsupported(error)
+        or _color_accuracy_error_is_structural_unsupported(error)
+    )
 
 
 def _latex_cell_without_reference(jit: dict[str, Any], cpp: dict[str, Any]) -> str:
@@ -1831,7 +2250,11 @@ def _latex_failure(mode: dict[str, Any]) -> str:
         return _missing_na()
     if _is_documented_backend_limitation(mode):
         return _structural_na()
-    if mode.get("status") == "unsupported" or _amplicol_error_is_unsupported(error):
+    if (
+        mode.get("status") == "unsupported"
+        or _amplicol_error_is_unsupported(error)
+        or _color_accuracy_error_is_structural_unsupported(error)
+    ):
         return _structural_na()
     status = str(mode.get("status", "missing"))
     if status == "missing":
@@ -1844,6 +2267,54 @@ def _amplicol_error_is_unsupported(error: str) -> bool:
         "Unknown number of quarks and anti-quarks",
     )
     return any(marker in error for marker in unsupported_markers)
+
+
+def _color_accuracy_error_is_structural_unsupported(error: str) -> bool:
+    unsupported_markers = (
+        "more than two quarks",
+        "only for zero, one, or two quark pairs",
+    )
+    return any(marker in error for marker in unsupported_markers)
+
+
+def _structural_color_accuracy_unsupported_reason(
+    process: str,
+    *,
+    base: BaseProcess,
+    color_accuracy: str,
+) -> str | None:
+    if color_accuracy == "lc":
+        return None
+    process_ir = build_process_ir(
+        process,
+        color_accuracy=color_accuracy,
+        options=base.process_options(),
+    )
+    if process_ir.quark_lines.quark_pair_count > 2:
+        return (
+            f"{color_accuracy.upper()} colour is currently supported for "
+            "zero, one, or two quark-pair lines; this process has "
+            f"{process_ir.quark_lines.quark_pair_count}."
+        )
+    return None
+
+
+def _unsupported_mode_payload(
+    reason: str,
+    *,
+    color_accuracy: str,
+) -> dict[str, Any]:
+    return {
+        "status": "unsupported",
+        "error": reason,
+        "reason": reason,
+        "color_accuracy": color_accuracy,
+        "matrix_settings": {
+            "color_accuracy": color_accuracy,
+            "structural_unsupported": True,
+        },
+        "finished_at": _now(),
+    }
 
 
 def _structural_na() -> str:
@@ -1902,13 +2373,27 @@ def _settings_match(actual: object, expected: dict[str, Any]) -> bool:
     return actual == expected
 
 
-def _amplicol_matrix_settings(*, amplicol_points: int, jobs: int) -> dict[str, Any]:
+def _amplicol_matrix_settings(
+    *,
+    amplicol_points: int,
+    jobs: int,
+    color_accuracy: str,
+) -> dict[str, Any]:
     return {
         "amplicol_points": int(amplicol_points),
         "jobs": int(jobs),
+        "color_accuracy": color_accuracy,
         "process_list_backend": "python",
-        "workflow": "library_create_make_library_use",
-        "runtime_probe": "direct_generated_library_benchmark",
+        "workflow": (
+            "library_create_make_library_use"
+            if color_accuracy == "lc"
+            else "direct_color_probe_imode2"
+        ),
+        "runtime_probe": (
+            "direct_generated_library_benchmark"
+            if color_accuracy == "lc"
+            else "amplicol_color_probe"
+        ),
     }
 
 
@@ -1920,10 +2405,13 @@ def _pyamplicol_matrix_settings(
     selected_lc_sector_ids: set[int] | None,
     reference_color_order: Sequence[int] | None,
     base: BaseProcess,
+    color_accuracy: str,
 ) -> dict[str, Any]:
+    numerical_current_passes = color_accuracy == "lc"
     settings: dict[str, Any] = {
         "runtime": "rusticol",
         "precision": 16,
+        "color_accuracy": color_accuracy,
         "target_runtime_s": float(target_runtime),
         "n_cores": int(n_cores),
         "symbolica_n_cores": int(n_cores),
@@ -1942,14 +2430,14 @@ def _pyamplicol_matrix_settings(
         "max_quark_pairs": base.max_quark_pairs,
         "lc_sector_strategy": base.lc_sector_strategy,
         "zero_current_filter": {
-            "enabled": True,
+            "enabled": numerical_current_passes,
             "sample_count": 10,
             "seed": 12345,
             "relative_tolerance": 1.0e-12,
             "zero_tolerance": 1.0e-300,
         },
         "current_merging": {
-            "enabled": True,
+            "enabled": numerical_current_passes,
             "sample_count": 10,
             "seed": 12345,
             "relative_tolerance": 1.0e-12,
@@ -1987,8 +2475,27 @@ def _record_not_applicable(data: dict[str, Any], base: BaseProcess, n_final: int
     )
 
 
+def _default_data_path(color_accuracy: str) -> Path:
+    if color_accuracy == "nlc":
+        return DEFAULT_NLC_DATA
+    if color_accuracy == "full":
+        return DEFAULT_FULL_DATA
+    return DEFAULT_DATA
+
+
+def _default_table_path(color_accuracy: str) -> Path:
+    if color_accuracy == "nlc":
+        return DEFAULT_NLC_TABLE
+    if color_accuracy == "full":
+        return DEFAULT_FULL_TABLE
+    return DEFAULT_TABLE
+
+
 def _case_payload(data: dict[str, Any], base: BaseProcess, n_final: int) -> dict[str, Any]:
-    _refresh_data_metadata(data)
+    _refresh_data_metadata(
+        data,
+        color_accuracy=str(data.get("color_accuracy", "lc")),
+    )
     entries = data.setdefault("entries", {})
     if not isinstance(entries, dict):
         raise TypeError("result matrix data 'entries' must be a JSON object")
@@ -2003,9 +2510,10 @@ def _case_payload(data: dict[str, Any], base: BaseProcess, n_final: int) -> dict
     return case
 
 
-def _refresh_data_metadata(data: dict[str, Any]) -> None:
+def _refresh_data_metadata(data: dict[str, Any], *, color_accuracy: str) -> None:
     data.setdefault("schema_version", 1)
     data.setdefault("created_by", "pyAmpliCol/docs/result_matrix.py")
+    data["color_accuracy"] = color_accuracy
     data["updated_at"] = _now()
     data["base_processes"] = [
         base_payload(process_id, item)
@@ -2030,12 +2538,31 @@ def base_payload(process_id: int, base: BaseProcess) -> dict[str, Any]:
 def _load_data(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        print(f"[matrix] warning: {path} is empty; starting a fresh cache", flush=True)
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        backup = path.with_name(f"{path.name}.invalid")
+        backup.write_text(text, encoding="utf-8")
+        print(
+            f"[matrix] warning: could not parse {path}: {exc}; "
+            f"copied invalid cache to {backup} and starting fresh",
+            flush=True,
+        )
+        return {}
 
 
 def _write_data(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def _parse_n_values(values: Iterable[str]) -> tuple[int, ...]:
@@ -2099,6 +2626,7 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "manifest",
         "process",
         "process_dir",
+        "_progress_log",
         "runtime_available",
         "runtime_backend",
         "runtime_unavailable_message",

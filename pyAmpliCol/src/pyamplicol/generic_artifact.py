@@ -13,6 +13,10 @@ from .color_plan import (
     lc_line_pairing_representative_ids,
     lc_topology_replay_safe_groups,
 )
+from .color_contraction import (
+    ColorGroupDescriptor,
+    build_color_contraction_plan,
+)
 from .core_types import ExternalMomentum, NativeEvaluationError
 from .generic_dag import (
     AmplitudeRoot,
@@ -80,7 +84,7 @@ class GenericProcessManifest:
             and not lowering["unimplemented_propagator_kernels"]
             and not self.dag.truncated
         )
-        color_ready = self.color_plan.ready_for_leading_colour
+        color_ready = self.color_plan.ready_for_requested_colour
         return {
             "schema_version": GENERIC_PROCESS_SCHEMA_VERSION,
             "kind": GENERIC_PROCESS_MANIFEST_KIND,
@@ -425,7 +429,7 @@ def _lc_topology_reuse_payload(
     root_sector_ids = tuple(
         sorted(
             {
-                manifest.dag.currents[root.left_id].index.color_state.sector_id
+                _root_color_sector_id(manifest.dag, root)
                 for root in manifest.dag.amplitude_roots
             }
         )
@@ -751,7 +755,7 @@ def select_leading_color_sector_ids(
         return None
     root_sectors = sorted(
         {
-            manifest.dag.currents[root.left_id].index.color_state.sector_id
+            _root_color_sector_id(manifest.dag, root)
             for root in manifest.dag.amplitude_roots
         }
     )
@@ -1978,6 +1982,7 @@ def _drop_currents_from_dag(
                 left_id=current_id_map[root.left_id],
                 right_id=current_id_map[root.right_id],
                 color_weight=root.color_weight,
+                color_sector_id=root.color_sector_id,
                 vertex_kind=root.vertex_kind,
                 vertex_particles=root.vertex_particles,
                 coupling=root.coupling,
@@ -2179,6 +2184,7 @@ def _merge_currents_in_dag(
                 left_id=current_id_map[left_id],
                 right_id=current_id_map[right_id],
                 color_weight=_scale_complex_tuple(root.color_weight, input_sign),
+                color_sector_id=root.color_sector_id,
                 vertex_kind=root.vertex_kind,
                 vertex_particles=root.vertex_particles,
                 coupling=root.coupling,
@@ -2385,6 +2391,9 @@ def _generic_dag_process_artifact_payload(
     )
     plan_payload = runtime_manifest.to_json_dict()
     runtime_schema = cast(dict[str, Any], plan_payload["runtime_schema"])
+    color_contraction_message = _runtime_color_contraction_unavailable_message(
+        runtime_schema,
+    )
     stage_blueprint = build_generic_stage_compiler_blueprint(
         runtime_manifest,
     )
@@ -2466,6 +2475,9 @@ def _generic_dag_process_artifact_payload(
         if bool(stage_evaluator_payload.get("runtime_available", False)):
             compiled_payload["runtime_available"] = True
             compiled_payload["runtime_unavailable_message"] = None
+    if color_contraction_message is not None:
+        compiled_payload["runtime_available"] = False
+        compiled_payload["runtime_unavailable_message"] = color_contraction_message
     return {
         "schema_version": GENERIC_PROCESS_SCHEMA_VERSION,
         "kind": GENERIC_DAG_PROCESS_ARTIFACT_KIND,
@@ -2506,6 +2518,27 @@ def _generic_dag_process_artifact_payload(
             "truncated": manifest.dag.truncated,
         },
     }
+
+
+def _runtime_color_contraction_unavailable_message(
+    runtime_schema: Mapping[str, Any],
+) -> str | None:
+    amplitude_stage = runtime_schema.get("amplitude_stage")
+    if not isinstance(amplitude_stage, Mapping):
+        return "generic runtime schema is missing amplitude_stage"
+    color_contraction = amplitude_stage.get("color_contraction")
+    if color_contraction is None:
+        return None
+    if not isinstance(color_contraction, Mapping):
+        return "generic runtime schema has malformed color_contraction"
+    if bool(color_contraction.get("supported", False)):
+        return None
+    reason = color_contraction.get("reason")
+    return (
+        str(reason)
+        if reason
+        else "requested colour contraction is not supported by this artifact"
+    )
 
 
 def _runtime_color_sector_ids(
@@ -2746,6 +2779,14 @@ def _runtime_normalization_payload(
         color_factor: int | None = int(leading_color_factor(external_pdgs))
     except Exception:
         color_factor = None
+    if (
+        color_factor is not None
+        and dag.process.color_accuracy == "lc"
+        and not dag.process.quark_labels
+        and not dag.process.antiquark_labels
+        and len(dag.process.gluon_labels) >= 3
+    ):
+        color_factor *= 2
     initial_pdgs = [int(pdg) for pdg in dag.process.initial_pdgs]
     final_pdgs = [int(pdg) for pdg in dag.process.final_pdgs]
     final_state_identical_factor = _final_state_identical_factor(final_pdgs)
@@ -2824,8 +2865,7 @@ def _selected_amplitude_roots(
     return tuple(
         root
         for root in dag.amplitude_roots
-        if dag.currents[root.left_id].index.color_state.sector_id
-        in selected_color_sector_ids
+        if _root_color_sector_id(dag, root) in selected_color_sector_ids
     )
 
 
@@ -3172,7 +3212,8 @@ def _runtime_amplitude_stage_payload(
         dag,
         selected_color_sector_ids=selected_color_sector_ids,
     )
-    coherent_group_ids = _amplitude_coherent_group_ids(dag, selected_roots)
+    coherent_group_ids, color_groups = _amplitude_group_metadata(dag, selected_roots)
+    color_contraction = build_color_contraction_plan(dag.color_plan, color_groups)
     for output_index, root in enumerate(selected_roots):
         roots.append(
             {
@@ -3204,6 +3245,7 @@ def _runtime_amplitude_stage_payload(
                 ),
                 "coupling": list(root.coupling),
                 "color_weight": list(root.color_weight),
+                "color_sector_id": _root_color_sector_id(dag, root),
                 "contraction": root.contraction,
                 "coherent_group_id": coherent_group_ids[root.id],
                 "helicity_weight": root.helicity_weight,
@@ -3219,19 +3261,26 @@ def _runtime_amplitude_stage_payload(
         ),
         "roots": roots,
         "final_reduction": {
-            "status": "pending-rusticol-schema-v2",
+            "status": (
+                "sparse-color-contraction"
+                if color_contraction is not None
+                else "coherent-leading-color-diagonal"
+            ),
             "operation": (
-                "sum helicity/color weighted squared complex root outputs "
-                "after evaluator execution"
+                "sum root outputs into coherent helicity/colour amplitudes, "
+                "then apply the requested colour contraction"
             ),
         },
+        "color_contraction": (
+            None if color_contraction is None else color_contraction.to_json_dict()
+        ),
     }
 
 
-def _amplitude_coherent_group_ids(
+def _amplitude_group_metadata(
     dag: GenericDAG,
     roots,
-) -> dict[int, int]:
+) -> tuple[dict[int, int], tuple[ColorGroupDescriptor, ...]]:
     """Map root contributions to physical helicity/colour coherent sums.
 
     A schema-v2 amplitude root is one current-closure contribution.  Roots
@@ -3241,6 +3290,7 @@ def _amplitude_coherent_group_ids(
 
     ids: dict[tuple[object, ...], int] = {}
     result: dict[int, int] = {}
+    group_descriptors: dict[int, ColorGroupDescriptor] = {}
     source_by_ancestry: dict[int, tuple[object, ...]] = {}
     for current in dag.currents:
         if not current.is_source:
@@ -3263,18 +3313,16 @@ def _amplitude_coherent_group_ids(
                 if ancestry & bit
             )
         )
-        sector = (
-            dag.color_plan.sector(left.color_state.sector_id)
-            if left.color_state.accuracy == "lc"
-            else None
+        sector_id = _root_color_sector_id(dag, root)
+        sector = dag.color_plan.sector(sector_id)
+        sector_word = (
+            tuple(sector.word_labels or sector.color_words[0])
+            if sector is not None and sector.color_words
+            else sector_id
         )
         color_key = (
             left.color_state.accuracy,
-            (
-                tuple(sector.word_labels)
-                if sector is not None
-                else left.color_state.sector_id
-            ),
+            sector_word,
             tuple(sorted(set(left.color_state.basis_key) | set(right.color_state.basis_key))),
             tuple(root.color_weight),
         )
@@ -3284,7 +3332,27 @@ def _amplitude_coherent_group_ids(
         )
         group_id = ids.setdefault(key, len(ids))
         result[root.id] = group_id
-    return result
+        if group_id not in group_descriptors:
+            word = ()
+            if sector is not None:
+                word = tuple(sector.word_labels or sector.color_words[0])
+            group_descriptors[group_id] = ColorGroupDescriptor(
+                group_id=group_id,
+                helicity_key=physical_sources or (ancestry,),
+                sector_id=int(sector_id),
+                word=word,
+                helicity_weight=float(root.helicity_weight),
+            )
+    return result, tuple(
+        group_descriptors[group_id]
+        for group_id in sorted(group_descriptors)
+    )
+
+
+def _root_color_sector_id(dag: GenericDAG, root) -> int:
+    if getattr(root, "color_sector_id", None) is not None:
+        return int(root.color_sector_id)
+    return int(dag.currents[root.left_id].index.color_state.sector_id)
 
 
 def _slot_ref(slot: dict[str, object]) -> dict[str, object]:

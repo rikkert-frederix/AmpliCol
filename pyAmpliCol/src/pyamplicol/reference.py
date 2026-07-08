@@ -109,6 +109,8 @@ class AmplicolWorkflowResult:
     first_point_matrix_element: float | None = None
     first_phase_space_point: "AmplicolFirstPoint | None" = None
     probe_points: tuple["AmplicolProbePoint", ...] = ()
+    color_probe_components: tuple[float, float, float] | None = None
+    color_probe_raw_components: tuple[float, float, float] | None = None
 
     @property
     def total_command_time_s(self) -> float:
@@ -587,6 +589,69 @@ class AmplicolAdapter:
             timing_rows=parse_timing_rows(output),
         )
 
+    def run_color_probe(
+        self,
+        process: str,
+        *,
+        color_accuracy: str,
+        particles: Sequence[ExternalMomentum],
+        points: int = 1,
+        group: int = 1,
+        integral: int = 1,
+        process_file: str | Path | None = None,
+        options: ProcessOptions | None = None,
+        process_list_backend: ProcessListBackend = "python",
+    ) -> AmplicolWorkflowResult:
+        """Run the direct AmpliCol LC/NLC/full colour reference probe.
+
+        The probe uses AmpliCol's ``imode=2`` all-colour-order amplitude and
+        ``init_col`` sparse colour matrix, then applies the same coupling and
+        averaging normalization as ``AMPICOL_PROBE_VALUE``.  It is the intended
+        point-reference path for NLC/full validation.
+        """
+
+        path = self.write_process_file(
+            process,
+            process_file,
+            options=options,
+            process_list_backend=process_list_backend,
+        )
+        entry = amplicol_process_file_entry(path, group=group, integral=integral)
+        ordered_particles: Sequence[ExternalMomentum] = particles
+        if entry is not None:
+            ordered_particles = reorder_external_momenta_by_pdg(
+                particles,
+                entry["process"],
+            )
+        momenta_path = self.write_momenta_probe_file(
+            ordered_particles,
+            group=group,
+            integral=integral,
+        )
+        build = self._run(["make", f"-j{self.jobs}", "amplicol_color_probe"])
+        build.check_returncode()
+        command = self._run(
+            [
+                "./amplicol_color_probe",
+                str(max(1, points)),
+                str(group),
+                str(integral),
+                color_accuracy,
+                str(path),
+                str(momenta_path),
+            ]
+        )
+        command.check_returncode()
+        output = "\n".join([command.stdout, command.stderr])
+        return AmplicolWorkflowResult(
+            commands=(build, command),
+            process_file=path,
+            timing_rows=parse_timing_rows(output),
+            first_point_matrix_element=parse_color_probe_value(output),
+            color_probe_components=parse_color_probe_components(output),
+            color_probe_raw_components=parse_color_probe_raw_components(output),
+        )
+
     def run_amplicol_probe(
         self,
         process: str,
@@ -821,6 +886,43 @@ def parse_first_matrix_element(output: str) -> float | None:
     return None if match is None else float(match.group(1))
 
 
+def parse_color_probe_value(output: str) -> float | None:
+    match = re.search(
+        r"^\s*AMPICOL_COLOR_PROBE_VALUE\s+"
+        r"\S+\s+\d+\s+\d+\s+([0-9.Ee+-]+)\s*$",
+        output,
+        re.MULTILINE,
+    )
+    return None if match is None else float(match.group(1))
+
+
+def parse_color_probe_components(output: str) -> tuple[float, float, float] | None:
+    return _parse_color_probe_component_line(output, "AMPICOL_COLOR_PROBE_COMPONENTS")
+
+
+def parse_color_probe_raw_components(output: str) -> tuple[float, float, float] | None:
+    return _parse_color_probe_component_line(
+        output,
+        "AMPICOL_COLOR_PROBE_RAW_COMPONENTS",
+    )
+
+
+def _parse_color_probe_component_line(
+    output: str,
+    label: str,
+) -> tuple[float, float, float] | None:
+    escaped = re.escape(label)
+    match = re.search(
+        rf"^\s*{escaped}\s+"
+        r"([0-9.Ee+-]+)\s+([0-9.Ee+-]+)\s+([0-9.Ee+-]+)\s*$",
+        output,
+        re.MULTILINE,
+    )
+    if match is None:
+        return None
+    return (float(match.group(1)), float(match.group(2)), float(match.group(3)))
+
+
 def parse_first_phase_space_point(output: str) -> AmplicolFirstPoint | None:
     header = re.search(
         r"(?:ME-check|AmpliCol probe) first phase-space point\s+group,\s+integral:\s*(\d+)\s+(\d+)",
@@ -945,6 +1047,9 @@ __all__ = [
     "TimingRow",
     "amplicol_process_file_entry",
     "amplicol_process_file_integrals",
+    "parse_color_probe_components",
+    "parse_color_probe_raw_components",
+    "parse_color_probe_value",
     "parse_amplicol_probe_points",
     "parse_first_phase_space_point",
     "parse_first_matrix_element",

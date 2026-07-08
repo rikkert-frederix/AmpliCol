@@ -29,34 +29,36 @@ def test_color_plan_builds_open_line_gluon_orderings() -> None:
 def test_color_plan_generates_arbitrary_quark_line_pairings() -> None:
     plan = build_color_plan("d d~ > u u~ s s~")
 
-    assert plan.sector_count == 36
+    assert plan.sector_count == 6
     assert all(sector.kind == "open-lines" for sector in plan.sectors)
     assert all(len(sector.quark_lines) == 3 for sector in plan.sectors)
     assert all(len(sector.coloured_label_groups) == 3 for sector in plan.sectors)
     assert all(len(sector.color_words) == 1 for sector in plan.sectors)
+    assert all(len(sector.compatibility_words) == 6 for sector in plan.sectors)
     assert all(sector.word_labels for sector in plan.sectors)
     direct_plan = build_color_plan("s s~ > u u~ d~ d")
-    assert (6, 1, 3, 4, 2, 5) in {
-        sector.color_words[0] for sector in direct_plan.sectors
-    }
+    assert any(
+        (6, 1, 3, 4, 2, 5) in sector.compatibility_words
+        for sector in direct_plan.sectors
+    )
 
 
 def test_color_plan_line_pairing_representatives_drop_only_block_orderings() -> None:
     three_line = build_color_plan("d d~ > u u~ s s~")
     four_line = build_color_plan("d d~ > u u~ s s~ c c~")
 
-    assert three_line.sector_count == 36
+    assert three_line.sector_count == 6
     assert lc_line_pairing_representative_ids(three_line) == (
         0,
-        6,
-        12,
-        18,
-        24,
-        30,
+        1,
+        2,
+        3,
+        4,
+        5,
     )
-    assert four_line.sector_count == 576
+    assert four_line.sector_count == 24
     assert len(lc_line_pairing_representative_ids(four_line)) == 24
-    assert lc_line_pairing_representative_ids(four_line)[:4] == (0, 24, 48, 72)
+    assert lc_line_pairing_representative_ids(four_line)[:4] == (0, 1, 2, 3)
 
 
 def test_open_line_compatibility_includes_complete_block_permutations() -> None:
@@ -85,7 +87,7 @@ def test_open_line_legacy_orders_include_antiquark_first_orientation() -> None:
 def test_color_plan_keeps_singlets_global_to_open_colour_sectors() -> None:
     plan = build_color_plan("d d~ > u u~ z")
 
-    assert plan.sector_count == 4
+    assert plan.sector_count == 2
     assert all(sector.kind == "open-lines" for sector in plan.sectors)
     assert {(5 in group) for sector in plan.sectors for group in sector.line_label_groups} == {
         False,
@@ -148,9 +150,10 @@ def test_color_plan_records_nlc_full_colour_scaffold() -> None:
     plan = build_color_plan("d d~ > z g", color_accuracy="full")
 
     assert plan.color_accuracy == "full"
-    assert plan.sector_count == 0
-    assert plan.idenso_required is True
-    assert "requires Idenso" in plan.diagnostics[0]
+    assert plan.sector_count == 1
+    assert plan.idenso_required is False
+    assert plan.ready_for_requested_colour is True
+    assert plan.diagnostics == ()
 
 
 def test_color_plan_groups_isomorphic_open_line_sectors() -> None:

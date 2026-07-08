@@ -427,7 +427,33 @@ struct GenericSlotRefManifestV2 {
 struct GenericAmplitudeStageManifestV2 {
     stage_kind: String,
     output_count: usize,
+    #[serde(default)]
+    color_contraction: Option<GenericColorContractionManifestV2>,
     roots: Vec<GenericAmplitudeRootManifestV2>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GenericColorContractionManifestV2 {
+    supported: bool,
+    #[serde(default)]
+    reason: Option<String>,
+    group_count: usize,
+    #[serde(default)]
+    includes_color_factor: bool,
+    entries: Vec<GenericColorContractionEntryManifestV2>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GenericColorContractionEntryManifestV2 {
+    left_group_id: i64,
+    right_group_id: i64,
+    weight: Vec<f64>,
+    #[serde(default = "default_symmetry_factor")]
+    symmetry_factor: f64,
+}
+
+fn default_symmetry_factor() -> f64 {
+    1.0
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2027,8 +2053,23 @@ struct AmplitudeStage {
 }
 
 struct RawSumGroup {
+    id: i64,
     indices: Vec<usize>,
     weight: f64,
+}
+
+struct ColorContractionRuntime {
+    group_count: usize,
+    entries: Vec<ColorContractionEntry>,
+    group_scratch_f64: Vec<Complex<f64>>,
+}
+
+struct ColorContractionEntry {
+    left_group_index: usize,
+    right_group_index: usize,
+    weight_re: f64,
+    weight_im: f64,
+    symmetry_factor: f64,
 }
 
 struct ZeroGluonStage {
@@ -2113,6 +2154,7 @@ struct GenericAmplitudeRuntimeV2 {
     raw_sum_weights: Vec<f64>,
     raw_sum_groups: Vec<RawSumGroup>,
     has_coherent_groups: bool,
+    color_contraction: Option<ColorContractionRuntime>,
     input_components: Option<Vec<usize>>,
     parameter_scratch_f64: Vec<Complex<f64>>,
     output_scratch_f64: Vec<Complex<f64>>,
@@ -2224,12 +2266,24 @@ impl GenericRuntimeV2 {
                     .collect::<BTreeMap<_, _>>()
             })
             .unwrap_or_default();
+        let color_factor_in_contraction = manifest
+            .runtime_schema
+            .amplitude_stage
+            .color_contraction
+            .as_ref()
+            .map(|contraction| contraction.supported && contraction.includes_color_factor)
+            .unwrap_or(false);
         let normalization_factor = manifest
             .runtime_schema
             .normalization
             .as_ref()
             .map(|normalization| {
-                normalization.color_factor * normalization.global_coupling_factor
+                let color_factor = if color_factor_in_contraction {
+                    1.0
+                } else {
+                    normalization.color_factor
+                };
+                color_factor * normalization.global_coupling_factor
                     / (normalization.average_factor * normalization.identical_factor)
             })
             .unwrap_or(1.0);
@@ -2446,7 +2500,7 @@ impl GenericRuntimeV2 {
 
         let reduction_start = Instant::now();
         self.amplitude_stage
-            .as_ref()
+            .as_mut()
             .expect("generic amplitude stage checked")
             .reduce_scratch_f64_into(n_points, &mut self.values_scratch_f64)?;
         for value in &mut self.values_scratch_f64 {
@@ -4092,8 +4146,9 @@ impl GenericStageRuntimeV2 {
                 for (column_start, state_offset_start, len) in &self.output_spans {
                     let source_start = row_eval + *column_start;
                     let target_start = row_state + *state_offset_start;
-                    state[target_start..target_start + *len]
-                        .copy_from_slice(&self.output_scratch_f64[source_start..source_start + *len]);
+                    state[target_start..target_start + *len].copy_from_slice(
+                        &self.output_scratch_f64[source_start..source_start + *len],
+                    );
                 }
             }
         }
@@ -4163,11 +4218,16 @@ impl GenericAmplitudeRuntimeV2 {
         } else {
             Vec::new()
         };
+        let color_contraction = build_color_contraction_runtime(
+            amplitude_stage.color_contraction.as_ref(),
+            &raw_sum_groups,
+        )?;
         Ok(Self {
             output_length: amplitude_stage.output_count,
             raw_sum_weights,
             raw_sum_groups,
             has_coherent_groups,
+            color_contraction,
             input_components: if stage.parameter_layout == "stage-local-value-momentum" {
                 let mut map = vec![0usize; stage.parameter_count];
                 for component in &stage.input_components {
@@ -4214,7 +4274,11 @@ impl GenericAmplitudeRuntimeV2 {
             .evaluate_batch_into(batch_size, state, &mut self.output_scratch_f64)
     }
 
-    fn reduce_scratch_f64_into(&self, batch_size: usize, raw_sums: &mut Vec<f64>) -> PyResult<()> {
+    fn reduce_scratch_f64_into(
+        &mut self,
+        batch_size: usize,
+        raw_sums: &mut Vec<f64>,
+    ) -> PyResult<()> {
         let amplitudes = &self.output_scratch_f64;
         if amplitudes.len() != batch_size * self.output_length {
             return Err(PyValueError::new_err(format!(
@@ -4225,6 +4289,35 @@ impl GenericAmplitudeRuntimeV2 {
         }
         raw_sums.clear();
         raw_sums.resize(batch_size, 0.0);
+        if let Some(contraction) = self.color_contraction.as_mut() {
+            if self.raw_sum_groups.len() != contraction.group_count {
+                return Err(PyValueError::new_err(
+                    "colour contraction group count does not match coherent groups",
+                ));
+            }
+            contraction
+                .group_scratch_f64
+                .resize(batch_size * contraction.group_count, c64(0.0, 0.0));
+            for row in 0..batch_size {
+                let row_offset = row * self.output_length;
+                let group_row = row * contraction.group_count;
+                for (group_index, group) in self.raw_sum_groups.iter().enumerate() {
+                    let mut sum = c64(0.0, 0.0);
+                    for index in &group.indices {
+                        sum += amplitudes[row_offset + *index];
+                    }
+                    contraction.group_scratch_f64[group_row + group_index] = sum;
+                }
+                for entry in &contraction.entries {
+                    let left = contraction.group_scratch_f64[group_row + entry.left_group_index];
+                    let right = contraction.group_scratch_f64[group_row + entry.right_group_index];
+                    let product = left * right.conj();
+                    raw_sums[row] += entry.symmetry_factor
+                        * (entry.weight_re * product.re - entry.weight_im * product.im);
+                }
+            }
+            return Ok(());
+        }
         for row in 0..batch_size {
             let row_offset = row * self.output_length;
             if self.has_coherent_groups {
@@ -4506,6 +4599,7 @@ fn build_raw_sum_groups(
             grouped.entry(group_id).or_default().push(index);
         } else {
             groups.push(RawSumGroup {
+                id: index as i64,
                 indices: vec![index],
                 weight: weights[index],
             });
@@ -4521,9 +4615,74 @@ fn build_raw_sum_groups(
                 "coherent amplitude group {group_id} has inconsistent raw-sum weights"
             )));
         }
-        groups.push(RawSumGroup { indices, weight });
+        groups.push(RawSumGroup {
+            id: group_id,
+            indices,
+            weight,
+        });
     }
     Ok(groups)
+}
+
+fn build_color_contraction_runtime(
+    manifest: Option<&GenericColorContractionManifestV2>,
+    groups: &[RawSumGroup],
+) -> PyResult<Option<ColorContractionRuntime>> {
+    let Some(manifest) = manifest else {
+        return Ok(None);
+    };
+    if !manifest.supported {
+        return Err(PyValueError::new_err(format!(
+            "generic colour contraction is unsupported: {}",
+            manifest
+                .reason
+                .as_deref()
+                .unwrap_or("no diagnostic was provided")
+        )));
+    }
+    let group_index_by_id = groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| (group.id, index))
+        .collect::<BTreeMap<_, _>>();
+    if group_index_by_id.len() != manifest.group_count {
+        return Err(PyValueError::new_err(format!(
+            "colour contraction declares {} groups but runtime has {} coherent groups",
+            manifest.group_count,
+            group_index_by_id.len()
+        )));
+    }
+    let mut entries = Vec::with_capacity(manifest.entries.len());
+    for entry in &manifest.entries {
+        let left_group_index = *group_index_by_id.get(&entry.left_group_id).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "colour contraction references unknown left group {}",
+                entry.left_group_id
+            ))
+        })?;
+        let right_group_index = *group_index_by_id
+            .get(&entry.right_group_id)
+            .ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "colour contraction references unknown right group {}",
+                    entry.right_group_id
+                ))
+            })?;
+        let weight_re = entry.weight.first().copied().unwrap_or(0.0);
+        let weight_im = entry.weight.get(1).copied().unwrap_or(0.0);
+        entries.push(ColorContractionEntry {
+            left_group_index,
+            right_group_index,
+            weight_re,
+            weight_im,
+            symmetry_factor: entry.symmetry_factor,
+        });
+    }
+    Ok(Some(ColorContractionRuntime {
+        group_count: manifest.group_count,
+        entries,
+        group_scratch_f64: Vec::new(),
+    }))
 }
 
 fn generic_root_group_id(root: &GenericAmplitudeRootManifestV2) -> PyResult<Option<i64>> {

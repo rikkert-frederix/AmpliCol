@@ -147,11 +147,11 @@ def test_process_support_includes_generic_current_plan_for_multi_quark_lines() -
     report = classify_process_support("d d~ > u u~")
 
     assert report.color_plan is not None
-    assert report.color_plan.sector_count == 4
-    assert report.color_plan.sector_kind_counts == (("open-lines", 4),)
+    assert report.color_plan.sector_count == 2
+    assert report.color_plan.sector_kind_counts == (("open-lines", 2),)
     assert report.current_plan is not None
     assert report.current_plan.has_closure is True
-    assert report.current_plan.color_sectors == (0, 1, 2, 3)
+    assert report.current_plan.color_sectors == (0, 1)
     assert report.current_plan.unimplemented_vertex_kinds == ()
     assert report.current_plan.pending_vertex_kinds == ()
     assert report.artifact_unavailable_message is None
@@ -166,7 +166,7 @@ def test_process_support_honors_generic_reference_sector_pruning() -> None:
     )
 
     assert report.color_plan is not None
-    assert report.color_plan.sector_count == 576
+    assert report.color_plan.sector_count == 24
     assert report.current_plan is not None
     assert report.current_plan.truncated is False
     assert report.current_plan.color_sectors == (0,)
@@ -178,7 +178,7 @@ def test_process_support_honors_generic_reference_sector_pruning() -> None:
 def test_process_support_accepts_selected_sector_when_full_color_plan_truncates() -> None:
     report = classify_process_support(
         "d d~ > u u~ s s~ c c~ b b~ t t~",
-        color_plan_max_sectors=20000,
+        color_plan_max_sectors=100,
         current_plan_max_currents=500000,
         selected_color_sector_ids={0},
         max_quark_pairs=6,
@@ -220,13 +220,24 @@ def test_process_support_can_skip_generic_current_plan_for_fast_diagnostics() ->
     assert "vertex kinds" not in report.artifact_unavailable_message
 
 
-def test_process_support_rejects_colour_expansion_without_lc_fallback() -> None:
+def test_process_support_accepts_full_colour_for_fortran_supported_colour_class() -> None:
     report = classify_process_support("d d~ > z g", color_accuracy="full")
 
-    assert report.runtime_artifact_supported is False
+    assert report.runtime_artifact_supported is True
     assert report.color_accuracy == "full"
-    assert report.support_class == "generic-dag-colour-preflight"
-    assert report.missing_feature == "colour-expansion"
+    assert report.support_class == "generic-dag-schema-v2"
+    assert report.missing_feature is None
+    assert report.artifact_unavailable_message is None
+    assert report.color_plan is not None
+    assert report.color_plan.ready_for_requested_colour is True
+
+
+def test_process_support_rejects_nlc_for_more_than_two_quark_pairs() -> None:
+    report = classify_process_support("d d~ > u u~ s s~", color_accuracy="nlc")
+
+    assert report.runtime_artifact_supported is False
+    assert report.color_accuracy == "nlc"
+    assert report.support_class == "generic-dag-colour-contraction-preflight"
+    assert report.missing_feature == "colour-contraction"
     assert report.artifact_unavailable_message is not None
-    assert "--color-accuracy=full" in report.artifact_unavailable_message
-    assert "Idenso basis/metric" in report.artifact_unavailable_message
+    assert "zero, one, or two quark pairs" in report.artifact_unavailable_message

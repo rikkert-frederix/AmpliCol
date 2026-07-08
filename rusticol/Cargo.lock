@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "symjit"
-version = "2.19.2"
+version = "2.19.3"
 dependencies = [
  "anyhow",
  "hashbrown 0.16.1",

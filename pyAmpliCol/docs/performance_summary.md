@@ -10,7 +10,7 @@ For C++ and ASM rows with multiple measured chunking options, this table reports
 
 The compiled pyAmplicCol DAG marks all known-real momentum-sum parameters as real with Symbolica `set_real_params(...)` before evaluator generation/compilation. In this hot path the couplings are embedded constants, so the relevant runtime input realness is the momentum sector. The refreshed low-multiplicity AmpliCol reference rows use the direct generated-library benchmark: `./amplicol_generate --library=create --amplicol_momenta_probe=10`, `make amplicol_generate_library`, `make amplicol_library_benchmark`, then `./amplicol_library_benchmark N 1 1`, which calls `amp_lib:evaluate_amp` directly and bypasses integration/probe bookkeeping.
 
-The dependency installer now uses upstream Symbolica `dev` plus the local pyAmplicCol patches and pins SymJIT to `2.19.2` at commit `54d6c6171f05b39505d18d1932f0972bfac9e4da`. This fixes the historical AArch64 complex-JIT crash captured in `MRE_symjit_bug_new.py`; staged-DAG JIT rows refreshed after this dependency update are noted in the tables.
+The dependency installer now uses upstream Symbolica `dev` plus the local pyAmplicCol patches and pins SymJIT to `2.19.3` at commit `dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4`. This fixes the historical AArch64 complex-JIT crash captured in `MRE_symjit_bug_new.py`; staged-DAG JIT rows refreshed after this dependency update are noted in the tables.
 
 | n | Setup | Gen [s] | Wall [us/pt] | Eval [us/pt] | Notes |
 |---:|---|---:|---:|---:|---|
@@ -206,10 +206,10 @@ python check_standalone.py --precision 32 --profile
       "source_ref": "dev",
       "source_rev": "e4167e767147ab8f3b4f039057c396c8fa961f6a",
       "source_url": "https://github.com/symbolica-dev/symbolica.git",
-      "symjit_source_ref": "54d6c6171f05b39505d18d1932f0972bfac9e4da",
-      "symjit_source_rev": "54d6c6171f05b39505d18d1932f0972bfac9e4da",
+      "symjit_source_ref": "dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4",
+      "symjit_source_rev": "dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4",
       "symjit_source_url": "https://github.com/siravan/symjit.git",
-      "symjit_version": "2.19.2"
+      "symjit_version": "2.19.3"
     },
     "symbolica_community": {
       "installed": true,
