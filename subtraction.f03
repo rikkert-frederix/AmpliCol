@@ -8,6 +8,8 @@ module subtraction
      integer,dimension(3) :: dip_ijk,dip_ijk_f
      integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
      integer :: dipole_type=0 ! 0:II, 1:IF, 2:FI, 3:FF
+   contains
+     final :: finalize_dipole
   end type dipole
   integer :: ndip
   type(dipole),dimension(:),allocatable :: dl
@@ -45,11 +47,17 @@ contains
           call fill_dipole(idip,pgl(igroup)%processes(1:n,iamp),ipart_r,ipart,ipart_l)
        endif
     enddo
-    call print_dipoles
+    call print_dipoles(pgl(igroup)%processes(:,iamp))
+    do idip=1,ndip
+       call finalize_dipole(dl(idip))
+    enddo
+    deallocate(dl)
   end subroutine initialise_subtraction
-  subroutine print_dipoles
+  subroutine print_dipoles(process)
     implicit none
+    integer,dimension(*),intent(in) :: process
     integer :: idip
+    write (*,*) 'process',process(1:n)
     do idip=1,ndip
        write (*,*) '------------------'
        write (*,*) 'dipole',idip
@@ -58,6 +66,8 @@ contains
        write (*,*) 'process reduced',dl(idip)%process_r
     enddo
     write (*,*) '------------------'
+    write (*,*) ''
+    write (*,*) ''
   end subroutine print_dipoles
   subroutine fill_dipole(idip,process,dip_i,dip_j,dip_k)
     implicit none
@@ -92,8 +102,6 @@ contains
     endif
     dl(idip)%dip_r_ijk_f(2)=dl(idip)%dip_ijk_f(3)
     allocate(dl(idip)%process_r(n-1))
-    write (*,*) dl(idip)%dip_ijk_f
-    write (*,*) dl(idip)%dip_r_ijk_f
     i=0
     do ipart=1,n
        if (ipart.eq.dip_j) cycle
@@ -144,4 +152,8 @@ contains
        endif
     endif
   end subroutine is_valid_dipole
+  subroutine finalize_dipole(di)
+    type(dipole) :: di
+    if (allocated(di%process_r)) deallocate(di%process_r)
+  end subroutine finalize_dipole
 end module subtraction
