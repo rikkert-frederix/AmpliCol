@@ -258,7 +258,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 220.74,
+        "runtime_us_per_point": 227.64270000000002,
         "status": "ok",
         "value": 3.553884772197126e-08
       },
@@ -273,7 +273,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_z_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_z_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -336,20 +336,20 @@
       "process": "d d~ > z g g g",
       "process_id": 1,
       "pyamplicol": {
-        "core_us_per_point": 70.36391619318182,
-        "generation_s": 1.2846867500338703,
+        "core_us_per_point": 41.96710469685629,
+        "generation_s": 1.2498419999610633,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 3.553884772197129e-08,
-        "wall_us_per_point": 73.73685986584115
+        "value": 3.5538847721971304e-08,
+        "wall_us_per_point": 46.78386975721802
       },
       "validation": {
-        "absolute_difference": 3.3087224502121107e-23,
+        "absolute_difference": 4.632211430296955e-23,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 9.310156806706338e-16,
+        "max_relative_difference": 1.303421952938887e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 9.310156806706338e-16,
+        "relative_difference": 1.303421952938887e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -612,7 +612,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 216.87,
+        "runtime_us_per_point": 234.96880000000002,
         "status": "ok",
         "value": 7.277150141020351e-08
       },
@@ -627,7 +627,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/ud_w_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/ud_w_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -690,18 +690,18 @@
       "process": "u d~ > w+ g g g",
       "process_id": 2,
       "pyamplicol": {
-        "core_us_per_point": 32.766664756944444,
-        "generation_s": 0.7165188749786466,
+        "core_us_per_point": 15.298496457122095,
+        "generation_s": 0.8144137079361826,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 7.277150141020362e-08,
-        "wall_us_per_point": 34.76135041435353
+        "wall_us_per_point": 18.18569275158996
       },
       "validation": {
         "absolute_difference": 1.0587911840678754e-22,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 1.454953056553836e-15,
+        "max_relative_difference": 1.6368221886230652e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 1.454953056553836e-15,
         "status": "ok",
@@ -891,7 +891,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 87.61,
+        "runtime_us_per_point": 94.4456,
         "status": "ok",
         "value": 4.249095195171272e-11
       },
@@ -906,7 +906,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_epem_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_epem_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -969,18 +969,18 @@
       "process": "d d~ > e+ e- g g",
       "process_id": 3,
       "pyamplicol": {
-        "core_us_per_point": 1.8105902168188202,
-        "generation_s": 0.2732852919725701,
+        "core_us_per_point": 1.3591995433022432,
+        "generation_s": 0.32068179198540747,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 4.249095195171272e-11,
-        "wall_us_per_point": 2.194603003833814
+        "wall_us_per_point": 1.788269373317463
       },
       "validation": {
         "absolute_difference": 0.0,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 0.0,
+        "max_relative_difference": 4.562629151905865e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 0.0,
         "status": "ok",
@@ -1170,7 +1170,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 85.16,
+        "runtime_us_per_point": 91.486,
         "status": "ok",
         "value": 5.4487229302231084e-11
       },
@@ -1185,7 +1185,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/ud_epve_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/ud_epve_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -1248,12 +1248,12 @@
       "process": "u d~ > e+ ve g g",
       "process_id": 4,
       "pyamplicol": {
-        "core_us_per_point": 0.6560430849542334,
-        "generation_s": 0.19808516604825854,
+        "core_us_per_point": 0.5276288581643737,
+        "generation_s": 0.28222637495491654,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 5.448722930223117e-11,
-        "wall_us_per_point": 0.8941046549179122
+        "wall_us_per_point": 0.8082088520642984
       },
       "validation": {
         "absolute_difference": 8.401053096241687e-26,
@@ -1449,7 +1449,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 235.74999999999997,
+        "runtime_us_per_point": 253.7556,
         "status": "ok",
         "value": 1.908286621291298e-09
       },
@@ -1464,7 +1464,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_zz_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -1527,18 +1527,18 @@
       "process": "d d~ > z z g g",
       "process_id": 5,
       "pyamplicol": {
-        "core_us_per_point": 21.522131548713237,
-        "generation_s": 0.7021542090224102,
+        "core_us_per_point": 6.458840233170607,
+        "generation_s": 0.6729981249663979,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.908286621291299e-09,
-        "wall_us_per_point": 23.169146074638668
+        "wall_us_per_point": 8.030856880458359
       },
       "validation": {
         "absolute_difference": 8.271806125530277e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 4.3346769993770187e-16,
+        "max_relative_difference": 6.502015499065526e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 4.3346769993770187e-16,
         "status": "ok",
@@ -1728,7 +1728,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 343.53000000000003,
+        "runtime_us_per_point": 378.7404,
         "status": "ok",
         "value": 1.3297504115314706e-06
       },
@@ -1743,7 +1743,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/gg_tt_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/gg_tt_jets/n4/jit/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -1806,20 +1806,20 @@
       "process": "g g > t t~ g g",
       "process_id": 6,
       "pyamplicol": {
-        "core_us_per_point": 657.365357421875,
-        "generation_s": 7.6772622499847785,
+        "core_us_per_point": 379.70709648437503,
+        "generation_s": 8.282825375092216,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 1.3297504115314617e-06,
-        "wall_us_per_point": 685.8229169210972
+        "value": 1.3297504115314619e-06,
+        "wall_us_per_point": 411.93819920408714
       },
       "validation": {
-        "absolute_difference": 8.893845946170154e-21,
+        "absolute_difference": 8.682087709356578e-21,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 6.688357355668822e-15,
+        "max_relative_difference": 6.529110751962421e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 6.688357355668822e-15,
+        "relative_difference": 6.529110751962421e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -2007,7 +2007,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 187.97,
+        "runtime_us_per_point": 187.6979,
         "status": "ok",
         "value": 1.0521884081060955e-07
       },
@@ -2022,7 +2022,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_tt_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_tt_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -2085,20 +2085,20 @@
       "process": "d d~ > t t~ g g",
       "process_id": 7,
       "pyamplicol": {
-        "core_us_per_point": 120.45640504807693,
-        "generation_s": 1.6923861670074984,
+        "core_us_per_point": 69.48136519607844,
+        "generation_s": 1.7861401670379564,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 1.0521884081060955e-07,
-        "wall_us_per_point": 125.86608569948183
+        "value": 1.0521884081060954e-07,
+        "wall_us_per_point": 77.33847485046591
       },
       "validation": {
-        "absolute_difference": 0.0,
+        "absolute_difference": 1.3234889800848443e-23,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 0.0,
+        "max_relative_difference": 1.257844098916734e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 0.0,
+        "relative_difference": 1.257844098916734e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -2286,7 +2286,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 1576.4796,
+        "runtime_us_per_point": 1708.4581,
         "status": "ok",
         "value": 0.00018874337394242944
       },
@@ -2364,12 +2364,12 @@
       "process": "g g > g g g g",
       "process_id": 8,
       "pyamplicol": {
-        "core_us_per_point": 613.4659828125,
-        "generation_s": 49.26131833391264,
+        "core_us_per_point": 799.86185546875,
+        "generation_s": 57.98297220794484,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.00018874337394243532,
-        "wall_us_per_point": 801.8405586881272
+        "wall_us_per_point": 1014.7752685725209
       },
       "validation": {
         "absolute_difference": 5.8817967857338616e-18,
@@ -2481,7 +2481,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 357.63000000000005,
+        "runtime_us_per_point": 365.39889999999997,
         "status": "ok",
         "value": 7.048672925034577e-11
       },
@@ -2496,7 +2496,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_zzz_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_zzz_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -2559,18 +2559,18 @@
       "process": "d d~ > z z z g",
       "process_id": 9,
       "pyamplicol": {
-        "core_us_per_point": 28.50806928066038,
-        "generation_s": 0.6154797499766573,
+        "core_us_per_point": 6.642059932809331,
+        "generation_s": 0.6865649579558522,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 7.048672925034558e-11,
-        "wall_us_per_point": 29.591041740512185
+        "wall_us_per_point": 7.927650845889782
       },
       "validation": {
         "absolute_difference": 1.9387045606711586e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 2.7504532857320067e-15,
+        "max_relative_difference": 2.9338168381141402e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 2.7504532857320067e-15,
         "status": "ok",
@@ -2583,7 +2583,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 74.72,
+        "runtime_us_per_point": 78.74940000000001,
         "status": "ok",
         "value": 4.362730888571686e-15
       },
@@ -2598,7 +2598,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_epemzh_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_epemzh_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -2661,20 +2661,20 @@
       "process": "d d~ > e+ e- z h",
       "process_id": 10,
       "pyamplicol": {
-        "core_us_per_point": 2.269273633465719,
-        "generation_s": 0.26133170898538083,
+        "core_us_per_point": 1.4726466859363725,
+        "generation_s": 0.30767666595056653,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 4.36273088857168e-15,
-        "wall_us_per_point": 2.6171016579731967
+        "value": 4.3627308885716794e-15,
+        "wall_us_per_point": 1.8796730838185034
       },
       "validation": {
-        "absolute_difference": 5.5220263365470826e-30,
+        "absolute_difference": 6.310887241768095e-30,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 1.265727013099114e-15,
+        "max_relative_difference": 1.4465451578275586e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 1.265727013099114e-15,
+        "relative_difference": 1.4465451578275586e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -2685,7 +2685,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 80.92,
+        "runtime_us_per_point": 84.0083,
         "status": "ok",
         "value": 6.692084027633928e-10
       },
@@ -2700,7 +2700,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_ttzh_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -2763,20 +2763,20 @@
       "process": "d d~ > t t~ z h",
       "process_id": 11,
       "pyamplicol": {
-        "core_us_per_point": 5.6018282877604175,
-        "generation_s": 0.39121120900381356,
+        "core_us_per_point": 3.870052708142552,
+        "generation_s": 0.4245073749916628,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 6.692084027633925e-10,
-        "wall_us_per_point": 6.519208261579479
+        "value": 6.692084027633924e-10,
+        "wall_us_per_point": 4.769736774666894
       },
       "validation": {
-        "absolute_difference": 3.101927297073854e-25,
+        "absolute_difference": 4.1359030627651384e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 4.635218691613739e-16,
+        "max_relative_difference": 6.180291588818319e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 4.635218691613739e-16,
+        "relative_difference": 6.180291588818319e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -2787,7 +2787,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | full",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 115.07999999999998,
+        "runtime_us_per_point": 120.37150000000001,
         "status": "ok",
         "value": 8.816759251064347e-16
       },
@@ -2802,7 +2802,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_4l_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/full/dd_4l_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_full_data.json"
       },
       "n_final": 4,
@@ -2865,20 +2865,20 @@
       "process": "d d~ > e+ e- e+ e-",
       "process_id": 12,
       "pyamplicol": {
-        "core_us_per_point": 2.536002052919708,
-        "generation_s": 0.27042395900934935,
+        "core_us_per_point": 1.489805912629503,
+        "generation_s": 0.32337737502530217,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 8.816759251064348e-16,
-        "wall_us_per_point": 2.8519485587728752
+        "value": 8.81675925106435e-16,
+        "wall_us_per_point": 1.839911811345641
       },
       "validation": {
-        "absolute_difference": 9.860761315262648e-32,
+        "absolute_difference": 2.9582283945787943e-31,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 1.118411088980599e-16,
+        "max_relative_difference": 3.3552332669417964e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
-        "relative_difference": 1.118411088980599e-16,
+        "relative_difference": 3.3552332669417964e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -3138,7 +3138,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 1.4154,
+        "runtime_us_per_point": 1.5252000000000001,
         "status": "ok",
         "value": 7.313471009652072e-10
       },
@@ -3215,20 +3215,20 @@
       "process": "d d~ > z g g g",
       "process_id": 1,
       "pyamplicol": {
-        "core_us_per_point": 2.952468550890929,
-        "generation_s": 0.3023602080065757,
+        "core_us_per_point": 2.2023016087883227,
+        "generation_s": 0.4934231670340523,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 7.313471009652077e-10,
-        "wall_us_per_point": 3.3747569815356027
+        "value": 7.31347100965208e-10,
+        "wall_us_per_point": 2.6919312876823005
       },
       "validation": {
-        "absolute_difference": 4.1359030627651384e-25,
+        "absolute_difference": 7.237830359838992e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
         "max_relative_difference": 1.5551758402533412e-15,
         "point_order_source": "process-file-pdg-order:1,-1,21,21,21,23",
-        "relative_difference": 5.655184873648519e-16,
+        "relative_difference": 9.896573528884904e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -3488,7 +3488,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.8980999999999999,
+        "runtime_us_per_point": 1.0286,
         "status": "ok",
         "value": 1.5054960507722693e-09
       },
@@ -3565,12 +3565,12 @@
       "process": "u d~ > w+ g g g",
       "process_id": 2,
       "pyamplicol": {
-        "core_us_per_point": 1.8560717108463034,
-        "generation_s": 0.2780538339866325,
+        "core_us_per_point": 1.4139233182305784,
+        "generation_s": 0.3758695409633219,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.5054960507722957e-09,
-        "wall_us_per_point": 2.171741218576924
+        "wall_us_per_point": 1.7643835519771944
       },
       "validation": {
         "absolute_difference": 2.6469779601696886e-23,
@@ -3764,7 +3764,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.44279999999999997,
+        "runtime_us_per_point": 0.4918,
         "status": "ok",
         "value": 1.097820147140249e-12
       },
@@ -3841,12 +3841,12 @@
       "process": "d d~ > e+ e- g g",
       "process_id": 3,
       "pyamplicol": {
-        "core_us_per_point": 0.8386177664401989,
-        "generation_s": 0.21120424999389797,
+        "core_us_per_point": 0.6605471046986646,
+        "generation_s": 0.3370352500351146,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.0978201471402506e-12,
-        "wall_us_per_point": 1.0642719828342466
+        "wall_us_per_point": 0.9151625133770697
       },
       "validation": {
         "absolute_difference": 1.6155871338926322e-27,
@@ -4040,7 +4040,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.14700000000000002,
+        "runtime_us_per_point": 0.1688,
         "status": "ok",
         "value": 1.4566112109790886e-12
       },
@@ -4117,20 +4117,20 @@
       "process": "u d~ > e+ ve g g",
       "process_id": 4,
       "pyamplicol": {
-        "core_us_per_point": 0.41699615119485295,
-        "generation_s": 0.05307129200082272,
+        "core_us_per_point": 0.24242687460029846,
+        "generation_s": 0.25137458299286664,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 1.4566112109790936e-12,
-        "wall_us_per_point": 0.5747362017834402
+        "value": 1.456611210979094e-12,
+        "wall_us_per_point": 0.4163696629498672
       },
       "validation": {
-        "absolute_difference": 5.0487097934144756e-27,
+        "absolute_difference": 5.4526065768876336e-27,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 3.466065450657127e-15,
+        "max_relative_difference": 3.743350686709696e-15,
         "point_order_source": "process-file-pdg-order:2,-1,21,21,-11,12",
-        "relative_difference": 3.466065450657127e-15,
+        "relative_difference": 3.743350686709696e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -4316,7 +4316,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 2.1927,
+        "runtime_us_per_point": 2.2714,
         "status": "ok",
         "value": 7.661622029747832e-11
       },
@@ -4393,12 +4393,12 @@
       "process": "d d~ > z z g g",
       "process_id": 5,
       "pyamplicol": {
-        "core_us_per_point": 5.0008003297738695,
-        "generation_s": 0.42398979095742106,
+        "core_us_per_point": 3.0923854229630074,
+        "generation_s": 0.6820431250380352,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 7.661622029747834e-11,
-        "wall_us_per_point": 5.61220467722868
+        "wall_us_per_point": 3.7792902775730015
       },
       "validation": {
         "absolute_difference": 1.2924697071141057e-26,
@@ -4592,7 +4592,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 2.3863,
+        "runtime_us_per_point": 2.5378000000000003,
         "status": "ok",
         "value": 1.0017188619402868e-08
       },
@@ -4669,20 +4669,20 @@
       "process": "g g > t t~ g g",
       "process_id": 6,
       "pyamplicol": {
-        "core_us_per_point": 5.721907161245922,
-        "generation_s": 0.3910255830269307,
+        "core_us_per_point": 3.9558268761439903,
+        "generation_s": 0.5714885829947889,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 1.0017188619402843e-08,
-        "wall_us_per_point": 6.376827240293284
+        "value": 1.0017188619402847e-08,
+        "wall_us_per_point": 4.769119148942343
       },
       "validation": {
-        "absolute_difference": 2.481541837659083e-23,
+        "absolute_difference": 2.150669592637872e-23,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
         "max_relative_difference": 3.137892723326676e-15,
         "point_order_source": "process-file-pdg-order:21,21,6,-6,21,21",
-        "relative_difference": 2.4772837289421127e-15,
+        "relative_difference": 2.146979231749831e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -4868,7 +4868,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.8843000000000001,
+        "runtime_us_per_point": 0.9304,
         "status": "ok",
         "value": 5.56709238995977e-09
       },
@@ -4945,12 +4945,12 @@
       "process": "d d~ > t t~ g g",
       "process_id": 7,
       "pyamplicol": {
-        "core_us_per_point": 2.2271240732255912,
-        "generation_s": 0.2425612920196727,
+        "core_us_per_point": 1.7642865512602661,
+        "generation_s": 0.3966713330009952,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 5.5670923899597644e-09,
-        "wall_us_per_point": 2.6037340040259664
+        "wall_us_per_point": 2.2131055399856576
       },
       "validation": {
         "absolute_difference": 5.790264287871194e-24,
@@ -5144,7 +5144,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 3.2291000000000003,
+        "runtime_us_per_point": 3.468,
         "status": "ok",
         "value": 1.3396190435276385e-09
       },
@@ -5221,20 +5221,20 @@
       "process": "g g > g g g g",
       "process_id": 8,
       "pyamplicol": {
-        "core_us_per_point": 7.7319759311018315,
-        "generation_s": 0.40358799998648465,
+        "core_us_per_point": 6.525081275082625,
+        "generation_s": 0.855429874965921,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 1.3396190435276383e-09,
-        "wall_us_per_point": 8.419083583483935
+        "value": 1.3396190435276385e-09,
+        "wall_us_per_point": 7.381661588460375
       },
       "validation": {
-        "absolute_difference": 2.0679515313825692e-25,
+        "absolute_difference": 0.0,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
         "max_relative_difference": 3.08737255023936e-16,
         "point_order_source": "process-file-pdg-order:21,21,21,21,21,21",
-        "relative_difference": 1.5436862751196804e-16,
+        "relative_difference": 0.0,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -5337,7 +5337,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 4.8324,
+        "runtime_us_per_point": 5.447400000000001,
         "status": "ok",
         "value": 7.929757040663882e-11
       },
@@ -5414,12 +5414,12 @@
       "process": "d d~ > z z z g",
       "process_id": 9,
       "pyamplicol": {
-        "core_us_per_point": 19.81709292763158,
-        "generation_s": 0.46517812507227063,
+        "core_us_per_point": 7.696890662114015,
+        "generation_s": 2.1962177909445018,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 7.929757040663876e-11,
-        "wall_us_per_point": 20.898883169712988
+        "wall_us_per_point": 9.28137555926573
       },
       "validation": {
         "absolute_difference": 5.169878828456423e-26,
@@ -5438,9 +5438,9 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.7604,
+        "runtime_us_per_point": 0.7999999999999999,
         "status": "ok",
-        "value": 4.362730888571675e-15
+        "value": 4.362730888571678e-15
       },
       "id": "lc:dd_epemzh_jets:n4",
       "metadata": {
@@ -5515,20 +5515,20 @@
       "process": "d d~ > e+ e- z h",
       "process_id": 10,
       "pyamplicol": {
-        "core_us_per_point": 2.126903940644654,
-        "generation_s": 0.12754916690755635,
+        "core_us_per_point": 1.5409239680251083,
+        "generation_s": 0.5323835409944877,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 4.36273088857168e-15,
-        "wall_us_per_point": 2.4592236685456776
+        "value": 4.3627308885716794e-15,
+        "wall_us_per_point": 1.991663423528856
       },
       "validation": {
-        "absolute_difference": 5.5220263365470826e-30,
+        "absolute_difference": 1.5777218104420236e-30,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 1.627363302556005e-15,
-        "point_order_source": "process-file-pdg-order:1,-1,-11,11,23,25",
-        "relative_difference": 1.2657270130991155e-15,
+        "max_relative_difference": 9.04090723642225e-16,
+        "point_order_source": "process-file-pdg-order:1,-1,23,-11,11,25",
+        "relative_difference": 3.616362894568902e-16,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -5539,7 +5539,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 1.0564,
+        "runtime_us_per_point": 1.1384,
         "status": "ok",
         "value": 7.528594531088168e-10
       },
@@ -5616,20 +5616,20 @@
       "process": "d d~ > t t~ z h",
       "process_id": 11,
       "pyamplicol": {
-        "core_us_per_point": 2.231816844334112,
-        "generation_s": 0.17011345806531608,
+        "core_us_per_point": 1.7672140915738652,
+        "generation_s": 0.4209914159728214,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 7.528594531088159e-10,
-        "wall_us_per_point": 2.6081090918803125
+        "value": 7.52859453108816e-10,
+        "wall_us_per_point": 2.2026465082510946
       },
       "validation": {
-        "absolute_difference": 9.305781891221561e-25,
+        "absolute_difference": 8.271806125530277e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
         "max_relative_difference": 1.510737943933367e-15,
         "point_order_source": "process-file-pdg-order:1,-1,6,-6,23,25",
-        "relative_difference": 1.2360583177636639e-15,
+        "relative_difference": 1.0987185046788124e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -5640,7 +5640,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 1.4459,
+        "runtime_us_per_point": 1.6339,
         "status": "ok",
         "value": 8.816759251064339e-16
       },
@@ -5717,20 +5717,20 @@
       "process": "d d~ > e+ e- e+ e-",
       "process_id": 12,
       "pyamplicol": {
-        "core_us_per_point": 2.0267758875739643,
-        "generation_s": 0.1280925419414416,
+        "core_us_per_point": 1.4716303125723045,
+        "generation_s": 0.5264403750188649,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
-        "value": 8.816759251064349e-16,
-        "wall_us_per_point": 2.3186117288905894
+        "value": 8.81675925106435e-16,
+        "wall_us_per_point": 1.8078038478576295
       },
       "validation": {
-        "absolute_difference": 9.860761315262648e-31,
+        "absolute_difference": 1.0846837446788912e-30,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 1.1184110889805988e-15,
-        "point_order_source": "process-file-pdg-order:1,-1,-11,11,-11,11",
-        "relative_difference": 1.1184110889805988e-15,
+        "max_relative_difference": 1.2302521978786586e-15,
+        "point_order_source": "process-file-pdg-order:1,-1,-11,-11,11,11",
+        "relative_difference": 1.2302521978786586e-15,
         "status": "ok",
         "tolerance": 1e-08
       }
@@ -5741,7 +5741,7 @@
       "fortran": {
         "mode": "AmpliCol - using-library",
         "reference_probe": "direct_generated_library_benchmark",
-        "runtime_us_per_point": 0.1748,
+        "runtime_us_per_point": 0.18660000000000002,
         "status": "ok",
         "value": 6.33598230017189e-10
       },
@@ -5818,12 +5818,12 @@
       "process": "d d~ > u u~ s s~",
       "process_id": 13,
       "pyamplicol": {
-        "core_us_per_point": 0.2390465181581415,
-        "generation_s": 0.23443570802919567,
+        "core_us_per_point": 0.2020382637288095,
+        "generation_s": 0.24129895900841802,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 6.335982300171898e-10,
-        "wall_us_per_point": 0.3960667054690223
+        "wall_us_per_point": 0.3752025423935573
       },
       "validation": {
         "absolute_difference": 8.271806125530277e-25,
@@ -6094,7 +6094,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 212.03,
+        "runtime_us_per_point": 220.55989999999997,
         "status": "ok",
         "value": 3.5298795068314526e-08
       },
@@ -6109,7 +6109,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_z_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_z_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -6172,12 +6172,12 @@
       "process": "d d~ > z g g g",
       "process_id": 1,
       "pyamplicol": {
-        "core_us_per_point": 34.59362574404762,
-        "generation_s": 1.1014357500243932,
+        "core_us_per_point": 41.66184548611111,
+        "generation_s": 1.2414774170611054,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 3.529879506831457e-08,
-        "wall_us_per_point": 37.56251529315099
+        "wall_us_per_point": 45.958007607974615
       },
       "validation": {
         "absolute_difference": 4.632211430296955e-23,
@@ -6448,7 +6448,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 216.39,
+        "runtime_us_per_point": 221.81670000000003,
         "status": "ok",
         "value": 7.227651332304325e-08
       },
@@ -6463,7 +6463,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/ud_w_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/ud_w_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -6526,18 +6526,18 @@
       "process": "u d~ > w+ g g g",
       "process_id": 2,
       "pyamplicol": {
-        "core_us_per_point": 12.883343522451456,
-        "generation_s": 0.7301707080332562,
+        "core_us_per_point": 14.934230124858917,
+        "generation_s": 0.7912229589419439,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 7.227651332304332e-08,
-        "wall_us_per_point": 15.196250635057968
+        "wall_us_per_point": 17.643364287649923
       },
       "validation": {
         "absolute_difference": 6.617444900424221e-23,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 9.155733441162604e-16,
+        "max_relative_difference": 1.0986880129395122e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 9.155733441162604e-16,
         "status": "ok",
@@ -6727,7 +6727,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 88.39,
+        "runtime_us_per_point": 90.2353,
         "status": "ok",
         "value": 4.249095195171272e-11
       },
@@ -6742,7 +6742,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_epem_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_epem_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -6805,18 +6805,18 @@
       "process": "d d~ > e+ e- g g",
       "process_id": 3,
       "pyamplicol": {
-        "core_us_per_point": 1.2140886824324324,
-        "generation_s": 0.29702137503772974,
+        "core_us_per_point": 1.3094647754619384,
+        "generation_s": 0.30743654107209295,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 4.249095195171272e-11,
-        "wall_us_per_point": 1.6895890705101821
+        "wall_us_per_point": 1.7291873359042629
       },
       "validation": {
         "absolute_difference": 0.0,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 0.0,
+        "max_relative_difference": 4.562629151905865e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 0.0,
         "status": "ok",
@@ -7006,7 +7006,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 82.53999999999999,
+        "runtime_us_per_point": 89.2692,
         "status": "ok",
         "value": 5.4487229302231084e-11
       },
@@ -7021,7 +7021,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/ud_epve_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/ud_epve_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -7084,12 +7084,12 @@
       "process": "u d~ > e+ ve g g",
       "process_id": 4,
       "pyamplicol": {
-        "core_us_per_point": 0.4461614241579178,
-        "generation_s": 0.1994842089479789,
+        "core_us_per_point": 0.483431883521655,
+        "generation_s": 0.2426059580175206,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 5.448722930223117e-11,
-        "wall_us_per_point": 0.6838190223031329
+        "wall_us_per_point": 0.7372264837151974
       },
       "validation": {
         "absolute_difference": 8.401053096241687e-26,
@@ -7285,7 +7285,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 245.64,
+        "runtime_us_per_point": 250.37140000000002,
         "status": "ok",
         "value": 1.908286621291298e-09
       },
@@ -7300,7 +7300,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_zz_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_zz_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -7363,18 +7363,18 @@
       "process": "d d~ > z z g g",
       "process_id": 5,
       "pyamplicol": {
-        "core_us_per_point": 5.9433237969483566,
-        "generation_s": 0.6511311249341816,
+        "core_us_per_point": 6.408803247517821,
+        "generation_s": 0.6687684999778867,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.908286621291299e-09,
-        "wall_us_per_point": 7.360417310192475
+        "wall_us_per_point": 7.959191836095453
       },
       "validation": {
         "absolute_difference": 8.271806125530277e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 4.3346769993770187e-16,
+        "max_relative_difference": 6.502015499065526e-16,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 4.3346769993770187e-16,
         "status": "ok",
@@ -7564,7 +7564,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 316.53,
+        "runtime_us_per_point": 332.36379999999997,
         "status": "ok",
         "value": 1.3349942164423387e-06
       },
@@ -7579,7 +7579,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/gg_tt_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/gg_tt_jets/n4/jit/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -7642,12 +7642,12 @@
       "process": "g g > t t~ g g",
       "process_id": 6,
       "pyamplicol": {
-        "core_us_per_point": 343.359984375,
-        "generation_s": 7.244217750034295,
+        "core_us_per_point": 385.251302734375,
+        "generation_s": 8.193826374947093,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.3349942164423328e-06,
-        "wall_us_per_point": 363.0429266650026
+        "wall_us_per_point": 407.06534878154343
       },
       "validation": {
         "absolute_difference": 5.929230630780102e-21,
@@ -7843,7 +7843,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 169.19,
+        "runtime_us_per_point": 179.33889999999997,
         "status": "ok",
         "value": 1.0434229425762886e-07
       },
@@ -7858,7 +7858,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_tt_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_tt_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -7921,12 +7921,12 @@
       "process": "d d~ > t t~ g g",
       "process_id": 7,
       "pyamplicol": {
-        "core_us_per_point": 63.30427343750001,
-        "generation_s": 1.6188237919704989,
+        "core_us_per_point": 71.323645884901,
+        "generation_s": 1.771505624987185,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 1.0434229425762889e-07,
-        "wall_us_per_point": 71.47616290901418
+        "wall_us_per_point": 77.44121318531745
       },
       "validation": {
         "absolute_difference": 2.6469779601696886e-23,
@@ -8122,7 +8122,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 992.9814000000001,
+        "runtime_us_per_point": 1068.2154,
         "status": "ok",
         "value": 0.00018878203188216512
       },
@@ -8200,12 +8200,12 @@
       "process": "g g > g g g g",
       "process_id": 8,
       "pyamplicol": {
-        "core_us_per_point": 609.9307434895833,
-        "generation_s": 39.561694916919805,
+        "core_us_per_point": 836.3984010416667,
+        "generation_s": 45.12784316705074,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 0.00018878203188216655,
-        "wall_us_per_point": 664.2656249672049
+        "wall_us_per_point": 910.8862848532024
       },
       "validation": {
         "absolute_difference": 1.4365678785432934e-18,
@@ -8317,7 +8317,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 357.52,
+        "runtime_us_per_point": 368.4606,
         "status": "ok",
         "value": 7.048672925034577e-11
       },
@@ -8332,7 +8332,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_zzz_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_zzz_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -8395,18 +8395,18 @@
       "process": "d d~ > z z z g",
       "process_id": 9,
       "pyamplicol": {
-        "core_us_per_point": 6.062390873579545,
-        "generation_s": 0.7378082500072196,
+        "core_us_per_point": 7.449000543400798,
+        "generation_s": 0.683832292095758,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 7.048672925034558e-11,
-        "wall_us_per_point": 7.13198206457574
+        "wall_us_per_point": 8.911630455138702
       },
       "validation": {
         "absolute_difference": 1.9387045606711586e-25,
         "absolute_tolerance": 1e-16,
         "kind": "same-deterministic-point",
-        "max_relative_difference": 2.7504532857320067e-15,
+        "max_relative_difference": 2.9338168381141402e-15,
         "point_order_source": "amplicol-color-probe-pdg-order",
         "relative_difference": 2.7504532857320067e-15,
         "status": "ok",
@@ -8419,7 +8419,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 71.42,
+        "runtime_us_per_point": 77.6528,
         "status": "ok",
         "value": 4.362730888571686e-15
       },
@@ -8434,7 +8434,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_epemzh_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_epemzh_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -8497,12 +8497,12 @@
       "process": "d d~ > e+ e- z h",
       "process_id": 10,
       "pyamplicol": {
-        "core_us_per_point": 1.3167914253860489,
-        "generation_s": 0.27216295909602195,
+        "core_us_per_point": 1.4195120761786961,
+        "generation_s": 0.31654004100710154,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 4.3627308885716794e-15,
-        "wall_us_per_point": 1.664414138409073
+        "wall_us_per_point": 1.8191830511672458
       },
       "validation": {
         "absolute_difference": 6.310887241768095e-30,
@@ -8521,7 +8521,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 90.39,
+        "runtime_us_per_point": 87.78580000000001,
         "status": "ok",
         "value": 6.692084027633928e-10
       },
@@ -8536,7 +8536,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_ttzh_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_ttzh_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -8599,12 +8599,12 @@
       "process": "d d~ > t t~ z h",
       "process_id": 11,
       "pyamplicol": {
-        "core_us_per_point": 3.7285619974415205,
-        "generation_s": 0.587212415994145,
+        "core_us_per_point": 4.110863745485884,
+        "generation_s": 0.51960520807188,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 6.692084027633924e-10,
-        "wall_us_per_point": 4.579683854101684
+        "wall_us_per_point": 5.131462185795305
       },
       "validation": {
         "absolute_difference": 4.1359030627651384e-25,
@@ -8623,7 +8623,7 @@
       "fortran": {
         "mode": "AmpliCol - color probe | nlc",
         "reference_probe": "direct_color_probe_imode2",
-        "runtime_us_per_point": 118.28,
+        "runtime_us_per_point": 130.1339,
         "status": "ok",
         "value": 8.816759251064347e-16
       },
@@ -8638,7 +8638,7 @@
           "/Users/vjhirsch/HEP_programs/AmpliCol/processes.txt",
           "/Users/vjhirsch/HEP_programs/AmpliCol/Utilities/ME_checks/momenta_1_1.txt"
         ],
-        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/dd_4l_jets/n4/jit/validation_momenta.json",
+        "point_source": "pyAmpliCol/docs/.result_matrix_outputs/nlc/dd_4l_jets/n4/cpp_o3/validation_momenta.json",
         "source_cache": "pyAmpliCol/docs/result_matrix_nlc_data.json"
       },
       "n_final": 4,
@@ -8701,12 +8701,12 @@
       "process": "d d~ > e+ e- e+ e-",
       "process_id": 12,
       "pyamplicol": {
-        "core_us_per_point": 1.5754203338244417,
-        "generation_s": 0.37419804197270423,
+        "core_us_per_point": 1.5203053186613367,
+        "generation_s": 0.32553920801728964,
         "mode": "pyAmpliCol - staged-DAG | JIT",
         "status": "ok",
         "value": 8.81675925106435e-16,
-        "wall_us_per_point": 1.9407377348719228
+        "wall_us_per_point": 1.8784722368245559
       },
       "validation": {
         "absolute_difference": 2.9582283945787943e-31,
@@ -8720,12 +8720,12 @@
       }
     }
   ],
-  "created_at": "2026-07-08T09:06:06.465095+00:00",
+  "created_at": "2026-07-08T09:28:49.333307+00:00",
   "created_by": "pyAmpliCol/scripts/refresh_result_matrix_fixtures.py",
   "git": {
     "branch": "pyamplicol_nlc_full_color",
     "dirty": true,
-    "head": "c31b4eff4cbff24f9ed6f2c99a1d9170bbcbcf0e"
+    "head": "9a3af982cab1167bf621d9043c99233794d764a7"
   },
   "kind": "pyamplicol-result-matrix-reference-fixture",
   "max_n": 4,
@@ -8735,19 +8735,19 @@
       "color_accuracy": "lc",
       "path": "pyAmpliCol/docs/result_matrix_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T09:05:22.845297+00:00"
+      "updated_at": "2026-07-08T09:27:44.814991+00:00"
     },
     {
       "color_accuracy": "nlc",
       "path": "pyAmpliCol/docs/result_matrix_nlc_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T09:00:35.156200+00:00"
+      "updated_at": "2026-07-08T09:23:16.985438+00:00"
     },
     {
       "color_accuracy": "full",
       "path": "pyAmpliCol/docs/result_matrix_full_data.json",
       "schema_version": 1,
-      "updated_at": "2026-07-08T09:03:42.557266+00:00"
+      "updated_at": "2026-07-08T09:26:06.091859+00:00"
     }
   ],
   "summary": {
