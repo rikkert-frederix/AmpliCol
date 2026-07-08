@@ -584,11 +584,10 @@ The blue rows are the Fortran \AC\ references.  The green highlighted rows are
 the current \PAC\ production route, \texttt{rusticol} with C++ O3 staged
 evaluators.
 The dependency installer currently uses upstream Symbolica \texttt{dev} with
-the pyAmpliCol local patches and pins SymJIT to \texttt{2.19.2} at commit
-\texttt{54d6c6171f05b39505d18d1932f0972bfac9e4da}.  This fixes the historical
-AArch64 complex-JIT crash captured by \texttt{MRE\_symjit\_bug\_new.py};
-staged-DAG JIT rows refreshed after this dependency update are noted in the
-tables below.
+the pyAmpliCol local patches and pins SymJIT to \texttt{2.19.3} at commit
+\texttt{dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4}.  The \PAC\ JIT rows below
+are generated with SymJIT \texttt{opt\_level=3}; staged-DAG JIT rows refreshed
+after this dependency update are noted in the tables below.
 
 \scriptsize
 \setlength{\tabcolsep}{1.55pt}

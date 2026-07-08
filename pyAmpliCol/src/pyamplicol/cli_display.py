@@ -148,7 +148,6 @@ class CliDisplay:
         columns: Sequence[DisplayColumn],
         rows: Sequence[DisplayRow | dict[str, object]],
     ) -> str:
-        self._ensure_tabled_checked()
         normalized = [
             row if isinstance(row, DisplayRow) else DisplayRow(dict(row))
             for row in rows

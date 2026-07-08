@@ -976,10 +976,12 @@ def _add_evaluator_build_options(
     )
     parser.add_argument(
         "--symbolica-jit-optimization-level",
+        "--symbolica-jit-opt-level",
+        dest="symbolica_jit_optimization_level",
         type=int,
         choices=(0, 1, 2, 3),
         default=3,
-        help="SymJIT optimization level.",
+        help="SymJIT opt_level passed through Symbolica's JIT evaluator.",
     )
     parser.add_argument(
         "--symbolica-max-horner-scheme-variables",
@@ -2499,24 +2501,35 @@ def _cmd_generate_generic_dag_artifact(
         build_kwargs,
         process=entry.process,
     )
-    manifest_path, manifest = write_generic_dag_process_artifact(
-        entry.process,
-        output_dir,
-        options=_process_options(args),
-        color_accuracy=str(getattr(args, "color_accuracy", "lc")),
-        max_currents=int(getattr(args, "max_currents", 50000)),
-        max_color_sectors=int(getattr(args, "max_color_sectors", 20000)),
-        evaluator_backend=str(build_kwargs["symbolica_evaluator_backend"]),
-        compiled_preset=str(build_kwargs["symbolica_compiled_preset"]),
-        batch_size=int(build_kwargs["batch_size"]),
-        emit_stage_evaluator_artifacts=True,
-        symbolica_settings=symbolica_settings,
-        merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
-        verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
-        progress_callback=_child_generation_progress_callback(entry.process),
-        lc_topology_replay=bool(getattr(args, "lc_topology_replay", False)),
-        **_generic_dag_pruning_kwargs(args, process=entry.process),
-    )
+    display = _display(args)
+    with display.stage_progress(
+        "Generating process",
+        total=1,
+        metadata=entry.key,
+    ) as progress:
+        progress_callback = _combined_progress_callback(
+            progress.callback,
+            _child_generation_progress_callback(entry.process),
+        )
+        manifest_path, manifest = write_generic_dag_process_artifact(
+            entry.process,
+            output_dir,
+            options=_process_options(args),
+            color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+            max_currents=int(getattr(args, "max_currents", 50000)),
+            max_color_sectors=int(getattr(args, "max_color_sectors", 20000)),
+            evaluator_backend=str(build_kwargs["symbolica_evaluator_backend"]),
+            compiled_preset=str(build_kwargs["symbolica_compiled_preset"]),
+            batch_size=int(build_kwargs["batch_size"]),
+            emit_stage_evaluator_artifacts=True,
+            symbolica_settings=symbolica_settings,
+            merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
+            verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
+            progress_callback=progress_callback,
+            lc_topology_replay=bool(getattr(args, "lc_topology_replay", False)),
+            **_generic_dag_pruning_kwargs(args, process=entry.process),
+        )
+        progress.update(stage="done", item=entry.key, increment=1)
     compiled = cast(dict[str, Any], manifest["compiled"])
     generation_s = time.perf_counter() - generation_start
     runtime_available = bool(compiled.get("stage_evaluators"))
@@ -3142,6 +3155,7 @@ def _generate_process_child_command(
         command.append("--lc-topology-replay")
     optional_integer_options = (
         ("symbolica_cpe_iterations", "--symbolica-cpe-iterations"),
+        ("symbolica_jit_optimization_level", "--symbolica-jit-optimization-level"),
         ("symbolica_max_horner_scheme_variables", "--symbolica-max-horner-scheme-variables"),
         ("symbolica_max_common_pair_cache_entries", "--symbolica-max-common-pair-cache-entries"),
         ("symbolica_max_common_pair_distance", "--symbolica-max-common-pair-distance"),

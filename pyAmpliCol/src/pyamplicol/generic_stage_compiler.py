@@ -280,6 +280,14 @@ def write_generic_stage_evaluator_artifacts(
 
     output_dir = Path(artifact_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "stage compile",
+                "item": "start",
+                "total": blueprint.stage_count,
+            }
+        )
 
     def compile_stage(stage: GenericCompiledStageBlueprint) -> dict[str, object]:
         if not stage.output_expressions:
@@ -315,9 +323,27 @@ def write_generic_stage_evaluator_artifacts(
         payload = stage.to_json_dict()
         payload["evaluator"] = compile_stage(stage)
         stage_payloads.append(payload)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "stage complete",
+                    "item": stage.evaluator_label,
+                    "increment": 1,
+                    "total": blueprint.stage_count,
+                }
+            )
 
     amplitude_payload = blueprint.amplitude_stage.to_json_dict()
     amplitude_payload["evaluator"] = compile_stage(blueprint.amplitude_stage)
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "stage complete",
+                "item": blueprint.amplitude_stage.evaluator_label,
+                "increment": 1,
+                "total": blueprint.stage_count,
+            }
+        )
 
     stage_local_layout = (
         blueprint.amplitude_stage.parameter_layout == "stage-local-value-momentum"

@@ -648,6 +648,8 @@ def test_cli_generate_process_explicit_jit_backend_overrides_fast_default(
             "generate-process",
             "--symbolica-evaluator-backend",
             "jit",
+            "--symbolica-jit-opt-level",
+            "2",
             "d d~ > z g",
             str(output_dir),
         ]
@@ -655,6 +657,7 @@ def test_cli_generate_process_explicit_jit_backend_overrides_fast_default(
     kwargs = _generation_build_kwargs(args, _runtime_backend(args), output_dir)
 
     assert kwargs["symbolica_evaluator_backend"] == "jit"
+    assert kwargs["symbolica_jit_optimization_level"] == 2
     assert kwargs["symbolica_compiled_output_dir"] == str(output_dir / "compiled")
 
 
@@ -711,6 +714,8 @@ def test_cli_generate_process_set_writes_root_manifest(
                 "--lc-sector-ids",
                 "0",
                 "--no-species-reachability-pruning",
+                "--symbolica-jit-opt-level",
+                "3",
                 "d d~ > z g | u u~ > z g",
                 str(output_dir),
                 "--n_cores",
@@ -726,6 +731,11 @@ def test_cli_generate_process_set_writes_root_manifest(
     assert payload["available"] is True
     assert [cmd[4] for cmd in launched] == ["d d~ > z g", "u u~ > z g"]
     assert all("--n_cores" in cmd and cmd[cmd.index("--n_cores") + 1] == "1" for cmd in launched)
+    assert all(
+        "--symbolica-jit-optimization-level" in cmd
+        and cmd[cmd.index("--symbolica-jit-optimization-level") + 1] == "3"
+        for cmd in launched
+    )
     assert all(kwargs["start_new_session"] is True for kwargs in launched_kwargs)
     assert manifest["default_process_key"] == "d_dbar_to_z_g"
     assert [entry["key"] for entry in manifest["processes"]] == [

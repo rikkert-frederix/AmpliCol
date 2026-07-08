@@ -1143,6 +1143,7 @@ def _run_pyamplicol_case(
         )
     if backend_key == "jit":
         generate.extend(["--symbolica-evaluator-backend", "jit"])
+        generate.extend(["--symbolica-jit-optimization-level", "3"])
     else:
         generate.extend(
             [
@@ -1510,11 +1511,11 @@ def _matrix_status_notes_latex(
                     + shown
                     + r".  The raw assertion is retained in "
                     r"\texttt{result\_matrix\_data.json}. The "
-                    r"current managed dependency set uses SymJIT \texttt{2.19.2}, "
-                    r"which fixes the smaller historical \texttt{v220} AArch64 "
+                    r"current managed dependency set uses SymJIT \texttt{2.19.3}, "
+                    r"which is expected to fix the remaining AArch64 "
                     r"JIT segfault reproduced by \texttt{MRE\_symjit\_bug\_new.py}; "
-                    r"the remaining listed AArch64 vector-offset assertions still "
-                    r"require an upstream SymJIT fix."
+                    r"any remaining entries listed here retain their raw backend "
+                    r"assertions for upstream diagnosis."
                 ),
                 r"\par\smallskip",
             ]
@@ -1960,6 +1961,7 @@ def _pyamplicol_matrix_settings(
         settings.update(
             {
                 "symbolica_evaluator_backend": "jit",
+                "symbolica_jit_optimization_level": 3,
             }
         )
     elif backend_key == "cpp_o3":
@@ -2035,7 +2037,12 @@ def _load_data(path: Path) -> dict[str, Any]:
 
 def _write_data(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tmp_path.replace(path)
 
 
 def _parse_n_values(values: Iterable[str]) -> tuple[int, ...]:
