@@ -44,15 +44,15 @@ def _report_progress(
 @dataclass(frozen=True)
 class SymbolicaEvaluatorSettings:
     backend: str = "jit"
-    iterations: int = 1
+    iterations: int = 50
     cpe_iterations: int | None = None
     n_cores: int = 4
     direct_translation: bool = True
     jit_direct_translation: bool = False
     jit_optimization_level: int = 3
-    max_horner_scheme_variables: int = 500
-    max_common_pair_cache_entries: int = 1000000
-    max_common_pair_distance: int = 100
+    max_horner_scheme_variables: int = 1000
+    max_common_pair_cache_entries: int = 5000000
+    max_common_pair_distance: int = 1000
     collect_factors: bool = False
     compiled_preset: str = "adaptive"
     compiled_inline_asm: str = "default"
@@ -619,6 +619,7 @@ class _JITSymbolicaEvaluatorAdapter:
         self.input_len = int(input_len)
         self.output_len = int(output_len)
         self.backend = settings.backend
+        self.settings = settings.to_json_dict()
         self.label = _safe_symbol_name(label)
         self._source_evaluator = evaluator
         self.evaluator_state_path: Path | None = None
@@ -651,6 +652,7 @@ class _JITSymbolicaEvaluatorAdapter:
         instance.input_len = int(manifest["input_len"])
         instance.output_len = int(manifest["output_len"])
         instance.backend = str(manifest["backend"])
+        instance.settings = dict(manifest.get("settings", {}))
         instance.label = str(manifest.get("label", "jit_symbolica_evaluator"))
         instance.evaluator_state_path = _artifact_path_from_manifest(
             str(manifest["evaluator_state_path"]),
@@ -673,6 +675,7 @@ class _JITSymbolicaEvaluatorAdapter:
             "label": self.label,
             "input_len": self.input_len,
             "output_len": self.output_len,
+            "settings": self.settings,
             "evaluator_state_path": _artifact_path_for_manifest(path, artifact_dir),
         }
 
@@ -702,6 +705,7 @@ class _CompiledComplexEvaluatorAdapter:
         self.input_len = int(input_len)
         self.output_len = int(output_len)
         self.backend = settings.backend
+        self.settings = settings.to_json_dict()
         self.number_type = (
             "complex_4x"
             if settings.backend == "compiled-complex-4x"
@@ -757,6 +761,7 @@ class _CompiledComplexEvaluatorAdapter:
         instance.input_len = int(manifest["input_len"])
         instance.output_len = int(manifest["output_len"])
         instance.backend = str(manifest["backend"])
+        instance.settings = dict(manifest.get("settings", {}))
         instance.number_type = str(manifest["number_type"])
         instance._source_evaluator = None
         instance.source_path = _artifact_path_from_manifest(
@@ -797,6 +802,7 @@ class _CompiledComplexEvaluatorAdapter:
             "function_name": self.function_name,
             "input_len": self.input_len,
             "output_len": self.output_len,
+            "settings": self.settings,
             "source_path": _artifact_path_for_manifest(
                 self.source_path,
                 artifact_dir,

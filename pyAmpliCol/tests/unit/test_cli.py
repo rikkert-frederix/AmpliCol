@@ -2021,7 +2021,7 @@ def test_cli_generic_stage_uses_tuned_common_pair_defaults() -> None:
     explicit_kwargs = _runtime_evaluator_kwargs(explicit_args)
 
     assert staged_kwargs["symbolica_cpe_iterations"] is None
-    assert staged_kwargs["symbolica_max_common_pair_distance"] == 100
+    assert staged_kwargs["symbolica_max_common_pair_distance"] == 1000
     assert explicit_kwargs["symbolica_cpe_iterations"] == 5
     assert explicit_kwargs["symbolica_max_common_pair_distance"] == 75
 

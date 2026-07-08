@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
 
@@ -55,6 +55,7 @@ class GenericProcessManifest:
     dag: GenericDAG
     model: Model
     color_plan: GenericColorPlan
+    structural_current_aggregation: Mapping[str, object] | None = None
     zero_current_filter: Mapping[str, object] | None = None
     current_merging: Mapping[str, object] | None = None
 
@@ -107,6 +108,13 @@ class GenericProcessManifest:
             "color_plan": self.color_plan.to_json_dict(),
             "lc_topology_reuse": _lc_topology_reuse_payload(self),
             "generation_filters": {
+                "structural_current_aggregation": dict(
+                    self.structural_current_aggregation
+                    or {
+                        "enabled": False,
+                        "reason": "structural current aggregation was not requested",
+                    }
+                ),
                 "zero_current": dict(
                     self.zero_current_filter
                     or {
@@ -268,6 +276,12 @@ def build_generic_process_manifest(
         )
     )
     dag = prune_global_helicity_flip_equivalent_roots(dag, model)
+    dag, structural_current_aggregation = _aggregate_lc_gluon_flavour_flow_currents(
+        dag,
+        model,
+        sample_count=numerical_current_samples,
+        seed=numerical_current_seed,
+    )
     zero_current_filter: Mapping[str, object] | None = None
     if numerical_filter_current:
         dag, zero_current_filter = _filter_zero_currents_by_warmup(
@@ -320,6 +334,7 @@ def build_generic_process_manifest(
         dag=dag,
         model=model,
         color_plan=color_plan,
+        structural_current_aggregation=structural_current_aggregation,
         zero_current_filter=zero_current_filter,
         current_merging=current_merging,
     )
@@ -1161,6 +1176,209 @@ def _generic_process_set_generation_metadata(
         },
         "lc_topology_replay": bool(lc_topology_replay),
     }
+
+
+def _aggregate_lc_gluon_flavour_flow_currents(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    sample_count: int,
+    seed: int,
+) -> tuple[GenericDAG, Mapping[str, object]]:
+    before = _dag_count_payload(dag)
+    report: dict[str, object] = {
+        "enabled": dag.process.color_accuracy == "lc",
+        "mode": "lc-gluon-flavour-flow-aggregation",
+        "before": before,
+    }
+    if dag.process.color_accuracy != "lc":
+        report.update(
+            {
+                "after": before,
+                "skipped": True,
+                "reason": "structural current aggregation is currently defined for LC DAGs",
+            }
+        )
+        return dag, report
+
+    def current_key(current: CurrentNode) -> tuple[object, ...]:
+        index = current.index
+        if current.is_source:
+            return ("source", current.id)
+        try:
+            is_gluon = model.color_rep(int(index.particle_id)) == 8
+        except KeyError:
+            is_gluon = False
+        if not is_gluon or index.auxiliary_kind is not None:
+            return ("current", current.id)
+        return (
+            "lc-gluon",
+            index.particle_id,
+            index.external_mask,
+            index.helicity_ancestry,
+            index.chirality,
+            index.spin_state,
+            index.color_state,
+            index.momentum_mask,
+            index.coupling_orders,
+            index.auxiliary_kind,
+            index.ordered_external_labels,
+        )
+
+    groups: dict[tuple[object, ...], list[int]] = {}
+    for current in dag.currents:
+        groups.setdefault(current_key(current), []).append(current.id)
+    merged_groups = tuple(tuple(ids) for ids in groups.values() if len(ids) > 1)
+    merged_current_count = sum(len(ids) - 1 for ids in merged_groups)
+    if merged_current_count == 0:
+        report.update(
+            {
+                "after": before,
+                "skipped": False,
+                "merged_group_count": 0,
+                "merged_current_count": 0,
+                "removed_interaction_count": 0,
+                "removed_amplitude_root_count": 0,
+            }
+        )
+        return dag, report
+
+    representative_by_old_id: dict[int, int] = {}
+    for ids in groups.values():
+        representative = min(ids)
+        for current_id in ids:
+            representative_by_old_id[current_id] = representative
+    representatives = tuple(
+        current.id
+        for current in dag.currents
+        if representative_by_old_id[current.id] == current.id
+    )
+    new_id_by_old_representative = {
+        old_id: new_id for new_id, old_id in enumerate(representatives)
+    }
+
+    def mapped_current_id(old_id: int) -> int:
+        return new_id_by_old_representative[representative_by_old_id[old_id]]
+
+    currents = tuple(
+        replace(dag.currents[old_id], id=new_id_by_old_representative[old_id])
+        for old_id in representatives
+    )
+    interactions: list[InteractionNode] = []
+    seen_interactions: set[tuple[object, ...]] = set()
+    skipped_interaction_count = 0
+    for interaction in dag.interactions:
+        mapped = replace(
+            interaction,
+            id=0,
+            left_id=mapped_current_id(interaction.left_id),
+            right_id=mapped_current_id(interaction.right_id),
+            result_id=mapped_current_id(interaction.result_id),
+        )
+        interaction_key = (
+            mapped.vertex_kind,
+            mapped.vertex_particles,
+            mapped.left_id,
+            mapped.right_id,
+            mapped.result_id,
+            mapped.coupling,
+            mapped.color_weight,
+            mapped.lowering_backend,
+            mapped.full_tensor_network_ready,
+        )
+        if interaction_key in seen_interactions:
+            skipped_interaction_count += 1
+            continue
+        seen_interactions.add(interaction_key)
+        interactions.append(replace(mapped, id=len(interactions)))
+
+    roots: list[AmplitudeRoot] = []
+    seen_roots: set[tuple[object, ...]] = set()
+    skipped_root_count = 0
+    for root in dag.amplitude_roots:
+        mapped = replace(
+            root,
+            id=0,
+            left_id=mapped_current_id(root.left_id),
+            right_id=mapped_current_id(root.right_id),
+        )
+        root_key = (
+            mapped.kind,
+            mapped.left_id,
+            mapped.right_id,
+            mapped.color_weight,
+            mapped.color_sector_id,
+            mapped.vertex_kind,
+            mapped.vertex_particles,
+            mapped.coupling,
+            mapped.contraction,
+            mapped.helicity_weight,
+        )
+        if root_key in seen_roots:
+            skipped_root_count += 1
+            continue
+        seen_roots.add(root_key)
+        roots.append(replace(mapped, id=len(roots)))
+
+    sources: list[int] = []
+    seen_sources: set[int] = set()
+    for source_id in dag.sources:
+        mapped_source = mapped_current_id(source_id)
+        if mapped_source in seen_sources:
+            continue
+        seen_sources.add(mapped_source)
+        sources.append(mapped_source)
+
+    candidate = prune_dag_to_amplitude_roots(
+        GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=currents,
+            sources=tuple(sources),
+            interactions=tuple(interactions),
+            amplitude_roots=tuple(roots),
+            truncated=dag.truncated,
+        )
+    )
+    validation = _validate_numerical_rewrite_preserves_raw_sums(
+        dag,
+        candidate,
+        model,
+        sample_count=sample_count,
+        seed=seed,
+    )
+    accepted = bool(validation.get("accepted", False))
+    effective_dag = candidate if accepted else dag
+    after = _dag_count_payload(effective_dag)
+    candidate_after = _dag_count_payload(candidate)
+    report.update(
+        {
+            "after": after,
+            "candidate_after": candidate_after,
+            "merged_group_count": len(merged_groups),
+            "merged_current_count": merged_current_count,
+            "merged_current_ids": [list(ids[1:]) for ids in merged_groups],
+            "removed_interaction_count": (
+                before["interaction_count"] - after["interaction_count"]
+            ),
+            "removed_amplitude_root_count": (
+                before["amplitude_root_count"] - after["amplitude_root_count"]
+            ),
+            "deduplicated_interaction_count": skipped_interaction_count,
+            "deduplicated_amplitude_root_count": skipped_root_count,
+            "validation": validation,
+        }
+    )
+    if not accepted:
+        report.update(
+            {
+                "skipped": True,
+                "reason": "candidate structural aggregation failed raw-sum validation; leaving DAG unchanged",
+            }
+        )
+        return dag, report
+    report["skipped"] = False
+    return candidate, report
 
 
 def _filter_zero_currents_by_warmup(
@@ -2705,6 +2923,14 @@ def _generic_dag_process_artifact_payload(
             "species_reachability_pruning": species_reachability_pruning,
             "ignored_particle_ids": list(ignored_particle_ids or ()),
             "ignored_vertex_kinds": list(ignored_vertex_kinds or ()),
+            "structural_current_aggregation": dict(
+                manifest.structural_current_aggregation
+                or {
+                    "enabled": manifest.dag.process.color_accuracy == "lc",
+                    "mode": "lc-gluon-flavour-flow-aggregation",
+                    "reason": "structural current aggregation was not run",
+                }
+            ),
             "zero_current_filter": dict(
                 manifest.zero_current_filter
                 or {
@@ -2851,6 +3077,7 @@ def _runtime_manifest_for_color_sectors(
         dag=filtered,
         model=manifest.model,
         color_plan=manifest.color_plan,
+        structural_current_aggregation=manifest.structural_current_aggregation,
         zero_current_filter=manifest.zero_current_filter,
         current_merging=manifest.current_merging,
     )

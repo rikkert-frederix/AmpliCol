@@ -1406,6 +1406,10 @@ def _run_pyamplicol_case(
     if backend_key == "jit":
         generate.extend(["--symbolica-evaluator-backend", "jit"])
         generate.extend(["--symbolica-jit-optimization-level", "3"])
+        generate.extend(["--symbolica-iterations", "50"])
+        generate.extend(["--symbolica-max-horner-scheme-variables", "1000"])
+        generate.extend(["--symbolica-max-common-pair-cache-entries", "5000000"])
+        generate.extend(["--symbolica-max-common-pair-distance", "1000"])
     else:
         generate.extend(
             [
@@ -2622,6 +2626,11 @@ def _pyamplicol_matrix_settings(
             {
                 "symbolica_evaluator_backend": "jit",
                 "symbolica_jit_optimization_level": 3,
+                "symbolica_iterations": 50,
+                "symbolica_cpe_iterations": None,
+                "symbolica_max_horner_scheme_variables": 1000,
+                "symbolica_max_common_pair_cache_entries": 5000000,
+                "symbolica_max_common_pair_distance": 1000,
             }
         )
     elif backend_key == "cpp_o3":

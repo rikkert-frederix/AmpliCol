@@ -962,7 +962,7 @@ def _add_evaluator_build_options(
         "--symbolica-n-iterations",
         dest="symbolica_iterations",
         type=int,
-        default=1,
+        default=50,
         help="Number of Horner-scheme optimization iterations.",
     )
     parser.add_argument(
@@ -1018,13 +1018,13 @@ def _add_evaluator_build_options(
     parser.add_argument(
         "--symbolica-max-horner-scheme-variables",
         type=int,
-        default=500,
+        default=1000,
         help="Maximum number of variables considered in a Horner scheme.",
     )
     parser.add_argument(
         "--symbolica-max-common-pair-cache-entries",
         type=int,
-        default=1_000_000,
+        default=5_000_000,
         help="Maximum common-pair cache entries during Symbolica optimization.",
     )
     parser.add_argument(
@@ -1032,7 +1032,7 @@ def _add_evaluator_build_options(
         type=int,
         help=(
             "Maximum distance between common pairs before cache eviction. "
-            "Defaults to 100 for generic DAG stage evaluators unless specified."
+            "Defaults to 1000 for generic DAG stage evaluators unless specified."
         ),
     )
     parser.add_argument(
@@ -1274,7 +1274,7 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         None,
     )
     if common_pair_distance is None:
-        common_pair_distance = 100
+        common_pair_distance = 1000
     return {
         "batch_size": int(getattr(args, "batch_size", 16)),
         "merge_evaluators_strategy": bool(
@@ -1289,7 +1289,7 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "symbolica_evaluator_backend": str(
             getattr(args, "symbolica_evaluator_backend", "jit")
         ),
-        "symbolica_iterations": int(getattr(args, "symbolica_iterations", 1)),
+        "symbolica_iterations": int(getattr(args, "symbolica_iterations", 50)),
         "symbolica_cpe_iterations": cpe_iterations,
         "symbolica_n_cores": int(getattr(args, "symbolica_n_cores", 4)),
         "symbolica_direct_translation": bool(
@@ -1300,10 +1300,10 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
             getattr(args, "symbolica_jit_optimization_level", 3)
         ),
         "symbolica_max_horner_scheme_variables": int(
-            getattr(args, "symbolica_max_horner_scheme_variables", 500)
+            getattr(args, "symbolica_max_horner_scheme_variables", 1000)
         ),
         "symbolica_max_common_pair_cache_entries": int(
-            getattr(args, "symbolica_max_common_pair_cache_entries", 1_000_000)
+            getattr(args, "symbolica_max_common_pair_cache_entries", 5_000_000)
         ),
         "symbolica_max_common_pair_distance": int(common_pair_distance),
         "symbolica_collect_factors": bool(
@@ -3054,7 +3054,7 @@ def _generate_process_child_command(
         "--symbolica-evaluator-backend",
         str(getattr(args, "symbolica_evaluator_backend", "compiled-complex")),
         "--symbolica-iterations",
-        str(int(getattr(args, "symbolica_iterations", 1))),
+        str(int(getattr(args, "symbolica_iterations", 50))),
         "--symbolica-compiled-preset",
         str(getattr(args, "symbolica_compiled_preset", "runtime-o3")),
         "--symbolica-compiled-inline-asm",

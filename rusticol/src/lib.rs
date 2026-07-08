@@ -2083,6 +2083,8 @@ struct ZeroGluonStage {
 struct RuntimeProfile {
     source_fill_s: f64,
     momentum_setup_s: f64,
+    stage_input_pack_s: f64,
+    stage_evaluator_call_s: f64,
     stage_evaluator_s: f64,
     output_assign_s: f64,
     amplitude_evaluator_s: f64,
@@ -2445,6 +2447,8 @@ impl GenericRuntimeV2 {
             }
             profile.source_fill_s += sector_profile.source_fill_s;
             profile.momentum_setup_s += sector_profile.momentum_setup_s;
+            profile.stage_input_pack_s += sector_profile.stage_input_pack_s;
+            profile.stage_evaluator_call_s += sector_profile.stage_evaluator_call_s;
             profile.stage_evaluator_s += sector_profile.stage_evaluator_s;
             profile.output_assign_s += sector_profile.output_assign_s;
             profile.amplitude_evaluator_s += sector_profile.amplitude_evaluator_s;
@@ -2500,15 +2504,19 @@ impl GenericRuntimeV2 {
         }
         let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
 
+        let mut stage_input_pack_s = 0.0;
+        let mut stage_evaluator_call_s = 0.0;
         let mut stage_evaluator_s = 0.0;
         let mut output_assign_s = 0.0;
         for stage in self.stages.as_mut().expect("generic stages checked") {
-            let (eval_s, assign_s) = stage.evaluate_f64_into_state(
+            let (pack_s, eval_s, assign_s) = stage.evaluate_f64_into_state(
                 n_points,
                 self.parameter_count,
                 state.as_mut_slice(),
             )?;
-            stage_evaluator_s += eval_s;
+            stage_input_pack_s += pack_s;
+            stage_evaluator_call_s += eval_s;
+            stage_evaluator_s += pack_s + eval_s;
             output_assign_s += assign_s;
         }
 
@@ -2533,6 +2541,8 @@ impl GenericRuntimeV2 {
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s,
+                stage_input_pack_s,
+                stage_evaluator_call_s,
                 stage_evaluator_s,
                 output_assign_s,
                 amplitude_evaluator_s,
@@ -2633,16 +2643,20 @@ impl GenericRuntimeV2 {
         }
         let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
 
+        let mut stage_input_pack_s = 0.0;
+        let mut stage_evaluator_call_s = 0.0;
         let mut stage_evaluator_s = 0.0;
         let mut output_assign_s = 0.0;
         for stage in self.stages.as_mut().expect("generic stages checked") {
-            let (eval_s, assign_s) = stage.evaluate_generic_into_state(
+            let (pack_s, eval_s, assign_s) = stage.evaluate_generic_into_state(
                 n_points,
                 self.parameter_count,
                 state.as_mut_slice(),
                 binary_precision,
             )?;
-            stage_evaluator_s += eval_s;
+            stage_input_pack_s += pack_s;
+            stage_evaluator_call_s += eval_s;
+            stage_evaluator_s += pack_s + eval_s;
             output_assign_s += assign_s;
         }
 
@@ -2666,6 +2680,8 @@ impl GenericRuntimeV2 {
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s,
+                stage_input_pack_s,
+                stage_evaluator_call_s,
                 stage_evaluator_s,
                 output_assign_s,
                 amplitude_evaluator_s,
@@ -3686,6 +3702,11 @@ impl Runtime {
         dict.set_item("source_fill_time_s", profile.source_fill_s)?;
         dict.set_item("momentum_setup_time_s", profile.momentum_setup_s)?;
         dict.set_item("parameter_pack_time_s", 0.0)?;
+        dict.set_item("stage_input_pack_time_s", profile.stage_input_pack_s)?;
+        dict.set_item(
+            "stage_evaluator_call_time_s",
+            profile.stage_evaluator_call_s,
+        )?;
         dict.set_item("stage_evaluator_time_s", profile.stage_evaluator_s)?;
         dict.set_item("output_transfer_time_s", profile.output_assign_s)?;
         dict.set_item("output_assign_time_s", profile.output_assign_s)?;
@@ -3957,6 +3978,8 @@ impl Runtime {
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s,
+                stage_input_pack_s: 0.0,
+                stage_evaluator_call_s: stage_evaluator_s,
                 stage_evaluator_s,
                 output_assign_s,
                 amplitude_evaluator_s,
@@ -4063,6 +4086,8 @@ impl Runtime {
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s,
+                stage_input_pack_s: 0.0,
+                stage_evaluator_call_s: stage_evaluator_s,
                 stage_evaluator_s,
                 output_assign_s,
                 amplitude_evaluator_s,
@@ -4108,6 +4133,8 @@ impl Runtime {
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s: 0.0,
+                stage_input_pack_s: 0.0,
+                stage_evaluator_call_s: 0.0,
                 stage_evaluator_s: 0.0,
                 output_assign_s: 0.0,
                 amplitude_evaluator_s,
@@ -4168,6 +4195,8 @@ impl Runtime {
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s: 0.0,
+                stage_input_pack_s: 0.0,
+                stage_evaluator_call_s: 0.0,
                 stage_evaluator_s: 0.0,
                 output_assign_s: 0.0,
                 amplitude_evaluator_s,
@@ -4535,10 +4564,12 @@ impl GenericStageRuntimeV2 {
         batch_size: usize,
         parameter_count: usize,
         state: &mut [Complex<f64>],
-    ) -> PyResult<(f64, f64)> {
-        let eval_start = Instant::now();
+    ) -> PyResult<(f64, f64, f64)> {
+        let mut input_pack_s = 0.0;
+        let eval_start;
         if let Some(input_components) = self.input_components.as_ref() {
             let local_parameter_count = input_components.len();
+            let pack_start = Instant::now();
             self.parameter_scratch_f64
                 .resize(batch_size * local_parameter_count, c64(0.0, 0.0));
             for row in 0..batch_size {
@@ -4549,12 +4580,15 @@ impl GenericStageRuntimeV2 {
                         state[row_state + *global_index];
                 }
             }
+            input_pack_s = pack_start.elapsed().as_secs_f64();
+            eval_start = Instant::now();
             self.evaluator.evaluate_batch_into(
                 batch_size,
                 &self.parameter_scratch_f64,
                 &mut self.output_scratch_f64,
             )?;
         } else {
+            eval_start = Instant::now();
             self.evaluator
                 .evaluate_batch_into(batch_size, state, &mut self.output_scratch_f64)?;
         }
@@ -4578,7 +4612,11 @@ impl GenericStageRuntimeV2 {
                 }
             }
         }
-        Ok((evaluator_s, assign_start.elapsed().as_secs_f64()))
+        Ok((
+            input_pack_s,
+            evaluator_s,
+            assign_start.elapsed().as_secs_f64(),
+        ))
     }
 
     fn evaluate_generic_into_state<T>(
@@ -4587,14 +4625,16 @@ impl GenericStageRuntimeV2 {
         parameter_count: usize,
         state: &mut [Complex<T>],
         binary_precision: Option<u32>,
-    ) -> PyResult<(f64, f64)>
+    ) -> PyResult<(f64, f64, f64)>
     where
         T: RusticolHighPrecisionNumber,
         Complex<T>: Real + EvaluationDomain,
     {
-        let eval_start = Instant::now();
-        let evaluated = if let Some(input_components) = self.input_components.as_ref() {
+        let mut input_pack_s = 0.0;
+        let (evaluated, evaluator_s) = if let Some(input_components) = self.input_components.as_ref()
+        {
             let local_parameter_count = input_components.len();
+            let pack_start = Instant::now();
             let mut parameter_scratch =
                 vec![complex_zero::<T>(); batch_size * local_parameter_count];
             for row in 0..batch_size {
@@ -4605,14 +4645,45 @@ impl GenericStageRuntimeV2 {
                         state[row_state + *global_index].clone();
                 }
             }
-            self.evaluator
-                .evaluate_batch_generic(batch_size, &parameter_scratch, binary_precision)?
+            input_pack_s = pack_start.elapsed().as_secs_f64();
+            let eval_start = Instant::now();
+            let evaluated = self.evaluator.evaluate_batch_generic(
+                batch_size,
+                &parameter_scratch,
+                binary_precision,
+            )?;
+            (evaluated, eval_start.elapsed().as_secs_f64())
         } else {
-            self.evaluator
-                .evaluate_batch_generic(batch_size, state, binary_precision)?
+            let eval_start = Instant::now();
+            let evaluated = self
+                .evaluator
+                .evaluate_batch_generic(batch_size, state, binary_precision)?;
+            (evaluated, eval_start.elapsed().as_secs_f64())
         };
-        let evaluator_s = eval_start.elapsed().as_secs_f64();
 
+        self.assign_generic_outputs(
+            batch_size,
+            parameter_count,
+            state,
+            evaluated,
+            input_pack_s,
+            evaluator_s,
+        )
+    }
+
+    fn assign_generic_outputs<T>(
+        &self,
+        batch_size: usize,
+        parameter_count: usize,
+        state: &mut [Complex<T>],
+        evaluated: Vec<Complex<T>>,
+        input_pack_s: f64,
+        evaluator_s: f64,
+    ) -> PyResult<(f64, f64, f64)>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
         let assign_start = Instant::now();
         for row in 0..batch_size {
             let row_state = row * parameter_count;
@@ -4630,7 +4701,11 @@ impl GenericStageRuntimeV2 {
                 }
             }
         }
-        Ok((evaluator_s, assign_start.elapsed().as_secs_f64()))
+        Ok((
+            input_pack_s,
+            evaluator_s,
+            assign_start.elapsed().as_secs_f64(),
+        ))
     }
 }
 

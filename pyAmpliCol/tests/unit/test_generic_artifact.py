@@ -253,6 +253,37 @@ def test_raw_sum_validation_rejects_weighted_single_initial_helicity() -> None:
     assert validation["max_relative_difference"] > 1.0e-6
 
 
+def test_lc_gluon_flavour_flow_aggregation_matches_amplicol_current_buckets() -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > t t~ g g g g",
+        selected_color_sector_ids={0},
+        reference_color_order=(3, 5, 6, 7, 8, 1, 2, 4),
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+
+    aggregation = manifest.structural_current_aggregation
+    assert aggregation is not None
+    assert aggregation["before"] == {
+        "current_count": 438,
+        "source_count": 16,
+        "interaction_count": 2102,
+        "amplitude_root_count": 128,
+    }
+    assert aggregation["after"] == {
+        "current_count": 378,
+        "source_count": 16,
+        "interaction_count": 1590,
+        "amplitude_root_count": 128,
+    }
+    assert aggregation["merged_current_count"] == 60
+    assert aggregation["deduplicated_interaction_count"] == 512
+    assert aggregation["validation"]["accepted"] is True
+    assert len(manifest.dag.currents) == 378
+    assert len(manifest.dag.interactions) == 1590
+    assert len(manifest.dag.amplitude_roots) == 128
+
+
 def test_zero_current_filter_can_be_disabled_in_artifact(tmp_path: Path) -> None:
     manifest_path, payload = write_generic_dag_process_artifact(
         "d d~ > z g",
@@ -619,6 +650,9 @@ def test_generic_dag_artifact_records_generic_pruning_options(
         "species_reachability_pruning": True,
         "ignored_particle_ids": [25],
         "ignored_vertex_kinds": [16],
+        "structural_current_aggregation": artifact["generation_filters"][
+            "structural_current_aggregation"
+        ],
         "zero_current_filter": artifact["generation_filters"]["zero_current"],
         "current_merging": artifact["generation_filters"]["current_merging"],
         "reference_color_order": None,
@@ -690,12 +724,18 @@ def test_generic_artifact_defaults_to_contributing_lc_sectors(
 
     assert artifact["compiled"]["selected_color_sector_ids"] == list(range(4))
     assert artifact["dag_summary"]["amplitude_root_count"] == 16
-    assert artifact["dag_summary"]["current_count"] == 93
-    assert artifact["dag_summary"]["interaction_count"] == 83
+    assert artifact["dag_summary"]["current_count"] == 85
+    assert artifact["dag_summary"]["interaction_count"] == 75
     assert artifact["dag_summary"]["source_count"] == 32
-    assert artifact["full_dag_summary"]["current_count"] == 93
-    assert artifact["full_dag_summary"]["interaction_count"] == 83
+    assert artifact["full_dag_summary"]["current_count"] == 85
+    assert artifact["full_dag_summary"]["interaction_count"] == 75
     assert artifact["full_dag_summary"]["source_count"] == 32
+    aggregation = artifact["generation_filters"]["structural_current_aggregation"]
+    assert aggregation["before"]["current_count"] == 93
+    assert aggregation["before"]["interaction_count"] == 83
+    assert aggregation["merged_current_count"] == 8
+    assert aggregation["removed_interaction_count"] == 8
+    assert aggregation["validation"]["accepted"] is True
     assert artifact["lowering_status"]["current_color_sectors"] == list(range(4))
     runtime_schema = artifact["runtime_schema"]
     assert runtime_schema["source_fill"]["source_count"] == 32

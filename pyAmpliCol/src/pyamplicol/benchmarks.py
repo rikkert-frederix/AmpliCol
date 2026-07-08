@@ -635,7 +635,7 @@ def _compiled_dag_profile_kwargs(values: dict[str, Any]) -> dict[str, Any]:
         filtered["cross_check_lowering"] = filtered.pop(
             "compiled_dag_cross_check_lowering"
         )
-    filtered.setdefault("symbolica_max_common_pair_distance", 250)
+    filtered.setdefault("symbolica_max_common_pair_distance", 1000)
     return filtered
 
 

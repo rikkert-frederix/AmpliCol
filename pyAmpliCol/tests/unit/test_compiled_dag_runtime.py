@@ -170,7 +170,7 @@ def test_z_gluon_compiled_dag_uses_adaptive_cpe_defaults() -> None:
     assert low.metadata.symbolica_evaluator_settings["cpe_iterations"] == 2
     assert low.metadata.symbolica_evaluator_settings[
         "max_common_pair_distance"
-    ] == 250
+    ] == 1000
     assert _resolve_compiled_dag_cpe_iterations(5, None) == 2
     assert _resolve_compiled_dag_cpe_iterations(6, None) is None
     assert _resolve_compiled_dag_cpe_iterations(6, 3) == 3

@@ -65,15 +65,15 @@ class NativeRuntimeEvaluator:
         split_vertex_current_stages: bool = False,
         verbose_evaluator_build: bool = False,
         symbolica_evaluator_backend: str = "jit",
-        symbolica_iterations: int = 1,
+        symbolica_iterations: int = 50,
         symbolica_cpe_iterations: int | None = None,
         symbolica_n_cores: int = 4,
         symbolica_direct_translation: bool = True,
         symbolica_jit_direct_translation: bool | None = None,
         symbolica_jit_optimization_level: int = 3,
-        symbolica_max_horner_scheme_variables: int = 500,
-        symbolica_max_common_pair_cache_entries: int = 1000000,
-        symbolica_max_common_pair_distance: int | None = None,
+        symbolica_max_horner_scheme_variables: int = 1000,
+        symbolica_max_common_pair_cache_entries: int = 5000000,
+        symbolica_max_common_pair_distance: int | None = 1000,
         symbolica_collect_factors: bool = False,
         symbolica_compiled_preset: str = "adaptive",
         symbolica_compiled_inline_asm: str = "default",
@@ -187,7 +187,7 @@ class NativeRuntimeEvaluator:
                     from .dag_runtime import ZGluonDAGEvaluator
 
                     dag_common_pair_distance = (
-                        100
+                        1000
                         if symbolica_max_common_pair_distance is None
                         else symbolica_max_common_pair_distance
                     )
