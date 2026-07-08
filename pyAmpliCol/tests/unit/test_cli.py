@@ -781,7 +781,7 @@ def test_cli_generate_process_set_writes_root_manifest(
     assert (output_dir / "check_standalone.py").exists()
 
 
-def test_cli_generate_process_set_reuses_crossing_equivalent_artifact(
+def test_cli_generate_process_set_does_not_reuse_initial_final_crossings(
     capsys,
     monkeypatch,
     tmp_path: Path,
@@ -836,23 +836,76 @@ def test_cli_generate_process_set_reuses_crossing_equivalent_artifact(
 
     payload = json.loads(capsys.readouterr().out)
     manifest = json.loads((output_dir / "process_set_manifest.json").read_text())
-    assert [cmd[4] for cmd in launched] == ["d d~ > u u~ g"]
+    assert [cmd[4] for cmd in launched] == [
+        "d d~ > u u~ g",
+        "u u~ > d~ d g",
+    ]
     assert [entry["key"] for entry in manifest["processes"]] == [
         "d_dbar_to_u_ubar_g",
         "u_ubar_to_dbar_d_g",
     ]
-    first, second = manifest["processes"]
-    assert second["path"] == first["path"]
-    assert second["crossing_alias_of"] == "d_dbar_to_u_ubar_g"
-    assert second["generation_request"] == manifest["generic_generation"]
-    assert second["input_crossing_map"] == [
-        {"sign": -1.0, "source_index": 2, "target_index": 0},
-        {"sign": -1.0, "source_index": 3, "target_index": 1},
-        {"sign": -1.0, "source_index": 1, "target_index": 2},
-        {"sign": -1.0, "source_index": 0, "target_index": 3},
-        {"sign": 1.0, "source_index": 4, "target_index": 4},
-    ]
-    assert payload["crossing_aliases"][0]["key"] == "u_ubar_to_dbar_d_g"
+    assert all("crossing_alias_of" not in entry for entry in manifest["processes"])
+    assert payload["crossing_aliases"] == []
+
+
+def test_cli_generate_process_dry_run_json_creates_no_output_dir(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "must-not-exist"
+
+    assert (
+        main(
+            [
+                "generate-process",
+                "--dry-run",
+                "--json",
+                "--max-quark-lines",
+                "1",
+                "p p > z 4j",
+                str(output_dir),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "pyamplicol-generic-process-selection-report"
+    assert payload["selected_count"] == 20
+    assert payload["rejection_counts"]["max-quark-lines"] > 0
+    assert not output_dir.exists()
+
+
+def test_cli_generate_process_dry_run_does_not_require_output_dir(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "generate-process",
+                "--dry-run",
+                "--json",
+                "p p > z g",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_count"] == 5
+    assert payload["duplicate_count"] == 5
+
+
+def test_cli_generate_process_dry_run_table_lists_selected_processes(
+    capsys,
+) -> None:
+    assert main(["generate-process", "--dry-run", "d d~ > z g | d d~ > g z"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Generic Process Enumeration Dry Run" in output
+    assert "d d~ > z g" in output
+    assert "duplicate" in output
+    assert "Enumeration Summary" in output
 
 
 def test_process_input_crossing_map_handles_self_conjugate_initial_crossing() -> None:
@@ -1000,7 +1053,7 @@ def test_cli_generate_process_set_respects_parallel_worker_limit_and_reports_ram
                 "generate-process",
                 "d d~ > z g | u u~ > z g | s s~ > z g",
                 str(output_dir),
-                "--n_cores",
+                "-n-cores",
                 "2",
                 "--json",
             ]
@@ -1013,6 +1066,32 @@ def test_cli_generate_process_set_respects_parallel_worker_limit_and_reports_ram
     assert max_live <= 2
     assert max(ram_active_sizes) <= 2
     assert any(size > 0 for size in ram_active_sizes)
+
+
+def test_generate_process_accepts_dash_n_cores_alias(tmp_path: Path) -> None:
+    args = parse_args(
+        [
+            "generate-process",
+            "d d~ > z g | u u~ > z g",
+            str(tmp_path / "set"),
+            "--n-cores",
+            "5",
+        ]
+    )
+
+    assert args.n_cores == 5
+
+    single_dash = parse_args(
+        [
+            "generate-process",
+            "d d~ > z g | u u~ > z g",
+            str(tmp_path / "set2"),
+            "-n-cores",
+            "4",
+        ]
+    )
+
+    assert single_dash.n_cores == 4
 
 
 def test_cli_process_set_child_progress_events_update_parent_progress(
@@ -1185,13 +1264,8 @@ def test_cli_generate_process_expands_builtin_p_to_child_artifacts(
         "c_cbar_to_g_z",
         "b_bbar_to_g_z",
     ]
-    assert [entry["crossing_alias_of"] for entry in manifest["processes"][5:]] == [
-        "d_dbar_to_g_z",
-        "u_ubar_to_g_z",
-        "s_sbar_to_g_z",
-        "c_cbar_to_g_z",
-        "b_bbar_to_g_z",
-    ]
+    assert len(manifest["processes"]) == 5
+    assert all("crossing_alias_of" not in entry for entry in manifest["processes"])
     assert manifest["default_process_key"] == "d_dbar_to_g_z"
     assert all("--n_cores" in cmd and cmd[cmd.index("--n_cores") + 1] == "1" for cmd in launched)
 
@@ -1257,11 +1331,8 @@ def test_cli_generate_zero_gluon_process_expands_builtin_p(
         "u u~ > z",
         "s s~ > z",
     ]
-    assert [entry["crossing_alias_of"] for entry in manifest["processes"][5:8]] == [
-        "d_dbar_to_z",
-        "u_ubar_to_z",
-        "s_sbar_to_z",
-    ]
+    assert len(manifest["processes"]) == 5
+    assert all("crossing_alias_of" not in entry for entry in manifest["processes"])
     assert manifest["default_process_key"] == "d_dbar_to_z"
 
 
@@ -1327,15 +1398,8 @@ def test_cli_generate_charged_current_process_expands_builtin_p(
     assert [entry["key"] for entry in manifest["processes"]] == [
         "u_dbar_to_g_wplus",
         "c_sbar_to_g_wplus",
-        "dbar_u_to_g_wplus",
-        "sbar_c_to_g_wplus",
     ]
-    assert [entry.get("crossing_alias_of") for entry in manifest["processes"]] == [
-        None,
-        None,
-        "u_dbar_to_g_wplus",
-        "c_sbar_to_g_wplus",
-    ]
+    assert all("crossing_alias_of" not in entry for entry in manifest["processes"])
     assert manifest["default_process_key"] == "u_dbar_to_g_wplus"
 
 
@@ -1405,7 +1469,7 @@ def test_generate_process_child_command_forwards_process_options(tmp_path: Path)
     assert command[command.index("--max-qed-order") + 1] == "1"
     assert command[command.index("--coupling-order-policy") + 1] == "minimal"
     assert command[command.index("--max-lc-current-line-groups") + 1] == "2"
-    assert command[command.index("--max-quark-pairs") + 1] == "3"
+    assert command[command.index("--max-quark-lines") + 1] == "3"
     assert command[command.index("--ignore-particles") + 1] == "h,a"
     assert command[command.index("--ignore-vertex-kinds") + 1] == "16,20"
     assert "--no-color-order-mask-pruning" in command

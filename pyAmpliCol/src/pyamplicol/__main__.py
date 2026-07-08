@@ -27,12 +27,15 @@ from .cli_display import (
 )
 from .core_types import NativeEvaluationError
 from .processes import (
+    ANTI_PARTICLE,
     PDGS,
     ProcessEnumeration,
     ProcessEnumerator,
     ProcessOptions,
+    ProcessSelectionReport,
     ProcessSetEntry,
-    enumerate_generic_process_set,
+    ProcessSetEnumeration,
+    build_generic_process_selection_report,
     enumerate_process_set,
 )
 from .reference import (
@@ -380,7 +383,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     _add_process_options(generate_process)
     generate_process.add_argument("process", metavar="PROCESS")
-    generate_process.add_argument("output_dir", type=Path, metavar="OUTPUT_DIR")
+    generate_process.add_argument(
+        "output_dir",
+        type=Path,
+        nargs="?",
+        metavar="OUTPUT_DIR",
+    )
+    generate_process.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Enumerate and display selected concrete subprocesses without "
+            "writing an artifact directory."
+        ),
+    )
+    generate_process.add_argument(
+        "--no-enumeration-prefilter",
+        dest="enumeration_prefilter",
+        action="store_false",
+        default=True,
+        help=(
+            "Use the slower legacy-compatible inclusive enumeration path for "
+            "diagnostics and before/after timing comparisons."
+        ),
+    )
     generate_process.add_argument(
         "--append",
         action="store_true",
@@ -403,6 +429,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     generate_process.add_argument(
         "--n_cores",
+        "--n-cores",
+        "-n-cores",
+        dest="n_cores",
         type=int,
         default=1,
         help=(
@@ -602,6 +631,15 @@ def _add_generic_dag_pruning_options(parser: argparse.ArgumentParser) -> None:
             "Generic leading-colour pruning cap on how many colour-line groups "
             "one intermediate current may span. This can be used to restrict "
             "multi-quark-line warmups without naming a process family."
+        ),
+    )
+    parser.add_argument(
+        "--max-quark-lines",
+        type=int,
+        help=(
+            "User-facing alias for --max-quark-pairs: generic cap on the "
+            "number of external quark-antiquark colour lines allowed in a "
+            "subprocess."
         ),
     )
     parser.add_argument(
@@ -1430,6 +1468,15 @@ def _process_options(args: argparse.Namespace) -> ProcessOptions:
     )
 
 
+def _max_quark_lines(args: argparse.Namespace) -> int | None:
+    legacy = getattr(args, "max_quark_pairs", None)
+    current = getattr(args, "max_quark_lines", None)
+    if legacy is not None and current is not None and int(legacy) != int(current):
+        raise ValueError("--max-quark-lines and --max-quark-pairs disagree")
+    value = current if current is not None else legacy
+    return None if value is None else int(value)
+
+
 def _generic_dag_pruning_kwargs(
     args: argparse.Namespace,
     *,
@@ -1449,7 +1496,7 @@ def _generic_dag_pruning_kwargs(
             "max_lc_current_line_groups",
             None,
         ),
-        "max_quark_pairs": getattr(args, "max_quark_pairs", None),
+        "max_quark_pairs": _max_quark_lines(args),
         "closure_side_mask_pruning": bool(
             getattr(args, "closure_side_mask_pruning", True)
         ),
@@ -2491,11 +2538,31 @@ def _cmd_profile_dag_evaluator(args: argparse.Namespace) -> int:
 
 def _cmd_generate_process(args: argparse.Namespace) -> int:
     try:
-        process_set = enumerate_generic_process_set(
-            args.process,
-            _process_options(args),
-            max_quark_pairs=getattr(args, "max_quark_pairs", None),
-        )
+        max_quark_lines = _max_quark_lines(args)
+        display = _display(args)
+        with display.stage_progress(
+            "Enumerating processes",
+            total=4,
+            metadata=str(args.process)[:48],
+        ) as progress:
+            progress.update(stage="parse", item=str(args.process)[:28])
+            progress.update(stage="expand", item="variants", increment=1)
+            report = build_generic_process_selection_report(
+                args.process,
+                _process_options(args),
+                max_quark_pairs=max_quark_lines,
+                use_prefilter=bool(getattr(args, "enumeration_prefilter", True)),
+            )
+            progress.update(
+                stage="prefilter",
+                item=f"cand={report.candidate_count} eval={report.evaluated_count}",
+                increment=2,
+            )
+            progress.update(
+                stage="canonicalize",
+                item=f"sel={report.selected_count} rej={report.rejected_count}",
+                increment=1,
+            )
     except ValueError as exc:
         payload = {
             "available": False,
@@ -2508,6 +2575,24 @@ def _cmd_generate_process(args: argparse.Namespace) -> int:
         else:
             print(str(exc), file=sys.stderr)
         return 1
+    if bool(getattr(args, "dry_run", False)):
+        return _cmd_generate_process_dry_run(args, report)
+    if getattr(args, "output_dir", None) is None:
+        print("generate-process requires OUTPUT_DIR unless --dry-run is set", file=sys.stderr)
+        return 2
+    if not report.entries:
+        message = f"no valid processes found for {args.process!r}"
+        if args.json:
+            print(json.dumps({"available": False, "error": message}, indent=2))
+        else:
+            print(message, file=sys.stderr)
+        return 1
+    process_set = ProcessSetEnumeration(
+        request=args.process,
+        options=_process_options(args),
+        entries=report.entries,
+        selection_report=report,
+    )
     if len(process_set.entries) == 1 and not any(
         marker in args.process for marker in ("|", "[")
     ):
@@ -2515,6 +2600,119 @@ def _cmd_generate_process(args: argparse.Namespace) -> int:
         return _cmd_generate_generic_dag_artifact(args, process_set.entries[0])
 
     return _cmd_generate_process_set(args, process_set)
+
+
+def _cmd_generate_process_dry_run(
+    args: argparse.Namespace,
+    report: ProcessSelectionReport,
+) -> int:
+    payload = _process_selection_report_to_dict(report)
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    display = _display(args)
+    display.print_table(
+        "Generic Process Enumeration Dry Run",
+        [
+            DisplayColumn("id", "ID", "right"),
+            DisplayColumn("status", "Status"),
+            DisplayColumn("process", "Process"),
+            DisplayColumn("key", "Key"),
+            DisplayColumn("quark_lines", "Quark lines", "right"),
+            DisplayColumn("charge3", "Q3", "right"),
+            DisplayColumn("source", "Source"),
+        ],
+        [
+            DisplayRow(
+                {
+                    "id": index,
+                    "status": record.status,
+                    "process": record.process,
+                    "key": record.key,
+                    "quark_lines": record.quark_lines,
+                    "charge3": record.charge3,
+                    "source": record.source,
+                },
+                "green" if record.status == "selected" else "yellow",
+            )
+            for index, record in enumerate(
+                (*report.selected_records, *report.duplicate_records),
+                start=1,
+            )
+        ],
+    )
+    display.print_table(
+        "Enumeration Summary",
+        _kv_columns(),
+        [
+            DisplayRow({"metric": "Request", "value": report.request}, "bold"),
+            {"metric": "Prefilter", "value": "enabled" if report.prefilter_enabled else "disabled"},
+            {"metric": "Candidates", "value": report.candidate_count},
+            {"metric": "Evaluated after cheap filters", "value": report.evaluated_count},
+            {"metric": "Selected", "value": report.selected_count},
+            {"metric": "Duplicates", "value": report.duplicate_count},
+            {"metric": "Rejected", "value": report.rejected_count},
+            {"metric": "Elapsed", "value": format_measurement(report.elapsed_s, unit="s")},
+        ],
+    )
+    if report.rejection_counts:
+        display.print_table(
+            "Rejection Reasons",
+            [
+                DisplayColumn("reason", "Reason"),
+                DisplayColumn("count", "Count", "right"),
+            ],
+            [
+                {"reason": reason, "count": count}
+                for reason, count in report.rejection_counts
+                if count
+            ],
+        )
+    return 0
+
+
+def _process_selection_report_to_dict(
+    report: ProcessSelectionReport,
+) -> dict[str, object]:
+    return {
+        "available": bool(report.entries),
+        "kind": "pyamplicol-generic-process-selection-report",
+        "request": report.request,
+        "prefilter_enabled": report.prefilter_enabled,
+        "elapsed_s": report.elapsed_s,
+        "candidate_count": report.candidate_count,
+        "evaluated_count": report.evaluated_count,
+        "selected_count": report.selected_count,
+        "duplicate_count": report.duplicate_count,
+        "rejected_count": report.rejected_count,
+        "rejection_counts": {
+            reason: count for reason, count in report.rejection_counts if count
+        },
+        "stage_timings": {
+            stage: elapsed for stage, elapsed in report.stage_timings
+        },
+        "selected": [
+            {
+                "id": index,
+                "key": record.key,
+                "process": record.process,
+                "source": record.source,
+                "quark_lines": record.quark_lines,
+                "charge3": record.charge3,
+                "family": record.family,
+            }
+            for index, record in enumerate(report.selected_records, start=1)
+        ],
+        "duplicates": [
+            {
+                "key": record.key,
+                "process": record.process,
+                "source": record.source,
+                "reason": record.reason,
+            }
+            for record in report.duplicate_records
+        ],
+    }
 
 
 def _rusticol_artifact_unavailable_message(
@@ -2731,7 +2929,7 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
         with display.stage_progress(
             "Generating process set",
             total=len(entries),
-            metadata=f"workers={worker_count}",
+            metadata=_process_set_progress_metadata(process_set, worker_count),
         ) as progress:
             if skipped:
                 progress.update(
@@ -3071,8 +3269,22 @@ def _generic_process_set_generation_metadata(
             getattr(args, "lc_sector_strategy", "topology-representatives")
         ),
         "lc_topology_replay": bool(getattr(args, "lc_topology_replay", False)),
+        "enumeration_prefilter": bool(
+            getattr(args, "enumeration_prefilter", True)
+        ),
         "n_cores": int(getattr(args, "n_cores", 1)),
     }
+
+
+def _process_set_progress_metadata(process_set: object, worker_count: int) -> str:
+    report = getattr(process_set, "selection_report", None)
+    if report is None:
+        return f"workers={worker_count}"
+    return (
+        f"workers={worker_count} "
+        f"sel={int(getattr(report, 'selected_count', 0))} "
+        f"rej={int(getattr(report, 'rejected_count', 0))}"
+    )
 
 
 def _generate_process_child_command(
@@ -3141,8 +3353,9 @@ def _generate_process_child_command(
                 str(int(args.max_lc_current_line_groups)),
             ]
         )
-    if getattr(args, "max_quark_pairs", None) is not None:
-        command.extend(["--max-quark-pairs", str(int(args.max_quark_pairs))])
+    max_quark_lines = _max_quark_lines(args)
+    if max_quark_lines is not None:
+        command.extend(["--max-quark-lines", str(max_quark_lines)])
     if not bool(getattr(args, "closure_side_mask_pruning", True)):
         command.append("--no-closure-side-mask-pruning")
     if not bool(getattr(args, "color_order_mask_pruning", True)):
@@ -3283,14 +3496,16 @@ def _process_crossing_reuse_signature(
     color_accuracy: str,
     options: ProcessOptions,
 ) -> tuple[int, ...]:
-    from .process_ir import build_process_ir
-
-    ir = build_process_ir(
-        process,
-        color_accuracy=color_accuracy,
-        options=options,
+    del color_accuracy
+    parsed = ProcessEnumerator(options).parse(process)
+    initial_pdgs = tuple(int(PDGS[ANTI_PARTICLE[p]]) for p in parsed.initial_state)
+    final_pdgs = tuple(sorted(int(PDGS[p]) for p in parsed.rest))
+    return (
+        len(initial_pdgs),
+        *initial_pdgs,
+        len(final_pdgs),
+        *final_pdgs,
     )
-    return tuple(sorted(int(pdg) for pdg in ir.outgoing_pdgs))
 
 
 def _process_input_crossing_map(
@@ -3804,14 +4019,13 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
             unavailable = _generic_dag_runtime_unavailable_message(manifest)
             if unavailable is not None:
                 raise RuntimeError(unavailable)
-            runtime = getattr(rusticol, "Runtime").load(
-                str(requested_root if process_set_manifest is not None else root),
-                args.process_key if process_set_manifest is not None else None,
-                (
-                    None
-                    if args.model_parameters is None
-                    else str(Path(args.model_parameters).expanduser())
+            runtime = _load_rusticol_runtime_compatible(
+                rusticol,
+                requested_root if process_set_manifest is not None else root,
+                process_key=(
+                    args.process_key if process_set_manifest is not None else None
                 ),
+                model_parameters=args.model_parameters,
             )
             runtime_metadata = dict(runtime.metadata())
             points = _load_rusticol_validation_momenta(root, int(args.precision), np)
@@ -4008,6 +4222,43 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
         sys.stderr.flush()
         os._exit(0)
     return 0
+
+
+def _load_rusticol_runtime_compatible(
+    rusticol_module: Any,
+    process_dir: str | Path,
+    *,
+    process_key: str | None = None,
+    model_parameters: str | Path | None = None,
+) -> Any:
+    """Load Rusticol while tolerating older local PyO3 signatures.
+
+    Source builds accept keyword arguments for process-set selection and model
+    parameters. Some existing editable installs expose an older positional-only
+    loader. Keep `time-process` usable in both environments while still
+    preferring the explicit new signature.
+    """
+
+    runtime_cls = getattr(rusticol_module, "Runtime")
+    process_dir_text = str(Path(process_dir).expanduser())
+    model_parameters_text = (
+        None if model_parameters is None else str(Path(model_parameters).expanduser())
+    )
+    try:
+        return runtime_cls.load(
+            process_dir_text,
+            process_key=process_key,
+            model_parameters=model_parameters_text,
+        )
+    except TypeError as exc:
+        if model_parameters_text is not None:
+            raise
+        if process_key is None:
+            return runtime_cls.load(process_dir_text)
+        try:
+            return runtime_cls.load(process_dir_text, process_key)
+        except TypeError:
+            raise exc
 
 
 def _rusticol_build_metadata(rusticol_module: Any) -> dict[str, str | None]:

@@ -357,12 +357,14 @@ class StageProgress:
                 self.stage = stage
             if item is not None:
                 self.item = item
-            self.ram = ram if ram is not None else _current_process_tree_rss_text()
             if increment:
                 self.current = min(self.total, self.current + int(increment))
 
             if not self.enabled or self.display is None:
+                if ram is not None:
+                    self.ram = ram
                 return
+            self.ram = ram if ram is not None else _current_process_tree_rss_text()
             if self._started and self._bar is not None:
                 self._render_bar_locked()
                 return

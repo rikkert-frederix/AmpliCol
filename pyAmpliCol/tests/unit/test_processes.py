@@ -10,6 +10,9 @@ from pyamplicol.processes import (
     ProcessEnumerator,
     ProcessOptions,
     QUARKS,
+    _process_dedupe_signature,
+    _tokenize_side,
+    build_generic_process_selection_report,
     enumerate_generic_process_set,
     enumerate_process_set,
     expand_process_variants,
@@ -142,6 +145,103 @@ def test_generic_process_set_can_cap_inclusive_quark_pairs() -> None:
         )
         <= 1
         for entry in capped.entries
+    )
+
+
+def test_generic_process_set_supports_max_quark_line_report() -> None:
+    unrestricted = build_generic_process_selection_report("p p > z 4j")
+    capped = build_generic_process_selection_report("p p > z 4j", max_quark_pairs=1)
+
+    assert capped.selected_count < unrestricted.selected_count
+    assert dict(capped.rejection_counts)["max-quark-lines"] > 0
+    assert all(record.quark_lines <= 1 for record in capped.selected_records)
+
+
+def test_generic_process_set_deduplicates_final_permutations_only() -> None:
+    process_set = enumerate_generic_process_set(
+        "d d~ > z g | d d~ > g z | g d~ > d~ z"
+    )
+
+    assert [entry.process for entry in process_set.entries] == [
+        "d d~ > z g",
+        "g d~ > d~ z",
+    ]
+    assert process_set.selection_report is not None
+    assert process_set.selection_report.duplicate_count == 1
+
+
+def test_generic_process_set_canonicalizes_symmetric_pp_beam_order() -> None:
+    report = build_generic_process_selection_report("p p > z g")
+
+    assert report.selected_count == 5
+    assert report.duplicate_count == 5
+    assert [record.process for record in report.selected_records] == [
+        "d d~ > g z",
+        "u u~ > g z",
+        "s s~ > g z",
+        "c c~ > g z",
+        "b b~ > g z",
+    ]
+
+
+def test_generic_process_selection_reports_higher_multiplicity_rejections() -> None:
+    report = build_generic_process_selection_report("p p > e+ e- j j j")
+
+    assert report.candidate_count > report.selected_count
+    assert report.selected_count == 145
+    reasons = dict(report.rejection_counts)
+    assert reasons["charge"] > 0
+    assert reasons["fermion-family"] > 0
+
+
+def test_generic_process_selection_handles_mixed_inline_multiparticle_syntax() -> None:
+    report = build_generic_process_selection_report(
+        "d d~ > e+ e- j j g g | p p > Z g [d  g]"
+    )
+
+    assert report.selected_count == 12
+    assert report.duplicate_count == 6
+    assert report.selected_records[0].process == "d d~ > d d~ g g e+ e-"
+
+
+@pytest.mark.parametrize(
+    "process_request",
+    [
+        "p p > z j j",
+        "p p > z 4j",
+        "d d~ > e+ e- j j g g | p p > Z g [d  g]",
+    ],
+)
+def test_generic_prefilter_preserves_legacy_selected_physical_signatures(
+    process_request: str,
+) -> None:
+    legacy = build_generic_process_selection_report(
+        process_request,
+        use_prefilter=False,
+    )
+    prefiltered = build_generic_process_selection_report(
+        process_request,
+        use_prefilter=True,
+    )
+
+    assert {
+        _selection_record_signature(record) for record in prefiltered.selected_records
+    } == {_selection_record_signature(record) for record in legacy.selected_records}
+
+
+def _selection_record_signature(record: object) -> str:
+    initial, _, final = str(getattr(record, "process")).partition(">")
+    source = str(getattr(record, "source"))
+    source_request = ProcessEnumerator().parse(source)
+    symmetric_initial = (
+        len(source_request.initial_state) == 2
+        and source_request.initial_state[0] == source_request.initial_state[1]
+        and source_request.initial_state[0] in {"p", "j"}
+    )
+    return _process_dedupe_signature(
+        tuple(_tokenize_side(initial.strip())),
+        tuple(_tokenize_side(final.strip())),
+        symmetric_initial=symmetric_initial,
     )
 
 
