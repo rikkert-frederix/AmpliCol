@@ -31,6 +31,7 @@ DEFAULT_N_CORES = 4
 DEFAULT_PROCESS_WORKERS = 1
 DEFAULT_COLUMNS_PER_TABLE = 3
 VALIDATION_REL_TOL = 1.0e-8
+COMMAND_HEARTBEAT_S = 30.0
 VALIDATION_ABS_TOL = 1.0e-16
 
 if str(SRC_DIR) not in sys.path:
@@ -1254,8 +1255,27 @@ def _run_json_command(args: Sequence[str], *, timeout: float | None) -> dict[str
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    deadline = None if timeout is None else start + timeout
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        while True:
+            wait_s = COMMAND_HEARTBEAT_S
+            if deadline is not None:
+                remaining_s = deadline - time.perf_counter()
+                if remaining_s <= 0:
+                    raise subprocess.TimeoutExpired(list(args), timeout)
+                wait_s = min(wait_s, remaining_s)
+            try:
+                stdout, stderr = process.communicate(timeout=wait_s)
+                break
+            except subprocess.TimeoutExpired:
+                elapsed_s = time.perf_counter() - start
+                if deadline is not None and time.perf_counter() >= deadline:
+                    raise
+                print(
+                    f"[matrix] still running after {elapsed_s:.0f}s: "
+                    f"{_command_label(args)}",
+                    flush=True,
+                )
     except subprocess.TimeoutExpired:
         _terminate_process_group(process.pid, signal.SIGTERM)
         try:
@@ -1276,6 +1296,15 @@ def _run_json_command(args: Sequence[str], *, timeout: float | None) -> dict[str
     payload["_command_elapsed_s"] = elapsed_s
     payload["_command_args"] = list(args)
     return payload
+
+
+def _command_label(args: Sequence[str]) -> str:
+    parts = [str(part) for part in args]
+    if "generate-process" in parts and len(parts) >= 2:
+        return f"generate-process {parts[-2]} -> {Path(parts[-1]).name}"
+    if "time-process" in parts and parts:
+        return f"time-process {Path(parts[-1]).name}"
+    return " ".join(parts[:4])
 
 
 def _terminate_process_group(pid: int, sig: signal.Signals) -> None:
