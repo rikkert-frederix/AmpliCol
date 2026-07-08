@@ -29,7 +29,6 @@ module handling_processes
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
      integer(kind=4),dimension(:),allocatable :: hel,passed
      integer,dimension(:,:),allocatable :: include_hel
-     integer,dimension(:),allocatable :: lepton_list
      ! cuts
      double precision,dimension(:),allocatable :: pT_min,eta_max
      double precision,dimension(:,:),allocatable :: DR_min,sqrt_s_min

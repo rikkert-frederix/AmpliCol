@@ -17,7 +17,7 @@ module phase_space_gen23_mod
   logical,parameter :: verbose=.true.
   logical,parameter,public :: debug=.false.
   ! importance sampling (0d0=flat transformation; -1d0=1/x transformation):
-  real(kind=8),dimension(-1:1) :: ip,ip_shat,ip_mass
+  real(kind=8),dimension(-1:1) :: ip,ip_shat,ip_dt,ip_mass
   real(kind=8),dimension(-1:1),parameter :: ip_flat=[0d0,0d0,0d0]
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
   real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
@@ -192,15 +192,18 @@ contains
        if (flat) then
           ip=ip_flat
           ip_shat=ip_flat
+          ip_dt=ip_flat
           ip_mass=ip_flat
        else
           ip=[2d0,-1d0,-2d0]
           ip_shat=[2d0,-1.2d0,-2d0]
+          ip_dt=[-1d0,-1d0,-1d0]
           ip_mass=[2d0,-0.5d0,-2d0]
        endif
     else
        ip=[2d0,-1d0,-2d0]
        ip_shat=[2d0,-1.2d0,-2d0]
+       ip_dt=[-1d0,-1d0,-1d0]
        ip_mass=[2d0,-0.5d0,-2d0]
     endif
     if (verbose) then
@@ -784,7 +787,7 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,tmin,tmax,invm(i+ia),ps%jac)
+      call random_to_var(ps%x(ix),ip_dt,tmin,tmax,invm(i+ia),ps%jac)
       if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
@@ -807,7 +810,7 @@ contains
          return
       endif
       ix=ix+1
-      call random_to_var(ps%x(ix),ip,tmin,tmax,invm(i+ib),ps%jac)
+      call random_to_var(ps%x(ix),ip_dt,tmin,tmax,invm(i+ib),ps%jac)
       if (ps%jac.le.0d0) return
       if (debug) then
          write (*,*) 'dt- i+ib',i+ib,invm(i+ib),tmin,tmax
@@ -1385,6 +1388,9 @@ contains
          elseif (ip.eq.0) then
             var=varmin+x*(varmax-varmin)
             jac=jac*(varmax-varmin)
+         elseif (ip.eq.101) then
+            var=varmin+(varmax-varmin)*(1d0-cos(pi*x))/2d0
+            jac=jac*(varmax-varmin)*pi*sin(pi*x)/2d0
          else
             var=(varmin**(1+ip)*(1d0-x)+varmax**(1+ip)*x)**(1d0/(1d0+power))
             jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
@@ -1847,7 +1853,7 @@ contains
          write (*,*) 'dti- i+ia',i+ia,tmin,tmax,invm(i+ia)
       endif
       ix=ix+1
-      call var_to_random(invm(i+ia),ip,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+ia),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       tmin(1:2)=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir,1:2)
       tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
@@ -1870,7 +1876,7 @@ contains
          write (*,*) 'dti- i+ib',i+ib,tmin,tmax,invm(i+ib)
       endif
       ix=ix+1
-      call var_to_random(invm(i+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
+      call var_to_random(invm(i+ib),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       phi=atan(pp(2,i)/pp(1,i))
       if(pp(1,i).lt.0d0) phi=phi+pi
@@ -2138,6 +2144,9 @@ contains
          elseif (ip.eq.0) then
             x=(var-varmin)/(varmax-varmin)
             jac=jac*(varmax-varmin)
+         elseif (ip.eq.101) then
+            x=acos(min(max(1d0-2d0*(var-varmin)/(varmax-varmin),-1d0),1d0))/pi
+            jac=jac*(varmax-varmin)*pi*sin(pi*x)/2d0
          else
             x=(var**(1+ip)-varmin**(1+ip))/(varmax**(1+ip)-varmin**(1+ip))
             jac=jac*(varmax**(1+ip)-varmin**(1+ip))* &
