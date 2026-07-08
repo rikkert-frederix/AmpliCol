@@ -2348,6 +2348,27 @@ impl GenericRuntimeV2 {
         self.run_f64_materialized(batch)
     }
 
+    fn run_double(
+        &mut self,
+        batch: &[Vec<[DoubleFloat; 4]>],
+    ) -> PyResult<(Vec<DoubleFloat>, RuntimeProfile)> {
+        if self.lc_topology_replay_enabled {
+            return self.run_generic_with_lc_topology_replay(batch, None);
+        }
+        self.run_generic_materialized(batch, None)
+    }
+
+    fn run_float(
+        &mut self,
+        batch: &[Vec<[Float; 4]>],
+        binary_precision: u32,
+    ) -> PyResult<(Vec<Float>, RuntimeProfile)> {
+        if self.lc_topology_replay_enabled {
+            return self.run_generic_with_lc_topology_replay(batch, Some(binary_precision));
+        }
+        self.run_generic_materialized(batch, Some(binary_precision))
+    }
+
     fn run_f64_with_lc_topology_replay(
         &mut self,
         batch: &[Vec<[f64; 4]>],
@@ -2467,6 +2488,139 @@ impl GenericRuntimeV2 {
         ))
     }
 
+    fn run_generic_with_lc_topology_replay<T>(
+        &mut self,
+        batch: &[Vec<[T; 4]>],
+        binary_precision: Option<u32>,
+    ) -> PyResult<(Vec<T>, RuntimeProfile)>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        let total_start = Instant::now();
+        let n_points = batch.len();
+        let mut values = vec![T::new_zero(); n_points];
+        let mut profile = RuntimeProfile::default();
+        let mappings = self.lc_topology_replay_mappings.clone();
+        let mappings_per_chunk = replay_mappings_per_expanded_batch(n_points);
+        for mapping_chunk in mappings.chunks(mappings_per_chunk) {
+            let expanded_batch = apply_lc_topology_label_permutations_generic(
+                batch,
+                self.external_count,
+                mapping_chunk,
+            )?;
+            let (expanded_values, sector_profile) =
+                self.run_generic_materialized(&expanded_batch, binary_precision)?;
+            for mapping_index in 0..mapping_chunk.len() {
+                let offset = mapping_index * n_points;
+                for point_index in 0..n_points {
+                    values[point_index] += expanded_values[offset + point_index].clone();
+                }
+            }
+            profile.source_fill_s += sector_profile.source_fill_s;
+            profile.momentum_setup_s += sector_profile.momentum_setup_s;
+            profile.stage_evaluator_s += sector_profile.stage_evaluator_s;
+            profile.output_assign_s += sector_profile.output_assign_s;
+            profile.amplitude_evaluator_s += sector_profile.amplitude_evaluator_s;
+            profile.reduction_s += sector_profile.reduction_s;
+        }
+        profile.total_s = total_start.elapsed().as_secs_f64();
+        Ok((values, profile))
+    }
+
+    fn run_generic_materialized<T>(
+        &mut self,
+        batch: &[Vec<[T; 4]>],
+        binary_precision: Option<u32>,
+    ) -> PyResult<(Vec<T>, RuntimeProfile)>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        if self.stages.is_none() || self.amplitude_stage.is_none() {
+            return Err(self.execution_unavailable_error());
+        }
+        let total_start = Instant::now();
+        let n_points = batch.len();
+        let mut state = vec![complex_zero::<T>(); n_points * self.parameter_count];
+        let sources = &self.sources;
+        let momentum_slots = &self.momentum_slots;
+        let external_count = self.external_count;
+        let external_is_initial = &self.external_is_initial;
+        let particle_masses = &self.particle_masses;
+        let value_parameter_count = self.value_parameter_count;
+
+        let source_start = Instant::now();
+        for (row, point) in batch.iter().enumerate() {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_sources_row_generic(
+                sources,
+                external_count,
+                particle_masses,
+                row_state,
+                point,
+            )?;
+        }
+        let source_fill_s = source_start.elapsed().as_secs_f64();
+
+        let momentum_start = Instant::now();
+        for (row, point) in batch.iter().enumerate() {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_momenta_row_generic(
+                momentum_slots,
+                value_parameter_count,
+                external_count,
+                external_is_initial,
+                row_state,
+                point,
+            )?;
+        }
+        let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
+
+        let mut stage_evaluator_s = 0.0;
+        let mut output_assign_s = 0.0;
+        for stage in self.stages.as_mut().expect("generic stages checked") {
+            let (eval_s, assign_s) = stage.evaluate_generic_into_state(
+                n_points,
+                self.parameter_count,
+                state.as_mut_slice(),
+                binary_precision,
+            )?;
+            stage_evaluator_s += eval_s;
+            output_assign_s += assign_s;
+        }
+
+        let amplitude_start = Instant::now();
+        let raw_sums = self
+            .amplitude_stage
+            .as_mut()
+            .expect("generic amplitude stage checked")
+            .evaluate_raw_sums_generic(n_points, state.as_slice(), binary_precision)?;
+        let amplitude_evaluator_s = amplitude_start.elapsed().as_secs_f64();
+
+        let reduction_start = Instant::now();
+        let factor = T::from(self.normalization_factor);
+        let values = raw_sums
+            .into_iter()
+            .map(|value| value * factor.clone())
+            .collect::<Vec<_>>();
+        let reduction_s = reduction_start.elapsed().as_secs_f64();
+        Ok((
+            values,
+            RuntimeProfile {
+                source_fill_s,
+                momentum_setup_s,
+                stage_evaluator_s,
+                output_assign_s,
+                amplitude_evaluator_s,
+                reduction_s,
+                total_s: total_start.elapsed().as_secs_f64(),
+            },
+        ))
+    }
+
     fn evaluate_amplitudes_f64(&mut self, batch: &[Vec<[f64; 4]>]) -> PyResult<Vec<Complex<f64>>> {
         if self.lc_topology_replay_enabled {
             let mappings = self.lc_topology_replay_mappings.clone();
@@ -2562,6 +2716,37 @@ impl GenericRuntimeV2 {
         Ok(())
     }
 
+    fn fill_sources_row_generic<T>(
+        sources: &[GenericSourceRecordManifestV2],
+        external_count: usize,
+        particle_masses: &BTreeMap<i32, f64>,
+        row: &mut [Complex<T>],
+        point: &[[T; 4]],
+    ) -> PyResult<()>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        for source in sources {
+            let start = source.value_slot.component_start;
+            let stop = source.value_slot.component_stop;
+            if stop > row.len() || stop < start {
+                return Err(PyValueError::new_err(format!(
+                    "generic source {} has an invalid value-slot range",
+                    source.source_id
+                )));
+            }
+            Self::write_source_wavefunction_generic(
+                source,
+                external_count,
+                particle_masses,
+                point,
+                &mut row[start..stop],
+            )?;
+        }
+        Ok(())
+    }
+
     fn fill_momenta_row(
         momentum_slots: &[GenericMomentumSlotManifestV2],
         value_parameter_count: usize,
@@ -2601,6 +2786,54 @@ impl GenericRuntimeV2 {
             }
             for component in 0..4 {
                 row[start + component] = c64(momentum[component], 0.0);
+            }
+        }
+        Ok(())
+    }
+
+    fn fill_momenta_row_generic<T>(
+        momentum_slots: &[GenericMomentumSlotManifestV2],
+        value_parameter_count: usize,
+        external_count: usize,
+        external_is_initial: &[bool],
+        row: &mut [Complex<T>],
+        point: &[[T; 4]],
+    ) -> PyResult<()>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        for slot in momentum_slots {
+            let start = value_parameter_count + slot.component_start;
+            let stop = value_parameter_count + slot.component_stop;
+            if stop > row.len() || stop < start || stop - start != 4 {
+                return Err(PyValueError::new_err(format!(
+                    "generic momentum slot {} has an invalid component range",
+                    slot.momentum_slot_id
+                )));
+            }
+            let mut momentum: [T; 4] = std::array::from_fn(|_| T::new_zero());
+            for label in &slot.external_labels {
+                let index = label.checked_sub(1).ok_or_else(|| {
+                    PyValueError::new_err("generic momentum labels are one-based")
+                })?;
+                if index >= external_count || index >= external_is_initial.len() {
+                    return Err(PyValueError::new_err(format!(
+                        "generic momentum slot {} refers to unknown external label {}",
+                        slot.momentum_slot_id, label
+                    )));
+                }
+                for component in 0..4 {
+                    if external_is_initial[index] {
+                        momentum[component] -= point[index][component].clone();
+                    } else {
+                        momentum[component] += point[index][component].clone();
+                    }
+                }
+            }
+            for component in 0..4 {
+                row[start + component] =
+                    c_generic(momentum[component].clone(), T::new_zero());
             }
         }
         Ok(())
@@ -2687,6 +2920,104 @@ impl GenericRuntimeV2 {
                 )
             };
             out.copy_from_slice(&wave);
+            return Ok(());
+        }
+        Err(PyValueError::new_err(format!(
+            "generic source dimension {} is not implemented",
+            source.dimension
+        )))
+    }
+
+    fn write_source_wavefunction_generic<T>(
+        source: &GenericSourceRecordManifestV2,
+        external_count: usize,
+        particle_masses: &BTreeMap<i32, f64>,
+        point: &[[T; 4]],
+        out: &mut [Complex<T>],
+    ) -> PyResult<()>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        if source.source_kind != "external-wavefunction" {
+            return Err(PyValueError::new_err(format!(
+                "generic source kind {:?} is not implemented",
+                source.source_kind
+            )));
+        }
+        let index = source
+            .leg_label
+            .checked_sub(1)
+            .ok_or_else(|| PyValueError::new_err("generic source leg labels are one-based"))?;
+        if index >= external_count {
+            return Err(PyValueError::new_err(format!(
+                "generic source {} refers to unknown external label {}",
+                source.source_id, source.leg_label
+            )));
+        }
+        let momentum = if source.crossing == "negate-incoming-momentum" {
+            negate_generic(&point[index])
+        } else {
+            point[index].clone()
+        };
+        if source.dimension == 1 {
+            if out.len() != 1 {
+                return Err(PyValueError::new_err(format!(
+                    "generic source {} expected dimension 1 but slot has length {}",
+                    source.source_id,
+                    out.len()
+                )));
+            }
+            out[0] = c_generic(T::from(1.0), T::new_zero());
+            return Ok(());
+        }
+        if source.dimension == 2 {
+            if out.len() != 2 {
+                return Err(PyValueError::new_err(format!(
+                    "generic source {} expected dimension 2 but slot has length {}",
+                    source.source_id,
+                    out.len()
+                )));
+            }
+            let chirality = source.chirality;
+            let wave = if source.particle_id < 0 {
+                ext_antiquark_weyl_generic(&momentum, source.source_helicity, chirality)
+            } else {
+                ext_quark_weyl_generic(&momentum, source.source_helicity, chirality)
+            };
+            out.clone_from_slice(&wave);
+            return Ok(());
+        }
+        if source.dimension == 4 {
+            if out.len() != 4 {
+                return Err(PyValueError::new_err(format!(
+                    "generic source {} expected dimension 4 but slot has length {}",
+                    source.source_id,
+                    out.len()
+                )));
+            }
+            let wave = if is_fermion_pdg(source.particle_id) {
+                let mass = particle_mass_from_map(particle_masses, source.particle_id);
+                if mass != 0.0 {
+                    return Err(PyValueError::new_err(
+                        "high-precision generic massive fermion sources are not implemented",
+                    ));
+                }
+                if source.particle_id < 0 {
+                    ext_antiquark_dirac_generic(&momentum, source.source_helicity)
+                } else {
+                    ext_quark_dirac_generic(&momentum, source.source_helicity)
+                }
+            } else if source.particle_id.abs() == 21 || source.particle_id == 22 {
+                ext_gluon_generic(&momentum, source.source_helicity)
+            } else {
+                ext_massive_vector_generic(
+                    &momentum,
+                    source.source_helicity,
+                    T::from(particle_mass_from_map(particle_masses, source.particle_id)),
+                )
+            };
+            out.clone_from_slice(&wave);
             return Ok(());
         }
         Err(PyValueError::new_err(format!(
@@ -3127,22 +3458,52 @@ impl Runtime {
         match PrecisionMode::from_decimal_digits(decimal_digit_precision)? {
             PrecisionMode::F64 => self.evaluate(py, momenta),
             PrecisionMode::DoubleDouble => {
-                self.ensure_legacy_runtime()?;
-                let batch =
-                    batch_momenta_double(momenta, self.legacy_manifest().external_pdg_order.len())?;
-                let (values, profile) = self.run_double(&batch)?;
+                let (values, profile) = if self.generic_runtime.is_some() {
+                    let external_count = self
+                        .generic_runtime
+                        .as_ref()
+                        .expect("checked")
+                        .external_count;
+                    let batch = self.generic_batch_double_from_python(momenta, external_count)?;
+                    self.generic_runtime
+                        .as_mut()
+                        .expect("checked")
+                        .run_double(&batch)?
+                } else {
+                    let batch = batch_momenta_double(
+                        momenta,
+                        self.legacy_manifest().external_pdg_order.len(),
+                    )?;
+                    self.run_double(&batch)?
+                };
                 self.last_profile = profile;
                 decimals_to_python(py, values, decimal_digit_precision)
             }
             PrecisionMode::Arbitrary(decimal_precision) => {
-                self.ensure_legacy_runtime()?;
                 let binary_precision = decimal_digits_to_bits(decimal_precision);
-                let batch = batch_momenta_float(
-                    momenta,
-                    binary_precision,
-                    self.legacy_manifest().external_pdg_order.len(),
-                )?;
-                let (values, profile) = self.run_float(&batch, binary_precision)?;
+                let (values, profile) = if self.generic_runtime.is_some() {
+                    let external_count = self
+                        .generic_runtime
+                        .as_ref()
+                        .expect("checked")
+                        .external_count;
+                    let batch = self.generic_batch_float_from_python(
+                        momenta,
+                        binary_precision,
+                        external_count,
+                    )?;
+                    self.generic_runtime
+                        .as_mut()
+                        .expect("checked")
+                        .run_float(&batch, binary_precision)?
+                } else {
+                    let batch = batch_momenta_float(
+                        momenta,
+                        binary_precision,
+                        self.legacy_manifest().external_pdg_order.len(),
+                    )?;
+                    self.run_float(&batch, binary_precision)?
+                };
                 self.last_profile = profile;
                 decimals_to_python(py, values, decimal_precision)
             }
@@ -3191,11 +3552,29 @@ impl Runtime {
                 (points, values, profile)
             }
             PrecisionMode::DoubleDouble => {
-                self.ensure_legacy_runtime()?;
-                let batch =
-                    batch_momenta_double(momenta, self.legacy_manifest().external_pdg_order.len())?;
-                let points = batch.len();
-                let (values, profile) = self.run_double(&batch)?;
+                let (points, values, profile) = if self.generic_runtime.is_some() {
+                    let external_count = self
+                        .generic_runtime
+                        .as_ref()
+                        .expect("checked")
+                        .external_count;
+                    let batch = self.generic_batch_double_from_python(momenta, external_count)?;
+                    let points = batch.len();
+                    let (values, profile) = self
+                        .generic_runtime
+                        .as_mut()
+                        .expect("checked")
+                        .run_double(&batch)?;
+                    (points, values, profile)
+                } else {
+                    let batch = batch_momenta_double(
+                        momenta,
+                        self.legacy_manifest().external_pdg_order.len(),
+                    )?;
+                    let points = batch.len();
+                    let (values, profile) = self.run_double(&batch)?;
+                    (points, values, profile)
+                };
                 let values = if include_values {
                     decimals_to_python(py, values, precision)?
                 } else {
@@ -3204,15 +3583,35 @@ impl Runtime {
                 (points, values, profile)
             }
             PrecisionMode::Arbitrary(decimal_precision) => {
-                self.ensure_legacy_runtime()?;
                 let binary_precision = decimal_digits_to_bits(decimal_precision);
-                let batch = batch_momenta_float(
-                    momenta,
-                    binary_precision,
-                    self.legacy_manifest().external_pdg_order.len(),
-                )?;
-                let points = batch.len();
-                let (values, profile) = self.run_float(&batch, binary_precision)?;
+                let (points, values, profile) = if self.generic_runtime.is_some() {
+                    let external_count = self
+                        .generic_runtime
+                        .as_ref()
+                        .expect("checked")
+                        .external_count;
+                    let batch = self.generic_batch_float_from_python(
+                        momenta,
+                        binary_precision,
+                        external_count,
+                    )?;
+                    let points = batch.len();
+                    let (values, profile) = self
+                        .generic_runtime
+                        .as_mut()
+                        .expect("checked")
+                        .run_float(&batch, binary_precision)?;
+                    (points, values, profile)
+                } else {
+                    let batch = batch_momenta_float(
+                        momenta,
+                        binary_precision,
+                        self.legacy_manifest().external_pdg_order.len(),
+                    )?;
+                    let points = batch.len();
+                    let (values, profile) = self.run_float(&batch, binary_precision)?;
+                    (points, values, profile)
+                };
                 (
                     points,
                     if include_values {
@@ -3347,6 +3746,33 @@ impl Runtime {
     ) -> PyResult<Vec<Vec<[f64; 4]>>> {
         let batch = batch_momenta_dynamic(py, momenta, expected_legs)?;
         apply_input_crossing_map(&batch, expected_legs, self.input_crossing_map.as_deref())
+    }
+
+    fn generic_batch_double_from_python(
+        &self,
+        momenta: &Bound<'_, PyAny>,
+        expected_legs: usize,
+    ) -> PyResult<Vec<Vec<[DoubleFloat; 4]>>> {
+        let batch = batch_momenta_double(momenta, expected_legs)?;
+        apply_input_crossing_map_generic(
+            &batch,
+            expected_legs,
+            self.input_crossing_map.as_deref(),
+        )
+    }
+
+    fn generic_batch_float_from_python(
+        &self,
+        momenta: &Bound<'_, PyAny>,
+        binary_precision: u32,
+        expected_legs: usize,
+    ) -> PyResult<Vec<Vec<[Float; 4]>>> {
+        let batch = batch_momenta_float(momenta, binary_precision, expected_legs)?;
+        apply_input_crossing_map_generic(
+            &batch,
+            expected_legs,
+            self.input_crossing_map.as_deref(),
+        )
     }
 
     fn legacy_manifest(&self) -> &ProcessManifest {
@@ -4099,6 +4525,58 @@ impl GenericStageRuntimeV2 {
         }
         Ok((evaluator_s, assign_start.elapsed().as_secs_f64()))
     }
+
+    fn evaluate_generic_into_state<T>(
+        &mut self,
+        batch_size: usize,
+        parameter_count: usize,
+        state: &mut [Complex<T>],
+        binary_precision: Option<u32>,
+    ) -> PyResult<(f64, f64)>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        let eval_start = Instant::now();
+        let evaluated = if let Some(input_components) = self.input_components.as_ref() {
+            let local_parameter_count = input_components.len();
+            let mut parameter_scratch =
+                vec![complex_zero::<T>(); batch_size * local_parameter_count];
+            for row in 0..batch_size {
+                let row_state = row * parameter_count;
+                let row_params = row * local_parameter_count;
+                for (local_index, global_index) in input_components.iter().enumerate() {
+                    parameter_scratch[row_params + local_index] =
+                        state[row_state + *global_index].clone();
+                }
+            }
+            self.evaluator
+                .evaluate_batch_generic(batch_size, &parameter_scratch, binary_precision)?
+        } else {
+            self.evaluator
+                .evaluate_batch_generic(batch_size, state, binary_precision)?
+        };
+        let evaluator_s = eval_start.elapsed().as_secs_f64();
+
+        let assign_start = Instant::now();
+        for row in 0..batch_size {
+            let row_state = row * parameter_count;
+            let row_eval = row * self.evaluator.output_len;
+            if self.output_spans.is_empty() {
+                for (column, state_offset) in &self.outputs {
+                    state[row_state + *state_offset] = evaluated[row_eval + *column].clone();
+                }
+            } else {
+                for (column_start, state_offset_start, len) in &self.output_spans {
+                    let source_start = row_eval + *column_start;
+                    let target_start = row_state + *state_offset_start;
+                    state[target_start..target_start + *len]
+                        .clone_from_slice(&evaluated[source_start..source_start + *len]);
+                }
+            }
+        }
+        Ok((evaluator_s, assign_start.elapsed().as_secs_f64()))
+    }
 }
 
 fn contiguous_output_spans(outputs: &[(usize, usize)]) -> Vec<(usize, usize, usize)> {
@@ -4244,6 +4722,72 @@ impl GenericAmplitudeRuntimeV2 {
             }
         }
         Ok(())
+    }
+
+    fn evaluate_raw_sums_generic<T>(
+        &mut self,
+        batch_size: usize,
+        state: &[Complex<T>],
+        binary_precision: Option<u32>,
+    ) -> PyResult<Vec<T>>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        let evaluated = if let Some(input_components) = self.input_components.as_ref() {
+            let local_parameter_count = input_components.len();
+            let global_parameter_count = state
+                .len()
+                .checked_div(batch_size)
+                .ok_or_else(|| PyValueError::new_err("generic amplitude batch size is zero"))?;
+            let mut parameter_scratch =
+                vec![complex_zero::<T>(); batch_size * local_parameter_count];
+            for row in 0..batch_size {
+                let row_state = row * global_parameter_count;
+                let row_params = row * local_parameter_count;
+                for (local_index, global_index) in input_components.iter().enumerate() {
+                    parameter_scratch[row_params + local_index] =
+                        state[row_state + *global_index].clone();
+                }
+            }
+            self.evaluator
+                .evaluate_batch_generic(batch_size, &parameter_scratch, binary_precision)?
+        } else {
+            self.evaluator
+                .evaluate_batch_generic(batch_size, state, binary_precision)?
+        };
+        if evaluated.len() != batch_size * self.output_length {
+            return Err(PyValueError::new_err(format!(
+                "generic amplitude output buffer has length {}, expected {}",
+                evaluated.len(),
+                batch_size * self.output_length
+            )));
+        }
+        let mut raw_sums = vec![T::new_zero(); batch_size];
+        for row in 0..batch_size {
+            let row_offset = row * self.output_length;
+            if self.has_coherent_groups {
+                for group in &self.raw_sum_groups {
+                    let mut sum_re = T::new_zero();
+                    let mut sum_im = T::new_zero();
+                    for index in &group.indices {
+                        let value = &evaluated[row_offset + *index];
+                        sum_re += value.re.clone();
+                        sum_im += value.im.clone();
+                    }
+                    raw_sums[row] +=
+                        T::from(group.weight) * (sum_re.clone() * sum_re + sum_im.clone() * sum_im);
+                }
+                continue;
+            }
+            for index in 0..self.output_length {
+                let value = &evaluated[row_offset + index];
+                raw_sums[row] += T::from(self.raw_sum_weights[index])
+                    * (value.re.clone() * value.re.clone()
+                        + value.im.clone() * value.im.clone());
+            }
+        }
+        Ok(raw_sums)
     }
 }
 
@@ -5213,6 +5757,68 @@ fn apply_input_crossing_map(
     Ok(mapped_batch)
 }
 
+fn validate_input_crossing_map(
+    expected_legs: usize,
+    input_crossing_map: Option<&[InputCrossingMapEntry]>,
+) -> PyResult<Option<&[InputCrossingMapEntry]>> {
+    let Some(map) = input_crossing_map else {
+        return Ok(None);
+    };
+    if map.len() != expected_legs {
+        return Err(PyValueError::new_err(format!(
+            "input crossing map has {} entries, expected {expected_legs}",
+            map.len()
+        )));
+    }
+    let mut seen = vec![false; expected_legs];
+    for entry in map {
+        if entry.target_index >= expected_legs || entry.source_index >= expected_legs {
+            return Err(PyValueError::new_err(
+                "input crossing map references an out-of-range external leg",
+            ));
+        }
+        if seen[entry.target_index] {
+            return Err(PyValueError::new_err(
+                "input crossing map contains a duplicate target index",
+            ));
+        }
+        seen[entry.target_index] = true;
+    }
+    if seen.iter().any(|value| !*value) {
+        return Err(PyValueError::new_err(
+            "input crossing map does not cover every target index",
+        ));
+    }
+    Ok(Some(map))
+}
+
+fn apply_input_crossing_map_generic<T>(
+    batch: &[Vec<[T; 4]>],
+    expected_legs: usize,
+    input_crossing_map: Option<&[InputCrossingMapEntry]>,
+) -> PyResult<Vec<Vec<[T; 4]>>>
+where
+    T: RusticolHighPrecisionNumber,
+    Complex<T>: Real + EvaluationDomain,
+{
+    let Some(map) = validate_input_crossing_map(expected_legs, input_crossing_map)? else {
+        return Ok(batch.to_vec());
+    };
+    let mut mapped_batch = Vec::with_capacity(batch.len());
+    for point in batch {
+        let mut mapped = vec![std::array::from_fn(|_| T::new_zero()); expected_legs];
+        for entry in map {
+            let source = &point[entry.source_index];
+            for component in 0..4 {
+                mapped[entry.target_index][component] =
+                    T::from(entry.sign) * source[component].clone();
+            }
+        }
+        mapped_batch.push(mapped);
+    }
+    Ok(mapped_batch)
+}
+
 fn apply_lc_topology_label_permutation(
     batch: &[Vec<[f64; 4]>],
     expected_legs: usize,
@@ -5257,6 +5863,66 @@ fn apply_lc_topology_label_permutations(
     let mut expanded_batch = Vec::with_capacity(batch.len() * mappings.len());
     for mapping in mappings {
         expanded_batch.extend(apply_lc_topology_label_permutation(
+            batch,
+            expected_legs,
+            mapping,
+        )?);
+    }
+    Ok(expanded_batch)
+}
+
+fn apply_lc_topology_label_permutation_generic<T>(
+    batch: &[Vec<[T; 4]>],
+    expected_legs: usize,
+    mapping: &[(usize, usize)],
+) -> PyResult<Vec<Vec<[T; 4]>>>
+where
+    T: RusticolHighPrecisionNumber,
+    Complex<T>: Real + EvaluationDomain,
+{
+    let mut seen = vec![false; expected_legs];
+    for (representative_index, sector_index) in mapping {
+        if *representative_index >= expected_legs || *sector_index >= expected_legs {
+            return Err(PyValueError::new_err(
+                "LC topology replay label permutation references an out-of-range external leg",
+            ));
+        }
+        if seen[*representative_index] {
+            return Err(PyValueError::new_err(
+                "LC topology replay label permutation contains a duplicate representative label",
+            ));
+        }
+        seen[*representative_index] = true;
+    }
+    let mut mapped_batch = Vec::with_capacity(batch.len());
+    for point in batch {
+        if point.len() != expected_legs {
+            return Err(PyValueError::new_err(format!(
+                "LC topology replay point has {} external legs, expected {expected_legs}",
+                point.len(),
+            )));
+        }
+        let mut mapped = point.clone();
+        for (representative_index, sector_index) in mapping {
+            mapped[*representative_index] = point[*sector_index].clone();
+        }
+        mapped_batch.push(mapped);
+    }
+    Ok(mapped_batch)
+}
+
+fn apply_lc_topology_label_permutations_generic<T>(
+    batch: &[Vec<[T; 4]>],
+    expected_legs: usize,
+    mappings: &[Vec<(usize, usize)>],
+) -> PyResult<Vec<Vec<[T; 4]>>>
+where
+    T: RusticolHighPrecisionNumber,
+    Complex<T>: Real + EvaluationDomain,
+{
+    let mut expanded_batch = Vec::with_capacity(batch.len() * mappings.len());
+    for mapping in mappings {
+        expanded_batch.extend(apply_lc_topology_label_permutation_generic(
             batch,
             expected_legs,
             mapping,

@@ -1769,6 +1769,15 @@ def test_cli_time_process_defaults_to_double_precision_and_ten_seconds(
     assert args.process_key is None
 
 
+def test_time_process_precision_upcasts_double_literals_with_trailing_zeros() -> None:
+    assert cli._upcast_decimal_literal("1.23456789012345", 16) == "1.23456789012345"
+    assert cli._upcast_decimal_literal("-1.25e+3", 8) == "-1.25e+3"
+    assert cli._upcast_decimal_literal("1.25e+3", 18) == f"1.25{'0' * 15}e+3"
+    assert cli._upcast_decimal_literal("-0.00125E-4", 18) == f"-0.00125{'0' * 15}E-4"
+    assert cli._upcast_decimal_literal("500", 18) == f"500.{'0' * 15}"
+    assert cli._upcast_decimal_literal("0", 18) == f"0.{'0' * 17}"
+
+
 def test_cli_time_process_preserves_crossing_alias_selection(
     capsys,
     monkeypatch,

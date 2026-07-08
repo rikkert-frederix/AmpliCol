@@ -53,7 +53,7 @@ def test_dependency_installer_uses_upstream_symbolica_dev_and_skips_gammaloop_by
     assert installer.SYMBOLICA_URL == "https://github.com/symbolica-dev/symbolica.git"
     assert installer.SYMBOLICA_REF == "dev"
     assert installer.SYMJIT_VERSION == "2.19.3"
-    assert installer.SYMJIT_REF == "dee77e14c8bf9c8d5304dbda2e393c52ee3e4cd4"
+    assert installer.SYMJIT_REF == "7fb09d1cb2a943c25a6fd71a208af44fcc6d813d"
     assert "import gammaloop" not in installer.smoke_test_code(include_gammaloop=False)
 
 

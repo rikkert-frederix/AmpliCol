@@ -3892,7 +3892,10 @@ def _load_rusticol_validation_momenta(
         )
     points = [
         [
-            [Decimal(str(component)) for component in particle["momentum"]]
+            [
+                Decimal(_upcast_decimal_literal(str(component), precision))
+                for component in particle["momentum"]
+            ]
             for particle in point
         ]
         for point in payload["points"]
@@ -3900,6 +3903,34 @@ def _load_rusticol_validation_momenta(
     if precision == 16:
         return np_module.asarray(points, dtype=np_module.float64)
     return points
+
+
+def _upcast_decimal_literal(value: str, precision: int) -> str:
+    if precision <= 16:
+        return value
+    text = value.strip()
+    if not text:
+        return text
+    exponent = ""
+    mantissa = text
+    for marker in ("e", "E"):
+        if marker in text:
+            mantissa, exp = text.split(marker, 1)
+            exponent = marker + exp
+            break
+    sign = ""
+    if mantissa.startswith(("+", "-")):
+        sign = mantissa[:1]
+        mantissa = mantissa[1:]
+    if "." in mantissa:
+        integer, fraction = mantissa.split(".", 1)
+    else:
+        integer, fraction = mantissa, ""
+    significant_digits = len((integer + fraction).lstrip("0"))
+    if significant_digits == 0:
+        significant_digits = 1
+    padding = max(int(precision) - significant_digits, 0)
+    return f"{sign}{integer}.{fraction}{'0' * padding}{exponent}"
 
 
 def _validation_momenta_for_selected_crossing(

@@ -4,6 +4,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,8 +61,28 @@ def popen_runner(
         start_new_session=True,
         text=True,
     )
+    deadline = None if timeout is None else start + timeout
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        while True:
+            wait_s = 30.0
+            if deadline is not None:
+                remaining_s = deadline - time.perf_counter()
+                if remaining_s <= 0:
+                    raise subprocess.TimeoutExpired(list(args), timeout)
+                wait_s = min(wait_s, remaining_s)
+            try:
+                stdout, stderr = process.communicate(timeout=wait_s)
+                break
+            except subprocess.TimeoutExpired:
+                if deadline is not None and time.perf_counter() >= deadline:
+                    raise subprocess.TimeoutExpired(list(args), timeout)
+                elapsed_s = time.perf_counter() - start
+                print(
+                    f"[amplicol] still running after {elapsed_s:.0f}s: "
+                    f"{' '.join(args)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
     except subprocess.TimeoutExpired:
         _terminate_process_group(process.pid, signal.SIGTERM)
         try:
