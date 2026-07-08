@@ -3257,21 +3257,15 @@ def _process_input_crossing_map(
 
 def _external_all_outgoing_legs(process_ir: Any) -> list[dict[str, int]]:
     legs: list[dict[str, int]] = []
-    for index, pdg in enumerate(process_ir.initial_pdgs):
+    for index, leg in enumerate(process_ir.legs):
+        outgoing_pdg = getattr(leg, "outgoing_pdg", None)
+        if outgoing_pdg is None:
+            continue
         legs.append(
             {
                 "external_index": index,
-                "outgoing_pdg": -int(pdg),
-                "sign": -1,
-            }
-        )
-    offset = len(process_ir.initial_pdgs)
-    for index, pdg in enumerate(process_ir.final_pdgs):
-        legs.append(
-            {
-                "external_index": offset + index,
-                "outgoing_pdg": int(pdg),
-                "sign": 1,
+                "outgoing_pdg": int(outgoing_pdg),
+                "sign": -1 if bool(getattr(leg, "is_initial", False)) else 1,
             }
         )
     return legs

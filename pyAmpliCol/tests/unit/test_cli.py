@@ -830,6 +830,21 @@ def test_cli_generate_process_set_reuses_crossing_equivalent_artifact(
     assert payload["crossing_aliases"][0]["key"] == "u_ubar_to_dbar_d_g"
 
 
+def test_process_input_crossing_map_handles_self_conjugate_initial_crossing() -> None:
+    assert cli._process_input_crossing_map(
+        "d d~ > g g z",
+        "g d~ > d~ g z",
+        color_accuracy="lc",
+        options=ProcessOptions(),
+    ) == [
+        {"sign": -1.0, "source_index": 2, "target_index": 0},
+        {"sign": 1.0, "source_index": 1, "target_index": 1},
+        {"sign": -1.0, "source_index": 0, "target_index": 2},
+        {"sign": 1.0, "source_index": 3, "target_index": 3},
+        {"sign": 1.0, "source_index": 4, "target_index": 4},
+    ]
+
+
 def test_cli_generate_process_set_append_uses_real_crossing_representative(
     capsys,
     monkeypatch,
