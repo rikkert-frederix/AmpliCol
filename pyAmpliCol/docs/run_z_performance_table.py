@@ -1,0 +1,656 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any, Sequence
+
+DOCS_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = DOCS_DIR.parent
+REPO_ROOT = PROJECT_DIR.parent
+SRC_DIR = PROJECT_DIR / "src"
+PYTHON = PROJECT_DIR / "dependencies" / ".venv" / "bin" / "python"
+Z_DATA = DOCS_DIR / "z_performance_data.json"
+LC_MATRIX_DATA = DOCS_DIR / "result_matrix_data.json"
+OUTPUT_ROOT = DOCS_DIR / ".z_performance_outputs"
+TABLE_SCRIPT = DOCS_DIR / "z_performance_table.py"
+
+DEFAULT_BATCH_SIZE = 64
+DEFAULT_CHUNK_SIZE = 128
+DEFAULT_SYMBOLICA_ITERATIONS = 10
+DEFAULT_TARGET_RUNTIME = 10.0
+DEFAULT_N_CORES = 5
+DEFAULT_CPP_TIME_LIMIT = 900.0
+DEFAULT_MEMORY_LIMIT_GB = 30.0
+HEARTBEAT_S = 30.0
+MEMORY_POLL_S = 1.0
+
+MODE_KEYS = ("amplicol", "jit_o1", "asm", "cpp_o3", "jit_o3")
+
+
+class MemoryLimitExceeded(RuntimeError):
+    def __init__(self, *, limit_gb: float, peak_rss_bytes: int, command: Sequence[str]):
+        self.limit_gb = float(limit_gb)
+        self.peak_rss_bytes = int(peak_rss_bytes)
+        self.peak_rss_gb = self.peak_rss_bytes / 1024**3
+        self.command = tuple(str(item) for item in command)
+        super().__init__(
+            f"memory limit {self.limit_gb:g} GB exceeded "
+            f"(RSS {self.peak_rss_gb:.3f} GiB): {' '.join(self.command)}"
+        )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Populate docs/z_performance_data.json and z_performance_table.tex "
+            "for the d d~ > Z + (n-1)*g dedicated comparison table."
+        )
+    )
+    parser.add_argument(
+        "--n",
+        nargs="*",
+        default=("1-9",),
+        help="Final-state multiplicities to run, e.g. 1-6 or 7 8 9.",
+    )
+    parser.add_argument(
+        "--modes",
+        nargs="*",
+        default=("all",),
+        help=(
+            "Rows to populate: amplicol, jit_o1, asm, cpp_o3, jit_o3, or all. "
+            "Comma-separated lists are accepted."
+        ),
+    )
+    parser.add_argument("--n-cores", type=int, default=DEFAULT_N_CORES)
+    parser.add_argument("--target-runtime", type=float, default=DEFAULT_TARGET_RUNTIME)
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--output-chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
+    parser.add_argument(
+        "--cpp-time-limit",
+        type=float,
+        default=DEFAULT_CPP_TIME_LIMIT,
+        help="Generation timeout in seconds for the C++ O3 row; use 0 to disable.",
+    )
+    parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="Skip rows already recorded with status ok in z_performance_data.json.",
+    )
+    parser.add_argument(
+        "--no-seed-lc-cache",
+        action="store_true",
+        help=(
+            "Do not seed AmpliCol and JIT O3 rows from result_matrix_data.json. "
+            "Without a seed, amplicol rows are left untouched by this script."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    n_values = _parse_n_values(args.n)
+    modes = _parse_modes(args.modes)
+    for n_final in n_values:
+        for mode in modes:
+            if args.only_missing and _row_is_terminal(n_final, mode):
+                print(
+                    f"[z-table] skip n={n_final} mode={mode}: already recorded",
+                    flush=True,
+                )
+                continue
+            if not args.no_seed_lc_cache and mode in {"amplicol", "jit_o3"}:
+                if _seed_from_lc_cache(n_final, mode):
+                    continue
+            if mode == "amplicol":
+                print(
+                    f"[z-table] n={n_final} mode=amplicol: no LC cache seed; "
+                    "run docs/result_matrix.py for process id 1 first",
+                    flush=True,
+                )
+                continue
+            _run_pyamplicol_mode(n_final, mode, args)
+    _render_table()
+    return 0
+
+
+def process_for_n(n_final: int) -> str:
+    if n_final < 1:
+        raise ValueError("n must be at least 1")
+    return "d d~ > z" + (" " + " ".join("g" for _ in range(n_final - 1)) if n_final > 1 else "")
+
+
+def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> None:
+    process = process_for_n(n_final)
+    output_dir = OUTPUT_ROOT / f"n{n_final}" / mode
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[z-table] start n={n_final} mode={mode}: {process}", flush=True)
+    generate = _generate_command(
+        process,
+        output_dir,
+        mode=mode,
+        n_final=n_final,
+        n_cores=max(1, int(args.n_cores)),
+        batch_size=int(args.batch_size),
+        output_chunk_size=int(args.output_chunk_size),
+    )
+    timeout = (
+        None
+        if mode != "cpp_o3" or float(args.cpp_time_limit) <= 0
+        else float(args.cpp_time_limit)
+    )
+    try:
+        gen = _run_json_command(
+            generate,
+            timeout=timeout,
+            log_path=output_dir.with_name(f"{output_dir.name}.generate.log"),
+        )
+    except MemoryLimitExceeded as exc:
+        _record_row(
+            n_final,
+            mode,
+            status="ram_limit",
+            notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+            error=str(exc),
+        )
+        print(f"[z-table] RAM limit n={n_final} mode={mode}: {exc}", flush=True)
+        return
+    except subprocess.TimeoutExpired:
+        _record_row(
+            n_final,
+            mode,
+            status="timeout",
+            notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+        )
+        print(f"[z-table] timeout n={n_final} mode={mode}", flush=True)
+        return
+    except Exception as exc:  # noqa: BLE001 - benchmark script records failures.
+        _record_row(n_final, mode, status="error", error=str(exc))
+        print(f"[z-table] error n={n_final} mode={mode}: {exc}", flush=True)
+        return
+
+    try:
+        timed = _run_json_command(
+            [
+                str(PYTHON),
+                "-m",
+                "pyamplicol",
+                "time-process",
+                "--target-runtime",
+                str(float(args.target_runtime)),
+                "--batch-size",
+                str(int(args.batch_size)),
+                "--json",
+                str(output_dir),
+            ],
+            timeout=None,
+            log_path=output_dir.with_name(f"{output_dir.name}.time.log"),
+        )
+    except MemoryLimitExceeded as exc:
+        _record_row(
+            n_final,
+            mode,
+            status="ram_limit",
+            notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+            error=str(exc),
+        )
+        print(f"[z-table] timing RAM limit n={n_final} mode={mode}: {exc}", flush=True)
+        return
+    except Exception as exc:  # noqa: BLE001 - benchmark script records failures.
+        _record_row(n_final, mode, status="error", error=str(exc))
+        print(f"[z-table] timing error n={n_final} mode={mode}: {exc}", flush=True)
+        return
+
+    profile = timed.get("profile", {})
+    if not isinstance(profile, dict):
+        profile = {}
+    generation_s = _optional_float(gen.get("_command_elapsed_s", gen.get("generation_s")))
+    wall = _optional_float(profile.get("wall_us_per_point"))
+    runtime = _optional_float(profile.get("core_evaluator_us_per_point"))
+    _record_row(
+        n_final,
+        mode,
+        status="ok",
+        generation_s=generation_s,
+        wall_us_per_point=wall,
+        runtime_us_per_point=runtime,
+        notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+    )
+    print(f"[z-table] done n={n_final} mode={mode}", flush=True)
+
+
+def _generate_command(
+    process: str,
+    output_dir: Path,
+    *,
+    mode: str,
+    n_final: int,
+    n_cores: int,
+    batch_size: int,
+    output_chunk_size: int,
+) -> list[str]:
+    reference_order, sector_ids = _lc_cache_color_settings(n_final)
+    if reference_order is None:
+        reference_order = _default_reference_color_order(n_final)
+    if sector_ids is None:
+        sector_ids = [0]
+    command = [
+        str(PYTHON),
+        "-m",
+        "pyamplicol",
+        "generate-process",
+        process,
+        str(output_dir),
+        "--replace",
+        "--n_cores",
+        str(n_cores),
+        "--color-accuracy",
+        "lc",
+        "--batch-size",
+        str(batch_size),
+        "--symbolica-n-cores",
+        str(n_cores),
+        "--json",
+        "--monitor",
+        "--symbolica-output-chunk-size",
+        str(output_chunk_size),
+        "--symbolica-stage-local-parameter-layout",
+        "--symbolica-iterations",
+        str(DEFAULT_SYMBOLICA_ITERATIONS),
+        "--symbolica-max-horner-scheme-variables",
+        "1000",
+        "--symbolica-max-common-pair-cache-entries",
+        "5000000",
+        "--symbolica-max-common-pair-distance",
+        "1000",
+        "--lc-sector-ids",
+        ",".join(str(item) for item in sector_ids),
+        "--reference-color-order",
+        ",".join(str(item) for item in reference_order),
+    ]
+    if mode == "jit_o1":
+        command.extend(
+            [
+                "--symbolica-evaluator-backend",
+                "jit",
+                "--symbolica-jit-optimization-level",
+                "1",
+            ]
+        )
+    elif mode == "jit_o3":
+        command.extend(
+            [
+                "--symbolica-evaluator-backend",
+                "jit",
+                "--symbolica-jit-optimization-level",
+                "3",
+            ]
+        )
+    elif mode == "asm":
+        command.extend(
+            [
+                "--symbolica-evaluator-backend",
+                "compiled-complex",
+                "--symbolica-compiled-preset",
+                "generation",
+                "--symbolica-compiled-inline-asm",
+                "default",
+                "--symbolica-compiled-optimization-level",
+                "3",
+                "--symbolica-compiled-chunk-compile-workers",
+                str(n_cores),
+            ]
+        )
+    elif mode == "cpp_o3":
+        command.extend(
+            [
+                "--symbolica-evaluator-backend",
+                "compiled-complex",
+                "--symbolica-compiled-preset",
+                "runtime-o3",
+                "--symbolica-compiled-inline-asm",
+                "none",
+                "--symbolica-compiled-optimization-level",
+                "3",
+                "--symbolica-compiled-chunk-compile-workers",
+                str(n_cores),
+            ]
+        )
+    else:
+        raise ValueError(f"unsupported pyAmpliCol mode: {mode}")
+    return command
+
+
+def _seed_from_lc_cache(n_final: int, mode: str) -> bool:
+    if not LC_MATRIX_DATA.exists():
+        return False
+    try:
+        data = json.loads(LC_MATRIX_DATA.read_text(encoding="utf-8"))
+        case = data["entries"]["dd_z_jets"][str(n_final)]
+    except (KeyError, json.JSONDecodeError):
+        return False
+    if mode == "amplicol":
+        row = case.get("amplicol", {})
+        if not isinstance(row, dict) or row.get("status") != "ok":
+            return False
+        _record_row(
+            n_final,
+            "amplicol",
+            status="ok",
+            generation_s=_optional_float(row.get("generation_s")),
+            runtime_us_per_point=_optional_float(row.get("runtime_us_per_point")),
+            notes="reused from LC result matrix cache",
+        )
+        print(f"[z-table] seeded n={n_final} mode=amplicol from LC cache", flush=True)
+        return True
+    row = case.get("pyamplicol_jit", {})
+    if not isinstance(row, dict) or row.get("status") != "ok":
+        return False
+    _record_row(
+        n_final,
+        "jit_o3",
+        status="ok",
+        generation_s=_optional_float(row.get("generation_s")),
+        wall_us_per_point=_optional_float(row.get("wall_us_per_point")),
+        runtime_us_per_point=_optional_float(row.get("runtime_us_per_point")),
+        notes="reused from LC result matrix cache",
+    )
+    print(f"[z-table] seeded n={n_final} mode=jit_o3 from LC cache", flush=True)
+    return True
+
+
+def _lc_cache_color_settings(n_final: int) -> tuple[list[int] | None, list[int] | None]:
+    if not LC_MATRIX_DATA.exists():
+        return None, None
+    try:
+        data = json.loads(LC_MATRIX_DATA.read_text(encoding="utf-8"))
+        case = data["entries"]["dd_z_jets"][str(n_final)]
+    except (KeyError, json.JSONDecodeError):
+        return None, None
+    reference_order = None
+    sector_ids = None
+    for row_key in ("pyamplicol_jit", "amplicol"):
+        row = case.get(row_key, {})
+        if not isinstance(row, dict):
+            continue
+        raw_order = row.get("reference_color_order")
+        if isinstance(raw_order, list) and raw_order:
+            reference_order = [int(item) for item in raw_order]
+        raw_sectors = row.get("selected_lc_sector_ids")
+        if isinstance(raw_sectors, list) and raw_sectors:
+            sector_ids = [int(item) for item in raw_sectors]
+        if reference_order is not None and sector_ids is not None:
+            break
+    return reference_order, sector_ids
+
+
+def _default_reference_color_order(n_final: int) -> list[int]:
+    return [2, *range(4, n_final + 3), 1, 3]
+
+
+def _record_row(
+    n_final: int,
+    mode: str,
+    *,
+    status: str,
+    generation_s: float | None = None,
+    wall_us_per_point: float | None = None,
+    runtime_us_per_point: float | None = None,
+    notes: str = "",
+    error: str = "",
+) -> None:
+    command = [
+        str(PYTHON),
+        str(TABLE_SCRIPT),
+        "record",
+        "--n",
+        str(n_final),
+        "--mode",
+        mode,
+        "--status",
+        status,
+        "--notes",
+        notes,
+        "--error",
+        error,
+    ]
+    if generation_s is not None:
+        command.extend(["--generation-s", str(generation_s)])
+    if wall_us_per_point is not None:
+        command.extend(["--wall-us-per-point", str(wall_us_per_point)])
+    if runtime_us_per_point is not None:
+        command.extend(["--runtime-us-per-point", str(runtime_us_per_point)])
+    _run_checked(command)
+
+
+def _render_table() -> None:
+    _run_checked([str(PYTHON), str(TABLE_SCRIPT), "render"])
+
+
+def _run_checked(command: Sequence[str]) -> None:
+    env = _env()
+    completed = subprocess.run(
+        list(command),
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"command failed with exit code {completed.returncode}: {' '.join(command)}")
+
+
+def _run_json_command(
+    command: Sequence[str],
+    *,
+    timeout: float | None,
+    log_path: Path,
+) -> dict[str, Any]:
+    env = _env()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[z-table] progress log: {log_path}", flush=True)
+    started = time.perf_counter()
+    with log_path.open("w", encoding="utf-8") as log_file:
+        log_file.write("# command: " + " ".join(str(arg) for arg in command) + "\n")
+        process = subprocess.Popen(
+            list(command),
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=log_file,
+            start_new_session=True,
+        )
+        try:
+            stdout = _wait_with_heartbeat(process, command, started=started, timeout=timeout)
+        except BaseException:
+            _terminate_process_group(process.pid, signal.SIGTERM)
+            try:
+                process.communicate(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                _terminate_process_group(process.pid, signal.SIGKILL)
+                process.communicate()
+            raise
+    elapsed_s = time.perf_counter() - started
+    if process.returncode != 0:
+        raise RuntimeError(
+            f"command failed with exit code {process.returncode}: {' '.join(command)}\n"
+            f"stdout:\n{(stdout or '')[-4000:]}\n"
+            f"stderr:\n{_read_tail(log_path)[-4000:]}"
+        )
+    payload = _parse_json_output(stdout or "")
+    payload["_command_elapsed_s"] = elapsed_s
+    payload["_progress_log"] = str(log_path)
+    return payload
+
+
+def _wait_with_heartbeat(
+    process: subprocess.Popen[str],
+    command: Sequence[str],
+    *,
+    started: float,
+    timeout: float | None,
+) -> str:
+    deadline = None if timeout is None else started + timeout
+    memory_limit_bytes = int(DEFAULT_MEMORY_LIMIT_GB * 1024**3)
+    peak_rss_bytes = 0
+    last_heartbeat = started
+    while True:
+        rss = _process_tree_rss_bytes(process.pid)
+        if rss is not None:
+            peak_rss_bytes = max(peak_rss_bytes, rss)
+            if rss > memory_limit_bytes:
+                raise MemoryLimitExceeded(
+                    limit_gb=DEFAULT_MEMORY_LIMIT_GB,
+                    peak_rss_bytes=peak_rss_bytes,
+                    command=command,
+                )
+        wait_s = MEMORY_POLL_S
+        if deadline is not None:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            wait_s = min(wait_s, remaining)
+        try:
+            stdout, _ = process.communicate(timeout=wait_s)
+            return stdout or ""
+        except subprocess.TimeoutExpired:
+            if deadline is not None and time.perf_counter() >= deadline:
+                raise
+            elapsed = time.perf_counter() - started
+            if time.perf_counter() - last_heartbeat >= HEARTBEAT_S:
+                rss_note = (
+                    ""
+                    if peak_rss_bytes <= 0
+                    else f", peak RSS {peak_rss_bytes / 1024**3:.2f} GiB"
+                )
+                print(
+                    f"[z-table] still running after {elapsed:.0f}s{rss_note}: "
+                    f"{_command_label(command)}",
+                    flush=True,
+                )
+                last_heartbeat = time.perf_counter()
+
+
+def _command_label(command: Sequence[str]) -> str:
+    if "generate-process" in command:
+        idx = list(command).index("generate-process")
+        return "generate-process " + " ".join(str(item) for item in command[idx + 1 : idx + 4])
+    if "time-process" in command:
+        return "time-process"
+    return " ".join(str(item) for item in command[:5])
+
+
+def _terminate_process_group(pid: int, sig: int) -> None:
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        return
+
+
+def _process_tree_rss_bytes(pid: int) -> int | None:
+    try:
+        import psutil  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        root = psutil.Process(pid)
+        processes = [root, *root.children(recursive=True)]
+        return sum(process.memory_info().rss for process in processes)
+    except Exception:
+        return None
+
+
+def _parse_json_output(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end < start:
+            raise
+        value = json.loads(text[start : end + 1])
+    if not isinstance(value, dict):
+        raise TypeError("expected JSON object output")
+    return value
+
+
+def _read_tail(path: Path, *, max_bytes: int = 16000) -> str:
+    if not path.exists():
+        return ""
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(0, size - max_bytes))
+        return handle.read().decode("utf-8", errors="replace")
+
+
+def _row_is_terminal(n_final: int, mode: str) -> bool:
+    if not Z_DATA.exists():
+        return False
+    try:
+        data = json.loads(Z_DATA.read_text(encoding="utf-8"))
+        row = data["entries"][str(n_final)]["modes"][mode]
+    except (KeyError, json.JSONDecodeError):
+        return False
+    return isinstance(row, dict) and row.get("status") in {"ok", "ram_limit"}
+
+
+def _parse_n_values(values: Sequence[str]) -> list[int]:
+    result: set[int] = set()
+    for token in _split_tokens(values):
+        if "-" in token:
+            left, right = token.split("-", 1)
+            start = int(left)
+            end = int(right)
+            if start > end:
+                start, end = end, start
+            result.update(range(start, end + 1))
+        else:
+            result.add(int(token))
+    return [n for n in sorted(result) if 1 <= n <= 9]
+
+
+def _parse_modes(values: Sequence[str]) -> list[str]:
+    tokens = _split_tokens(values)
+    if not tokens or "all" in tokens:
+        return list(MODE_KEYS)
+    unknown = sorted(set(tokens) - set(MODE_KEYS))
+    if unknown:
+        raise ValueError(f"unknown modes: {', '.join(unknown)}")
+    return [mode for mode in MODE_KEYS if mode in tokens]
+
+
+def _split_tokens(values: Sequence[str]) -> list[str]:
+    tokens: list[str] = []
+    for value in values:
+        tokens.extend(part.strip() for part in str(value).split(",") if part.strip())
+    return tokens
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _env() -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = (
+        f"{SRC_DIR}{os.pathsep}{env['PYTHONPATH']}"
+        if env.get("PYTHONPATH")
+        else str(SRC_DIR)
+    )
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
+    return env
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -548,15 +548,14 @@ def test_cli_compare_amplicol_rejects_legacy_native_backends() -> None:
     assert exc.value.code == 2
 
 
-def test_cli_profile_dag_defaults_to_fast_rusticol_cxx_o3() -> None:
+def test_cli_profile_dag_defaults_to_fast_rusticol_jit_o3() -> None:
     args = parse_args(["profile-dag-evaluator", "d d~ > z g"])
     kwargs = _runtime_evaluator_kwargs(args)
 
     assert _runtime_backend(args) == "rusticol"
-    assert kwargs["symbolica_evaluator_backend"] == "compiled-complex"
-    assert kwargs["symbolica_compiled_preset"] == "runtime-o3"
+    assert kwargs["symbolica_evaluator_backend"] == "jit"
+    assert kwargs["symbolica_jit_optimization_level"] == 3
     assert kwargs["symbolica_n_cores"] == 10
-    assert kwargs["symbolica_compiled_chunk_compile_workers"] == 10
     assert kwargs["batch_size"] == 64
 
 
@@ -578,7 +577,7 @@ def test_cli_profile_dag_generate_only_flag_is_available(tmp_path: Path) -> None
     assert args.save_evaluator_dir == tmp_path / "process"
 
 
-def test_cli_generate_process_minimal_command_uses_fast_rusticol_defaults(
+def test_cli_generate_process_minimal_command_uses_fast_rusticol_jit_defaults(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "process"
@@ -588,10 +587,9 @@ def test_cli_generate_process_minimal_command_uses_fast_rusticol_defaults(
     assert args.process == "d d~ > z g"
     assert args.output_dir == output_dir
     assert _runtime_backend(args) == "rusticol"
-    assert kwargs["symbolica_evaluator_backend"] == "compiled-complex"
-    assert kwargs["symbolica_compiled_preset"] == "runtime-o3"
+    assert kwargs["symbolica_evaluator_backend"] == "jit"
+    assert kwargs["symbolica_jit_optimization_level"] == 3
     assert kwargs["symbolica_n_cores"] == 10
-    assert kwargs["symbolica_compiled_chunk_compile_workers"] == 10
     assert kwargs["batch_size"] == 64
     assert args.color_accuracy == "lc"
     assert args.append is False

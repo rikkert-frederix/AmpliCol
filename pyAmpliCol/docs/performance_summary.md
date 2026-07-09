@@ -1,4 +1,15 @@
-# pyAmplicCol Performance Summary
+# pyAmplicCol Historical Performance Summary
+
+> **Historical note:** this file records the earlier `d d~ -> Z + n g`
+> benchmark campaign.  The live refreshed results now live in
+> `pyAmpliCol.pdf`, generated from `z_performance_data.json`,
+> `z_performance_table.tex`, and the LC/NLC/full-colour result-matrix caches.
+> The current production defaults are Rusticol schema-v2 process artifacts,
+> SymJIT `opt_level=3`, batch size `64`, output chunk size `128`, stage-local
+> evaluator inputs, ten Horner iterations, Symbolica's backend-default CPE
+> choice, enlarged common-pair/Horner limits, and `time-process
+> --target-runtime 10`.  The rows below are kept for provenance and should not
+> be used as the current regenerated table.
 
 Process family: `d d~ -> Z + n g`, for `n = 1,...,9`.
 

@@ -240,7 +240,7 @@ def build_color_plan(
     *,
     color_accuracy: str = "lc",
     options: ProcessOptions | None = None,
-    max_sectors: int = 20000,
+    max_sectors: int | None = 20000,
     reference_color_order: Sequence[int] | None = None,
 ) -> GenericColorPlan:
     process_ir = (
@@ -248,6 +248,7 @@ def build_color_plan(
         if isinstance(process, CanonicalProcessIR)
         else build_process_ir(process, color_accuracy=color_accuracy, options=options)
     )
+    max_sector_count = _normalize_sector_cap(max_sectors)
     if color_accuracy != process_ir.color_accuracy:
         process_ir = build_process_ir(
             process_ir.process,
@@ -273,7 +274,7 @@ def build_color_plan(
             process_ir,
             gluon_labels=gluon_labels,
             singlet_labels=singlet_labels,
-            max_sectors=max_sectors,
+            max_sectors=max_sector_count,
             reference_color_order=reference_color_order,
         )
 
@@ -313,7 +314,7 @@ def build_color_plan(
                     continue
                 seen_sector_keys.add(key)
                 sectors.append(candidate)
-                if len(sectors) >= max_sectors:
+                if max_sector_count is not None and len(sectors) >= max_sector_count:
                     truncated = True
                     break
             if truncated:
@@ -324,7 +325,7 @@ def build_color_plan(
     diagnostics: tuple[str, ...] = ()
     if truncated:
         diagnostics = (
-            f"leading-colour sector enumeration reached max_sectors={max_sectors}",
+            f"leading-colour sector enumeration reached max_sectors={max_sector_count}",
         )
     return GenericColorPlan(
         process=process_ir,
@@ -335,12 +336,19 @@ def build_color_plan(
     )
 
 
+def _normalize_sector_cap(value: int | None) -> int | None:
+    if value is None:
+        return None
+    normalized = int(value)
+    return None if normalized < 0 else normalized
+
+
 def _build_no_quark_color_plan(
     process: CanonicalProcessIR,
     *,
     gluon_labels: tuple[int, ...],
     singlet_labels: tuple[int, ...],
-    max_sectors: int,
+    max_sectors: int | None,
     reference_color_order: Sequence[int] | None = None,
 ) -> GenericColorPlan:
     if not gluon_labels:
@@ -382,7 +390,7 @@ def _build_no_quark_color_plan(
             continue
         seen_sector_keys.add(key)
         sectors.append(candidate)
-        if len(sectors) >= max_sectors:
+        if max_sectors is not None and len(sectors) >= max_sectors:
             truncated = True
             break
     diagnostics: tuple[str, ...] = ()

@@ -163,6 +163,12 @@ python3 ./scripts/run_with_memory_watch.py --limit-gb 30 -- \
 
 ## Documentation
 
-See `docs/description.pdf` for the architecture overview,
-`docs/performance_summary.md` for the current benchmark summary, and
-`docs/process_coverage.md` for the current parser/model/runtime coverage.
+See `docs/pyAmpliCol.pdf` for the architecture overview and the live generated
+LC/NLC/full-colour and dedicated `d d~ > Z + (n-1)g` performance tables.
+The generated JSON/TeX caches next to the PDF are the source of truth for the
+current refresh.  Matrix tables are refreshed with `docs/result_matrix.py`; the
+dedicated Z-family table is populated with `docs/run_z_performance_table.py`,
+which preserves generated processes in `docs/.z_performance_outputs`.
+`docs/performance_summary.md` and the older comparison notes are retained as
+historical benchmark snapshots, while `docs/process_coverage.md` summarizes the
+current parser/model/runtime coverage.

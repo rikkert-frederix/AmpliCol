@@ -727,8 +727,8 @@ class GenericDAGCompiler:
         model: Model | None = None,
         color_accuracy: str = "lc",
         options: ProcessOptions | None = None,
-        max_currents: int = 50000,
-        max_color_sectors: int = 20000,
+        max_currents: int | None = 50000,
+        max_color_sectors: int | None = 20000,
         reference_color_order: tuple[int, ...] | None = None,
         selected_color_sector_ids: Iterable[int] | None = None,
         max_coupling_orders: Mapping[str, int] | None = None,
@@ -743,8 +743,8 @@ class GenericDAGCompiler:
         self.model = model or AmplicolSMLeadingColorModel()
         self.color_accuracy = color_accuracy
         self.options = options
-        self.max_currents = max_currents
-        self.max_color_sectors = max_color_sectors
+        self.max_currents = _normalize_generation_cap(max_currents)
+        self.max_color_sectors = _normalize_generation_cap(max_color_sectors)
         self.reference_color_order = reference_color_order
         self.selected_color_sector_ids = (
             None
@@ -1157,7 +1157,10 @@ class GenericDAGCompiler:
                                             ),
                                         )
                                     )
-                                    if len(table.currents) > self.max_currents:
+                                    if (
+                                        self.max_currents is not None
+                                        and len(table.currents) > self.max_currents
+                                    ):
                                         truncated = True
                                         return GenericDAG(
                                             process=process_ir,
@@ -1491,8 +1494,8 @@ def compile_generic_dag(
     model: Model | None = None,
     color_accuracy: str = "lc",
     options: ProcessOptions | None = None,
-    max_currents: int = 50000,
-    max_color_sectors: int = 20000,
+    max_currents: int | None = 50000,
+    max_color_sectors: int | None = 20000,
     reference_color_order: tuple[int, ...] | None = None,
     selected_color_sector_ids: Iterable[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
@@ -1521,6 +1524,13 @@ def compile_generic_dag(
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
     ).compile(process)
+
+
+def _normalize_generation_cap(value: int | None) -> int | None:
+    if value is None:
+        return None
+    normalized = int(value)
+    return None if normalized < 0 else normalized
 
 
 def infer_minimal_coupling_order_limits(

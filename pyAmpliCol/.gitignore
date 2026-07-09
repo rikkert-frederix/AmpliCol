@@ -29,6 +29,7 @@ stop.order
 docs/*.swp
 docs/.result_matrix_outputs/
 docs/.sanity_matrix_outputs/
+docs/.z_performance_outputs/
 docs/*.aux
 docs/*.fdb_latexmk
 docs/*.fls

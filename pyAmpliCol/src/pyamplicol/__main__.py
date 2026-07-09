@@ -211,13 +211,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--max-currents",
         type=int,
         default=20000,
-        help="Safety cap for generic current-plan construction.",
+        help=(
+            "Safety cap for generic current-plan construction; use a negative "
+            "value to disable this internal cap."
+        ),
     )
     process_plan.add_argument(
         "--max-color-sectors",
         type=int,
         default=20000,
-        help="Safety cap for generic colour-flow sector enumeration.",
+        help=(
+            "Safety cap for generic colour-flow sector enumeration; use a "
+            "negative value to disable this internal cap."
+        ),
     )
     _add_generic_dag_pruning_options(process_plan)
     process_plan.add_argument("--json", action="store_true")
@@ -378,7 +384,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "generate-process",
         help=(
             "Generate the default fast Rusticol eager-DAG process directory. "
-            "Defaults to C++ O3 stage evaluators."
+            "Defaults to JIT O3 stage evaluators."
         ),
     )
     _add_process_options(generate_process)
@@ -444,13 +450,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--max-currents",
         type=int,
         default=50000,
-        help="Safety cap for generic current-plan construction.",
+        help=(
+            "Safety cap for generic current-plan construction; use a negative "
+            "value to disable this internal cap."
+        ),
     )
     generate_process.add_argument(
         "--max-color-sectors",
         type=int,
         default=20000,
-        help="Safety cap for generic colour-flow sector enumeration.",
+        help=(
+            "Safety cap for generic colour-flow sector enumeration; use a "
+            "negative value to disable this internal cap."
+        ),
     )
     generate_process.add_argument(
         "--monitor",
@@ -1221,7 +1233,7 @@ def _add_evaluator_build_options(
 def _set_fast_rusticol_dag_defaults(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(
         runtime_backend="rusticol",
-        symbolica_evaluator_backend="compiled-complex",
+        symbolica_evaluator_backend="jit",
         symbolica_compiled_preset="runtime-o3",
         symbolica_n_cores=10,
         symbolica_compiled_chunk_compile_workers=10,
