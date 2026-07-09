@@ -27,6 +27,11 @@ module phase_space_gen23_mod
   logical,parameter :: use_soft_bounds_as_actual_limits=.false.
 
 contains
+  pure elemental real(kind=8) function sqrt0(x)
+    implicit none
+    real(kind=8),intent(in) :: x
+    sqrt0=sqrt(max(x,0d0))
+  end function sqrt0
   subroutine gen23_init(this,sqrts,n,m,o,pt_cut,rap_cut,dr_cut,sqrt_s_min,t_chan,include_pdf,flat)
     ! Phase-space initialisation routines.
     implicit none
@@ -173,13 +178,20 @@ contains
 !!$       endif
 !!$    enddo
     
-    if (verbose) then
-       write (99,*) "set 1:",this%sets(:,1)
-       write (99,*) "set 2:",this%sets(:,2)
-    endif
     ndim_extra=0
     iset(1)=popcnt(this%sets(0,1))
     iset(2)=popcnt(this%sets(0,2))
+    if (verbose) then
+       write (99,*) "iset:",iset(1),iset(2),"ub:",ubound(this%sets,1)
+       write (99,*) "set 1:"
+       do i=0,min(iset(1),ubound(this%sets,1))
+          write (99,*) i,this%sets(i,1)
+       enddo
+       write (99,*) "set 2:"
+       do i=0,min(iset(2),ubound(this%sets,1))
+          write (99,*) i,this%sets(i,2)
+       enddo
+    endif
     if (iset(1).eq.2 .and. iset(2).gt.0) ndim_extra=ndim_extra+1
     if (iset(2).eq.2 .and. iset(1).gt.0) ndim_extra=ndim_extra+1
     if (iset(1).ge.3) ndim_extra=ndim_extra+(iset(1)-2)
@@ -849,7 +861,7 @@ contains
       elseif (invm(ir).lt.0d0) then
          invm(ir)=0d0
       endif
-      ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
+      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t
 
     subroutine gen23_one_step(i,ir,ib,im1)
@@ -861,7 +873,7 @@ contains
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
       real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot
-      real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax
+      real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -891,19 +903,25 @@ contains
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
       ! ETmin() is boost invariant in the z-direction)
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
+      if ((pp(0,i+ir)+pp(3,i+ir))*(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+         ps%jac=-35d0
+         return
+      endif
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(i,1:2)**2-invm(i)) )**2))
 
       elsewhere
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)))
       end where
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(ir,1:2)**2-invm(ir)) )**2))
       elsewhere
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)))
       end where
       base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
@@ -920,14 +938,14 @@ contains
          if (debug) write (*,*) 'zero-energy system in gen23_one_step',piir(0)
          return
       endif
-      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
-      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt(root(1))))
+      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt0(root(1))))
+      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt0(root(1))))
       if (root(2).lt.0d0) then
          tmin(2)=tmin(1)
          tmax(2)=tmin(1)
       else
-         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt(root(2))))
-         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt(root(2))))
+         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt0(root(2))))
+         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt0(root(2))))
       endif
       if (tmin(1).ge.tmax(1)) then
          ps%jac=-3d0
@@ -950,21 +968,30 @@ contains
       where (this%invm_max(i+im1,1:2).ne.0d0)
          smax(1:2)=min(smax_S,this%invm_max(i+im1,1:2))
       end where
-      if (im1.gt.2) then
+     if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
+         if ((pp(0,im1)+pp(3,im1))*(pp(0,im1)-pp(3,im1)).le.vtiny) then
+            ps%jac=-35d0
+            return
+         endif
          y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
          call boostz(pp(0,i+ir),y,piirr)
          call boostz(pp(0,im1),y,pim1r)
          call boostz(pp(0,ib),y,pib)
-         phi_rot=atan(pp(2,im1)/pp(1,im1))
-         if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+         phi_rot=atan2(pp(2,im1),pp(1,im1))
          call rotz(piirr,-phi_rot,piir)
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
          etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
               this%ETmin(ir,1:2))
+         rad=(piir(0)-etminir(1:2))**2-invm(i)
+         if (any(rad.lt.0d0)) then
+            ps%jac=-34d0
+            if (debug) write (*,*) 'rad.lt.0d0 inverse',rad,piir(0),etminir,invm(i)
+            return
+         endif
          smax(1:2)=min(smax(1:2),&
-              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt((piir(0)-etminir(1:2))**2-invm(i))*pim1(1))
+              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt(rad)*pim1(1))
 
          if(invm(i).eq.0d0) then
             smin(1)=max(smin(1),2d0*this%ETmin(i,1)*(pim1(0)-pim1(1)))
@@ -1084,7 +1111,7 @@ contains
             ! Eir=(sqrtshat+(invm(ir)-invm(i))/sqrtshat)/2d0. This gives a
             ! constraint on the allowed value of invm(ir), since Eir>ETmin(ir)
             shatmin(1:2)=max(shatmin(1:2),invm(i)+sqrtshat*(2d0*this%ETmin(ir,1:2)-sqrtshat))
-            shatmax(1:2)=min(shatmax(1:2),invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i,1:2))))
+            shatmax(1:2)=min(shatmax(1:2),invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt0(invm(i)),this%ETmin(i,1:2))))
          endif
          call generate_mass(ir,shatmin,shatmax)
          if (debug) then
@@ -1106,18 +1133,24 @@ contains
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
       ! ETmin() is boost invariant in the z-direction)
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
+      if ((pp(0,i+ir)+pp(3,i+ir))*(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+         ps%jac=-35d0
+         return
+      endif
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(i,1:2)**2-invm(i)) )**2))
       elsewhere
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)))
       end where
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(ir,1:2)**2-invm(ir)) )**2))
       elsewhere
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)))
       end where
       base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
@@ -1160,10 +1193,10 @@ contains
       if (debug) then
          write (*,*) 't - phi  ',i,phi,0d0,2d0*pi
       endif
-      call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt(invm(i)) &
-           &,sqrt(invm(ir)),pp(0,i),pp(0,ib+ir))
+      call gentcms(pp(0,ib+ir+i),pp(0,ib),invm(ib+ir),phi,sqrt0(invm(i)) &
+           &,sqrt0(invm(ir)),pp(0,i),pp(0,ib+ir))
       pp(0:3,ir)=pp(0:3,ib+ir+i)+pp(0:3,ib)-pp(0:3,i)
-      ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
+      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
     end subroutine gent_one_step
 
     subroutine gens_one_step(i,ir)
@@ -1182,17 +1215,17 @@ contains
          call generate_mass(ir,shatmin,shatmax)
       endif
       if (ps%jac.le.0d0) return
-      esum=sqrt(invm(i+ir))
+      esum=sqrt0(invm(i+ir))
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,[-1d0,-1d0],[1d0,1d0],costh,ps%jac)
       if (ps%jac.le.0d0) return
       ix=ix+1
       call random_to_var(ps%x(ix),ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],phi,ps%jac)
       if (ps%jac.le.0d0) return
-      call mom2cx(esum,sqrt(invm(i)),sqrt(invm(ir)),costh,phi,p_i,p_ir)
+      call mom2cx(esum,sqrt0(invm(i)),sqrt0(invm(ir)),costh,phi,p_i,p_ir)
       call boostm(p_i,pp(0:3,i+ir),esum,pp(0:3,i))
       call boostm(p_ir,pp(0:3,i+ir),esum,pp(0:3,ir))
-      ps%jac=ps%jac*sqrt(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
+      ps%jac=ps%jac*sqrt0(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
       ! fill t-channel stuff to be safe.
       pp(0:3,i+1)=pp(0:3,i)-pp(0:3,1)
       pp(0:3,i+2)=pp(0:3,i)-pp(0:3,2)
@@ -1658,7 +1691,7 @@ contains
          call shatminmax(this,ir,i,shatmin,shatmax,invm)
          if (popcnt(i+ir).eq.this%next-2) then
             shatmin(1:2)=max(shatmin(1:2),invm(i)+sqrtshat*(2d0*this%ETmin(ir,1:2)-sqrtshat))
-            shatmax(1:2)=min(shatmax(1:2),invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt(invm(i)),this%ETmin(i,1:2))))
+            shatmax(1:2)=min(shatmax(1:2),invm(i)+sqrtshat*(sqrtshat-2d0*max(sqrt0(invm(i)),this%ETmin(i,1:2))))
          endif
          if (debug) write (*,*) 'generate_mass_inverse gent 2',ir
          call generate_mass_inverse(ir,shatmin,shatmax)
@@ -1677,18 +1710,24 @@ contains
       ! invariant we can compute it in any frame. Let's use the frame in which
       ! p(:,i+ir) has p_z=0, since in this frame p_z(i)=-p_z(ir). (Note that
       ! ETmin() is boost invariant in the z-direction)
+      if ((pp(0,i+ir)+pp(3,i+ir))*(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+         ps%jac=-35d0
+         return
+      endif
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(i,1:2)**2-invm(i)) )**2))
       elsewhere
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)))
       end where
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(ir,1:2)**2-invm(ir)) )**2))
       elsewhere
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)))
       end where
       base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
@@ -1724,14 +1763,13 @@ contains
       call var_to_random(invm(ir+ib),ip,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       ! inverse of boosts and rotation from gentcms()
-      esum=sqrt(invm(i+ir))
+      esum=sqrt0(invm(i+ir))
       p_boost(0)=pp(0,i+ir)
       p_boost(1:3)=-pp(1:3,i+ir)
       call boostm(pp(0:3,i),p_boost,esum,pib)
       call boostm(pp(0:3,ib+ir+i),p_boost,esum,pa_cms)
       call rotxxx_inv(pib,pa_cms,pi_rot)
-      phi=atan(pi_rot(2)/pi_rot(1))
-      if(pi_rot(1).lt.0d0) phi=phi+pi
+      phi=atan2(pi_rot(2),pi_rot(1))
       if(phi.lt.0d0) phi=phi+2d0*pi
       if (debug) then
          write (*,*) 'ti - phi',0d0,2d0*pi,phi
@@ -1739,7 +1777,7 @@ contains
       ix=ix+1
       call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
-      ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
+      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,invm(ir+i+ib))))
     end subroutine gent_one_step_inverse
     subroutine gens_one_step_inverse(i,ir)
       implicit none
@@ -1761,7 +1799,7 @@ contains
          if (bad_inverse_jac()) return
       endif
       ! boost p(i) and p(ir) to the p(i+ir) rest frame
-      esum=sqrt(invm(i+ir))
+      esum=sqrt0(invm(i+ir))
       p_boost(0)=-pp(0,i+ir)
       p_boost(1:3)=-pp(1:3,i+ir)
       call boostm(pp(0:3,i),p_boost,esum,p_i)
@@ -1773,8 +1811,7 @@ contains
       ix=ix+1
       call var_to_random(costh,ip_flat,[-1d0,-1d0],[1d0,1d0],ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
-      phi=atan(p_i(2)/p_i(1))
-      if(p_i(1).lt.0d0) phi=phi+pi
+      phi=atan2(p_i(2),p_i(1))
       if(phi.lt.0d0) phi=phi+2d0*pi
       if (debug) then
          write (*,*) 'si - phi i',i,0d0,2d0*pi,phi
@@ -1783,7 +1820,7 @@ contains
       call var_to_random(phi,ip_flat,[0d0,0d0],[2d0*pi,2d0*pi],ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
       ! update the Jacobian
-      ps%jac=ps%jac*sqrt(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
+      ps%jac=ps%jac*sqrt0(lambda(invm(i+ir),invm(i),invm(ir)))/(8d0*invm(i+ir))
       ! compute some t-channel invariants just to make sure they are filled. 
       invm(i+1)=dot(pp(0:3,i+1),pp(0:3,i+1))
       invm(i+2)=dot(pp(0:3,i+2),pp(0:3,i+2))
@@ -1878,8 +1915,7 @@ contains
       ix=ix+1
       call var_to_random(invm(i+ib),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
-      phi=atan(pp(2,i)/pp(1,i))
-      if(pp(1,i).lt.0d0) phi=phi+pi
+      phi=atan2(pp(2,i),pp(1,i))
       if(phi.lt.0d0) phi=phi+2d0*pi
       if (debug) then
          write (*,*) 'dti- phi',i,0d0,2d0*pi,phi
@@ -1898,13 +1934,13 @@ contains
       elseif (invm(ir).lt.0d0) then
          invm(ir)=0d0
       endif
-      ps%jac = ps%jac/(4d0*sqrt(lambda(invm(ir+i),0d0,0d0)))
+      ps%jac = ps%jac/(4d0*sqrt0(lambda(invm(ir+i),0d0,0d0)))
     end subroutine double_t_inverse
     subroutine gen23_one_step_inverse(i,ir,ib,im1)
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
       real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot
-      real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax
+      real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       if (popcnt(i).gt.1) then
          if (popcnt(ir).gt.1) invm(ir)=0d0 ! set this mass to zero to get the correct smax limit in shatminmax
@@ -1929,18 +1965,24 @@ contains
          tmin(1:2)=max(tmin_S,this%invm_min(ir+ib,1:2))
       end where
       pp(0:3,i+ir)=pp(0:3,i+ir+ib)+pp(0:3,ib)
+      if (abs(pp(0,i+ir)-pp(3,i+ir)).le.vtiny) then
+         ps%jac=-35d0
+         return
+      endif
       y=log((pp(0,i+ir)+pp(3,i+ir))/(pp(0,i+ir)-pp(3,i+ir)))/2d0
       call boostz(pp(0,i+ir),y,piir)
       call boostz(pp(0,ib),y,pib)
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(i,1:2)**2-invm(i) .and. popcnt(i).eq.1 )
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(i,1:2)**2-invm(i)))**2) )
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(i,1:2)**2-invm(i)) )**2))
       elsewhere
-         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt(invm(ir)))
+         etminir(1:2)=max(this%ETmin(ir,1:2),sqrt0(invm(ir)))
       end where
       where ( piir(1)**2+piir(2)**2.lt.this%ETmin(ir,1:2)**2-invm(ir) .and. popcnt(ir).eq.1 )
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-sqrt(this%ETmin(ir,1:2)**2-invm(ir)))**2) )
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)+abs(sqrt(piir(1)**2+piir(2)**2)-&
+              sqrt0(this%ETmin(ir,1:2)**2-invm(ir)) )**2))
       elsewhere
-         etmini(1:2)=max(this%ETmin(i,1:2),sqrt(invm(i)))
+         etmini(1:2)=max(this%ETmin(i,1:2),sqrt0(invm(i)))
       end where
       base(1:2)=piir(0)**2-ETmini(1:2)**2+ETminir(1:2)**2
       ! Note, root=lambda(piir(0)**2,this%ETmin(i)**2,this%ETmin(ir)**2), but the
@@ -1948,25 +1990,25 @@ contains
       root(1:2)=(piir(0)-ETmini(1:2)-ETminir(1:2))*(piir(0)+ETmini(1:2)-ETminir(1:2))*&
            (piir(0)-ETmini(1:2)+ETminir(1:2))*(piir(0)+ETmini(1:2)+ETminir(1:2))
       if (root(1).lt.0d0) then
-         write (*,*) 'root.lt.0d0 in gen23_one_step_inverse',root
-         stop 1
+         ps%jac=-33d0
+         return
       endif
       if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
          ps%jac=-33d0
          return
       endif
-      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
-      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt(root(1))))
+      tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt0(root(1))))
+      tmax(1)=min(tmax(1),invm(ir)-pib(0)/piir(0)*(base(1)-sqrt0(root(1))))
       if (root(2).lt.0d0) then
          tmin(2)=tmin(1)
          tmax(2)=tmin(1)
       else
-         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt(root(2))))
-         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt(root(2))))
+         tmin(2)=max(tmin(2),invm(ir)-pib(0)/piir(0)*(base(2)+sqrt0(root(2))))
+         tmax(2)=min(tmax(2),invm(ir)-pib(0)/piir(0)*(base(2)-sqrt0(root(2))))
       endif
       if (tmin(1).ge.tmax(1)) then
-         if (debug) write (*,*) 'tmin.ge.tmax in gen23_one_step_inverse',tmin,tmax
-         stop 1
+         ps%jac=-3d0
+         return
       endif
       invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
       if (debug) then
@@ -1985,30 +2027,38 @@ contains
       where (this%invm_max(i+im1,1:2).ne.0d0)
          smax(1:2)=min(smax_S,this%invm_max(i+im1,1:2))
       end where
-      if (im1.gt.2) then
+     if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
+         if ((pp(0,im1)+pp(3,im1))*(pp(0,im1)-pp(3,im1)).le.vtiny) then
+            ps%jac=-35d0
+            return
+         endif
          y=log((pp(0,im1)+pp(3,im1))/(pp(0,im1)-pp(3,im1)))/2d0
          call boostz(pp(0,i+ir),y,piirr)
          call boostz(pp(0,im1),y,pim1r)
          call boostz(pp(0,ib),y,pib)
-         phi_rot=atan(pp(2,im1)/pp(1,im1))
-         if(pp(1,im1).lt.0d0) phi_rot=phi_rot+pi
+         phi_rot=atan2(pp(2,im1),pp(1,im1))
          call rotz(piirr,-phi_rot,piir)
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
          etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
               this%ETmin(ir,1:2))
+         rad=(piir(0)-etminir(1:2))**2-invm(i)
+         if (any(rad.lt.0d0)) then
+            ps%jac=-34d0
+            if (debug) write (*,*) 'rad.lt.0d0 inverse',rad,piir(0),etminir,invm(i)
+            return
+         endif
          smax(1:2)=min(smax(1:2),&
-              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt((piir(0)-etminir(1:2))**2-invm(i))*pim1(1))
+              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt(rad)*pim1(1))
          if(invm(i).eq.0d0) then
             smin(1)=max(smin(1),2d0*this%ETmin(i,1)*(pim1(0)-pim1(1)))
             smin(2)=max(smin(2),2d0*this%ETmin(i,2)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
       endif
       if (smin(1).ge.smax(1)) then
-         write (*,*) 'smin.ge.smax in gen23_one_step_inverse',smin,smax
-         write (*,*) ir,ib,i,im1,this%invm_min(i+im1,1:2)
-         stop 1
+         ps%jac=-4d0
+         return
       endif
       invm(i+im1)=dot(pp(0:3,i+im1),pp(0:3,i+im1))
       if (debug) then
@@ -2024,12 +2074,12 @@ contains
       phi1=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,1d0)
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi1 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi1,ppibir1)
+           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi1,ppibir1)
       pr1(0:3)=pp(0:3,ir+i)-pi1(0:3)
       phi2=getphifroms(invm(i+im1),invm(ir+i),invm(ir),invm(ir+i+im1)&
            &,invm(ir+i+ib),V,sqrtGG,0d0)
       call gentcms2(pp(0,ib),pp(0,ib+ir+i),pp(0,ib+ir+i+im1),invm(ir+ib),phi2 &
-           &,sqrt(invm(i)),sqrt(invm(ir)),pi2,ppibir2)
+           &,sqrt0(invm(i)),sqrt0(invm(ir)),pi2,ppibir2)
       pr2(0:3)=pp(0:3,ir+i)-pi2(0:3)
       if ( pi1(0)**2-pi1(3)**2.ge.this%ETmin(i,1)**2 .and. pr1(0)**2-pr1(3)**2.ge.this%ETmin(ir,1)**2 .and. &
            pi2(0)**2-pi2(3)**2.ge.this%ETmin(i,1)**2 .and. pr2(0)**2-pr2(3)**2.ge.this%ETmin(ir,1)**2 ) then
@@ -2198,11 +2248,11 @@ contains
     shatmin=0d0
     do j=0,this%next-1
        if (btest(j1,j)) then
-          shatmin=shatmin+sqrt(invm(ibset(0,j)))
+          shatmin=shatmin+sqrt0(invm(ibset(0,j)))
        endif
     enddo
     shatmin=shatmin**2
-    shatmax(1:2)=(sqrt(invm(j1+j2))-sqrt(max(invm(j2),this%invm_min(j2,1:2))))**2
+    shatmax(1:2)=(sqrt0(invm(j1+j2))-sqrt0(max(invm(j2),this%invm_min(j2,1:2))))**2
   end subroutine shatminmax
   elemental real(kind=8) function lambda(s,xa2,xb2)
     ! The usual two dimensional phase-space volume factor. See, e.g.,

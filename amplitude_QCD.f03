@@ -656,26 +656,31 @@ contains
 
     subroutine increase_max_cur()
       implicit none
-      integer :: new_max_cur,ic
+      integer :: new_max_cur,old_n_cur,ic
       type(current),dimension(:),allocatable :: tmp
+      old_n_cur=min(this%n_cur-1,max_cur)
       new_max_cur=2*max_cur
       allocate(tmp(new_max_cur))
-      do ic=1,max_cur
-         allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
-         allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
+      do ic=1,old_n_cur
+         if (allocated(current_list_local(ic)%vertices)) &
+              allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
+         if (allocated(current_list_local(ic)%vertex_sign)) &
+              allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
          tmp(ic)=current_list_local(ic)
       enddo
-      do ic=1,max_cur
+      do ic=1,old_n_cur
          call finalize_current(current_list_local(ic))
       enddo
       deallocate(current_list_local)
       allocate(current_list_local(new_max_cur))
-      do ic=1,max_cur
-         allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
-         allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
+      do ic=1,old_n_cur
+         if (allocated(tmp(ic)%vertices)) &
+              allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
+         if (allocated(tmp(ic)%vertex_sign)) &
+              allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
          current_list_local(ic)=tmp(ic)
       enddo
-      do ic=1,max_cur
+      do ic=1,old_n_cur
          call finalize_current(tmp(ic))
       enddo
       deallocate(tmp)
@@ -1749,7 +1754,9 @@ contains
     integer :: n
     integer,dimension(n)::hel
     real(kind=8),dimension(0:3,n) :: p
-    integer :: ic,iv,isize,ih_in,ifinal,dim
+    integer :: ic,iv,isize,ih_in,ifinal,dim,ip
+    real(kind=8),dimension(0:3) :: pp_loc,pp1_loc,pp2_loc
+    complex(kind=8),dimension(6) :: wf1_loc,wf2_loc,wfi_loc
     logical :: read_file
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
@@ -1791,37 +1798,38 @@ contains
              else
                 ih_in=this%current_list(ic)%spin(1)
              endif
+             pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
              if (pm%is_gluon(this%current_list(ic)%type) .or. pm%is_photon(this%current_list(ic)%type)) then
                 if (use_real_gluons) then
-                   call ext_gluon_real(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                   call ext_gluon_real(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_r(1:4))
                 else
-                   call ext_gluon_cmplx(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                   call ext_gluon_cmplx(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4))
                 endif
              elseif (pm%is_quark(this%current_list(ic)%type) .or. &
                   pm%is_lepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call ext_quark_weyl(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                   call ext_quark_weyl(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
                 else
-                   call ext_quark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                   call ext_quark(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
                 endif
              elseif (pm%is_antiquark(this%current_list(ic)%type) .or. &
                   pm%is_antilepton(this%current_list(ic)%type)) then
                 if (this%current_list(ic)%chirality.ne.0) then
-                   call ext_antiquark_weyl(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                   call ext_antiquark_weyl(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:2),this%current_list(ic)%chirality)
                 else
-                   call ext_antiquark(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                   call ext_antiquark(pp_loc, &
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
                 endif
              elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
-                call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                call ext_gluon_mass(pp_loc, &
                      ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
              elseif (pm%is_higgs(this%current_list(ic)%type)) then
-                call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                call ext_scalar(pp_loc, &
                      ifinal,this%current_list(ic)%val_c(1))
              else
                 write (*,*) 'External particle type unknown',ic,this%current_list(ic)%type,ih_in
@@ -1834,17 +1842,25 @@ contains
        ! number of external particles combined
        do iv=this%n_vert_start(isize),this%n_vert_end(isize)
           if (this%interaction_list(iv)%type.eq.0) then
+             pp1_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin))
+             pp2_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin))
+             wf1_loc=(0d0,0d0)
+             wf2_loc=(0d0,0d0)
+             wf1_loc(1:size(this%current_list(this%interaction_list(iv)%currents(1))%val_c))=&
+                  this%current_list(this%interaction_list(iv)%currents(1))%val_c
+             wf2_loc(1:size(this%current_list(this%interaction_list(iv)%currents(2))%val_c))=&
+                  this%current_list(this%interaction_list(iv)%currents(2))%val_c
              if (use_real_gluons) then
                 call threeGluon_real(this%current_list(this%interaction_list(iv)%currents(1))%val_r(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     pp1_loc,&
                      this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     pp2_loc,&
                      this%interaction_list(iv)%val_r(1:4))
              else
-                call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
-                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                call threeGluon(wf1_loc(1:4),&
+                     pp1_loc,&
+                     wf2_loc(1:4),&
+                     pp2_loc,&
                      this%interaction_list(iv)%val_c(1:4))
              endif
           elseif(this%interaction_list(iv)%type.eq.1) then
@@ -2015,10 +2031,12 @@ contains
                                                this%interaction_list(iv)%coupl(1:2))
              endif
           elseif (this%interaction_list(iv)%type.eq.12) then
+             pp1_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin))
+             pp2_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin))
              call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                       pp1_loc,&
                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                       this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                       pp2_loc,&
                        this%interaction_list(iv)%val_c(1:4),&
                        this%interaction_list(iv)%coupl(1:2))
 
@@ -2368,54 +2386,68 @@ contains
     end subroutine combine_interactions
     subroutine include_gluon_propagator()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       if (use_real_gluons) then
          call GluonPropagator_real(this%current_list(ic)%val_r, &
-              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+              pp_loc)
       else
          call GluonPropagator(this%current_list(ic)%val_c, &
-              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+              pp_loc)
       endif
     end subroutine include_gluon_propagator
 
     subroutine include_gluon_propagator_mass()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       call GluonPropagator_mass(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           pp_loc,&
            this%current_list(ic)%mass,this%current_list(ic)%width)
     end subroutine include_gluon_propagator_mass
 
     subroutine include_quark_propagator()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       call QuarkPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), & 
+           pp_loc, &
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_quark_propagator
 
     subroutine include_quark_propagator_weyl()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       call QuarkPropagator_weyl(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           pp_loc, &
            this%current_list(ic)%chirality)
     end subroutine include_quark_propagator_weyl
 
     subroutine include_aquark_propagator()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       call AquarkPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           pp_loc,&
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_aquark_propagator
     subroutine include_aquark_propagator_weyl()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       call AquarkPropagator_weyl(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+           pp_loc,&
            this%current_list(ic)%chirality)
     end subroutine include_aquark_propagator_weyl
     subroutine include_scalar_propagator()
       implicit none
+      real(kind=8),dimension(0:3) :: pp_loc
+      pp_loc=this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin))
       call ScalarPropagator(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+           pp_loc, &
            this%current_list(ic)%mass,&
            this%current_list(ic)%width)
     end subroutine include_scalar_propagator

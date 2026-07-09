@@ -187,7 +187,7 @@ program amplicol_generate
 
      ! number of helicities to sum over
      allocate(pgl(igroup)%amp2_hel(1:maxval(pgl(igroup)%nhel)))
-     allocate(pgl(igroup)%hel(1:pgl(igroup)%next))
+     pgl(igroup)%hel = pgl(igroup)%spin(1,1:pgl(igroup)%next)
      if (keep_processes_separate) then
         allocate(pgl(igroup)%hel_fac(1:maxval(pgl(igroup)%nhel),pgl(igroup)%nproc))
      else

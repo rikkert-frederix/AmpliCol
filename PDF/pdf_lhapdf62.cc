@@ -655,7 +655,7 @@ extern "C" {
   /// Load a PDF set by name
   void initpdfsetbynamem_(const int& nset, const char* setname, int setnamelength) {
     // Truncate input to size setnamelength
-    string p = setname;
+    string p(setname, setnamelength);
     p.erase(setnamelength, std::string::npos);
     // Strip file extension for backward compatibility
     string name = LHAPDF::file_extn(p).empty() ? p : LHAPDF::file_stem(p);

@@ -75,6 +75,7 @@ contains
        pgl(igroup)%next=next
        pgl(igroup)%nproc=nprocs
        pgl(igroup)%ndim=ndim
+       pgl(igroup)%ndim_extra=0
        pgl(igroup)%multichan%max_channels=max_channels
        if (keep_processes_separate) then
           allocate(pgl(igroup)%amps(1:pgl(igroup)%nproc))
