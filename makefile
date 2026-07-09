@@ -8,14 +8,22 @@ FC = gfortran
 FFLAGS = -ffast-math -O3
 PYTHON ?= python
 
-CXX ?= g++
+CXX_ORIGIN := $(origin CXX)
+UNAME_S := $(shell uname -s)
+ifeq ($(CXX_ORIGIN),default)
+  ifeq ($(UNAME_S),Darwin)
+    CXX = clang++
+  else
+    CXX = g++
+  endif
+endif
 
 ifeq ($(shell $(CXX) --version | grep -c clang),1)
   STDLIB_FLAG = -stdlib=libc++
   STDLIB_LDLIBS   = -lc++
 else
   STDLIB_FLAG =
-  STDLIB_LDLIBS   =
+  STDLIB_LDLIBS   = -lstdc++
 endif
 
 LHAPDF_CFLAGS  := $(shell lhapdf-config --cflags)
@@ -115,11 +123,11 @@ amplitude_QCD.o matrix_element_regression.o
 # ----------------------------------------------------------------------
 
 amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o `lhapdf-config --ldflags` -lstdc++ 
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o `lhapdf-config --ldflags` $(STDLIB_LDLIBS)
 
 amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
-	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
+	`lhapdf-config --ldflags` $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
