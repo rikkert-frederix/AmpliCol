@@ -10,11 +10,21 @@ module handling_processes
    contains
      final :: finalize_multichan_info
   end type multichan_info
+  type dipole
+     integer,dimension(:),allocatable :: process_r,dip_map,reduced_color_order
+     integer,dimension(3) :: dip_ijk,dip_ijk_f
+     integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
+     integer :: dipole_type=0 ! 0:II, 1:IF, 2:FI, 3:FF
+     type(amplitude_QCD) :: amp
+   contains
+     final :: finalize_dipole
+  end type dipole
   type phase_space_order_group
      ! if adding variables here, also update the finalize_phase_space_order_group subroutine
      type(amplitude_QCD),dimension(:),allocatable :: amps
      class(phase_space_type),allocatable :: phase_space
      type(multichan_info) :: multichan
+     type(dipole),dimension(:),allocatable :: dl
      type(psv),dimension(:),allocatable :: ps
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
@@ -665,6 +675,14 @@ contains
     if (allocated(mi%number_of_channels)) deallocate(mi%number_of_channels)
   end subroutine finalize_multichan_info
 
+  subroutine finalize_dipole(di)
+    type(dipole),intent(inout) :: di
+    if (allocated(di%process_r)) deallocate(di%process_r)
+    if (allocated(di%dip_map)) deallocate(di%dip_map)
+    if (allocated(di%reduced_color_order)) deallocate(di%reduced_color_order)
+    call finalize_amplitude_QCD(di%amp)
+  end subroutine finalize_dipole
+
   subroutine finalize_phase_space_order_group(pgl)
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i
@@ -704,5 +722,9 @@ contains
     if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
     if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
     if (allocated(pgl%same_flavour)) deallocate(pgl%same_flavour)
+    do i=1,size(pgl%dl)
+       call finalize_dipole(pgl%dl(i))
+    enddo
+    if (allocated(pgl%dl)) deallocate(pgl%dl)
   end subroutine finalize_phase_space_order_group
 end module handling_processes

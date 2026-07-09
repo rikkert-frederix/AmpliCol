@@ -108,9 +108,9 @@ FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
 feynmanrules.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
-read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
-helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
-pdf_lhapdf62.o subtraction.o
+read_process_file.o subtraction.o multichannel.o handling_processes.o 	\
+simple_integrator.o helper_modules.o amplitude_library.o command_line_parser.o \
+mg_checks.o scales.o pdf_lhapdf62.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o

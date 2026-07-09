@@ -3,22 +3,13 @@ module subtraction
   use particles
   implicit none
   integer :: n
-  type dipole
-     integer,dimension(:),allocatable :: process_r
-     integer,dimension(3) :: dip_ijk,dip_ijk_f
-     integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
-     integer :: dipole_type=0 ! 0:II, 1:IF, 2:FI, 3:FF
-   contains
-     final :: finalize_dipole
-  end type dipole
   integer :: ndip
-  type(dipole),dimension(:),allocatable :: dl
   private
   public :: initialise_subtraction
 contains
   subroutine initialise_subtraction(igroup,iamp)
     implicit none
-    integer,intent(in) :: igroup,iamp
+    integer,intent(in) :: iamp,igroup
     integer :: ipart,is_dipole,ipart_l,ipart_r,idip
     n=pgl(igroup)%next
     ! First pass: just count how many dipoles we need so we can
@@ -29,7 +20,7 @@ contains
        ndip=ndip+popcnt(is_dipole)
     enddo
     write (*,*) 'Need',ndip,'dipoles'
-    allocate(dl(ndip))
+    allocate(pgl(igroup)%dl(ndip))
 
     ! Second pass: now we really fill the appropriate information
     idip=0
@@ -39,82 +30,216 @@ contains
        if (btest(is_dipole,0)) then
           ! valid dipole with particle on the left as emitter
           idip=idip+1
-          call fill_dipole(idip,pgl(igroup)%processes(1:n,iamp),ipart_l,ipart,ipart_r)
+          call fill_dipole(pgl(igroup)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_l,ipart,ipart_r,.true.)
        endif
        if (btest(is_dipole,1)) then
           ! valid dipole with particle on the right as emitter
           idip=idip+1
-          call fill_dipole(idip,pgl(igroup)%processes(1:n,iamp),ipart_r,ipart,ipart_l)
+          call fill_dipole(pgl(igroup)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_r,ipart,ipart_l,.false.)
+!          pgl(igroup)%dl(idip)%spin(
        endif
     enddo
-    call print_dipoles(pgl(igroup)%processes(:,iamp))
     do idip=1,ndip
-       call finalize_dipole(dl(idip))
+       allocate(pgl(igroup)%dl(idip)%reduced_color_order(n-1))
+       call build_reduced_color_order(pgl(igroup)%color_orders(1:n,iamp), &
+            pgl(igroup)%dl(idip)%dip_ijk(2),pgl(igroup)%dl(idip)%process_r, &
+            pgl(igroup)%dl(idip)%reduced_color_order)
+       if (.not.reduced_order_is_valid(pgl(igroup)%dl(idip)%process_r, &
+            pgl(igroup)%dl(idip)%reduced_color_order)) then
+          write (*,*) 'ERROR: reduced colour order still invalid after trying both combined-current labels'
+          write (*,*) 'process',pgl(igroup)%dl(idip)%process_r
+          write (*,*) 'order  ',pgl(igroup)%dl(idip)%reduced_color_order
+          stop 1
+       endif
+       call pgl(igroup)%dl(idip)%amp%init(1,n-1,1,pgl(igroup)%dl(idip)%process_r,&
+            pgl(igroup)%spin(0:3,pgl(igroup)%dl(idip)%dip_map(1:n-1)), &
+            pgl(igroup)%dl(idip)%reduced_color_order,&
+            phys_model)
     enddo
-    deallocate(dl)
+    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dl)
   end subroutine initialise_subtraction
-  subroutine print_dipoles(process)
+  subroutine print_dipoles(process,order,dips)
     implicit none
-    integer,dimension(*),intent(in) :: process
+    integer,dimension(*),intent(in) :: process,order
+    type(dipole),dimension(ndip),intent(in) :: dips
     integer :: idip
     write (*,*) 'process',process(1:n)
+    write (*,*) 'color-order',order(1:n)
     do idip=1,ndip
        write (*,*) '------------------'
        write (*,*) 'dipole',idip
-       write (*,*) 'i,j,k',dl(idip)%dip_ijk
-       write (*,*) 'i,j,k',dl(idip)%dip_ijk_f
-       write (*,*) 'process reduced',dl(idip)%process_r
+       write (*,*) 'i,j,k',dips(idip)%dip_ijk
+       write (*,*) 'i,j,k',dips(idip)%dip_ijk_f
+       write (*,*) 'process reduced',dips(idip)%process_r
+       write (*,*) 'color order reduced',dips(idip)%reduced_color_order
     enddo
     write (*,*) '------------------'
     write (*,*) ''
     write (*,*) ''
   end subroutine print_dipoles
-  subroutine fill_dipole(idip,process,dip_i,dip_j,dip_k)
+  subroutine fill_dipole(dip,process,dip_i,dip_j,dip_k,reverse)
     implicit none
     integer,dimension(*),intent(in) :: process
-    integer,intent(in) :: idip,dip_i,dip_j,dip_k
+    type(dipole),intent(inout) :: dip
+    integer,intent(in) :: dip_i,dip_j,dip_k
+    logical,intent(in) :: reverse
     integer :: ipart,i
-    dl(idip)%dip_ijk(1:3)=[dip_i,dip_j,dip_k]
-    dl(idip)%dip_ijk_f(1:3)=[process(dip_i),process(dip_j),process(dip_k)]
-    if (dip_i.gt.2) dl(idip)%dipole_type=ibset(dl(idip)%dipole_type,0)
-    if (dip_k.gt.2) dl(idip)%dipole_type=ibset(dl(idip)%dipole_type,1)
+    dip%dip_ijk(1:3)=[dip_i,dip_j,dip_k]
+    dip%dip_ijk_f(1:3)=[process(dip_i),process(dip_j),process(dip_k)]
+    if (dip_i.gt.2) dip%dipole_type=ibset(dip%dipole_type,0)
+    if (dip_k.gt.2) dip%dipole_type=ibset(dip%dipole_type,1)
     ! reduced process and dipole info
-    dl(idip)%dip_r_ijk(1)=min(dip_i,dip_j)
+    dip%dip_r_ijk(1)=min(dip_i,dip_j)
     if (dip_j .lt. dip_k) then
-       dl(idip)%dip_r_ijk(2)=dip_k-1
+       dip%dip_r_ijk(2)=dip_k-1
     else
-       dl(idip)%dip_r_ijk(2)=dip_k
+       dip%dip_r_ijk(2)=dip_k
     endif
     if (phys_model%is_gluon(process(dip_j))) then
-       dl(idip)%dip_r_ijk_f(1)=dl(idip)%dip_ijk_f(1)
+       dip%dip_r_ijk_f(1)=dip%dip_ijk_f(1)
     elseif (phys_model%is_gluon(process(dip_i))) then
-       if (btest(dl(idip)%dipole_type,0)) then
+       if (btest(dip%dipole_type,0)) then
           write (*,*) 'error in dipoles: emitter is a final-state gluon and '// &
                'emitted is a quark'
-          write (*,*) dl(idip)%dip_ijk
-          write (*,*) dl(idip)%dipole_type
-          write (*,*) dl(idip)%dip_ijk_f
+          write (*,*) dip%dip_ijk
+          write (*,*) dip%dipole_type
+          write (*,*) dip%dip_ijk_f
           stop 1
        endif
-       dl(idip)%dip_r_ijk_f(1)=phys_model%get_antipart(dl(idip)%dip_ijk_f(2))
+       dip%dip_r_ijk_f(1)=phys_model%get_antipart(dip%dip_ijk_f(2))
     else
-       dl(idip)%dip_r_ijk_f(1)=21
+       dip%dip_r_ijk_f(1)=combined_gluon_type(dip_i,process(dip_i),dip_j,process(dip_j),reverse)
     endif
-    dl(idip)%dip_r_ijk_f(2)=dl(idip)%dip_ijk_f(3)
-    allocate(dl(idip)%process_r(n-1))
+    dip%dip_r_ijk_f(2)=dip%dip_ijk_f(3)
+    allocate(dip%process_r(n-1))
+    allocate(dip%dip_map(n-1))
     i=0
     do ipart=1,n
        if (ipart.eq.dip_j) cycle
        i=i+1
+       dip%dip_map(i)=ipart
        if (ipart.eq.dip_i) then
-          dl(idip)%process_r(i)=dl(idip)%dip_r_ijk_f(1)
+          dip%process_r(i)=dip%dip_r_ijk_f(1)
        elseif(ipart.eq.dip_k) then
-          dl(idip)%process_r(i)=dl(idip)%dip_r_ijk_f(2)
+          dip%process_r(i)=dip%dip_r_ijk_f(2)
        else
-          dl(idip)%process_r(i)=process(ipart)
+          dip%process_r(i)=process(ipart)
        endif
     enddo
   end subroutine fill_dipole
+  integer function combined_gluon_type(dip_i,part_i,dip_j,part_j,reverse)
+    implicit none
+    integer,intent(in) :: dip_i,part_i,dip_j,part_j
+    logical,intent(in) :: reverse
+    if (((dip_i.le.2 .and. phys_model%is_quark(part_i)) .or. &
+         (dip_i.gt.2 .and. phys_model%is_antiquark(part_i))) .and. &
+        ((dip_j.le.2 .and. phys_model%is_antiquark(part_j)) .or. &
+         (dip_j.gt.2 .and. phys_model%is_quark(part_j)))) then
+       if (reverse) then
+          combined_gluon_type=21
+       else
+          combined_gluon_type=99
+       endif
+    elseif (((dip_i.le.2 .and. phys_model%is_antiquark(part_i)) .or. &
+             (dip_i.gt.2 .and. phys_model%is_quark(part_i))) .and. &
+            ((dip_j.le.2 .and. phys_model%is_quark(part_j)) .or. &
+             (dip_j.gt.2 .and. phys_model%is_antiquark(part_j)))) then
+       if (reverse) then
+          combined_gluon_type=99
+       else
+          combined_gluon_type=21
+       endif
+    else
+       write (*,*) 'ERROR: cannot infer combined gluon type from dipole pair'
+       write (*,*) part_i,part_j
+       stop 1
+    endif
+  end function combined_gluon_type
+  subroutine build_reduced_color_order(parent_order,removed_pos,process,order)
+    implicit none
+    integer,dimension(:),intent(in) :: parent_order
+    integer,intent(in) :: removed_pos
+    integer,dimension(:),intent(in) :: process
+    integer,dimension(:),intent(out) :: order
+    integer :: i,ipos,insert
+    logical :: valid
+    ipos=0
+    do i=1,n
+       if (parent_order(i).eq.removed_pos) cycle
+       ipos=ipos+1
+       if (parent_order(i).gt.removed_pos) then
+          order(ipos)=parent_order(i)-1
+       else
+          order(ipos)=parent_order(i)
+       endif
+    enddo
+    do i=1,n-1
+       if ((order(i).le.2 .and. phys_model%is_antiquark(process(order(i)))) .or. &
+            (order(i).gt.2 .and. phys_model%is_quark(process(order(i))))) then
+          ! found quark to start colour order with
+          order=[order(i:),order(:i-1)]
+          exit
+       endif
+    enddo
+    do i=n-1,1,-1
+       if ((order(i).le.2 .and. phys_model%is_quark(process(order(i)))) .or. &
+            (order(i).gt.2 .and. phys_model%is_antiquark(process(order(i))))) then
+          ! found the last antiquark
+          insert=i
+          exit
+       endif
+    enddo
+    i=n-1
+    do
+       if (phys_model%is_singlet(process(order(i)))) then
+          if (i.gt.insert) then
+             order=[order(1:insert-1),order(i),order(insert:i-1),order(i+1:n-1)]
+             insert=insert+1
+             i=i+1
+          elseif (i.lt.insert) then
+             order=[order(1:i-1),order(i+1:insert-1),order(i),order(insert:n-1)]
+             insert=insert-1 ! new position
+          endif
+       endif
+       i=i-1
+       if (i.eq.0) exit
+    enddo
+  end subroutine build_reduced_color_order
+  logical function reduced_order_is_valid(process,order)
+    implicit none
+    integer,dimension(:),intent(in) :: process,order
+    integer :: i,first_non_sing,last_non_sing
+    reduced_order_is_valid=.false.
+    first_non_sing=0
+    last_non_sing=0
+    do i=1,n-1
+       if (.not.phys_model%is_singlet(process(order(i)))) then
+          first_non_sing=order(i)
+          exit
+       endif
+    enddo
+    do i=n-1,1,-1
+       if (.not.phys_model%is_singlet(process(order(i)))) then
+          last_non_sing=order(i)
+          exit
+       endif
+    enddo
+    if (first_non_sing.eq.0 .or. last_non_sing.eq.0) then
+       reduced_order_is_valid=.true.
+       return
+    endif
+    if (first_non_sing.le.2) then
+       if (.not.phys_model%is_antiquark(process(first_non_sing))) return
+    else
+       if (.not.phys_model%is_quark(process(first_non_sing))) return
+    endif
+    if (last_non_sing.le.2) then
+       if (.not.phys_model%is_quark(process(last_non_sing))) return
+    else
+       if (.not.phys_model%is_antiquark(process(last_non_sing))) return
+    endif
+    reduced_order_is_valid=.true.
+  end function reduced_order_is_valid
   subroutine is_valid_dipole(ipart,process,order,is_dipole,ipart_l,ipart_r)
     ! Checks if the two particles next to ipart in the colour order
     ! form a valid dipole that could have radiated particle ipart
@@ -152,8 +277,4 @@ contains
        endif
     endif
   end subroutine is_valid_dipole
-  subroutine finalize_dipole(di)
-    type(dipole) :: di
-    if (allocated(di%process_r)) deallocate(di%process_r)
-  end subroutine finalize_dipole
 end module subtraction
