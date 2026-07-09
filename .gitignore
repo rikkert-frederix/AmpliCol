@@ -12,6 +12,7 @@
 /amplicol_color_library_probe.output
 /libamp*.so
 /z
+/pyAmpliCol.pdf
 
 # Generated AmpliCol process/library outputs
 /processes.txt
