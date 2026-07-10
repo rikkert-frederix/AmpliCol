@@ -3,6 +3,7 @@ from __future__ import annotations
 from pyamplicol.color_plan import (
     build_color_plan,
     lc_line_pairing_representative_ids,
+    lc_topology_replay_partitions,
     lc_topology_replay_safe_groups,
 )
 
@@ -193,3 +194,56 @@ def test_lc_topology_replay_safe_groups_preserve_initial_labels() -> None:
     ]
     assert lc_topology_replay_safe_groups(pure_gluon) == ()
     assert lc_topology_replay_safe_groups(gluon_initiated) == ()
+
+
+def test_lc_topology_replay_partitions_cover_gluon_initiated_open_lines() -> None:
+    cases = [
+        ("g g > t t~ g g g", 120, 10, 12),
+        ("g g > t t~ g g g g", 720, 15, 48),
+        ("g g > t t~ g g g g g", 5040, 21, 240),
+    ]
+
+    for process, sector_count, partition_count, partition_size in cases:
+        plan = build_color_plan(process)
+        partitions = lc_topology_replay_partitions(plan)
+        covered = [
+            sector_id
+            for partition in partitions
+            for sector_id in partition.active_sector_ids
+        ]
+
+        assert plan.sector_count == sector_count
+        assert len(partitions) == partition_count
+        assert {len(partition.active_sector_ids) for partition in partitions} == {
+            partition_size,
+        }
+        assert sorted(covered) == list(range(sector_count))
+        assert len(set(covered)) == sector_count
+
+
+def test_lc_topology_replay_partitions_cover_pure_single_trace_gluons() -> None:
+    cases = [
+        ("g g > g g", 3, 2, {1, 2}),
+        ("g g > g g g", 12, 3, {3, 6}),
+        ("g g > g g g g", 60, 4, {12, 24}),
+    ]
+
+    for process, sector_count, partition_count, partition_sizes in cases:
+        plan = build_color_plan(process)
+        partitions = lc_topology_replay_partitions(plan)
+        covered = [
+            sector_id
+            for partition in partitions
+            for sector_id in partition.active_sector_ids
+        ]
+
+        assert plan.sector_count == sector_count
+        assert len(partitions) == partition_count
+        assert {len(partition.active_sector_ids) for partition in partitions} == partition_sizes
+        assert all(
+            weight == 2.0
+            for partition in partitions
+            for weight in partition.replay_weights
+        )
+        assert sorted(covered) == list(range(sector_count))
+        assert len(set(covered)) == sector_count

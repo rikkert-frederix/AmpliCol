@@ -140,6 +140,10 @@ physics budgets, not process-family modes.  Useful examples are coupling-order
 caps, explicit LC sector ids, line-pairing representative sectors, and a cap on
 external quark-pair count:
 
+Generic current and colour-sector caps are unbounded by default.  Prefer the
+RAM watchdog for production benchmark refreshes; pass `--max-currents` or
+`--max-color-sectors` only when you intentionally want to truncate exploration.
+
 ```sh
 ./pyamplicol.sh process-plan --coupling-order-policy minimal 'd d~ > Z 4*g' outputs/plans/dd_z_4g
 ./pyamplicol.sh process-plan --lc-sector-strategy line-pairing-representatives 'd d~ > u u~ s s~ c c~' outputs/plans/dd_3pairs

@@ -9,6 +9,7 @@ import pytest
 from pyamplicol.generic_artifact import (
     GENERIC_DAG_PROCESS_ARTIFACT_KIND,
     GENERIC_DAG_PROCESS_SET_ARTIFACT_KIND,
+    GENERIC_LC_REPLAY_PARTITION_ARTIFACT_KIND,
     GENERIC_PROCESS_MANIFEST_KIND,
     GENERIC_PROCESS_SET_MANIFEST_KIND,
     GENERIC_PROCESS_SCHEMA_VERSION,
@@ -18,6 +19,7 @@ from pyamplicol.generic_artifact import (
     load_generic_process_set_manifest,
     write_generic_dag_process_artifact,
     write_generic_dag_process_set_artifact,
+    write_lc_topology_replay_partition_artifact,
     write_generic_process_set_manifest,
     write_generic_process_manifest,
     select_leading_color_sector_ids_from_plan,
@@ -35,6 +37,7 @@ from pyamplicol.generic_dag import (
 )
 from pyamplicol.color_plan import build_color_plan
 from pyamplicol.generic_stage_compiler import (
+    _parameter_builder,
     build_generic_stage_compiler_blueprint,
     write_generic_stage_evaluator_artifacts,
 )
@@ -597,6 +600,36 @@ def test_generic_dag_artifact_records_lc_topology_replay_for_representative_sect
     assert artifact["dag_summary"]["amplitude_root_count"] == 24
 
 
+def test_lc_topology_replay_partition_artifact_writes_representative_sidecars(
+    tmp_path: Path,
+) -> None:
+    manifest_path, artifact = write_lc_topology_replay_partition_artifact(
+        "d d~ > z g g",
+        tmp_path,
+    )
+
+    assert manifest_path == tmp_path / "process_manifest.json"
+    assert artifact["kind"] == GENERIC_LC_REPLAY_PARTITION_ARTIFACT_KIND
+    assert artifact["artifact_class"] == "lc-replay-partition-schema-v2"
+    assert artifact["planning_status"]["color_sector_count"] == 2
+    assert artifact["lowering_status"]["replayed_color_sector_count"] == 2
+    assert artifact["compiled"]["representative_count"] == 1
+    representatives = artifact["compiled"]["representative_artifacts"]
+    assert len(representatives) == 1
+    representative = representatives[0]
+    assert representative["representative_sector_id"] == 0
+    assert representative["active_sector_ids"] == [0, 1]
+    sidecar_path = tmp_path / representative["path"]
+    sidecar_manifest = json.loads(
+        (sidecar_path / "process_manifest.json").read_text(encoding="utf-8")
+    )
+    replay = sidecar_manifest["compiled"]["lc_topology_replay"]
+    assert replay["enabled"] is True
+    assert replay["replayed_sector_count"] == 2
+    assert replay["groups"][0]["active_sector_ids"] == [0, 1]
+    assert (tmp_path / "validation_momenta.json").exists()
+
+
 def test_generic_dag_artifact_rejects_unsafe_lc_topology_replay(
     tmp_path: Path,
 ) -> None:
@@ -692,6 +725,21 @@ def test_generic_stage_blueprint_defaults_to_global_layout_but_supports_local_in
     )
 
 
+def test_generic_parameter_builder_accepts_empty_global_value_storage() -> None:
+    builder = _parameter_builder(
+        {
+            "parameter_layout": {
+                "value_component_count": 0,
+                "momentum_parameter_count": 8,
+                "model_parameter_count": 1,
+            }
+        }
+    )
+
+    assert len(builder.parameter_symbols()) == 9
+    assert builder.real_valued_inputs == list(range(9))
+
+
 def test_generic_stage_blueprint_keeps_four_quark_line_amplitude_outputs() -> None:
     manifest = build_generic_process_manifest(
         "d d~ > u u~ s s~ c c~ g g",
@@ -724,21 +772,22 @@ def test_generic_artifact_defaults_to_contributing_lc_sectors(
 
     assert artifact["compiled"]["selected_color_sector_ids"] == list(range(4))
     assert artifact["dag_summary"]["amplitude_root_count"] == 16
-    assert artifact["dag_summary"]["current_count"] == 85
-    assert artifact["dag_summary"]["interaction_count"] == 75
-    assert artifact["dag_summary"]["source_count"] == 32
-    assert artifact["full_dag_summary"]["current_count"] == 85
-    assert artifact["full_dag_summary"]["interaction_count"] == 75
-    assert artifact["full_dag_summary"]["source_count"] == 32
+    assert artifact["dag_summary"]["current_count"] == 53
+    assert artifact["dag_summary"]["interaction_count"] == 67
+    assert artifact["dag_summary"]["source_count"] == 8
+    assert artifact["full_dag_summary"]["current_count"] == 53
+    assert artifact["full_dag_summary"]["interaction_count"] == 67
+    assert artifact["full_dag_summary"]["source_count"] == 8
     aggregation = artifact["generation_filters"]["structural_current_aggregation"]
-    assert aggregation["before"]["current_count"] == 93
-    assert aggregation["before"]["interaction_count"] == 83
+    assert aggregation["before"]["current_count"] == 61
+    assert aggregation["before"]["interaction_count"] == 75
     assert aggregation["merged_current_count"] == 8
     assert aggregation["removed_interaction_count"] == 8
     assert aggregation["validation"]["accepted"] is True
     assert artifact["lowering_status"]["current_color_sectors"] == list(range(4))
+    assert artifact["lowering_status"]["internal_current_color_sectors"] == [0]
     runtime_schema = artifact["runtime_schema"]
-    assert runtime_schema["source_fill"]["source_count"] == 32
+    assert runtime_schema["source_fill"]["source_count"] == 8
     assert runtime_schema["amplitude_stage"]["output_count"] == 16
     assert {
         root["helicity_weight"]
@@ -836,7 +885,7 @@ def test_generic_process_manifest_handles_multi_quark_line_plan() -> None:
         source["color_state"]["sector_id"]
         for source in runtime_schema["source_fill"]["sources"]
     }
-    assert source_sectors == {0, 1}
+    assert source_sectors == {0}
     assert payload["stage_plan"]["current_stages"][-1]["subset_size"] == 3
     assert payload["stage_plan"]["amplitude_stage"]["closure_count"] > 0
 
@@ -860,7 +909,8 @@ def test_pure_gluon_subleading_colour_shares_currents_but_keeps_root_sectors(
     color_contraction = amplitude_stage["color_contraction"]
 
     assert payload["color_plan"]["sector_count"] == 24
-    assert payload["lowering_status"]["current_color_sectors"] == [0]
+    assert payload["lowering_status"]["internal_current_color_sectors"] == [0]
+    assert payload["lowering_status"]["current_color_sectors"] == list(range(24))
     assert {
         root["color_sector_id"]
         for root in amplitude_stage["roots"]
@@ -1376,6 +1426,96 @@ def test_generic_dag_process_artifact_can_embed_stage_evaluator_manifests(
     assert str(
         stage_evaluators["amplitude_stage"]["evaluator"]["evaluator_state_path"]
     ).startswith("evaluators/")
+
+
+def test_generic_dag_process_artifact_can_omit_lc_runtime_selector(
+    tmp_path: Path,
+) -> None:
+    def fake_compiler(stage, params, real_inputs):
+        return {
+            "kind": "jit-symbolica-evaluator",
+            "label": stage.evaluator_label,
+            "input_len": len(params),
+            "output_len": len(stage.output_expressions),
+            "real_input_count": len(real_inputs),
+            "evaluator_state_path": f"evaluators/{stage.evaluator_label}.bin",
+        }
+
+    manifest_path, _ = write_generic_dag_process_artifact(
+        "d d~ > z g g",
+        tmp_path,
+        emit_stage_evaluator_artifacts=True,
+        enable_lc_sector_runtime_selector=False,
+        stage_evaluator_compiler=fake_compiler,
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert raw["compiled"]["runtime_available"] is True
+    assert not any(
+        parameter["name"] == "runtime.lc_sector_id"
+        for parameter in raw["runtime_schema"]["model_parameters"]
+    )
+
+
+def test_generic_dag_process_artifact_writes_compact_main_with_lc_runtime_sidecar(
+    tmp_path: Path,
+) -> None:
+    def fake_compiler(stage, params, real_inputs):
+        return {
+            "kind": "jit-symbolica-evaluator",
+            "label": stage.evaluator_label,
+            "input_len": len(params),
+            "output_len": len(stage.output_expressions),
+            "real_input_count": len(real_inputs),
+            "evaluator_state_path": f"evaluators/{stage.evaluator_label}.bin",
+        }
+
+    manifest_path, payload = write_generic_dag_process_artifact(
+        "d d~ > z g g",
+        tmp_path,
+        emit_stage_evaluator_artifacts=True,
+        skip_main_stage_evaluator_artifacts=True,
+        stage_evaluator_compiler=fake_compiler,
+        runtime_lc_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    compiled = raw["compiled"]
+    sidecars = compiled["runtime_lc_sector_artifacts"]
+    sidecar_path = tmp_path / sidecars[0]["path"]
+    sidecar = json.loads(
+        (sidecar_path / "process_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert payload == raw
+    assert raw["generic_plan_path"] is None
+    assert "runtime_schema" not in raw
+    assert not (tmp_path / "generic_process_manifest.json").exists()
+    assert compiled["compact_main_artifact"] is True
+    assert compiled["runtime_available"] is False
+    assert raw["lowering_status"]["color_sector_summaries"] == []
+    assert raw["lowering_status"]["color_sector_summaries_omitted"] is True
+    assert sidecars == [
+        {
+            "color_sector_ids": [0],
+            "path": "runtime_lc_sectors/lc_0",
+            "kind": "selected-lc-runtime-sidecar",
+            "runtime_available": True,
+            "runtime_selector": "none-specialized-runtime-artifact",
+        }
+    ]
+    assert sidecar["generic_plan_path"] == "generic_process_manifest.json"
+    assert sidecar["compiled"]["runtime_available"] is True
+    assert "runtime_schema" in sidecar
+    assert not any(
+        parameter["name"] == "runtime.lc_sector_id"
+        for parameter in sidecar["runtime_schema"]["model_parameters"]
+    )
+    assert (sidecar_path / "generic_process_manifest.json").exists()
 
 
 def test_generic_dag_process_set_artifact_writes_subprocess_manifests(

@@ -90,8 +90,8 @@ class MatrixElementGenerator:
         options: ProcessOptions | None = None,
         color_accuracy: str = "lc",
         write_cache_metadata: bool = True,
-        max_currents: int = 50000,
-        max_color_sectors: int = 20000,
+        max_currents: int | None = None,
+        max_color_sectors: int | None = None,
     ) -> GenerationResult:
         start = time.perf_counter()
         support_report = classify_process_support(

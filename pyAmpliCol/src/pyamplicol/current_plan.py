@@ -11,6 +11,7 @@ from .generic_dag import (
     GenericDAG,
     GenericDAGCompiler,
     InteractionNode,
+    contributing_color_sector_ids,
 )
 from .model import AmplicolSMLeadingColorModel, Model
 from .process_ir import CanonicalProcessIR
@@ -191,6 +192,9 @@ class GenericCurrentPlan:
 
     @property
     def color_sectors(self) -> tuple[int, ...]:
+        root_sectors = contributing_color_sector_ids(self.dag)
+        if root_sectors:
+            return root_sectors
         return tuple(
             sorted({current.index.color_state.sector_id for current in self.currents})
         )
@@ -277,8 +281,8 @@ def build_generic_current_plan(
     model: Model | None = None,
     color_accuracy: ColorAccuracy = "lc",
     options: ProcessOptions | None = None,
-    max_currents: int = 50000,
-    max_color_sectors: int = 20000,
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
     reference_color_order: tuple[int, ...] | None = None,
     selected_color_sector_ids: Iterable[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
@@ -422,29 +426,45 @@ def _sector_summaries(
     model: Model,
 ) -> tuple[GenericColorSectorUseSummary, ...]:
     current_ids_by_sector: dict[int, set[int]] = {}
-    interactions_by_sector: dict[int, list[InteractionNode]] = {}
+    interactions_by_sector: dict[int, dict[int, InteractionNode]] = {}
     closures_by_sector: dict[int, list[AmplitudeRoot]] = {}
-    for current in currents:
-        current_ids_by_sector.setdefault(current.index.color_state.sector_id, set()).add(
-            current.id
-        )
-    for interaction in interactions:
-        sector = currents[interaction.result_id].index.color_state.sector_id
-        interactions_by_sector.setdefault(sector, []).append(interaction)
-        current_ids_by_sector.setdefault(sector, set()).update(
-            (interaction.left_id, interaction.right_id, interaction.result_id)
-        )
-    for closure in closures:
-        sector = currents[closure.left_id].index.color_state.sector_id
-        closures_by_sector.setdefault(sector, []).append(closure)
-        current_ids_by_sector.setdefault(sector, set()).update(
-            (closure.left_id, closure.right_id)
-        )
+    interaction_tuple = tuple(interactions)
+    closure_tuple = tuple(closures)
+    interactions_by_result: dict[int, list[InteractionNode]] = {}
+    for interaction in interaction_tuple:
+        interactions_by_result.setdefault(interaction.result_id, []).append(interaction)
+    if closure_tuple:
+        for closure in closure_tuple:
+            sector = _closure_color_sector(currents, closure)
+            closures_by_sector.setdefault(sector, []).append(closure)
+            seen_currents = current_ids_by_sector.setdefault(sector, set())
+            sector_interactions = interactions_by_sector.setdefault(sector, {})
+            stack = [closure.left_id, closure.right_id]
+            while stack:
+                current_id = stack.pop()
+                if current_id in seen_currents:
+                    continue
+                seen_currents.add(current_id)
+                for interaction in interactions_by_result.get(current_id, ()):
+                    sector_interactions.setdefault(interaction.id, interaction)
+                    stack.extend((interaction.left_id, interaction.right_id))
+    else:
+        for current in currents:
+            current_ids_by_sector.setdefault(
+                current.index.color_state.sector_id,
+                set(),
+            ).add(current.id)
+        for interaction in interaction_tuple:
+            sector = currents[interaction.result_id].index.color_state.sector_id
+            interactions_by_sector.setdefault(sector, {})[interaction.id] = interaction
+            current_ids_by_sector.setdefault(sector, set()).update(
+                (interaction.left_id, interaction.right_id, interaction.result_id)
+            )
     summaries = []
     for sector in sorted(
         set(interactions_by_sector) | set(closures_by_sector) | set(current_ids_by_sector)
     ):
-        sector_interactions = tuple(interactions_by_sector.get(sector, ()))
+        sector_interactions = tuple(interactions_by_sector.get(sector, {}).values())
         sector_closures = tuple(closures_by_sector.get(sector, ()))
         vertex_counts = _vertex_kind_counts(sector_interactions, sector_closures)
         ready, pending, unimplemented = _vertex_kind_status(
@@ -464,6 +484,15 @@ def _sector_summaries(
             )
         )
     return tuple(summaries)
+
+
+def _closure_color_sector(
+    currents: tuple[CurrentNode, ...],
+    closure: AmplitudeRoot,
+) -> int:
+    if closure.color_sector_id is not None:
+        return int(closure.color_sector_id)
+    return int(currents[closure.left_id].index.color_state.sector_id)
 
 
 __all__ = [

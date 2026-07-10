@@ -624,6 +624,48 @@ def test_cli_generate_process_disables_numerical_current_passes_for_nlc_default(
     assert pruning["numerical_current_merging"] is False
 
 
+def test_cli_generate_process_disables_numerical_current_passes_for_lc_all_default(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(
+        [
+            "generate-process",
+            "--lc-sector-strategy",
+            "all",
+            "g g > t t~ g g g g",
+            str(output_dir),
+        ]
+    )
+    pruning = cli._generic_dag_pruning_kwargs(args)
+
+    assert args.numerical_filter_current is None
+    assert args.numerical_current_merging is None
+    assert pruning["numerical_filter_current"] is False
+    assert pruning["numerical_current_merging"] is False
+
+
+def test_cli_generate_process_can_force_numerical_current_passes_for_lc_all(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(
+        [
+            "generate-process",
+            "--lc-sector-strategy",
+            "all",
+            "--numerical-filter-current",
+            "--numerical-current-merging",
+            "g g > t t~ g g g g",
+            str(output_dir),
+        ]
+    )
+    pruning = cli._generic_dag_pruning_kwargs(args)
+
+    assert pruning["numerical_filter_current"] is True
+    assert pruning["numerical_current_merging"] is True
+
+
 def test_cli_generate_process_can_disable_numerical_current_passes(
     tmp_path: Path,
 ) -> None:

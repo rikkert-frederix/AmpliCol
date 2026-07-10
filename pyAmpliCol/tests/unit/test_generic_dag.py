@@ -11,6 +11,7 @@ from pyamplicol.generic_dag import (
     CurrentIndex,
     GenericDAGCompiler,
     compile_generic_dag,
+    filter_dag_to_source_helicities,
     infer_minimal_coupling_order_limits,
     prune_dag_to_amplitude_roots,
 )
@@ -166,6 +167,25 @@ def test_generic_dag_can_compile_selected_lc_sector_without_family_branch() -> N
     assert {current.index.color_state.sector_id for current in selected.currents} == {0}
     assert len(selected.currents) * 24 == len(full.currents)
     assert len(selected.amplitude_roots) * 24 == len(full.amplitude_roots)
+
+
+def test_generic_dag_can_filter_fixed_source_helicity_roots() -> None:
+    dag = prune_dag_to_amplitude_roots(
+        compile_generic_dag("g g > t t~", selected_color_sector_ids={0})
+    )
+
+    filtered = filter_dag_to_source_helicities(
+        dag,
+        {1: -1, 2: 1, 3: -1, 4: 1},
+    )
+
+    assert len(filtered.amplitude_roots) == 1
+    assert len(filtered.currents) < len(dag.currents)
+    source_helicities = {
+        (filtered.currents[source_id].source_leg_label, filtered.currents[source_id].source_helicity)
+        for source_id in filtered.sources
+    }
+    assert source_helicities == {(1, -1), (2, 1), (3, -1), (4, 1)}
 
 
 def test_generic_dag_prunes_dead_currents_after_amplitude_closure() -> None:

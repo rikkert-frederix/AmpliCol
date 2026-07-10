@@ -19,6 +19,7 @@ use symbolica::prelude::{
 use toml::Value as TomlValue;
 
 const MAX_LC_TOPOLOGY_REPLAY_EXPANDED_POINTS: usize = 8192;
+const LC_SECTOR_SELECTOR_PARAMETER: &str = "runtime.lc_sector_id";
 
 #[derive(Clone, Debug, Deserialize)]
 struct ProcessManifest {
@@ -111,6 +112,8 @@ struct LcTopologyReplayGroupManifestV2 {
 #[derive(Clone, Debug, Default, Deserialize)]
 struct LcTopologyReplaySectorPermutationManifestV2 {
     sector_id: i64,
+    #[serde(default = "default_lc_topology_replay_weight")]
+    weight: f64,
     #[serde(default)]
     label_permutation: Vec<LcTopologyReplayLabelPermutationManifestV2>,
 }
@@ -119,6 +122,10 @@ struct LcTopologyReplaySectorPermutationManifestV2 {
 struct LcTopologyReplayLabelPermutationManifestV2 {
     representative_label: usize,
     sector_label: usize,
+}
+
+fn default_lc_topology_replay_weight() -> f64 {
+    1.0
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -495,6 +502,8 @@ struct GenericAmplitudeRootManifestV2 {
     vertex_particles: Option<Vec<i32>>,
     coupling: Vec<f64>,
     color_weight: Vec<f64>,
+    #[serde(default)]
+    color_sector_id: Option<i64>,
     contraction: String,
     coherent_group_id: Option<Value>,
     helicity_weight: f64,
@@ -847,7 +856,7 @@ fn validate_lc_topology_replay(manifest: &GenericProcessManifestV2) -> PyResult<
     if !replay.enabled {
         return Ok(());
     }
-    let mappings = build_lc_topology_replay_mappings(Some(replay))?;
+    let (mappings, _weights) = build_lc_topology_replay_mappings(Some(replay))?;
     if mappings.is_empty() {
         return Err(PyValueError::new_err(
             "enabled LC topology replay contains no sector mappings",
@@ -2111,6 +2120,7 @@ struct RawSumGroup {
     id: i64,
     indices: Vec<usize>,
     weight: f64,
+    sector_ids: Vec<i64>,
 }
 
 struct ColorContractionRuntime {
@@ -2188,6 +2198,35 @@ fn add_profile_vector(target: &mut Vec<f64>, source: &[f64]) {
     }
 }
 
+fn parse_optional_color_sector_ids(
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<BTreeSet<i64>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    parse_required_color_sector_ids(value).map(Some)
+}
+
+fn parse_required_color_sector_ids(value: &Bound<'_, PyAny>) -> PyResult<BTreeSet<i64>> {
+    if let Ok(sector_id) = value.extract::<i64>() {
+        return Ok(BTreeSet::from([sector_id]));
+    }
+    if let Ok(sector_ids) = value.extract::<Vec<i64>>() {
+        if sector_ids.is_empty() {
+            return Err(PyValueError::new_err(
+                "color_sector_ids must contain at least one sector id",
+            ));
+        }
+        return Ok(sector_ids.into_iter().collect());
+    }
+    Err(PyValueError::new_err(
+        "color_sector_ids must be an integer or a sequence of integers",
+    ))
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct MemorySnapshot {
     current_rss_bytes: Option<u64>,
@@ -2227,6 +2266,7 @@ struct GenericRuntimeV2 {
     lc_topology_replay_enabled: bool,
     lc_topology_replay_sector_count: usize,
     lc_topology_replay_mappings: Vec<Vec<(usize, usize)>>,
+    lc_topology_replay_weights: Vec<f64>,
     runtime_unavailable_message: Option<String>,
     sources: Vec<GenericSourceRecordManifestV2>,
     momentum_slots: Vec<GenericMomentumSlotManifestV2>,
@@ -2260,6 +2300,7 @@ struct GenericStageRuntimeV2 {
 struct GenericAmplitudeRuntimeV2 {
     output_length: usize,
     raw_sum_weights: Vec<f64>,
+    raw_sum_color_sector_ids: Vec<Option<i64>>,
     raw_sum_groups: Vec<RawSumGroup>,
     has_coherent_groups: bool,
     color_contraction: Option<ColorContractionRuntime>,
@@ -2272,12 +2313,12 @@ struct GenericAmplitudeRuntimeV2 {
 
 fn build_lc_topology_replay_mappings(
     replay: Option<&LcTopologyReplayManifestV2>,
-) -> PyResult<Vec<Vec<(usize, usize)>>> {
+) -> PyResult<(Vec<Vec<(usize, usize)>>, Vec<f64>)> {
     let Some(replay) = replay else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     if !replay.enabled {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     if replay.mode != "external-label-permutation" {
         return Err(PyValueError::new_err(format!(
@@ -2286,6 +2327,7 @@ fn build_lc_topology_replay_mappings(
         )));
     }
     let mut mappings = Vec::new();
+    let mut weights = Vec::new();
     for group in &replay.groups {
         if group.materialized_sector_id != group.representative_sector_id {
             return Err(PyValueError::new_err(
@@ -2329,6 +2371,11 @@ fn build_lc_topology_replay_mappings(
                     "LC topology replay sector permutations contain duplicate sector ids",
                 ));
             }
+            if !permutation.weight.is_finite() || permutation.weight <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "LC topology replay sector permutation weights must be positive finite numbers",
+                ));
+            }
             let mut mapping = Vec::new();
             for item in &permutation.label_permutation {
                 if item.representative_label == 0 || item.sector_label == 0 {
@@ -2339,6 +2386,7 @@ fn build_lc_topology_replay_mappings(
                 mapping.push((item.representative_label - 1, item.sector_label - 1));
             }
             mappings.push(mapping);
+            weights.push(permutation.weight);
         }
     }
     if mappings.len() != replay.replayed_sector_count {
@@ -2348,7 +2396,7 @@ fn build_lc_topology_replay_mappings(
             mappings.len()
         )));
     }
-    Ok(mappings)
+    Ok((mappings, weights))
 }
 
 fn collect_toml_numeric_overrides(
@@ -2390,7 +2438,8 @@ impl GenericRuntimeV2 {
         let stage_evaluators = manifest.compiled.stage_evaluators.as_ref();
         let topology_reuse = manifest.lc_topology_reuse.as_ref();
         let topology_replay = manifest.compiled.lc_topology_replay.as_ref();
-        let topology_replay_mappings = build_lc_topology_replay_mappings(topology_replay)?;
+        let (topology_replay_mappings, topology_replay_weights) =
+            build_lc_topology_replay_mappings(topology_replay)?;
         let external_is_initial = manifest
             .runtime_schema
             .external_particles
@@ -2519,6 +2568,7 @@ impl GenericRuntimeV2 {
             lc_topology_replay_enabled: !topology_replay_mappings.is_empty(),
             lc_topology_replay_sector_count: topology_replay_mappings.len(),
             lc_topology_replay_mappings: topology_replay_mappings,
+            lc_topology_replay_weights: topology_replay_weights,
             runtime_unavailable_message: manifest.compiled.runtime_unavailable_message,
             sources: manifest.runtime_schema.source_fill.sources,
             momentum_slots: manifest.runtime_schema.momentum_slots,
@@ -2675,11 +2725,86 @@ impl GenericRuntimeV2 {
             / (self.normalization_average_factor * self.normalization_identical_factor);
     }
 
+    fn set_lc_sector_selector(&mut self, sector_id: Option<i64>) -> Option<f64> {
+        let index = *self
+            .model_parameter_name_to_index
+            .get(LC_SECTOR_SELECTOR_PARAMETER)?;
+        let previous = *self.model_parameter_values_f64.get(index)?;
+        if let Some(value) = self.model_parameter_values_f64.get_mut(index) {
+            *value = sector_id.map(|id| id as f64).unwrap_or(-1.0);
+        }
+        Some(previous)
+    }
+
+    fn restore_lc_sector_selector(&mut self, previous: Option<f64>) {
+        let Some(previous) = previous else {
+            return;
+        };
+        let Some(index) = self
+            .model_parameter_name_to_index
+            .get(LC_SECTOR_SELECTOR_PARAMETER)
+            .copied()
+        else {
+            return;
+        };
+        if let Some(value) = self.model_parameter_values_f64.get_mut(index) {
+            *value = previous;
+        }
+    }
+
     fn run_f64(&mut self, batch: &[Vec<[f64; 4]>]) -> PyResult<(Vec<f64>, RuntimeProfile)> {
+        self.run_f64_selected(batch, None)
+    }
+
+    fn run_f64_selected(
+        &mut self,
+        batch: &[Vec<[f64; 4]>],
+        selected_color_sector_ids: Option<&BTreeSet<i64>>,
+    ) -> PyResult<(Vec<f64>, RuntimeProfile)> {
         if self.lc_topology_replay_enabled {
+            if selected_color_sector_ids.is_some() {
+                return Err(PyValueError::new_err(
+                    "LC color-sector runtime selection is not available for topology-replay artifacts",
+                ));
+            }
             return self.run_f64_with_lc_topology_replay(batch);
         }
-        self.run_f64_materialized(batch)
+        let Some(selected) = selected_color_sector_ids else {
+            let previous = self.set_lc_sector_selector(None);
+            let result = self.run_f64_materialized_selected(batch, None);
+            self.restore_lc_sector_selector(previous);
+            return result;
+        };
+        if selected.is_empty() {
+            return Err(PyValueError::new_err(
+                "LC color-sector runtime selection requires at least one sector id",
+            ));
+        }
+        if !self
+            .model_parameter_name_to_index
+            .contains_key(LC_SECTOR_SELECTOR_PARAMETER)
+        {
+            return self.run_f64_materialized_selected(batch, Some(selected));
+        }
+        let total_start = Instant::now();
+        let n_points = batch.len();
+        let mut values = vec![0.0; n_points];
+        let mut profile = RuntimeProfile::default();
+        let previous = self.set_lc_sector_selector(None);
+        for sector_id in selected {
+            self.set_lc_sector_selector(Some(*sector_id));
+            let mut singleton = BTreeSet::new();
+            singleton.insert(*sector_id);
+            let (sector_values, sector_profile) =
+                self.run_f64_materialized_selected(batch, Some(&singleton))?;
+            for (value, sector_value) in values.iter_mut().zip(sector_values) {
+                *value += sector_value;
+            }
+            profile.add_sector(&sector_profile);
+        }
+        self.restore_lc_sector_selector(previous);
+        profile.total_s = total_start.elapsed().as_secs_f64();
+        return Ok((values, profile));
     }
 
     fn run_double(
@@ -2712,15 +2837,20 @@ impl GenericRuntimeV2 {
         let mut values = vec![0.0; n_points];
         let mut profile = RuntimeProfile::default();
         let mappings = self.lc_topology_replay_mappings.clone();
+        let weights = self.lc_topology_replay_weights.clone();
         let mappings_per_chunk = replay_mappings_per_expanded_batch(n_points);
-        for mapping_chunk in mappings.chunks(mappings_per_chunk) {
+        for chunk_start in (0..mappings.len()).step_by(mappings_per_chunk) {
+            let chunk_end = usize::min(chunk_start + mappings_per_chunk, mappings.len());
+            let mapping_chunk = &mappings[chunk_start..chunk_end];
+            let weight_chunk = &weights[chunk_start..chunk_end];
             let expanded_batch =
                 apply_lc_topology_label_permutations(batch, self.external_count, mapping_chunk)?;
             let (expanded_values, sector_profile) = self.run_f64_materialized(&expanded_batch)?;
             for mapping_index in 0..mapping_chunk.len() {
+                let weight = weight_chunk[mapping_index];
                 let offset = mapping_index * n_points;
                 for point_index in 0..n_points {
-                    values[point_index] += expanded_values[offset + point_index];
+                    values[point_index] += weight * expanded_values[offset + point_index];
                 }
             }
             profile.add_sector(&sector_profile);
@@ -2732,6 +2862,14 @@ impl GenericRuntimeV2 {
     fn run_f64_materialized(
         &mut self,
         batch: &[Vec<[f64; 4]>],
+    ) -> PyResult<(Vec<f64>, RuntimeProfile)> {
+        self.run_f64_materialized_selected(batch, None)
+    }
+
+    fn run_f64_materialized_selected(
+        &mut self,
+        batch: &[Vec<[f64; 4]>],
+        selected_color_sector_ids: Option<&BTreeSet<i64>>,
     ) -> PyResult<(Vec<f64>, RuntimeProfile)> {
         if self.stages.is_none() || self.amplitude_stage.is_none() {
             return Err(self.execution_unavailable_error());
@@ -2822,7 +2960,11 @@ impl GenericRuntimeV2 {
         self.amplitude_stage
             .as_mut()
             .expect("generic amplitude stage checked")
-            .reduce_scratch_f64_into(n_points, &mut self.values_scratch_f64)?;
+            .reduce_scratch_f64_into_selected(
+                n_points,
+                &mut self.values_scratch_f64,
+                selected_color_sector_ids,
+            )?;
         for value in &mut self.values_scratch_f64 {
             *value *= self.normalization_factor;
         }
@@ -2862,8 +3004,12 @@ impl GenericRuntimeV2 {
         let mut values = vec![T::new_zero(); n_points];
         let mut profile = RuntimeProfile::default();
         let mappings = self.lc_topology_replay_mappings.clone();
+        let weights = self.lc_topology_replay_weights.clone();
         let mappings_per_chunk = replay_mappings_per_expanded_batch(n_points);
-        for mapping_chunk in mappings.chunks(mappings_per_chunk) {
+        for chunk_start in (0..mappings.len()).step_by(mappings_per_chunk) {
+            let chunk_end = usize::min(chunk_start + mappings_per_chunk, mappings.len());
+            let mapping_chunk = &mappings[chunk_start..chunk_end];
+            let weight_chunk = &weights[chunk_start..chunk_end];
             let expanded_batch = apply_lc_topology_label_permutations_generic(
                 batch,
                 self.external_count,
@@ -2872,9 +3018,11 @@ impl GenericRuntimeV2 {
             let (expanded_values, sector_profile) =
                 self.run_generic_materialized(&expanded_batch, binary_precision)?;
             for mapping_index in 0..mapping_chunk.len() {
+                let weight = T::from(weight_chunk[mapping_index]);
                 let offset = mapping_index * n_points;
                 for point_index in 0..n_points {
-                    values[point_index] += expanded_values[offset + point_index].clone();
+                    values[point_index] +=
+                        weight.clone() * expanded_values[offset + point_index].clone();
                 }
             }
             profile.add_sector(&sector_profile);
@@ -3868,6 +4016,22 @@ impl Runtime {
         f64_values_to_numpy_or_list(py, values)
     }
 
+    fn evaluate_color_sectors<'py>(
+        &mut self,
+        py: Python<'py>,
+        momenta: &Bound<'py, PyAny>,
+        color_sector_ids: &Bound<'py, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let selected_color_sector_ids =
+            parse_required_color_sector_ids(color_sector_ids)?;
+        let values = self.evaluate_f64_values_selected(
+            py,
+            momenta,
+            Some(&selected_color_sector_ids),
+        )?;
+        f64_values_to_numpy_or_list(py, values)
+    }
+
     fn raw_amplitudes<'py>(
         &mut self,
         py: Python<'py>,
@@ -3968,14 +4132,21 @@ impl Runtime {
         }
     }
 
-    #[pyo3(signature = (momenta, precision = 16, include_values = true))]
+    #[pyo3(signature = (momenta, precision = 16, include_values = true, color_sector_ids = None))]
     fn profile<'py>(
         &mut self,
         py: Python<'py>,
         momenta: &Bound<'py, PyAny>,
         precision: u32,
         include_values: bool,
+        color_sector_ids: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyDict>> {
+        let selected_color_sector_ids = parse_optional_color_sector_ids(color_sector_ids)?;
+        if selected_color_sector_ids.is_some() && precision != 16 {
+            return Err(PyValueError::new_err(
+                "LC color-sector runtime selection is currently supported only at precision 16",
+            ));
+        }
         let (points, values, profile) = match PrecisionMode::from_decimal_digits(precision)? {
             PrecisionMode::F64 => {
                 let (points, values, profile) = if self.generic_runtime.is_some() {
@@ -3990,9 +4161,14 @@ impl Runtime {
                         .generic_runtime
                         .as_mut()
                         .expect("checked")
-                        .run_f64(&batch)?;
+                        .run_f64_selected(&batch, selected_color_sector_ids.as_ref())?;
                     (points, values, profile)
                 } else {
+                    if selected_color_sector_ids.is_some() {
+                        return Err(PyValueError::new_err(
+                            "LC color-sector runtime selection is only available for schema-v2 generic DAG artifacts",
+                        ));
+                    }
                     let batch = batch_momenta(
                         py,
                         momenta,
@@ -4087,6 +4263,12 @@ impl Runtime {
         dict.set_item("points", points)?;
         dict.set_item("batch_size", points)?;
         dict.set_item("values", values)?;
+        dict.set_item(
+            "color_sector_ids",
+            selected_color_sector_ids
+                .as_ref()
+                .map(|ids| ids.iter().copied().collect::<Vec<_>>()),
+        )?;
         dict.set_item("source_fill_time_s", profile.source_fill_s)?;
         dict.set_item("momentum_setup_time_s", profile.momentum_setup_s)?;
         dict.set_item("parameter_pack_time_s", 0.0)?;
@@ -4298,6 +4480,15 @@ impl Runtime {
         py: Python<'_>,
         momenta: &Bound<'_, PyAny>,
     ) -> PyResult<Vec<f64>> {
+        self.evaluate_f64_values_selected(py, momenta, None)
+    }
+
+    fn evaluate_f64_values_selected(
+        &mut self,
+        py: Python<'_>,
+        momenta: &Bound<'_, PyAny>,
+        selected_color_sector_ids: Option<&BTreeSet<i64>>,
+    ) -> PyResult<Vec<f64>> {
         if self.generic_runtime.is_some() {
             let external_count = self
                 .generic_runtime
@@ -4309,9 +4500,14 @@ impl Runtime {
                 .generic_runtime
                 .as_mut()
                 .expect("checked")
-                .run_f64(&batch)?;
+                .run_f64_selected(&batch, selected_color_sector_ids)?;
             self.last_profile = profile;
             return Ok(values);
+        }
+        if selected_color_sector_ids.is_some() {
+            return Err(PyValueError::new_err(
+                "LC color-sector runtime selection is only available for schema-v2 generic DAG artifacts",
+            ));
         }
         let batch = batch_momenta(py, momenta, self.legacy_manifest().external_pdg_order.len())?;
         let (values, profile) = self.run_f64(&batch)?;
@@ -5243,6 +5439,11 @@ impl GenericAmplitudeRuntimeV2 {
             .iter()
             .map(|root| root.helicity_weight)
             .collect::<Vec<_>>();
+        let raw_sum_color_sector_ids = amplitude_stage
+            .roots
+            .iter()
+            .map(|root| root.color_sector_id)
+            .collect::<Vec<_>>();
         let raw_sum_group_ids = amplitude_stage
             .roots
             .iter()
@@ -5254,6 +5455,7 @@ impl GenericAmplitudeRuntimeV2 {
                 amplitude_stage.output_count,
                 &raw_sum_weights,
                 &raw_sum_group_ids,
+                &raw_sum_color_sector_ids,
             )?
         } else {
             Vec::new()
@@ -5276,6 +5478,7 @@ impl GenericAmplitudeRuntimeV2 {
         Ok(Self {
             output_length: amplitude_stage.output_count,
             raw_sum_weights,
+            raw_sum_color_sector_ids,
             raw_sum_groups,
             has_coherent_groups,
             color_contraction,
@@ -5338,6 +5541,15 @@ impl GenericAmplitudeRuntimeV2 {
         batch_size: usize,
         raw_sums: &mut Vec<f64>,
     ) -> PyResult<()> {
+        self.reduce_scratch_f64_into_selected(batch_size, raw_sums, None)
+    }
+
+    fn reduce_scratch_f64_into_selected(
+        &mut self,
+        batch_size: usize,
+        raw_sums: &mut Vec<f64>,
+        selected_color_sector_ids: Option<&BTreeSet<i64>>,
+    ) -> PyResult<()> {
         let amplitudes = &self.output_scratch_f64;
         if amplitudes.len() != batch_size * self.output_length {
             return Err(PyValueError::new_err(format!(
@@ -5349,6 +5561,11 @@ impl GenericAmplitudeRuntimeV2 {
         raw_sums.clear();
         raw_sums.resize(batch_size, 0.0);
         if let Some(contraction) = self.color_contraction.as_mut() {
+            if selected_color_sector_ids.is_some() {
+                return Err(PyValueError::new_err(
+                    "LC color-sector runtime selection is only supported for leading-colour diagonal artifacts",
+                ));
+            }
             if self.raw_sum_groups.len() != contraction.group_count {
                 return Err(PyValueError::new_err(
                     "colour contraction group count does not match coherent groups",
@@ -5381,6 +5598,9 @@ impl GenericAmplitudeRuntimeV2 {
             let row_offset = row * self.output_length;
             if self.has_coherent_groups {
                 for group in &self.raw_sum_groups {
+                    if !raw_sum_group_is_selected(group, selected_color_sector_ids) {
+                        continue;
+                    }
                     let mut sum = c64(0.0, 0.0);
                     for index in &group.indices {
                         sum += amplitudes[row_offset + *index];
@@ -5390,6 +5610,12 @@ impl GenericAmplitudeRuntimeV2 {
                 continue;
             }
             for index in 0..self.output_length {
+                if !raw_sum_index_is_selected(
+                    self.raw_sum_color_sector_ids.get(index).copied().flatten(),
+                    selected_color_sector_ids,
+                ) {
+                    continue;
+                }
                 let value = amplitudes[row_offset + index];
                 raw_sums[row] +=
                     self.raw_sum_weights[index] * (value.re * value.re + value.im * value.im);
@@ -5579,12 +5805,14 @@ impl AmplitudeStage {
             .raw_sum_group_ids
             .clone()
             .unwrap_or_else(|| vec![None; manifest.output_length]);
+        let raw_sum_color_sector_ids = vec![None; manifest.output_length];
         let has_coherent_groups = raw_sum_group_ids.iter().any(Option::is_some);
         let raw_sum_groups = if has_coherent_groups {
             build_raw_sum_groups(
                 manifest.output_length,
                 &manifest.raw_sum_weights,
                 &raw_sum_group_ids,
+                &raw_sum_color_sector_ids,
             )?
         } else {
             Vec::new()
@@ -5731,8 +5959,12 @@ fn build_raw_sum_groups(
     output_length: usize,
     weights: &[f64],
     group_ids: &[Option<i64>],
+    color_sector_ids: &[Option<i64>],
 ) -> PyResult<Vec<RawSumGroup>> {
-    if weights.len() != output_length || group_ids.len() != output_length {
+    if weights.len() != output_length
+        || group_ids.len() != output_length
+        || color_sector_ids.len() != output_length
+    {
         return Err(PyValueError::new_err(
             "raw-sum group metadata length does not match amplitude outputs",
         ));
@@ -5747,6 +5979,7 @@ fn build_raw_sum_groups(
                 id: index as i64,
                 indices: vec![index],
                 weight: weights[index],
+                sector_ids: color_sector_ids[index].into_iter().collect(),
             });
         }
     }
@@ -5762,11 +5995,46 @@ fn build_raw_sum_groups(
         }
         groups.push(RawSumGroup {
             id: group_id,
+            sector_ids: unique_color_sector_ids(&indices, color_sector_ids),
             indices,
             weight,
         });
     }
     Ok(groups)
+}
+
+fn unique_color_sector_ids(indices: &[usize], color_sector_ids: &[Option<i64>]) -> Vec<i64> {
+    indices
+        .iter()
+        .filter_map(|index| color_sector_ids.get(*index).copied().flatten())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn raw_sum_group_is_selected(
+    group: &RawSumGroup,
+    selected_color_sector_ids: Option<&BTreeSet<i64>>,
+) -> bool {
+    let Some(selected) = selected_color_sector_ids else {
+        return true;
+    };
+    group
+        .sector_ids
+        .iter()
+        .any(|sector_id| selected.contains(sector_id))
+}
+
+fn raw_sum_index_is_selected(
+    sector_id: Option<i64>,
+    selected_color_sector_ids: Option<&BTreeSet<i64>>,
+) -> bool {
+    let Some(selected) = selected_color_sector_ids else {
+        return true;
+    };
+    sector_id
+        .map(|value| selected.contains(&value))
+        .unwrap_or(false)
 }
 
 fn build_color_contraction_runtime(
@@ -8761,6 +9029,7 @@ mod tests {
             runtime.lc_topology_replay_mappings,
             vec![vec![(0, 0), (1, 1), (2, 2)], vec![(0, 1), (1, 0), (2, 2)],]
         );
+        assert_eq!(runtime.lc_topology_replay_weights, vec![1.0, 1.0]);
     }
 
     #[test]

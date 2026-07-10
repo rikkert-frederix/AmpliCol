@@ -127,6 +127,7 @@ def process_for_n(n_final: int) -> str:
 def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> None:
     process = process_for_n(n_final)
     output_dir = OUTPUT_ROOT / f"n{n_final}" / mode
+    all_flow_output_dir = OUTPUT_ROOT / f"n{n_final}" / f"{mode}_all_flows"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[z-table] start n={n_final} mode={mode}: {process}", flush=True)
     generate = _generate_command(
@@ -137,6 +138,17 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
         n_cores=max(1, int(args.n_cores)),
         batch_size=int(args.batch_size),
         output_chunk_size=int(args.output_chunk_size),
+        all_flows=False,
+    )
+    all_flow_generate = _generate_command(
+        process,
+        all_flow_output_dir,
+        mode=mode,
+        n_final=n_final,
+        n_cores=max(1, int(args.n_cores)),
+        batch_size=int(args.batch_size),
+        output_chunk_size=int(args.output_chunk_size),
+        all_flows=True,
     )
     timeout = (
         None
@@ -209,8 +221,78 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
     if not isinstance(profile, dict):
         profile = {}
     generation_s = _optional_float(gen.get("_command_elapsed_s", gen.get("generation_s")))
+    internal_generation_s = _optional_float(gen.get("generation_s"))
     wall = _optional_float(profile.get("wall_us_per_point"))
     runtime = _optional_float(profile.get("core_evaluator_us_per_point"))
+    all_flow_record: dict[str, Any] = {
+        "all_flow_status": "missing",
+        "all_flow_notes": (
+            f"generated process kept at "
+            f"pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}_all_flows"
+        ),
+    }
+    try:
+        all_flow_gen = _run_json_command(
+            all_flow_generate,
+            timeout=timeout,
+            log_path=all_flow_output_dir.with_name(
+                f"{all_flow_output_dir.name}.generate.log"
+            ),
+        )
+        all_flow_timed = _run_json_command(
+            [
+                str(PYTHON),
+                "-m",
+                "pyamplicol",
+                "time-process",
+                "--target-runtime",
+                str(float(args.target_runtime)),
+                "--batch-size",
+                str(int(args.batch_size)),
+                "--json",
+                str(all_flow_output_dir),
+            ],
+            timeout=None,
+            log_path=all_flow_output_dir.with_name(
+                f"{all_flow_output_dir.name}.time.log"
+            ),
+        )
+        all_flow_profile = all_flow_timed.get("profile", {})
+        if not isinstance(all_flow_profile, dict):
+            all_flow_profile = {}
+        all_flow_record.update(
+            {
+                "all_flow_status": "ok",
+                "all_flow_generation_s": _optional_float(
+                    all_flow_gen.get("_command_elapsed_s", all_flow_gen.get("generation_s"))
+                ),
+                "all_flow_wall_us_per_point": _optional_float(
+                    all_flow_profile.get("wall_us_per_point")
+                ),
+                "all_flow_runtime_us_per_point": _optional_float(
+                    all_flow_profile.get("core_evaluator_us_per_point")
+                ),
+            }
+        )
+    except MemoryLimitExceeded as exc:
+        all_flow_record.update(
+            {
+                "all_flow_status": "ram_limit",
+                "all_flow_error": str(exc),
+            }
+        )
+        print(f"[z-table] all-flow RAM limit n={n_final} mode={mode}: {exc}", flush=True)
+    except subprocess.TimeoutExpired:
+        all_flow_record["all_flow_status"] = "timeout"
+        print(f"[z-table] all-flow timeout n={n_final} mode={mode}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - benchmark script records failures.
+        all_flow_record.update(
+            {
+                "all_flow_status": "error",
+                "all_flow_error": str(exc),
+            }
+        )
+        print(f"[z-table] all-flow error n={n_final} mode={mode}: {exc}", flush=True)
     _record_row(
         n_final,
         mode,
@@ -218,9 +300,14 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
         generation_s=generation_s,
         wall_us_per_point=wall,
         runtime_us_per_point=runtime,
+        **all_flow_record,
         notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
     )
-    print(f"[z-table] done n={n_final} mode={mode}", flush=True)
+    print(
+        f"[z-table] done n={n_final} mode={mode} "
+        f"(selected gen {internal_generation_s or generation_s})",
+        flush=True,
+    )
 
 
 def _generate_command(
@@ -232,6 +319,7 @@ def _generate_command(
     n_cores: int,
     batch_size: int,
     output_chunk_size: int,
+    all_flows: bool,
 ) -> list[str]:
     reference_order, sector_ids = _lc_cache_color_settings(n_final)
     if reference_order is None:
@@ -267,11 +355,27 @@ def _generate_command(
         "5000000",
         "--symbolica-max-common-pair-distance",
         "1000",
-        "--lc-sector-ids",
-        ",".join(str(item) for item in sector_ids),
-        "--reference-color-order",
-        ",".join(str(item) for item in reference_order),
     ]
+    if all_flows:
+        fixed_helicity = _fixed_helicity_choice(process)
+        command.extend(
+            [
+                "--lc-topology-replay",
+                "--skip-generic-plan",
+                "--no-runtime-lc-sector-selector",
+                "--source-helicities",
+                str(fixed_helicity["source_helicities_cli"]),
+            ]
+        )
+    else:
+        command.extend(
+            [
+                "--lc-sector-ids",
+                ",".join(str(item) for item in sector_ids),
+                "--reference-color-order",
+                ",".join(str(item) for item in reference_order),
+            ]
+        )
     if mode == "jit_o1":
         command.extend(
             [
@@ -343,6 +447,16 @@ def _seed_from_lc_cache(n_final: int, mode: str) -> bool:
             status="ok",
             generation_s=_optional_float(row.get("generation_s")),
             runtime_us_per_point=_optional_float(row.get("runtime_us_per_point")),
+            all_flow_status=(
+                "ok"
+                if _optional_float(row.get("all_flow_runtime_us_per_point")) is not None
+                else "missing"
+            ),
+            all_flow_generation_s=_optional_float(row.get("all_flow_generation_s")),
+            all_flow_runtime_us_per_point=_optional_float(
+                row.get("all_flow_runtime_us_per_point")
+            ),
+            all_flow_notes="reused from LC result matrix cache",
             notes="reused from LC result matrix cache",
         )
         print(f"[z-table] seeded n={n_final} mode=amplicol from LC cache", flush=True)
@@ -354,13 +468,49 @@ def _seed_from_lc_cache(n_final: int, mode: str) -> bool:
         n_final,
         "jit_o3",
         status="ok",
-        generation_s=_optional_float(row.get("generation_s")),
+        generation_s=_selected_generation_from_lc_row(row),
         wall_us_per_point=_optional_float(row.get("wall_us_per_point")),
         runtime_us_per_point=_optional_float(row.get("runtime_us_per_point")),
+        all_flow_status=(
+            "ok"
+            if _optional_float(row.get("all_flow_runtime_us_per_point")) is not None
+            else "missing"
+        ),
+        all_flow_generation_s=(
+            _optional_float(row.get("all_flow_generation_s"))
+            or _optional_float(row.get("generation_s"))
+        ),
+        all_flow_wall_us_per_point=_optional_float(row.get("all_flow_wall_us_per_point")),
+        all_flow_runtime_us_per_point=_optional_float(
+            row.get("all_flow_runtime_us_per_point")
+        ),
+        all_flow_notes="reused from LC result matrix cache",
         notes="reused from LC result matrix cache",
     )
     print(f"[z-table] seeded n={n_final} mode=jit_o3 from LC cache", flush=True)
     return True
+
+
+def _selected_generation_from_lc_row(row: dict[str, Any]) -> float | None:
+    explicit = _optional_float(row.get("selected_generation_s"))
+    if explicit is not None:
+        return explicit
+    selected = row.get("selected_generate_payload")
+    if isinstance(selected, dict):
+        generation = _optional_float(selected.get("_command_elapsed_s"))
+        if generation is not None:
+            return generation
+        generation = _optional_float(selected.get("generation_s"))
+        if generation is not None:
+            return generation
+    return _optional_float(row.get("generation_s"))
+
+
+def _fixed_helicity_choice(process: str) -> dict[str, Any]:
+    import result_matrix
+
+    base = next(item for item in result_matrix.BASE_PROCESSES if item.key == "dd_z_jets")
+    return result_matrix._fixed_helicity_choice(process, base)
 
 
 def _lc_cache_color_settings(n_final: int) -> tuple[list[int] | None, list[int] | None]:
@@ -400,6 +550,12 @@ def _record_row(
     generation_s: float | None = None,
     wall_us_per_point: float | None = None,
     runtime_us_per_point: float | None = None,
+    all_flow_status: str | None = None,
+    all_flow_generation_s: float | None = None,
+    all_flow_wall_us_per_point: float | None = None,
+    all_flow_runtime_us_per_point: float | None = None,
+    all_flow_notes: str = "",
+    all_flow_error: str = "",
     notes: str = "",
     error: str = "",
 ) -> None:
@@ -424,6 +580,20 @@ def _record_row(
         command.extend(["--wall-us-per-point", str(wall_us_per_point)])
     if runtime_us_per_point is not None:
         command.extend(["--runtime-us-per-point", str(runtime_us_per_point)])
+    if all_flow_status is not None:
+        command.extend(["--all-flow-status", str(all_flow_status)])
+    if all_flow_generation_s is not None:
+        command.extend(["--all-flow-generation-s", str(all_flow_generation_s)])
+    if all_flow_wall_us_per_point is not None:
+        command.extend(["--all-flow-wall-us-per-point", str(all_flow_wall_us_per_point)])
+    if all_flow_runtime_us_per_point is not None:
+        command.extend(
+            ["--all-flow-runtime-us-per-point", str(all_flow_runtime_us_per_point)]
+        )
+    if all_flow_notes:
+        command.extend(["--all-flow-notes", all_flow_notes])
+    if all_flow_error:
+        command.extend(["--all-flow-error", all_flow_error])
     _run_checked(command)
 
 
@@ -597,7 +767,11 @@ def _row_is_terminal(n_final: int, mode: str) -> bool:
         row = data["entries"][str(n_final)]["modes"][mode]
     except (KeyError, json.JSONDecodeError):
         return False
-    return isinstance(row, dict) and row.get("status") in {"ok", "ram_limit"}
+    if not isinstance(row, dict) or row.get("status") not in {"ok", "ram_limit"}:
+        return False
+    if row.get("status") == "ram_limit":
+        return True
+    return row.get("all_flow_status") in {"ok", "ram_limit"}
 
 
 def _parse_n_values(values: Sequence[str]) -> list[int]:

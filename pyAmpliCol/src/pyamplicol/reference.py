@@ -321,6 +321,35 @@ def reorder_external_momenta_by_pdg(
     return tuple(ordered)
 
 
+def reorder_external_values_by_pdg(
+    particles: Sequence[ExternalMomentum],
+    values: Sequence[int],
+    expected_pdgs: Sequence[int],
+) -> tuple[int, ...]:
+    """Return external-leg values in the same stable PDG order as momenta."""
+
+    if len(particles) != len(values):
+        raise ValueError("external value list length does not match momenta")
+    remaining = list(zip(particles, values, strict=True))
+    ordered: list[int] = []
+    for expected in expected_pdgs:
+        for index, (particle, value) in enumerate(remaining):
+            if int(particle.pdg) == int(expected):
+                ordered.append(int(value))
+                del remaining[index]
+                break
+        else:
+            raise ValueError(
+                "external values cannot be reordered to Fortran process "
+                f"PDG order {list(expected_pdgs)}"
+            )
+    if remaining:
+        raise ValueError(
+            "external values contain extra particles after Fortran PDG reordering"
+        )
+    return tuple(ordered)
+
+
 def reference_color_order_for_run(
     run: AmplicolWorkflowResult,
 ) -> tuple[int, ...] | None:
@@ -597,6 +626,7 @@ class AmplicolAdapter:
         options: ProcessOptions | None = None,
         process_list_backend: ProcessListBackend = "python",
         color_complete: bool = False,
+        reuse_process_file: bool = False,
     ) -> AmplicolWorkflowResult:
         """Run the direct generated-library timing driver.
 
@@ -607,13 +637,20 @@ class AmplicolAdapter:
         benchmark for the generated Fortran amplitude library itself.
         """
 
-        path = self.write_process_file(
-            process,
-            process_file,
-            options=options,
-            process_list_backend=process_list_backend,
-            color_complete=color_complete,
-        )
+        if reuse_process_file:
+            if process_file is None:
+                raise ValueError("reuse_process_file requires process_file")
+            path = Path(process_file)
+            if not path.is_absolute():
+                path = self.repo_root / path
+        else:
+            path = self.write_process_file(
+                process,
+                process_file,
+                options=options,
+                process_list_backend=process_list_backend,
+                color_complete=color_complete,
+            )
         build = self._run(["make", f"-j{self.jobs}", "amplicol_library_benchmark"])
         build.check_returncode()
         command = self._run(
@@ -638,6 +675,7 @@ class AmplicolAdapter:
         *,
         color_accuracy: str,
         particles: Sequence[ExternalMomentum],
+        helicities: Sequence[int] | None = None,
         points: int = 1,
         group: int = 1,
         integral: int = 1,
@@ -661,11 +699,18 @@ class AmplicolAdapter:
         )
         entry = amplicol_process_file_entry(path, group=group, integral=integral)
         ordered_particles: Sequence[ExternalMomentum] = particles
+        ordered_helicities: Sequence[int] | None = helicities
         if entry is not None:
             ordered_particles = reorder_external_momenta_by_pdg(
                 particles,
                 entry["process"],
             )
+            if helicities is not None:
+                ordered_helicities = reorder_external_values_by_pdg(
+                    particles,
+                    helicities,
+                    entry["process"],
+                )
         momenta_path = self.write_momenta_probe_file(
             ordered_particles,
             group=group,
@@ -682,6 +727,11 @@ class AmplicolAdapter:
                 color_accuracy,
                 str(path),
                 str(momenta_path),
+                *(
+                    [str(int(helicity)) for helicity in ordered_helicities]
+                    if ordered_helicities
+                    else []
+                ),
             ]
         )
         command.check_returncode()

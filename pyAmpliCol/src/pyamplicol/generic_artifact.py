@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
+import time
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -9,8 +11,10 @@ from typing import Any, Mapping, Sequence, cast
 
 from .color_plan import (
     GenericColorPlan,
+    LCColorSectorReplayPartition,
     build_color_plan,
     lc_line_pairing_representative_ids,
+    lc_topology_replay_partitions,
     lc_topology_replay_safe_groups,
 )
 from .color_contraction import (
@@ -26,6 +30,7 @@ from .generic_dag import (
     InteractionNode,
     contributing_color_sector_ids,
     filter_dag_to_color_sectors,
+    filter_dag_to_source_helicities,
     prune_global_helicity_flip_equivalent_roots,
     prune_dag_to_amplitude_roots,
 )
@@ -40,6 +45,10 @@ GENERIC_PROCESS_MANIFEST_KIND = "pyamplicol-generic-process-plan"
 GENERIC_PROCESS_SET_MANIFEST_KIND = "pyamplicol-generic-process-set-plan"
 GENERIC_DAG_PROCESS_ARTIFACT_KIND = "pyamplicol-generic-dag-process"
 GENERIC_DAG_PROCESS_SET_ARTIFACT_KIND = "pyamplicol-generic-dag-process-set"
+GENERIC_LC_REPLAY_PARTITION_ARTIFACT_KIND = (
+    "pyamplicol-lc-replay-partition-process"
+)
+LC_SECTOR_SELECTOR_PARAMETER = "runtime.lc_sector_id"
 
 _FULL_COLOR_PLAN_SERIALIZATION_SECTOR_LIMIT = 1000
 _NUMERICAL_REWRITE_VALIDATION_SAMPLE_LIMIT = 3
@@ -79,6 +88,7 @@ class GenericProcessManifest:
         self,
         *,
         selected_color_sector_ids: set[int] | None = None,
+        enable_lc_sector_runtime_selector: bool = True,
     ) -> dict[str, object]:
         lowering = _dag_lowering_status(self.dag, self.model)
         current_ready = (
@@ -146,6 +156,7 @@ class GenericProcessManifest:
                 self.dag,
                 self.model,
                 selected_color_sector_ids=selected_color_sector_ids,
+                enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
             ),
             "planning_status": {
                 "color_ready": color_ready,
@@ -224,8 +235,8 @@ def build_generic_process_manifest(
     model: Model | None = None,
     options: ProcessOptions | None = None,
     color_accuracy: str = "lc",
-    max_currents: int = 20000,
-    max_color_sectors: int = 20000,
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
     reference_color_order: Sequence[int] | None = None,
     selected_color_sector_ids: set[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
@@ -236,14 +247,22 @@ def build_generic_process_manifest(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    selected_source_helicities: Mapping[int, int] | None = None,
     numerical_filter_current: bool = True,
     numerical_current_merging: bool = True,
     numerical_current_samples: int = 10,
     numerical_current_seed: int = 12345,
     numerical_current_relative_tolerance: float = 1.0e-12,
     numerical_current_zero_tolerance: float = 1.0e-300,
+    progress_callback: Any | None = None,
 ) -> GenericProcessManifest:
     model = model or AmplicolSMLeadingColorModel()
+    _emit_generation_progress(
+        progress_callback,
+        "dag compile",
+        _process_progress_label(process),
+    )
+    phase_started = time.perf_counter()
     dag = (
         prune_dag_to_amplitude_roots(process)
         if isinstance(process, GenericDAG)
@@ -275,15 +294,72 @@ def build_generic_process_manifest(
             ).compile(process)
         )
     )
+    _emit_generation_progress(
+        progress_callback,
+        "dag ready",
+        _dag_progress_label(dag),
+        increment=1,
+        duration_s=time.perf_counter() - phase_started,
+    )
+    if selected_source_helicities:
+        _emit_generation_progress(
+            progress_callback,
+            "helicity select",
+            ",".join(
+                f"{int(label)}:{int(helicity)}"
+                for label, helicity in sorted(selected_source_helicities.items())
+            ),
+        )
+        phase_started = time.perf_counter()
+        dag = filter_dag_to_source_helicities(dag, selected_source_helicities)
+        _emit_generation_progress(
+            progress_callback,
+            "helicity selected",
+            _dag_progress_label(dag),
+            increment=1,
+            duration_s=time.perf_counter() - phase_started,
+        )
+    _emit_generation_progress(
+        progress_callback,
+        "helicity prune",
+        "global flip representatives",
+    )
+    phase_started = time.perf_counter()
     dag = prune_global_helicity_flip_equivalent_roots(dag, model)
+    _emit_generation_progress(
+        progress_callback,
+        "helicity ready",
+        _dag_progress_label(dag),
+        increment=1,
+        duration_s=time.perf_counter() - phase_started,
+    )
+    _emit_generation_progress(
+        progress_callback,
+        "current aggregate",
+        "lc gluon-flavour flow",
+    )
+    phase_started = time.perf_counter()
     dag, structural_current_aggregation = _aggregate_lc_gluon_flavour_flow_currents(
         dag,
         model,
         sample_count=numerical_current_samples,
         seed=numerical_current_seed,
     )
+    _emit_generation_progress(
+        progress_callback,
+        "aggregate ready",
+        _dag_progress_label(dag),
+        increment=1,
+        duration_s=time.perf_counter() - phase_started,
+    )
     zero_current_filter: Mapping[str, object] | None = None
     if numerical_filter_current:
+        _emit_generation_progress(
+            progress_callback,
+            "zero filter",
+            f"{numerical_current_samples} samples",
+        )
+        phase_started = time.perf_counter()
         dag, zero_current_filter = _filter_zero_currents_by_warmup(
             dag,
             model,
@@ -292,13 +368,33 @@ def build_generic_process_manifest(
             relative_tolerance=numerical_current_relative_tolerance,
             zero_tolerance=numerical_current_zero_tolerance,
         )
+        _emit_generation_progress(
+            progress_callback,
+            "zero ready",
+            _dag_progress_label(dag),
+            increment=1,
+            duration_s=time.perf_counter() - phase_started,
+        )
     else:
         zero_current_filter = {
             "enabled": False,
             "reason": "disabled by --no-numerical-filter-current",
         }
+        _emit_generation_progress(
+            progress_callback,
+            "zero filter",
+            "disabled",
+            increment=1,
+            duration_s=0.0,
+        )
     current_merging: Mapping[str, object] | None = None
     if numerical_current_merging:
+        _emit_generation_progress(
+            progress_callback,
+            "current merge",
+            f"{numerical_current_samples} samples",
+        )
+        phase_started = time.perf_counter()
         dag, current_merging = _merge_identical_currents_by_warmup(
             dag,
             model,
@@ -307,17 +403,44 @@ def build_generic_process_manifest(
             relative_tolerance=numerical_current_relative_tolerance,
             zero_tolerance=numerical_current_zero_tolerance,
         )
+        _emit_generation_progress(
+            progress_callback,
+            "merge ready",
+            _dag_progress_label(dag),
+            increment=1,
+            duration_s=time.perf_counter() - phase_started,
+        )
     else:
         current_merging = {
             "enabled": False,
             "reason": "disabled by --no-numerical-current-merging",
         }
+        _emit_generation_progress(
+            progress_callback,
+            "current merge",
+            "disabled",
+            increment=1,
+            duration_s=0.0,
+        )
+    _emit_generation_progress(
+        progress_callback,
+        "color plan",
+        dag.process.color_accuracy,
+    )
+    phase_started = time.perf_counter()
     full_color_plan = build_color_plan(
         dag.process,
         color_accuracy=dag.process.color_accuracy,
         options=options,
         max_sectors=max_color_sectors,
         reference_color_order=reference_color_order,
+    )
+    _emit_generation_progress(
+        progress_callback,
+        "color ready",
+        f"sectors={full_color_plan.sector_count}",
+        increment=1,
+        duration_s=time.perf_counter() - phase_started,
     )
     if (
         (selected_color_sector_ids is not None or reference_color_order is not None)
@@ -346,8 +469,8 @@ def build_generic_process_set_manifest(
     model: Model | None = None,
     options: ProcessOptions | None = None,
     color_accuracy: str = "lc",
-    max_currents: int = 20000,
-    max_color_sectors: int = 20000,
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
     selected_color_sector_ids: set[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
     max_lc_current_line_groups: int | None = None,
@@ -357,6 +480,7 @@ def build_generic_process_set_manifest(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    selected_source_helicities: Mapping[int, int] | None = None,
     numerical_filter_current: bool = True,
     numerical_current_merging: bool = True,
     numerical_current_samples: int = 10,
@@ -388,6 +512,7 @@ def build_generic_process_set_manifest(
             species_reachability_pruning=species_reachability_pruning,
             ignored_particle_ids=ignored_particle_ids,
             ignored_vertex_kinds=ignored_vertex_kinds,
+            selected_source_helicities=selected_source_helicities,
             numerical_filter_current=numerical_filter_current,
             numerical_current_merging=numerical_current_merging,
             numerical_current_samples=numerical_current_samples,
@@ -409,6 +534,7 @@ def build_generic_process_set_manifest(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        selected_source_helicities=selected_source_helicities,
         numerical_filter_current=numerical_filter_current,
         numerical_current_merging=numerical_current_merging,
         numerical_current_samples=numerical_current_samples,
@@ -594,6 +720,58 @@ def _lc_topology_replay_payload(
     }
 
 
+def _lc_topology_replay_payload_from_partition(
+    partition: LCColorSectorReplayPartition,
+) -> dict[str, object]:
+    replay_weights = (
+        partition.replay_weights
+        if partition.replay_weights
+        else tuple(1.0 for _ in partition.active_sector_ids)
+    )
+    sector_permutations = [
+        {
+            "sector_id": int(sector_id),
+            "weight": float(weight),
+            "label_permutation": [
+                {
+                    "representative_label": int(representative_label),
+                    "sector_label": int(sector_label),
+                }
+                for representative_label, sector_label in permutation
+            ],
+        }
+        for sector_id, permutation, weight in zip(
+            partition.active_sector_ids,
+            partition.label_permutations,
+            replay_weights,
+            strict=True,
+        )
+    ]
+    group = {
+        "representative_sector_id": int(partition.representative_sector_id),
+        "materialized_sector_id": int(partition.representative_sector_id),
+        "sector_ids": [int(sector_id) for sector_id in partition.active_sector_ids],
+        "active_sector_ids": [
+            int(sector_id) for sector_id in partition.active_sector_ids
+        ],
+        "label_permutations": [
+            [[int(left), int(right)] for left, right in permutation]
+            for permutation in partition.label_permutations
+        ],
+        "replay_weights": [float(weight) for weight in replay_weights],
+        "sector_permutations": sector_permutations,
+    }
+    return {
+        "enabled": True,
+        "mode": "external-label-permutation",
+        "normalization": "sum replayed sector raw sums before global normalization",
+        "materialized_sector_ids": [int(partition.representative_sector_id)],
+        "replayed_sector_count": len(partition.active_sector_ids),
+        "group_count": 1,
+        "groups": [group],
+    }
+
+
 def write_generic_process_manifest(
     manifest: GenericProcessManifest,
     output_dir: str | Path,
@@ -604,7 +782,11 @@ def write_generic_process_manifest(
     output_path.mkdir(parents=True, exist_ok=True)
     manifest_path = output_path / filename
     manifest_path.write_text(
-        json.dumps(_json_safe_bigints(manifest.to_json_dict()), indent=2, sort_keys=True),
+        json.dumps(
+            _json_safe_bigints(manifest.to_json_dict()),
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
         encoding="utf-8",
     )
     return manifest_path
@@ -631,6 +813,47 @@ def write_generic_process_set_manifest(
     return manifest_path
 
 
+def _emit_generation_progress(
+    progress_callback: Any | None,
+    stage: str,
+    item: object = "",
+    *,
+    increment: int = 0,
+    total: int | None = None,
+    duration_s: float | None = None,
+) -> None:
+    if progress_callback is None:
+        return
+    event: dict[str, object] = {
+        "stage": stage,
+        "item": str(item),
+    }
+    if increment:
+        event["increment"] = int(increment)
+    if total is not None:
+        event["total"] = int(total)
+    if duration_s is not None:
+        event["duration_s"] = float(duration_s)
+    progress_callback(event)
+
+
+def _process_progress_label(
+    process: str | CanonicalProcessIR | GenericDAG,
+) -> str:
+    if isinstance(process, GenericDAG):
+        return process.process.process
+    if isinstance(process, CanonicalProcessIR):
+        return process.process
+    return str(process)
+
+
+def _dag_progress_label(dag: GenericDAG) -> str:
+    return (
+        f"c={len(dag.currents)} i={len(dag.interactions)} "
+        f"r={len(dag.amplitude_roots)}"
+    )
+
+
 def write_generic_dag_process_artifact(
     process: str | CanonicalProcessIR | GenericDAG | GenericProcessManifest,
     output_dir: str | Path,
@@ -638,12 +861,13 @@ def write_generic_dag_process_artifact(
     model: Model | None = None,
     options: ProcessOptions | None = None,
     color_accuracy: str = "lc",
-    max_currents: int = 50000,
-    max_color_sectors: int = 20000,
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
     evaluator_backend: str = "compiled-complex",
     compiled_preset: str = "runtime-o3",
     batch_size: int = 64,
     emit_stage_evaluator_artifacts: bool = False,
+    skip_main_stage_evaluator_artifacts: bool = False,
     stage_evaluator_compiler: Any | None = None,
     symbolica_settings: Any | None = None,
     merge_evaluators_strategy: bool = False,
@@ -651,8 +875,11 @@ def write_generic_dag_process_artifact(
     verbose_evaluator_build: bool = False,
     jit_compile: bool = True,
     progress_callback: Any | None = None,
+    write_generic_plan: bool = True,
+    enable_lc_sector_runtime_selector: bool | None = None,
     reference_color_order: Sequence[int] | None = None,
     selected_color_sector_ids: set[int] | None = None,
+    runtime_lc_sector_ids: set[int] | None = None,
     lc_topology_replay: bool = False,
     max_coupling_orders: Mapping[str, int] | None = None,
     max_lc_current_line_groups: int | None = None,
@@ -662,6 +889,7 @@ def write_generic_dag_process_artifact(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    selected_source_helicities: Mapping[int, int] | None = None,
     numerical_filter_current: bool = True,
     numerical_current_merging: bool = True,
     numerical_current_samples: int = 10,
@@ -677,6 +905,8 @@ def write_generic_dag_process_artifact(
     evaluators loadable by Rusticol schema-v2 execution.
     """
 
+    if enable_lc_sector_runtime_selector is None:
+        enable_lc_sector_runtime_selector = selected_color_sector_ids is None
     generic_manifest = (
         process
         if isinstance(process, GenericProcessManifest)
@@ -697,6 +927,47 @@ def write_generic_dag_process_artifact(
             species_reachability_pruning=species_reachability_pruning,
             ignored_particle_ids=ignored_particle_ids,
             ignored_vertex_kinds=ignored_vertex_kinds,
+            selected_source_helicities=selected_source_helicities,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
+            progress_callback=progress_callback,
+        )
+    )
+    if isinstance(process, GenericProcessManifest):
+        _emit_generation_progress(
+            progress_callback,
+            "dag ready",
+            _dag_progress_label(generic_manifest.dag),
+            increment=1,
+        )
+    output_path = Path(output_dir).expanduser()
+    output_path.mkdir(parents=True, exist_ok=True)
+    if skip_main_stage_evaluator_artifacts:
+        _emit_generation_progress(
+            progress_callback,
+            "main artifact",
+            "compact manifest",
+        )
+        payload = _generic_dag_process_compact_artifact_payload(
+            generic_manifest,
+            evaluator_backend=evaluator_backend,
+            compiled_preset=compiled_preset,
+            batch_size=batch_size,
+            stage_local_parameter_layout=stage_local_parameter_layout,
+            reference_color_order=reference_color_order,
+            selected_color_sector_ids=selected_color_sector_ids,
+            max_coupling_orders=max_coupling_orders,
+            max_lc_current_line_groups=max_lc_current_line_groups,
+            max_quark_pairs=max_quark_pairs,
+            closure_side_mask_pruning=closure_side_mask_pruning,
+            color_order_mask_pruning=color_order_mask_pruning,
+            species_reachability_pruning=species_reachability_pruning,
+            ignored_particle_ids=ignored_particle_ids,
+            ignored_vertex_kinds=ignored_vertex_kinds,
             numerical_filter_current=numerical_filter_current,
             numerical_current_merging=numerical_current_merging,
             numerical_current_samples=numerical_current_samples,
@@ -704,29 +975,309 @@ def write_generic_dag_process_artifact(
             numerical_current_relative_tolerance=numerical_current_relative_tolerance,
             numerical_current_zero_tolerance=numerical_current_zero_tolerance,
         )
+        _emit_generation_progress(
+            progress_callback,
+            "main artifact",
+            "compact ready",
+            increment=1,
+        )
+    else:
+        _emit_generation_progress(
+            progress_callback,
+            "main plan",
+            "serialize" if write_generic_plan else "skipped",
+        )
+        if write_generic_plan:
+            phase_started = time.perf_counter()
+            plan_path = write_generic_process_manifest(generic_manifest, output_path)
+            plan_path_name: str | None = plan_path.name
+            _emit_generation_progress(
+                progress_callback,
+                "main plan",
+                plan_path.name,
+                increment=1,
+                duration_s=time.perf_counter() - phase_started,
+            )
+        else:
+            plan_path_name = None
+            _emit_generation_progress(
+                progress_callback,
+                "main plan",
+                "skipped",
+                increment=1,
+                duration_s=0.0,
+            )
+        phase_started = time.perf_counter()
+        payload = _generic_dag_process_artifact_payload(
+            generic_manifest,
+            plan_path=plan_path_name,
+            evaluator_backend=evaluator_backend,
+            compiled_preset=compiled_preset,
+            batch_size=batch_size,
+            stage_evaluator_artifact_dir=(
+                output_path if emit_stage_evaluator_artifacts else None
+            ),
+            stage_evaluator_compiler=stage_evaluator_compiler,
+            symbolica_settings=symbolica_settings,
+            merge_evaluators_strategy=merge_evaluators_strategy,
+            stage_local_parameter_layout=stage_local_parameter_layout,
+            verbose_evaluator_build=verbose_evaluator_build,
+            jit_compile=jit_compile,
+            progress_callback=progress_callback,
+            reference_color_order=reference_color_order,
+            selected_color_sector_ids=selected_color_sector_ids,
+            enable_lc_sector_runtime_selector=bool(enable_lc_sector_runtime_selector),
+            lc_topology_replay=lc_topology_replay,
+            max_coupling_orders=max_coupling_orders,
+            max_lc_current_line_groups=max_lc_current_line_groups,
+            max_quark_pairs=max_quark_pairs,
+            closure_side_mask_pruning=closure_side_mask_pruning,
+            color_order_mask_pruning=color_order_mask_pruning,
+            species_reachability_pruning=species_reachability_pruning,
+            ignored_particle_ids=ignored_particle_ids,
+            ignored_vertex_kinds=ignored_vertex_kinds,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
+        )
+        _emit_generation_progress(
+            progress_callback,
+            "main artifact",
+            "runtime ready" if payload.get("runtime_schema") else "metadata ready",
+            increment=1,
+            duration_s=time.perf_counter() - phase_started,
+        )
+    sidecar_metadata: list[dict[str, object]] = []
+    if runtime_lc_sector_ids and generic_manifest.dag.process.color_accuracy == "lc":
+        _emit_generation_progress(
+            progress_callback,
+            "runtime sidecar",
+            _runtime_lc_sector_artifact_key(runtime_lc_sector_ids),
+        )
+        sidecar_dir = (
+            output_path
+            / "runtime_lc_sectors"
+            / _runtime_lc_sector_artifact_key(runtime_lc_sector_ids)
+        )
+        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        phase_started = time.perf_counter()
+        sidecar_manifest = _runtime_manifest_for_color_sectors(
+            generic_manifest,
+            runtime_lc_sector_ids,
+        )
+        _emit_generation_progress(
+            progress_callback,
+            "sidecar dag",
+            _dag_progress_label(sidecar_manifest.dag),
+            increment=1,
+            duration_s=time.perf_counter() - phase_started,
+        )
+        if write_generic_plan:
+            phase_started = time.perf_counter()
+            sidecar_plan_path = write_generic_process_manifest(
+                sidecar_manifest,
+                sidecar_dir,
+            )
+            sidecar_plan_path_name: str | None = sidecar_plan_path.name
+            _emit_generation_progress(
+                progress_callback,
+                "sidecar plan",
+                sidecar_plan_path.name,
+                increment=1,
+                duration_s=time.perf_counter() - phase_started,
+            )
+        else:
+            sidecar_plan_path_name = None
+            _emit_generation_progress(
+                progress_callback,
+                "sidecar plan",
+                "skipped",
+                increment=1,
+                duration_s=0.0,
+            )
+        phase_started = time.perf_counter()
+        sidecar_payload = _generic_dag_process_artifact_payload(
+            sidecar_manifest,
+            plan_path=sidecar_plan_path_name,
+            evaluator_backend=evaluator_backend,
+            compiled_preset=compiled_preset,
+            batch_size=batch_size,
+            stage_evaluator_artifact_dir=(
+                sidecar_dir if emit_stage_evaluator_artifacts else None
+            ),
+            stage_evaluator_compiler=stage_evaluator_compiler,
+            symbolica_settings=symbolica_settings,
+            merge_evaluators_strategy=merge_evaluators_strategy,
+            stage_local_parameter_layout=stage_local_parameter_layout,
+            verbose_evaluator_build=verbose_evaluator_build,
+            jit_compile=jit_compile,
+            progress_callback=progress_callback,
+            reference_color_order=reference_color_order,
+            selected_color_sector_ids=None,
+            enable_lc_sector_runtime_selector=False,
+            lc_topology_replay=lc_topology_replay,
+            max_coupling_orders=max_coupling_orders,
+            max_lc_current_line_groups=max_lc_current_line_groups,
+            max_quark_pairs=max_quark_pairs,
+            closure_side_mask_pruning=closure_side_mask_pruning,
+            color_order_mask_pruning=color_order_mask_pruning,
+            species_reachability_pruning=species_reachability_pruning,
+            ignored_particle_ids=ignored_particle_ids,
+            ignored_vertex_kinds=ignored_vertex_kinds,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
+        )
+        sidecar_manifest_path = sidecar_dir / "process_manifest.json"
+        sidecar_manifest_path.write_text(
+            json.dumps(sidecar_payload, separators=(",", ":"), sort_keys=True),
+            encoding="utf-8",
+        )
+        _emit_generation_progress(
+            progress_callback,
+            "sidecar artifact",
+            "process_manifest.json",
+            increment=1,
+            duration_s=time.perf_counter() - phase_started,
+        )
+        (sidecar_dir / "check_standalone.py").write_text(
+            _GENERIC_DAG_CHECK_STANDALONE,
+            encoding="utf-8",
+        )
+        _write_generic_validation_momenta(generic_manifest, sidecar_dir)
+        sidecar_compiled = cast(dict[str, Any], sidecar_payload["compiled"])
+        sidecar_metadata.append(
+            {
+                "color_sector_ids": sorted(
+                    int(sector_id) for sector_id in runtime_lc_sector_ids
+                ),
+                "path": str(sidecar_dir.relative_to(output_path)),
+                "kind": "selected-lc-runtime-sidecar",
+                "runtime_available": bool(sidecar_compiled.get("runtime_available")),
+                "runtime_selector": "none-specialized-runtime-artifact",
+            }
+        )
+    if sidecar_metadata:
+        compiled_payload = cast(dict[str, Any], payload["compiled"])
+        compiled_payload["runtime_lc_sector_artifacts"] = sidecar_metadata
+    manifest_path = output_path / "process_manifest.json"
+    phase_started = time.perf_counter()
+    manifest_path.write_text(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
+        encoding="utf-8",
     )
+    _emit_generation_progress(
+        progress_callback,
+        "manifest",
+        "process_manifest.json",
+        increment=1,
+        duration_s=time.perf_counter() - phase_started,
+    )
+    (output_path / "check_standalone.py").write_text(
+        _GENERIC_DAG_CHECK_STANDALONE,
+        encoding="utf-8",
+    )
+    _write_generic_validation_momenta(generic_manifest, output_path)
+    return manifest_path, payload
+
+
+def write_lc_topology_replay_partition_artifact(
+    process: str | CanonicalProcessIR,
+    output_dir: str | Path,
+    *,
+    model: Model | None = None,
+    options: ProcessOptions | None = None,
+    color_accuracy: str = "lc",
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
+    evaluator_backend: str = "compiled-complex",
+    compiled_preset: str = "runtime-o3",
+    batch_size: int = 64,
+    emit_stage_evaluator_artifacts: bool = False,
+    skip_main_stage_evaluator_artifacts: bool = False,
+    stage_evaluator_compiler: Any | None = None,
+    symbolica_settings: Any | None = None,
+    merge_evaluators_strategy: bool = False,
+    stage_local_parameter_layout: bool = False,
+    verbose_evaluator_build: bool = False,
+    jit_compile: bool = True,
+    progress_callback: Any | None = None,
+    write_generic_plan: bool = True,
+    reference_color_order: Sequence[int] | None = None,
+    max_coupling_orders: Mapping[str, int] | None = None,
+    max_lc_current_line_groups: int | None = None,
+    max_quark_pairs: int | None = None,
+    closure_side_mask_pruning: bool = True,
+    color_order_mask_pruning: bool = True,
+    species_reachability_pruning: bool = True,
+    ignored_particle_ids: Sequence[int] | None = None,
+    ignored_vertex_kinds: Sequence[int] | None = None,
+    selected_source_helicities: Mapping[int, int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
+) -> tuple[Path, dict[str, object]]:
+    """Write an LC all-ordering artifact as exact replay partitions.
+
+    Each representative sidecar is a normal selected-sector schema-v2 runtime.
+    Its manifest is then annotated with the subset of LC sectors that can be
+    replayed by external-label permutation while preserving the physical
+    initial-state labels.  This avoids materializing a monolithic all-sector DAG
+    and keeps every generated process output available for later re-timing.
+    """
+
+    if color_accuracy != "lc":
+        raise ValueError("LC replay partition artifacts require color_accuracy='lc'")
+    model = model or AmplicolSMLeadingColorModel()
     output_path = Path(output_dir).expanduser()
     output_path.mkdir(parents=True, exist_ok=True)
-    plan_path = write_generic_process_manifest(generic_manifest, output_path)
-    payload = _generic_dag_process_artifact_payload(
-        generic_manifest,
-        plan_path=plan_path.name,
-        evaluator_backend=evaluator_backend,
-        compiled_preset=compiled_preset,
-        batch_size=batch_size,
-        stage_evaluator_artifact_dir=(
-            output_path if emit_stage_evaluator_artifacts else None
-        ),
-        stage_evaluator_compiler=stage_evaluator_compiler,
-        symbolica_settings=symbolica_settings,
-        merge_evaluators_strategy=merge_evaluators_strategy,
-        stage_local_parameter_layout=stage_local_parameter_layout,
-        verbose_evaluator_build=verbose_evaluator_build,
-        jit_compile=jit_compile,
-        progress_callback=progress_callback,
+    _emit_generation_progress(
+        progress_callback,
+        "lc replay plan",
+        _process_progress_label(process),
+    )
+    phase_started = time.perf_counter()
+    color_plan = build_color_plan(
+        process,
+        color_accuracy="lc",
+        options=options,
+        max_sectors=max_color_sectors,
         reference_color_order=reference_color_order,
-        selected_color_sector_ids=selected_color_sector_ids,
-        lc_topology_replay=lc_topology_replay,
+    )
+    partitions = lc_topology_replay_partitions(color_plan)
+    _emit_generation_progress(
+        progress_callback,
+        "lc replay plan",
+        f"partitions={len(partitions)} sectors={color_plan.sector_count}",
+        increment=1,
+        duration_s=time.perf_counter() - phase_started,
+    )
+    if color_plan.truncated:
+        raise ValueError(
+            "LC replay partition generation requires the complete colour plan; "
+            f"the current plan was truncated at max_color_sectors={max_color_sectors}"
+        )
+    if not partitions:
+        raise ValueError(
+            "no LC replay partitions are available for this process; use normal "
+            "generic DAG generation or a selected LC sector instead"
+        )
+
+    representative_root = output_path / "lc_topology_replay_representatives"
+    representative_root.mkdir(parents=True, exist_ok=True)
+    generation_metadata = _generic_process_set_generation_metadata(
+        options=options,
+        selected_color_sector_ids=None,
+        lc_topology_replay=True,
         max_coupling_orders=max_coupling_orders,
         max_lc_current_line_groups=max_lc_current_line_groups,
         max_quark_pairs=max_quark_pairs,
@@ -735,6 +1286,7 @@ def write_generic_dag_process_artifact(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        selected_source_helicities=selected_source_helicities,
         numerical_filter_current=numerical_filter_current,
         numerical_current_merging=numerical_current_merging,
         numerical_current_samples=numerical_current_samples,
@@ -742,16 +1294,211 @@ def write_generic_dag_process_artifact(
         numerical_current_relative_tolerance=numerical_current_relative_tolerance,
         numerical_current_zero_tolerance=numerical_current_zero_tolerance,
     )
+    representative_artifacts: list[dict[str, object]] = []
+    total_counts = Counter()
+    replayed_root_count = 0
+    runtime_available = True
+    runtime_unavailable_messages: list[str] = []
+    first_sidecar_dir: Path | None = None
+    for index, partition in enumerate(partitions, start=1):
+        representative_id = int(partition.representative_sector_id)
+        _emit_generation_progress(
+            progress_callback,
+            "lc replay representative",
+            f"{index}/{len(partitions)} sector={representative_id}",
+        )
+        sidecar_dir = representative_root / f"sector_{representative_id}"
+        sidecar_manifest_path, sidecar_payload = write_generic_dag_process_artifact(
+            process,
+            sidecar_dir,
+            model=model,
+            options=options,
+            color_accuracy="lc",
+            max_currents=max_currents,
+            max_color_sectors=max_color_sectors,
+            evaluator_backend=evaluator_backend,
+            compiled_preset=compiled_preset,
+            batch_size=batch_size,
+            emit_stage_evaluator_artifacts=emit_stage_evaluator_artifacts,
+            skip_main_stage_evaluator_artifacts=skip_main_stage_evaluator_artifacts,
+            stage_evaluator_compiler=stage_evaluator_compiler,
+            symbolica_settings=symbolica_settings,
+            merge_evaluators_strategy=merge_evaluators_strategy,
+            stage_local_parameter_layout=stage_local_parameter_layout,
+            verbose_evaluator_build=verbose_evaluator_build,
+            jit_compile=jit_compile,
+            progress_callback=progress_callback,
+            write_generic_plan=write_generic_plan,
+            enable_lc_sector_runtime_selector=False,
+            reference_color_order=reference_color_order,
+            selected_color_sector_ids={representative_id},
+            runtime_lc_sector_ids=None,
+            lc_topology_replay=False,
+            max_coupling_orders=max_coupling_orders,
+            max_lc_current_line_groups=max_lc_current_line_groups,
+            max_quark_pairs=max_quark_pairs,
+            closure_side_mask_pruning=closure_side_mask_pruning,
+            color_order_mask_pruning=color_order_mask_pruning,
+            species_reachability_pruning=species_reachability_pruning,
+            ignored_particle_ids=ignored_particle_ids,
+            ignored_vertex_kinds=ignored_vertex_kinds,
+            selected_source_helicities=selected_source_helicities,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
+        )
+        replay_payload = _lc_topology_replay_payload_from_partition(partition)
+        compiled_payload = cast(dict[str, Any], sidecar_payload["compiled"])
+        compiled_payload["lc_topology_replay"] = replay_payload
+        sidecar_payload["runtime_lc_topology_replay"] = replay_payload
+        sidecar_manifest_path.write_text(
+            json.dumps(sidecar_payload, separators=(",", ":"), sort_keys=True),
+            encoding="utf-8",
+        )
+        if first_sidecar_dir is None:
+            first_sidecar_dir = sidecar_dir
+        sidecar_runtime_available = bool(compiled_payload.get("runtime_available"))
+        if not sidecar_runtime_available:
+            runtime_available = False
+            message = compiled_payload.get("runtime_unavailable_message")
+            if isinstance(message, str) and message:
+                runtime_unavailable_messages.append(message)
+        dag_summary = sidecar_payload.get("dag_summary")
+        if isinstance(dag_summary, Mapping):
+            for key in (
+                "current_count",
+                "source_count",
+                "interaction_count",
+                "amplitude_root_count",
+            ):
+                value = dag_summary.get(key)
+                if isinstance(value, int):
+                    total_counts[key] += value
+            root_count = dag_summary.get("amplitude_root_count")
+            if isinstance(root_count, int):
+                replayed_root_count += root_count * len(partition.active_sector_ids)
+        representative_artifacts.append(
+            {
+                "representative_sector_id": representative_id,
+                "active_sector_ids": [
+                    int(sector_id) for sector_id in partition.active_sector_ids
+                ],
+                "replayed_sector_count": len(partition.active_sector_ids),
+                "path": str(sidecar_dir.relative_to(output_path)),
+                "manifest": str(sidecar_manifest_path.relative_to(output_path)),
+                "kind": GENERIC_DAG_PROCESS_ARTIFACT_KIND,
+                "artifact_class": "generic-dag-schema-v2",
+                "runtime_available": sidecar_runtime_available,
+                "dag_summary": dag_summary if isinstance(dag_summary, Mapping) else {},
+                "lc_topology_replay": replay_payload,
+            }
+        )
+        _emit_generation_progress(
+            progress_callback,
+            "lc replay representative",
+            f"{index}/{len(partitions)} ready",
+            increment=1,
+        )
+    if first_sidecar_dir is not None:
+        validation_source = first_sidecar_dir / "validation_momenta.json"
+        if validation_source.exists():
+            shutil.copy2(validation_source, output_path / "validation_momenta.json")
+
+    process_ir = color_plan.process
+    payload: dict[str, object] = {
+        "schema_version": GENERIC_PROCESS_SCHEMA_VERSION,
+        "kind": GENERIC_LC_REPLAY_PARTITION_ARTIFACT_KIND,
+        "artifact_class": "lc-replay-partition-schema-v2",
+        "process": process_ir.process,
+        "key": process_ir.key,
+        "color_accuracy": "lc",
+        "model": {
+            "name": model.name,
+            "vertex_lowering_coverage": (
+                model.vertex_lowering_coverage().to_json_dict()
+            ),
+        },
+        "external_pdg_order": [
+            *process_ir.initial_pdgs,
+            *process_ir.final_pdgs,
+        ],
+        "outgoing_pdg_order": list(process_ir.outgoing_pdgs),
+        "process_ir": process_ir.to_json_dict(),
+        "color_plan": color_plan.to_json_dict(),
+        "generic_generation": generation_metadata,
+        "planning_status": {
+            "color_ready": color_plan.ready_for_requested_colour,
+            "color_sector_count": color_plan.sector_count,
+            "color_truncated": color_plan.truncated,
+            "generic_evaluator_ready": runtime_available,
+            "lc_replay_partition_count": len(partitions),
+        },
+        "lowering_status": {
+            "current_color_sector_count": len(partitions),
+            "amplitude_color_sector_count": color_plan.sector_count,
+            "replay_partition_count": len(partitions),
+            "replayed_color_sector_count": sum(
+                len(partition.active_sector_ids) for partition in partitions
+            ),
+            "full_tensor_network_ready": runtime_available,
+        },
+        "compiled": {
+            "kind": "lc-topology-replay-partition",
+            "runtime_available": runtime_available,
+            "runtime_unavailable_message": (
+                None
+                if runtime_available
+                else "; ".join(sorted(set(runtime_unavailable_messages)))
+                or "one or more LC replay representative artifacts are unavailable"
+            ),
+            "requested_evaluator_backend": evaluator_backend,
+            "requested_compiled_preset": compiled_preset,
+            "batch_size": batch_size,
+            "stage_local_parameter_layout": stage_local_parameter_layout,
+            "representative_count": len(representative_artifacts),
+            "replayed_sector_count": sum(
+                len(partition.active_sector_ids) for partition in partitions
+            ),
+            "representative_artifacts": representative_artifacts,
+        },
+        "dag_summary": {
+            "current_count": int(total_counts["current_count"]),
+            "source_count": int(total_counts["source_count"]),
+            "interaction_count": int(total_counts["interaction_count"]),
+            "amplitude_root_count": int(total_counts["amplitude_root_count"]),
+            "materialized_color_sector_count": len(partitions),
+            "replayed_color_sector_count": sum(
+                len(partition.active_sector_ids) for partition in partitions
+            ),
+            "truncated": False,
+        },
+        "full_dag_summary": {
+            "current_count": int(total_counts["current_count"]),
+            "source_count": int(total_counts["source_count"]),
+            "interaction_count": int(total_counts["interaction_count"]),
+            "amplitude_root_count": replayed_root_count,
+            "materialized_amplitude_root_count": int(
+                total_counts["amplitude_root_count"]
+            ),
+            "materialized_color_sector_count": len(partitions),
+            "replayed_color_sector_count": sum(
+                len(partition.active_sector_ids) for partition in partitions
+            ),
+            "truncated": False,
+        },
+    }
     manifest_path = output_path / "process_manifest.json"
     manifest_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True),
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
         encoding="utf-8",
     )
     (output_path / "check_standalone.py").write_text(
         _GENERIC_DAG_CHECK_STANDALONE,
         encoding="utf-8",
     )
-    _write_generic_validation_momenta(generic_manifest, output_path)
     return manifest_path, payload
 
 
@@ -975,12 +1722,13 @@ def write_generic_dag_process_set_artifact(
     *,
     model: Model | None = None,
     options: ProcessOptions | None = None,
-    max_currents: int = 50000,
-    max_color_sectors: int = 20000,
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
     evaluator_backend: str = "compiled-complex",
     compiled_preset: str = "runtime-o3",
     batch_size: int = 64,
     emit_stage_evaluator_artifacts: bool = False,
+    skip_main_stage_evaluator_artifacts: bool = False,
     stage_evaluator_compiler: Any | None = None,
     symbolica_settings: Any | None = None,
     merge_evaluators_strategy: bool = False,
@@ -988,8 +1736,10 @@ def write_generic_dag_process_set_artifact(
     verbose_evaluator_build: bool = False,
     jit_compile: bool = True,
     progress_callback: Any | None = None,
+    enable_lc_sector_runtime_selector: bool | None = None,
     reference_color_order: Sequence[int] | None = None,
     selected_color_sector_ids: set[int] | None = None,
+    runtime_lc_sector_ids: set[int] | None = None,
     lc_topology_replay: bool = False,
     max_coupling_orders: Mapping[str, int] | None = None,
     max_lc_current_line_groups: int | None = None,
@@ -999,6 +1749,7 @@ def write_generic_dag_process_set_artifact(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Sequence[int] | None = None,
     ignored_vertex_kinds: Sequence[int] | None = None,
+    selected_source_helicities: Mapping[int, int] | None = None,
     numerical_filter_current: bool = True,
     numerical_current_merging: bool = True,
     numerical_current_samples: int = 10,
@@ -1020,6 +1771,7 @@ def write_generic_dag_process_set_artifact(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        selected_source_helicities=selected_source_helicities,
         numerical_filter_current=numerical_filter_current,
         numerical_current_merging=numerical_current_merging,
         numerical_current_samples=numerical_current_samples,
@@ -1042,6 +1794,7 @@ def write_generic_dag_process_set_artifact(
             compiled_preset=compiled_preset,
             batch_size=batch_size,
             emit_stage_evaluator_artifacts=emit_stage_evaluator_artifacts,
+            skip_main_stage_evaluator_artifacts=skip_main_stage_evaluator_artifacts,
             stage_evaluator_compiler=stage_evaluator_compiler,
             symbolica_settings=symbolica_settings,
             merge_evaluators_strategy=merge_evaluators_strategy,
@@ -1049,7 +1802,9 @@ def write_generic_dag_process_set_artifact(
             verbose_evaluator_build=verbose_evaluator_build,
             jit_compile=jit_compile,
             progress_callback=progress_callback,
+            enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
             selected_color_sector_ids=selected_color_sector_ids,
+            runtime_lc_sector_ids=runtime_lc_sector_ids,
             lc_topology_replay=lc_topology_replay,
             max_coupling_orders=max_coupling_orders,
             max_lc_current_line_groups=max_lc_current_line_groups,
@@ -1059,6 +1814,7 @@ def write_generic_dag_process_set_artifact(
             species_reachability_pruning=species_reachability_pruning,
             ignored_particle_ids=ignored_particle_ids,
             ignored_vertex_kinds=ignored_vertex_kinds,
+            selected_source_helicities=selected_source_helicities,
             numerical_filter_current=numerical_filter_current,
             numerical_current_merging=numerical_current_merging,
             numerical_current_samples=numerical_current_samples,
@@ -1126,6 +1882,7 @@ def _generic_process_set_generation_metadata(
     species_reachability_pruning: bool,
     ignored_particle_ids: Sequence[int] | None,
     ignored_vertex_kinds: Sequence[int] | None,
+    selected_source_helicities: Mapping[int, int] | None,
     numerical_filter_current: bool,
     numerical_current_merging: bool,
     numerical_current_samples: int,
@@ -1162,6 +1919,16 @@ def _generic_process_set_generation_metadata(
                 None
                 if selected_color_sector_ids is None
                 else sorted(int(sector_id) for sector_id in selected_color_sector_ids)
+            ),
+            "selected_source_helicities": (
+                None
+                if selected_source_helicities is None
+                else {
+                    str(int(label)): int(helicity)
+                    for label, helicity in sorted(
+                        selected_source_helicities.items()
+                    )
+                }
             ),
             "zero_current_filter": {
                 "enabled": bool(numerical_filter_current),
@@ -1760,7 +2527,12 @@ def _evaluate_current_component_maxima(
     model: Model,
     points: Sequence[Sequence[ExternalMomentum]],
 ) -> dict[int, float]:
-    maxima, _ = _evaluate_current_warmup(dag, model, points)
+    maxima, _ = _evaluate_current_warmup(
+        dag,
+        model,
+        points,
+        collect_signatures=False,
+    )
     return maxima
 
 
@@ -1768,6 +2540,8 @@ def _evaluate_current_warmup(
     dag: GenericDAG,
     model: Model,
     points: Sequence[Sequence[ExternalMomentum]],
+    *,
+    collect_signatures: bool = True,
 ) -> tuple[
     dict[int, float],
     dict[int, tuple[tuple[complex, ...], ...]],
@@ -1786,25 +2560,51 @@ def _evaluate_current_warmup(
     layout = cast(dict[str, Any], schema["parameter_layout"])
     value_count = int(layout["value_component_count"])
     momentum_count = int(layout["momentum_parameter_count"])
+    stage_runtime: list[
+        tuple[
+            dict[str, Any],
+            tuple[int, ...],
+            dict[int, list[dict[str, Any]]],
+            dict[int, list[dict[str, Any]]],
+        ]
+    ] = []
+    for stage_obj in stages:
+        stage = cast(dict[str, Any], stage_obj)
+        slots_by_current: dict[int, list[dict[str, Any]]] = {}
+        for slot_id in cast(list[Any], stage["output_value_slot_ids"]):
+            slot = value_slots[int(slot_id)]
+            slots_by_current.setdefault(int(slot["current_id"]), []).append(slot)
+        interactions_by_result: dict[int, list[dict[str, Any]]] = {}
+        for raw in cast(list[Any], stage["interactions"]):
+            interaction = cast(dict[str, Any], raw)
+            interactions_by_result.setdefault(
+                int(interaction["result_current_id"]),
+                [],
+            ).append(interaction)
+        stage_runtime.append(
+            (
+                stage,
+                tuple(sorted(interactions_by_result)),
+                interactions_by_result,
+                slots_by_current,
+            )
+        )
     maxima = {current.id: 0.0 for current in dag.currents}
-    signature_parts: dict[int, list[tuple[complex, ...]]] = {
-        current.id: [] for current in dag.currents
-    }
+    signature_parts: dict[int, list[tuple[complex, ...]]] = (
+        {current.id: [] for current in dag.currents} if collect_signatures else {}
+    )
     for point in points:
         values = [0j for _ in range(value_count)]
         momenta = [0j for _ in range(momentum_count)]
         _fill_warmup_sources(schema, model, values, point)
         _fill_warmup_momenta(schema, momenta, point)
-        for stage_obj in stages:
-            stage = cast(dict[str, Any], stage_obj)
-            interactions_by_result: dict[int, list[dict[str, Any]]] = {}
-            for raw in cast(list[Any], stage["interactions"]):
-                interaction = cast(dict[str, Any], raw)
-                interactions_by_result.setdefault(
-                    int(interaction["result_current_id"]),
-                    [],
-                ).append(interaction)
-            for current_id in sorted(interactions_by_result):
+        for (
+            _stage,
+            current_ids,
+            interactions_by_result,
+            output_value_slots_by_current,
+        ) in stage_runtime:
+            for current_id in current_ids:
                 current_slot = current_slots[current_id]
                 dimension = int(current_slot["dimension"])
                 total = tuple(0j for _ in range(dimension))
@@ -1821,11 +2621,9 @@ def _evaluate_current_warmup(
                     )
                     total = _sum_components(total, contribution)
                 total_signature = tuple(complex(component) for component in total)
-                signature_parts[current_id].append(total_signature)
-                for slot_id in cast(list[Any], stage["output_value_slot_ids"]):
-                    slot = value_slots[int(slot_id)]
-                    if int(slot["current_id"]) != current_id:
-                        continue
+                if collect_signatures:
+                    signature_parts[current_id].append(total_signature)
+                for slot in output_value_slots_by_current.get(current_id, ()):
                     components = (
                         model.propagator_component_expression(
                             int(current_slot["particle_id"]),
@@ -2861,10 +3659,270 @@ def _schema_list(value: object) -> list[Any]:
     return value
 
 
+def _runtime_lc_sector_artifact_key(sector_ids: set[int]) -> str:
+    return "lc_" + "_".join(str(sector_id) for sector_id in sorted(sector_ids))
+
+
+def _generic_manifest_status_payloads(
+    manifest: GenericProcessManifest,
+    *,
+    include_color_sector_summaries: bool = True,
+) -> tuple[dict[str, object], dict[str, object]]:
+    lowering = _dag_lowering_status(
+        manifest.dag,
+        manifest.model,
+        include_color_sector_summaries=include_color_sector_summaries,
+    )
+    current_ready = (
+        manifest.dag.has_amplitudes
+        and not lowering["pending_vertex_kinds"]
+        and not lowering["unimplemented_vertex_kinds"]
+        and not lowering["pending_propagator_kernels"]
+        and not lowering["unimplemented_propagator_kernels"]
+        and not manifest.dag.truncated
+    )
+    color_ready = manifest.color_plan.ready_for_requested_colour
+    planning_status = {
+        "color_ready": color_ready,
+        "color_sector_count": manifest.color_plan.sector_count,
+        "color_truncated": manifest.color_plan.truncated,
+        "idenso_required": manifest.color_plan.idenso_required,
+        "current_ready": current_ready,
+        "has_closure": manifest.dag.has_amplitudes,
+        "has_amplitude_roots": manifest.dag.has_amplitudes,
+        "generic_evaluator_ready": color_ready and current_ready,
+    }
+    lowering_status = {
+        **lowering,
+        "closure_count": len(manifest.dag.amplitude_roots),
+        "amplitude_root_count": len(manifest.dag.amplitude_roots),
+        "truncated": manifest.dag.truncated,
+        "has_closure": manifest.dag.has_amplitudes,
+        "has_amplitude_roots": manifest.dag.has_amplitudes,
+        "full_tensor_network_ready": current_ready,
+    }
+    return planning_status, lowering_status
+
+
+def _generation_filters_payload(
+    manifest: GenericProcessManifest,
+) -> dict[str, object]:
+    return {
+        "structural_current_aggregation": dict(
+            manifest.structural_current_aggregation
+            or {
+                "enabled": False,
+                "reason": "structural current aggregation was not requested",
+            }
+        ),
+        "zero_current": dict(
+            manifest.zero_current_filter
+            or {
+                "enabled": False,
+                "reason": "zero-current warmup filter was not requested",
+            }
+        ),
+        "current_merging": dict(
+            manifest.current_merging
+            or {
+                "enabled": False,
+                "reason": "numerical current merging was not requested",
+            }
+        ),
+    }
+
+
+def _generic_pruning_payload(
+    manifest: GenericProcessManifest,
+    *,
+    max_coupling_orders: Mapping[str, int] | None,
+    max_lc_current_line_groups: int | None,
+    max_quark_pairs: int | None,
+    closure_side_mask_pruning: bool,
+    color_order_mask_pruning: bool,
+    species_reachability_pruning: bool,
+    ignored_particle_ids: Sequence[int] | None,
+    ignored_vertex_kinds: Sequence[int] | None,
+    numerical_filter_current: bool,
+    numerical_current_merging: bool,
+    numerical_current_samples: int,
+    numerical_current_seed: int,
+    numerical_current_relative_tolerance: float,
+    numerical_current_zero_tolerance: float,
+    reference_color_order: Sequence[int] | None,
+) -> dict[str, object]:
+    return {
+        "max_coupling_orders": dict(max_coupling_orders or {}),
+        "max_lc_current_line_groups": max_lc_current_line_groups,
+        "max_quark_pairs": max_quark_pairs,
+        "closure_side_mask_pruning": closure_side_mask_pruning,
+        "color_order_mask_pruning": color_order_mask_pruning,
+        "species_reachability_pruning": species_reachability_pruning,
+        "ignored_particle_ids": list(ignored_particle_ids or ()),
+        "ignored_vertex_kinds": list(ignored_vertex_kinds or ()),
+        "structural_current_aggregation": dict(
+            manifest.structural_current_aggregation
+            or {
+                "enabled": manifest.dag.process.color_accuracy == "lc",
+                "mode": "lc-gluon-flavour-flow-aggregation",
+                "reason": "structural current aggregation was not run",
+            }
+        ),
+        "zero_current_filter": dict(
+            manifest.zero_current_filter
+            or {
+                "enabled": bool(numerical_filter_current),
+                "sample_count": int(numerical_current_samples),
+                "seed": int(numerical_current_seed),
+                "relative_tolerance": float(numerical_current_relative_tolerance),
+                "zero_tolerance": float(numerical_current_zero_tolerance),
+            }
+        ),
+        "current_merging": dict(
+            manifest.current_merging
+            or {
+                "enabled": bool(numerical_current_merging),
+                "sample_count": int(numerical_current_samples),
+                "seed": int(numerical_current_seed),
+                "relative_tolerance": float(numerical_current_relative_tolerance),
+                "zero_tolerance": float(numerical_current_zero_tolerance),
+            }
+        ),
+        "reference_color_order": (
+            None
+            if reference_color_order is None
+            else [int(label) for label in reference_color_order]
+        ),
+    }
+
+
+def _stage_evaluator_progress_callback(
+    progress_callback: Any | None,
+    *,
+    completed_steps: int,
+    trailing_steps: int,
+):
+    if progress_callback is None:
+        return None
+
+    def callback(event: dict[str, object]) -> None:
+        forwarded = dict(event)
+        total = forwarded.get("total")
+        if isinstance(total, int):
+            forwarded["total"] = max(
+                int(total) + int(completed_steps) + int(trailing_steps),
+                1,
+            )
+        progress_callback(forwarded)
+
+    return callback
+
+
+def _generic_dag_process_compact_artifact_payload(
+    manifest: GenericProcessManifest,
+    *,
+    evaluator_backend: str,
+    compiled_preset: str,
+    batch_size: int,
+    stage_local_parameter_layout: bool = False,
+    reference_color_order: Sequence[int] | None = None,
+    selected_color_sector_ids: set[int] | None = None,
+    max_coupling_orders: Mapping[str, int] | None = None,
+    max_lc_current_line_groups: int | None = None,
+    max_quark_pairs: int | None = None,
+    closure_side_mask_pruning: bool = True,
+    color_order_mask_pruning: bool = True,
+    species_reachability_pruning: bool = True,
+    ignored_particle_ids: Sequence[int] | None = None,
+    ignored_vertex_kinds: Sequence[int] | None = None,
+    numerical_filter_current: bool = True,
+    numerical_current_merging: bool = True,
+    numerical_current_samples: int = 10,
+    numerical_current_seed: int = 12345,
+    numerical_current_relative_tolerance: float = 1.0e-12,
+    numerical_current_zero_tolerance: float = 1.0e-300,
+) -> dict[str, object]:
+    planning_status, lowering_status = _generic_manifest_status_payloads(
+        manifest,
+        include_color_sector_summaries=False,
+    )
+    topology_replay_payload = _lc_topology_replay_payload(
+        manifest,
+        materialized_sector_ids=selected_color_sector_ids,
+        enabled=False,
+    )
+    compiled_payload: dict[str, object] = {
+        "kind": "generic-dag-stage-blueprint",
+        "runtime_available": False,
+        "runtime_unavailable_message": (
+            "main all-sector runtime evaluator was skipped; use a matching "
+            "runtime_lc_sector_artifacts sidecar or regenerate without "
+            "--skip-main-runtime-evaluator"
+        ),
+        "compact_main_artifact": True,
+        "requested_evaluator_backend": evaluator_backend,
+        "requested_compiled_preset": compiled_preset,
+        "batch_size": batch_size,
+        "stage_local_parameter_layout": stage_local_parameter_layout,
+        "generic_pruning": _generic_pruning_payload(
+            manifest,
+            max_coupling_orders=max_coupling_orders,
+            max_lc_current_line_groups=max_lc_current_line_groups,
+            max_quark_pairs=max_quark_pairs,
+            closure_side_mask_pruning=closure_side_mask_pruning,
+            color_order_mask_pruning=color_order_mask_pruning,
+            species_reachability_pruning=species_reachability_pruning,
+            ignored_particle_ids=ignored_particle_ids,
+            ignored_vertex_kinds=ignored_vertex_kinds,
+            numerical_filter_current=numerical_filter_current,
+            numerical_current_merging=numerical_current_merging,
+            numerical_current_samples=numerical_current_samples,
+            numerical_current_seed=numerical_current_seed,
+            numerical_current_relative_tolerance=numerical_current_relative_tolerance,
+            numerical_current_zero_tolerance=numerical_current_zero_tolerance,
+            reference_color_order=reference_color_order,
+        ),
+        "lc_topology_replay": topology_replay_payload,
+    }
+    if selected_color_sector_ids is not None:
+        compiled_payload["selected_color_sector_ids"] = sorted(
+            int(sector_id) for sector_id in selected_color_sector_ids
+        )
+    return {
+        "schema_version": GENERIC_PROCESS_SCHEMA_VERSION,
+        "kind": GENERIC_DAG_PROCESS_ARTIFACT_KIND,
+        "artifact_class": "generic-dag-schema-v2",
+        "process": manifest.process,
+        "key": manifest.key,
+        "color_accuracy": manifest.dag.process.color_accuracy,
+        "model": {
+            "name": manifest.model.name,
+            "vertex_lowering_coverage": (
+                manifest.model.vertex_lowering_coverage().to_json_dict()
+            ),
+        },
+        "external_pdg_order": list(manifest.external_pdg_order),
+        "outgoing_pdg_order": list(manifest.outgoing_pdg_order),
+        "process_ir": manifest.dag.process.to_json_dict(),
+        "generic_plan_path": None,
+        "generation_filters": _generation_filters_payload(manifest),
+        "lc_topology_reuse": _lc_topology_reuse_payload(manifest),
+        "runtime_lc_topology_reuse": _lc_topology_reuse_payload(manifest),
+        "runtime_lc_topology_replay": topology_replay_payload,
+        "planning_status": planning_status,
+        "lowering_status": lowering_status,
+        "compiled": compiled_payload,
+        "dag_summary": _dag_count_payload(manifest.dag)
+        | {"required_vertex_kinds": list(manifest.dag.required_vertex_kinds)},
+        "full_dag_summary": _dag_count_payload(manifest.dag)
+        | {"required_vertex_kinds": list(manifest.dag.required_vertex_kinds)},
+    }
+
+
 def _generic_dag_process_artifact_payload(
     manifest: GenericProcessManifest,
     *,
-    plan_path: str,
+    plan_path: str | None,
     evaluator_backend: str,
     compiled_preset: str,
     batch_size: int,
@@ -2878,6 +3936,7 @@ def _generic_dag_process_artifact_payload(
     progress_callback: Any | None = None,
     reference_color_order: Sequence[int] | None = None,
     selected_color_sector_ids: set[int] | None = None,
+    enable_lc_sector_runtime_selector: bool = True,
     lc_topology_replay: bool = False,
     max_coupling_orders: Mapping[str, int] | None = None,
     max_lc_current_line_groups: int | None = None,
@@ -2899,7 +3958,21 @@ def _generic_dag_process_artifact_payload(
         write_generic_stage_evaluator_artifacts,
     )
 
-    full_plan_payload = manifest.to_json_dict()
+    _emit_generation_progress(
+        progress_callback,
+        "main schema",
+        "status",
+    )
+    full_planning_status, _full_lowering_status = _generic_manifest_status_payloads(
+        manifest,
+        include_color_sector_summaries=False,
+    )
+    _emit_generation_progress(
+        progress_callback,
+        "main schema",
+        "status ready",
+        increment=1,
+    )
     runtime_sector_ids = _runtime_color_sector_ids(
         manifest.dag,
         selected_color_sector_ids=selected_color_sector_ids,
@@ -2908,14 +3981,48 @@ def _generic_dag_process_artifact_payload(
         manifest,
         runtime_sector_ids,
     )
-    plan_payload = runtime_manifest.to_json_dict()
-    runtime_schema = cast(dict[str, Any], plan_payload["runtime_schema"])
+    _emit_generation_progress(
+        progress_callback,
+        "runtime schema",
+        (
+            "all sectors"
+            if runtime_sector_ids is None
+            else f"{len(runtime_sector_ids)} sectors"
+        ),
+    )
+    runtime_schema = _generic_runtime_schema_payload(
+        runtime_manifest.dag,
+        runtime_manifest.model,
+        enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+    )
+    _runtime_planning_status, runtime_lowering_status = _generic_manifest_status_payloads(
+        runtime_manifest,
+        include_color_sector_summaries=False,
+    )
+    _emit_generation_progress(
+        progress_callback,
+        "runtime schema",
+        "ready",
+        increment=1,
+    )
     color_contraction_message = _runtime_color_contraction_unavailable_message(
         runtime_schema,
+    )
+    _emit_generation_progress(
+        progress_callback,
+        "stage blueprint",
+        "build",
     )
     stage_blueprint = build_generic_stage_compiler_blueprint(
         runtime_manifest,
         stage_local_parameter_layout=stage_local_parameter_layout,
+        enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+    )
+    _emit_generation_progress(
+        progress_callback,
+        "stage blueprint",
+        f"stages={stage_blueprint.stage_count}",
+        increment=1,
     )
     compiled_payload: dict[str, object] = {
         "kind": "generic-dag-stage-blueprint",
@@ -2998,7 +4105,11 @@ def _generic_dag_process_artifact_payload(
             merge_evaluators_strategy=merge_evaluators_strategy,
             verbose_evaluator_build=verbose_evaluator_build,
             jit_compile=jit_compile,
-            progress_callback=progress_callback,
+            progress_callback=_stage_evaluator_progress_callback(
+                progress_callback,
+                completed_steps=3,
+                trailing_steps=2,
+            ),
         )
         compiled_payload["stage_evaluators"] = stage_evaluator_payload
         if bool(stage_evaluator_payload.get("runtime_available", False)):
@@ -3014,18 +4125,23 @@ def _generic_dag_process_artifact_payload(
         "process": manifest.process,
         "key": manifest.key,
         "color_accuracy": manifest.dag.process.color_accuracy,
-        "model": plan_payload["model"],
+        "model": {
+            "name": manifest.model.name,
+            "vertex_lowering_coverage": (
+                manifest.model.vertex_lowering_coverage().to_json_dict()
+            ),
+        },
         "external_pdg_order": list(manifest.external_pdg_order),
         "outgoing_pdg_order": list(manifest.outgoing_pdg_order),
-        "process_ir": plan_payload["process_ir"],
+        "process_ir": manifest.dag.process.to_json_dict(),
         "generic_plan_path": plan_path,
-        "generation_filters": plan_payload["generation_filters"],
-        "lc_topology_reuse": full_plan_payload["lc_topology_reuse"],
-        "runtime_lc_topology_reuse": plan_payload["lc_topology_reuse"],
+        "generation_filters": _generation_filters_payload(runtime_manifest),
+        "lc_topology_reuse": _lc_topology_reuse_payload(manifest),
+        "runtime_lc_topology_reuse": _lc_topology_reuse_payload(runtime_manifest),
         "runtime_lc_topology_replay": topology_replay_payload,
-        "planning_status": full_plan_payload["planning_status"],
-        "lowering_status": plan_payload["lowering_status"],
-        "runtime_schema": plan_payload["runtime_schema"],
+        "planning_status": full_planning_status,
+        "lowering_status": runtime_lowering_status,
+        "runtime_schema": runtime_schema,
         "normalization": runtime_schema["normalization"],
         "compiled": compiled_payload,
         "dag_summary": {
@@ -3104,6 +4220,7 @@ def _generic_runtime_schema_payload(
     model: Model,
     *,
     selected_color_sector_ids: set[int] | None = None,
+    enable_lc_sector_runtime_selector: bool = True,
 ) -> dict[str, object]:
     current_slots = _runtime_current_slots(dag)
     slot_by_current_id = {
@@ -3142,9 +4259,11 @@ def _generic_runtime_schema_payload(
         selected_color_sector_ids=selected_color_sector_ids,
     )
     model_parameters = _runtime_model_parameter_records(
+        dag,
         model,
         stage_payloads=stage_payloads,
         amplitude_stage_payload=amplitude_stage_payload,
+        enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
     )
     source_component_count = sum(
         _schema_int(slot_by_current_id[source_id]["dimension"])
@@ -3311,10 +4430,12 @@ def _runtime_model_payload(model: Model) -> dict[str, object]:
 
 
 def _runtime_model_parameter_records(
+    dag: GenericDAG,
     model: Model,
     *,
     stage_payloads: Sequence[Mapping[str, object]],
     amplitude_stage_payload: Mapping[str, object],
+    enable_lc_sector_runtime_selector: bool = True,
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     seen: set[str] = set()
@@ -3352,6 +4473,18 @@ def _runtime_model_parameter_records(
             "normalization",
             float(alpha_ew),
         )
+    if (
+        enable_lc_sector_runtime_selector
+        and dag.process.color_accuracy == "lc"
+        and dag.amplitude_roots
+    ):
+        add_record(
+            LC_SECTOR_SELECTOR_PARAMETER,
+            "runtime_control",
+            -1.0,
+            control="lc_sector_id",
+            mode="minus_one_means_all",
+        )
 
     for particle in sorted(model.particles.values(), key=lambda item: item.pdg):
         if float(particle.mass) != 0.0:
@@ -3369,12 +4502,19 @@ def _runtime_model_parameter_records(
                 pdg=int(particle.pdg),
             )
 
+    processed_coupling_name_sets: set[tuple[str | None, ...]] = set()
     for stage in stage_payloads:
         for interaction in _schema_list(stage["interactions"]):
             names = interaction.get("coupling_parameter_names")
             values = interaction.get("coupling")
             if not isinstance(names, list) or not isinstance(values, list):
                 continue
+            name_key = tuple(
+                None if name is None else str(name) for name in names
+            )
+            if name_key in processed_coupling_name_sets:
+                continue
+            processed_coupling_name_sets.add(name_key)
             particles = tuple(int(pdg) for pdg in _schema_list(interaction["vertex_particles"]))
             for component, name in enumerate(names):
                 if not isinstance(name, str):
@@ -3394,6 +4534,10 @@ def _runtime_model_parameter_records(
         particles = root.get("vertex_particles")
         if not isinstance(names, list) or not isinstance(values, list) or not isinstance(particles, list):
             continue
+        name_key = tuple(None if name is None else str(name) for name in names)
+        if name_key in processed_coupling_name_sets:
+            continue
+        processed_coupling_name_sets.add(name_key)
         for component, name in enumerate(names):
             if not isinstance(name, str):
                 continue
@@ -3740,62 +4884,48 @@ def _runtime_stage_payloads(
         size = len(result.index.external_labels)
         interactions_by_size.setdefault(size, []).append(interaction.id)
     stages = []
+    coupling_name_cache: dict[tuple[int, tuple[int, ...], tuple[float, ...]], list[str | None]] = {}
+    lowering_payload_cache: dict[int, dict[str, object]] = {}
     for stage_index, size in enumerate(sorted(interactions_by_size), start=1):
         interaction_ids = interactions_by_size[size]
-        interactions = [
-            _runtime_interaction_record(
+        interactions: list[dict[str, object]] = []
+        output_current_ids: set[int] = set()
+        input_current_ids: set[int] = set()
+        input_value_slot_ids: set[int] = set()
+        output_value_slot_ids: set[int] = set()
+        for interaction_id in interaction_ids:
+            interaction = _runtime_interaction_record(
                 dag,
                 model,
                 interaction_id=interaction_id,
                 slot_by_current_id=slot_by_current_id,
                 value_slot_by_current_variant=value_slot_by_current_variant,
                 momentum_slot_by_mask=momentum_slot_by_mask,
+                coupling_name_cache=coupling_name_cache,
+                lowering_payload_cache=lowering_payload_cache,
             )
-            for interaction_id in interaction_ids
-        ]
-        runtime_interactions = cast(list[dict[str, Any]], interactions)
-        output_current_ids = sorted(
-            {
-                _schema_int(interaction["result_current_id"])
-                for interaction in runtime_interactions
-            }
-        )
-        input_current_ids = sorted(
-            {
-                _schema_int(interaction["left_current_id"])
-                for interaction in runtime_interactions
-            }
-            | {
-                _schema_int(interaction["right_current_id"])
-                for interaction in runtime_interactions
-            }
-        )
-        input_value_slot_ids = sorted(
-            {
-                _schema_int(interaction["left_value_slot"]["value_slot_id"])
-                for interaction in runtime_interactions
-            }
-            | {
-                _schema_int(interaction["right_value_slot"]["value_slot_id"])
-                for interaction in runtime_interactions
-            }
-        )
-        output_value_slot_ids = sorted(
-            {
-                _schema_int(slot["value_slot_id"])
-                for interaction in runtime_interactions
-                for slot in interaction["result_value_slots"]
-            }
-        )
+            interaction_any = cast(dict[str, Any], interaction)
+            interactions.append(interaction)
+            output_current_ids.add(_schema_int(interaction["result_current_id"]))
+            input_current_ids.add(_schema_int(interaction["left_current_id"]))
+            input_current_ids.add(_schema_int(interaction["right_current_id"]))
+            input_value_slot_ids.add(
+                _schema_int(interaction_any["left_value_slot"]["value_slot_id"])
+            )
+            input_value_slot_ids.add(
+                _schema_int(interaction_any["right_value_slot"]["value_slot_id"])
+            )
+            for slot in interaction_any["result_value_slots"]:
+                output_value_slot_ids.add(_schema_int(slot["value_slot_id"]))
         stages.append(
             {
                 "stage_index": stage_index,
                 "stage_kind": "current-combine",
                 "subset_size": size,
-                "input_current_ids": input_current_ids,
-                "output_current_ids": output_current_ids,
-                "input_value_slot_ids": input_value_slot_ids,
-                "output_value_slot_ids": output_value_slot_ids,
+                "input_current_ids": sorted(input_current_ids),
+                "output_current_ids": sorted(output_current_ids),
+                "input_value_slot_ids": sorted(input_value_slot_ids),
+                "output_value_slot_ids": sorted(output_value_slot_ids),
                 "interaction_count": len(interactions),
                 "interactions": interactions,
             }
@@ -3811,6 +4941,8 @@ def _runtime_interaction_record(
     slot_by_current_id: dict[int, dict[str, object]],
     value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
     momentum_slot_by_mask: dict[int, int],
+    coupling_name_cache: dict[tuple[int, tuple[int, ...], tuple[float, ...]], list[str | None]],
+    lowering_payload_cache: dict[int, dict[str, object]],
 ) -> dict[str, object]:
     interaction = dag.interactions[interaction_id]
     left = dag.currents[interaction.left_id]
@@ -3831,6 +4963,23 @@ def _runtime_interaction_record(
         result,
         value_slot_by_current_variant,
     )
+    coupling_key = (
+        int(interaction.vertex_kind),
+        tuple(int(pdg) for pdg in interaction.vertex_particles),
+        tuple(float(value) for value in interaction.coupling),
+    )
+    coupling_parameter_names = coupling_name_cache.get(coupling_key)
+    if coupling_parameter_names is None:
+        coupling_parameter_names = _runtime_coupling_parameter_names(
+            interaction.vertex_kind,
+            interaction.vertex_particles,
+            interaction.coupling,
+        )
+        coupling_name_cache[coupling_key] = coupling_parameter_names
+    lowering_payload = lowering_payload_cache.get(int(interaction.vertex_kind))
+    if lowering_payload is None:
+        lowering_payload = _lowering_rule_payload(rule)
+        lowering_payload_cache[int(interaction.vertex_kind)] = lowering_payload
     return {
         "interaction_id": interaction.id,
         "vertex_kind": interaction.vertex_kind,
@@ -3858,14 +5007,10 @@ def _runtime_interaction_record(
             "result": momentum_slot_by_mask[result.index.momentum_mask],
         },
         "coupling": list(interaction.coupling),
-        "coupling_parameter_names": _runtime_coupling_parameter_names(
-            interaction.vertex_kind,
-            interaction.vertex_particles,
-            interaction.coupling,
-        ),
+        "coupling_parameter_names": list(coupling_parameter_names),
         "color_weight": list(interaction.color_weight),
         "accumulation": "sum-into-result-current",
-        "lowering": _lowering_rule_payload(rule),
+        "lowering": lowering_payload,
         "full_tensor_network_ready": interaction.full_tensor_network_ready,
     }
 
@@ -3971,6 +5116,7 @@ def _amplitude_group_metadata(
     result: dict[int, int] = {}
     group_descriptors: dict[int, ColorGroupDescriptor] = {}
     source_by_ancestry: dict[int, tuple[object, ...]] = {}
+    physical_sources_by_ancestry: dict[int, tuple[object, ...]] = {}
     for current in dag.currents:
         if not current.is_source:
             continue
@@ -3981,17 +5127,40 @@ def _amplitude_group_metadata(
             current.index.spin_state,
             current.source_helicity,
         )
+    source_ancestry_is_single_bit = all(
+        bit > 0 and bit & (bit - 1) == 0 for bit in source_by_ancestry
+    )
+
+    def physical_sources_for_ancestry(ancestry: int) -> tuple[object, ...]:
+        cached = physical_sources_by_ancestry.get(ancestry)
+        if cached is not None:
+            return cached
+        if source_ancestry_is_single_bit:
+            sources: list[tuple[object, ...]] = []
+            remaining = int(ancestry)
+            while remaining:
+                bit = remaining & -remaining
+                source_key = source_by_ancestry.get(bit)
+                if source_key is not None:
+                    sources.append(source_key)
+                remaining ^= bit
+            physical_sources = tuple(sorted(sources))
+        else:
+            physical_sources = tuple(
+                sorted(
+                    source_key
+                    for bit, source_key in source_by_ancestry.items()
+                    if ancestry & bit
+                )
+            )
+        physical_sources_by_ancestry[ancestry] = physical_sources
+        return physical_sources
+
     for root in roots:
         left = dag.currents[root.left_id].index
         right = dag.currents[root.right_id].index
         ancestry = int(left.helicity_ancestry | right.helicity_ancestry)
-        physical_sources = tuple(
-            sorted(
-                source_key
-                for bit, source_key in source_by_ancestry.items()
-                if ancestry & bit
-            )
-        )
+        physical_sources = physical_sources_for_ancestry(ancestry)
         sector_id = _root_color_sector_id(dag, root)
         sector = dag.color_plan.sector(sector_id)
         sector_word = (
@@ -4378,7 +5547,12 @@ if __name__ == "__main__":
 """
 
 
-def _dag_lowering_status(dag: GenericDAG, model: Model) -> dict[str, object]:
+def _dag_lowering_status(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    include_color_sector_summaries: bool = True,
+) -> dict[str, object]:
     vertex_kinds = [
         interaction.vertex_kind for interaction in dag.interactions
     ] + [
@@ -4399,16 +5573,21 @@ def _dag_lowering_status(dag: GenericDAG, model: Model) -> dict[str, object]:
         else:
             pending.add(kind)
     propagators = _dag_propagator_lowering_status(dag, model)
-    current_color_sectors = tuple(
+    internal_current_color_sectors = tuple(
         sorted({current.index.color_state.sector_id for current in dag.currents})
     )
-    return {
+    amplitude_color_sectors = contributing_color_sector_ids(dag)
+    current_color_sectors = amplitude_color_sectors or internal_current_color_sectors
+    payload: dict[str, object] = {
         "current_count": len(dag.currents),
         "source_count": len(dag.sources),
         "interaction_count": len(dag.interactions),
         "current_color_sectors": list(current_color_sectors),
         "current_color_sector_count": len(current_color_sectors),
-        "color_sector_summaries": _dag_color_sector_summaries(dag, model),
+        "internal_current_color_sectors": list(internal_current_color_sectors),
+        "internal_current_color_sector_count": len(internal_current_color_sectors),
+        "amplitude_color_sectors": list(amplitude_color_sectors),
+        "amplitude_color_sector_count": len(amplitude_color_sectors),
         "required_vertex_kind_counts": [
             [kind, count] for kind, count in sorted(counts.items())
         ],
@@ -4417,6 +5596,16 @@ def _dag_lowering_status(dag: GenericDAG, model: Model) -> dict[str, object]:
         "unimplemented_vertex_kinds": sorted(unimplemented),
         **propagators,
     }
+    if include_color_sector_summaries:
+        payload["color_sector_summaries"] = _dag_color_sector_summaries(dag, model)
+    else:
+        payload["color_sector_summaries"] = []
+        payload["color_sector_summaries_omitted"] = True
+        payload["color_sector_summaries_omitted_reason"] = (
+            "compact main artifact; selected runtime sidecars keep detailed "
+            "sector-local lowering manifests"
+        )
+    return payload
 
 
 def _dag_propagator_lowering_status(
@@ -4458,30 +5647,26 @@ def _dag_color_sector_summaries(
     dag: GenericDAG,
     model: Model,
 ) -> list[dict[str, object]]:
-    current_counts = Counter(
-        current.index.color_state.sector_id for current in dag.currents
+    root_sectors = contributing_color_sector_ids(dag)
+    sectors = (
+        root_sectors
+        if root_sectors
+        else tuple(sorted({current.index.color_state.sector_id for current in dag.currents}))
     )
-    interaction_counts = Counter(
-        dag.currents[interaction.result_id].index.color_state.sector_id
-        for interaction in dag.interactions
-    )
-    root_counts = Counter(
-        dag.currents[root.left_id].index.color_state.sector_id
-        for root in dag.amplitude_roots
-    )
-    sectors = sorted(set(current_counts) | set(interaction_counts) | set(root_counts))
     summaries: list[dict[str, object]] = []
     for sector in sectors:
+        sector_dag = (
+            filter_dag_to_color_sectors(dag, {sector})
+            if root_sectors
+            else dag
+        )
         vertex_kinds = [
             interaction.vertex_kind
-            for interaction in dag.interactions
-            if dag.currents[interaction.result_id].index.color_state.sector_id
-            == sector
+            for interaction in sector_dag.interactions
         ] + [
             int(root.vertex_kind)
-            for root in dag.amplitude_roots
+            for root in sector_dag.amplitude_roots
             if root.vertex_kind is not None
-            and dag.currents[root.left_id].index.color_state.sector_id == sector
         ]
         counts = Counter(vertex_kinds)
         ready: set[int] = set()
@@ -4498,10 +5683,10 @@ def _dag_color_sector_summaries(
         summaries.append(
             {
                 "color_sector": sector,
-                "current_count": current_counts[sector],
-                "interaction_count": interaction_counts[sector],
-                "closure_count": root_counts[sector],
-                "amplitude_root_count": root_counts[sector],
+                "current_count": len(sector_dag.currents),
+                "interaction_count": len(sector_dag.interactions),
+                "closure_count": len(sector_dag.amplitude_roots),
+                "amplitude_root_count": len(sector_dag.amplitude_roots),
                 "required_vertex_kind_counts": [
                     [kind, count] for kind, count in sorted(counts.items())
                 ],
@@ -4603,6 +5788,7 @@ def load_generic_process_set_manifest(path: str | Path) -> dict[str, object]:
 __all__ = [
     "GENERIC_DAG_PROCESS_ARTIFACT_KIND",
     "GENERIC_DAG_PROCESS_SET_ARTIFACT_KIND",
+    "GENERIC_LC_REPLAY_PARTITION_ARTIFACT_KIND",
     "GENERIC_PROCESS_MANIFEST_KIND",
     "GENERIC_PROCESS_SET_MANIFEST_KIND",
     "GENERIC_PROCESS_SCHEMA_VERSION",
@@ -4618,4 +5804,5 @@ __all__ = [
     "write_generic_process_set_manifest",
     "write_generic_dag_process_artifact",
     "write_generic_dag_process_set_artifact",
+    "write_lc_topology_replay_partition_artifact",
 ]

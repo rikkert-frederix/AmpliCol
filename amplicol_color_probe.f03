@@ -19,7 +19,7 @@ program amplicol_color_probe
   character(len=80) :: process_file, momenta_file
   character(len=32) :: color_arg, color_name
   character(len=256) :: arg, env_value
-  logical :: print_matrix
+  logical :: print_matrix, fixed_helicity
   real(kind=8),parameter :: alpha_check=0.118d0
   real(kind=8),parameter :: pi=3.14159265358979323846d0
 
@@ -31,6 +31,7 @@ program amplicol_color_probe
   igroup = 1
   iint = 1
   print_matrix = .false.
+  fixed_helicity = .false.
   call get_environment_variable('AMPICOL_COLOR_PROBE_MATRIX',env_value)
   if (trim(adjustl(env_value)).eq.'1') print_matrix = .true.
 
@@ -93,6 +94,7 @@ program amplicol_color_probe
   call set_final_state_identical_particle_factor(pgl(igroup))
   call set_initial_state_average_factor(pgl(igroup))
   call read_probe_momenta()
+  call read_optional_helicities()
 
   local_part(1:n,1) = pgl(igroup)%processes(1:n,iint)
   local_order(1:n,1) = pgl(igroup)%color_orders(1:n,iint)
@@ -112,7 +114,11 @@ program amplicol_color_probe
   t_colour = 0d0
   call cpu_time(t0)
   do ipoint=1,points
-     call loop_helicity(1)
+     if (fixed_helicity) then
+        call evaluate_current_helicity()
+     else
+        call loop_helicity(1)
+     endif
   enddo
   call cpu_time(t1)
   t_total = t1 - t0
@@ -122,6 +128,11 @@ program amplicol_color_probe
   write (*,'(a,i0)') 'group ',igroup
   write (*,'(a,i0)') 'integral ',iint
   write (*,'(a,a)') 'color_accuracy ',trim(color_name)
+  if (fixed_helicity) then
+     write (*,'(a,*(1x,i0))') 'helicity_mode fixed',hel(1:n)
+  else
+     write (*,'(a)') 'helicity_mode summed'
+  endif
   write (*,'(a,i0)') 'color_orders ',amp%nColOrd
   write (*,'(a,3(1x,es24.16))') 'AMPICOL_COLOR_PROBE_COMPONENTS',&
        norm_factor*matrix2(1)/dble(points),&
@@ -196,27 +207,48 @@ contains
     close(14)
   end subroutine read_probe_momenta
 
+  subroutine read_optional_helicities()
+    implicit none
+    integer :: j
+    if (argc == 6) return
+    if (argc /= 6 + n) then
+       write (*,*) 'fixed-helicity mode expects one helicity per external leg'
+       write (*,*) 'received extra arguments',argc-6,'expected',n
+       stop 1
+    endif
+    do j=1,n
+       call get_command_argument(6+j,arg)
+       read(arg,*) hel(j)
+    enddo
+    fixed_helicity = .true.
+  end subroutine read_optional_helicities
+
   recursive subroutine loop_helicity(position)
     implicit none
     integer,intent(in) :: position
     integer :: spin_index
-    real(kind=8) :: before, after
     if (position > n) then
-       call cpu_time(before)
-       call amp%evaluate(n,p,hel,.true.,phys_model)
-       call cpu_time(after)
-       t_eval = t_eval + after - before
-       call cpu_time(before)
-       call accumulate_colour()
-       call cpu_time(after)
-       t_colour = t_colour + after - before
+       call evaluate_current_helicity()
        return
     endif
     do spin_index=1,pgl(igroup)%spin(0,position)
        hel(position) = pgl(igroup)%spin(spin_index,position)
        call loop_helicity(position+1)
-    enddo
+     enddo
   end subroutine loop_helicity
+
+  subroutine evaluate_current_helicity()
+    implicit none
+    real(kind=8) :: before, after
+    call cpu_time(before)
+    call amp%evaluate(n,p,hel,.true.,phys_model)
+    call cpu_time(after)
+    t_eval = t_eval + after - before
+    call cpu_time(before)
+    call accumulate_colour()
+    call cpu_time(after)
+    t_colour = t_colour + after - before
+  end subroutine evaluate_current_helicity
 
   subroutine accumulate_colour()
     implicit none

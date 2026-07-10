@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, TypedDict
 
 from .color_plan import GenericColorPlan, build_color_plan
-from .generic_dag import GenericDAG, GenericDAGCompiler
+from .generic_dag import GenericDAG, GenericDAGCompiler, contributing_color_sector_ids
 from .model import AmplicolSMLeadingColorModel
 from .process_ir import CanonicalProcessIR, build_process_ir
 from .processes import (
@@ -628,7 +628,7 @@ def _current_plan_summary_from_dag(
         else:
             pending.add(kind)
     propagators = _current_plan_propagator_summary(dag, model)
-    color_sectors = tuple(
+    color_sectors = contributing_color_sector_ids(dag) or tuple(
         sorted({current.index.color_state.sector_id for current in dag.currents})
     )
     return CurrentPlanSupportSummary(

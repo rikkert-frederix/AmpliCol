@@ -210,19 +210,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     process_plan.add_argument(
         "--max-currents",
         type=int,
-        default=20000,
+        default=-1,
         help=(
-            "Safety cap for generic current-plan construction; use a negative "
-            "value to disable this internal cap."
+            "Optional cap for generic current-plan construction; the default "
+            "negative value disables this internal cap."
         ),
     )
     process_plan.add_argument(
         "--max-color-sectors",
         type=int,
-        default=20000,
+        default=-1,
         help=(
-            "Safety cap for generic colour-flow sector enumeration; use a "
-            "negative value to disable this internal cap."
+            "Optional cap for generic colour-flow sector enumeration; the "
+            "default negative value disables this internal cap."
         ),
     )
     _add_generic_dag_pruning_options(process_plan)
@@ -449,19 +449,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     generate_process.add_argument(
         "--max-currents",
         type=int,
-        default=50000,
+        default=-1,
         help=(
-            "Safety cap for generic current-plan construction; use a negative "
-            "value to disable this internal cap."
+            "Optional cap for generic current-plan construction; the default "
+            "negative value disables this internal cap."
         ),
     )
     generate_process.add_argument(
         "--max-color-sectors",
         type=int,
-        default=20000,
+        default=-1,
         help=(
-            "Safety cap for generic colour-flow sector enumeration; use a "
-            "negative value to disable this internal cap."
+            "Optional cap for generic colour-flow sector enumeration; the "
+            "default negative value disables this internal cap."
         ),
     )
     generate_process.add_argument(
@@ -470,6 +470,45 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Emit fixed-width generation progress updates to stderr. This is "
             "safe to combine with --json because stdout remains machine JSON."
+        ),
+    )
+    generate_process.add_argument(
+        "--skip-main-runtime-evaluator",
+        action="store_true",
+        help=(
+            "Write the main all-sector DAG manifest without serialized main "
+            "stage evaluators. Selected LC runtime sidecars requested with "
+            "--runtime-lc-sector-ids are still compiled."
+        ),
+    )
+    generate_process.add_argument(
+        "--skip-generic-plan",
+        action="store_true",
+        help=(
+            "Do not write the duplicate generic_process_manifest.json planning "
+            "file. The runnable process_manifest.json is still written; this "
+            "option is useful for large all-ordering artifacts."
+        ),
+    )
+    generate_process.add_argument(
+        "--runtime-lc-sector-selector",
+        dest="runtime_lc_sector_selector",
+        action="store_true",
+        default=None,
+        help=(
+            "Keep the runtime LC sector-selector parameter in all-sector "
+            "artifacts, allowing evaluate_color_sectors(...) to select "
+            "subsets from one materialized artifact."
+        ),
+    )
+    generate_process.add_argument(
+        "--no-runtime-lc-sector-selector",
+        dest="runtime_lc_sector_selector",
+        action="store_false",
+        help=(
+            "Omit runtime LC sector-selector guards from all-sector artifacts. "
+            "Use this for fastest one-shot evaluation of all generated LC "
+            "orderings when runtime sub-selection is not needed."
         ),
     )
     _add_evaluator_build_options(generate_process)
@@ -510,6 +549,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "TOML file with runtime model-parameter overrides consumed by "
             "Rusticol. Keys must match the artifact model_parameter_names metadata."
+        ),
+    )
+    time_process.add_argument(
+        "--lc-sector-ids",
+        default="",
+        metavar="LIST",
+        help=(
+            "Comma-separated LC colour-sector ids to evaluate at runtime. "
+            "When omitted, Rusticol evaluates the artifact default reduction."
         ),
     )
     time_process.add_argument("--json", action="store_true")
@@ -816,6 +864,22 @@ def _add_generic_dag_pruning_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--runtime-lc-sector-ids",
+        default="",
+        metavar="LIST",
+        help=(
+            "Comma-separated LC colour-sector ids for an additional selected-flow "
+            "runtime sidecar. The main artifact still follows --lc-sector-strategy "
+            "and is not pruned by this option."
+        ),
+    )
+    parser.add_argument(
+        "--source-helicities",
+        default="",
+        metavar="LIST",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--reference-color-order",
         default="",
         metavar="LIST",
@@ -1009,7 +1073,7 @@ def _add_evaluator_build_options(
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
+        default=64,
         help="Number of phase-space samples to evaluate together at runtime.",
     )
     parser.add_argument(
@@ -1357,7 +1421,7 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     if common_pair_distance is None:
         common_pair_distance = 1000
     return {
-        "batch_size": int(getattr(args, "batch_size", 16)),
+        "batch_size": int(getattr(args, "batch_size", 64)),
         "merge_evaluators_strategy": bool(
             getattr(args, "merge_evaluators_strategy", False)
         ),
@@ -1497,10 +1561,10 @@ def _generic_dag_pruning_kwargs(
     color_accuracy = str(getattr(args, "color_accuracy", "lc")).lower()
     numerical_filter_current = getattr(args, "numerical_filter_current", None)
     if numerical_filter_current is None:
-        numerical_filter_current = color_accuracy == "lc"
+        numerical_filter_current = _default_numerical_current_passes(args)
     numerical_current_merging = getattr(args, "numerical_current_merging", None)
     if numerical_current_merging is None:
-        numerical_current_merging = color_accuracy == "lc"
+        numerical_current_merging = _default_numerical_current_passes(args)
     kwargs: dict[str, Any] = {
         "max_coupling_orders": _parse_max_coupling_orders(args),
         "max_lc_current_line_groups": getattr(
@@ -1550,6 +1614,12 @@ def _generic_dag_pruning_kwargs(
     )
     if reference_color_order:
         kwargs["reference_color_order"] = tuple(reference_color_order)
+    source_helicities = _parse_source_helicities(
+        str(getattr(args, "source_helicities", "")),
+        option="--source-helicities",
+    )
+    if source_helicities:
+        kwargs["selected_source_helicities"] = source_helicities
     if explicit_sector_ids:
         kwargs["selected_color_sector_ids"] = set(explicit_sector_ids)
     elif (
@@ -1593,7 +1663,7 @@ def _generic_dag_pruning_kwargs(
             process,
             color_accuracy=str(getattr(args, "color_accuracy", "lc")),
             options=_process_options(args),
-            max_color_sectors=int(getattr(args, "max_color_sectors", 20000)),
+            max_color_sectors=int(getattr(args, "max_color_sectors", -1)),
             selected_color_sector_ids=kwargs.get("selected_color_sector_ids"),
             max_coupling_orders=kwargs["max_coupling_orders"],
             closure_side_mask_pruning=kwargs["closure_side_mask_pruning"],
@@ -1606,6 +1676,20 @@ def _generic_dag_pruning_kwargs(
             inferred_limits,
         )
     return kwargs
+
+
+def _default_numerical_current_passes(args: argparse.Namespace) -> bool:
+    color_accuracy = str(getattr(args, "color_accuracy", "lc")).lower()
+    if color_accuracy != "lc":
+        return False
+    if str(getattr(args, "lc_sector_strategy", "topology-representatives")) == "all":
+        explicit_sector_ids = _parse_int_list(
+            str(getattr(args, "lc_sector_ids", "")),
+            option="--lc-sector-ids",
+        )
+        if not explicit_sector_ids:
+            return False
+    return True
 
 
 def _compare_generic_dag_pruning_kwargs(
@@ -1631,6 +1715,14 @@ def _compare_generic_dag_pruning_kwargs(
     return kwargs
 
 
+def _runtime_lc_sector_ids_arg(args: argparse.Namespace) -> set[int] | None:
+    sector_ids = _parse_int_list(
+        str(getattr(args, "runtime_lc_sector_ids", "")),
+        option="--runtime-lc-sector-ids",
+    )
+    return set(sector_ids) if sector_ids else None
+
+
 def _normalize_generic_dag_pruning_kwargs(
     values: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -1647,6 +1739,12 @@ def _normalize_generic_dag_pruning_kwargs(
         normalized["max_coupling_orders"] = {
             str(name).upper(): int(value)
             for name, value in coupling_orders.items()
+        }
+    source_helicities = normalized.get("selected_source_helicities")
+    if isinstance(source_helicities, Mapping):
+        normalized["selected_source_helicities"] = {
+            str(int(label)): int(helicity)
+            for label, helicity in sorted(source_helicities.items())
         }
     for key in ("ignored_particle_ids", "ignored_vertex_kinds"):
         if normalized.get(key) is not None:
@@ -1702,6 +1800,35 @@ def _parse_int_list(value: str, *, option: str) -> tuple[int, ...]:
         raise ValueError(f"{option} expects comma-separated integers") from exc
 
 
+def _parse_source_helicities(value: str, *, option: str) -> dict[int, int]:
+    items = _split_cli_list(value)
+    if not items:
+        return {}
+    parsed: dict[int, int] = {}
+    saw_label = any("=" in item or ":" in item for item in items)
+    if saw_label:
+        for item in items:
+            if "=" in item:
+                label, helicity = item.split("=", 1)
+            elif ":" in item:
+                label, helicity = item.split(":", 1)
+            else:
+                raise ValueError(
+                    f"{option} must use labels for every entry when any label is used"
+                )
+            parsed[int(label)] = int(helicity)
+    else:
+        parsed = {index: int(item) for index, item in enumerate(items, start=1)}
+    invalid = {
+        label: helicity
+        for label, helicity in parsed.items()
+        if helicity not in {-1, 0, 1}
+    }
+    if invalid:
+        raise ValueError(f"{option} helicities must be -1, 0, or 1")
+    return parsed
+
+
 def _split_cli_list(value: str) -> tuple[str, ...]:
     return tuple(
         item.strip()
@@ -1721,7 +1848,7 @@ def _lc_topology_representative_ids(
         process,
         color_accuracy=str(getattr(args, "color_accuracy", "lc")),
         options=_process_options(args),
-        max_sectors=int(getattr(args, "max_color_sectors", 20000)),
+        max_sectors=int(getattr(args, "max_color_sectors", -1)),
     )
     return {
         int(group.representative_sector_id)
@@ -1739,7 +1866,7 @@ def _lc_line_pairing_representative_ids(
         process,
         color_accuracy=str(getattr(args, "color_accuracy", "lc")),
         options=_process_options(args),
-        max_sectors=int(getattr(args, "max_color_sectors", 20000)),
+        max_sectors=int(getattr(args, "max_color_sectors", -1)),
     )
     return set(lc_line_pairing_representative_ids(plan))
 
@@ -2759,7 +2886,10 @@ def _cmd_generate_generic_dag_artifact(
     args: argparse.Namespace,
     entry: ProcessSetEntry,
 ) -> int:
-    from .generic_artifact import write_generic_dag_process_artifact
+    from .generic_artifact import (
+        write_generic_dag_process_artifact,
+        write_lc_topology_replay_partition_artifact,
+    )
 
     output_dir = Path(args.output_dir).expanduser()
     if bool(getattr(args, "replace", False)) and output_dir.exists():
@@ -2773,24 +2903,56 @@ def _cmd_generate_generic_dag_artifact(
     display = _display(args)
     with display.stage_progress(
         "Generating process",
-        total=1,
+        total=16,
         metadata=entry.key,
     ) as progress:
+        monitor_callback = _generation_progress_callback(args, entry.process)
         progress_callback = _combined_progress_callback(
             progress.callback,
-            _child_generation_progress_callback(entry.process),
+            monitor_callback,
         )
-        manifest_path, manifest = write_generic_dag_process_artifact(
+        pruning_kwargs = _generic_dag_pruning_kwargs(args, process=entry.process)
+        explicit_lc_sector_ids = _parse_int_list(
+            str(getattr(args, "lc_sector_ids", "")),
+            option="--lc-sector-ids",
+        )
+        use_lc_replay_partition = (
+            bool(getattr(args, "lc_topology_replay", False))
+            and str(getattr(args, "color_accuracy", "lc")).lower() == "lc"
+            and not explicit_lc_sector_ids
+            and _runtime_lc_sector_ids_arg(args) is None
+        )
+        if use_lc_replay_partition:
+            pruning_kwargs.pop("selected_color_sector_ids", None)
+            writer = write_lc_topology_replay_partition_artifact
+            writer_kwargs: dict[str, Any] = {}
+        else:
+            writer = write_generic_dag_process_artifact
+            writer_kwargs = {
+                "enable_lc_sector_runtime_selector": getattr(
+                    args,
+                    "runtime_lc_sector_selector",
+                    None,
+                ),
+                "runtime_lc_sector_ids": _runtime_lc_sector_ids_arg(args),
+                "lc_topology_replay": bool(
+                    getattr(args, "lc_topology_replay", False)
+                ),
+            }
+        manifest_path, manifest = writer(
             entry.process,
             output_dir,
             options=_process_options(args),
             color_accuracy=str(getattr(args, "color_accuracy", "lc")),
-            max_currents=int(getattr(args, "max_currents", 50000)),
-            max_color_sectors=int(getattr(args, "max_color_sectors", 20000)),
+            max_currents=int(getattr(args, "max_currents", -1)),
+            max_color_sectors=int(getattr(args, "max_color_sectors", -1)),
             evaluator_backend=str(build_kwargs["symbolica_evaluator_backend"]),
             compiled_preset=str(build_kwargs["symbolica_compiled_preset"]),
             batch_size=int(build_kwargs["batch_size"]),
             emit_stage_evaluator_artifacts=True,
+            skip_main_stage_evaluator_artifacts=bool(
+                getattr(args, "skip_main_runtime_evaluator", False)
+            ),
             symbolica_settings=symbolica_settings,
             merge_evaluators_strategy=bool(build_kwargs["merge_evaluators_strategy"]),
             stage_local_parameter_layout=bool(
@@ -2798,13 +2960,18 @@ def _cmd_generate_generic_dag_artifact(
             ),
             verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
             progress_callback=progress_callback,
-            lc_topology_replay=bool(getattr(args, "lc_topology_replay", False)),
-            **_generic_dag_pruning_kwargs(args, process=entry.process),
+            write_generic_plan=not bool(getattr(args, "skip_generic_plan", False)),
+            **writer_kwargs,
+            **pruning_kwargs,
         )
         progress.update(stage="done", item=entry.key, increment=1)
     compiled = cast(dict[str, Any], manifest["compiled"])
     generation_s = time.perf_counter() - generation_start
     runtime_available = bool(compiled.get("runtime_available"))
+    evaluator_build_timing = _stage_evaluator_build_timing_from_manifest(
+        manifest,
+        manifest_path.parent,
+    )
     payload = {
         "available": True,
         "runtime_available": runtime_available,
@@ -2824,6 +2991,16 @@ def _cmd_generate_generic_dag_artifact(
             else compiled["runtime_unavailable_message"]
         ),
     }
+    if evaluator_build_timing is not None:
+        payload["stage_evaluator_build_timing"] = evaluator_build_timing
+        jit_compile_s = evaluator_build_timing.get("jit_compile_s")
+        if isinstance(jit_compile_s, (float, int)):
+            payload["jit_compile_s"] = float(jit_compile_s)
+            payload["jit_fraction_of_generation"] = (
+                None
+                if generation_s <= 0.0
+                else float(jit_compile_s) / generation_s
+            )
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
@@ -2844,6 +3021,123 @@ def _cmd_generate_generic_dag_artifact(
             ],
         )
     return 0
+
+
+def _stage_evaluator_build_timing_from_manifest(
+    manifest: Mapping[str, Any],
+    manifest_dir: Path,
+) -> dict[str, Any] | None:
+    compiled = manifest.get("compiled")
+    if not isinstance(compiled, Mapping):
+        return None
+    timing = _stage_evaluator_build_timing_from_compiled(compiled)
+    if timing is not None:
+        return {"source": "main-runtime-evaluator", **timing}
+    representatives = compiled.get("representative_artifacts")
+    if isinstance(representatives, list):
+        timings: list[dict[str, Any]] = []
+        for representative in representatives:
+            if not isinstance(representative, Mapping):
+                continue
+            relative_path = representative.get("path")
+            if not isinstance(relative_path, str) or not relative_path:
+                continue
+            representative_manifest = manifest_dir / relative_path / "process_manifest.json"
+            try:
+                representative_payload = json.loads(
+                    representative_manifest.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+            representative_compiled = representative_payload.get("compiled")
+            if not isinstance(representative_compiled, Mapping):
+                continue
+            timing = _stage_evaluator_build_timing_from_compiled(
+                representative_compiled
+            )
+            if timing is None:
+                continue
+            timings.append(timing)
+        if timings:
+            return _aggregate_stage_evaluator_build_timings(
+                timings,
+                source="lc-replay-partition-representatives",
+            )
+    sidecars = compiled.get("runtime_lc_sector_artifacts")
+    if not isinstance(sidecars, list):
+        return None
+    for sidecar in sidecars:
+        if not isinstance(sidecar, Mapping):
+            continue
+        relative_path = sidecar.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            continue
+        sidecar_manifest = manifest_dir / relative_path / "process_manifest.json"
+        try:
+            sidecar_payload = json.loads(sidecar_manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        sidecar_compiled = sidecar_payload.get("compiled")
+        if not isinstance(sidecar_compiled, Mapping):
+            continue
+        timing = _stage_evaluator_build_timing_from_compiled(sidecar_compiled)
+        if timing is None:
+            continue
+        return {
+            "source": "runtime-lc-sector-sidecar",
+            "sidecar_path": str(sidecar_manifest),
+            **timing,
+        }
+    return None
+
+
+def _aggregate_stage_evaluator_build_timings(
+    timings: Sequence[Mapping[str, Any]],
+    *,
+    source: str,
+) -> dict[str, Any]:
+    stage_evaluator_build_s = sum(
+        float(timing.get("stage_evaluator_build_s") or 0.0)
+        for timing in timings
+    )
+    symbolica_evaluator_build_s = sum(
+        float(timing.get("symbolica_evaluator_build_s") or 0.0)
+        for timing in timings
+    )
+    jit_compile_s = sum(
+        float(timing.get("jit_compile_s") or 0.0)
+        for timing in timings
+    )
+    stages: list[Any] = []
+    for timing in timings:
+        raw_stages = timing.get("stages")
+        if isinstance(raw_stages, list):
+            stages.extend(raw_stages)
+    return {
+        "source": source,
+        "representative_count": len(timings),
+        "stage_evaluator_build_s": stage_evaluator_build_s,
+        "symbolica_evaluator_build_s": symbolica_evaluator_build_s,
+        "jit_compile_s": jit_compile_s,
+        "jit_fraction_of_stage_evaluator_build": (
+            None
+            if stage_evaluator_build_s <= 0.0
+            else jit_compile_s / stage_evaluator_build_s
+        ),
+        "stages": stages,
+    }
+
+
+def _stage_evaluator_build_timing_from_compiled(
+    compiled: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    stage_evaluators = compiled.get("stage_evaluators")
+    if not isinstance(stage_evaluators, Mapping):
+        return None
+    timing = stage_evaluators.get("build_timing")
+    if not isinstance(timing, Mapping):
+        return None
+    return dict(timing)
 
 
 def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> int:
@@ -3266,6 +3560,7 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
 def _generic_process_set_generation_metadata(
     args: argparse.Namespace,
 ) -> dict[str, object]:
+    runtime_lc_sector_ids = _runtime_lc_sector_ids_arg(args)
     return {
         "process_options": {
             "flavour_scheme": int(getattr(args, "flavour_scheme", 5)),
@@ -3279,6 +3574,11 @@ def _generic_process_set_generation_metadata(
         "coupling_order_policy": str(getattr(args, "coupling_order_policy", "all")),
         "lc_sector_strategy": str(
             getattr(args, "lc_sector_strategy", "topology-representatives")
+        ),
+        "runtime_lc_sector_ids": (
+            None
+            if runtime_lc_sector_ids is None
+            else sorted(runtime_lc_sector_ids)
         ),
         "lc_topology_replay": bool(getattr(args, "lc_topology_replay", False)),
         "enumeration_prefilter": bool(
@@ -3334,11 +3634,16 @@ def _generate_process_child_command(
         str(int(getattr(args, "symbolica_compiled_chunk_compile_workers", 1))),
         "--n_cores",
         "1",
-        "--max-currents",
-        str(int(getattr(args, "max_currents", 50000))),
-        "--max-color-sectors",
-        str(int(getattr(args, "max_color_sectors", 20000))),
+        f"--max-currents={int(getattr(args, 'max_currents', -1))}",
+        f"--max-color-sectors={int(getattr(args, 'max_color_sectors', -1))}",
     ]
+    if bool(getattr(args, "skip_main_runtime_evaluator", False)):
+        command.append("--skip-main-runtime-evaluator")
+    runtime_selector = getattr(args, "runtime_lc_sector_selector", None)
+    if runtime_selector is True:
+        command.append("--runtime-lc-sector-selector")
+    elif runtime_selector is False:
+        command.append("--no-runtime-lc-sector-selector")
     if bool(getattr(args, "include_3qqbar", False)):
         command.append("--include-3qqbar")
     if bool(getattr(args, "include_cc", False)):
@@ -3377,10 +3682,10 @@ def _generate_process_child_command(
     color_accuracy = str(getattr(args, "color_accuracy", "lc")).lower()
     numerical_filter_current = getattr(args, "numerical_filter_current", None)
     if numerical_filter_current is None:
-        numerical_filter_current = color_accuracy == "lc"
+        numerical_filter_current = _default_numerical_current_passes(args)
     numerical_current_merging = getattr(args, "numerical_current_merging", None)
     if numerical_current_merging is None:
-        numerical_current_merging = color_accuracy == "lc"
+        numerical_current_merging = _default_numerical_current_passes(args)
     if bool(numerical_filter_current) and color_accuracy != "lc":
         command.append("--numerical-filter-current")
     elif not bool(numerical_filter_current):
@@ -3446,6 +3751,9 @@ def _generate_process_child_command(
     lc_sector_ids = str(getattr(args, "lc_sector_ids", ""))
     if lc_sector_ids:
         command.extend(["--lc-sector-ids", lc_sector_ids])
+    runtime_lc_sector_ids = str(getattr(args, "runtime_lc_sector_ids", ""))
+    if runtime_lc_sector_ids:
+        command.extend(["--runtime-lc-sector-ids", runtime_lc_sector_ids])
     reference_color_order = str(getattr(args, "reference_color_order", ""))
     if reference_color_order:
         command.extend(["--reference-color-order", reference_color_order])
@@ -3617,7 +3925,7 @@ def _child_generation_progress_callback(process: str):
             "stage": str(event.get("stage", "")),
             "item": str(event.get("item", "")),
         }
-        for key in ("increment", "total", "ram"):
+        for key in ("increment", "total", "ram", "duration_s"):
             if key in event:
                 payload[key] = event[key]
         print(
@@ -3653,6 +3961,11 @@ def _stderr_generation_monitor_callback(process: str):
             extras.append(f"inc={event['increment']}")
         if "total" in event:
             extras.append(f"total={event['total']}")
+        if "duration_s" in event:
+            try:
+                extras.append(f"dt={float(event['duration_s']):.3f}s")
+            except (TypeError, ValueError):
+                extras.append(f"dt={event['duration_s']}")
         if "ram" in event:
             extras.append(f"ram={event['ram']}")
         suffix = "" if not extras else " " + " ".join(str(item) for item in extras)
@@ -4006,6 +4319,167 @@ def _select_process_set_manifest_entry(
     raise ValueError(f"process {selected!r} not found; available: {available}")
 
 
+def _selected_runtime_lc_sidecar_root(
+    root: Path,
+    manifest: dict[str, Any],
+    sector_ids: Sequence[int],
+) -> Path | None:
+    if not sector_ids:
+        return None
+    compiled = manifest.get("compiled")
+    if not isinstance(compiled, dict):
+        return None
+    artifacts = compiled.get("runtime_lc_sector_artifacts")
+    if not isinstance(artifacts, list):
+        return None
+    requested = sorted(int(sector_id) for sector_id in sector_ids)
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        color_sector_ids = artifact.get("color_sector_ids")
+        if not isinstance(color_sector_ids, list):
+            continue
+        if sorted(int(sector_id) for sector_id in color_sector_ids) != requested:
+            continue
+        if not bool(artifact.get("runtime_available", False)):
+            continue
+        path = artifact.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        sidecar = Path(path)
+        if not sidecar.is_absolute():
+            sidecar = root / sidecar
+        if (sidecar / "process_manifest.json").exists():
+            return sidecar
+    return None
+
+
+def _time_lc_replay_partition_process(
+    args: argparse.Namespace,
+    root: Path,
+    manifest: dict[str, Any],
+    rusticol_module: Any,
+    points: Any,
+    np_module: Any,
+) -> tuple[Sequence[float], dict[str, Any]]:
+    compiled = manifest.get("compiled")
+    if not isinstance(compiled, dict):
+        raise RuntimeError("LC replay partition manifest is missing compiled metadata")
+    artifacts = compiled.get("representative_artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise RuntimeError("LC replay partition manifest has no representative artifacts")
+    target_per_representative = max(
+        float(args.target_runtime) / max(len(artifacts), 1),
+        0.05,
+    )
+    accumulated_values: list[float] | None = None
+    representative_profiles: list[dict[str, Any]] = []
+    sum_fields = (
+        "wall_us_per_point",
+        "core_evaluator_us_per_point",
+        "pure_evaluator_us_per_point",
+        "input_pack_us_per_point",
+        "stage_input_pack_us_per_point",
+        "amplitude_input_pack_us_per_point",
+    )
+    error_squares = {f"{field}_error": 0.0 for field in sum_fields}
+    summed = {field: 0.0 for field in sum_fields}
+    total_samples = 0
+    total_block_count = 0
+    batch_size = None
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        relative_path = artifact.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            continue
+        representative_root = Path(relative_path)
+        if not representative_root.is_absolute():
+            representative_root = root / representative_root
+        sidecar_manifest_path = representative_root / "process_manifest.json"
+        sidecar_manifest = json.loads(sidecar_manifest_path.read_text(encoding="utf-8"))
+        runtime_unavailable = _generic_dag_runtime_unavailable_message(sidecar_manifest)
+        if runtime_unavailable is not None:
+            raise RuntimeError(
+                f"LC replay representative {relative_path} is not runnable: "
+                f"{runtime_unavailable}"
+            )
+        runtime = _load_rusticol_runtime_compatible(
+            rusticol_module,
+            representative_root,
+            model_parameters=args.model_parameters,
+        )
+        raw_values = _rusticol_evaluate(
+            runtime,
+            points,
+            int(args.precision),
+            color_sector_ids=None,
+        )
+        values = [float(value) for value in raw_values]
+        if accumulated_values is None:
+            accumulated_values = [0.0 for _ in values]
+        if len(values) != len(accumulated_values):
+            raise RuntimeError(
+                "LC replay representative returned a different number of values "
+                f"({len(values)} instead of {len(accumulated_values)})"
+            )
+        for index, value in enumerate(values):
+            accumulated_values[index] += value
+        representative_batch_size = _time_process_batch_size(args, sidecar_manifest)
+        batch_size = representative_batch_size if batch_size is None else batch_size
+        profile = _profile_rusticol_process(
+            runtime,
+            points,
+            precision=int(args.precision),
+            target_s=target_per_representative,
+            batch_size=representative_batch_size,
+            color_sector_ids=None,
+            np_module=np_module,
+        )
+        for field in sum_fields:
+            value = profile.get(field)
+            if isinstance(value, (float, int)):
+                summed[field] += float(value)
+            error = profile.get(f"{field}_error")
+            if isinstance(error, (float, int)):
+                error_squares[f"{field}_error"] += float(error) ** 2
+        samples = profile.get("samples")
+        if isinstance(samples, int):
+            total_samples += samples
+        block_count = profile.get("block_count")
+        if isinstance(block_count, int):
+            total_block_count += block_count
+        representative_profiles.append(
+            {
+                "path": str(representative_root),
+                "representative_sector_id": artifact.get(
+                    "representative_sector_id"
+                ),
+                "active_sector_ids": artifact.get("active_sector_ids", []),
+                "replayed_sector_count": artifact.get("replayed_sector_count"),
+                "profile": profile,
+                "values": values,
+            }
+        )
+    if accumulated_values is None:
+        raise RuntimeError("LC replay partition manifest did not yield any values")
+    aggregate_profile: dict[str, Any] = {
+        **summed,
+        **{
+            field: math.sqrt(value)
+            for field, value in error_squares.items()
+        },
+        "block_size": int(batch_size or _time_process_batch_size(args, manifest)),
+        "block_count": total_block_count,
+        "samples": total_samples,
+        "representative_count": len(representative_profiles),
+        "target_runtime_s_per_representative": target_per_representative,
+        "replayed_sector_count": compiled.get("replayed_sector_count"),
+        "representative_profiles": representative_profiles,
+    }
+    return accumulated_values, aggregate_profile
+
+
 def _cmd_time_process(args: argparse.Namespace) -> int:
     requested_root = Path(args.process_dir).expanduser()
     root = requested_root
@@ -4028,18 +4502,10 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
             )
             root = _resolve_process_artifact_dir(requested_root, args.process_key)
             manifest = json.loads((root / "process_manifest.json").read_text())
-            unavailable = _generic_dag_runtime_unavailable_message(manifest)
-            if unavailable is not None:
-                raise RuntimeError(unavailable)
-            runtime = _load_rusticol_runtime_compatible(
-                rusticol,
-                requested_root if process_set_manifest is not None else root,
-                process_key=(
-                    args.process_key if process_set_manifest is not None else None
-                ),
-                model_parameters=args.model_parameters,
+            runtime_lc_sector_ids = _parse_int_list(
+                str(getattr(args, "lc_sector_ids", "")),
+                option="--lc-sector-ids",
             )
-            runtime_metadata = dict(runtime.metadata())
             points = _load_rusticol_validation_momenta(root, int(args.precision), np)
             if selected_process_entry is not None:
                 points = _validation_momenta_for_selected_crossing(
@@ -4047,19 +4513,96 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
                     selected_process_entry,
                     np,
                 )
-            values = _rusticol_evaluate(runtime, points, int(args.precision))
-        with display.progress(
-            "Profiling Rusticol runtime",
-            metadata=f"precision={int(args.precision)}, target={float(args.target_runtime):.3g}s",
-        ):
-            profile_payload = _profile_rusticol_process(
-                runtime,
-                points,
-                precision=int(args.precision),
-                target_s=float(args.target_runtime),
-                batch_size=_time_process_batch_size(args, manifest),
-                np_module=np,
-            )
+            if manifest.get("kind") == "pyamplicol-lc-replay-partition-process":
+                if runtime_lc_sector_ids:
+                    raise RuntimeError(
+                        "--lc-sector-ids is not supported for an LC replay "
+                        "partition artifact; time the matching selected-sector "
+                        "representative artifact directly instead"
+                    )
+                sidecar_root = None
+                runtime_root = root
+                runtime_process_key = None
+                runtime_manifest = manifest
+                runtime_metadata = {
+                    "process": manifest.get("process"),
+                    "artifact_class": manifest.get("artifact_class"),
+                    "schema_version": manifest.get("schema_version"),
+                }
+                effective_lc_sector_ids = None
+                values = []
+                profile_payload = None
+            else:
+                sidecar_root = _selected_runtime_lc_sidecar_root(
+                    root,
+                    manifest,
+                    runtime_lc_sector_ids,
+                )
+                runtime_root = sidecar_root or (
+                    requested_root if process_set_manifest is not None else root
+                )
+                runtime_process_key = (
+                    None
+                    if sidecar_root is not None
+                    else (args.process_key if process_set_manifest is not None else None)
+                )
+                runtime_manifest = (
+                    json.loads((sidecar_root / "process_manifest.json").read_text())
+                    if sidecar_root is not None
+                    else manifest
+                )
+                runtime_unavailable = _generic_dag_runtime_unavailable_message(
+                    runtime_manifest
+                )
+                if runtime_unavailable is not None:
+                    raise RuntimeError(runtime_unavailable)
+                runtime = _load_rusticol_runtime_compatible(
+                    rusticol,
+                    runtime_root,
+                    process_key=runtime_process_key,
+                    model_parameters=args.model_parameters,
+                )
+                runtime_metadata = dict(runtime.metadata())
+                effective_lc_sector_ids = (
+                    None if sidecar_root is not None else runtime_lc_sector_ids
+                )
+                values = _rusticol_evaluate(
+                    runtime,
+                    points,
+                    int(args.precision),
+                    color_sector_ids=effective_lc_sector_ids,
+                )
+                profile_payload = None
+        if manifest.get("kind") == "pyamplicol-lc-replay-partition-process":
+            with display.progress(
+                "Profiling LC replay partitions",
+                metadata=(
+                    f"precision={int(args.precision)}, "
+                    f"target={float(args.target_runtime):.3g}s"
+                ),
+            ):
+                values, profile_payload = _time_lc_replay_partition_process(
+                    args,
+                    root,
+                    manifest,
+                    rusticol,
+                    points,
+                    np,
+                )
+        else:
+            with display.progress(
+                "Profiling Rusticol runtime",
+                metadata=f"precision={int(args.precision)}, target={float(args.target_runtime):.3g}s",
+            ):
+                profile_payload = _profile_rusticol_process(
+                    runtime,
+                    points,
+                    precision=int(args.precision),
+                    target_s=float(args.target_runtime),
+                    batch_size=_time_process_batch_size(args, manifest),
+                    color_sector_ids=effective_lc_sector_ids,
+                    np_module=np,
+                )
     except Exception as exc:
         if args.json:
             print(
@@ -4081,6 +4624,10 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
         "available": True,
         "process_dir": str(root),
         "requested_process_dir": str(requested_root),
+        "runtime_process_dir": str(runtime_root),
+        "runtime_lc_sector_artifact": (
+            None if sidecar_root is None else str(sidecar_root)
+        ),
         "process": runtime_metadata.get("process") or manifest.get("process"),
         "artifact_class": (
             manifest.get("artifact_class")
@@ -4090,6 +4637,8 @@ def _cmd_time_process(args: argparse.Namespace) -> int:
         "schema_version": runtime_metadata.get("schema_version"),
         "precision": int(args.precision),
         "target_runtime_s": float(args.target_runtime),
+        "lc_sector_ids": runtime_lc_sector_ids,
+        "effective_lc_sector_ids": list(effective_lc_sector_ids or ()),
         "model_parameters": (
             None
             if args.model_parameters is None
@@ -4435,7 +4984,17 @@ def _repeat_rusticol_points(points: Any, count: int, np_module: Any) -> Any:
     return (points * reps)[:count]
 
 
-def _rusticol_evaluate(runtime: Any, points: Any, precision: int) -> Sequence[Any]:
+def _rusticol_evaluate(
+    runtime: Any,
+    points: Any,
+    precision: int,
+    *,
+    color_sector_ids: Sequence[int] | None = None,
+) -> Sequence[Any]:
+    if color_sector_ids:
+        if precision != 16:
+            raise ValueError("--lc-sector-ids is currently supported only with --precision 16")
+        return runtime.evaluate_color_sectors(points, list(color_sector_ids))
     if precision == 16:
         return runtime.evaluate(points)
     return runtime.evaluate_with_prec(points, precision)
@@ -4445,6 +5004,11 @@ def _time_process_batch_size(args: argparse.Namespace, manifest: dict[str, Any])
     requested = getattr(args, "batch_size", None)
     if requested is not None:
         return max(int(requested), 1)
+    compiled = manifest.get("compiled")
+    if isinstance(compiled, dict):
+        batch_size = compiled.get("batch_size")
+        if isinstance(batch_size, int) and batch_size > 0:
+            return batch_size
     metadata = manifest.get("metadata")
     if isinstance(metadata, dict):
         batch_size = metadata.get("batch_size")
@@ -4470,12 +5034,18 @@ def _profile_rusticol_process(
     precision: int,
     target_s: float,
     batch_size: int,
+    color_sector_ids: Sequence[int] | None,
     np_module: Any,
 ) -> dict[str, Any]:
     block_size = max(int(batch_size), 1)
     estimate_points = _repeat_rusticol_points(points, block_size, np_module)
     last_profile = dict(
-        runtime.profile(estimate_points, precision=precision, include_values=False)
+        runtime.profile(
+            estimate_points,
+            precision=precision,
+            include_values=False,
+            color_sector_ids=(list(color_sector_ids) if color_sector_ids else None),
+        )
     )
     min_block_count = 8
     target_elapsed_s = max(float(target_s), 0.0)
@@ -4490,7 +5060,12 @@ def _profile_rusticol_process(
         batch = _repeat_rusticol_points(points, block_size, np_module)
         start = time.perf_counter()
         last_profile = dict(
-            runtime.profile(batch, precision=precision, include_values=False)
+            runtime.profile(
+                batch,
+                precision=precision,
+                include_values=False,
+                color_sector_ids=(list(color_sector_ids) if color_sector_ids else None),
+            )
         )
         elapsed_s = time.perf_counter() - start
         elapsed_total_s += elapsed_s
@@ -4538,6 +5113,7 @@ def _profile_rusticol_process(
         "samples": len(samples) * block_size,
         "block_count": len(samples),
         "block_size": block_size,
+        "lc_sector_ids": list(color_sector_ids or ()),
         "wall_us_per_point": wall_s * 1.0e6,
         "wall_us_per_point_error": wall_error_s * 1.0e6,
         "core_evaluator_us_per_point": core_s * 1.0e6,

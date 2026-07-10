@@ -78,6 +78,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("--generation-s", type=float)
     record.add_argument("--wall-us-per-point", type=float)
     record.add_argument("--runtime-us-per-point", type=float)
+    record.add_argument(
+        "--all-flow-status",
+        choices=("ok", "missing", "timeout", "ram_limit", "error", "not_run"),
+        default=None,
+    )
+    record.add_argument("--all-flow-generation-s", type=float)
+    record.add_argument("--all-flow-wall-us-per-point", type=float)
+    record.add_argument("--all-flow-runtime-us-per-point", type=float)
+    record.add_argument("--all-flow-notes", default="")
+    record.add_argument("--all-flow-error", default="")
     record.add_argument("--notes", default="")
     record.add_argument("--error", default="")
 
@@ -98,6 +108,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             generation_s=args.generation_s,
             wall_us_per_point=args.wall_us_per_point,
             runtime_us_per_point=args.runtime_us_per_point,
+            all_flow_status=args.all_flow_status,
+            all_flow_generation_s=args.all_flow_generation_s,
+            all_flow_wall_us_per_point=args.all_flow_wall_us_per_point,
+            all_flow_runtime_us_per_point=args.all_flow_runtime_us_per_point,
+            all_flow_notes=str(args.all_flow_notes),
+            all_flow_error=str(args.all_flow_error),
             notes=str(args.notes),
             error=str(args.error),
         )
@@ -163,6 +179,12 @@ def _record_row(
     generation_s: float | None,
     wall_us_per_point: float | None,
     runtime_us_per_point: float | None,
+    all_flow_status: str | None,
+    all_flow_generation_s: float | None,
+    all_flow_wall_us_per_point: float | None,
+    all_flow_runtime_us_per_point: float | None,
+    all_flow_notes: str,
+    all_flow_error: str,
     notes: str,
     error: str,
 ) -> None:
@@ -186,6 +208,18 @@ def _record_row(
         row["wall_us_per_point"] = float(wall_us_per_point)
     if runtime_us_per_point is not None:
         row["runtime_us_per_point"] = float(runtime_us_per_point)
+    if all_flow_status is not None:
+        row["all_flow_status"] = str(all_flow_status)
+    if all_flow_generation_s is not None:
+        row["all_flow_generation_s"] = float(all_flow_generation_s)
+    if all_flow_wall_us_per_point is not None:
+        row["all_flow_wall_us_per_point"] = float(all_flow_wall_us_per_point)
+    if all_flow_runtime_us_per_point is not None:
+        row["all_flow_runtime_us_per_point"] = float(all_flow_runtime_us_per_point)
+    if all_flow_notes:
+        row["all_flow_notes"] = all_flow_notes
+    if all_flow_error:
+        row["all_flow_error"] = all_flow_error
     if notes:
         row["notes"] = notes
     if error:
@@ -213,22 +247,34 @@ def render_table(data: dict[str, Any]) -> str:
         r"\setlength{\tabcolsep}{1.55pt}",
         r"\renewcommand{\arraystretch}{1.03}",
         (
-            r"\begin{longtable}{@{}r L{1.02in} L{0.60in} L{1.00in} "
-            r"r r r L{1.30in}@{}}"
+            r"\begin{longtable}{@{}r L{0.92in} L{0.48in} L{0.86in} "
+            r"r r r r r r L{0.96in}@{}}"
         ),
         r"\toprule",
         (
             r"\textbf{n} & \textbf{process} & \textbf{route} & \textbf{setup} "
-            r"& \textbf{gen [s]} & \textbf{wall [us/pt]} "
-            r"& \textbf{eval [us/pt]} & \textbf{notes} \\"
+            r"& \multicolumn{3}{c}{\textbf{selected flow, helicity sum}} "
+            r"& \multicolumn{3}{c}{\textbf{all flows, fixed helicity}} "
+            r"& \textbf{notes} \\"
+        ),
+        (
+            r"& & & & \textbf{gen [s]} & \textbf{wall [us/pt]} "
+            r"& \textbf{eval [us/pt]} & \textbf{gen [s]} "
+            r"& \textbf{wall [us/pt]} & \textbf{eval [us/pt]} & \\"
         ),
         r"\midrule",
         r"\endfirsthead",
         r"\toprule",
         (
             r"\textbf{n} & \textbf{process} & \textbf{route} & \textbf{setup} "
-            r"& \textbf{gen [s]} & \textbf{wall [us/pt]} "
-            r"& \textbf{eval [us/pt]} & \textbf{notes} \\"
+            r"& \multicolumn{3}{c}{\textbf{selected flow, helicity sum}} "
+            r"& \multicolumn{3}{c}{\textbf{all flows, fixed helicity}} "
+            r"& \textbf{notes} \\"
+        ),
+        (
+            r"& & & & \textbf{gen [s]} & \textbf{wall [us/pt]} "
+            r"& \textbf{eval [us/pt]} & \textbf{gen [s]} "
+            r"& \textbf{wall [us/pt]} & \textbf{eval [us/pt]} & \\"
         ),
         r"\midrule",
         r"\endhead",
@@ -246,6 +292,8 @@ def render_table(data: dict[str, Any]) -> str:
             reference = {}
         ref_generation = _optional_float(reference.get("generation_s"))
         ref_runtime = _optional_float(reference.get("runtime_us_per_point"))
+        ref_all_flow_generation = _optional_float(reference.get("all_flow_generation_s"))
+        ref_all_flow_runtime = _optional_float(reference.get("all_flow_runtime_us_per_point"))
         for mode in MODES:
             mode_key = str(mode["key"])
             row = modes.get(mode_key, {})
@@ -259,6 +307,8 @@ def render_table(data: dict[str, Any]) -> str:
                 mode_key=mode_key,
                 ref_generation=ref_generation,
                 ref_runtime=ref_runtime,
+                ref_all_flow_generation=ref_all_flow_generation,
+                ref_all_flow_runtime=ref_all_flow_runtime,
             )
             lines.append(
                 " & ".join(
@@ -285,6 +335,11 @@ def render_table(data: dict[str, Any]) -> str:
                 r"\(d\bar d\to Z+(n-1)g\).  \PAC\ rows use Rusticol, batch size "
                 r"64, output chunk size 128, stage-local evaluator inputs, ten "
                 r"Horner iterations, and \texttt{time-process --target-runtime 10}. "
+                r"The first timing block is one selected LC flow with the helicity "
+                r"sum; the second is the sum over all LC flows for one fixed source "
+                r"helicity.  Generation columns report the artifact used by the "
+                r"corresponding timing block: selected-flow generation on the left "
+                r"and all-flow generation on the right. "
                 r"The green row is the default \PAC\ route, SymJIT O3.  Generated "
                 r"processes are kept under \texttt{docs/.z\_performance\_outputs}; "
                 r"the driver is \texttt{docs/run\_z\_performance\_table.py}."
@@ -293,9 +348,11 @@ def render_table(data: dict[str, Any]) -> str:
             (
                 r"\noindent\footnotesize To reproduce one \PAC\ row, run "
                 r"generation followed by timing.  This example is the \(n=7\) "
-                r"JIT O3 row; use optimization level 1 for the JIT O1 row, or "
-                r"the compiled/ASM flags from \texttt{run\_z\_performance\_table.py} "
-                r"for the ASM row."
+                r"JIT O3 selected-flow block; for the all-flow block, use the "
+                r"same command but replace the sector/order flags with "
+                r"\texttt{--lc-topology-replay --skip-generic-plan "
+                r"--no-runtime-lc-sector-selector --source-helicities "
+                r"1=-1,2=-1,4=1,5=1,6=1,7=1,8=1,9=1}."
             ),
             r"\begin{lstlisting}[language=bash,basicstyle=\ttfamily\tiny,breaklines=true,breakatwhitespace=true]",
             (
@@ -329,13 +386,28 @@ def _render_mode_cells(
     mode_key: str,
     ref_generation: float | None,
     ref_runtime: float | None,
+    ref_all_flow_generation: float | None,
+    ref_all_flow_runtime: float | None,
 ) -> list[str]:
     status = str(row.get("status", "missing"))
+    all_flow_status = str(row.get("all_flow_status", "missing"))
     if status == "timeout" and mode_key == "cpp_o3":
         return [
             r"\textcolor{speedred}{\texttt{t/o >15 min}}",
             _missing(),
             _missing(),
+            *_render_timing_triplet(
+                row,
+                mode_key=mode_key,
+                status=all_flow_status,
+                generation_key="all_flow_generation_s",
+                wall_key="all_flow_wall_us_per_point",
+                runtime_key="all_flow_runtime_us_per_point",
+                ref_generation=ref_all_flow_generation,
+                ref_runtime=ref_all_flow_runtime,
+                notes_key="all_flow_notes",
+                error_key="all_flow_error",
+            ),
             _notes(row),
         ]
     if status == "ram_limit":
@@ -343,6 +415,18 @@ def _render_mode_cells(
             r"\textcolor{speedred}{\texttt{>30 GB RAM}}",
             _missing(color="black!45") if mode_key == "amplicol" else _missing(),
             _missing(),
+            *_render_timing_triplet(
+                row,
+                mode_key=mode_key,
+                status=all_flow_status,
+                generation_key="all_flow_generation_s",
+                wall_key="all_flow_wall_us_per_point",
+                runtime_key="all_flow_runtime_us_per_point",
+                ref_generation=ref_all_flow_generation,
+                ref_runtime=ref_all_flow_runtime,
+                notes_key="all_flow_notes",
+                error_key="all_flow_error",
+            ),
             _notes(row),
         ]
     if status not in {"ok", "missing"}:
@@ -350,33 +434,130 @@ def _render_mode_cells(
             rf"\textcolor{{speedred}}{{\texttt{{{_latex_escape(status)}}}}}",
             _missing(color="black!45") if mode_key == "amplicol" else _missing(),
             _missing(),
+            *_render_timing_triplet(
+                row,
+                mode_key=mode_key,
+                status=all_flow_status,
+                generation_key="all_flow_generation_s",
+                wall_key="all_flow_wall_us_per_point",
+                runtime_key="all_flow_runtime_us_per_point",
+                ref_generation=ref_all_flow_generation,
+                ref_runtime=ref_all_flow_runtime,
+                notes_key="all_flow_notes",
+                error_key="all_flow_error",
+            ),
             _notes(row),
         ]
     if status == "missing":
         if mode_key == "amplicol":
-            return [_missing(), _missing(color="black!45"), _missing(), ""]
-        return [_missing(), _missing(), _missing(), ""]
+            selected = [_missing(), _missing(color="black!45"), _missing()]
+        else:
+            selected = [_missing(), _missing(), _missing()]
+        return [
+            *selected,
+            *_render_timing_triplet(
+                row,
+                mode_key=mode_key,
+                status=all_flow_status,
+                generation_key="all_flow_generation_s",
+                wall_key="all_flow_wall_us_per_point",
+                runtime_key="all_flow_runtime_us_per_point",
+                ref_generation=ref_all_flow_generation,
+                ref_runtime=ref_all_flow_runtime,
+                notes_key="all_flow_notes",
+                error_key="all_flow_error",
+            ),
+            "",
+        ]
     generation = _optional_float(row.get("generation_s"))
     wall = _optional_float(row.get("wall_us_per_point"))
     runtime = _optional_float(row.get("runtime_us_per_point"))
     if mode_key == "amplicol":
-        return [
+        selected = [
             _format_plain(generation),
             _missing(color="black!45"),
             _format_plain(runtime),
-            _notes(row),
         ]
+    else:
+        selected = [
+            _format_with_ratio(generation, ref_generation),
+            _format_with_ratio(wall, ref_runtime),
+            _format_with_ratio(runtime, ref_runtime),
+        ]
+    return [
+        *selected,
+        *_render_timing_triplet(
+            row,
+            mode_key=mode_key,
+            status=all_flow_status,
+            generation_key="all_flow_generation_s",
+            wall_key="all_flow_wall_us_per_point",
+            runtime_key="all_flow_runtime_us_per_point",
+            ref_generation=ref_all_flow_generation,
+            ref_runtime=ref_all_flow_runtime,
+            notes_key="all_flow_notes",
+            error_key="all_flow_error",
+        ),
+        _joined_notes(row),
+    ]
+
+
+def _render_timing_triplet(
+    row: dict[str, Any],
+    *,
+    mode_key: str,
+    status: str,
+    generation_key: str,
+    wall_key: str,
+    runtime_key: str,
+    ref_generation: float | None,
+    ref_runtime: float | None,
+    notes_key: str,
+    error_key: str,
+) -> list[str]:
+    if status == "missing":
+        if mode_key == "amplicol":
+            return [_missing(), _missing(color="black!45"), _missing()]
+        return [_missing(), _missing(), _missing()]
+    if status == "timeout" and mode_key == "cpp_o3":
+        return [r"\textcolor{speedred}{\texttt{t/o >15 min}}", _missing(), _missing()]
+    if status == "ram_limit":
+        return [
+            r"\textcolor{speedred}{\texttt{>30 GB RAM}}",
+            _missing(color="black!45") if mode_key == "amplicol" else _missing(),
+            _missing(),
+        ]
+    if status != "ok":
+        return [
+            rf"\textcolor{{speedred}}{{\texttt{{{_latex_escape(status)}}}}}",
+            _missing(color="black!45") if mode_key == "amplicol" else _missing(),
+            _missing(),
+        ]
+    generation = _optional_float(row.get(generation_key))
+    wall = _optional_float(row.get(wall_key))
+    runtime = _optional_float(row.get(runtime_key))
+    if mode_key == "amplicol":
+        return [_format_plain(generation), _missing(color="black!45"), _format_plain(runtime)]
     return [
         _format_with_ratio(generation, ref_generation),
         _format_with_ratio(wall, ref_runtime),
         _format_with_ratio(runtime, ref_runtime),
-        _notes(row),
     ]
 
 
-def _notes(row: dict[str, Any]) -> str:
-    notes = str(row.get("notes", ""))
-    error = str(row.get("error", ""))
+def _joined_notes(row: dict[str, Any]) -> str:
+    notes = [note for note in (_notes(row), _notes(row, notes_key="all_flow_notes", error_key="all_flow_error")) if note]
+    return "; ".join(notes)
+
+
+def _notes(
+    row: dict[str, Any],
+    *,
+    notes_key: str = "notes",
+    error_key: str = "error",
+) -> str:
+    notes = str(row.get(notes_key, ""))
+    error = str(row.get(error_key, ""))
     if notes:
         if (
             notes.startswith("generated process kept at ")

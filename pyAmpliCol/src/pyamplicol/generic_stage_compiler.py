@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .generic_artifact import GenericProcessManifest
+from .generic_artifact import GenericProcessManifest, LC_SECTOR_SELECTOR_PARAMETER
 from .generic_dag import GenericDAG
 from .model import AmplicolSMLeadingColorModel, Model
 from .params import ParamBuilder
@@ -215,6 +216,7 @@ def build_generic_stage_compiler_blueprint(
     *,
     model: Model | None = None,
     selected_color_sector_ids: set[int] | None = None,
+    enable_lc_sector_runtime_selector: bool | None = None,
     stage_local_parameter_layout: bool = False,
 ) -> GenericStageCompilerBlueprint:
     """Build evaluator-ready symbolic stage metadata for schema-v2 DAGs.
@@ -237,8 +239,11 @@ def build_generic_stage_compiler_blueprint(
             color_plan=manifest.color_plan,
         )
     )
+    if enable_lc_sector_runtime_selector is None:
+        enable_lc_sector_runtime_selector = selected_color_sector_ids is None
     payload = generic_manifest.to_json_dict(
         selected_color_sector_ids=selected_color_sector_ids,
+        enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
     )
     schema = _dict(payload["runtime_schema"])
     builder = _parameter_builder(schema)
@@ -355,6 +360,7 @@ def write_generic_stage_evaluator_artifacts(
 
     output_dir = Path(artifact_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
+    build_started = time.perf_counter()
     if progress_callback is not None:
         progress_callback(
             {
@@ -369,6 +375,7 @@ def write_generic_stage_evaluator_artifacts(
             raise ValueError(
                 f"generic stage {stage.evaluator_label!r} has no output expressions"
             )
+        started = time.perf_counter()
         if compiler is not None:
             manifest = compiler(
                 stage,
@@ -391,38 +398,65 @@ def write_generic_stage_evaluator_artifacts(
                 f"generic stage compiler for {stage.evaluator_label!r} "
                 "did not return a manifest dictionary"
             )
+        build_s = time.perf_counter() - started
+        manifest.setdefault("build_timing", {})
+        timing = manifest["build_timing"]
+        if isinstance(timing, dict):
+            timing["stage_evaluator_build_s"] = build_s
+            timing["symbolica_evaluator_build_s"] = build_s
+            if _manifest_uses_jit_evaluator(manifest):
+                timing["jit_compile_s"] = build_s
         return manifest
 
     stage_payloads = []
+    stage_timings: list[dict[str, object]] = []
     for stage in blueprint.stages:
         payload = stage.to_json_dict()
         payload["evaluator"] = compile_stage(stage)
+        stage_timings.append(
+            _stage_build_timing_record(stage.evaluator_label, payload["evaluator"])
+        )
         stage_payloads.append(payload)
         if progress_callback is not None:
+            timing = stage_timings[-1]
             progress_callback(
                 {
                     "stage": "stage complete",
                     "item": stage.evaluator_label,
                     "increment": 1,
                     "total": blueprint.stage_count,
+                    "duration_s": timing["stage_evaluator_build_s"],
                 }
             )
 
     amplitude_payload = blueprint.amplitude_stage.to_json_dict()
     amplitude_payload["evaluator"] = compile_stage(blueprint.amplitude_stage)
+    stage_timings.append(
+        _stage_build_timing_record(
+            blueprint.amplitude_stage.evaluator_label,
+            amplitude_payload["evaluator"],
+        )
+    )
     if progress_callback is not None:
+        timing = stage_timings[-1]
         progress_callback(
             {
                 "stage": "stage complete",
                 "item": blueprint.amplitude_stage.evaluator_label,
                 "increment": 1,
                 "total": blueprint.stage_count,
+                "duration_s": timing["stage_evaluator_build_s"],
             }
         )
 
     stage_local_layout = (
         blueprint.amplitude_stage.parameter_layout == "stage-local-value-momentum"
         and all(stage.parameter_layout == "stage-local-value-momentum" for stage in blueprint.stages)
+    )
+    total_build_s = time.perf_counter() - build_started
+    jit_compile_s = sum(
+        float(record.get("jit_compile_s") or 0.0)
+        for record in stage_timings
     )
     return {
         "kind": "generic-dag-stage-evaluator-artifacts",
@@ -447,9 +481,61 @@ def write_generic_stage_evaluator_artifacts(
             else "global-value-momentum"
         ),
         "stage_count": blueprint.stage_count,
+        "build_timing": {
+            "stage_evaluator_build_s": total_build_s,
+            "symbolica_evaluator_build_s": sum(
+                float(record["symbolica_evaluator_build_s"])
+                for record in stage_timings
+            ),
+            "jit_compile_s": jit_compile_s,
+            "jit_fraction_of_stage_evaluator_build": (
+                None if total_build_s <= 0.0 else jit_compile_s / total_build_s
+            ),
+            "stages": stage_timings,
+        },
         "stages": stage_payloads,
         "amplitude_stage": amplitude_payload,
     }
+
+
+def _stage_build_timing_record(
+    evaluator_label: str,
+    evaluator_manifest: object,
+) -> dict[str, object]:
+    manifest = evaluator_manifest if isinstance(evaluator_manifest, dict) else {}
+    raw_timing = manifest.get("build_timing") if isinstance(manifest, dict) else None
+    timing = raw_timing if isinstance(raw_timing, dict) else {}
+    return {
+        "evaluator_label": evaluator_label,
+        "stage_evaluator_build_s": float(
+            timing.get("stage_evaluator_build_s") or 0.0
+        ),
+        "symbolica_evaluator_build_s": float(
+            timing.get("symbolica_evaluator_build_s") or 0.0
+        ),
+        "jit_compile_s": (
+            None
+            if timing.get("jit_compile_s") is None
+            else float(timing.get("jit_compile_s") or 0.0)
+        ),
+    }
+
+
+def _manifest_uses_jit_evaluator(manifest: Mapping[str, object]) -> bool:
+    if str(manifest.get("kind", "")) == "jit-symbolica-evaluator":
+        return True
+    if str(manifest.get("kind", "")) == "chunked-symbolica-evaluator":
+        chunks = manifest.get("chunks")
+        if isinstance(chunks, Sequence) and chunks:
+            return all(
+                isinstance(chunk, Mapping)
+                and _manifest_uses_jit_evaluator(chunk)
+                for chunk in chunks
+            )
+    settings = manifest.get("settings")
+    if isinstance(settings, Mapping):
+        return str(settings.get("backend", "")) == "jit"
+    return False
 
 
 def _compile_default_stage_evaluator(
@@ -708,6 +794,9 @@ def _compile_amplitude_stage_blueprint(
         if isinstance(model, _RuntimeParameterizedModel)
         else _RuntimeParameterizedModel(model, local_inputs.model_parameter_symbols)
     )
+    lc_sector_selector = local_inputs.model_parameter_symbols.get(
+        LC_SECTOR_SELECTOR_PARAMETER
+    )
     for root in (_dict(item) for item in _list(stage["roots"])):
         try:
             output = _amplitude_root_expression(
@@ -720,6 +809,12 @@ def _compile_amplitude_stage_blueprint(
         except ValueError as error:
             blockers.append(f"amplitude root {root['root_id']}: {error}")
             continue
+        if lc_sector_selector is not None:
+            output = _lc_sector_guard(
+                output,
+                selector=lc_sector_selector,
+                sector_id=int(root["color_sector_id"]),
+            )
         start = len(outputs)
         outputs.append(output)
         output_slots.append(
@@ -879,6 +974,11 @@ def _current_stage_model_parameter_records(
     current_slots: Mapping[int, dict[str, Any]],
 ) -> tuple[dict[str, Any], ...]:
     used_names = _coupling_parameter_names_used_by_records(interactions)
+    if _has_model_parameter_record(
+        model_parameter_records,
+        LC_SECTOR_SELECTOR_PARAMETER,
+    ):
+        used_names.add(LC_SECTOR_SELECTOR_PARAMETER)
     for current_id, slots in output_slots_by_current.items():
         if not any(str(slot["variant"]) == "propagated" for slot in slots):
             continue
@@ -897,10 +997,32 @@ def _amplitude_stage_model_parameter_records(
     *,
     roots: Sequence[dict[str, Any]],
 ) -> tuple[dict[str, Any], ...]:
-    return _filter_model_parameter_records(
+    used_names = _coupling_parameter_names_used_by_records(roots)
+    if _has_model_parameter_record(
         model_parameter_records,
-        _coupling_parameter_names_used_by_records(roots),
-    )
+        LC_SECTOR_SELECTOR_PARAMETER,
+    ):
+        used_names.add(LC_SECTOR_SELECTOR_PARAMETER)
+    return _filter_model_parameter_records(model_parameter_records, used_names)
+
+
+def _has_model_parameter_record(
+    model_parameter_records: Sequence[dict[str, Any]],
+    name: str,
+) -> bool:
+    return any(str(record.get("name")) == name for record in model_parameter_records)
+
+
+def _lc_sector_guard(
+    expression: Any,
+    *,
+    selector: Any,
+    sector_id: int,
+) -> Any:
+    from symbolica import Expression
+
+    selected = Expression.IF(selector - int(sector_id), 0, expression)
+    return Expression.IF(selector + 1, selected, expression)
 
 
 def _coupling_parameter_names_used_by_records(
@@ -1080,17 +1202,21 @@ def _global_stage_inputs(
 def _parameter_builder(schema: dict[str, Any]) -> ParamBuilder:
     layout = _dict(schema["parameter_layout"])
     builder = ParamBuilder()
-    builder.add_parameter_list(
-        ("generic_schema_v2", "values"),
-        int(layout["value_component_count"]),
-        role="generic_value_storage",
-    )
-    builder.add_parameter_list(
-        ("generic_schema_v2", "momenta"),
-        int(layout["momentum_parameter_count"]),
-        role="generic_momentum_storage",
-        real_valued=True,
-    )
+    value_component_count = int(layout["value_component_count"])
+    if value_component_count:
+        builder.add_parameter_list(
+            ("generic_schema_v2", "values"),
+            value_component_count,
+            role="generic_value_storage",
+        )
+    momentum_parameter_count = int(layout["momentum_parameter_count"])
+    if momentum_parameter_count:
+        builder.add_parameter_list(
+            ("generic_schema_v2", "momenta"),
+            momentum_parameter_count,
+            role="generic_momentum_storage",
+            real_valued=True,
+        )
     model_parameter_count = int(layout.get("model_parameter_count", 0))
     if model_parameter_count:
         builder.add_parameter_list(

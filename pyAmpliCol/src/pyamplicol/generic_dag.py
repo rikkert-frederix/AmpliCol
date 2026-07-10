@@ -358,8 +358,47 @@ class ColorEngine:
             for sector in color_plan.sectors
             for word in (sector.color_words or ())
         )
+        self._shared_lc_orderings = (
+            color_plan.color_accuracy == "lc"
+            and bool(color_plan.sectors)
+        )
+        self._shared_lc_coloured_labels = set(color_plan.coloured_labels)
+        self._shared_lc_singlet_labels = set(color_plan.process.singlet_labels)
+        self._shared_lc_words_by_sector = tuple(
+            (
+                sector,
+                tuple(_sector_intermediate_order_words(sector)),
+            )
+            for sector in color_plan.sectors
+        )
+        self._shared_lc_sector_ids_by_word: dict[tuple[int, ...], tuple[int, ...]] = {}
+        if self._shared_lc_orderings:
+            sector_ids_by_word: dict[tuple[int, ...], list[int]] = {}
+            segments: set[tuple[int, ...]] = set()
+            for sector in color_plan.sectors:
+                for word in sector.color_words:
+                    sector_ids_by_word.setdefault(tuple(word), []).append(int(sector.id))
+                for word in _sector_intermediate_order_words(sector):
+                    for start in range(len(word)):
+                        for stop in range(start + 1, len(word) + 1):
+                            segments.add(tuple(word[start:stop]))
+            self._shared_lc_sector_ids_by_word = {
+                word: tuple(ids) for word, ids in sector_ids_by_word.items()
+            }
+            self._shared_lc_segments = frozenset(segments)
+        else:
+            self._shared_lc_segments = frozenset()
 
     def source_states_for_leg(self, leg: ProcessLegIR) -> tuple[ColorState, ...]:
+        if self._shared_lc_orderings:
+            leg_is_singlet = self._label_is_color_singlet.get(leg.label, False)
+            return (
+                ColorState(
+                    accuracy=self.color_plan.color_accuracy,
+                    sector_id=0,
+                    line_groups=() if leg_is_singlet else (0,),
+                ),
+            )
         if self._shared_single_trace:
             return (
                 ColorState(
@@ -415,6 +454,19 @@ class ColorEngine:
                         accuracy=left.accuracy,
                         sector_id=0,
                         line_groups=groups or (0,),
+                    )
+                ),
+            )
+        if self._shared_lc_orderings:
+            groups = self._lc_combined_line_groups(left, right, vertex)
+            if groups is None:
+                return ()
+            return (
+                ColorFlow(
+                    state=ColorState(
+                        accuracy=left.accuracy,
+                        sector_id=0,
+                        line_groups=groups,
                     )
                 ),
             )
@@ -547,6 +599,11 @@ class ColorEngine:
     ) -> bool:
         if not self._vertex_has_colour(vertex):
             return True
+        if self._shared_lc_orderings:
+            return self._shared_lc_ordered_combination_labels(
+                left_index,
+                right_index,
+            ) is not None
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
         if sector is None:
             return True
@@ -598,6 +655,13 @@ class ColorEngine:
                     return segment
             self._ordered_combination_labels_cache[cache_key] = None
             return None
+        if self._shared_lc_orderings:
+            labels = self._shared_lc_ordered_combination_labels(
+                left_index,
+                right_index,
+            )
+            self._ordered_combination_labels_cache[cache_key] = labels
+            return labels
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
         if sector is None:
             self._ordered_combination_labels_cache[cache_key] = proposed
@@ -661,6 +725,8 @@ class ColorEngine:
                 )
                 for word in self._shared_single_trace_words
             )
+        if self._shared_lc_orderings:
+            return self._shared_lc_closure_word(left_index, right_index) is not None
         if left_index.color_state.sector_id != right_index.color_state.sector_id:
             return False
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
@@ -711,6 +777,75 @@ class ColorEngine:
     def shared_single_trace(self) -> bool:
         return self._shared_single_trace
 
+    def shared_lc_closure_flows(
+        self,
+        left_index: CurrentIndex,
+        right_index: CurrentIndex,
+    ) -> tuple[ColorFlow, ...]:
+        if not self._shared_lc_orderings:
+            return ()
+        flows: list[ColorFlow] = []
+        word = self._shared_lc_closure_word(left_index, right_index)
+        if word is None:
+            return ()
+        for sector_id in self._shared_lc_sector_ids_by_word.get(word, ()):
+            flows.append(
+                ColorFlow(
+                    state=ColorState(
+                        accuracy=self.color_plan.color_accuracy,
+                        sector_id=sector_id,
+                        line_groups=(0,),
+                    )
+                )
+            )
+        return tuple(flows)
+
+    @property
+    def shared_lc_orderings(self) -> bool:
+        return self._shared_lc_orderings
+
+    def _shared_lc_ordered_combination_labels(
+        self,
+        left_index: CurrentIndex,
+        right_index: CurrentIndex,
+    ) -> tuple[int, ...] | None:
+        proposed = (
+            *left_index.ordered_external_labels,
+            *right_index.ordered_external_labels,
+        )
+        coloured_segment = tuple(
+            label for label in proposed if label in self._shared_lc_coloured_labels
+        )
+        extras = tuple(
+            sorted(label for label in proposed if label not in self._shared_lc_coloured_labels)
+        )
+        if extras and not set(extras).issubset(self._shared_lc_singlet_labels):
+            return None
+        if not coloured_segment:
+            return extras
+        if coloured_segment not in self._shared_lc_segments:
+            return None
+        return (*coloured_segment, *extras)
+
+    def _shared_lc_closure_word(
+        self,
+        left_index: CurrentIndex,
+        right_index: CurrentIndex,
+    ) -> tuple[int, ...] | None:
+        word = tuple(
+            label
+            for label in (
+                *left_index.ordered_external_labels,
+                *right_index.ordered_external_labels,
+            )
+            if label in self._shared_lc_coloured_labels
+        )
+        if not word:
+            return None
+        if word not in self._shared_lc_sector_ids_by_word:
+            return None
+        return word
+
 
 class GenericDAGCompiler:
     """Compile a concrete process into a model-driven current DAG.
@@ -727,8 +862,8 @@ class GenericDAGCompiler:
         model: Model | None = None,
         color_accuracy: str = "lc",
         options: ProcessOptions | None = None,
-        max_currents: int | None = 50000,
-        max_color_sectors: int | None = 20000,
+        max_currents: int | None = None,
+        max_color_sectors: int | None = None,
         reference_color_order: tuple[int, ...] | None = None,
         selected_color_sector_ids: Iterable[int] | None = None,
         max_coupling_orders: Mapping[str, int] | None = None,
@@ -1000,7 +1135,11 @@ class GenericDAGCompiler:
                     candidate_right_ids = table.ids_by_mask_and_particles(
                         right_mask,
                         possible_right_particles,
-                        color_sector_id=left.index.color_state.sector_id,
+                        color_sector_id=(
+                            None
+                            if color_engine.shared_lc_orderings
+                            else left.index.color_state.sector_id
+                        ),
                     )
                     if not candidate_right_ids:
                         continue
@@ -1312,6 +1451,11 @@ class GenericDAGCompiler:
                             right.index,
                         )
                         if color_engine.shared_single_trace
+                        else color_engine.shared_lc_closure_flows(
+                            left.index,
+                            right.index,
+                        )
+                        if color_engine.shared_lc_orderings
                         else color_engine.closure_compatible(
                             left.index.color_state,
                             right.index.color_state,
@@ -1474,6 +1618,18 @@ class _CurrentTable:
         *,
         color_sector_id: int | None = None,
     ) -> Sequence[int]:
+        try:
+            particle_count = len(particle_ids)  # type: ignore[arg-type]
+        except TypeError:
+            particle_count = -1
+        if particle_count == 1:
+            particle_id = next(iter(particle_ids))
+            if color_sector_id is None:
+                return self._ids_by_mask_particle.get((mask, particle_id), ())
+            return self._ids_by_mask_particle_sector.get(
+                (mask, particle_id, color_sector_id),
+                (),
+            )
         ids: list[int] = []
         for particle_id in particle_ids:
             if color_sector_id is None:
@@ -1494,8 +1650,8 @@ def compile_generic_dag(
     model: Model | None = None,
     color_accuracy: str = "lc",
     options: ProcessOptions | None = None,
-    max_currents: int | None = 50000,
-    max_color_sectors: int | None = 20000,
+    max_currents: int | None = None,
+    max_color_sectors: int | None = None,
     reference_color_order: tuple[int, ...] | None = None,
     selected_color_sector_ids: Iterable[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
@@ -1539,7 +1695,7 @@ def infer_minimal_coupling_order_limits(
     model: Model | None = None,
     color_accuracy: str = "lc",
     options: ProcessOptions | None = None,
-    max_color_sectors: int = 20000,
+    max_color_sectors: int | None = None,
     selected_color_sector_ids: Iterable[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
     closure_side_mask_pruning: bool = True,
@@ -1899,6 +2055,21 @@ def _root_physical_helicity_signature(
     return (sector_id, source_helicities)
 
 
+def _root_source_helicity_mapping(
+    dag: GenericDAG,
+    root: AmplitudeRoot,
+    source_by_bit: Mapping[int, tuple[int, int]],
+) -> dict[int, int]:
+    left = dag.currents[root.left_id].index
+    right = dag.currents[root.right_id].index
+    ancestry = int(left.helicity_ancestry | right.helicity_ancestry)
+    return {
+        int(label): int(helicity)
+        for bit, (label, helicity) in source_by_bit.items()
+        if ancestry & bit
+    }
+
+
 def _source_helicity_signature_by_bit(
     dag: GenericDAG,
 ) -> dict[int, tuple[int, int]]:
@@ -2015,9 +2186,12 @@ def filter_dag_to_color_sectors(
     """Return a dense-current DAG restricted to the requested colour sectors.
 
     Full DAG construction remains useful for diagnostics, but Rusticol schema-v2
-    expects dense current ids.  This helper derives the runtime DAG by keeping
-    only currents, interactions, sources, and roots whose LC colour sector is in
-    ``sector_ids`` and remapping current/root/interaction ids densely.
+    expects dense current ids.  This helper derives the runtime DAG by selecting
+    roots whose LC colour sector is in ``sector_ids``, walking backward through
+    the current DAG, and remapping the required currents/interactions densely.
+    Root-based filtering is required for shared LC all-ordering DAGs where
+    internal currents are sector-neutral but amplitude roots still carry the
+    physical sector identity.
     """
 
     selected = set(sector_ids)
@@ -2031,10 +2205,53 @@ def filter_dag_to_color_sectors(
             amplitude_roots=(),
             truncated=dag.truncated,
         )
+
+    selected_roots = tuple(
+        root
+        for root in dag.amplitude_roots
+        if _amplitude_root_color_sector_id(dag, root) in selected
+    )
+    if not selected_roots:
+        return GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=(),
+            sources=(),
+            interactions=(),
+            amplitude_roots=(),
+            truncated=dag.truncated,
+        )
+
+    interactions_by_result: dict[int, list[InteractionNode]] = {}
+    for interaction in dag.interactions:
+        interactions_by_result.setdefault(interaction.result_id, []).append(
+            interaction
+        )
+
+    required_current_ids: set[int] = set()
+    required_interaction_ids: set[int] = set()
+    stack: list[int] = []
+    for root in selected_roots:
+        for current_id in (root.left_id, root.right_id):
+            if current_id not in required_current_ids:
+                required_current_ids.add(current_id)
+                stack.append(current_id)
+
+    while stack:
+        current_id = stack.pop()
+        for interaction in interactions_by_result.get(current_id, ()):
+            if interaction.id in required_interaction_ids:
+                continue
+            required_interaction_ids.add(interaction.id)
+            for parent_id in (interaction.left_id, interaction.right_id):
+                if parent_id not in required_current_ids:
+                    required_current_ids.add(parent_id)
+                    stack.append(parent_id)
+
     current_id_map: dict[int, int] = {}
     currents: list[CurrentNode] = []
     for current in dag.currents:
-        if current.index.color_state.sector_id not in selected:
+        if current.id not in required_current_ids:
             continue
         new_id = len(currents)
         current_id_map[current.id] = new_id
@@ -2057,6 +2274,8 @@ def filter_dag_to_color_sectors(
 
     interactions: list[InteractionNode] = []
     for interaction in dag.interactions:
+        if interaction.id not in required_interaction_ids:
+            continue
         if (
             interaction.left_id not in current_id_map
             or interaction.right_id not in current_id_map
@@ -2079,7 +2298,7 @@ def filter_dag_to_color_sectors(
         )
 
     amplitude_roots: list[AmplitudeRoot] = []
-    for root in dag.amplitude_roots:
+    for root in selected_roots:
         if root.left_id not in current_id_map or root.right_id not in current_id_map:
             continue
         amplitude_roots.append(
@@ -2106,6 +2325,41 @@ def filter_dag_to_color_sectors(
         interactions=tuple(interactions),
         amplitude_roots=tuple(amplitude_roots),
         truncated=dag.truncated,
+    )
+
+
+def filter_dag_to_source_helicities(
+    dag: GenericDAG,
+    source_helicities: Mapping[int, int],
+) -> GenericDAG:
+    """Return a DAG restricted to roots matching fixed source helicities."""
+
+    requested = {
+        int(label): int(helicity)
+        for label, helicity in source_helicities.items()
+    }
+    if not requested:
+        return dag
+
+    source_by_bit = _source_helicity_signature_by_bit(dag)
+    selected_roots = tuple(
+        root
+        for root in dag.amplitude_roots
+        if _root_source_helicity_mapping(dag, root, source_by_bit).items()
+        >= requested.items()
+    )
+    if len(selected_roots) == len(dag.amplitude_roots):
+        return dag
+    return prune_dag_to_amplitude_roots(
+        GenericDAG(
+            process=dag.process,
+            color_plan=dag.color_plan,
+            currents=dag.currents,
+            sources=dag.sources,
+            interactions=dag.interactions,
+            amplitude_roots=selected_roots,
+            truncated=dag.truncated,
+        )
     )
 
 
@@ -2224,6 +2478,18 @@ def _shared_single_trace_closure_matches_word(
 ) -> bool:
     left_projected = _labels_projected_to_word(left_labels, word)
     right_projected = _labels_projected_to_word(right_labels, word)
+    return (*left_projected, *right_projected) == word
+
+
+def _shared_lc_closure_matches_word(
+    left_labels: Iterable[int],
+    right_labels: Iterable[int],
+    word: tuple[int, ...],
+) -> bool:
+    left_projected = _labels_projected_to_word(left_labels, word)
+    right_projected = _labels_projected_to_word(right_labels, word)
+    if not left_projected or not right_projected:
+        return False
     return (*left_projected, *right_projected) == word
 
 
@@ -3042,6 +3308,7 @@ __all__ = [
     "compile_generic_dag",
     "contributing_color_sector_ids",
     "filter_dag_to_color_sectors",
+    "filter_dag_to_source_helicities",
     "infer_minimal_coupling_order_limits",
     "prune_global_helicity_flip_equivalent_roots",
 ]

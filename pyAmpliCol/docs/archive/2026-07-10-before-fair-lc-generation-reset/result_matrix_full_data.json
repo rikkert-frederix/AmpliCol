@@ -1,0 +1,258 @@
+{
+  "base_processes": [
+    {
+      "base_final": [
+        "z"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_z_jets",
+      "label": "$d\\bar d\\to Z+(n-1)g$",
+      "max_quark_pairs": null,
+      "process_id": 1
+    },
+    {
+      "base_final": [
+        "w+"
+      ],
+      "include_3qqbar": false,
+      "include_cc": true,
+      "include_resonance": false,
+      "initial": [
+        "u",
+        "d~"
+      ],
+      "key": "ud_w_jets",
+      "label": "$u\\bar d\\to W^++(n-1)g$",
+      "max_quark_pairs": null,
+      "process_id": 2
+    },
+    {
+      "base_final": [
+        "e+",
+        "e-"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_epem_jets",
+      "label": "$d\\bar d\\to e^+e^-+(n-2)g$",
+      "max_quark_pairs": null,
+      "process_id": 3
+    },
+    {
+      "base_final": [
+        "e+",
+        "ve"
+      ],
+      "include_3qqbar": false,
+      "include_cc": true,
+      "include_resonance": false,
+      "initial": [
+        "u",
+        "d~"
+      ],
+      "key": "ud_epve_jets",
+      "label": "$u\\bar d\\to e^+\\nu_e+(n-2)g$",
+      "max_quark_pairs": null,
+      "process_id": 4
+    },
+    {
+      "base_final": [
+        "z",
+        "z"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_zz_jets",
+      "label": "$d\\bar d\\to ZZ+(n-2)g$",
+      "max_quark_pairs": null,
+      "process_id": 5
+    },
+    {
+      "base_final": [
+        "t",
+        "t~"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "g",
+        "g"
+      ],
+      "key": "gg_tt_jets",
+      "label": "$gg\\to t\\bar t+(n-2)g$",
+      "max_quark_pairs": null,
+      "process_id": 6
+    },
+    {
+      "base_final": [
+        "t",
+        "t~"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_tt_jets",
+      "label": "$d\\bar d\\to t\\bar t+(n-2)g$",
+      "max_quark_pairs": null,
+      "process_id": 7
+    },
+    {
+      "base_final": [
+        "g",
+        "g"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "g",
+        "g"
+      ],
+      "key": "gg_gluons",
+      "label": "$gg\\to gg+(n-2)g$",
+      "max_quark_pairs": null,
+      "process_id": 8
+    },
+    {
+      "base_final": [
+        "z",
+        "z",
+        "z"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_zzz_jets",
+      "label": "$d\\bar d\\to ZZZ+(n-3)g$",
+      "max_quark_pairs": null,
+      "process_id": 9
+    },
+    {
+      "base_final": [
+        "e+",
+        "e-",
+        "z",
+        "h"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_epemzh_jets",
+      "label": "$d\\bar d\\to e^+e^-ZH+(n-4)g$",
+      "max_quark_pairs": null,
+      "process_id": 10
+    },
+    {
+      "base_final": [
+        "t",
+        "t~",
+        "z",
+        "h"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_ttzh_jets",
+      "label": "$d\\bar d\\to t\\bar t ZH+(n-4)g$",
+      "max_quark_pairs": null,
+      "process_id": 11
+    },
+    {
+      "base_final": [
+        "e+",
+        "e-",
+        "e+",
+        "e-"
+      ],
+      "include_3qqbar": false,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_4l_jets",
+      "label": "$d\\bar d\\to e^+e^-e^+e^-+(n-4)g$",
+      "max_quark_pairs": null,
+      "process_id": 12
+    },
+    {
+      "base_final": [
+        "u",
+        "u~",
+        "s",
+        "s~"
+      ],
+      "include_3qqbar": true,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_3q_lines",
+      "label": "$d\\bar d\\to u\\bar{u}\\,s\\bar{s}+(n-4)g$",
+      "max_quark_pairs": 3,
+      "process_id": 13
+    },
+    {
+      "base_final": [
+        "u",
+        "u~",
+        "s",
+        "s~",
+        "c",
+        "c~"
+      ],
+      "include_3qqbar": true,
+      "include_cc": false,
+      "include_resonance": false,
+      "initial": [
+        "d",
+        "d~"
+      ],
+      "key": "dd_4q_lines",
+      "label": "$d\\bar d\\to u\\bar{u}\\,s\\bar{s}\\,c\\bar{c}+(n-6)g$",
+      "max_quark_pairs": 4,
+      "process_id": 14
+    }
+  ],
+  "color_accuracy": "full",
+  "created_by": "pyAmpliCol/docs/result_matrix.py",
+  "entries": {},
+  "schema_version": 1,
+  "updated_at": "2026-07-10T01:20:52.335512+00:00"
+}

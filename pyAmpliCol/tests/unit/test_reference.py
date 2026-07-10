@@ -22,6 +22,7 @@ from pyamplicol.reference import (
     parse_timing_rows,
     reference_color_order_for_run,
     reorder_external_momenta_by_pdg,
+    reorder_external_values_by_pdg,
 )
 
 
@@ -240,6 +241,11 @@ def test_reorder_external_momenta_by_fortran_pdg_order() -> None:
     assert tuple(particle.pdg for particle in ordered) == (1, -1, 21, 23)
     assert ordered[2].momentum == particles[3].momentum
     assert ordered[3].momentum == particles[2].momentum
+    assert reorder_external_values_by_pdg(
+        particles,
+        (-1, 1, 0, -1),
+        (1, -1, 21, 23),
+    ) == (-1, 1, -1, 0)
 
 
 def test_reference_adapter_reorders_supplied_momenta_probe_to_process_file_order(
@@ -690,6 +696,7 @@ total                                   0.000025    100.00%
         color_accuracy="full",
         particles=particles,
         points=3,
+        helicities=[-1, 1, 0, -1],
     )
 
     assert calls[-2] == ("make", "-j2", "amplicol_color_probe")
@@ -701,6 +708,10 @@ total                                   0.000025    100.00%
         "full",
         str(tmp_path / "processes.txt"),
         str(tmp_path / "Utilities" / "ME_checks" / "momenta_1_1.txt"),
+        "-1",
+        "1",
+        "0",
+        "-1",
     )
     assert result.first_point_matrix_element == 0.8
     assert result.color_probe_components == (1.0, 0.8, 0.8)

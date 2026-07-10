@@ -173,6 +173,27 @@ class LCColorSectorTopologyGroup:
 
 
 @dataclass(frozen=True)
+class LCColorSectorReplayPartition:
+    """Initial-label-safe replay block inside one LC topology group."""
+
+    representative_sector_id: int
+    active_sector_ids: tuple[int, ...]
+    label_permutations: tuple[tuple[tuple[int, int], ...], ...]
+    replay_weights: tuple[float, ...] = ()
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "representative_sector_id": self.representative_sector_id,
+            "active_sector_ids": list(self.active_sector_ids),
+            "label_permutations": [
+                [[left, right] for left, right in permutation]
+                for permutation in self.label_permutations
+            ],
+            "replay_weights": list(self.replay_weights),
+        }
+
+
+@dataclass(frozen=True)
 class GenericColorPlan:
     """Colour-flow planning payload shared by future Python/Rust runtimes."""
 
@@ -240,7 +261,7 @@ def build_color_plan(
     *,
     color_accuracy: str = "lc",
     options: ProcessOptions | None = None,
-    max_sectors: int | None = 20000,
+    max_sectors: int | None = None,
     reference_color_order: Sequence[int] | None = None,
 ) -> GenericColorPlan:
     process_ir = (
@@ -807,6 +828,119 @@ def lc_topology_replay_safe_groups(
     )
 
 
+def lc_topology_replay_partitions(
+    color_plan: GenericColorPlan,
+) -> tuple[LCColorSectorReplayPartition, ...]:
+    """Partition LC topology groups into exact replay-safe representatives.
+
+    The selected-sector ``lc_topology_replay_safe_groups`` helper only accepts
+    groups whose full topology orbit preserves the initial-state label set.
+    All-flow replay artifacts can be more general: they split one topology
+    group into several initial-label-safe blocks and materialize one
+    representative sidecar per block.  This also covers pure single-trace
+    gluon sectors without falling back to an all-sector artifact.
+    """
+
+    if color_plan.color_accuracy != "lc":
+        return ()
+    initial_labels = {leg.label for leg in color_plan.process.initial_legs}
+    if not initial_labels:
+        return ()
+    partitions: list[LCColorSectorReplayPartition] = []
+    for group in color_plan.topology_groups:
+        sectors = tuple(
+            sector
+            for sector_id in group.sector_ids
+            if (sector := color_plan.sector(sector_id)) is not None
+        )
+        if len(sectors) != len(group.sector_ids):
+            continue
+        if any(sector.kind not in {"open-lines", "single-trace"} for sector in sectors):
+            continue
+        base_maps = {
+            int(sector_id): {
+                int(representative_label): int(sector_label)
+                for representative_label, sector_label in permutation
+            }
+            for sector_id, permutation in zip(
+                group.sector_ids,
+                group.label_permutations,
+                strict=True,
+            )
+        }
+        unassigned = set(int(sector_id) for sector_id in group.sector_ids)
+        while unassigned:
+            representative = min(unassigned)
+            representative_map = base_maps[representative]
+            inverse_representative_map = {
+                sector_label: representative_label
+                for representative_label, sector_label in representative_map.items()
+            }
+            active_sector_ids: list[int] = []
+            relative_permutations: list[tuple[tuple[int, int], ...]] = []
+            replay_weights: list[float] = []
+            for sector_id in group.sector_ids:
+                sector = color_plan.sector(int(sector_id))
+                if sector is None:
+                    continue
+                sector_map = base_maps[int(sector_id)]
+                relative_map = {
+                    representative_label: sector_map[
+                        inverse_representative_map[representative_label]
+                    ]
+                    for representative_label in sorted(representative_map.values())
+                }
+                if {
+                    relative_map[label]
+                    for label in initial_labels
+                } != initial_labels:
+                    continue
+                active_sector_ids.append(int(sector_id))
+                relative_permutations.append(tuple(sorted(relative_map.items())))
+                replay_weights.append(
+                    _lc_topology_replay_sector_weight(color_plan, sector)
+                )
+            active_set = set(active_sector_ids)
+            if not active_set:
+                raise RuntimeError(
+                    "internal LC replay partitioning error: representative sector "
+                    f"{representative} did not produce a non-empty replay block"
+                )
+            partitions.append(
+                LCColorSectorReplayPartition(
+                    representative_sector_id=representative,
+                    active_sector_ids=tuple(active_sector_ids),
+                    label_permutations=tuple(relative_permutations),
+                    replay_weights=tuple(replay_weights),
+                )
+            )
+            unassigned -= active_set
+    return tuple(partitions)
+
+
+def _lc_topology_replay_sector_weight(
+    color_plan: GenericColorPlan,
+    sector: LCColorSector,
+) -> float:
+    """Return the LC multiplicity represented by a materialized sector.
+
+    Pure single-trace LC plans fold trace reflections during colour-sector
+    enumeration.  AmpliCol's all-ordering ``imode=2`` basis keeps both trace
+    orientations, while the reflected colour-ordered amplitude has the same
+    squared contribution.  Replaying the folded sector with weight two preserves
+    the full all-ordering sum without compiling or evaluating the reflected
+    duplicate.
+    """
+
+    if (
+        color_plan.color_accuracy == "lc"
+        and sector.kind == "single-trace"
+        and len(sector.trace_labels) > 2
+    ):
+        return 2.0
+    return 1.0
+
+
 def lc_line_pairing_representative_ids(
     color_plan: GenericColorPlan,
 ) -> tuple[int, ...]:
@@ -910,10 +1044,12 @@ __all__ = [
     "ColorAccuracy",
     "ColorSectorKind",
     "GenericColorPlan",
+    "LCColorSectorReplayPartition",
     "LCColorSectorTopologyGroup",
     "LCColorSector",
     "LCQuarkLine",
     "build_color_plan",
     "lc_line_pairing_representative_ids",
+    "lc_topology_replay_partitions",
     "lc_topology_replay_safe_groups",
 ]

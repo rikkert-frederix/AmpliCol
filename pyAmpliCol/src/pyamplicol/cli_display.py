@@ -250,6 +250,7 @@ class StageProgress:
         self.stage = ""
         self.item = ""
         self.ram = "n/a"
+        self.duration_s: float | None = None
         self.start_time = 0.0
         self._bar: Any = None
         self._started = False
@@ -334,6 +335,11 @@ class StageProgress:
             stage=_optional_str(event.get("stage")),
             item=_optional_str(event.get("item")),
             ram=_optional_str(event.get("ram")),
+            duration_s=(
+                float(event["duration_s"])
+                if isinstance(event.get("duration_s"), (float, int))
+                else None
+            ),
             increment=increment if isinstance(increment, int) else 0,
             total=total if isinstance(total, int) else None,
         )
@@ -344,6 +350,7 @@ class StageProgress:
         stage: str | None = None,
         item: str | None = None,
         ram: str | None = None,
+        duration_s: float | None = None,
         increment: int = 0,
         total: int | None = None,
     ) -> None:
@@ -357,6 +364,8 @@ class StageProgress:
                 self.stage = stage
             if item is not None:
                 self.item = item
+            if duration_s is not None:
+                self.duration_s = float(duration_s)
             if increment:
                 self.current = min(self.total, self.current + int(increment))
 
@@ -425,6 +434,7 @@ class StageProgress:
             f"stage={_fixed_field(self.stage, 18)} "
             f"item={_fixed_field(self.item, 28)} "
             f"ram={_fixed_field(self.ram, 12)} "
+            f"{'' if self.duration_s is None else f'dt={self.duration_s:.3f}s '} "
             f"{self.current:>6d}/{self.total:<6d}"
         )
 

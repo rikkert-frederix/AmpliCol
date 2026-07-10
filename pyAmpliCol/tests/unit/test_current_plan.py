@@ -37,12 +37,12 @@ def test_generic_current_plan_uses_model_owned_colour_filtering() -> None:
     assert full_plan.color_sectors == (0,)
 
 
-def test_generic_current_plan_keys_currents_by_leading_colour_sector() -> None:
+def test_generic_current_plan_recycles_currents_across_leading_colour_orderings() -> None:
     plan = build_generic_current_plan("d d~ > z g g")
     payload = plan.to_json_dict()
 
     assert plan.color_sectors == (0, 1)
-    assert {plan.currents[source].index.color_state.sector_id for source in plan.sources} == {0, 1}
+    assert {plan.currents[source].index.color_state.sector_id for source in plan.sources} == {0}
     assert all(
         plan.currents[interaction.left_id].index.color_state.sector_id
         == plan.currents[interaction.right_id].index.color_state.sector_id
@@ -54,6 +54,7 @@ def test_generic_current_plan_keys_currents_by_leading_colour_sector() -> None:
         == plan.currents[closure.right_id].index.color_state.sector_id
         for closure in plan.closures
     )
+    assert sorted({closure.color_sector_id for closure in plan.closures}) == [0, 1]
     summaries = payload["color_sector_summaries"]
     assert [summary["color_sector"] for summary in summaries] == [0, 1]
     assert summaries[0]["current_count"] == summaries[1]["current_count"]
@@ -122,8 +123,8 @@ def test_generic_current_plan_handles_more_than_three_quark_pair_candidates() ->
     payload = plan.to_json_dict()
 
     assert plan.process.quark_lines.quark_pair_count == 3
-    assert plan.color_sectors == tuple(range(6))
-    assert len(plan.sources) == 72
+    assert plan.color_sectors == (0, 1, 2, 3, 5)
+    assert len(plan.sources) == 12
     assert plan.has_closure is True
     assert plan.unimplemented_vertex_kinds == ()
     assert plan.pending_vertex_kinds == ()
@@ -132,10 +133,10 @@ def test_generic_current_plan_handles_more_than_three_quark_pair_candidates() ->
         for current in plan.currents
         if not current.is_source
     )
-    assert len(payload["color_sector_summaries"]) == 6
+    assert len(payload["color_sector_summaries"]) == 5
     assert {
         summary["color_sector"] for summary in payload["color_sector_summaries"]
-    } == set(range(6))
+    } == {0, 1, 2, 3, 5}
     assert sum(summary["closure_count"] for summary in payload["color_sector_summaries"]) == len(plan.closures)
 
 
