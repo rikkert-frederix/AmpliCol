@@ -15,21 +15,29 @@ module handling_processes
      integer,dimension(3) :: dip_ijk,dip_ijk_f
      integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
      integer :: dipole_type=0 ! 0:II, 1:IF, 2:FI, 3:FF
+     integer :: col_fac=1
+     real(kind=8) :: lc_weight=1d0
      type(amplitude_QCD) :: amp
      real(kind=8),dimension(0:3) :: p_mapped_ij
    contains
      final :: finalize_dipole
   end type dipole
+  type dipole_set
+     type(dipole),dimension(:),allocatable :: dl
+     integer :: ndip=0
+   contains
+     final :: finalize_dipole_set
+  end type dipole_set
   type phase_space_order_group
      ! if adding variables here, also update the finalize_phase_space_order_group subroutine
      type(amplitude_QCD),dimension(:),allocatable :: amps
      class(phase_space_type),allocatable :: phase_space
      type(multichan_info) :: multichan
-     type(dipole),dimension(:),allocatable :: dl
+     type(dipole_set),dimension(:),allocatable :: dpl
      type(psv),dimension(:),allocatable :: ps
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
-     integer :: nproc,ndip
+     integer :: nproc
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
@@ -684,6 +692,18 @@ contains
     call finalize_amplitude_QCD(di%amp)
   end subroutine finalize_dipole
 
+  subroutine finalize_dipole_set(ds)
+    type(dipole_set),intent(inout) :: ds
+    integer :: i
+    if (allocated(ds%dl)) then
+       do i=1,size(ds%dl)
+          call finalize_dipole(ds%dl(i))
+       enddo
+       deallocate(ds%dl)
+    endif
+    ds%ndip=0
+  end subroutine finalize_dipole_set
+
   subroutine finalize_phase_space_order_group(pgl)
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i
@@ -723,9 +743,11 @@ contains
     if (allocated(pgl%DR_min)) deallocate(pgl%DR_min)
     if (allocated(pgl%sqrt_s_min)) deallocate(pgl%sqrt_s_min)
     if (allocated(pgl%same_flavour)) deallocate(pgl%same_flavour)
-    do i=1,size(pgl%dl)
-       call finalize_dipole(pgl%dl(i))
-    enddo
-    if (allocated(pgl%dl)) deallocate(pgl%dl)
+    if (allocated(pgl%dpl)) then
+       do i=1,size(pgl%dpl)
+          call finalize_dipole_set(pgl%dpl(i))
+       enddo
+       deallocate(pgl%dpl)
+    endif
   end subroutine finalize_phase_space_order_group
 end module handling_processes

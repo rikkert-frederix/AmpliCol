@@ -4,7 +4,7 @@ module cs_lc_spin_dipoles
 
   real(dp), parameter :: pi_dp = 3.1415926535897932384626433832795_dp
   real(dp), parameter :: ca = 3.0_dp
-  real(dp), parameter :: cf = 4.0_dp / 3.0_dp
+  real(dp), parameter :: cf_lc = ca / 2.0_dp
   real(dp), parameter :: tr = 0.5_dp
   real(dp), parameter :: tiny_dip = 1.0d-30
 
@@ -434,7 +434,7 @@ contains
           return
        end if
 
-       scalar = 8.0_dp*pi_dp*alpha_s*cf * (2.0_dp/denom_i - (1.0_dp + zq))
+       scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (2.0_dp/denom_i - (1.0_dp + zq))
        call scalar_to_vhel(scalar, vhel)
 
     else
@@ -458,12 +458,16 @@ contains
              return
           end if
 
-          aterm = 1.0_dp/denom_i + 1.0_dp/denom_j - 2.0_dp
+          ! Ordered LC dipoles designate leg j as unresolved.  The
+          ! complementary i-soft pole is supplied by the dipole where i is
+          ! the unresolved leg; keeping it here would over-subtract soft
+          ! gluons in a colour-ordered sum.
+          aterm = 1.0_dp/denom_i - 1.0_dp
           coeff = 1.0_dp / dotij
 
           call zero_tensor(vten)
           call add_minus_g_term(vten, 16.0_dp*pi_dp*alpha_s*ca*aterm)
-          call add_outer_term(vten, 16.0_dp*pi_dp*alpha_s*ca*coeff, r)
+          call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*ca*coeff, r)
           call tensor_to_helicity(vten, eps_parent, vhel)
 
        else if (is_q_qbar_pair(fi, fj)) then
@@ -513,7 +517,7 @@ contains
           return
        end if
 
-       scalar = 8.0_dp*pi_dp*alpha_s*cf * (2.0_dp/denom - (1.0_dp + x))
+       scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (2.0_dp/denom - (1.0_dp + x))
        call scalar_to_vhel(scalar, vhel)
 
     case (ch_i_gq)
@@ -535,8 +539,8 @@ contains
        coeff = ((1.0_dp - x)/x) * (2.0_dp*u*(1.0_dp - u)/dotjk)
 
        call zero_tensor(vten)
-       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*cf*x)
-       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*cf*coeff, r)
+       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*x)
+       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*coeff, r)
        call tensor_to_helicity(vten, eps_parent, vhel)
 
     case (ch_i_gg)
@@ -596,7 +600,7 @@ contains
           return
        end if
 
-       scalar = 8.0_dp*pi_dp*alpha_s*cf * (2.0_dp/(1.0_dp - x) - (1.0_dp + x))
+       scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (2.0_dp/(1.0_dp - x) - (1.0_dp + x))
        call scalar_to_vhel(scalar, vhel)
 
     case (ch_i_gq)
@@ -620,8 +624,8 @@ contains
        coeff = ((1.0_dp - x)/x) * (2.0_dp*dotab/(dotja*dotjb))
 
        call zero_tensor(vten)
-       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*cf*x)
-       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*cf*coeff, r)
+       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*x)
+       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*coeff, r)
        call tensor_to_helicity(vten, eps_parent, vhel)
 
     case (ch_i_gg)
@@ -690,4 +694,3 @@ contains
   end subroutine initial_channel
 
 end module cs_lc_spin_dipoles
-

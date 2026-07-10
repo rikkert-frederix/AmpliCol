@@ -11,15 +11,19 @@ contains
     integer,intent(in) :: iamp,igroup
     integer :: ipart,is_dipole,ipart_l,ipart_r,idip
     n=pgl(igroup)%next
+    if (.not.allocated(pgl(igroup)%dpl)) allocate(pgl(igroup)%dpl(pgl(igroup)%nproc))
+    if (allocated(pgl(igroup)%dpl(iamp)%dl)) then
+       call finalize_dipole_set(pgl(igroup)%dpl(iamp))
+    endif
     ! First pass: just count how many dipoles we need so we can
-    ! allocated the right size dl
-    pgl(igroup)%ndip=0
+    ! allocate the right size dl
+    pgl(igroup)%dpl(iamp)%ndip=0
     do ipart=3,pgl(igroup)%next
        call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(igroup)%phase_space_orders(:),is_dipole,ipart_l,ipart_r)
-       pgl(igroup)%ndip=pgl(igroup)%ndip+popcnt(is_dipole)
+       pgl(igroup)%dpl(iamp)%ndip=pgl(igroup)%dpl(iamp)%ndip+popcnt(is_dipole)
     enddo
-    write (*,*) 'Need',pgl(igroup)%ndip,'dipoles'
-    allocate(pgl(igroup)%dl(pgl(igroup)%ndip))
+    write (*,*) 'Need',pgl(igroup)%dpl(iamp)%ndip,'dipoles'
+    allocate(pgl(igroup)%dpl(iamp)%dl(pgl(igroup)%dpl(iamp)%ndip))
 
     ! Second pass: now we really fill the appropriate information
     idip=0
@@ -29,26 +33,26 @@ contains
        if (btest(is_dipole,0)) then
           ! valid dipole with particle on the left as emitter
           idip=idip+1
-          call fill_dipole(pgl(igroup)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_l,ipart,ipart_r,.true.)
+          call fill_dipole(pgl(igroup)%dpl(iamp)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_l,ipart,ipart_r,.true.)
        endif
        if (btest(is_dipole,1)) then
           ! valid dipole with particle on the right as emitter
           idip=idip+1
-          call fill_dipole(pgl(igroup)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_r,ipart,ipart_l,.false.)
-!          pgl(igroup)%dl(idip)%spin(
+          call fill_dipole(pgl(igroup)%dpl(iamp)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_r,ipart,ipart_l,.false.)
        endif
     enddo
-    do idip=1,pgl(igroup)%ndip
-       allocate(pgl(igroup)%dl(idip)%reduced_color_order(n-1))
+    do idip=1,pgl(igroup)%dpl(iamp)%ndip
+       allocate(pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order(n-1))
        call build_reduced_color_order(pgl(igroup)%color_orders(1:n,iamp), &
-            pgl(igroup)%dl(idip)%dip_ijk(2),pgl(igroup)%dl(idip)%process_r, &
-            pgl(igroup)%dl(idip)%reduced_color_order)
-       call pgl(igroup)%dl(idip)%amp%init(1,n-1,1,pgl(igroup)%dl(idip)%process_r,&
-            pgl(igroup)%spin(0:3,pgl(igroup)%dl(idip)%dip_map(1:n-1)), &
-            pgl(igroup)%dl(idip)%reduced_color_order,&
+            pgl(igroup)%dpl(iamp)%dl(idip)%dip_ijk(2),pgl(igroup)%dpl(iamp)%dl(idip)%process_r, &
+            pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order)
+       pgl(igroup)%dpl(iamp)%dl(idip)%col_fac=lc_colour_factor(pgl(igroup)%dpl(iamp)%dl(idip)%process_r)
+       call pgl(igroup)%dpl(iamp)%dl(idip)%amp%init(1,n-1,1,pgl(igroup)%dpl(iamp)%dl(idip)%process_r,&
+            pgl(igroup)%spin(0:3,pgl(igroup)%dpl(iamp)%dl(idip)%dip_map(1:n-1)), &
+            pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order,&
             phys_model)
     enddo
-    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dl)
+    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
   end subroutine initialise_subtraction
   subroutine print_dipoles(process,order,dips)
     implicit none
@@ -81,7 +85,11 @@ contains
     if (dip_i.gt.2) dip%dipole_type=ibset(dip%dipole_type,0)
     if (dip_k.gt.2) dip%dipole_type=ibset(dip%dipole_type,1)
     ! reduced process and dipole info
-    dip%dip_r_ijk(1)=min(dip_i,dip_j)
+    if (dip_j .lt. dip_i) then
+       dip%dip_r_ijk(1)=dip_i-1
+    else
+       dip%dip_r_ijk(1)=dip_i
+    endif
     if (dip_j .lt. dip_k) then
        dip%dip_r_ijk(2)=dip_k-1
     else
@@ -102,6 +110,7 @@ contains
     else
        dip%dip_r_ijk_f(1)=combined_gluon_type(dip_i,process(dip_i),dip_j,process(dip_j),reverse)
     endif
+    if (phys_model%is_gluon(dip%dip_r_ijk_f(1))) dip%lc_weight=0.5d0
     dip%dip_r_ijk_f(2)=dip%dip_ijk_f(3)
     allocate(dip%process_r(n-1))
     allocate(dip%dip_map(n-1))
@@ -119,6 +128,27 @@ contains
        endif
     enddo
   end subroutine fill_dipole
+  integer function lc_colour_factor(process)
+    implicit none
+    integer,dimension(:),intent(in) :: process
+    integer :: i,ifac
+    real(kind=8) :: fac
+    fac=0d0
+    do i=1,size(process)
+       if (phys_model%is_gluon(process(i))) then
+          fac=fac+1d0
+       elseif (phys_model%is_quark(process(i)) .or. phys_model%is_antiquark(process(i))) then
+          fac=fac+0.5d0
+       endif
+    enddo
+    ifac=nint(fac)
+    if (dble(ifac).ne.fac) then
+       write (*,*) 'There is some issue with the reduced LC colour factor computation: ',ifac,fac
+       stop 1
+    endif
+    lc_colour_factor=3**ifac
+  end function lc_colour_factor
+
   integer function combined_gluon_type(dip_i,part_i,dip_j,part_j,reverse)
     implicit none
     integer,intent(in) :: dip_i,part_i,dip_j,part_j

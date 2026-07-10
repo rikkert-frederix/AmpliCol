@@ -429,13 +429,16 @@ contains
     call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     p_save=pgl(ichan)%ps(1)%p
 
-    
     do i=3,pgl(ichan)%next
        mass(i-2)=phys_model%get_mass(pgl(ichan)%processes(i,1))
     enddo
     
     do i=3,pgl(ichan)%next
        write (*,*) 'soft limit',i
+       if (.not.phys_model%is_gluon(pgl(ichan)%processes(i,1))) then
+          write (*,*) 'skipping CS soft comparison for non-gluon leg'
+          cycle
+       endif
        do k = 0, 10
           lambda = 10.0_dp**(-real(k,kind=8))
           call soft_deform_event(pgl(ichan)%next-2, mass, p_save, i, lambda, pgl(ichan)%ps(1)%p, status)
@@ -443,7 +446,7 @@ contains
           call square_the_amps(1,ichan)
 
           call compute_the_dipole_amps(1,ichan)
-          call square_the_dipole_amps(1,ichan,amp2_dip)
+          call square_the_dipole_amps(1,ichan,amp2_dip,i)
           
           write (*,*) pgl(ichan)%amp2(1),amp2_dip,pgl(ichan)%amp2(1)/amp2_dip
           
@@ -664,43 +667,52 @@ contains
     integer :: idip,info
     real(kind=8),dimension(0:3,pgl(ichan)%next-1) :: ps_mapped
     integer,dimension(pgl(ichan)%next-1) :: hel_mapped
-    do idip=1,pgl(ichan)%ndip
-       call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dl(idip)%dip_ijk,ps_mapped,info)
-       pgl(ichan)%dl(idip)%p_mapped_ij(0:3)=ps_mapped(0:3,pgl(ichan)%dl(idip)%dip_r_ijk(1))
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info)
+       pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij(0:3)= &
+            ps_mapped(0:3,pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1))
        if (info.ne.0) then
           write (*,*) 'error in cs momentum mapping',info
           stop 1
        endif
-       hel_mapped=pgl(ichan)%hel(1:pgl(ichan)%next-1)
-       call pgl(ichan)%dl(idip)%amp%evaluate(pgl(ichan)%next-1,ps_mapped,&
+       hel_mapped=pgl(ichan)%hel(pgl(ichan)%dpl(iint)%dl(idip)%dip_map(1:pgl(ichan)%next-1))
+       call pgl(ichan)%dpl(iint)%dl(idip)%amp%evaluate(pgl(ichan)%next-1,ps_mapped,&
             hel_mapped,read_proc_from_file,phys_model)
     enddo
   end subroutine compute_the_dipole_amps
 
-  subroutine square_the_dipole_amps(iint,ichan,amp2_dip)
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres)
     use cs_lc_spin_dipoles
     use FeynmanRules
     implicit none
     integer,intent(in) :: iint,ichan
+    integer,intent(in),optional :: iunres
     integer :: idip
     real(kind=8) :: amp2_dip,dip
-    integer :: info,ij
+    integer :: ij
     complex(kind=8),dimension(2,2) :: rho
     complex(kind=8),dimension(0:3,2) :: eps_parent
     amp2_dip=0d0
-    do idip=1,pgl(ichan)%ndip
-       ij=pgl(ichan)%dl(idip)%dip_r_ijk(1)
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       if (present(iunres)) then
+          ! only include the dipoles for which 'j' corresponds to the
+          ! particle that goes soft. Normally the cuts would remove
+          ! all the other dipoles (since in the Born momenta there
+          ! would be a soft parton).
+          if (pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2).ne.iunres) cycle
+       endif
+       ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
        call create_rho(iint,ichan,idip,rho)
        if (ij.gt.2) then
-          call ext_gluon_cmplx(pgl(ichan)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
-          call ext_gluon_cmplx(pgl(ichan)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+          call ext_gluon_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_gluon_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
        else
-          call ext_gluon_cmplx(-pgl(ichan)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
-          call ext_gluon_cmplx(-pgl(ichan)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+          call ext_gluon_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_gluon_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
        endif
-       call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1), &
-            pgl(ichan)%dl(idip)%process_r,pgl(ichan)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
-            rho,eps_parent,dip)
+       call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,iint), &
+            pgl(ichan)%dpl(iint)%dl(idip)%process_r,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
+            rho,eps_parent,dip,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight)
        amp2_dip=amp2_dip+dip
     enddo
   end subroutine square_the_dipole_amps
@@ -713,17 +725,17 @@ contains
     integer,dimension(pgl(ichan)%next-2) :: spins1_r,spins2_r
     integer :: ih1,ih2,ij
     rho=(0d0,0d0)
-    ij=pgl(ichan)%dl(idip)%dip_r_ijk(1)
-    do ih1=1,pgl(ichan)%dl(idip)%amp%n_amps
-       spins1=pgl(ichan)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih1)
+    ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
+    do ih1=1,pgl(ichan)%dpl(iint)%dl(idip)%amp%n_amps
+       spins1=pgl(ichan)%dpl(iint)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih1)
        spins1_r=[spins1(1:ij-1),spins1(ij+1:pgl(ichan)%next-1)]
-       do ih2=1,pgl(ichan)%dl(idip)%amp%n_amps
-          spins2=pgl(ichan)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih2)
+       do ih2=1,pgl(ichan)%dpl(iint)%dl(idip)%amp%n_amps
+          spins2=pgl(ichan)%dpl(iint)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih2)
           spins2_r=[spins2(1:ij-1),spins2(ij+1:pgl(ichan)%next-1)]
           if (any(spins1_r.ne.spins2_r)) cycle
           rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)=rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)+ &
-               pgl(ichan)%dl(idip)%amp%amps(ih1)*pgl(ichan)%col_fac(iint)* &
-               pgl(ichan)%dl(idip)%amp%amps(ih2)
+               pgl(ichan)%dpl(iint)%dl(idip)%amp%amps(ih1)*pgl(ichan)%dpl(iint)%dl(idip)%col_fac* &
+               dconjg(pgl(ichan)%dpl(iint)%dl(idip)%amp%amps(ih2))
        enddo
     enddo
   end subroutine create_rho
