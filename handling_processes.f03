@@ -28,7 +28,7 @@ module handling_processes
      type(psv),dimension(:),allocatable :: ps
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
-     integer :: nproc
+     integer :: nproc,ndip
      real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac

@@ -253,6 +253,15 @@ program amplicol_generate
         call cpu_time(tSampleAfter)
         t_Int_get=t_Int_get+(tSampleAfter-tSampleBefore)*dble(timing_sample)
      endif
+
+     do ichan=1,ngroups
+        call test_limits_integrand(ichan,simple_integrator%x(1,1))
+
+        stop 1
+     enddo
+
+     stop 1
+     
      call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
      if (time_detail_point) call cpu_time(tSampleBefore)
      call simple_integrator%fill_points(1,f_abs,f,to_write,done)
@@ -406,6 +415,57 @@ contains
     if (sampled) residual_note='residual'
   end function residual_note
 
+  subroutine test_limits_integrand(ichan,x)
+    use phase_space_module
+    implicit none
+    integer,intent(in) :: ichan
+    real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
+    integer :: i,j,k,status
+    real(kind=8) :: lambda,mass(pgl(ichan)%next-2),amp2_dip
+    real(kind=8),dimension(0:3,pgl(ichan)%next) :: ps,p_save
+
+    write (*,*) 'testing channel',ichan
+    pgl(ichan)%ps(1)%x=x
+    call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
+    p_save=pgl(ichan)%ps(1)%p
+
+    
+    do i=3,pgl(ichan)%next
+       mass(i-2)=phys_model%get_mass(pgl(ichan)%processes(i,1))
+    enddo
+    
+    do i=3,pgl(ichan)%next
+       write (*,*) 'soft limit',i
+       do k = 0, 10
+          lambda = 10.0_dp**(-real(k,kind=8))
+          call soft_deform_event(pgl(ichan)%next-2, mass, p_save, i, lambda, pgl(ichan)%ps(1)%p, status)
+          call compute_the_amps(1,ichan)
+          call square_the_amps(1,ichan)
+
+          call compute_the_dipole_amps(1,ichan)
+          call square_the_dipole_amps(1,ichan,amp2_dip)
+          
+          write (*,*) pgl(ichan)%amp2(1)
+          
+          if (status.ne.0) then
+             write (*,*) 'found error in phase-space mapping',status
+             stop 1
+          endif
+       enddo
+    enddo
+    
+    do i=1,pgl(ichan)%next-1
+       do j=min(3,i+1),pgl(ichan)%next
+          write (*,*) 'collinear limit',i,j
+       enddo
+    enddo
+
+    
+    write (*,*) ''
+    write (*,*) ''
+    write (*,*) ''
+  end subroutine test_limits_integrand
+  
   subroutine integrand(ichan,iint,x,vol,f,f_abs)
     use scales
     use amp_lib
@@ -596,6 +656,43 @@ contains
        call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
     endif
   end subroutine compute_the_amps
+    
+  subroutine compute_the_dipole_amps(iint,ichan)
+    use cs_dipole_mappings
+    implicit none
+    integer,intent(in) :: iint,ichan
+    integer :: idip,info
+    real(kind=8),dimension(0:3,pgl(ichan)%next-1) :: ps_mapped
+    integer,dimension(pgl(ichan)%next-1) :: hel_mapped
+    do idip=1,pgl(ichan)%ndip
+       call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dl(idip)%dip_ijk,ps_mapped,info)
+       if (info.ne.0) then
+          write (*,*) 'error in cs momentum mapping',info
+          stop 1
+       endif
+       hel_mapped=pgl(ichan)%hel(1:pgl(ichan)%next-1)
+       call pgl(ichan)%dl(idip)%amp%evaluate(pgl(ichan)%next-1,ps_mapped,&
+            hel_mapped,read_proc_from_file,phys_model)
+    enddo
+  end subroutine compute_the_dipole_amps
+
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip)
+    use cs_lc_spin_dipoles
+    implicit none
+    integer,intent(in) :: iint,ichan
+    integer :: idip
+    real(kind=8) :: amp2_dip
+!!$    amp2_dip=0d0
+!!$    do idip=1,pgl(ichan)%ndip
+!!$
+!!$       do ih=1,pgl(ichan)%dl(idip)%amp%n_amps
+!!$          amp2_dip=amp2_dip+dble(pgl(ichan)%amps(iint)%amps(ih)*&
+!!$               pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))
+!!$       enddo
+!!$
+!!$       
+!!$    enddo
+  end subroutine square_the_dipole_amps
     
   subroutine square_the_amps(iint,ichan)
     implicit none

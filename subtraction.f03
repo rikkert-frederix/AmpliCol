@@ -3,7 +3,6 @@ module subtraction
   use particles
   implicit none
   integer :: n
-  integer :: ndip
   private
   public :: initialise_subtraction
 contains
@@ -14,13 +13,13 @@ contains
     n=pgl(igroup)%next
     ! First pass: just count how many dipoles we need so we can
     ! allocated the right size dl
-    ndip=0
+    pgl(igroup)%ndip=0
     do ipart=3,pgl(igroup)%next
        call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(igroup)%phase_space_orders(:),is_dipole,ipart_l,ipart_r)
-       ndip=ndip+popcnt(is_dipole)
+       pgl(igroup)%ndip=pgl(igroup)%ndip+popcnt(is_dipole)
     enddo
-    write (*,*) 'Need',ndip,'dipoles'
-    allocate(pgl(igroup)%dl(ndip))
+    write (*,*) 'Need',pgl(igroup)%ndip,'dipoles'
+    allocate(pgl(igroup)%dl(pgl(igroup)%ndip))
 
     ! Second pass: now we really fill the appropriate information
     idip=0
@@ -39,18 +38,11 @@ contains
 !          pgl(igroup)%dl(idip)%spin(
        endif
     enddo
-    do idip=1,ndip
+    do idip=1,pgl(igroup)%ndip
        allocate(pgl(igroup)%dl(idip)%reduced_color_order(n-1))
        call build_reduced_color_order(pgl(igroup)%color_orders(1:n,iamp), &
             pgl(igroup)%dl(idip)%dip_ijk(2),pgl(igroup)%dl(idip)%process_r, &
             pgl(igroup)%dl(idip)%reduced_color_order)
-       if (.not.reduced_order_is_valid(pgl(igroup)%dl(idip)%process_r, &
-            pgl(igroup)%dl(idip)%reduced_color_order)) then
-          write (*,*) 'ERROR: reduced colour order still invalid after trying both combined-current labels'
-          write (*,*) 'process',pgl(igroup)%dl(idip)%process_r
-          write (*,*) 'order  ',pgl(igroup)%dl(idip)%reduced_color_order
-          stop 1
-       endif
        call pgl(igroup)%dl(idip)%amp%init(1,n-1,1,pgl(igroup)%dl(idip)%process_r,&
             pgl(igroup)%spin(0:3,pgl(igroup)%dl(idip)%dip_map(1:n-1)), &
             pgl(igroup)%dl(idip)%reduced_color_order,&
@@ -61,11 +53,11 @@ contains
   subroutine print_dipoles(process,order,dips)
     implicit none
     integer,dimension(*),intent(in) :: process,order
-    type(dipole),dimension(ndip),intent(in) :: dips
+    type(dipole),dimension(:),intent(in) :: dips
     integer :: idip
     write (*,*) 'process',process(1:n)
     write (*,*) 'color-order',order(1:n)
-    do idip=1,ndip
+    do idip=1,size(dips)
        write (*,*) '------------------'
        write (*,*) 'dipole',idip
        write (*,*) 'i,j,k',dips(idip)%dip_ijk
@@ -205,41 +197,6 @@ contains
        if (i.eq.0) exit
     enddo
   end subroutine build_reduced_color_order
-  logical function reduced_order_is_valid(process,order)
-    implicit none
-    integer,dimension(:),intent(in) :: process,order
-    integer :: i,first_non_sing,last_non_sing
-    reduced_order_is_valid=.false.
-    first_non_sing=0
-    last_non_sing=0
-    do i=1,n-1
-       if (.not.phys_model%is_singlet(process(order(i)))) then
-          first_non_sing=order(i)
-          exit
-       endif
-    enddo
-    do i=n-1,1,-1
-       if (.not.phys_model%is_singlet(process(order(i)))) then
-          last_non_sing=order(i)
-          exit
-       endif
-    enddo
-    if (first_non_sing.eq.0 .or. last_non_sing.eq.0) then
-       reduced_order_is_valid=.true.
-       return
-    endif
-    if (first_non_sing.le.2) then
-       if (.not.phys_model%is_antiquark(process(first_non_sing))) return
-    else
-       if (.not.phys_model%is_quark(process(first_non_sing))) return
-    endif
-    if (last_non_sing.le.2) then
-       if (.not.phys_model%is_quark(process(last_non_sing))) return
-    else
-       if (.not.phys_model%is_antiquark(process(last_non_sing))) return
-    endif
-    reduced_order_is_valid=.true.
-  end function reduced_order_is_valid
   subroutine is_valid_dipole(ipart,process,order,is_dipole,ipart_l,ipart_r)
     ! Checks if the two particles next to ipart in the colour order
     ! form a valid dipole that could have radiated particle ipart
