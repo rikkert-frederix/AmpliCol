@@ -16,6 +16,7 @@ module handling_processes
      integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
      integer :: dipole_type=0 ! 0:II, 1:IF, 2:FI, 3:FF
      type(amplitude_QCD) :: amp
+     real(kind=8),dimension(0:3) :: p_mapped_ij
    contains
      final :: finalize_dipole
   end type dipole

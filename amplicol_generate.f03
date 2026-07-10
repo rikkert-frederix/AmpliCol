@@ -445,7 +445,7 @@ contains
           call compute_the_dipole_amps(1,ichan)
           call square_the_dipole_amps(1,ichan,amp2_dip)
           
-          write (*,*) pgl(ichan)%amp2(1)
+          write (*,*) pgl(ichan)%amp2(1),amp2_dip,pgl(ichan)%amp2(1)/amp2_dip
           
           if (status.ne.0) then
              write (*,*) 'found error in phase-space mapping',status
@@ -666,6 +666,7 @@ contains
     integer,dimension(pgl(ichan)%next-1) :: hel_mapped
     do idip=1,pgl(ichan)%ndip
        call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dl(idip)%dip_ijk,ps_mapped,info)
+       pgl(ichan)%dl(idip)%p_mapped_ij(0:3)=ps_mapped(0:3,pgl(ichan)%dl(idip)%dip_r_ijk(1))
        if (info.ne.0) then
           write (*,*) 'error in cs momentum mapping',info
           stop 1
@@ -678,21 +679,54 @@ contains
 
   subroutine square_the_dipole_amps(iint,ichan,amp2_dip)
     use cs_lc_spin_dipoles
+    use FeynmanRules
     implicit none
     integer,intent(in) :: iint,ichan
     integer :: idip
-    real(kind=8) :: amp2_dip
-!!$    amp2_dip=0d0
-!!$    do idip=1,pgl(ichan)%ndip
-!!$
-!!$       do ih=1,pgl(ichan)%dl(idip)%amp%n_amps
-!!$          amp2_dip=amp2_dip+dble(pgl(ichan)%amps(iint)%amps(ih)*&
-!!$               pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))
-!!$       enddo
-!!$
-!!$       
-!!$    enddo
+    real(kind=8) :: amp2_dip,dip
+    integer :: info,ij
+    complex(kind=8),dimension(2,2) :: rho
+    complex(kind=8),dimension(0:3,2) :: eps_parent
+    amp2_dip=0d0
+    do idip=1,pgl(ichan)%ndip
+       ij=pgl(ichan)%dl(idip)%dip_r_ijk(1)
+       call create_rho(iint,ichan,idip,rho)
+       if (ij.gt.2) then
+          call ext_gluon_cmplx(pgl(ichan)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_gluon_cmplx(pgl(ichan)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+       else
+          call ext_gluon_cmplx(-pgl(ichan)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_gluon_cmplx(-pgl(ichan)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+       endif
+       call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1), &
+            pgl(ichan)%dl(idip)%process_r,pgl(ichan)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
+            rho,eps_parent,dip)
+       amp2_dip=amp2_dip+dip
+    enddo
   end subroutine square_the_dipole_amps
+
+  subroutine create_rho(iint,ichan,idip,rho)
+    implicit none
+    integer,intent(in) :: iint,ichan,idip
+    complex(kind=8),dimension(2,2),intent(out) :: rho
+    integer,dimension(pgl(ichan)%next-1) :: spins1,spins2
+    integer,dimension(pgl(ichan)%next-2) :: spins1_r,spins2_r
+    integer :: ih1,ih2,ij
+    rho=(0d0,0d0)
+    ij=pgl(ichan)%dl(idip)%dip_r_ijk(1)
+    do ih1=1,pgl(ichan)%dl(idip)%amp%n_amps
+       spins1=pgl(ichan)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih1)
+       spins1_r=[spins1(1:ij-1),spins1(ij+1:pgl(ichan)%next-1)]
+       do ih2=1,pgl(ichan)%dl(idip)%amp%n_amps
+          spins2=pgl(ichan)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih2)
+          spins2_r=[spins2(1:ij-1),spins2(ij+1:pgl(ichan)%next-1)]
+          if (any(spins1_r.ne.spins2_r)) cycle
+          rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)=rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)+ &
+               pgl(ichan)%dl(idip)%amp%amps(ih1)*pgl(ichan)%col_fac(iint)* &
+               pgl(ichan)%dl(idip)%amp%amps(ih2)
+       enddo
+    enddo
+  end subroutine create_rho
     
   subroutine square_the_amps(iint,ichan)
     implicit none

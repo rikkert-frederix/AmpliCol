@@ -174,7 +174,7 @@ amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_function
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o mg_checks.o scales.o subtraction.o phase_space_module.o \
-	cs_dipole_mappings.o cs_lc_dipoles.o
+	cs_dipole_mappings.o cs_lc_dipoles.o feynmanrules.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o

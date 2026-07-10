@@ -56,7 +56,7 @@ module common
   logical,parameter :: decompose_same_flavour_into_two_diff_flavour=.true.
   logical,parameter :: use_cross_process_optimisation_of_currents=.true.
   logical,parameter :: keep_processes_separate=.true.
-  logical,parameter :: optimise_amplitudes=.true.
+  logical,parameter :: optimise_amplitudes=.false.
   integer,parameter :: timing_none=0,timing_basic=1,timing_detailed=2
   integer :: timing_mode=timing_basic,timing_sample=100
   real(kind=8) :: tBefore,tAfter,tTot_A,tTot_B

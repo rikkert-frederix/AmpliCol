@@ -24,19 +24,19 @@ contains
 
   logical function is_gluon(f)
     integer, intent(in) :: f
-    is_gluon = (f == 0)
+    is_gluon = (f == 21)
   end function is_gluon
 
 
   logical function is_quark(f)
     integer, intent(in) :: f
-    is_quark = (f /= 0)
+    is_quark = (f /= 21)
   end function is_quark
 
 
   logical function is_q_qbar_pair(f1, f2)
     integer, intent(in) :: f1, f2
-    is_q_qbar_pair = (f1 /= 0 .and. f1 == -f2)
+    is_q_qbar_pair = (f1 /= 21 .and. f1 == -f2)
   end function is_q_qbar_pair
 
 
@@ -161,7 +161,7 @@ contains
   end subroutine scalar_to_vhel
 
 
-  subroutine cs_lc_dipole_spinrho(p, flav_real, flav_born, i, j, k, alpha_s, rho, eps_parent, dip, info, lc_weight)
+  subroutine cs_lc_dipole_spinrho(p, flav_real, flav_born, ijk, alpha_s, rho, eps_parent, dip, info, lc_weight)
     ! Leading-colour, spin-correlated, massless Catani-Seymour dipole.
     !
     ! p(:,1), p(:,2) are incoming physical momenta with positive energy.
@@ -184,7 +184,7 @@ contains
 
     real(dp), intent(in) :: p(0:,:)
     integer, intent(in) :: flav_real(:), flav_born(:)
-    integer, intent(in) :: i, j, k
+    integer, dimension(3),intent(in) :: ijk
     real(dp), intent(in) :: alpha_s
     complex(dp), intent(in) :: rho(2,2)
     complex(dp), intent(in) :: eps_parent(0:3,2)
@@ -192,7 +192,7 @@ contains
     integer, intent(out), optional :: info
     real(dp), intent(in), optional :: lc_weight
 
-    integer :: n, ni, nk, istat
+    integer :: n, ni, nk, istat,i,j,k
     logical :: iini, kini
     real(dp) :: wt, pref
     real(dp) :: sij, sik, sjk, dotij
@@ -200,6 +200,10 @@ contains
     complex(dp) :: vhel(2,2)
     real(dp) :: vcontract
 
+    i=ijk(1)
+    j=ijk(2)
+    k=ijk(3)
+    
     dip = 0.0_dp
     istat = 0
 
@@ -261,7 +265,6 @@ contains
     end if
 
     if (.not. iini .and. .not. kini) then
-
        ! FF: final emitter, final unresolved, final spectator.
 
        sik = 2.0_dp * dot4(p(:,i), p(:,k))
@@ -278,6 +281,7 @@ contains
        call final_splitting_matrix(.false., alpha_s, flav_real(i), flav_real(j), flav_born(ni), &
             z, y_dummy=y, x_dummy=0.0_dp, p_i=p(:,i), p_j=p(:,j), &
             eps_parent=eps_parent, vhel=vhel, info=istat)
+       
        if (istat /= 0) goto 900
 
        pref = wt / sij
