@@ -429,6 +429,13 @@ contains
     call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     p_save=pgl(ichan)%ps(1)%p
 
+    write (*,*) 'Full momenta'
+    do i=1,pgl(ichan)%next
+       write (*,*) i,p_save(0:3,i)
+    enddo
+    write (*,*) ''
+    
+
     do i=3,pgl(ichan)%next
        mass(i-2)=phys_model%get_mass(pgl(ichan)%processes(i,1))
     enddo
@@ -440,7 +447,7 @@ contains
           cycle
        endif
        do k = 0, 10
-          lambda = 10.0_dp**(-real(k,kind=8))
+          lambda = 10.0_dp**(-real(k,kind=8)/2d0)
           call soft_deform_event(pgl(ichan)%next-2, mass, p_save, i, lambda, pgl(ichan)%ps(1)%p, status)
           call compute_the_amps(1,ichan)
           call square_the_amps(1,ichan)
@@ -458,8 +465,28 @@ contains
     enddo
     
     do i=1,pgl(ichan)%next-1
-       do j=min(3,i+1),pgl(ichan)%next
+       do j=max(3,i+1),pgl(ichan)%next
           write (*,*) 'collinear limit',i,j
+          do k = 0, 10
+             lambda = 10.0_dp**(-real(k, dp)/2d0)
+             call collinear_deform_event(pgl(ichan)%next-2, mass, p_save, i, j, lambda, pgl(ichan)%ps(1)%p, status)
+             if (status.ne.0) then
+                write (*,*) 'found error in phase-space mapping',status
+                stop 1
+             endif
+             call compute_the_amps(1,ichan)
+             call square_the_amps(1,ichan)
+
+             call compute_the_dipole_amps(1,ichan)
+             call square_the_dipole_amps(1,ichan,amp2_dip,icol1=i,icol2=j)
+
+             if (amp2_dip.ne.0d0) then
+                write (*,*) pgl(ichan)%amp2(1),amp2_dip,pgl(ichan)%amp2(1)/amp2_dip
+             else
+                write (*,*) pgl(ichan)%amp2(1),amp2_dip,'no collinear dipole'
+             endif
+
+          enddo
        enddo
     enddo
 
@@ -681,24 +708,30 @@ contains
     enddo
   end subroutine compute_the_dipole_amps
 
-  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres)
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2)
     use cs_lc_spin_dipoles
     use FeynmanRules
     implicit none
     integer,intent(in) :: iint,ichan
-    integer,intent(in),optional :: iunres
+    integer,intent(in),optional :: iunres,icol1,icol2
     integer :: idip
     real(kind=8) :: amp2_dip,dip
     integer :: ij
+    logical :: use_collinear
     complex(kind=8),dimension(2,2) :: rho
     complex(kind=8),dimension(0:3,2) :: eps_parent
+    use_collinear=present(icol1).or.present(icol2)
+    if (use_collinear .and. .not.(present(icol1).and.present(icol2))) then
+       write (*,*) 'collinear dipole selection needs both collinear legs'
+       stop 1
+    endif
     amp2_dip=0d0
     do idip=1,pgl(ichan)%dpl(iint)%ndip
-       if (present(iunres)) then
-          ! only include the dipoles for which 'j' corresponds to the
-          ! particle that goes soft. Normally the cuts would remove
-          ! all the other dipoles (since in the Born momenta there
-          ! would be a soft parton).
+       if (use_collinear) then
+          if (.not.collinear_dipole_matches(iint,ichan,idip,icol1,icol2)) cycle
+       elseif (present(iunres)) then
+          ! For a raw soft diagnostic, isolate the dipoles where the
+          ! tested leg is the CS unresolved leg j.
           if (pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2).ne.iunres) cycle
        endif
        ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
@@ -716,6 +749,30 @@ contains
        amp2_dip=amp2_dip+dip
     enddo
   end subroutine square_the_dipole_amps
+
+  logical function collinear_dipole_matches(iint,ichan,idip,icol1,icol2)
+    implicit none
+    integer,intent(in) :: iint,ichan,idip,icol1,icol2
+    integer :: dip_i,dip_j,dip_k,iini,ifin
+    dip_i=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(1)
+    dip_j=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2)
+    dip_k=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(3)
+    collinear_dipole_matches=.false.
+    if (icol1.le.2 .and. icol2.le.2) return
+    if (icol1.le.2 .or. icol2.le.2) then
+       if (icol1.le.2) then
+          iini=icol1
+          ifin=icol2
+       else
+          iini=icol2
+          ifin=icol1
+       endif
+       collinear_dipole_matches=(dip_j.eq.ifin .and. (dip_i.eq.iini .or. dip_k.eq.iini))
+    else
+       collinear_dipole_matches=((dip_i.eq.icol1 .and. dip_j.eq.icol2) .or. &
+            (dip_i.eq.icol2 .and. dip_j.eq.icol1))
+    endif
+  end function collinear_dipole_matches
 
   subroutine create_rho(iint,ichan,idip,rho)
     implicit none

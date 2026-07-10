@@ -194,7 +194,7 @@ contains
 
     integer :: n, ni, nk, istat,i,j,k
     logical :: iini, kini
-    real(dp) :: wt, pref
+    real(dp) :: wt, pref, vcontract_alt
     real(dp) :: sij, sik, sjk, dotij
     real(dp) :: x, y, z, u
     complex(dp) :: vhel(2,2)
@@ -522,7 +522,11 @@ contains
 
     case (ch_i_gq)
 
-       scalar = 8.0_dp*pi_dp*alpha_s*tr * (1.0_dp - 2.0_dp*x*(1.0_dp - x))
+       ! In the crossed initial-state q <- g channel, the reduced Born
+       ! amplitude carries one fewer power of N_c than the real ordered
+       ! amplitude.  The leading-colour normalization is therefore C_F^LC,
+       ! not T_R.
+       scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (1.0_dp - 2.0_dp*x*(1.0_dp - x))
        call scalar_to_vhel(scalar, vhel)
 
     case (ch_i_qq)
@@ -539,8 +543,8 @@ contains
        coeff = ((1.0_dp - x)/x) * (2.0_dp*u*(1.0_dp - u)/dotjk)
 
        call zero_tensor(vten)
-       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*x)
-       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*coeff, r)
+       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*x)
+       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*coeff, r)
        call tensor_to_helicity(vten, eps_parent, vhel)
 
     case (ch_i_gg)
@@ -605,7 +609,7 @@ contains
 
     case (ch_i_gq)
 
-       scalar = 8.0_dp*pi_dp*alpha_s*tr * (1.0_dp - 2.0_dp*x*(1.0_dp - x))
+       scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (1.0_dp - 2.0_dp*x*(1.0_dp - x))
        call scalar_to_vhel(scalar, vhel)
 
     case (ch_i_qq)
@@ -624,8 +628,8 @@ contains
        coeff = ((1.0_dp - x)/x) * (2.0_dp*dotab/(dotja*dotjb))
 
        call zero_tensor(vten)
-       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*x)
-       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*cf_lc*coeff, r)
+       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*x)
+       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*coeff, r)
        call tensor_to_helicity(vten, eps_parent, vhel)
 
     case (ch_i_gg)
