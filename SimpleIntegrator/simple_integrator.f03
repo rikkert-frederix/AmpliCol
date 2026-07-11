@@ -686,11 +686,11 @@ contains
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
          'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(*,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
+         'Integral     (accum):',this%res(2),'+/-',this%unc(2)
     write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
          'Integral ABS (accum):',this%res(1),'+/-',this%unc(1),'(',rel_unc,'%)'
     write(99,'(4x,a,1x,e12.6,1x,a,1x,e10.4,1x,a,f8.4,1x,a)') &
-         'Integral     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
+         'Integral     (accum):',this%res(2),'+/-',this%unc(2)
     call flush()
   end subroutine print_results
   
