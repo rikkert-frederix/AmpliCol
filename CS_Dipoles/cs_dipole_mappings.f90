@@ -62,8 +62,9 @@ contains
   end subroutine boost_K_to_Ktilde
 
 
-  subroutine cs_map(p, ijk, ptilde, info, xout, yout)
-    ! Massless Catani-Seymour momentum mappings.
+  subroutine cs_map(p, ijk, ptilde, info, xout, yout, mass_real, mass_parent)
+    ! Catani-Seymour momentum mappings.  The original massless interface is
+    ! retained; supplying masses enables the massive final-state mappings.
     !
     ! Convention:
     !   p(0:3,1:nexternal)
@@ -108,6 +109,7 @@ contains
     real(dp), intent(out) :: ptilde(0:,:)
     integer, intent(out), optional :: info
     real(dp), intent(out), optional :: xout, yout
+    real(dp), intent(in), optional :: mass_real(:), mass_parent
 
     integer :: n, nm, i, j, k
     integer :: l, ni, nj, nk, nl
@@ -117,6 +119,9 @@ contains
 
     real(dp) :: x, y, den, omx, omy
     real(dp) :: Kvec(0:3), Ktvec(0:3), tmp(0:3)
+    real(dp) :: mi2, mj2, mk2, mij2, q2, pij2, lambda_real, lambda_born
+    real(dp) :: map_scale, qdotk, qvec(0:3), pairvec(0:3)
+    logical :: use_masses
 
     i=ijk(1)
     j=ijk(2)
@@ -130,6 +135,18 @@ contains
 
     n  = size(p, 2)
     nm = size(ptilde, 2)
+
+    use_masses = present(mass_real) .or. present(mass_parent)
+    if (use_masses) then
+       if (.not.(present(mass_real) .and. present(mass_parent))) then
+          istat = -5
+          goto 900
+       endif
+       if (size(mass_real) /= n .or. any(mass_real < 0.0_dp) .or. mass_parent < 0.0_dp) then
+          istat = -5
+          goto 900
+       endif
+    endif
 
     if (size(p,1) /= 4 .or. size(ptilde,1) /= 4 .or. nm /= n-1) then
        istat = -1
@@ -162,6 +179,22 @@ contains
        goto 900
     end if
 
+    if (use_masses) then
+       mi2 = mass_real(i)*mass_real(i)
+       mj2 = mass_real(j)*mass_real(j)
+       mk2 = mass_real(k)*mass_real(k)
+       mij2 = mass_parent*mass_parent
+       if (mass_real(j) > 100.0_dp*epsilon(1.0_dp)*max(1.0_dp,mass_parent)) then
+          istat = -5
+          goto 900
+       endif
+    else
+       mi2 = 0.0_dp
+       mj2 = 0.0_dp
+       mk2 = 0.0_dp
+       mij2 = 0.0_dp
+    endif
+
     i_is_initial = is_initial(i)
     k_is_initial = is_initial(k)
 
@@ -182,6 +215,27 @@ contains
        !
        ! ptilde_k  = p_k / (1 - y)
        ! ptilde_ij = p_i + p_j - y/(1-y) p_k
+
+       if (use_masses .and. (mi2 > 0.0_dp .or. mk2 > 0.0_dp .or. mij2 > 0.0_dp)) then
+          qvec = p(:,i) + p(:,j) + p(:,k)
+          pairvec = p(:,i) + p(:,j)
+          q2 = dot4(qvec,qvec)
+          pij2 = dot4(pairvec,pairvec)
+          lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
+          lambda_born = q2*q2 + mij2*mij2 + mk2*mk2 - 2.0_dp*(q2*mij2 + q2*mk2 + mij2*mk2)
+          if (q2 <= tiny_kin .or. lambda_real <= tiny_kin .or. lambda_born < -tiny_kin) then
+             istat = -10
+             goto 900
+          endif
+          map_scale = sqrt(max(0.0_dp,lambda_born)/lambda_real)
+          qdotk = dot4(qvec,p(:,k))
+          ptilde(:,nk) = map_scale*(p(:,k) - qdotk/q2*qvec) + &
+               (q2 + mk2 - mij2)/(2.0_dp*q2)*qvec
+          ptilde(:,ni) = qvec - ptilde(:,nk)
+          y = dot4(p(:,i),p(:,j))/(dot4(p(:,i),p(:,j)) + dot4(p(:,i),p(:,k)) + dot4(p(:,j),p(:,k)))
+          if (present(yout)) yout = y
+          goto 900
+       endif
 
        den = dot4(p(:,i), p(:,j)) + dot4(p(:,i), p(:,k)) + dot4(p(:,j), p(:,k))
 
@@ -220,7 +274,11 @@ contains
           goto 900
        end if
 
-       x = (den - dot4(p(:,i), p(:,j))) / den
+       if (use_masses .and. (mi2 > 0.0_dp .or. mij2 > 0.0_dp)) then
+          x = (den - dot4(p(:,i),p(:,j)) + 0.5_dp*(mij2-mi2-mj2))/den
+       else
+          x = (den - dot4(p(:,i), p(:,j))) / den
+       endif
        if (present(xout)) xout = x
 
        omx = 1.0_dp - x

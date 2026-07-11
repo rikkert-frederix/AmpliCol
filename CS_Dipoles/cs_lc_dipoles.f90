@@ -178,8 +178,10 @@ contains
   end subroutine scalar_to_vhel
 
 
-  subroutine cs_lc_dipole_spinrho(p, flav_real, flav_born, ijk, alpha_s, rho, eps_parent, dip, info, lc_weight)
-    ! Leading-colour, spin-correlated, massless Catani-Seymour dipole.
+  subroutine cs_lc_dipole_spinrho(p, flav_real, flav_born, ijk, alpha_s, rho, eps_parent, dip, info, lc_weight, &
+       mass_real, mass_parent)
+    ! Leading-colour, spin-correlated Catani-Seymour dipole.  The optional
+    ! masses activate the massive final-state kernels.
     !
     ! p(:,1), p(:,2) are incoming physical momenta with positive energy.
     ! j is the unresolved final-state parton and must satisfy j > 2.
@@ -208,14 +210,17 @@ contains
     real(dp), intent(out) :: dip
     integer, intent(out), optional :: info
     real(dp), intent(in), optional :: lc_weight
+    real(dp), intent(in), optional :: mass_real(:), mass_parent
 
     integer :: n, ni, nk, istat,i,j,k
     logical :: iini, kini
     real(dp) :: wt, pref, vcontract_alt
-    real(dp) :: sij, sik, sjk, dotij
+    real(dp) :: sij, sik, sjk, dotij, sij_parent
+    real(dp) :: mi, mj, mk, mparent
     real(dp) :: x, y, z, u
     complex(dp) :: vhel(2,2)
     real(dp) :: vcontract
+    logical :: use_masses
 
     i=ijk(1)
     j=ijk(2)
@@ -231,6 +236,23 @@ contains
     end if
 
     n = size(p, 2)
+
+    use_masses = present(mass_real) .or. present(mass_parent)
+    if (use_masses) then
+       if (.not.(present(mass_real) .and. present(mass_parent))) then
+          istat = -2
+          goto 900
+       endif
+       if (size(mass_real) /= n .or. any(mass_real < 0.0_dp) .or. mass_parent < 0.0_dp) then
+          istat = -2
+          goto 900
+       endif
+    else
+       mi = 0.0_dp
+       mj = 0.0_dp
+       mk = 0.0_dp
+       mparent = 0.0_dp
+    endif
 
     if (size(p, 1) /= 4) then
        istat = -1
@@ -257,6 +279,17 @@ contains
        goto 900
     end if
 
+    if (use_masses) then
+       mi = mass_real(i)
+       mj = mass_real(j)
+       mk = mass_real(k)
+       mparent = mass_parent
+       if (mj > 100.0_dp*epsilon(1.0_dp)*max(1.0_dp,mparent)) then
+          istat = -7
+          goto 900
+       endif
+    endif
+
     ni = new_index(i, j)
     nk = new_index(k, j)
 
@@ -275,8 +308,9 @@ contains
 
     sij = 2.0_dp * dot4(p(:,i), p(:,j))
     dotij = dot4(p(:,i), p(:,j))
+    sij_parent = dot4(p(:,i)+p(:,j),p(:,i)+p(:,j))-mparent*mparent
 
-    if (abs(sij) <= tiny_dip .or. abs(dotij) <= tiny_dip) then
+    if (abs(sij_parent) <= tiny_dip .or. abs(dotij) <= tiny_dip) then
        istat = -10
        goto 900
     end if
@@ -297,11 +331,12 @@ contains
 
        call final_splitting_matrix(.false., alpha_s, flav_real(i), flav_real(j), flav_born(ni), &
             z, y_dummy=y, x_dummy=0.0_dp, p_i=p(:,i), p_j=p(:,j), &
+            p_k=p(:,k), mass_i=mi, mass_j=mj, mass_k=mk, mass_parent=mparent, &
             eps_parent=eps_parent, vhel=vhel, info=istat)
        
        if (istat /= 0) goto 900
 
-       pref = wt / sij
+       pref = wt / sij_parent
        vcontract = contract_rho_v(rho, vhel)
        dip = pref * vcontract
 
@@ -327,10 +362,11 @@ contains
 
        call final_splitting_matrix(.true., alpha_s, flav_real(i), flav_real(j), flav_born(ni), &
             z, y_dummy=0.0_dp, x_dummy=x, p_i=p(:,i), p_j=p(:,j), &
+            p_k=p(:,k), mass_i=mi, mass_j=mj, mass_k=mk, mass_parent=mparent, &
             eps_parent=eps_parent, vhel=vhel, info=istat)
        if (istat /= 0) goto 900
 
-       pref = wt / (sij * x)
+       pref = wt / (sij_parent * x)
        vcontract = contract_rho_v(rho, vhel)
        dip = pref * vcontract
 
@@ -356,11 +392,11 @@ contains
        u = sij / (sij + sik)
 
        call initial_final_splitting_matrix(alpha_s, flav_real(i), flav_real(j), flav_born(ni), &
-            x, u, p_emit=p(:,i), p_unres=p(:,j), p_spec=p(:,k), eps_parent=eps_parent, &
+            x, u, p_emit=p(:,i), p_unres=p(:,j), p_spec=p(:,k), mass_spec=mk, eps_parent=eps_parent, &
             vhel=vhel, info=istat)
        if (istat /= 0) goto 900
 
-       pref = wt / (sij * x)
+       pref = wt / (sij_parent * x)
        vcontract = contract_rho_v(rho, vhel)
        dip = pref * vcontract
 
@@ -388,7 +424,7 @@ contains
             vhel=vhel, info=istat)
        if (istat /= 0) goto 900
 
-       pref = wt / (sij * x)
+       pref = wt / (sij_parent * x)
        vcontract = contract_rho_v(rho, vhel)
        dip = pref * vcontract
 
@@ -399,7 +435,8 @@ contains
   end subroutine cs_lc_dipole_spinrho
 
 
-  subroutine final_splitting_matrix(is_fi, alpha_s, fi, fj, fp, z, y_dummy, x_dummy, p_i, p_j, eps_parent, vhel, info)
+  subroutine final_splitting_matrix(is_fi, alpha_s, fi, fj, fp, z, y_dummy, x_dummy, p_i, p_j, p_k, &
+       mass_i, mass_j, mass_k, mass_parent, eps_parent, vhel, info)
     ! Final-state emitter kernels for FF and FI.
     ! If is_fi = .false., use y_dummy as y_ij,k.
     ! If is_fi = .true.,  use x_dummy as x_ij,a.
@@ -408,19 +445,25 @@ contains
     real(dp), intent(in) :: alpha_s
     integer, intent(in) :: fi, fj, fp
     real(dp), intent(in) :: z, y_dummy, x_dummy
-    real(dp), intent(in) :: p_i(0:3), p_j(0:3)
+    real(dp), intent(in) :: p_i(0:3), p_j(0:3), p_k(0:3)
+    real(dp), intent(in) :: mass_i, mass_j, mass_k, mass_parent
     complex(dp), intent(in) :: eps_parent(0:3,2)
     complex(dp), intent(out) :: vhel(2,2)
     integer, intent(out) :: info
 
     real(dp) :: zi, zj, zq, denom_i, denom_j
-    real(dp) :: scalar, aterm, coeff, dotij
+    real(dp) :: scalar, aterm, coeff, dotij, y, vreal, vtilde
+    real(dp) :: q2, pij2, mk2, mp2, lambda_real, lambda_born
+    real(dp) :: zim, zjm
     real(dp) :: r(0:3), vten(0:3,0:3)
+    logical :: massive
 
     info = 0
     zi = z
     zj = 1.0_dp - z
     dotij = dot4(p_i, p_j)
+    massive = mass_i > 100.0_dp*epsilon(1.0_dp) .or. mass_j > 100.0_dp*epsilon(1.0_dp) .or. &
+         mass_k > 100.0_dp*epsilon(1.0_dp) .or. mass_parent > 100.0_dp*epsilon(1.0_dp)
 
     if (abs(dotij) <= tiny_dip) then
        info = -101
@@ -451,14 +494,36 @@ contains
           return
        end if
 
-       scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (2.0_dp/denom_i - (1.0_dp + zq))
+       if (massive .and. .not.is_fi) then
+          q2 = dot4(p_i+p_j+p_k,p_i+p_j+p_k)
+          pij2 = dot4(p_i+p_j,p_i+p_j)
+          mk2 = mass_k*mass_k
+          mp2 = mass_parent*mass_parent
+          lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
+          lambda_born = q2*q2 + mp2*mp2 + mk2*mk2 - 2.0_dp*(q2*mp2 + q2*mk2 + mp2*mk2)
+          if (q2 <= tiny_dip .or. lambda_real <= tiny_dip .or. lambda_born < -tiny_dip) then
+             info = -106
+             return
+          endif
+          vreal = sqrt(max(0.0_dp,lambda_real))/(q2-pij2-mk2)
+          vtilde = sqrt(max(0.0_dp,lambda_born))/(q2-mp2-mk2)
+          if (abs(vreal) <= tiny_dip) then
+             info = -106
+             return
+          endif
+          scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * &
+               (2.0_dp/denom_i - (vtilde/vreal)*(1.0_dp + zq + mass_parent*mass_parent/dotij))
+       else if (massive .and. is_fi) then
+          scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * &
+               (2.0_dp/denom_i - (1.0_dp + zq) - mass_parent*mass_parent/dotij)
+       else
+          scalar = 8.0_dp*pi_dp*alpha_s*cf_lc * (2.0_dp/denom_i - (1.0_dp + zq))
+       endif
        call scalar_to_vhel(scalar, vhel)
 
     else
 
        ! Parent gluon: g -> g g or g -> q qbar.
-
-       r = zi*p_i - zj*p_j
 
        if (is_gluon(fi) .and. is_gluon(fj)) then
 
@@ -481,12 +546,37 @@ contains
              return
           end if
 
+          if (massive .and. (mass_i > 100.0_dp*epsilon(1.0_dp) .or. &
+               mass_j > 100.0_dp*epsilon(1.0_dp) .or. mass_parent > 100.0_dp*epsilon(1.0_dp))) then
+             info = -107
+             return
+          endif
           ! Ordered LC dipoles designate leg j as unresolved.  The
           ! complementary i-soft pole is supplied by the dipole where i is
           ! the unresolved leg; keeping it here would over-subtract soft
           ! gluons in a colour-ordered sum.
           aterm = 1.0_dp/denom_i - 1.0_dp
-          coeff = 1.0_dp / dotij
+          if (massive .and. .not.is_fi) then
+             q2 = dot4(p_i+p_j+p_k,p_i+p_j+p_k)
+             pij2 = dot4(p_i+p_j,p_i+p_j)
+             mk2 = mass_k*mass_k
+             lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
+             if (q2 <= tiny_dip .or. lambda_real <= tiny_dip) then
+                info = -107
+                return
+             endif
+             vreal = sqrt(lambda_real)/(q2-pij2-mk2)
+             if (abs(vreal) <= tiny_dip) then
+                info = -107
+                return
+             endif
+          else
+             vreal = 1.0_dp
+          endif
+          zim = zi - 0.5_dp*(1.0_dp-vreal)
+          zjm = zj - 0.5_dp*(1.0_dp-vreal)
+          r = zim*p_i - zjm*p_j
+          coeff = 1.0_dp / (vreal*dotij)
 
           call zero_tensor(vten)
           call add_minus_g_term(vten, 16.0_dp*pi_dp*alpha_s*ca*aterm)
@@ -495,14 +585,39 @@ contains
 
        else if (is_q_qbar_pair(fi, fj)) then
 
-          coeff = -2.0_dp / dotij
+          if (massive .and. (mass_i > 100.0_dp*epsilon(1.0_dp) .or. &
+               mass_j > 100.0_dp*epsilon(1.0_dp) .or. mass_parent > 100.0_dp*epsilon(1.0_dp))) then
+             info = -108
+             return
+          endif
+          if (massive .and. .not.is_fi) then
+             q2 = dot4(p_i+p_j+p_k,p_i+p_j+p_k)
+             pij2 = dot4(p_i+p_j,p_i+p_j)
+             mk2 = mass_k*mass_k
+             lambda_real = q2*q2 + pij2*pij2 + mk2*mk2 - 2.0_dp*(q2*pij2 + q2*mk2 + pij2*mk2)
+             if (q2 <= tiny_dip .or. lambda_real <= tiny_dip) then
+                info = -108
+                return
+             endif
+             vreal = sqrt(lambda_real)/(q2-pij2-mk2)
+             if (abs(vreal) <= tiny_dip) then
+                info = -108
+                return
+             endif
+          else
+             vreal = 1.0_dp
+          endif
+          zim = zi - 0.5_dp*(1.0_dp-vreal)
+          zjm = zj - 0.5_dp*(1.0_dp-vreal)
+          r = zim*p_i - zjm*p_j
+          coeff = -2.0_dp / (vreal*dotij)
 
           call zero_tensor(vten)
           if (is_u1_gluon(fp)) then
-             call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr_u1)
+             call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr_u1/vreal)
              call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*tr_u1*coeff, r)
           else
-             call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr)
+             call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr/vreal)
              call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*tr*coeff, r)
           end if
           call tensor_to_helicity(vten, eps_parent, vhel)
@@ -515,7 +630,8 @@ contains
   end subroutine final_splitting_matrix
 
 
-  subroutine initial_final_splitting_matrix(alpha_s, fa, fj, fp, x, u, p_emit, p_unres, p_spec, eps_parent, vhel, info)
+  subroutine initial_final_splitting_matrix(alpha_s, fa, fj, fp, x, u, p_emit, p_unres, p_spec, mass_spec, &
+       eps_parent, vhel, info)
     ! Initial-state emitter, final-state spectator kernels.
     ! p_emit is the real incoming emitter a, p_unres is emitted final j,
     ! p_spec is final spectator k.
@@ -523,6 +639,7 @@ contains
     real(dp), intent(in) :: alpha_s, x, u
     integer, intent(in) :: fa, fj, fp
     real(dp), intent(in) :: p_emit(0:3), p_unres(0:3), p_spec(0:3)
+    real(dp), intent(in) :: mass_spec
     complex(dp), intent(in) :: eps_parent(0:3,2)
     complex(dp), intent(out) :: vhel(2,2)
     integer, intent(out) :: info
@@ -532,6 +649,10 @@ contains
     real(dp) :: r(0:3), vten(0:3,0:3)
 
     info = 0
+    if (mass_spec < 0.0_dp) then
+       info = -205
+       return
+    endif
     call initial_channel(fa, fj, fp, ch)
 
     select case (ch)

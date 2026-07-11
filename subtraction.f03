@@ -773,9 +773,16 @@ contains
     integer,intent(in) :: iint,ichan
     integer :: idip,info
     real(kind=8),dimension(0:3,pgl(ichan)%next-1) :: ps_mapped
+    real(kind=8),dimension(pgl(ichan)%next) :: mass_real
     integer,dimension(pgl(ichan)%next-1) :: hel_mapped
+    integer :: ipart
+    do ipart=1,pgl(ichan)%next
+       mass_real(ipart)=phys_model%get_mass(pgl(ichan)%processes(ipart,iint))
+    enddo
     do idip=1,pgl(ichan)%dpl(iint)%ndip
-       call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info)
+       call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info, &
+            mass_real=mass_real, &
+            mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
        pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij(0:3)= &
             ps_mapped(0:3,pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1))
        if (info.ne.0) then
@@ -798,7 +805,9 @@ contains
     integer :: idip
     real(kind=8) :: amp2_dip,dip
     real(kind=8),parameter :: pi=3.14159265358979323846d0
+    real(kind=8),dimension(pgl(ichan)%next) :: mass_real
     integer :: ij
+    integer :: ipart
     logical :: use_collinear
     complex(kind=8),dimension(2,2) :: rho
     complex(kind=8),dimension(0:3,2) :: eps_parent
@@ -808,6 +817,9 @@ contains
        stop 1
     endif
     amp2_dip=0d0
+    do ipart=1,pgl(ichan)%next
+       mass_real(ipart)=phys_model%get_mass(pgl(ichan)%processes(ipart,iint))
+    enddo
     if (present(nselected)) nselected=0
     do idip=1,pgl(ichan)%dpl(iint)%ndip
        if (use_collinear) then
@@ -832,7 +844,9 @@ contains
        eps_parent=conjg(eps_parent)
        call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,iint), &
             pgl(ichan)%dpl(iint)%dl(idip)%process_r,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
-            rho,eps_parent,dip,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight)
+            rho,eps_parent,dip,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight, &
+            mass_real=mass_real, &
+            mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
        amp2_dip=amp2_dip+dip
     enddo
   end subroutine square_the_dipole_amps

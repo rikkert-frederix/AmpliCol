@@ -63,7 +63,9 @@ program amplicol_generate
      endif
   endif
   
-  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
+!!$  call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
+!!$                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,&
                            80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
   call phys_model%init_vert()
 
