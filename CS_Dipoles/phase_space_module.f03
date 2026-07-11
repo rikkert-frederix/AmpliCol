@@ -873,14 +873,116 @@ contains
     pout(:, 1:2) = pin(:, 1:2)
     call soft_deform(nout, mass, pin(:, 3:nout+2), ifinal, lambda, &
          pout(:, 3:nout+2), st)
+    if (st == PS_NO_PHASE_SPACE) then
+       ! At fixed incoming momentum a two-body final state with a massive
+       ! spectator cannot generally reach a soft limit.  Vary s-hat instead.
+       call soft_deform_variable_shat_event(nout, mass, pin, ifinal, lambda, pout, st)
+    end if
     if (st /= PS_OK) then
        pout = 0.0_dp
        call set_status(status, st)
        return
     end if
-    pout(:, 1:2) = pin(:, 1:2)
     call set_status(status, PS_OK)
   end subroutine soft_deform_event
+
+  subroutine soft_deform_variable_shat_event(nout, mass, pin, ifinal, lambda, pout, status)
+    integer, intent(in) :: nout, ifinal
+    real(dp), intent(in) :: mass(nout)
+    real(dp), intent(in) :: pin(0:3,nout+2)
+    real(dp), intent(in) :: lambda
+    real(dp), intent(out) :: pout(0:3,nout+2)
+    integer, intent(out) :: status
+
+    integer :: i, a, c, st, nspec
+    integer, allocatable :: idx(:)
+    real(dp), allocatable :: pcm(:,:), pout_cm(:,:), krest(:,:)
+    real(dp) :: ptot(0:3), pnew(0:3), p_cm_tot(0:3), beta(3), beta_back(3), beta_r(3)
+    real(dp) :: r0(0:3), rnew(0:3), m_spec, tol, e1, e2
+
+    status = PS_OK
+    pout = 0.0_dp
+    if (nout < 2 .or. ifinal < 1 .or. ifinal > nout .or. lambda < 0.0_dp) then
+       status = PS_BAD_INPUT
+       return
+    end if
+
+    nspec = nout - 1
+    allocate(idx(nspec), pcm(0:3,nout), pout_cm(0:3,nout), krest(0:3,nspec))
+    c = 0
+    do i = 1, nout
+       if (i /= ifinal) then
+          c = c + 1
+          idx(c) = i
+       end if
+    end do
+
+    ptot = pin(:, 1) + pin(:, 2)
+    if (ptot(0) <= 0.0_dp .or. msq4(ptot) <= 0.0_dp) then
+       status = PS_BAD_INPUT
+       return
+    end if
+    beta = -ptot(1:3) / ptot(0)
+    beta_back = -beta
+    call boost_many(nout, pin(:, 3:nout+2), beta, pcm, st)
+    if (st /= PS_OK) then
+       status = st
+       return
+    end if
+
+    p_cm_tot = 0.0_dp
+    p_cm_tot(0) = invariant_mass(ptot)
+    pout_cm = 0.0_dp
+    pout_cm(1:3, ifinal) = lambda*pcm(1:3, ifinal)
+    pout_cm(0, ifinal) = sqrt(mass(ifinal)*mass(ifinal) + dot3(pout_cm(1:3, ifinal), pout_cm(1:3, ifinal)))
+
+    r0 = p_cm_tot - pcm(:, ifinal)
+    tol = 1.0e-10_dp*max(1.0_dp, p_cm_tot(0))
+    if (r0(0) <= 0.0_dp .or. msq4(r0) < -tol) then
+       status = PS_NO_PHASE_SPACE
+       return
+    end if
+    m_spec = invariant_mass(r0)
+    beta_r = -r0(1:3) / r0(0)
+    do a = 1, nspec
+       call boost_one(pcm(:, idx(a)), beta_r, krest(:, a), st)
+       if (st /= PS_OK) then
+          status = st
+          return
+       end if
+    end do
+
+    rnew = 0.0_dp
+    rnew(1:3) = -pout_cm(1:3, ifinal)
+    rnew(0) = sqrt(m_spec*m_spec + dot3(rnew(1:3), rnew(1:3)))
+    beta_r = rnew(1:3) / rnew(0)
+    do a = 1, nspec
+       call boost_one(krest(:, a), beta_r, pout_cm(:, idx(a)), st)
+       if (st /= PS_OK) then
+          status = st
+          return
+       end if
+    end do
+
+    call boost_many(nout, pout_cm, beta_back, pout(:, 3:nout+2), st)
+    if (st /= PS_OK) then
+       status = st
+       return
+    end if
+    call total_momentum(nout, pout(:, 3:nout+2), pnew)
+    if (abs(pnew(1)) > tol .or. abs(pnew(2)) > tol) then
+       status = PS_BAD_INPUT
+       return
+    end if
+    e1 = 0.5_dp*(pnew(0) + pnew(3))
+    e2 = 0.5_dp*(pnew(0) - pnew(3))
+    if (e1 <= 0.0_dp .or. e2 <= 0.0_dp) then
+       status = PS_NO_PHASE_SPACE
+       return
+    end if
+    pout(:, 1) = (/ e1, 0.0_dp, 0.0_dp, e1 /)
+    pout(:, 2) = (/ e2, 0.0_dp, 0.0_dp, -e2 /)
+  end subroutine soft_deform_variable_shat_event
 
   subroutine collinear_deform_event(nout, mass, pin, icol1, icol2, lambda, pout, status)
     integer, intent(in) :: nout, icol1, icol2

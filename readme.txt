@@ -106,6 +106,8 @@ Catani-Seymour dipole are checked for bounded matrix elements. In both cases,
 three consecutive finite samples must not grow by more than 5% as the limit is
 approached. These checks are included in the reported failure fractions and
 are labelled '(integrable)' or '(finite)' in the summary.
+Soft limits for massive particles, and collinear limits involving at least one
+massive particle, are skipped.
 The base point for every test is regenerated until it has positive phase-space
 weight and passes the built-in cuts before the limiting deformation starts.
 For failed limits, the complete deformation table is written to

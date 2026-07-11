@@ -293,8 +293,8 @@ contains
     enddo
 
     do i=3,pgl(ichan)%next
+       if (phys_model%get_mass(pgl(ichan)%processes(i,iint)).gt.0d0) cycle
        is_gluon=phys_model%is_gluon(pgl(ichan)%processes(i,iint))
-       soft_tested(i)=soft_tested(i)+1
        ratios=0d0
        residuals=-1d0
        lambdas=0d0
@@ -330,6 +330,7 @@ contains
              valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
           endif
        enddo
+       soft_tested(i)=soft_tested(i)+1
        if (mapping_failed) cycle
        if (is_gluon) then
           call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
@@ -351,6 +352,8 @@ contains
 
     do i=1,pgl(ichan)%next-1
        do j=max(3,i+1),pgl(ichan)%next
+          if (phys_model%get_mass(pgl(ichan)%processes(i,iint)).gt.0d0 .or. &
+               phys_model%get_mass(pgl(ichan)%processes(j,iint)).gt.0d0) cycle
           ratios=0d0
           residuals=-1d0
           lambdas=0d0
@@ -368,7 +371,6 @@ contains
                 mapping_status(k+1)=status
                 call write_limit_failure('collinear',ichan,iint,limit_point,i,j,nsteps,lambdas,amp_values,dip_values,ratios,&
                      residuals,valid_values,mapping_status)
-                collinear_tested(i,j)=collinear_tested(i,j)+1
                 collinear_fail(i,j)=collinear_fail(i,j)+1
                 mapping_failed=.true.
                 exit
@@ -391,8 +393,8 @@ contains
                 endif
              endif
           enddo
-          if (mapping_failed) cycle
           collinear_tested(i,j)=collinear_tested(i,j)+1
+          if (mapping_failed) cycle
           if (no_dipoles) then
              call assess_nonsingular_limit_sequence(amp_values,valid_values,nsteps,nonsingular_growth_tolerance,sequence_ok)
           else
@@ -505,6 +507,11 @@ contains
     do ichan=1,ngroups
        do iint=1,pgl(ichan)%nproc
           do i=3,pgl(ichan)%next
+             if (phys_model%get_mass(pgl(ichan)%processes(i,iint)).gt.0d0) then
+                write (*,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": SKIP (massive)")') ichan,iint,i
+                write (99,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": SKIP (massive)")') ichan,iint,i
+                cycle
+             endif
              fraction=100d0*dble(soft_fail(ichan,iint,i))/dble(soft_tested(ichan,iint,i))
              if (soft_fail(ichan,iint,i).ge.failure_threshold) then
                 result='FAIL'
@@ -530,6 +537,14 @@ contains
           enddo
           do i=1,pgl(ichan)%next-1
              do j=max(3,i+1),pgl(ichan)%next
+                if (phys_model%get_mass(pgl(ichan)%processes(i,iint)).gt.0d0 .or. &
+                     phys_model%get_mass(pgl(ichan)%processes(j,iint)).gt.0d0) then
+                   write (*,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0, &
+                        ": SKIP (massive)")') ichan,iint,i,j
+                   write (99,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0, &
+                        ": SKIP (massive)")') ichan,iint,i,j
+                   cycle
+                endif
                 fraction=100d0*dble(collinear_fail(ichan,iint,i,j))/&
                      dble(collinear_tested(ichan,iint,i,j))
                 if (collinear_fail(ichan,iint,i,j).ge.failure_threshold) then
