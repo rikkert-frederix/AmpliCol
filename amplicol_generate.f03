@@ -740,7 +740,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy)
+         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -749,6 +749,8 @@ contains
        open(unit=100,file=limit_logfile,action='write',status='replace')
        write (100,'(a)') '# Failed Catani-Seymour limit diagnostic records'
        write (100,'(a)') '# For boundedness checks, dipole and ratio are zero and residual is -1.'
+       write (100,'(a,4(es12.4,1x))') '# alpha FF FI IF II: ',alpha_dipole
+       write (100,'(a)') '# mapping_status -100: all matching real dipoles excluded by alpha'
     endif
 
     timing_arg=trim(adjustl(timing_arg))

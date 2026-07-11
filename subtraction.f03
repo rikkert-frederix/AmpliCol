@@ -2,8 +2,11 @@ module subtraction
   use handling_processes
   use particles
   use amplitude_QCD_mod, only: use_real_gluons
+  use common, only: alpha_dipole
   implicit none
   integer :: n
+  integer,parameter :: alpha_status_excluded=-100
+  real(kind=8),parameter :: alpha_cut_tolerance=1d-12
   private
   public :: initialise_subtraction, test_limits_integrand, generate_limit_phase_space_point
   public :: print_limit_failure_fractions, compute_the_amps, square_the_amps
@@ -387,12 +390,12 @@ contains
     logical,intent(in) :: use_amplitude_library
     integer,parameter :: nsteps=11
     real(kind=8),parameter :: limit_tolerance=1d-2,nonsingular_growth_tolerance=5d-2
-    integer :: i,j,k,status,nselected
+    integer :: i,j,k,status,nselected,nmatched
     real(kind=8) :: lambda,mass(pgl(ichan)%next-2),amp2_dip,ratio
     real(kind=8) :: ratios(nsteps),residuals(nsteps)
     real(kind=8) :: lambdas(nsteps),amp_values(nsteps),dip_values(nsteps)
     integer :: mapping_status(nsteps)
-    logical :: sequence_ok,no_dipoles,valid_values(nsteps),mapping_failed,is_gluon
+    logical :: sequence_ok,no_dipoles,soft_no_dipoles,valid_values(nsteps),mapping_failed,is_gluon
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_save
 
     p_save=pgl(ichan)%ps(1)%p
@@ -412,6 +415,7 @@ contains
        mapping_status=0
        valid_values=.false.
        mapping_failed=.false.
+       soft_no_dipoles=.false.
        do k = 0, nsteps-1
           lambda = 10.0_dp**(-real(k,kind=8)/2d0)
           lambdas(k+1)=lambda
@@ -429,11 +433,19 @@ contains
           amp_values(k+1)=pgl(ichan)%amp2(1)
           if (is_gluon) then
              call compute_the_dipole_amps(iint,ichan)
-             call square_the_dipole_amps(iint,ichan,amp2_dip,i)
-             dip_values(k+1)=amp2_dip
-             valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
-             if (valid_values(k+1)) then
-                ratios(k+1)=ratio
+             call square_the_dipole_amps(iint,ichan,amp2_dip,i,nselected=nselected,nmatched=nmatched)
+             if (nmatched.eq.0) then
+                soft_no_dipoles=.true.
+                valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
+             elseif (nselected.eq.0) then
+                mapping_status(k+1)=alpha_status_excluded
+                cycle
+             else
+                dip_values(k+1)=amp2_dip
+                valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
+                if (valid_values(k+1)) then
+                   ratios(k+1)=ratio
+                endif
              endif
           else
              valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
@@ -441,7 +453,9 @@ contains
        enddo
        soft_tested(i)=soft_tested(i)+1
        if (mapping_failed) cycle
-       if (is_gluon) then
+       if (is_gluon .and. soft_no_dipoles) then
+          call assess_nonsingular_limit_sequence(amp_values,valid_values,nsteps,nonsingular_growth_tolerance,sequence_ok)
+       elseif (is_gluon) then
           call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
        else
           call assess_integrable_soft_limit_sequence(amp_values,lambdas,valid_values,nsteps,&
@@ -449,7 +463,10 @@ contains
        endif
        if (.not.sequence_ok) then
           soft_fail(i)=soft_fail(i)+1
-          if (is_gluon) then
+          if (is_gluon .and. soft_no_dipoles) then
+             call write_limit_failure('nonsingular soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,&
+                  ratios,residuals,valid_values,mapping_status)
+          elseif (is_gluon) then
              call write_limit_failure('soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,ratios,&
                   residuals,valid_values,mapping_status)
           else
@@ -489,8 +506,13 @@ contains
              amp_values(k+1)=pgl(ichan)%amp2(1)
              if (.not.no_dipoles) then
                 call compute_the_dipole_amps(iint,ichan)
-                call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,nselected=nselected)
-                if (nselected.eq.0) no_dipoles=.true.
+                call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,&
+                     nselected=nselected,nmatched=nmatched)
+                if (nmatched.eq.0) no_dipoles=.true.
+                if (nmatched.gt.0 .and. nselected.eq.0) then
+                   mapping_status(k+1)=alpha_status_excluded
+                   cycle
+                endif
              endif
              if (no_dipoles) then
                 valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
@@ -593,6 +615,7 @@ contains
        write (100,*) 'FAILED ',trim(limit_name),' limit: point ',limit_point,' channel ',ichan,' iint ',iint,' legs ',ileg1,ileg2
     endif
     write (100,'(a)') '# step lambda matrix_element dipole ratio residual valid mapping_status'
+    write (100,'(a)') '# mapping_status -100: all matching real dipoles excluded by alpha'
     do k=1,nsteps
        write (100,'(i4,1x,5(es24.16,1x),l1,1x,i0)') k-1,lambdas(k),amp_values(k),&
             dip_values(k),ratios(k),residuals(k),valid_values(k),mapping_status(k)
@@ -769,9 +792,11 @@ contains
 
   subroutine compute_the_dipole_amps(iint,ichan)
     use cs_dipole_mappings
+    use common, only: alpha_dipole
     implicit none
     integer,intent(in) :: iint,ichan
-    integer :: idip,info
+    integer :: idip,info,cut_info,topology
+    real(kind=8) :: cut_variable
     real(kind=8),dimension(0:3,pgl(ichan)%next-1) :: ps_mapped
     real(kind=8),dimension(pgl(ichan)%next) :: mass_real
     integer,dimension(pgl(ichan)%next-1) :: hel_mapped
@@ -780,6 +805,16 @@ contains
        mass_real(ipart)=phys_model%get_mass(pgl(ichan)%processes(ipart,iint))
     enddo
     do idip=1,pgl(ichan)%dpl(iint)%ndip
+       pgl(ichan)%dpl(iint)%dl(idip)%active=.false.
+       call cs_dipole_cut_variable(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,&
+            mass_real,phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)),cut_variable,cut_info)
+       if (cut_info.ne.0) then
+          write (*,*) 'error computing cs alpha variable',cut_info
+          stop 1
+       endif
+       topology=cs_dipole_topology(pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk)
+       if (cut_variable.gt.alpha_dipole(topology)+alpha_cut_tolerance) cycle
+       pgl(ichan)%dpl(iint)%dl(idip)%active=.true.
        call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info, &
             mass_real=mass_real, &
             mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
@@ -795,13 +830,14 @@ contains
     enddo
   end subroutine compute_the_dipole_amps
 
-  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected)
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched)
     use cs_lc_spin_dipoles
     use FeynmanRules
     implicit none
     integer,intent(in) :: iint,ichan
     integer,intent(in),optional :: iunres,icol1,icol2
     integer,intent(out),optional :: nselected
+    integer,intent(out),optional :: nmatched
     integer :: idip
     real(kind=8) :: amp2_dip,dip
     real(kind=8),parameter :: pi=3.14159265358979323846d0
@@ -821,6 +857,7 @@ contains
        mass_real(ipart)=phys_model%get_mass(pgl(ichan)%processes(ipart,iint))
     enddo
     if (present(nselected)) nselected=0
+    if (present(nmatched)) nmatched=0
     do idip=1,pgl(ichan)%dpl(iint)%ndip
        if (use_collinear) then
           if (.not.collinear_dipole_matches(iint,ichan,idip,icol1,icol2)) cycle
@@ -829,6 +866,8 @@ contains
           ! tested leg is the CS unresolved leg j.
           if (pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2).ne.iunres) cycle
        endif
+       if (present(nmatched)) nmatched=nmatched+1
+       if (.not.pgl(ichan)%dpl(iint)%dl(idip)%active) cycle
        if (present(nselected)) nselected=nselected+1
        ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
        call create_rho(iint,ichan,idip,rho)

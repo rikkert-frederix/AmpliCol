@@ -19,6 +19,7 @@ module handling_processes
      real(kind=8) :: lc_weight=1d0
      type(amplitude_QCD) :: amp
      real(kind=8),dimension(0:3) :: p_mapped_ij
+     logical :: active=.true.
      integer,dimension(:),allocatable :: rho_lookup_ih1,rho_lookup_ih2
      logical :: rho_lookup_upper=.false.,rho_hermitian_checked=.false.
    contains

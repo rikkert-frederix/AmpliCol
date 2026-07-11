@@ -21,6 +21,99 @@ contains
   end function is_initial
 
 
+  subroutine cs_dipole_cut_variable(p, ijk, mass_real, mass_parent, cut_variable, info)
+    ! Return the variable restricted by an alpha cut.  The variable must
+    ! vanish in the unresolved limit selected by the dipole.
+    real(dp), intent(in) :: p(0:,:), mass_real(:), mass_parent
+    integer, intent(in) :: ijk(3)
+    real(dp), intent(out) :: cut_variable
+    integer, intent(out) :: info
+    integer :: n, i, j, k
+    real(dp) :: den, x, mi2, mj2, parent2
+
+    cut_variable=0.0_dp
+    info=0
+    n=size(p,2)
+    i=ijk(1)
+    j=ijk(2)
+    k=ijk(3)
+    if (size(p,1) /= 4 .or. size(mass_real) /= n) then
+       info=-1
+       return
+    endif
+    if (i < 1 .or. i > n .or. j < 1 .or. j > n .or. k < 1 .or. k > n) then
+       info=-2
+       return
+    endif
+    if (i == j .or. i == k .or. j == k) then
+       info=-3
+       return
+    endif
+    if (j <= 2 .or. any(mass_real < 0.0_dp) .or. mass_parent < 0.0_dp) then
+       info=-4
+       return
+    endif
+    if (mass_real(j) > 100.0_dp*epsilon(1.0_dp)*max(1.0_dp,mass_parent)) then
+       info=-5
+       return
+    endif
+
+    mi2=mass_real(i)*mass_real(i)
+    mj2=mass_real(j)*mass_real(j)
+    parent2=mass_parent*mass_parent
+    if (i > 2 .and. k > 2) then
+       den=dot4(p(:,i),p(:,j))+dot4(p(:,i),p(:,k))+dot4(p(:,j),p(:,k))
+       if (abs(den) <= tiny_kin) then
+          info=-10
+          return
+       endif
+       cut_variable=dot4(p(:,i),p(:,j))/den
+    elseif (i > 2) then
+       den=dot4(p(:,k),p(:,i))+dot4(p(:,k),p(:,j))
+       if (abs(den) <= tiny_kin) then
+          info=-11
+          return
+       endif
+       x=(den-dot4(p(:,i),p(:,j))+0.5_dp*(parent2-mi2-mj2))/den
+       cut_variable=1.0_dp-x
+    elseif (k > 2) then
+       den=dot4(p(:,i),p(:,j))+dot4(p(:,i),p(:,k))
+       if (abs(den) <= tiny_kin) then
+          info=-12
+          return
+       endif
+       cut_variable=dot4(p(:,i),p(:,j))/den
+    else
+       den=dot4(p(:,i),p(:,k))
+       if (abs(den) <= tiny_kin) then
+          info=-13
+          return
+       endif
+       cut_variable=dot4(p(:,i),p(:,j))/(den+dot4(p(:,i),p(:,j)))
+    endif
+    if (abs(cut_variable) < 100.0_dp*epsilon(1.0_dp)) cut_variable=0.0_dp
+    if (abs(cut_variable-1.0_dp) < 100.0_dp*epsilon(1.0_dp)) cut_variable=1.0_dp
+  end subroutine cs_dipole_cut_variable
+
+
+  integer function cs_dipole_topology(ijk)
+    integer, intent(in) :: ijk(3)
+    if (ijk(1) > 2) then
+       if (ijk(3) > 2) then
+          cs_dipole_topology=1 ! FF
+       else
+          cs_dipole_topology=2 ! FI
+       endif
+    else
+       if (ijk(3) > 2) then
+          cs_dipole_topology=3 ! IF
+       else
+          cs_dipole_topology=4 ! II
+       endif
+    endif
+  end function cs_dipole_topology
+
+
   function new_index(old_index, removed_index) result(idx)
     integer, intent(in) :: old_index, removed_index
     integer :: idx

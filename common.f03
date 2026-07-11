@@ -7,6 +7,8 @@ module common
   real(kind=8),parameter :: alphaS_MZ=0.119d0,alphaEW=0.007546771114d0
   real(kind=8),parameter :: sqrts=14000.d0
   real(kind=8) :: alphaS
+  ! Real-dipole phase-space restrictions in the order FF, FI, IF, II.
+  real(kind=8) :: alpha_dipole(4)=(/1d0,1d0,1d0,1d0/)
   ! scale choice:
   ! 0: ren/fac scale = M_Z
   ! 1: ren/fac scale = H_T

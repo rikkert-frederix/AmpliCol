@@ -113,6 +113,12 @@ weight and passes the built-in cuts before the limiting deformation starts.
 For failed limits, the complete deformation table is written to
 'Outputs/limit_test_failures.log' (or the corresponding tagged filename).
 
+For real Catani-Seymour dipoles, the optional '--alpha=X' argument restricts the
+dipole phase space. A single value applies to all topologies; alternatively use
+four comma-separated values in the order FF, FI, IF, II. Values must satisfy
+0 < X <= 1. The default is one, and integrated I/K/P contributions are not
+affected.
+
 For the number of events, it is best to require somewhere between
 100000-1000000 events per run. Requiring too few, and then combining
 many separate runs together might undersample some phase-space regions
