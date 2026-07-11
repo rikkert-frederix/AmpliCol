@@ -2,7 +2,7 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       timing,timing_sample,accuracy)
+       limit_test,timing,timing_sample,accuracy)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -10,7 +10,7 @@ contains
     character(len=80) :: filename,library,tag,timing
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta 
+    logical :: read_momenta,limit_test
     integer :: me_points,timing_sample
     real(kind=8) :: accuracy
 
@@ -24,6 +24,7 @@ contains
     library='none'
     tag=''
     read_momenta=.false.
+    limit_test=.false.
     timing='basic'
     timing_sample=100
     accuracy=0d0
@@ -55,6 +56,8 @@ contains
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) me_points
           read_momenta=.true.
+       elseif (arg.eq."--limit_test" .or. arg.eq."-lt") then
+          limit_test=.true.
        elseif (index(arg, "--timing=").eq.1) then
           timing = arg(index(arg, "=")+1:)
        elseif (index(arg, "--timing-sample=").eq.1) then
@@ -90,6 +93,7 @@ contains
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
        write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
             "with [X] points tested (single PS kinematics)"
+       write (*,'(a)') "  --limit_test,     -lt      : Test soft and collinear CS limits and exit."
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&

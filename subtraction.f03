@@ -1,10 +1,12 @@
 module subtraction
   use handling_processes
   use particles
+  use amplitude_QCD_mod, only: use_real_gluons
   implicit none
   integer :: n
   private
-  public :: initialise_subtraction
+  public :: initialise_subtraction, test_limits_integrand, generate_limit_phase_space_point
+  public :: print_limit_failure_fractions, compute_the_amps, square_the_amps
 contains
   subroutine initialise_subtraction(igroup,iamp)
     implicit none
@@ -241,7 +243,7 @@ contains
     enddo
     ipart_l=order(mod(n+i-1,n)) ! left of ipart in colour order
     ipart_r=order(mod(i,n)+1)   ! right of ipart in colour order
-    
+
     if (phys_model%get_mass(process(ipart)).ne.0d0) return
     if (phys_model%get_colour_rep(process(ipart)).eq.1) return
     if (phys_model%get_colour_rep(process(ipart_l)).eq.1) return
@@ -264,4 +266,461 @@ contains
        endif
     endif
   end subroutine is_valid_dipole
+  subroutine test_limits_integrand(ichan,iint,limit_point,soft_fail,soft_tested,&
+       collinear_fail,collinear_tested,use_amplitude_library)
+    use phase_space_module
+    implicit none
+    integer,intent(in) :: ichan
+    integer,intent(in) :: iint
+    integer,intent(in) :: limit_point
+    integer,intent(inout) :: soft_fail(:),soft_tested(:)
+    integer,intent(inout) :: collinear_fail(:,:),collinear_tested(:,:)
+    logical,intent(in) :: use_amplitude_library
+    integer,parameter :: nsteps=11
+    real(kind=8),parameter :: limit_tolerance=1d-2
+    integer :: i,j,k,status,nselected
+    real(kind=8) :: lambda,mass(pgl(ichan)%next-2),amp2_dip,ratio
+    real(kind=8) :: ratios(nsteps),residuals(nsteps)
+    real(kind=8) :: lambdas(nsteps),amp_values(nsteps),dip_values(nsteps)
+    integer :: mapping_status(nsteps)
+    logical :: sequence_ok,no_dipoles,valid_values(nsteps),mapping_failed
+    real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_save
+
+    p_save=pgl(ichan)%ps(1)%p
+
+    do i=3,pgl(ichan)%next
+       mass(i-2)=phys_model%get_mass(pgl(ichan)%processes(i,iint))
+    enddo
+
+    do i=3,pgl(ichan)%next
+       if (.not.phys_model%is_gluon(pgl(ichan)%processes(i,iint))) then
+          cycle
+       endif
+       soft_tested(i)=soft_tested(i)+1
+       ratios=0d0
+       residuals=-1d0
+       lambdas=0d0
+       amp_values=0d0
+       dip_values=0d0
+       mapping_status=0
+       valid_values=.false.
+       mapping_failed=.false.
+       do k = 0, nsteps-1
+          lambda = 10.0_dp**(-real(k,kind=8)/2d0)
+          lambdas(k+1)=lambda
+          call soft_deform_event(pgl(ichan)%next-2, mass, p_save, i, lambda, pgl(ichan)%ps(1)%p, status)
+          if (status.ne.0) then
+             mapping_status(k+1)=status
+             call write_limit_failure('soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,ratios,&
+                  residuals,valid_values,mapping_status)
+             soft_fail(i)=soft_fail(i)+1
+             mapping_failed=.true.
+             exit
+          endif
+          call compute_the_amps(iint,ichan,use_amplitude_library)
+          call square_the_amps(iint,ichan)
+
+          call compute_the_dipole_amps(iint,ichan)
+          call square_the_dipole_amps(iint,ichan,amp2_dip,i)
+          amp_values(k+1)=pgl(ichan)%amp2(1)
+          dip_values(k+1)=amp2_dip
+          valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
+          if (valid_values(k+1)) then
+             ratios(k+1)=ratio
+          endif
+       enddo
+       if (mapping_failed) cycle
+       call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
+       if (.not.sequence_ok) then
+          soft_fail(i)=soft_fail(i)+1
+          call write_limit_failure('soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,ratios,&
+               residuals,valid_values,mapping_status)
+       endif
+    enddo
+
+    do i=1,pgl(ichan)%next-1
+       do j=max(3,i+1),pgl(ichan)%next
+          ratios=0d0
+          residuals=-1d0
+          lambdas=0d0
+          amp_values=0d0
+          dip_values=0d0
+          mapping_status=0
+          valid_values=.false.
+          no_dipoles=.false.
+          mapping_failed=.false.
+          do k = 0, nsteps-1
+             lambda = 10.0_dp**(-real(k, dp)/2d0)
+             lambdas(k+1)=lambda
+             call collinear_deform_event(pgl(ichan)%next-2, mass, p_save, i, j, lambda, pgl(ichan)%ps(1)%p, status)
+             if (status.ne.0) then
+                mapping_status(k+1)=status
+                call write_limit_failure('collinear',ichan,iint,limit_point,i,j,nsteps,lambdas,amp_values,dip_values,ratios,&
+                     residuals,valid_values,mapping_status)
+                collinear_tested(i,j)=collinear_tested(i,j)+1
+                collinear_fail(i,j)=collinear_fail(i,j)+1
+                mapping_failed=.true.
+                exit
+             endif
+             call compute_the_amps(iint,ichan,use_amplitude_library)
+             call square_the_amps(iint,ichan)
+
+             call compute_the_dipole_amps(iint,ichan)
+             call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,nselected=nselected)
+             if (k.eq.0 .and. nselected.eq.0) then
+                no_dipoles=.true.
+                exit
+             endif
+             amp_values(k+1)=pgl(ichan)%amp2(1)
+             dip_values(k+1)=amp2_dip
+             valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
+             if (valid_values(k+1)) then
+                ratios(k+1)=ratio
+             endif
+          enddo
+          if (mapping_failed) cycle
+          if (no_dipoles) then
+             cycle
+          endif
+          collinear_tested(i,j)=collinear_tested(i,j)+1
+          call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
+          if (.not.sequence_ok) then
+             collinear_fail(i,j)=collinear_fail(i,j)+1
+             call write_limit_failure('collinear',ichan,iint,limit_point,i,j,nsteps,lambdas,amp_values,dip_values,ratios,&
+                  residuals,valid_values,mapping_status)
+          endif
+       enddo
+    enddo
+  end subroutine test_limits_integrand
+
+  subroutine generate_limit_phase_space_point(ichan)
+    use phase_space_module
+    use cuts
+    implicit none
+    integer,intent(in) :: ichan
+    integer :: ix
+    real(kind=8),external :: ran2
+    do
+       do ix=1,size(pgl(ichan)%ps(1)%x)
+          pgl(ichan)%ps(1)%x(ix)=ran2()
+       enddo
+       call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
+       if (pgl(ichan)%ps(1)%jac.gt.0d0 .and. pass_cuts(pgl(ichan))) then
+          return
+       endif
+   enddo
+  end subroutine generate_limit_phase_space_point
+
+  logical function finite_limit_values(amp2,amp2_dip,ratio,residual)
+    use, intrinsic :: ieee_arithmetic
+    implicit none
+    real(kind=8),intent(in) :: amp2,amp2_dip
+    real(kind=8),intent(out) :: ratio,residual
+    real(kind=8) :: scale,norm_amp2,norm_dip
+    finite_limit_values=.false.
+    ratio=0d0
+    residual=-1d0
+    if (.not.ieee_is_finite(amp2) .or. .not.ieee_is_finite(amp2_dip)) return
+    scale=max(abs(amp2),abs(amp2_dip))
+    if (scale.eq.0d0 .or. .not.ieee_is_finite(scale)) return
+    norm_amp2=amp2/scale
+    norm_dip=amp2_dip/scale
+    residual=abs(norm_amp2-norm_dip)
+    if (abs(norm_dip).lt.sqrt(tiny(1d0)) .or. .not.ieee_is_finite(residual)) then
+       residual=-1d0
+       return
+    endif
+    ratio=norm_amp2/norm_dip
+    if (.not.ieee_is_finite(ratio)) return
+    if (ratio.le.0d0) then
+       residual=-1d0
+       return
+    endif
+    finite_limit_values=.true.
+  end function finite_limit_values
+
+  subroutine write_limit_failure(limit_name,ichan,iint,limit_point,ileg1,ileg2,nsteps,lambdas,amp_values,dip_values,&
+       ratios,residuals,valid_values,mapping_status)
+    implicit none
+    character(len=*),intent(in) :: limit_name
+    integer,intent(in) :: ichan,iint,limit_point,ileg1,ileg2,nsteps
+    real(kind=8),intent(in) :: lambdas(nsteps),amp_values(nsteps),dip_values(nsteps)
+    real(kind=8),intent(in) :: ratios(nsteps),residuals(nsteps)
+    logical,intent(in) :: valid_values(nsteps)
+    integer,intent(in) :: mapping_status(nsteps)
+    integer :: k
+    write (100,'(a)') '------------------------------------------------------------'
+    if (limit_name.eq.'soft') then
+       write (100,*) 'FAILED soft limit: point ',limit_point,' channel ',ichan,' iint ',iint,' leg ',ileg1
+    else
+       write (100,*) 'FAILED collinear limit: point ',limit_point,' channel ',ichan,' iint ',iint,' legs ',ileg1,ileg2
+    endif
+    write (100,'(a)') '# step lambda matrix_element dipole ratio residual valid mapping_status'
+    do k=1,nsteps
+       write (100,'(i4,1x,5(es24.16,1x),l1,1x,i0)') k-1,lambdas(k),amp_values(k),&
+            dip_values(k),ratios(k),residuals(k),valid_values(k),mapping_status(k)
+    enddo
+    write (100,'(a)') ''
+  end subroutine write_limit_failure
+
+  subroutine print_limit_failure_fractions(soft_fail,soft_tested,collinear_fail,collinear_tested,&
+       failure_threshold,all_ok)
+    implicit none
+    integer,intent(in) :: soft_fail(:,:,:),soft_tested(:,:,:)
+    integer,intent(in) :: collinear_fail(:,:,:,:),collinear_tested(:,:,:,:)
+    integer,intent(in) :: failure_threshold
+    logical,intent(out) :: all_ok
+    integer :: ichan,i,j,iint
+    real(kind=8) :: fraction
+    character(len=4) :: result
+    all_ok=.true.
+    write (*,'(a)') 'Limit failure fractions:'
+    write (99,'(a)') 'Limit failure fractions:'
+    do ichan=1,ngroups
+       do iint=1,pgl(ichan)%nproc
+          do i=3,pgl(ichan)%next
+             if (.not.phys_model%is_gluon(pgl(ichan)%processes(i,iint))) then
+                write (*,*) '  channel',ichan,' iint',iint,' soft leg',i,'SKIP (not a gluon)'
+                write (99,*) '  channel',ichan,' iint',iint,' soft leg',i,'SKIP (not a gluon)'
+             else
+                fraction=100d0*dble(soft_fail(ichan,iint,i))/dble(soft_tested(ichan,iint,i))
+                if (soft_fail(ichan,iint,i).ge.failure_threshold) then
+                   result='FAIL'
+                   all_ok=.false.
+                else
+                   result='PASS'
+                endif
+                write (*,*) '  channel',ichan,' iint',iint,' soft leg',i,':',&
+                     soft_fail(ichan,iint,i),'/',soft_tested(ichan,iint,i),'failed (',fraction,'%)',result
+                write (99,*) '  channel',ichan,' iint',iint,' soft leg',i,':',&
+                     soft_fail(ichan,iint,i),'/',soft_tested(ichan,iint,i),'failed (',fraction,'%)',result
+             endif
+          enddo
+          do i=1,pgl(ichan)%next-1
+             do j=max(3,i+1),pgl(ichan)%next
+                if (collinear_tested(ichan,iint,i,j).eq.0) then
+                   write (*,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,&
+                        'SKIP (no matching CS dipoles)'
+                   write (99,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,&
+                        'SKIP (no matching CS dipoles)'
+                else
+                   fraction=100d0*dble(collinear_fail(ichan,iint,i,j))/&
+                        dble(collinear_tested(ichan,iint,i,j))
+                   if (collinear_fail(ichan,iint,i,j).ge.failure_threshold) then
+                      result='FAIL'
+                      all_ok=.false.
+                   else
+                      result='PASS'
+                   endif
+                   write (*,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,':',&
+                        collinear_fail(ichan,iint,i,j),'/',collinear_tested(ichan,iint,i,j),&
+                        'failed (',fraction,'%)',result
+                   write (99,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,':',&
+                        collinear_fail(ichan,iint,i,j),'/',collinear_tested(ichan,iint,i,j),&
+                        'failed (',fraction,'%)',result
+                endif
+             enddo
+          enddo
+       enddo
+    enddo
+  end subroutine print_limit_failure_fractions
+
+  subroutine assess_limit_sequence(ratios,residuals,nsteps,tolerance,passed)
+    implicit none
+    integer,intent(in) :: nsteps
+    real(kind=8),intent(in) :: ratios(nsteps),residuals(nsteps),tolerance
+    logical,intent(out) :: passed
+    integer :: k
+    real(kind=8) :: window_error,window_change
+    passed=.false.
+    do k=1,nsteps-2
+       if (any(residuals(k:k+2).lt.0d0) .or. any(residuals(k:k+2).gt.1d0)) cycle
+       window_error=maxval(residuals(k:k+2))
+       window_change=maxval(abs(ratios(k+1:k+2)-ratios(k:k+1)))
+       if (window_error.le.tolerance .and. window_change.le.2d0*tolerance) then
+          passed=.true.
+       elseif (residuals(k+2).le.tolerance .and. residuals(k).le.3d0*tolerance .and. &
+            residuals(k).gt.residuals(k+1) .and. residuals(k+1).gt.residuals(k+2) .and. &
+            window_change.le.3d0*tolerance) then
+          ! At the smallest usable lambda the asymptotic window may contain
+          ! only two points before roundoff spoils the next point.  Accept a
+          ! monotonic approach when its last point is already within the
+          ! strict tolerance.
+          passed=.true.
+       endif
+    enddo
+  end subroutine assess_limit_sequence
+
+  subroutine compute_the_dipole_amps(iint,ichan)
+    use cs_dipole_mappings
+    implicit none
+    integer,intent(in) :: iint,ichan
+    integer :: idip,info
+    real(kind=8),dimension(0:3,pgl(ichan)%next-1) :: ps_mapped
+    integer,dimension(pgl(ichan)%next-1) :: hel_mapped
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info)
+       pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij(0:3)= &
+            ps_mapped(0:3,pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1))
+       if (info.ne.0) then
+          write (*,*) 'error in cs momentum mapping',info
+          stop 1
+       endif
+       hel_mapped=pgl(ichan)%hel(pgl(ichan)%dpl(iint)%dl(idip)%dip_map(1:pgl(ichan)%next-1))
+       call pgl(ichan)%dpl(iint)%dl(idip)%amp%evaluate(pgl(ichan)%next-1,ps_mapped,&
+            hel_mapped,read_proc_from_file,phys_model)
+    enddo
+  end subroutine compute_the_dipole_amps
+
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected)
+    use cs_lc_spin_dipoles
+    use FeynmanRules
+    implicit none
+    integer,intent(in) :: iint,ichan
+    integer,intent(in),optional :: iunres,icol1,icol2
+    integer,intent(out),optional :: nselected
+    integer :: idip
+    real(kind=8) :: amp2_dip,dip
+    real(kind=8),parameter :: pi=3.14159265358979323846d0
+    integer :: ij
+    logical :: use_collinear
+    complex(kind=8),dimension(2,2) :: rho
+    complex(kind=8),dimension(0:3,2) :: eps_parent
+    use_collinear=present(icol1).or.present(icol2)
+    if (use_collinear .and. .not.(present(icol1).and.present(icol2))) then
+       write (*,*) 'collinear dipole selection needs both collinear legs'
+       stop 1
+    endif
+    amp2_dip=0d0
+    if (present(nselected)) nselected=0
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       if (use_collinear) then
+          if (.not.collinear_dipole_matches(iint,ichan,idip,icol1,icol2)) cycle
+       elseif (present(iunres)) then
+          ! For a raw soft diagnostic, isolate the dipoles where the
+          ! tested leg is the CS unresolved leg j.
+          if (pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2).ne.iunres) cycle
+       endif
+       if (present(nselected)) nselected=nselected+1
+       ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
+       call create_rho(iint,ichan,idip,rho)
+       if (ij.gt.2) then
+          call ext_gluon_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_gluon_cmplx(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+       else
+          call ext_gluon_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij,-1, 1, eps_parent(0:3,1))
+          call ext_gluon_cmplx(-pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij, 1, 1, eps_parent(0:3,2))
+       endif
+       ! HELAS returns the external gluon wavefunction epsilon^*.  The CS
+       ! helicity projection expects the physical polarization epsilon.
+       eps_parent=conjg(eps_parent)
+       call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,iint), &
+            pgl(ichan)%dpl(iint)%dl(idip)%process_r,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
+            rho,eps_parent,dip,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight)
+       amp2_dip=amp2_dip+dip
+    enddo
+  end subroutine square_the_dipole_amps
+
+  logical function collinear_dipole_matches(iint,ichan,idip,icol1,icol2)
+    implicit none
+    integer,intent(in) :: iint,ichan,idip,icol1,icol2
+    integer :: dip_i,dip_j,iini,ifin
+    dip_i=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(1)
+    dip_j=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2)
+    collinear_dipole_matches=.false.
+    if (icol1.le.2 .and. icol2.le.2) return
+    if (icol1.le.2 .or. icol2.le.2) then
+       if (icol1.le.2) then
+          iini=icol1
+          ifin=icol2
+       else
+          iini=icol2
+          ifin=icol1
+       endif
+       ! For an initial-final collinear pair, the initial leg must be the
+       ! emitter.  A dipole with the initial leg as spectator belongs to a
+       ! different singular configuration and must not be selected here.
+       collinear_dipole_matches=(dip_i.eq.iini .and. dip_j.eq.ifin)
+    else
+       collinear_dipole_matches=((dip_i.eq.icol1 .and. dip_j.eq.icol2) .or. &
+            (dip_i.eq.icol2 .and. dip_j.eq.icol1))
+    endif
+  end function collinear_dipole_matches
+
+  subroutine create_rho(iint,ichan,idip,rho)
+    implicit none
+    integer,intent(in) :: iint,ichan,idip
+    complex(kind=8),dimension(2,2),intent(out) :: rho
+    integer,dimension(pgl(ichan)%next-1) :: spins1,spins2
+    integer,dimension(pgl(ichan)%next-2) :: spins1_r,spins2_r
+    integer :: ih1,ih2,ij
+    rho=(0d0,0d0)
+    ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
+    do ih1=1,pgl(ichan)%dpl(iint)%dl(idip)%amp%n_amps
+       spins1=pgl(ichan)%dpl(iint)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih1)
+       spins1_r=[spins1(1:ij-1),spins1(ij+1:pgl(ichan)%next-1)]
+       do ih2=1,pgl(ichan)%dpl(iint)%dl(idip)%amp%n_amps
+          spins2=pgl(ichan)%dpl(iint)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih2)
+          spins2_r=[spins2(1:ij-1),spins2(ij+1:pgl(ichan)%next-1)]
+          if (any(spins1_r.ne.spins2_r)) cycle
+          rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)=rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)+ &
+               pgl(ichan)%dpl(iint)%dl(idip)%amp%amps(ih1)*pgl(ichan)%dpl(iint)%dl(idip)%col_fac* &
+               dconjg(pgl(ichan)%dpl(iint)%dl(idip)%amp%amps(ih2))
+       enddo
+    enddo
+  end subroutine create_rho
+
+  subroutine compute_the_amps(iint,ichan,use_amplitude_library)
+    use amp_lib
+    implicit none
+    integer,intent(in) :: iint,ichan
+    logical,intent(in) :: use_amplitude_library
+    if (.not. use_amplitude_library) then
+       call pgl(ichan)%amps(iint)%evaluate(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+            pgl(ichan)%hel,read_proc_from_file,phys_model)
+    else
+       call evaluate_amp(ichan,iint,pgl(ichan)%ps(1)%p,pgl(ichan)%amps(iint)%amps)
+    endif
+  end subroutine compute_the_amps
+
+  subroutine square_the_amps(iint,ichan)
+    implicit none
+    integer,intent(in) :: iint,ichan
+    integer :: iproc,ih
+    iproc=0
+    pgl(ichan)%amp2=0d0
+    if (keep_processes_separate) then
+       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
+                  pgl(ichan)%col_fac(iint)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       else
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
+                  pgl(ichan)%col_fac(iint)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       endif
+    else
+       if (use_real_gluons .and. all(pgl(ichan)%amps(iint)%n_qqbar(1:1).eq.0)) then
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=pgl(ichan)%amps(iint)%amps_r(ih)*&
+                  pgl(ichan)%col_fac(iproc)*pgl(ichan)%amps(iint)%amps_r(ih)*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       else
+          do ih=1,pgl(ichan)%amps(iint)%n_amps
+             do while (pgl(ichan)%amps(iint)%iproc_start(iproc+1).eq.ih) ; iproc=iproc+1 ; enddo
+             pgl(ichan)%amp2_hel(ih)=dble(pgl(ichan)%amps(iint)%amps(ih)*&
+                  pgl(ichan)%col_fac(iproc)*dconjg(pgl(ichan)%amps(iint)%amps(ih)))*pgl(ichan)%hel_fac(ih,iint)
+             pgl(ichan)%amp2(iproc)=pgl(ichan)%amp2(iproc)+pgl(ichan)%amp2_hel(ih)
+          enddo
+       endif
+    endif
+  end subroutine square_the_amps
 end module subtraction

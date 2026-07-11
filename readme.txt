@@ -86,10 +86,26 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make amplicol_generate_library' after a library has been created). Default is 'none'.
   --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
   --me_test=[X],    -mt=[X] : Perform ME-level test against MG with [X] points tested (single PS kinematics)
+  --limit_test,     -lt     : Test soft and collinear Catani-Seymour limits and exit.
 *****************************
 
 Most important are the '--nevents=X' to set the number of events to
 generate, '--seed=X' to set the random seed.
+
+The limit diagnostic can be run with '--limit_test'. It tests each channel at
+100 generated phase-space points. A limit passes at a given channel and limit
+when fewer than 20 of the tested points fail, and the screen reports the
+failure fraction separately for every integral (`iint`). At an individual
+point, a limit passes when three consecutive finite
+deformation points have a positive matrix-element/dipole ratio within 1% of
+one and vary by less than 2%. If roundoff spoils the third point, a monotonic
+approach is accepted when the last point is within 1% and the preceding point
+within 3%. Pairs without a matching Catani-Seymour dipole are reported as
+skipped and excluded from the fraction.
+The base point for every test is regenerated until it has positive phase-space
+weight and passes the built-in cuts before the limiting deformation starts.
+For failed limits, the complete deformation table is written to
+'Outputs/limit_test_failures.log' (or the corresponding tagged filename).
 
 For the number of events, it is best to require somewhere between
 100000-1000000 events per run. Requiring too few, and then combining
