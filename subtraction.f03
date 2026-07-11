@@ -11,37 +11,42 @@ contains
   subroutine initialise_subtraction(igroup,iamp)
     implicit none
     integer,intent(in) :: iamp,igroup
-    integer :: ipart,is_dipole,ipart_l,ipart_r,idip
+    integer :: ipart,is_dipole,ipart_l,ipart_r,idip,ichan,ichannel,nchannels,ncandidates,max_candidates
+    integer,allocatable :: candidate_dipoles(:,:)
+    logical,allocatable :: candidate_reverse(:)
     n=pgl(igroup)%next
     if (.not.allocated(pgl(igroup)%dpl)) allocate(pgl(igroup)%dpl(pgl(igroup)%nproc))
     if (allocated(pgl(igroup)%dpl(iamp)%dl)) then
        call finalize_dipole_set(pgl(igroup)%dpl(iamp))
     endif
-    ! First pass: just count how many dipoles we need so we can
-    ! allocate the right size dl
-    pgl(igroup)%dpl(iamp)%ndip=0
-    do ipart=3,pgl(igroup)%next
-       call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(igroup)%phase_space_orders(:),is_dipole,ipart_l,ipart_r)
-       pgl(igroup)%dpl(iamp)%ndip=pgl(igroup)%dpl(iamp)%ndip+popcnt(is_dipole)
+    ! A matrix element can be integrated by several phase-space channels when
+    ! colour singlets are permuted.  Its dipoles must cover the union of the
+    ! colour-adjacent limits of all those channels, not just igroup's order.
+    nchannels=pgl(igroup)%multichan%unique_channelgroup_list(0, &
+         pgl(igroup)%multichan%map_proc_to_channelgroup(iamp))
+    max_candidates=2*(pgl(igroup)%next-2)*nchannels
+    allocate(candidate_dipoles(3,max_candidates),candidate_reverse(max_candidates))
+    ncandidates=0
+    do ichannel=1,nchannels
+       ichan=pgl(igroup)%multichan%unique_channel_list( &
+            pgl(igroup)%multichan%unique_channelgroup_list(ichannel, &
+            pgl(igroup)%multichan%map_proc_to_channelgroup(iamp)))
+       do ipart=3,pgl(igroup)%next
+          call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(ichan)%phase_space_orders(:), &
+               is_dipole,ipart_l,ipart_r)
+          if (btest(is_dipole,0)) call add_dipole_candidate(ipart_l,ipart,ipart_r,.true., &
+               candidate_dipoles,candidate_reverse,ncandidates)
+          if (btest(is_dipole,1)) call add_dipole_candidate(ipart_r,ipart,ipart_l,.false., &
+               candidate_dipoles,candidate_reverse,ncandidates)
+       enddo
     enddo
+    pgl(igroup)%dpl(iamp)%ndip=ncandidates
     write (*,*) 'Need',pgl(igroup)%dpl(iamp)%ndip,'dipoles'
     allocate(pgl(igroup)%dpl(iamp)%dl(pgl(igroup)%dpl(iamp)%ndip))
 
-    ! Second pass: now we really fill the appropriate information
-    idip=0
-    do ipart=3,pgl(igroup)%next
-       call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(igroup)%phase_space_orders(:),is_dipole,ipart_l,ipart_r)
-       if (is_dipole.eq.0) cycle
-       if (btest(is_dipole,0)) then
-          ! valid dipole with particle on the left as emitter
-          idip=idip+1
-          call fill_dipole(pgl(igroup)%dpl(iamp)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_l,ipart,ipart_r,.true.)
-       endif
-       if (btest(is_dipole,1)) then
-          ! valid dipole with particle on the right as emitter
-          idip=idip+1
-          call fill_dipole(pgl(igroup)%dpl(iamp)%dl(idip),pgl(igroup)%processes(1:n,iamp),ipart_r,ipart,ipart_l,.false.)
-       endif
+    do idip=1,pgl(igroup)%dpl(iamp)%ndip
+       call fill_dipole(pgl(igroup)%dpl(iamp)%dl(idip),pgl(igroup)%processes(1:n,iamp), &
+            candidate_dipoles(1,idip),candidate_dipoles(2,idip),candidate_dipoles(3,idip),candidate_reverse(idip))
     enddo
     do idip=1,pgl(igroup)%dpl(iamp)%ndip
        allocate(pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order(n-1))
@@ -56,6 +61,21 @@ contains
     enddo
     call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
   end subroutine initialise_subtraction
+
+  subroutine add_dipole_candidate(dip_i,dip_j,dip_k,reverse,candidates,reverses,ncandidates)
+    implicit none
+    integer,intent(in) :: dip_i,dip_j,dip_k
+    logical,intent(in) :: reverse
+    integer,intent(inout) :: candidates(:,:),ncandidates
+    logical,intent(inout) :: reverses(:)
+    integer :: i
+    do i=1,ncandidates
+       if (all(candidates(:,i).eq.[dip_i,dip_j,dip_k])) return
+    enddo
+    ncandidates=ncandidates+1
+    candidates(:,ncandidates)=[dip_i,dip_j,dip_k]
+    reverses(ncandidates)=reverse
+  end subroutine add_dipole_candidate
   subroutine print_dipoles(process,order,dips)
     implicit none
     integer,dimension(*),intent(in) :: process,order
