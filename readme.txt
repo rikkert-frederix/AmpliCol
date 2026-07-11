@@ -100,8 +100,12 @@ point, a limit passes when three consecutive finite
 deformation points have a positive matrix-element/dipole ratio within 1% of
 one and vary by less than 2%. If roundoff spoils the third point, a monotonic
 approach is accepted when the last point is within 1% and the preceding point
-within 3%. Pairs without a matching Catani-Seymour dipole are reported as
-skipped and excluded from the fraction.
+within 3%. Soft non-gluons are checked for bounded `lambda * matrix element`,
+which permits integrable `1/lambda` growth. Collinear pairs without a matching
+Catani-Seymour dipole are checked for bounded matrix elements. In both cases,
+three consecutive finite samples must not grow by more than 5% as the limit is
+approached. These checks are included in the reported failure fractions and
+are labelled '(integrable)' or '(finite)' in the summary.
 The base point for every test is regenerated until it has positive phase-space
 weight and passes the built-in cuts before the limiting deformation starts.
 For failed limits, the complete deformation table is written to

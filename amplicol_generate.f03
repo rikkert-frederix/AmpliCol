@@ -746,7 +746,7 @@ contains
        limit_logfile="Outputs/"//trim(adjustl(tag))//"limit_test_failures.log"
        open(unit=100,file=limit_logfile,action='write',status='replace')
        write (100,'(a)') '# Failed Catani-Seymour limit diagnostic records'
-       write (100,'(a)') '# ratio and residual are set to zero/-1 when valid is false.'
+       write (100,'(a)') '# For boundedness checks, dipole and ratio are zero and residual is -1.'
     endif
 
     timing_arg=trim(adjustl(timing_arg))

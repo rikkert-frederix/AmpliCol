@@ -277,13 +277,13 @@ contains
     integer,intent(inout) :: collinear_fail(:,:),collinear_tested(:,:)
     logical,intent(in) :: use_amplitude_library
     integer,parameter :: nsteps=11
-    real(kind=8),parameter :: limit_tolerance=1d-2
+    real(kind=8),parameter :: limit_tolerance=1d-2,nonsingular_growth_tolerance=5d-2
     integer :: i,j,k,status,nselected
     real(kind=8) :: lambda,mass(pgl(ichan)%next-2),amp2_dip,ratio
     real(kind=8) :: ratios(nsteps),residuals(nsteps)
     real(kind=8) :: lambdas(nsteps),amp_values(nsteps),dip_values(nsteps)
     integer :: mapping_status(nsteps)
-    logical :: sequence_ok,no_dipoles,valid_values(nsteps),mapping_failed
+    logical :: sequence_ok,no_dipoles,valid_values(nsteps),mapping_failed,is_gluon
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_save
 
     p_save=pgl(ichan)%ps(1)%p
@@ -293,9 +293,7 @@ contains
     enddo
 
     do i=3,pgl(ichan)%next
-       if (.not.phys_model%is_gluon(pgl(ichan)%processes(i,iint))) then
-          cycle
-       endif
+       is_gluon=phys_model%is_gluon(pgl(ichan)%processes(i,iint))
        soft_tested(i)=soft_tested(i)+1
        ratios=0d0
        residuals=-1d0
@@ -319,22 +317,35 @@ contains
           endif
           call compute_the_amps(iint,ichan,use_amplitude_library)
           call square_the_amps(iint,ichan)
-
-          call compute_the_dipole_amps(iint,ichan)
-          call square_the_dipole_amps(iint,ichan,amp2_dip,i)
           amp_values(k+1)=pgl(ichan)%amp2(1)
-          dip_values(k+1)=amp2_dip
-          valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
-          if (valid_values(k+1)) then
-             ratios(k+1)=ratio
+          if (is_gluon) then
+             call compute_the_dipole_amps(iint,ichan)
+             call square_the_dipole_amps(iint,ichan,amp2_dip,i)
+             dip_values(k+1)=amp2_dip
+             valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
+             if (valid_values(k+1)) then
+                ratios(k+1)=ratio
+             endif
+          else
+             valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
           endif
        enddo
        if (mapping_failed) cycle
-       call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
+       if (is_gluon) then
+          call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
+       else
+          call assess_integrable_soft_limit_sequence(amp_values,lambdas,valid_values,nsteps,&
+               nonsingular_growth_tolerance,sequence_ok)
+       endif
        if (.not.sequence_ok) then
           soft_fail(i)=soft_fail(i)+1
-          call write_limit_failure('soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,ratios,&
-               residuals,valid_values,mapping_status)
+          if (is_gluon) then
+             call write_limit_failure('soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,ratios,&
+                  residuals,valid_values,mapping_status)
+          else
+             call write_limit_failure('integrable soft',ichan,iint,limit_point,i,0,nsteps,lambdas,amp_values,dip_values,ratios,&
+                  residuals,valid_values,mapping_status)
+          endif
        endif
     enddo
 
@@ -364,30 +375,38 @@ contains
              endif
              call compute_the_amps(iint,ichan,use_amplitude_library)
              call square_the_amps(iint,ichan)
-
-             call compute_the_dipole_amps(iint,ichan)
-             call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,nselected=nselected)
-             if (k.eq.0 .and. nselected.eq.0) then
-                no_dipoles=.true.
-                exit
-             endif
              amp_values(k+1)=pgl(ichan)%amp2(1)
-             dip_values(k+1)=amp2_dip
-             valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
-             if (valid_values(k+1)) then
-                ratios(k+1)=ratio
+             if (.not.no_dipoles) then
+                call compute_the_dipole_amps(iint,ichan)
+                call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,nselected=nselected)
+                if (nselected.eq.0) no_dipoles=.true.
+             endif
+             if (no_dipoles) then
+                valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
+             else
+                dip_values(k+1)=amp2_dip
+                valid_values(k+1)=finite_limit_values(amp_values(k+1),amp2_dip,ratio,residuals(k+1))
+                if (valid_values(k+1)) then
+                   ratios(k+1)=ratio
+                endif
              endif
           enddo
           if (mapping_failed) cycle
-          if (no_dipoles) then
-             cycle
-          endif
           collinear_tested(i,j)=collinear_tested(i,j)+1
-          call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
+          if (no_dipoles) then
+             call assess_nonsingular_limit_sequence(amp_values,valid_values,nsteps,nonsingular_growth_tolerance,sequence_ok)
+          else
+             call assess_limit_sequence(ratios,residuals,nsteps,limit_tolerance,sequence_ok)
+          endif
           if (.not.sequence_ok) then
              collinear_fail(i,j)=collinear_fail(i,j)+1
-             call write_limit_failure('collinear',ichan,iint,limit_point,i,j,nsteps,lambdas,amp_values,dip_values,ratios,&
-                  residuals,valid_values,mapping_status)
+             if (no_dipoles) then
+                call write_limit_failure('nonsingular collinear',ichan,iint,limit_point,i,j,nsteps,lambdas,amp_values,dip_values,&
+                     ratios,residuals,valid_values,mapping_status)
+             else
+                call write_limit_failure('collinear',ichan,iint,limit_point,i,j,nsteps,lambdas,amp_values,dip_values,ratios,&
+                     residuals,valid_values,mapping_status)
+             endif
           endif
        enddo
     enddo
@@ -439,6 +458,13 @@ contains
     finite_limit_values=.true.
   end function finite_limit_values
 
+  logical function finite_nonsingular_value(amp2)
+    use, intrinsic :: ieee_arithmetic
+    implicit none
+    real(kind=8),intent(in) :: amp2
+    finite_nonsingular_value=ieee_is_finite(amp2)
+  end function finite_nonsingular_value
+
   subroutine write_limit_failure(limit_name,ichan,iint,limit_point,ileg1,ileg2,nsteps,lambdas,amp_values,dip_values,&
        ratios,residuals,valid_values,mapping_status)
     implicit none
@@ -450,10 +476,10 @@ contains
     integer,intent(in) :: mapping_status(nsteps)
     integer :: k
     write (100,'(a)') '------------------------------------------------------------'
-    if (limit_name.eq.'soft') then
-       write (100,*) 'FAILED soft limit: point ',limit_point,' channel ',ichan,' iint ',iint,' leg ',ileg1
+    if (index(limit_name,'soft').ne.0) then
+       write (100,*) 'FAILED ',trim(limit_name),' limit: point ',limit_point,' channel ',ichan,' iint ',iint,' leg ',ileg1
     else
-       write (100,*) 'FAILED collinear limit: point ',limit_point,' channel ',ichan,' iint ',iint,' legs ',ileg1,ileg2
+       write (100,*) 'FAILED ',trim(limit_name),' limit: point ',limit_point,' channel ',ichan,' iint ',iint,' legs ',ileg1,ileg2
     endif
     write (100,'(a)') '# step lambda matrix_element dipole ratio residual valid mapping_status'
     do k=1,nsteps
@@ -479,45 +505,53 @@ contains
     do ichan=1,ngroups
        do iint=1,pgl(ichan)%nproc
           do i=3,pgl(ichan)%next
-             if (.not.phys_model%is_gluon(pgl(ichan)%processes(i,iint))) then
-                write (*,*) '  channel',ichan,' iint',iint,' soft leg',i,'SKIP (not a gluon)'
-                write (99,*) '  channel',ichan,' iint',iint,' soft leg',i,'SKIP (not a gluon)'
+             fraction=100d0*dble(soft_fail(ichan,iint,i))/dble(soft_tested(ichan,iint,i))
+             if (soft_fail(ichan,iint,i).ge.failure_threshold) then
+                result='FAIL'
+                all_ok=.false.
              else
-                fraction=100d0*dble(soft_fail(ichan,iint,i))/dble(soft_tested(ichan,iint,i))
-                if (soft_fail(ichan,iint,i).ge.failure_threshold) then
+                result='PASS'
+             endif
+             if (phys_model%is_gluon(pgl(ichan)%processes(i,iint))) then
+                write (*,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": ",i0,"/",i0, &
+                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     soft_tested(ichan,iint,i),fraction,result
+                write (99,'(2x,"channel ",i0," integral ",i0," soft leg ",i0,": ",i0,"/",i0, &
+                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     soft_tested(ichan,iint,i),fraction,result
+             else
+                write (*,'(2x,"channel ",i0," integral ",i0," soft leg ",i0," (integrable): ",i0,"/",i0, &
+                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     soft_tested(ichan,iint,i),fraction,result
+                write (99,'(2x,"channel ",i0," integral ",i0," soft leg ",i0," (integrable): ",i0,"/",i0, &
+                     " failed (",f5.1,"%)",t86,a4)') ichan,iint,i,soft_fail(ichan,iint,i), &
+                     soft_tested(ichan,iint,i),fraction,result
+             endif
+          enddo
+          do i=1,pgl(ichan)%next-1
+             do j=max(3,i+1),pgl(ichan)%next
+                fraction=100d0*dble(collinear_fail(ichan,iint,i,j))/&
+                     dble(collinear_tested(ichan,iint,i,j))
+                if (collinear_fail(ichan,iint,i,j).ge.failure_threshold) then
                    result='FAIL'
                    all_ok=.false.
                 else
                    result='PASS'
                 endif
-                write (*,*) '  channel',ichan,' iint',iint,' soft leg',i,':',&
-                     soft_fail(ichan,iint,i),'/',soft_tested(ichan,iint,i),'failed (',fraction,'%)',result
-                write (99,*) '  channel',ichan,' iint',iint,' soft leg',i,':',&
-                     soft_fail(ichan,iint,i),'/',soft_tested(ichan,iint,i),'failed (',fraction,'%)',result
-             endif
-          enddo
-          do i=1,pgl(ichan)%next-1
-             do j=max(3,i+1),pgl(ichan)%next
-                if (collinear_tested(ichan,iint,i,j).eq.0) then
-                   write (*,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,&
-                        'SKIP (no matching CS dipoles)'
-                   write (99,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,&
-                        'SKIP (no matching CS dipoles)'
+                if (has_collinear_dipoles(iint,ichan,i,j)) then
+                   write (*,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0,": ", &
+                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
+                   write (99,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0,": ", &
+                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
                 else
-                   fraction=100d0*dble(collinear_fail(ichan,iint,i,j))/&
-                        dble(collinear_tested(ichan,iint,i,j))
-                   if (collinear_fail(ichan,iint,i,j).ge.failure_threshold) then
-                      result='FAIL'
-                      all_ok=.false.
-                   else
-                      result='PASS'
-                   endif
-                   write (*,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,':',&
-                        collinear_fail(ichan,iint,i,j),'/',collinear_tested(ichan,iint,i,j),&
-                        'failed (',fraction,'%)',result
-                   write (99,*) '  channel',ichan,' iint',iint,' collinear legs',i,j,':',&
-                        collinear_fail(ichan,iint,i,j),'/',collinear_tested(ichan,iint,i,j),&
-                        'failed (',fraction,'%)',result
+                   write (*,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0," (finite): ", &
+                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
+                   write (99,'(2x,"channel ",i0," integral ",i0," collinear legs ",i0,"/",i0," (finite): ", &
+                        i0,"/",i0," failed (",f5.1,"%)",t86,a4)') ichan,iint,i,j, &
+                        collinear_fail(ichan,iint,i,j),collinear_tested(ichan,iint,i,j),fraction,result
                 endif
              enddo
           enddo
@@ -550,6 +584,47 @@ contains
        endif
     enddo
   end subroutine assess_limit_sequence
+
+  subroutine assess_nonsingular_limit_sequence(amp_values,valid_values,nsteps,growth_tolerance,passed)
+    implicit none
+    integer,intent(in) :: nsteps
+    real(kind=8),intent(in) :: amp_values(nsteps),growth_tolerance
+    logical,intent(in) :: valid_values(nsteps)
+    logical,intent(out) :: passed
+    integer :: k
+    real(kind=8) :: previous_scale
+    passed=.false.
+    do k=1,nsteps-2
+       if (.not.all(valid_values(k:k+2))) cycle
+       previous_scale=max(abs(amp_values(k)),abs(amp_values(k+1)),tiny(1d0))
+       ! A nonsingular matrix element must level off as lambda decreases.
+       ! A small tolerance avoids rejecting harmless phase-space variation.
+       if (abs(amp_values(k+2)).le.(1d0+growth_tolerance)*previous_scale) then
+          passed=.true.
+       endif
+    enddo
+  end subroutine assess_nonsingular_limit_sequence
+
+  subroutine assess_integrable_soft_limit_sequence(amp_values,lambdas,valid_values,nsteps,growth_tolerance,passed)
+    implicit none
+    integer,intent(in) :: nsteps
+    real(kind=8),intent(in) :: amp_values(nsteps),lambdas(nsteps),growth_tolerance
+    logical,intent(in) :: valid_values(nsteps)
+    logical,intent(out) :: passed
+    integer :: k
+    real(kind=8) :: scaled_values(nsteps),previous_scale
+    scaled_values=lambdas*abs(amp_values)
+    passed=.false.
+    do k=1,nsteps-2
+       if (.not.all(valid_values(k:k+2))) cycle
+       previous_scale=max(scaled_values(k),scaled_values(k+1),tiny(1d0))
+       ! Soft-fermion amplitudes may grow as 1/lambda while remaining
+       ! integrable.  Test the phase-space-weighted matrix element instead.
+       if (scaled_values(k+2).le.(1d0+growth_tolerance)*previous_scale) then
+          passed=.true.
+       endif
+    enddo
+  end subroutine assess_integrable_soft_limit_sequence
 
   subroutine compute_the_dipole_amps(iint,ichan)
     use cs_dipole_mappings
@@ -646,6 +721,19 @@ contains
             (dip_i.eq.icol2 .and. dip_j.eq.icol1))
     endif
   end function collinear_dipole_matches
+
+  logical function has_collinear_dipoles(iint,ichan,icol1,icol2)
+    implicit none
+    integer,intent(in) :: iint,ichan,icol1,icol2
+    integer :: idip
+    has_collinear_dipoles=.false.
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       if (collinear_dipole_matches(iint,ichan,idip,icol1,icol2)) then
+          has_collinear_dipoles=.true.
+          return
+       endif
+    enddo
+  end function has_collinear_dipoles
 
   subroutine create_rho(iint,ichan,idip,rho)
     implicit none
