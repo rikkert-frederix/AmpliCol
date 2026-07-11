@@ -1293,13 +1293,40 @@ contains
     wfg(4)=prefact*(coupl(1)*(-l3*a1+l4*a2)+coupl(2)*(l1*a3-l2*a4))
   end subroutine AleptonLeptontoGluon_weyl
   
+  subroutine massless_propagator_denominator(p,denominator,valid)
+    ! Avoid evaluating an exactly singular or underflowing massless
+    ! propagator at a measure-zero phase-space boundary.
+    implicit none
+    real(kind=8),dimension(0:3),intent(in) :: p
+    real(kind=8),intent(out) :: denominator
+    logical,intent(out) :: valid
+    real(kind=8) :: scale,q2_scaled
+
+    denominator=0d0
+    valid=.false.
+    scale=maxval(abs(p))
+    if (scale .le. sqrt(tiny(1d0))) return
+    q2_scaled=(p(0)/scale)**2-(p(1)/scale)**2-(p(2)/scale)**2-(p(3)/scale)**2
+    if (abs(q2_scaled) .le. sqrt(tiny(1d0))) return
+    denominator=scale*scale*q2_scaled
+    if (abs(denominator).le.tiny(1d0)) return
+    valid=.true.
+  end subroutine massless_propagator_denominator
+
   subroutine GluonPropagator(wfg,p)
     implicit none
     complex(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: propagator
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    propagator=-cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    real(kind=8) :: denominator
+    logical :: valid
+    call massless_propagator_denominator(p,denominator,valid)
+    if (.not.valid) then
+       wfg=0d0
+       return
+    endif
+    propagator=-cImag/denominator
     wfg(1:4)=wfg(1:4)*propagator
   end subroutine GluonPropagator
 
@@ -1307,8 +1334,14 @@ contains
     implicit none
     real(kind=8),dimension(1:4),intent(inout) :: wfg
     real(kind=8),dimension(0:3),intent(in) :: p
-    real(kind=8) :: propagator
-    propagator=1d0/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    real(kind=8) :: propagator,denominator
+    logical :: valid
+    call massless_propagator_denominator(p,denominator,valid)
+    if (.not.valid) then
+       wfg=0d0
+       return
+    endif
+    propagator=1d0/denominator
     wfg(1:4)=wfg(1:4)*propagator
   end subroutine GluonPropagator_Real
 
@@ -1336,7 +1369,18 @@ contains
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: fm,fw
-    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    real(kind=8) :: denominator
+    logical :: valid
+    if (fm.eq.0d0 .and. fw.eq.0d0) then
+       call massless_propagator_denominator(p,denominator,valid)
+       if (.not.valid) then
+          wfq=0d0
+          return
+       endif
+       prefact=cImag/denominator
+    else
+       prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    endif
     tmp_val(1:4)=wfq(1:4)
     tmp_p(1)=(p(0)+p(3))
     tmp_p(2)=(p(0)-p(3))
@@ -1355,7 +1399,14 @@ contains
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    real(kind=8) :: denominator
+    logical :: valid
+    call massless_propagator_denominator(p,denominator,valid)
+    if (.not.valid) then
+       wfq(1:2)=0d0
+       return
+    endif
+    prefact=cImag/denominator
     tmp1=(p(0)+p(3))
     tmp2=(p(0)-p(3))
     tmp3=(p(1)+cImag*p(2))
@@ -1382,7 +1433,18 @@ contains
     complex(kind=8),dimension(1:4) :: tmp_p,tmp_val
     complex(kind=8),parameter :: cImag=(0d0,1d0)
     real(kind=8) :: fm,fw
-    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    real(kind=8) :: denominator
+    logical :: valid
+    if (fm.eq.0d0 .and. fw.eq.0d0) then
+       call massless_propagator_denominator(p,denominator,valid)
+       if (.not.valid) then
+          wfq=0d0
+          return
+       endif
+       prefact=cImag/denominator
+    else
+       prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2-fm**2+cImag*fm*fw)
+    endif
     tmp_val(1:4)=wfq(1:4)
     tmp_p(1)=-(p(0)+p(3))
     tmp_p(2)=-(p(0)-p(3))
@@ -1401,7 +1463,14 @@ contains
     real(kind=8),dimension(0:3),intent(in) :: p
     complex(kind=8) :: prefact,tmp1,tmp2,tmp3,tmp4,val1,val2
     complex(kind=8),parameter :: cImag=(0d0,1d0)
-    prefact=cImag/(p(0)**2-p(1)**2-p(2)**2-p(3)**2)
+    real(kind=8) :: denominator
+    logical :: valid
+    call massless_propagator_denominator(p,denominator,valid)
+    if (.not.valid) then
+       wfq(1:2)=0d0
+       return
+    endif
+    prefact=cImag/denominator
     tmp1=-(p(0)+p(3))
     tmp2=-(p(0)-p(3))
     tmp3=-(p(1)+cImag*p(2))

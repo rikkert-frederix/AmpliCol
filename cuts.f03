@@ -153,7 +153,7 @@ contains
     real(kind=8),intent(out) :: jets(0:,:)
     integer,intent(out) :: njets
     real(kind=8) :: work(0:3,max(1,size(process)-2))
-    real(kind=8) :: dmin,dbeam,dij
+    real(kind=8) :: dmin,dbeam,dij,pti,ptj
     integer :: i,j,imin,jmin,nwork
 
     jets=0d0
@@ -170,7 +170,12 @@ contains
        imin=0
        jmin=0
        do i=1,nwork
-          dbeam=pt(work(:,i))**2
+          pti=pt(work(:,i))
+          if (pti .le. sqrt(tiny(1d0))) then
+             dbeam=0d0
+          else
+             dbeam=pti*pti
+          endif
           if (dbeam.lt.dmin) then
              dmin=dbeam
              imin=i
@@ -178,10 +183,12 @@ contains
           endif
        enddo
        do i=1,nwork-1
-          if (pt(work(:,i)).le.tiny(1d0)) cycle
+          pti=pt(work(:,i))
+          if (pti .le. sqrt(tiny(1d0))) cycle
           do j=i+1,nwork
-             if (pt(work(:,j)).le.tiny(1d0)) cycle
-             dij=min(pt(work(:,i))**2,pt(work(:,j))**2)*deltaR(work(:,i),work(:,j))**2/DRjj_min**2
+             ptj=pt(work(:,j))
+             if (ptj .le. sqrt(tiny(1d0))) cycle
+             dij=min(pti*pti,ptj*ptj)*deltaR(work(:,i),work(:,j))**2/DRjj_min**2
              if (dij.lt.dmin) then
                 dmin=dij
                 imin=i
@@ -286,7 +293,13 @@ contains
     ! transverse momentum of 'p'
     implicit none
     real(kind=8), dimension(0:3) :: p
-    pt=sqrt(p(1)**2+p(2)**2)
+    real(kind=8) :: scale
+    scale=max(abs(p(1)),abs(p(2)))
+    if (scale .le. sqrt(tiny(1d0))) then
+       pt=0d0
+    else
+       pt=scale*sqrt((p(1)/scale)**2+(p(2)/scale)**2)
+    endif
   end function pt
   
   real(kind=8) function dot(p1,p2)
@@ -309,25 +322,36 @@ contains
     ! pseudo-rapidity of 'p'
     implicit none
     real(kind=8), dimension(0:3) :: p
-    real(kind=8) :: theta
-    theta=acos(p(3)/sqrt(p(1)**2+p(2)**2+p(3)**2))
-    eta=-log(dtan(theta/2d0))
+    real(kind=8) :: pt_value
+    pt_value=pt(p)
+    if (pt_value .le. sqrt(tiny(1d0))) then
+       eta=sign(huge(1d0),p(3))
+    else
+       ! asinh(pz/pT) is equivalent to pseudorapidity and remains stable
+       ! for nearly beam-collinear momenta.
+       eta=asinh(p(3)/pt_value)
+    endif
   end function eta
 
   real(kind=8) function delta_phi(p1,p2)
     ! azimuthal difference of 'p1' and 'p2'
     implicit none
     real(kind=8), dimension(0:3) :: p1,p2
-    real(kind=8) :: denom,arg
-    real(kind=8),parameter :: tiny=1d-8
-    denom=pt(p1)*pt(p2)
-    arg=(p1(1)*p2(1)+p1(2)*p2(2))/denom
-    if (arg.lt.-1d0-tiny) then
+    real(kind=8) :: pt1,pt2,arg
+    real(kind=8),parameter :: angle_tolerance=1d-8
+    pt1=pt(p1)
+    pt2=pt(p2)
+    if (pt1 .le. sqrt(tiny(1d0)) .or. pt2 .le. sqrt(tiny(1d0))) then
+       delta_phi=0d0
+       return
+    endif
+    arg=(p1(1)/pt1)*(p2(1)/pt2)+(p1(2)/pt1)*(p2(2)/pt2)
+    if (arg.lt.-1d0-angle_tolerance) then
        write (*,*) 'cosine is complex'
        stop 1
     elseif (arg.lt.-1d0) then
        arg=-1d0
-    elseif(arg.gt.1d0+tiny) then
+    elseif(arg.gt.1d0+angle_tolerance) then
        write (*,*) 'cosine is complex'
        stop 1
     elseif(arg.gt.1d0) then
