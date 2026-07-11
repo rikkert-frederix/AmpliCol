@@ -49,7 +49,6 @@ contains
        enddo
     enddo
     pgl(igroup)%dpl(iamp)%ndip=ncandidates
-    write (*,*) 'Need',pgl(igroup)%dpl(iamp)%ndip,'dipoles'
     allocate(pgl(igroup)%dpl(iamp)%dl(pgl(igroup)%dpl(iamp)%ndip))
 
     do idip=1,pgl(igroup)%dpl(iamp)%ndip
@@ -68,7 +67,7 @@ contains
             phys_model)
        call initialise_rho_lookup(pgl(igroup)%dpl(iamp)%dl(idip))
     enddo
-    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
+!!$    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
   end subroutine initialise_subtraction
 
   subroutine add_dipole_candidate(dip_i,dip_j,dip_k,reverse,candidates,reverses,ncandidates)
@@ -155,6 +154,7 @@ contains
     integer :: idip
     write (*,*) 'process',process(1:n)
     write (*,*) 'color-order',order(1:n)
+    write (*,*) 'Need',size(dips),'dipoles'
     do idip=1,size(dips)
        write (*,*) '------------------'
        write (*,*) 'dipole',idip
@@ -893,8 +893,8 @@ contains
        b=(dip%amp%spins(ij,1,ih2)+3)/2
        term=dip%amp%amps(ih1)*dip%col_fac*dconjg(dip%amp%amps(ih2))
        rho(a,b)=rho(a,b)+term
-       if (dip%rho_lookup_upper .and. a.ne.b) rho(b,a)=rho(b,a)+dconjg(term)
     enddo
+    if (dip%rho_lookup_upper) rho(2,1)=dconjg(rho(1,2))
     if (.not.dip%rho_hermitian_checked .and. phys_model%is_gluon(dip%dip_r_ijk_f(1))) then
        hermitian_scale=max(1d0,maxval(abs(rho)))
        dip%rho_hermitian_checked=(abs(rho(1,2)-dconjg(rho(2,1))).le.1d-10*hermitian_scale .and. &
@@ -912,12 +912,20 @@ contains
     implicit none
     type(dipole),intent(inout) :: dip
     integer,allocatable :: keep_ih1(:),keep_ih2(:)
-    integer :: i,nkeep
-    nkeep=count(dip%rho_lookup_ih1.le.dip%rho_lookup_ih2)
+    integer :: i,nkeep,ij,a,b
+    ij=dip%dip_r_ijk(1)
+    nkeep=0
+    do i=1,size(dip%rho_lookup_ih1)
+       a=(dip%amp%spins(ij,1,dip%rho_lookup_ih1(i))+3)/2
+       b=(dip%amp%spins(ij,1,dip%rho_lookup_ih2(i))+3)/2
+       if (a.le.b) nkeep=nkeep+1
+    enddo
     allocate(keep_ih1(nkeep),keep_ih2(nkeep))
     nkeep=0
     do i=1,size(dip%rho_lookup_ih1)
-       if (dip%rho_lookup_ih1(i).gt.dip%rho_lookup_ih2(i)) cycle
+       a=(dip%amp%spins(ij,1,dip%rho_lookup_ih1(i))+3)/2
+       b=(dip%amp%spins(ij,1,dip%rho_lookup_ih2(i))+3)/2
+       if (a.gt.b) cycle
        nkeep=nkeep+1
        keep_ih1(nkeep)=dip%rho_lookup_ih1(i)
        keep_ih2(nkeep)=dip%rho_lookup_ih2(i)
