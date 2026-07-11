@@ -42,7 +42,7 @@ program amplicol_generate
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,subtracted_real
   logical :: limits_ok
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
@@ -473,7 +473,8 @@ contains
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    logical :: done,time_physics
+    real(kind=8) :: amp2_integrand,amp2_dip
+    logical :: done,time_physics,real_pass
     real(kind=8),external :: alphaspdf
     time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
     if (create_amplitude_library) then
@@ -512,15 +513,15 @@ contains
        endif
        return
     endif
-    if (.not.read_momenta) then
-    if (.not.pass_cuts(pgl(ichan))) then
-       val=0d0
-       if (time_physics) then
-          call cpu_time(tAfter)
-          t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
+    if (.not.read_momenta .and. .not.subtracted_real) then
+       if (.not.pass_cuts(pgl(ichan))) then
+          val=0d0
+          if (time_physics) then
+             call cpu_time(tAfter)
+             t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
+          endif
+          return
        endif
-       return
-    endif
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
@@ -557,6 +558,18 @@ contains
         if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
+    real_pass=.true.
+    if (subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
+    amp2_integrand=pgl(ichan)%amp2(1)
+    if (subtracted_real) then
+       call evaluate_real_dipoles(iint,ichan,amp2_dip)
+       if (real_pass) then
+          amp2_integrand=amp2_integrand-amp2_dip
+       else
+          amp2_integrand=-amp2_dip
+       endif
+    endif
+
     ! set scales and update alphaS
     if (time_physics) call cpu_time(tBefore)
     call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1),scale_ren)
@@ -582,7 +595,7 @@ contains
     endif
 
     if (keep_processes_separate) then
-       val(1)=pgl(ichan)%amp2(1)*weight/dble(pgl(ichan)%iden(iint))
+       val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(iint))
        val(1)=val(1)*colour_singlet_multichannel_weight(iint)
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
        f_abs=sum(val_abs(1:1))
@@ -740,7 +753,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole)
+         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,subtracted_real)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -751,6 +764,7 @@ contains
        write (100,'(a)') '# For boundedness checks, dipole and ratio are zero and residual is -1.'
        write (100,'(a,4(es12.4,1x))') '# alpha FF FI IF II: ',alpha_dipole
        write (100,'(a)') '# mapping_status -100: all matching real dipoles excluded by alpha'
+       write (100,'(a)') '# mapping_status -101: all alpha-active matching dipoles fail mapped cuts'
     endif
 
     timing_arg=trim(adjustl(timing_arg))
@@ -769,6 +783,21 @@ contains
        stop 1
     endif
     timing_sample=timing_sample_arg
+
+    if (subtracted_real) then
+       if (.not.keep_processes_separate) then
+          write (*,*) '--subtracted-real requires keep_processes_separate=true'
+          stop 1
+       endif
+       if (.not.limit_test .and. accuracy.le.0d0) then
+          write (*,*) '--subtracted-real is integration-only; provide --accuracy=X'
+          stop 1
+       endif
+       if (library.ne.'none') then
+          write (*,*) '--subtracted-real is not available with --library=create or --library=use'
+          stop 1
+       endif
+    endif
 
     if (library.eq.'none') then
        create_amplitude_library=.false.

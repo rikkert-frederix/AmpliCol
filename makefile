@@ -3,9 +3,9 @@
 .PHONY: test_matrix_elements update_matrix_cases update_matrix_goldens
 
 FC = gfortran
-#FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
+FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 #FFLAGS = -ffast-math -O3 -mcmodel=large
-FFLAGS = -ffast-math -O3
+#FFLAGS = -ffast-math -O3
 PYTHON ?= python
 
 CXX_ORIGIN := $(origin CXX)

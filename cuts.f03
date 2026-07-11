@@ -46,6 +46,241 @@ contains
 !!$       return
 !!$    endif
   end function pass_cuts
+
+  logical function pass_real_subtracted_cuts(pgl,iint)
+    ! The real matrix element is measured with inclusive kT jets.  The
+    ! required multiplicity is one below the real final-state jet count.
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iint
+    integer :: i,njet_required
+
+    njet_required=0
+    do i=3,pgl%next
+       if (phys_model%is_jet(pgl%processes(i,iint))) njet_required=njet_required+1
+    enddo
+    njet_required=max(0,njet_required-1)
+    pass_real_subtracted_cuts=pass_clustered_jet_cuts(pgl%ps(1)%p,pgl%processes(:,iint),njet_required)
+  end function pass_real_subtracted_cuts
+
+  logical function pass_mapped_dipole_cuts(p,process)
+    ! A mapped dipole has the Born jet multiplicity, so every final-state
+    ! jet parton is required to pass the jet cuts directly.
+    implicit none
+    real(kind=8),intent(in) :: p(0:,:)
+    integer,intent(in) :: process(:)
+    integer :: i,j,kind_i,kind_j
+
+    pass_mapped_dipole_cuts=.false.
+    if (size(p,2).ne.size(process)) return
+    do i=3,size(process)
+       kind_i=object_kind(process(i))
+       if (kind_i.eq.1) then
+          if (.not.pass_jet_cuts(p(:,i))) return
+       elseif (.not.pass_nonjet_cuts(p(:,i),kind_i)) then
+          return
+       endif
+    enddo
+    do i=3,size(process)-1
+       kind_i=object_kind(process(i))
+       do j=i+1,size(process)
+          kind_j=object_kind(process(j))
+          if (.not.pass_object_pair_cuts(p(:,i),kind_i,p(:,j),kind_j,.true.)) return
+       enddo
+    enddo
+    pass_mapped_dipole_cuts=.true.
+  end function pass_mapped_dipole_cuts
+
+  logical function pass_clustered_jet_cuts(p,process,njet_required)
+    implicit none
+    real(kind=8),intent(in) :: p(0:,:)
+    integer,intent(in) :: process(:),njet_required
+    real(kind=8) :: jets(0:3,max(1,size(process)-2))
+    logical :: selected(max(1,size(process)-2))
+    integer :: i,j,ijet,njets,nselected,kind_i,kind_j
+
+    pass_clustered_jet_cuts=.false.
+    if (size(p,2).ne.size(process)) return
+    call cluster_kt_jets(p,process,jets,njets)
+    selected=.false.
+    nselected=0
+    do ijet=1,njets
+       if (pass_jet_cuts(jets(:,ijet))) then
+          selected(ijet)=.true.
+          nselected=nselected+1
+       endif
+    enddo
+    if (nselected.lt.njet_required) return
+
+    do i=3,size(process)
+       kind_i=object_kind(process(i))
+       if (kind_i.eq.1) cycle
+       if (.not.pass_nonjet_cuts(p(:,i),kind_i)) return
+    enddo
+    do i=1,njets-1
+       if (.not.selected(i)) cycle
+       do j=i+1,njets
+          if (.not.selected(j)) cycle
+          ! The inclusive kT algorithm has already imposed the jet radius.
+          if (.not.pass_object_pair_cuts(jets(:,i),1,jets(:,j),1,.false.)) return
+       enddo
+    enddo
+    do ijet=1,njets
+       if (.not.selected(ijet)) cycle
+       do i=3,size(process)
+          kind_i=object_kind(process(i))
+          if (kind_i.eq.1) cycle
+          if (.not.pass_object_pair_cuts(jets(:,ijet),1,p(:,i),kind_i,.true.)) return
+       enddo
+    enddo
+    do i=3,size(process)-1
+       kind_i=object_kind(process(i))
+       if (kind_i.eq.1) cycle
+       do j=i+1,size(process)
+          kind_j=object_kind(process(j))
+          if (kind_j.eq.1) cycle
+          if (.not.pass_object_pair_cuts(p(:,i),kind_i,p(:,j),kind_j,.true.)) return
+       enddo
+    enddo
+    pass_clustered_jet_cuts=.true.
+  end function pass_clustered_jet_cuts
+
+  subroutine cluster_kt_jets(p,process,jets,njets)
+    ! Inclusive longitudinally invariant kT clustering with E-scheme sums.
+    implicit none
+    real(kind=8),intent(in) :: p(0:,:)
+    integer,intent(in) :: process(:)
+    real(kind=8),intent(out) :: jets(0:,:)
+    integer,intent(out) :: njets
+    real(kind=8) :: work(0:3,max(1,size(process)-2))
+    real(kind=8) :: dmin,dbeam,dij
+    integer :: i,j,imin,jmin,nwork
+
+    jets=0d0
+    work=0d0
+    nwork=0
+    do i=3,size(process)
+       if (.not.phys_model%is_jet(process(i))) cycle
+       nwork=nwork+1
+       work(:,nwork)=p(:,i)
+    enddo
+    njets=0
+    do while (nwork.gt.0)
+       dmin=huge(1d0)
+       imin=0
+       jmin=0
+       do i=1,nwork
+          dbeam=pt(work(:,i))**2
+          if (dbeam.lt.dmin) then
+             dmin=dbeam
+             imin=i
+             jmin=0
+          endif
+       enddo
+       do i=1,nwork-1
+          if (pt(work(:,i)).le.tiny(1d0)) cycle
+          do j=i+1,nwork
+             if (pt(work(:,j)).le.tiny(1d0)) cycle
+             dij=min(pt(work(:,i))**2,pt(work(:,j))**2)*deltaR(work(:,i),work(:,j))**2/DRjj_min**2
+             if (dij.lt.dmin) then
+                dmin=dij
+                imin=i
+                jmin=j
+             endif
+          enddo
+       enddo
+       if (jmin.eq.0) then
+          njets=njets+1
+          jets(:,njets)=work(:,imin)
+          call remove_cluster(work,nwork,imin)
+       else
+          work(:,imin)=work(:,imin)+work(:,jmin)
+          call remove_cluster(work,nwork,jmin)
+       endif
+    enddo
+  end subroutine cluster_kt_jets
+
+  subroutine remove_cluster(work,nwork,idx)
+    implicit none
+    real(kind=8),intent(inout) :: work(0:,:)
+    integer,intent(inout) :: nwork
+    integer,intent(in) :: idx
+    if (idx.lt.nwork) work(:,idx:nwork-1)=work(:,idx+1:nwork)
+    work(:,nwork)=0d0
+    nwork=nwork-1
+  end subroutine remove_cluster
+
+  integer function object_kind(ipdg)
+    implicit none
+    integer,intent(in) :: ipdg
+    if (phys_model%is_jet(ipdg)) then
+       object_kind=1
+    elseif (phys_model%is_photon(ipdg)) then
+       object_kind=2
+    elseif (phys_model%is_lepton_any(ipdg)) then
+       object_kind=3
+    else
+       object_kind=0
+    endif
+  end function object_kind
+
+  logical function pass_jet_cuts(p)
+    implicit none
+    real(kind=8),intent(in) :: p(0:3)
+    pass_jet_cuts=pt(p).gt.pTj_min
+    if (pass_jet_cuts .and. etaj_max.gt.0d0) pass_jet_cuts=abs(eta(p)).lt.etaj_max
+  end function pass_jet_cuts
+
+  logical function pass_nonjet_cuts(p,kind)
+    implicit none
+    real(kind=8),intent(in) :: p(0:3)
+    integer,intent(in) :: kind
+    pass_nonjet_cuts=.true.
+    if (kind.eq.2) then
+       if (pTa_min.gt.0d0 .and. pt(p).lt.pTa_min) pass_nonjet_cuts=.false.
+       if (pass_nonjet_cuts .and. etaa_max.gt.0d0) pass_nonjet_cuts=abs(eta(p)).lt.etaa_max
+    elseif (kind.eq.3) then
+       if (pTl_min.gt.0d0 .and. pt(p).lt.pTl_min) pass_nonjet_cuts=.false.
+       if (pass_nonjet_cuts .and. etal_max.gt.0d0) pass_nonjet_cuts=abs(eta(p)).lt.etal_max
+    endif
+  end function pass_nonjet_cuts
+
+  logical function pass_object_pair_cuts(p1,kind1,p2,kind2,apply_jet_dr)
+    implicit none
+    real(kind=8),intent(in) :: p1(0:3),p2(0:3)
+    integer,intent(in) :: kind1,kind2
+    logical,intent(in) :: apply_jet_dr
+    real(kind=8) :: drmin,smin
+
+    pass_object_pair_cuts=.true.
+    drmin=-1d0
+    smin=-1d0
+    if (kind1.eq.1 .and. kind2.eq.1) then
+       smin=sqrt_sjj_min
+       if (apply_jet_dr) drmin=DRjj_min
+    elseif (kind1.eq.2 .and. kind2.eq.2) then
+       smin=sqrt_saa_min
+       drmin=DRaa_min
+    elseif (kind1.eq.3 .and. kind2.eq.3) then
+       smin=sqrt_sll_min
+       drmin=DRll_min
+    elseif ((kind1.eq.1 .and. kind2.eq.2) .or. (kind1.eq.2 .and. kind2.eq.1)) then
+       smin=sqrt_sja_min
+       drmin=DRja_min
+    elseif ((kind1.eq.1 .and. kind2.eq.3) .or. (kind1.eq.3 .and. kind2.eq.1)) then
+       smin=sqrt_sjl_min
+       drmin=DRjl_min
+    elseif ((kind1.eq.2 .and. kind2.eq.3) .or. (kind1.eq.3 .and. kind2.eq.2)) then
+       smin=sqrt_sla_min
+       drmin=DRla_min
+    else
+       return
+    endif
+    if (smin.gt.0d0 .and. abs(sumdot(p1,p2)).lt.smin**2) pass_object_pair_cuts=.false.
+    if (pass_object_pair_cuts .and. drmin.gt.0d0) then
+       pass_object_pair_cuts=deltaR(p1,p2).ge.drmin
+    endif
+  end function pass_object_pair_cuts
   
   real(kind=8) function pt(p)
     ! transverse momentum of 'p'

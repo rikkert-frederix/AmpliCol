@@ -10,6 +10,7 @@ module subtraction
   private
   public :: initialise_subtraction, test_limits_integrand, generate_limit_phase_space_point
   public :: print_limit_failure_fractions, compute_the_amps, square_the_amps
+  public :: evaluate_real_dipoles
 contains
   subroutine initialise_subtraction(igroup,iamp)
     implicit none
@@ -381,6 +382,7 @@ contains
   subroutine test_limits_integrand(ichan,iint,limit_point,soft_fail,soft_tested,&
        collinear_fail,collinear_tested,use_amplitude_library)
     use phase_space_module
+    use cuts, only: pass_real_subtracted_cuts
     implicit none
     integer,intent(in) :: ichan
     integer,intent(in) :: iint
@@ -390,12 +392,12 @@ contains
     logical,intent(in) :: use_amplitude_library
     integer,parameter :: nsteps=11
     real(kind=8),parameter :: limit_tolerance=1d-2,nonsingular_growth_tolerance=5d-2
-    integer :: i,j,k,status,nselected,nmatched
+    integer :: i,j,k,status,nselected,nmatched,nalpha_selected
     real(kind=8) :: lambda,mass(pgl(ichan)%next-2),amp2_dip,ratio
     real(kind=8) :: ratios(nsteps),residuals(nsteps)
     real(kind=8) :: lambdas(nsteps),amp_values(nsteps),dip_values(nsteps)
     integer :: mapping_status(nsteps)
-    logical :: sequence_ok,no_dipoles,soft_no_dipoles,valid_values(nsteps),mapping_failed,is_gluon
+    logical :: sequence_ok,no_dipoles,soft_no_dipoles,valid_values(nsteps),mapping_failed,is_gluon,real_pass
     real(kind=8),dimension(0:3,pgl(ichan)%next) :: p_save
 
     p_save=pgl(ichan)%ps(1)%p
@@ -431,14 +433,27 @@ contains
           call compute_the_amps(iint,ichan,use_amplitude_library)
           call square_the_amps(iint,ichan)
           amp_values(k+1)=pgl(ichan)%amp2(1)
+          real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
+          if (.not.real_pass) amp_values(k+1)=0d0
           if (is_gluon) then
              call compute_the_dipole_amps(iint,ichan)
-             call square_the_dipole_amps(iint,ichan,amp2_dip,i,nselected=nselected,nmatched=nmatched)
+             call square_the_dipole_amps(iint,ichan,amp2_dip,i,nselected=nselected,nmatched=nmatched,&
+                  nalpha_selected=nalpha_selected)
              if (nmatched.eq.0) then
                 soft_no_dipoles=.true.
                 valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
              elseif (nselected.eq.0) then
-                mapping_status(k+1)=alpha_status_excluded
+                if (.not.real_pass) then
+                   ! Both measurement functions vanish, so this point cannot
+                   ! contribute to the cut real-subtracted observable.
+                   ratios(k+1)=1d0
+                   residuals(k+1)=0d0
+                   valid_values(k+1)=.true.
+                elseif (nalpha_selected.eq.0) then
+                   mapping_status(k+1)=alpha_status_excluded
+                else
+                   mapping_status(k+1)=-101
+                endif
                 cycle
              else
                 dip_values(k+1)=amp2_dip
@@ -504,13 +519,24 @@ contains
              call compute_the_amps(iint,ichan,use_amplitude_library)
              call square_the_amps(iint,ichan)
              amp_values(k+1)=pgl(ichan)%amp2(1)
+             real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
+             if (.not.real_pass) amp_values(k+1)=0d0
              if (.not.no_dipoles) then
                 call compute_the_dipole_amps(iint,ichan)
                 call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,&
-                     nselected=nselected,nmatched=nmatched)
+                     nselected=nselected,nmatched=nmatched,nalpha_selected=nalpha_selected)
                 if (nmatched.eq.0) no_dipoles=.true.
                 if (nmatched.gt.0 .and. nselected.eq.0) then
-                   mapping_status(k+1)=alpha_status_excluded
+                   if (.not.real_pass) then
+                      ratios(k+1)=1d0
+                      residuals(k+1)=0d0
+                      valid_values(k+1)=.true.
+                      cycle
+                   elseif (nalpha_selected.eq.0) then
+                      mapping_status(k+1)=alpha_status_excluded
+                   else
+                      mapping_status(k+1)=-101
+                   endif
                    cycle
                 endif
              endif
@@ -557,7 +583,7 @@ contains
           pgl(ichan)%ps(1)%x(ix)=ran2()
        enddo
        call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
-       if (pgl(ichan)%ps(1)%jac.gt.0d0 .and. pass_cuts(pgl(ichan))) then
+       if (pgl(ichan)%ps(1)%jac.gt.0d0 .and. pass_real_subtracted_cuts(pgl(ichan),1)) then
           return
        endif
    enddo
@@ -616,6 +642,7 @@ contains
     endif
     write (100,'(a)') '# step lambda matrix_element dipole ratio residual valid mapping_status'
     write (100,'(a)') '# mapping_status -100: all matching real dipoles excluded by alpha'
+    write (100,'(a)') '# mapping_status -101: all alpha-active matching dipoles fail mapped cuts'
     do k=1,nsteps
        write (100,'(i4,1x,5(es24.16,1x),l1,1x,i0)') k-1,lambdas(k),amp_values(k),&
             dip_values(k),ratios(k),residuals(k),valid_values(k),mapping_status(k)
@@ -793,6 +820,7 @@ contains
   subroutine compute_the_dipole_amps(iint,ichan)
     use cs_dipole_mappings
     use common, only: alpha_dipole
+    use cuts, only: pass_mapped_dipole_cuts
     implicit none
     integer,intent(in) :: iint,ichan
     integer :: idip,info,cut_info,topology
@@ -806,6 +834,8 @@ contains
     enddo
     do idip=1,pgl(ichan)%dpl(iint)%ndip
        pgl(ichan)%dpl(iint)%dl(idip)%active=.false.
+       pgl(ichan)%dpl(iint)%dl(idip)%alpha_active=.false.
+       pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts=.false.
        call cs_dipole_cut_variable(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,&
             mass_real,phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)),cut_variable,cut_info)
        if (cut_info.ne.0) then
@@ -814,7 +844,7 @@ contains
        endif
        topology=cs_dipole_topology(pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk)
        if (cut_variable.gt.alpha_dipole(topology)+alpha_cut_tolerance) cycle
-       pgl(ichan)%dpl(iint)%dl(idip)%active=.true.
+       pgl(ichan)%dpl(iint)%dl(idip)%alpha_active=.true.
        call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info, &
             mass_real=mass_real, &
             mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
@@ -824,13 +854,27 @@ contains
           write (*,*) 'error in cs momentum mapping',info
           stop 1
        endif
+       pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts=pass_mapped_dipole_cuts(ps_mapped,&
+            pgl(ichan)%dpl(iint)%dl(idip)%process_r)
+       if (.not.pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts) cycle
+       pgl(ichan)%dpl(iint)%dl(idip)%active=.true.
        hel_mapped=pgl(ichan)%hel(pgl(ichan)%dpl(iint)%dl(idip)%dip_map(1:pgl(ichan)%next-1))
        call pgl(ichan)%dpl(iint)%dl(idip)%amp%evaluate(pgl(ichan)%next-1,ps_mapped,&
             hel_mapped,read_proc_from_file,phys_model)
     enddo
   end subroutine compute_the_dipole_amps
 
-  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched)
+  subroutine evaluate_real_dipoles(iint,ichan,amp2_dip)
+    ! Sum all alpha-active local dipoles for one real-emission subprocess.
+    implicit none
+    integer,intent(in) :: iint,ichan
+    real(kind=8),intent(out) :: amp2_dip
+
+    call compute_the_dipole_amps(iint,ichan)
+    call square_the_dipole_amps(iint,ichan,amp2_dip)
+  end subroutine evaluate_real_dipoles
+
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched,nalpha_selected)
     use cs_lc_spin_dipoles
     use FeynmanRules
     implicit none
@@ -838,6 +882,7 @@ contains
     integer,intent(in),optional :: iunres,icol1,icol2
     integer,intent(out),optional :: nselected
     integer,intent(out),optional :: nmatched
+    integer,intent(out),optional :: nalpha_selected
     integer :: idip
     real(kind=8) :: amp2_dip,dip
     real(kind=8),parameter :: pi=3.14159265358979323846d0
@@ -858,6 +903,7 @@ contains
     enddo
     if (present(nselected)) nselected=0
     if (present(nmatched)) nmatched=0
+    if (present(nalpha_selected)) nalpha_selected=0
     do idip=1,pgl(ichan)%dpl(iint)%ndip
        if (use_collinear) then
           if (.not.collinear_dipole_matches(iint,ichan,idip,icol1,icol2)) cycle
@@ -867,6 +913,9 @@ contains
           if (pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2).ne.iunres) cycle
        endif
        if (present(nmatched)) nmatched=nmatched+1
+       if (pgl(ichan)%dpl(iint)%dl(idip)%alpha_active) then
+          if (present(nalpha_selected)) nalpha_selected=nalpha_selected+1
+       endif
        if (.not.pgl(ichan)%dpl(iint)%dl(idip)%active) cycle
        if (present(nselected)) nselected=nselected+1
        ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)

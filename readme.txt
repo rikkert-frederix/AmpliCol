@@ -119,6 +119,19 @@ four comma-separated values in the order FF, FI, IF, II. Values must satisfy
 0 < X <= 1. The default is one, and integrated I/K/P contributions are not
 affected.
 
+The optional '--subtracted-real' mode integrates the local real contribution
+`R - sum(D)`, using all alpha-active leading-colour Catani-Seymour dipoles.
+It is opt-in and requires '--accuracy=X', since unweighted signed events are
+not implemented. The real matrix element and the dipole sum use the same
+phase-space, PDF, symmetry, coupling, and multichannel factors. This is only
+the finite real-subtracted contribution: until integrated I/K/P terms are
+included, its finite integral depends on the alpha restriction.
+Its real-emission measurement clusters massless QCD partons with inclusive
+kT and radius `DRjj_min`, requiring at least one fewer accepted jets than the
+number of real final-state jet legs. Each mapped dipole is cut independently
+at parton level: every reduced final-state jet must pass `pTj_min`, `etaj_max`,
+and `DRjj_min`.
+
 For the number of events, it is best to require somewhere between
 100000-1000000 events per run. Requiring too few, and then combining
 many separate runs together might undersample some phase-space regions
