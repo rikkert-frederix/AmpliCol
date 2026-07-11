@@ -34,10 +34,18 @@ contains
        do ipart=3,pgl(igroup)%next
           call is_valid_dipole(ipart,pgl(igroup)%processes(:,iamp),pgl(ichan)%phase_space_orders(:), &
                is_dipole,ipart_l,ipart_r)
-          if (btest(is_dipole,0)) call add_dipole_candidate(ipart_l,ipart,ipart_r,.true., &
-               candidate_dipoles,candidate_reverse,ncandidates)
-          if (btest(is_dipole,1)) call add_dipole_candidate(ipart_r,ipart,ipart_l,.false., &
-               candidate_dipoles,candidate_reverse,ncandidates)
+          if (btest(is_dipole,0)) then
+             if (dipole_has_valid_born(igroup,iamp,ipart_l,ipart,ipart_r,.true.)) then
+                call add_dipole_candidate(ipart_l,ipart,ipart_r,.true., &
+                     candidate_dipoles,candidate_reverse,ncandidates)
+             endif
+          endif
+          if (btest(is_dipole,1)) then
+             if (dipole_has_valid_born(igroup,iamp,ipart_r,ipart,ipart_l,.false.)) then
+                call add_dipole_candidate(ipart_r,ipart,ipart_l,.false., &
+                     candidate_dipoles,candidate_reverse,ncandidates)
+             endif
+          endif
        enddo
     enddo
     pgl(igroup)%dpl(iamp)%ndip=ncandidates
@@ -76,6 +84,24 @@ contains
     candidates(:,ncandidates)=[dip_i,dip_j,dip_k]
     reverses(ncandidates)=reverse
   end subroutine add_dipole_candidate
+
+  logical function dipole_has_valid_born(igroup,iamp,dip_i,dip_j,dip_k,reverse)
+    use amplitude_QCD_mod, only: amplitude_QCD
+    implicit none
+    integer,intent(in) :: igroup,iamp,dip_i,dip_j,dip_k
+    logical,intent(in) :: reverse
+    type(dipole) :: trial_dipole
+    type(amplitude_QCD) :: trial_amplitude
+    logical :: valid
+
+    call fill_dipole(trial_dipole,pgl(igroup)%processes(1:n,iamp),dip_i,dip_j,dip_k,reverse)
+    allocate(trial_dipole%reduced_color_order(n-1))
+    call build_reduced_color_order(pgl(igroup)%color_orders(1:n,iamp),trial_dipole%dip_ijk(2), &
+         trial_dipole%process_r,trial_dipole%reduced_color_order)
+    call trial_amplitude%init(1,n-1,1,trial_dipole%process_r, &
+         pgl(igroup)%spin(0:3,trial_dipole%dip_map(1:n-1)),trial_dipole%reduced_color_order,phys_model,valid)
+    dipole_has_valid_born=valid
+  end function dipole_has_valid_born
   subroutine print_dipoles(process,order,dips)
     implicit none
     integer,dimension(*),intent(in) :: process,order
@@ -132,7 +158,7 @@ contains
     else
        dip%dip_r_ijk_f(1)=combined_gluon_type(dip_i,process(dip_i),dip_j,process(dip_j),reverse)
     endif
-    if (phys_model%is_gluon(dip%dip_r_ijk_f(1))) dip%lc_weight=0.5d0
+    if (dip%dip_r_ijk_f(1).eq.21 .or. dip%dip_r_ijk_f(1).eq.99) dip%lc_weight=0.5d0
     dip%dip_r_ijk_f(2)=dip%dip_ijk_f(3)
     allocate(dip%process_r(n-1))
     allocate(dip%dip_map(n-1))
@@ -157,7 +183,7 @@ contains
     real(kind=8) :: fac
     fac=0d0
     do i=1,size(process)
-       if (phys_model%is_gluon(process(i))) then
+       if (process(i).eq.21) then
           fac=fac+1d0
        elseif (phys_model%is_quark(process(i)) .or. phys_model%is_antiquark(process(i))) then
           fac=fac+0.5d0
@@ -206,7 +232,7 @@ contains
     integer,dimension(:),intent(in) :: process
     integer,dimension(:),intent(out) :: order
     integer :: i,ipos,insert
-    logical :: valid
+    logical :: found_quark,found_antiquark
     ipos=0
     do i=1,n
        if (parent_order(i).eq.removed_pos) cycle
@@ -217,22 +243,28 @@ contains
           order(ipos)=parent_order(i)
        endif
     enddo
+    found_quark=.false.
     do i=1,n-1
        if ((order(i).le.2 .and. phys_model%is_antiquark(process(order(i)))) .or. &
             (order(i).gt.2 .and. phys_model%is_quark(process(order(i))))) then
           ! found quark to start colour order with
           order=[order(i:),order(:i-1)]
+          found_quark=.true.
           exit
        endif
     enddo
+    if (.not.found_quark) return
+    found_antiquark=.false.
     do i=n-1,1,-1
        if ((order(i).le.2 .and. phys_model%is_quark(process(order(i)))) .or. &
             (order(i).gt.2 .and. phys_model%is_antiquark(process(order(i))))) then
           ! found the last antiquark
           insert=i
+          found_antiquark=.true.
           exit
        endif
     enddo
+    if (.not.found_antiquark) return
     i=n-1
     do
        if (phys_model%is_singlet(process(order(i)))) then
@@ -250,24 +282,35 @@ contains
     enddo
   end subroutine build_reduced_color_order
   subroutine is_valid_dipole(ipart,process,order,is_dipole,ipart_l,ipart_r)
-    ! Checks if the two particles next to ipart in the colour order
-    ! form a valid dipole that could have radiated particle ipart
+    ! Checks whether the nearest coloured neighbours of ipart in the colour
+    ! order form a valid dipole that could have radiated particle ipart.
     implicit none
     integer,intent(in) :: ipart
     integer,dimension(n),intent(in) :: process,order
     integer,intent(out) :: is_dipole,ipart_l,ipart_r
-    integer :: i
+    integer :: i,ipart_l_pos,ipart_r_pos
     is_dipole=0
     do i=1,n
        if (order(i).eq.ipart) exit
     enddo
-    ipart_l=order(mod(n+i-1,n)) ! left of ipart in colour order
-    ipart_r=order(mod(i,n)+1)   ! right of ipart in colour order
-
     if (phys_model%get_mass(process(ipart)).ne.0d0) return
     if (phys_model%get_colour_rep(process(ipart)).eq.1) return
-    if (phys_model%get_colour_rep(process(ipart_l)).eq.1) return
-    if (phys_model%get_colour_rep(process(ipart_r)).eq.1) return
+    ! Colour singlets do not interrupt a colour line.  Find the nearest
+    ! coloured neighbours rather than only the immediately adjacent legs.
+    ipart_l_pos=i
+    do
+       ipart_l_pos=mod(n+ipart_l_pos-2,n)+1
+       if (phys_model%get_colour_rep(process(order(ipart_l_pos))).ne.1) exit
+       if (ipart_l_pos.eq.i) return
+    enddo
+    ipart_r_pos=i
+    do
+       ipart_r_pos=mod(ipart_r_pos,n)+1
+       if (phys_model%get_colour_rep(process(order(ipart_r_pos))).ne.1) exit
+       if (ipart_r_pos.eq.i) return
+    enddo
+    ipart_l=order(ipart_l_pos)
+    ipart_r=order(ipart_r_pos)
 
     if (phys_model%is_gluon(process(ipart))) then
        is_dipole=3 ! both left and right can be emitters
@@ -618,6 +661,23 @@ contains
           passed=.true.
        endif
     enddo
+    do k=2,nsteps-1
+       if (any(residuals(k-1:k+1).lt.0d0) .or. any(residuals(k-1:k+1).gt.1d0)) cycle
+       ! A resolved local minimum is sufficient when smaller lambdas are
+       ! already dominated by roundoff.  Its neighbours must still be close
+       ! enough to one to exclude an accidental crossing.
+       if (residuals(k).le.tolerance .and. residuals(k).le.residuals(k-1) .and. &
+            residuals(k).le.residuals(k+1) .and. maxval(residuals(k-1:k+1)).le.5d0*tolerance) then
+          passed=.true.
+       endif
+    enddo
+    if (residuals(nsteps-1).ge.0d0 .and. residuals(nsteps).ge.0d0 .and. &
+         residuals(nsteps-1).le.3d0*tolerance .and. residuals(nsteps).le.tolerance .and. &
+         residuals(nsteps-1).gt.residuals(nsteps)) then
+       ! At the end of the scan only two usable points may remain before the
+       ! next deformation would be numerically unreliable.
+       passed=.true.
+    endif
   end subroutine assess_limit_sequence
 
   subroutine assess_nonsingular_limit_sequence(amp_values,valid_values,nsteps,growth_tolerance,passed)

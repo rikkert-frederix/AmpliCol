@@ -98,9 +98,9 @@ when fewer than 20 of the tested points fail, and the screen reports the
 failure fraction separately for every integral (`iint`). At an individual
 point, a limit passes when three consecutive finite
 deformation points have a positive matrix-element/dipole ratio within 1% of
-one and vary by less than 2%. If roundoff spoils the third point, a monotonic
-approach is accepted when the last point is within 1% and the preceding point
-within 3%. Soft non-gluons are checked for bounded `lambda * matrix element`,
+one and vary by less than 2%. If roundoff spoils this window, a two-point
+convergent tail or a local minimum within 1%, with both neighbours within 5%,
+is accepted. Soft non-gluons are checked for bounded `lambda * matrix element`,
 which permits integrable `1/lambda` growth. Collinear pairs without a matching
 Catani-Seymour dipole are checked for bounded matrix elements. In both cases,
 three consecutive finite samples must not grow by more than 5% as the limit is

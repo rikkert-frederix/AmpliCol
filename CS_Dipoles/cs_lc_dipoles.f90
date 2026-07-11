@@ -6,6 +6,7 @@ module cs_lc_spin_dipoles
   real(dp), parameter :: ca = 3.0_dp
   real(dp), parameter :: cf_lc = ca / 2.0_dp
   real(dp), parameter :: tr = 0.5_dp
+  real(dp), parameter :: tr_u1 = tr / ca
   real(dp), parameter :: tiny_dip = 1.0d-30
 
   integer, parameter :: ch_none = 0
@@ -24,20 +25,36 @@ contains
 
   logical function is_gluon(f)
     integer, intent(in) :: f
-    is_gluon = (f == 21)
+    is_gluon = (f == 21 .or. f == 99)
   end function is_gluon
+
+
+  logical function is_u1_gluon(f)
+    integer, intent(in) :: f
+    is_u1_gluon = (f == 99)
+  end function is_u1_gluon
 
 
   logical function is_quark(f)
     integer, intent(in) :: f
-    is_quark = (f /= 21)
+    is_quark = .not.is_gluon(f)
   end function is_quark
 
 
   logical function is_q_qbar_pair(f1, f2)
     integer, intent(in) :: f1, f2
-    is_q_qbar_pair = (f1 /= 21 .and. f1 == -f2)
+    is_q_qbar_pair = (is_quark(f1) .and. f1 == -f2)
   end function is_q_qbar_pair
+
+
+  real(dp) function vector_trace(f)
+    integer, intent(in) :: f
+    if (is_u1_gluon(f)) then
+       vector_trace = tr_u1
+    else
+       vector_trace = tr
+    end if
+  end function vector_trace
 
 
   real(dp) function gcontra(mu, nu) result(g)
@@ -445,6 +462,12 @@ contains
 
        if (is_gluon(fi) .and. is_gluon(fj)) then
 
+          if (is_u1_gluon(fp)) then
+             ! The U(1) gluon has no triple-vector coupling.
+             info = -105
+             return
+          end if
+
           if (is_fi) then
              denom_i = 1.0_dp - zi + (1.0_dp - x_dummy)
              denom_j = 1.0_dp - zj + (1.0_dp - x_dummy)
@@ -475,8 +498,13 @@ contains
           coeff = -2.0_dp / dotij
 
           call zero_tensor(vten)
-          call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr)
-          call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*tr*coeff, r)
+          if (is_u1_gluon(fp)) then
+             call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr_u1)
+             call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*tr_u1*coeff, r)
+          else
+             call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*tr)
+             call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*tr*coeff, r)
+          end if
           call tensor_to_helicity(vten, eps_parent, vhel)
 
        else
@@ -500,7 +528,7 @@ contains
     integer, intent(out) :: info
 
     integer :: ch
-    real(dp) :: scalar, denom, dotjk, coeff, aterm
+    real(dp) :: scalar, denom, dotjk, coeff, aterm, parent_tr
     real(dp) :: r(0:3), vten(0:3,0:3)
 
     info = 0
@@ -541,13 +569,19 @@ contains
 
        r = p_unres/u - p_spec/(1.0_dp - u)
        coeff = ((1.0_dp - x)/x) * (2.0_dp*u*(1.0_dp - u)/dotjk)
+       parent_tr = vector_trace(fp)
 
        call zero_tensor(vten)
-       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*x)
-       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*coeff, r)
+       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*parent_tr)*x)
+       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*parent_tr)*coeff, r)
        call tensor_to_helicity(vten, eps_parent, vhel)
 
     case (ch_i_gg)
+
+       if (is_u1_gluon(fp) .or. is_u1_gluon(fa) .or. is_u1_gluon(fj)) then
+          info = -204
+          return
+       end if
 
        dotjk = dot4(p_unres, p_spec)
        denom = 1.0_dp - x + u
@@ -589,7 +623,7 @@ contains
     integer, intent(out) :: info
 
     integer :: ch
-    real(dp) :: scalar, dotab, dotja, dotjb, coeff, aterm
+    real(dp) :: scalar, dotab, dotja, dotjb, coeff, aterm, parent_tr
     real(dp) :: r(0:3), vten(0:3,0:3)
 
     info = 0
@@ -626,13 +660,19 @@ contains
 
        r = p_unres - (dotja/dotab)*p_spec
        coeff = ((1.0_dp - x)/x) * (2.0_dp*dotab/(dotja*dotjb))
+       parent_tr = vector_trace(fp)
 
        call zero_tensor(vten)
-       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*x)
-       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*tr)*coeff, r)
+       call add_minus_g_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*parent_tr)*x)
+       call add_outer_term(vten, 8.0_dp*pi_dp*alpha_s*(2.0_dp*parent_tr)*coeff, r)
        call tensor_to_helicity(vten, eps_parent, vhel)
 
     case (ch_i_gg)
+
+       if (is_u1_gluon(fp) .or. is_u1_gluon(fa) .or. is_u1_gluon(fj)) then
+          info = -304
+          return
+       end if
 
        dotab = dot4(p_emit, p_spec)
        dotja = dot4(p_unres, p_emit)

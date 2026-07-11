@@ -58,7 +58,7 @@ module amplitude_QCD_mod
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
 contains
-  subroutine init(this,imode,n,n_processes,part,spin,o,pm)
+  subroutine init(this,imode,n,n_processes,part,spin,o,pm,valid)
     use math_functions
     use particles
     implicit none
@@ -67,6 +67,7 @@ contains
     integer,intent(in) :: n,imode,n_processes
     integer,dimension(n,n_processes),intent(in) :: part,o
     integer,dimension(0:3,n),intent(in) :: spin
+    logical,intent(out),optional :: valid
     integer,dimension(:,:,:),allocatable :: order
     type(current),dimension(:),allocatable :: current_list_local
     type(interaction),dimension(:),allocatable :: interaction_list_local
@@ -74,6 +75,7 @@ contains
     integer(kind=8),dimension(:),allocatable :: current_dict
     integer,dimension(:,:),allocatable :: key_to_current
 
+    if (present(valid)) valid=.true.
     if (imode.eq.1) then
        write (99,*) 'Initialising amplitude for:'
        write (99,*) '   - all polarisation/helicity configurations'
@@ -158,8 +160,19 @@ contains
     enddo
 
     call simple_consistency_checks()
+    if (present(valid)) then
+       if (.not.valid) return
+    endif
 
     call allocate_and_fill_currents_to_amps_map()
+    if (this%n_amps.eq.0) then
+       if (present(valid)) then
+          valid=.false.
+          return
+       endif
+       write (*,*) 'ERROR: no valid matrix elements found: check your process definition'
+       stop 1
+    endif
     
     call allocate_current_list_and_interaction_list()
 
@@ -399,6 +412,10 @@ contains
          stop 1
       endif
       if (this%n_cur_start(n-1).gt.this%n_cur_end(n-1)) then
+         if (present(valid)) then
+            valid=.false.
+            return
+         endif
          write (*,*) 'ERROR: no valid matrix elements found: check your process definition'
          stop 1
       endif
