@@ -19,6 +19,8 @@ module handling_processes
      real(kind=8) :: lc_weight=1d0
      type(amplitude_QCD) :: amp
      real(kind=8),dimension(0:3) :: p_mapped_ij
+     integer,dimension(:),allocatable :: rho_lookup_ih1,rho_lookup_ih2
+     logical :: rho_lookup_upper=.false.,rho_hermitian_checked=.false.
    contains
      final :: finalize_dipole
   end type dipole
@@ -689,6 +691,8 @@ contains
     if (allocated(di%process_r)) deallocate(di%process_r)
     if (allocated(di%dip_map)) deallocate(di%dip_map)
     if (allocated(di%reduced_color_order)) deallocate(di%reduced_color_order)
+    if (allocated(di%rho_lookup_ih1)) deallocate(di%rho_lookup_ih1)
+    if (allocated(di%rho_lookup_ih2)) deallocate(di%rho_lookup_ih2)
     call finalize_amplitude_QCD(di%amp)
   end subroutine finalize_dipole
 

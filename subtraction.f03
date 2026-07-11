@@ -66,6 +66,7 @@ contains
             pgl(igroup)%spin(0:3,pgl(igroup)%dpl(iamp)%dl(idip)%dip_map(1:n-1)), &
             pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order,&
             phys_model)
+       call initialise_rho_lookup(pgl(igroup)%dpl(iamp)%dl(idip))
     enddo
     call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
   end subroutine initialise_subtraction
@@ -84,6 +85,51 @@ contains
     candidates(:,ncandidates)=[dip_i,dip_j,dip_k]
     reverses(ncandidates)=reverse
   end subroutine add_dipole_candidate
+
+  subroutine initialise_rho_lookup(dip)
+    implicit none
+    type(dipole),intent(inout) :: dip
+    integer :: ih1,ih2,ij,nmatch
+    logical :: is_vector_parent
+
+    ij=dip%dip_r_ijk(1)
+    is_vector_parent=phys_model%is_gluon(dip%dip_r_ijk_f(1))
+    nmatch=0
+    do ih1=1,dip%amp%n_amps
+       do ih2=1,dip%amp%n_amps
+          if (.not.same_rho_spins(dip%amp%spins(:,1,ih1),dip%amp%spins(:,1,ih2),ij, &
+               is_vector_parent)) cycle
+          nmatch=nmatch+1
+       enddo
+    enddo
+    allocate(dip%rho_lookup_ih1(nmatch),dip%rho_lookup_ih2(nmatch))
+    nmatch=0
+    do ih1=1,dip%amp%n_amps
+       do ih2=1,dip%amp%n_amps
+          if (.not.same_rho_spins(dip%amp%spins(:,1,ih1),dip%amp%spins(:,1,ih2),ij, &
+               is_vector_parent)) cycle
+          nmatch=nmatch+1
+          dip%rho_lookup_ih1(nmatch)=ih1
+          dip%rho_lookup_ih2(nmatch)=ih2
+       enddo
+    enddo
+    dip%rho_lookup_upper=.not.is_vector_parent
+    dip%rho_hermitian_checked=.not.is_vector_parent
+  end subroutine initialise_rho_lookup
+
+  logical function same_rho_spins(spins1,spins2,ij,is_vector_parent)
+    implicit none
+    integer,intent(in) :: spins1(:),spins2(:),ij
+    logical,intent(in) :: is_vector_parent
+    integer :: i
+    same_rho_spins=.false.
+    if (.not.is_vector_parent .and. spins1(ij).ne.spins2(ij)) return
+    do i=1,size(spins1)
+       if (i.eq.ij) cycle
+       if (spins1(i).ne.spins2(i)) return
+    enddo
+    same_rho_spins=.true.
+  end function same_rho_spins
 
   logical function dipole_has_valid_born(igroup,iamp,dip_i,dip_j,dip_k,reverse)
     use amplitude_QCD_mod, only: amplitude_QCD
@@ -834,24 +880,51 @@ contains
     implicit none
     integer,intent(in) :: iint,ichan,idip
     complex(kind=8),dimension(2,2),intent(out) :: rho
-    integer,dimension(pgl(ichan)%next-1) :: spins1,spins2
-    integer,dimension(pgl(ichan)%next-2) :: spins1_r,spins2_r
-    integer :: ih1,ih2,ij
+    integer :: ilook,ih1,ih2,ij,a,b
+    complex(kind=8) :: term
+    real(kind=8) :: hermitian_scale
+    associate(dip => pgl(ichan)%dpl(iint)%dl(idip))
     rho=(0d0,0d0)
-    ij=pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1)
-    do ih1=1,pgl(ichan)%dpl(iint)%dl(idip)%amp%n_amps
-       spins1=pgl(ichan)%dpl(iint)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih1)
-       spins1_r=[spins1(1:ij-1),spins1(ij+1:pgl(ichan)%next-1)]
-       do ih2=1,pgl(ichan)%dpl(iint)%dl(idip)%amp%n_amps
-          spins2=pgl(ichan)%dpl(iint)%dl(idip)%amp%spins(1:pgl(ichan)%next-1,1,ih2)
-          spins2_r=[spins2(1:ij-1),spins2(ij+1:pgl(ichan)%next-1)]
-          if (any(spins1_r.ne.spins2_r)) cycle
-          rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)=rho((spins1(ij)+3)/2,(spins2(ij)+3)/2)+ &
-               pgl(ichan)%dpl(iint)%dl(idip)%amp%amps(ih1)*pgl(ichan)%dpl(iint)%dl(idip)%col_fac* &
-               dconjg(pgl(ichan)%dpl(iint)%dl(idip)%amp%amps(ih2))
-       enddo
+    ij=dip%dip_r_ijk(1)
+    do ilook=1,size(dip%rho_lookup_ih1)
+       ih1=dip%rho_lookup_ih1(ilook)
+       ih2=dip%rho_lookup_ih2(ilook)
+       a=(dip%amp%spins(ij,1,ih1)+3)/2
+       b=(dip%amp%spins(ij,1,ih2)+3)/2
+       term=dip%amp%amps(ih1)*dip%col_fac*dconjg(dip%amp%amps(ih2))
+       rho(a,b)=rho(a,b)+term
+       if (dip%rho_lookup_upper .and. a.ne.b) rho(b,a)=rho(b,a)+dconjg(term)
     enddo
+    if (.not.dip%rho_hermitian_checked .and. phys_model%is_gluon(dip%dip_r_ijk_f(1))) then
+       hermitian_scale=max(1d0,maxval(abs(rho)))
+       dip%rho_hermitian_checked=(abs(rho(1,2)-dconjg(rho(2,1))).le.1d-10*hermitian_scale .and. &
+            abs(aimag(rho(1,1))).le.1d-10*hermitian_scale .and. &
+            abs(aimag(rho(2,2))).le.1d-10*hermitian_scale)
+       if (dip%rho_hermitian_checked) then
+          call compact_rho_lookup(dip)
+          dip%rho_lookup_upper=.true.
+       endif
+    endif
+    end associate
   end subroutine create_rho
+
+  subroutine compact_rho_lookup(dip)
+    implicit none
+    type(dipole),intent(inout) :: dip
+    integer,allocatable :: keep_ih1(:),keep_ih2(:)
+    integer :: i,nkeep
+    nkeep=count(dip%rho_lookup_ih1.le.dip%rho_lookup_ih2)
+    allocate(keep_ih1(nkeep),keep_ih2(nkeep))
+    nkeep=0
+    do i=1,size(dip%rho_lookup_ih1)
+       if (dip%rho_lookup_ih1(i).gt.dip%rho_lookup_ih2(i)) cycle
+       nkeep=nkeep+1
+       keep_ih1(nkeep)=dip%rho_lookup_ih1(i)
+       keep_ih2(nkeep)=dip%rho_lookup_ih2(i)
+    enddo
+    call move_alloc(keep_ih1,dip%rho_lookup_ih1)
+    call move_alloc(keep_ih2,dip%rho_lookup_ih2)
+  end subroutine compact_rho_lookup
 
   subroutine compute_the_amps(iint,ichan,use_amplitude_library)
     use amp_lib
