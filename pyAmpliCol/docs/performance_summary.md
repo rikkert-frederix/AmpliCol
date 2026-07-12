@@ -5,11 +5,15 @@
 > `pyAmpliCol.pdf`, generated from `z_performance_data.json`,
 > `z_performance_table.tex`, and the LC/NLC/full-colour result-matrix caches.
 > The current production defaults are Rusticol schema-v2 process artifacts,
-> SymJIT `opt_level=3`, batch size `64`, output chunk size `128`, stage-local
-> evaluator inputs, ten Horner iterations, Symbolica's backend-default CPE
-> choice, enlarged common-pair/Horner limits, and `time-process
-> --target-runtime 10`.  The rows below are kept for provenance and should not
-> be used as the current regenerated table.
+> SymJIT `opt_level=3`, stage-local evaluator inputs, ten Horner iterations,
+> Symbolica's backend-default CPE choice, and enlarged common-pair/Horner
+> limits. The live result matrix deliberately uses O1 throughout; repeated
+> ten-second checks have not found a consistent, material O3 gain for a current
+> matrix cell. Selected-flow
+> JIT artifacts use runtime batch 128 and measure stage chunks around base 128;
+> documented all-flow artifacts use uniform chunk 8192 and batch 64. Timings
+> use `time-process --target-runtime 10`. The rows below are kept for provenance
+> and should not be used as the current regenerated table.
 
 Process family: `d d~ -> Z + n g`, for `n = 1,...,9`.
 
@@ -21,7 +25,7 @@ For C++ and ASM rows with multiple measured chunking options, this table reports
 
 The compiled pyAmplicCol DAG marks all known-real momentum-sum parameters as real with Symbolica `set_real_params(...)` before evaluator generation/compilation. In this hot path the couplings are embedded constants, so the relevant runtime input realness is the momentum sector. The refreshed low-multiplicity AmpliCol reference rows use the direct generated-library benchmark: `./amplicol_generate --library=create --amplicol_momenta_probe=10`, `make amplicol_generate_library`, `make amplicol_library_benchmark`, then `./amplicol_library_benchmark N 1 1`, which calls `amp_lib:evaluate_amp` directly and bypasses integration/probe bookkeeping.
 
-The dependency installer now uses upstream Symbolica `dev` plus the local pyAmplicCol patches and pins SymJIT to `2.19.3` at commit `7fb09d1cb2a943c25a6fd71a208af44fcc6d813d`. This includes the historical AArch64 complex-JIT fix captured in `MRE_symjit_bug_new.py`. The refreshed staged-DAG JIT rows pass SymJIT `opt_level=3` through Symbolica's JIT evaluator.
+The dependency installer now uses upstream Symbolica `dev` plus the local pyAmplicCol patches and pins SymJIT to `2.19.3` at commit `7fb09d1cb2a943c25a6fd71a208af44fcc6d813d`. Managed patches cover the historical AArch64 complex-JIT register-allocation failure, external-call spill offsets at the 4096-byte boundary, and stack adjustments above the shifted 12-bit immediate range. The historical rows below use the optimization levels recorded in their notes; the current matrix policy is O1 throughout.
 
 | n | Setup | Gen [s] | Wall [us/pt] | Eval [us/pt] | Notes |
 |---:|---|---:|---:|---:|---|

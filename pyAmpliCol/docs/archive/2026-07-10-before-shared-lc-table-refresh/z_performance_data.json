@@ -1,0 +1,599 @@
+{
+  "created_by": "pyAmpliCol/docs/z_performance_table.py",
+  "entries": {
+    "1": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.11988112604704498,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 0.9778,
+          "all_flow_status": "ok",
+          "generation_s": 2.0578247096855193,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.021500000000000002,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:34:04.121357+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 0.6783082080073655,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/asm_all_flows",
+          "all_flow_runtime_us_per_point": 0.03145046376703388,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.15580536825169944,
+          "generation_s": 0.7112540421076119,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/asm",
+          "runtime_us_per_point": 0.09114847368212256,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:35:04.886534+00:00",
+          "wall_us_per_point": 0.22438554503093766
+        },
+        "cpp_o3": {
+          "all_flow_generation_s": 0.6967196250334382,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.025299003715431843,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.14794973564857347,
+          "generation_s": 0.7141556658316404,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/cpp_o3",
+          "runtime_us_per_point": 0.04167279246910152,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:35:36.376268+00:00",
+          "wall_us_per_point": 0.1749393478931599
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.15385954198427498,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 0.03317195228656827,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.15648222628494604,
+          "generation_s": 0.18453395809046924,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/jit_o1",
+          "runtime_us_per_point": 0.04793121221683581,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:34:33.958792+00:00",
+          "wall_us_per_point": 0.18380612129543134
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 0.16052354197017848,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 0.03282299316220309,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.1537496402465803,
+          "generation_s": 0.19229666702449322,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.0545143028299946,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:35:37.507639+00:00",
+          "wall_us_per_point": 0.1919108968832547
+        }
+      },
+      "process": "d d~ > Z + (1-1)*g"
+    },
+    "2": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.13116441694159806,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 1.0493000000000001,
+          "all_flow_status": "ok",
+          "generation_s": 2.1928088339045644,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.1273,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:45:39.731396+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 0.9609557080548257,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n2/asm_all_flows",
+          "all_flow_runtime_us_per_point": 0.14160639474873304,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.27687211842236265,
+          "generation_s": 0.9831981249153614,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n2/asm",
+          "runtime_us_per_point": 0.5443003465679638,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:46:33.349229+00:00",
+          "wall_us_per_point": 0.7269570874267364
+        },
+        "cpp_o3": {
+          "all_flow_generation_s": 1.0593770421110094,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n2/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.06859903678099089,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.20525312959128633,
+          "generation_s": 1.224121249979362,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n2/cpp_o3",
+          "runtime_us_per_point": 0.22474932811556023,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:47:02.083649+00:00",
+          "wall_us_per_point": 0.40514059724444407
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.17299191583879292,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n2/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 0.07955730255800086,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.21467833028327576,
+          "generation_s": 0.20603045891039073,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n2/jit_o1",
+          "runtime_us_per_point": 0.19760228735508972,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:46:06.644986+00:00",
+          "wall_us_per_point": 0.3795850476315719
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 0.17491349996998906,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 0.07851495272213845,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.21225609558304137,
+          "generation_s": 0.18847341695800424,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.20933190511345015,
+          "status": "ok",
+          "updated_at": "2026-07-10T01:47:03.075966+00:00",
+          "wall_us_per_point": 0.40643365545089505
+        }
+      },
+      "process": "d d~ > Z + (2-1)*g"
+    },
+    "3": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.11436949887427687,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 1.1507,
+          "all_flow_status": "ok",
+          "generation_s": 2.169807500205934,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.4425,
+          "status": "ok",
+          "updated_at": "2026-07-10T07:32:12.772325+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 1.3320330830756575,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n3/asm_all_flows",
+          "all_flow_runtime_us_per_point": 0.7284414362619869,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.9929529821105596,
+          "generation_s": 1.520822542021051,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n3/asm",
+          "runtime_us_per_point": 1.6583342119960998,
+          "status": "ok",
+          "updated_at": "2026-07-10T07:33:02.072875+00:00",
+          "wall_us_per_point": 1.9286037608580522
+        },
+        "cpp_o3": {
+          "all_flow_generation_s": 1.3817462080623955,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n3/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.31989577037524564,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.5793692590031662,
+          "generation_s": 2.3094856669194996,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n3/cpp_o3",
+          "runtime_us_per_point": 0.687014322223904,
+          "status": "ok",
+          "updated_at": "2026-07-10T07:33:29.044976+00:00",
+          "wall_us_per_point": 0.9555364416026756
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.20893616694957018,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n3/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 0.32468985326294203,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.5841552368018107,
+          "generation_s": 0.2899560418445617,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n3/jit_o1",
+          "runtime_us_per_point": 0.5419566025697724,
+          "status": "ok",
+          "updated_at": "2026-07-10T07:32:36.806468+00:00",
+          "wall_us_per_point": 0.8129725339935545
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 0.17822595895268023,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 0.3273924853935027,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 0.5881197114925344,
+          "generation_s": 0.18864275002852082,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.5386919632152747,
+          "status": "ok",
+          "updated_at": "2026-07-10T07:33:30.027741+00:00",
+          "wall_us_per_point": 0.8057102316031027
+        }
+      },
+      "process": "d d~ > Z + (3-1)*g"
+    },
+    "4": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.1029658330667764,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 1.9925,
+          "all_flow_status": "ok",
+          "generation_s": 2.282431626226753,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 1.4092,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:14:30.080557+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 1.5746507921721786,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n4/asm_all_flows",
+          "all_flow_runtime_us_per_point": 5.076145071236042,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 6.016631039306141,
+          "generation_s": 1.9221835411153734,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n4/asm",
+          "runtime_us_per_point": 5.141127664113441,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:15:18.026431+00:00",
+          "wall_us_per_point": 5.628879406964999
+        },
+        "cpp_o3": {
+          "all_flow_generation_s": 1.8428937499411404,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n4/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 2.1143723671564083,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 3.0186672750722674,
+          "generation_s": 5.702806166140363,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n4/cpp_o3",
+          "runtime_us_per_point": 2.270383983752212,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:15:47.497040+00:00",
+          "wall_us_per_point": 2.7375634340193473
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.20874533313326538,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n4/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 2.2336845507103993,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 3.148974534784339,
+          "generation_s": 0.40392004093155265,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n4/jit_o1",
+          "runtime_us_per_point": 1.573889453648197,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:14:52.839300+00:00",
+          "wall_us_per_point": 2.0318409625354406
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 0.19186183321289718,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 1.9876876238830499,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 2.8610661506584005,
+          "generation_s": 0.24045933410525322,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 1.5351193689848364,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:15:48.560218+00:00",
+          "wall_us_per_point": 1.9760957773608652
+        }
+      },
+      "process": "d d~ > Z + (4-1)*g"
+    },
+    "5": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.14699699997772275,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 7.5083,
+          "all_flow_status": "ok",
+          "generation_s": 2.6927188746631145,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 4.524,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:20:04.620881+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 1.9276068331673741,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/asm_all_flows",
+          "all_flow_runtime_us_per_point": 42.474482108288555,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 49.39210685077459,
+          "generation_s": 4.143692834069952,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/asm",
+          "runtime_us_per_point": 15.69835426831734,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:17:36.000725+00:00",
+          "wall_us_per_point": 16.84921807791452
+        },
+        "cpp_o3": {
+          "all_flow_generation_s": 2.502611583098769,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 18.307944129237956,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 24.755697155153157,
+          "generation_s": 17.317205166909844,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/cpp_o3",
+          "runtime_us_per_point": 7.345327649423585,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:18:17.437613+00:00",
+          "wall_us_per_point": 8.41733032655026
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.2756057921797037,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 16.708986243953387,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 22.904760192434015,
+          "generation_s": 0.8251040419563651,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/jit_o1",
+          "runtime_us_per_point": 5.269226915322581,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:17:08.443310+00:00",
+          "wall_us_per_point": 6.300511141460213
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 0.27153762499801815,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/jit_o3_all_flows",
+          "all_flow_runtime_us_per_point": 17.101270686222957,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 23.478287804852453,
+          "generation_s": 0.76749875000678,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n5/jit_o3",
+          "runtime_us_per_point": 5.277214120697665,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:18:40.072578+00:00",
+          "wall_us_per_point": 6.312342861058411
+        }
+      },
+      "process": "d d~ > Z + (5-1)*g"
+    },
+    "6": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.23752775011223554,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 42.6603,
+          "all_flow_status": "ok",
+          "generation_s": 3.274399665882811,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 13.4664,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:21:15.689362+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 2.249767709057778,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n6/asm_all_flows",
+          "all_flow_runtime_us_per_point": 415.4896291992187,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 489.5452655205191,
+          "generation_s": 8.197602458996698,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n6/asm",
+          "runtime_us_per_point": 48.272771803513066,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:22:11.468207+00:00",
+          "wall_us_per_point": 51.07628429173287
+        },
+        "cpp_o3": {
+          "all_flow_generation_s": 3.5047784170601517,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n6/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 209.4375290138134,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 283.4459718265545,
+          "generation_s": 49.29956170893274,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n6/cpp_o3",
+          "runtime_us_per_point": 25.283834140954642,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:23:25.825130+00:00",
+          "wall_us_per_point": 27.47172094616919
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.3033035830594599,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n6/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 174.8449305913233,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 247.99654363847716,
+          "generation_s": 1.6954718751367182,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n6/jit_o1",
+          "runtime_us_per_point": 15.4487563538646,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:21:39.420379+00:00",
+          "wall_us_per_point": 17.428788211376073
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 0.27186570898629725,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 170.8867656738281,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 244.23046775723378,
+          "generation_s": 0.8689839171711355,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 15.22660429777674,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:23:26.907613+00:00",
+          "wall_us_per_point": 17.177480824453053
+        }
+      },
+      "process": "d d~ > Z + (6-1)*g"
+    },
+    "7": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 1.3480673341892508,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 307.82843454616085,
+          "all_flow_status": "ok",
+          "generation_s": 4.672658542171121,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 37.115,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:24:53.312287+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 2.7348055420443416,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n7/asm_all_flows",
+          "all_flow_runtime_us_per_point": 4058.6466475183825,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 4663.501857280875,
+          "generation_s": 17.606433500070125,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n7/asm",
+          "runtime_us_per_point": 124.60005615923237,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:26:03.404875+00:00",
+          "wall_us_per_point": 129.73371710030736
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 0.49890070781111717,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n7/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 1696.7553978713768,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 2295.5131246725205,
+          "generation_s": 4.869330583140254,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n7/jit_o1",
+          "runtime_us_per_point": 54.92916944575472,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:25:20.918443+00:00",
+          "wall_us_per_point": 58.98082564323525
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 9.740898415911943,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n7/jit_o3_all_flows; time batch 2048, output chunk 8192",
+          "all_flow_runtime_us_per_point": 273.43522138129345,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 2048,
+          "all_flow_wall_us_per_point": 282.7805966805701,
+          "generation_s": 2.2858185411896557,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n7/jit_o3",
+          "runtime_us_per_point": 45.94345058773391,
+          "status": "ok",
+          "updated_at": "2026-07-10T19:21:05.096930+00:00",
+          "wall_us_per_point": 49.57168381620378
+        }
+      },
+      "process": "d d~ > Z + (7-1)*g"
+    },
+    "8": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 17.428690958019406,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 7329.257062146892,
+          "all_flow_status": "ok",
+          "generation_s": 9.568006417015567,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 93.51310000000001,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:27:48.049772+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 3.959085874957964,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n8/asm_all_flows",
+          "all_flow_runtime_us_per_point": 42907.544945312504,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 47787.55151755831,
+          "generation_s": 37.963326416909695,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n8/asm",
+          "runtime_us_per_point": 319.6651158854167,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:29:47.955734+00:00",
+          "wall_us_per_point": 325.5861199098338
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 1.2882697919849306,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n8/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 17809.550951171874,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 22675.014482501865,
+          "generation_s": 11.023794166045263,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n8/jit_o1",
+          "runtime_us_per_point": 179.8063241356383,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:28:26.318963+00:00",
+          "wall_us_per_point": 184.83155870952712
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 1.0804076250642538,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 17485.021019531247,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 22335.489014949417,
+          "generation_s": 5.117334874812514,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 179.08435335689043,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:29:49.032286+00:00",
+          "wall_us_per_point": 184.1095934466838
+        }
+      },
+      "process": "d d~ > Z + (8-1)*g"
+    },
+    "9": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 551.9691831250341,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 103619.60317460317,
+          "all_flow_status": "ok",
+          "generation_s": 25.45829933299683,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 229.0434,
+          "status": "ok",
+          "updated_at": "2026-07-10T08:59:54.156179+00:00"
+        },
+        "asm": {
+          "all_flow_generation_s": 54.36589933396317,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n9/asm_all_flows",
+          "all_flow_runtime_us_per_point": 525376.4667597654,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 582293.4774587338,
+          "generation_s": 89.71687695919536,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n9/asm",
+          "runtime_us_per_point": 1032.8131519505032,
+          "status": "ok",
+          "updated_at": "2026-07-10T09:12:54.629481+00:00",
+          "wall_us_per_point": 1049.5301837895781
+        },
+        "jit_o1": {
+          "all_flow_generation_s": 61.07442979211919,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n9/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 221395.49130078123,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 278656.6499826222,
+          "generation_s": 29.58387970807962,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n9/jit_o1",
+          "runtime_us_per_point": 644.6940819984244,
+          "status": "ok",
+          "updated_at": "2026-07-10T09:04:38.399085+00:00",
+          "wall_us_per_point": 659.1480547637324
+        },
+        "jit_o3": {
+          "all_flow_generation_s": 55.67287600017153,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 184747.95668554684,
+          "all_flow_status": "ok",
+          "all_flow_wall_us_per_point": 234924.3151875271,
+          "generation_s": 13.39268200006336,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 659.9297315463363,
+          "status": "ok",
+          "updated_at": "2026-07-10T09:12:55.720471+00:00",
+          "wall_us_per_point": 675.3064983591873
+        }
+      },
+      "process": "d d~ > Z + (9-1)*g"
+    }
+  },
+  "multiplicity_convention": "final_state",
+  "process_family": "d d~ > z + (n-1)g",
+  "schema_version": 1,
+  "settings": {
+    "all_flow_runtime_batch_size": 2048,
+    "all_flow_symbolica_output_chunk_size": 8192,
+    "batch_size": 64,
+    "selected_runtime_batch_size": 64,
+    "selected_symbolica_output_chunk_size": 128,
+    "symbolica_cpe_iterations": null,
+    "symbolica_iterations": 10,
+    "symbolica_max_common_pair_cache_entries": 5000000,
+    "symbolica_max_common_pair_distance": 1000,
+    "symbolica_max_horner_scheme_variables": 1000,
+    "symbolica_output_chunk_size": 128,
+    "symbolica_stage_local_parameter_layout": true,
+    "target_runtime_s": 10.0
+  },
+  "updated_at": "2026-07-10T19:21:06.150499+00:00"
+}

@@ -1646,6 +1646,9 @@ def _as_expression(value: Any) -> Any:
 def _minkowski_square_expression(momentum: Sequence[Any]) -> Any:
     if len(momentum) != 4:
         raise ValueError("Minkowski momentum needs four components")
+    if all(isinstance(value, int | float | complex) for value in momentum):
+        p0, p1, p2, p3 = momentum
+        return p0 * p0 - p1 * p1 - p2 * p2 - p3 * p3
     p0, p1, p2, p3 = (_as_expression(value) for value in momentum)
     return p0 * p0 - p1 * p1 - p2 * p2 - p3 * p3
 

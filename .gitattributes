@@ -1,0 +1,2 @@
+# Unified-diff payloads require context markers on otherwise blank lines.
+pyAmpliCol/dependencies/patches/** whitespace=-trailing-space,-space-before-tab

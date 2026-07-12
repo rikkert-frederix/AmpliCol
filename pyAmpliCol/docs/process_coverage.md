@@ -36,9 +36,10 @@ This document separates three layers that are easy to conflate:
 | Symbolica evaluator bridge | Split from retired staged-DAG runtime | `symbolica_evaluator.py` owns evaluator settings, chunking, save/load manifests, and compiled/JIT adapter construction for production schema-v2 stages. Generic stage compilation no longer imports the retired `dag_runtime.py` implementation. |
 | Matrix generation facade | Generic-only | `matrix.py` is now a process-generic schema-v2 planning facade.  The previous `CurrentKey`/`RecursionGraph` family graph builder is quarantined in `legacy_matrix.py` for reference tests and migration diagnostics. |
 | Arbitrary quark-pair counts in enumeration formulas | Implemented | The Python process layer uses generic quark-line combinatorics instead of explicit 1/2/3 branches. |
-| Production ME lowering | Implemented and validated for broad generic LC; NLC/full validation started | The schema-v2 generic DAG path reaches model-owned kernels for multi-boson, scalar/Higgs, pure-gluon, and multi-quark-line processes, builds evaluator-stage expressions, serializes evaluator artifacts, and records explicit blockers when a requested process or colour accuracy is not yet implemented. |
+| Production ME lowering | Implemented and validated for broad generic LC and the documented NLC/full matrix coverage | The schema-v2 generic DAG path reaches model-owned kernels for multi-boson, scalar/Higgs, pure-gluon, and multi-quark-line processes, builds evaluator-stage expressions, serializes evaluator artifacts, and records explicit blockers when a requested process or colour accuracy is not yet implemented. |
 | Python artifact loader | Implemented for schema-v2 generic DAG artifacts | `load_process(..., runtime="python")` resolves process sets, subprocess keys, generic external layouts, and stage-plan metadata without depending on process-family labels. Schema-v1 execution is rejected by default and requires the explicit `allow_legacy_schema_v1=True` reference-only opt-in. |
-| Rusticol runtime | Implemented for schema-v2 generic DAG artifacts | `rusticol.Runtime.load()` is the production loader and accepts only schema-v2 generic DAG artifacts.  Schema-v1 family artifacts are reference-only and require the explicit `rusticol.Runtime.load_legacy()` entry point. |
+| Rusticol runtime | Implemented for schema-v2 generic DAG artifacts | `rusticol.Runtime.load()` is the production loader and accepts only schema-v2 generic DAG artifacts. On AArch64, the f64 path uses native two-lane complex SymJIT payloads and shares one packed stage-local input across output chunks; `RUSTICOL_NATIVE_SIMD_JIT=0` selects the scalar diagnostic fallback. Schema-v1 family artifacts are reference-only and require the explicit `rusticol.Runtime.load_legacy()` entry point. |
+| Compact runnable manifests | Implemented | After evaluator serialization, generation-only interaction detail is reduced to stage IDs and vertex-kind counts; the full records remain in the trusted local `runtime_schema_diagnostics.pickle.gz` sidecar, plan-only manifests stay detailed, and Rusticol loads both layouts. |
 | NLC/full-colour | Initial production support, direct Fortran colour-matrix validation through two quark lines | `--color-accuracy nlc` and `--color-accuracy full` build the same colour-ordered DAG and replace the final LC diagonal contraction by a sparse colour metric.  Pure-gluon, one-quark-line, and two-quark-line classes are matched directly to Fortran AmpliCol colour matrices.  Higher quark-line counts use the generic open-line trace-overlap metric, including gluons on the open lines; those cases require raw-amplitude probes rather than Fortran's built-in colour matrix for validation. |
 | Production CLI surface | Generic DAG only | `processes`, `process-plan`, `generate-process`, `time-process`, and `compare-amplicol --runtime-backend rusticol` are the visible workflow. `compare-amplicol` defaults to the generated-library supplied-momenta probe (`--library=create`, `make amplicol_generate_library`, `--library=use`). Legacy native/tensor/Z-family commands remain compatibility stubs only and are hidden from help output. |
 
@@ -49,8 +50,9 @@ route, not to a permanent physics special case.  For one-quark-line
 `q q~ > V + n g` processes, pyAmpliCol generates a fixed shared-current sweep,
 serializes bounded Symbolica evaluator blocks, and Rusticol executes the
 resulting stage plan without dynamic process interpretation.  This is the route
-used for the documented `d d~ > Z + n g` timings in
-`performance_summary.md`.
+used for the live `d d~ > Z + (n-1)g` timings in `pyAmpliCol.pdf` and
+`z_performance_data.json`; `performance_summary.md` is retained only as a
+historical benchmark snapshot.
 
 Generic process support must preserve that property.  Parser, colour-flow, and
 current-DAG construction can be process-generic at generation time, but the
@@ -63,31 +65,28 @@ If a generalization changes the hot runtime into hash-map lookup, dynamic
 dispatch, extra live colour sectors, or different evaluator chunk/CSE
 boundaries, that is a regression rather than acceptable genericity.
 
-The generic way to keep generation time competitive is LC colour-sector
-topology reuse.  For example, `d d~ > Z + 4g` has 24 leading-colour sectors,
-but all 24 are the same current topology with different external gluon-label
-permutations.  The colour planner records `topology_groups`, each with one
-representative sector id and a label permutation for every equivalent sector.
-The production default compiles one replay-safe representative sector, matching
-the Fortran AmpliCol reference-order convention used in ME comparisons.  Full
-sibling-sector replay is available explicitly with `--lc-topology-replay` for
-diagnostics or full-sector studies, but it is not the default timing path.
-This is not a `Z+gluons` shortcut: the grouping key is built from process IR
-labels, PDGs, open colour lines, trace structure, and singlet attachments.  It
-also applies to dilepton, charged-current, pure-gluon, and multi-quark
-processes whenever their LC sectors are isomorphic.
+LC generation supports two complementary sharing modes.  The ordinary CLI
+default, `--lc-sector-strategy topology-representatives`, compiles one
+replay-safe representative for a selected-flow workload.  The all-flow
+benchmark path uses `--lc-sector-strategy all`: it retains every LC amplitude
+root but keys reusable currents by physics state and ordered coloured word, not
+by sector id.  Current and interaction counts therefore follow the shared
+recursion rather than multiplying by the number of colour orderings.
 
-Schema-v2 process manifests and generated artifacts expose the representative
-plan as `lc_topology_reuse`; generated artifacts also include
-`runtime_lc_topology_reuse` and, when requested, `compiled.lc_topology_replay`.
-Rusticol keeps the metadata in its schema-v2 summary through
-`lc_topology_reuse_available`, `lc_topology_group_count`,
-`lc_topology_representative_sector_ids`, `lc_topology_replay_enabled`, and
-`lc_topology_replay_sector_count`.  When replay metadata is enabled, Rusticol's
-schema-v2 `evaluate()` path batches the materialized representative stage plan
-over stored external-label permutations and sums the replayed LC sector
-contributions.  This runtime plumbing is generic and is validated against
-fully materialized all-sector artifacts.
+`--runtime-lc-sector-ids` can additionally write a pruned selected-flow
+sidecar.  Its colour choice is fixed before Symbolica evaluator construction,
+so a one-flow timing does not execute an all-flow evaluator or retain dynamic
+selector conditionals.  The result matrix deliberately generates both the
+shared all-flow artifact and this selected sidecar: generation is compared
+against AmpliCol's complete LC capability, while the two runtime columns time
+one flow with a helicity sum and all flows at one fixed helicity separately.
+
+The colour planner still records topology groups and exact label
+permutations.  `--lc-topology-replay` remains available as a diagnostic
+representative-replay route, but it is not required by the materialized shared
+all-sector artifact.  The grouping and shared-current keys are process-generic:
+they are derived from process IR, particle state, open colour lines, trace
+structure, and singlet attachments rather than a `Z+gluons` family tag.
 
 Generic pruning knobs are allowed when they describe physics budgets rather
 than process families.  Examples include maximum QCD/QED/EW coupling order,
@@ -122,23 +121,14 @@ current insertion without inspecting the process family.  It is useful when a
 user wants, for example, `p p > Z + jets` expansion but only up to a chosen
 number of open quark lines.
 
-For LC colour sectors, `--lc-sector-strategy topology-representatives` is the
-default generic generation-time sharing knob.  It compiles only one
-representative DAG per replay-safe isomorphic LC topology.  If a topology group
-would move initial-state labels, or is a pure single-trace gluon topology whose
-trace symmetries need separate validation, pyAmpliCol falls back to
-materializing all contributing sectors.  The separate `--lc-topology-replay`
-flag asks Rusticol to evaluate and sum every recorded sibling sector; without
-that flag, the generated artifact evaluates the selected representative colour
-ordering, matching the Fortran reference-order convention.
-On
-`d d~ > z g g g g`, full LC planning materializes 24 colour sectors with
-14,280 currents, 53,280 interactions, and 2,304 amplitude roots before
-backward pruning.  The topology representative plan materializes one
-representative sector and, after amplitude-root reachability pruning, keeps 333
-live currents, 1,202 interactions, and 96 roots.  Optional replay validation
-compares the replayed Rusticol result against the fully materialized all-sector
-result.
+For selected workloads, topology representatives remain the default generic
+generation-time sharing knob.  If a requested topology cannot be replayed
+safely, the planner falls back to the contributing sectors rather than
+returning an approximation.  For complete all-flow workloads, the shared
+all-sector DAG handles open-line and pure single-trace gluon processes
+directly.  Pure-gluon reflection symmetry and mixed-process gluon-subcurrent
+reflection reuse carry their signs on interaction edges; selected-sector
+artifacts disable those all-ordering transformations.
 
 Executable replay validation is available through:
 
@@ -146,22 +136,12 @@ Executable replay validation is available through:
 python pyAmpliCol/scripts/validate_lc_topology_replay.py 'd d~ > z g g'
 ```
 
-This builds a full materialized artifact and a topology-representative artifact
-for the same deterministic phase-space point, loads both through Rusticol, and
-compares the final matrix element.  Current smoke results with JIT evaluator
-artifacts are:
-
-| Process | Full LC Sectors | Replay Representatives | Relative Difference |
-|---|---:|---:|---:|
-| `d d~ > z g g` | 2 | 1 | `1.19e-16` |
-| `d d~ > z g g g` | 6 | 1 | `2.68e-16` |
-| `d d~ > e+ e- g g` | 2 | 1 | `2.35e-16` |
-| `u d~ > w+ g g` | 2 | 1 | `1.03e-15` |
-
-The same validator reports pure-gluon and gluon-initiated examples such as
-`g g > g g` and `g g > u u~ g` as `not-applicable` for replay at this stage,
-because their LC topology permutations do not preserve the initial-label set
-or involve single-trace colour conventions that need dedicated validation.
+This builds a complete shared artifact and a topology-representative artifact
+for the same deterministic point, loads both through Rusticol, and compares
+their final matrix elements.  The matrix refresh performs the stronger
+production check against AmpliCol as well and records selected-flow and
+all-flow values, current counts, generation phases, and runtimes in
+`result_matrix_data.json`.
 
 ## Legacy Process Families
 
@@ -493,6 +473,12 @@ the blocking evaluator-construction call.  The heartbeat cannot expose
 Symbolica's internal optimization phase boundaries, but it keeps the
 progressbar alive with elapsed `jit initialize` updates and refreshed process
 RAM while that call is running.
+
+`generate-process --monitor` exposes the same DAG construction, pruning,
+stage-blueprint, evaluator-build, diagnostics, and manifest phases in non-TTY
+logs. Rapid per-chunk JIT transitions are coalesced into periodic updates, so
+captured logs remain useful without losing the selected autotune layout or
+phase-completion timings.
 
 ## Colour Accuracy
 

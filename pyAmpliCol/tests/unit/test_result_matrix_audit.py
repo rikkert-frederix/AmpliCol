@@ -39,6 +39,8 @@ def test_result_matrix_gate_passes_with_documented_unsupported_cells() -> None:
     assert "Gate status: **PASS_WITH_LIMITATIONS**." in report
     assert "`amplicol_unsupported`=1" in report
     assert "`jit_backend_unsupported`=1" in report
+    assert "`jit_ram_limit`=0" in report
+    assert "`all_flow_ram_limit`=0" in report
     assert "`missing_cpp_o3`=1" in report
 
 
@@ -90,7 +92,8 @@ def test_result_matrix_report_separates_low_n_mode_and_validation_coverage() -> 
 
     report = audit.render_report(data, [])
 
-    assert "Low-multiplicity coverage (`n <= 5`):" in report
+    assert "from `n=5` upward at a `2.0x` threshold" in report
+    assert "Low-multiplicity coverage (`n <= 4`):" in report
     assert "`cases`=2" in report
     assert "`amplicol_ok`=2" in report
     assert "`jit_ok`=2" in report
@@ -99,3 +102,70 @@ def test_result_matrix_report_separates_low_n_mode_and_validation_coverage() -> 
     assert "`validation_clean`=1" in report
     assert "`missing_validation_records`=1" in report
     assert "`validation_failures`=0" in report
+
+
+def test_high_ratio_audit_covers_selected_and_all_flow_from_n6() -> None:
+    audit = _load_audit_module()
+    row = {
+        "5": {
+            "amplicol": {
+                "status": "ok",
+                "runtime_us_per_point": 1.0,
+                "all_flow_runtime_us_per_point": 2.0,
+            },
+            "pyamplicol_jit": {
+                "status": "ok",
+                "wall_us_per_point": 10.0,
+                "all_flow_wall_us_per_point": 20.0,
+            },
+        },
+        "6": {
+            "amplicol": {
+                "status": "ok",
+                "runtime_us_per_point": 1.0,
+                "all_flow_runtime_us_per_point": 2.0,
+            },
+            "pyamplicol_jit": {
+                "status": "ok",
+                "wall_us_per_point": 3.0,
+                "all_flow_wall_us_per_point": 6.0,
+            },
+        },
+    }
+
+    findings = list(
+        audit._audit_row_ratios(1, "proc", row, threshold=2.5, min_n=6)
+    )
+
+    assert [finding.mode for finding in findings] == [
+        "pyamplicol_jit:selected-flow",
+        "pyamplicol_jit:all-flow",
+    ]
+
+
+def test_lc_monotonicity_never_compares_all_flow_with_selected_generation() -> None:
+    audit = _load_audit_module()
+    row = {
+        "7": {
+            "pyamplicol_jit": {
+                "status": "ok",
+                "generation_s": 1700.0,
+                "selected_generation_s": 30.0,
+                "all_flow_generation_s": 1700.0,
+            }
+        },
+        "8": {
+            "pyamplicol_jit": {
+                "status": "ok",
+                "generation_s": 40.0,
+                "selected_generation_s": 40.0,
+                "all_flow_status": "ram_limit",
+            }
+        },
+    }
+
+    findings = list(
+        audit._audit_row_monotonicity(8, "gg_gluons", row, factor=3.0)
+    )
+
+    assert findings == []

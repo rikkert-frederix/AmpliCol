@@ -4286,6 +4286,7 @@ class _JITSymbolicaEvaluatorAdapter:
             "label": self.label,
             "input_len": self.input_len,
             "output_len": self.output_len,
+            "jit_payload_layout": _jit_payload_layout(),
             "evaluator_state_path": _artifact_path_for_manifest(path, artifact_dir),
         }
 
@@ -4444,6 +4445,10 @@ def _compiled_compiler_flags(settings: SymbolicaEvaluatorSettings) -> tuple[str,
 def _aarch64_platform() -> bool:
     machine = platform.machine().lower()
     return machine in {"arm64", "aarch64"}
+
+
+def _jit_payload_layout() -> str:
+    return "native-complex-f64x2" if _aarch64_platform() else "scalar-complex-f64"
 
 
 class _ChunkedSymbolicaEvaluator:

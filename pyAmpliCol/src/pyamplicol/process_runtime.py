@@ -159,7 +159,13 @@ class PythonProcessRuntime:
                         "stage": stage.get("stage_index"),
                         "stage_kind": stage.get("stage_kind"),
                         "subset_size": stage.get("subset_size"),
-                        "interaction_count": len(stage.get("interactions", [])),
+                        "interaction_count": stage.get(
+                            "interaction_count",
+                            len(stage.get("interactions", [])),
+                        ),
+                        "interaction_metadata_compacted": bool(
+                            stage.get("interactions_compacted", False)
+                        ),
                         "output_value_slot_count": len(
                             stage.get("output_value_slot_ids", [])
                         ),

@@ -25,6 +25,12 @@ def test_color_plan_builds_open_line_gluon_orderings() -> None:
     assert plan.sectors[0].coloured_label_groups == ((2, 4, 5, 1),)
     assert plan.sectors[0].line_label_groups == ((2, 4, 5, 1),)
     assert plan.coloured_labels == (1, 2, 4, 5)
+    assert "_sectors_by_id" not in plan.__dict__
+    assert plan.sector(plan.sectors[-1].id) is plan.sectors[-1]
+    assert plan.__dict__["_sectors_by_id"] == {
+        sector.id: sector for sector in plan.sectors
+    }
+    assert plan.sector(10_000) is None
 
 
 def test_color_plan_generates_arbitrary_quark_line_pairings() -> None:

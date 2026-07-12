@@ -7,6 +7,19 @@ from symbolica.community.spenso import Representation, TensorName, TensorLibrary
 from pyamplicol.params import ParamBuilder, SymbolicaEvaluatorBundle
 
 
+def test_param_builder_reuses_symbols_created_when_ranges_are_added() -> None:
+    builder = ParamBuilder()
+    first = builder.add_parameter_list(("cached", "first"), 2)
+    second = builder.add_parameter_list(("cached", "second"), 1)
+
+    symbols = builder.parameter_symbols()
+
+    assert len(symbols) == 3
+    assert symbols[0] is first[0]
+    assert symbols[1] is first[1]
+    assert symbols[2] is second[0]
+
+
 def test_param_builder_registers_rank1_tensor_for_symbolica_evaluator() -> None:
     library = TensorLibrary.hep_lib_atom()
     mink = Representation.mink(4)

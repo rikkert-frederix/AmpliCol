@@ -72,6 +72,27 @@ runtime:
 ./pyamplicol.sh time-process outputs/dd_z_4g
 ```
 
+For normal selected-flow JIT artifacts, the CLI uses batch 128 and measures
+stage output chunks around the base size 128.  A candidate replaces uniform
+chunk 128 only when its stage microbenchmark is at least 5% faster. On AArch64,
+the score counts one shared native input pack and sums evaluator/output-unpack
+work across chunks, matching Rusticol's fused stage call. Use
+`--symbolica-output-chunk-strategy uniform` for fixed-backend comparisons;
+the all-flow documentation benchmarks pair that with output chunk 8192 and
+runtime batch 64 to control memory use.
+
+On AArch64, Rusticol uses native two-lane complex SymJIT payloads and packs a
+stage's local inputs once for all of its output chunks.  Set
+`RUSTICOL_NATIVE_SIMD_JIT=0` only when a scalar-JIT diagnostic comparison is
+needed.
+
+Runnable schema-v2 artifacts compact generation-only interaction records once
+their stage evaluators have been serialized. They retain stage interaction IDs
+and vertex-kind counts, while plan-only manifests keep the full diagnostic
+records in `runtime_schema_diagnostics.pickle.gz`. Rusticol accepts both
+layouts, so existing artifacts remain usable; the compact form reduces
+high-multiplicity manifest size by roughly 80%.
+
 The generated process directory is self-contained.  It includes a
 `process_manifest.json`, serialized evaluator artifacts under `evaluators/`,
 validation momenta, and a standalone checker:
@@ -80,6 +101,26 @@ validation momenta, and a standalone checker:
 cd outputs/dd_z_4g
 python3 check_standalone.py --precision 16 --profile
 ```
+
+Masses, widths, normalization inputs, and model couplings remain runtime
+parameters.  Their exact names and defaults are listed under
+`runtime_schema.model_parameters` in the process manifest.  Override any used
+subset with a TOML file:
+
+```toml
+"normalization.alpha_s_me_check" = 0.118
+"particle.23.mass" = 91.188
+"particle.23.width" = 2.441404
+"coupling.10.1_23_1.component_0" = -1.0244420275940371
+```
+
+```sh
+./pyamplicol.sh time-process outputs/dd_z_4g \
+  --model-parameters model-parameters.toml
+```
+
+Rusticol rejects unknown parameter names instead of silently baking or
+ignoring them.
 
 ## Useful Commands
 
@@ -122,6 +163,17 @@ The production artifact defaults to leading colour:
 ./pyamplicol.sh generate-process --color-accuracy lc 'd d~ > Z 4*g' outputs/dd_z_4g
 ```
 
+An LC artifact can retain every ordering while also compiling pruned runtime
+sidecars for selected flows.  Omitting `--lc-sector-ids` at timing uses the
+main artifact reduction; supplying it loads the matching sidecar when present:
+
+```sh
+./pyamplicol.sh generate-process --lc-sector-strategy all \
+  --runtime-lc-sector-ids 0 'd d~ > Z 4*g' outputs/dd_z_4g_all
+./pyamplicol.sh time-process --lc-sector-ids 0 outputs/dd_z_4g_all
+./pyamplicol.sh time-process outputs/dd_z_4g_all
+```
+
 NLC and full-colour matrix elements are available through the same generic
 staged-DAG/Rusticol route.  They reuse the same colour-ordered amplitude vector
 and change only the final sparse colour contraction.  Pure-gluon, one-quark-line
@@ -157,7 +209,8 @@ comparison is needed.
 
 Long validation and benchmark jobs should be run behind the bundled RAM
 watchdog so the process is stopped before exceeding the repository guideline of
-30 GB:
+30 GB.  On macOS the watchdog checks compressed physical footprint in addition
+to RSS, so memory moved into the compressor cannot evade the cap:
 
 ```sh
 python3 ./scripts/run_with_memory_watch.py --limit-gb 30 -- \
@@ -173,6 +226,14 @@ The generated JSON/TeX caches next to the PDF are the source of truth for the
 current refresh.  Matrix tables are refreshed with `docs/result_matrix.py`; the
 dedicated Z-family table is populated with `docs/run_z_performance_table.py`,
 which preserves generated processes in `docs/.z_performance_outputs`.
+Use `--force-pyamplicol-regeneration` for a full current-code Z refresh: the
+driver retains the LC-cache AmpliCol reference but rebuilds every requested
+pyAmpliCol selected/all-flow artifact before timing it. Use
+`--retime-existing` after runtime-only changes to retain generation times and
+rerun both timing blocks from the saved artifacts.
+Matrix process artifacts are likewise retained in
+`docs/.result_matrix_outputs`, so completed cells can be retimed or profiled
+without regenerating their evaluators.
 `docs/performance_summary.md` and the older comparison notes are retained as
 historical benchmark snapshots, while `docs/process_coverage.md` summarizes the
 current parser/model/runtime coverage.

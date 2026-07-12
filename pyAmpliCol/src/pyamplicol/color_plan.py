@@ -228,11 +228,12 @@ class GenericColorPlan:
             )
         )
 
+    @cached_property
+    def _sectors_by_id(self) -> dict[int, LCColorSector]:
+        return {int(sector.id): sector for sector in self.sectors}
+
     def sector(self, color_sector: int) -> LCColorSector | None:
-        for sector in self.sectors:
-            if sector.id == color_sector:
-                return sector
-        return None
+        return self._sectors_by_id.get(int(color_sector))
 
     @cached_property
     def topology_groups(self) -> tuple[LCColorSectorTopologyGroup, ...]:
@@ -868,9 +869,31 @@ def lc_topology_replay_partitions(
                 strict=True,
             )
         }
-        unassigned = set(int(sector_id) for sector_id in group.sector_ids)
-        while unassigned:
-            representative = min(unassigned)
+        sector_ids_by_initial_preimage: dict[tuple[int, ...], list[int]] = {}
+        complete_initial_maps = True
+        for sector_id in group.sector_ids:
+            sector_map = base_maps[int(sector_id)]
+            inverse_sector_map = {
+                sector_label: representative_label
+                for representative_label, sector_label in sector_map.items()
+            }
+            if not initial_labels.issubset(inverse_sector_map):
+                complete_initial_maps = False
+                break
+            initial_preimage = tuple(
+                sorted(inverse_sector_map[label] for label in initial_labels)
+            )
+            sector_ids_by_initial_preimage.setdefault(initial_preimage, []).append(
+                int(sector_id)
+            )
+        if not complete_initial_maps:
+            continue
+        partition_sector_ids = sorted(
+            sector_ids_by_initial_preimage.values(),
+            key=lambda sector_ids: min(sector_ids),
+        )
+        for grouped_sector_ids in partition_sector_ids:
+            representative = min(grouped_sector_ids)
             representative_map = base_maps[representative]
             inverse_representative_map = {
                 sector_label: representative_label
@@ -879,7 +902,10 @@ def lc_topology_replay_partitions(
             active_sector_ids: list[int] = []
             relative_permutations: list[tuple[tuple[int, int], ...]] = []
             replay_weights: list[float] = []
+            grouped_sector_id_set = set(grouped_sector_ids)
             for sector_id in group.sector_ids:
+                if int(sector_id) not in grouped_sector_id_set:
+                    continue
                 sector = color_plan.sector(int(sector_id))
                 if sector is None:
                     continue
@@ -894,14 +920,16 @@ def lc_topology_replay_partitions(
                     relative_map[label]
                     for label in initial_labels
                 } != initial_labels:
-                    continue
+                    raise RuntimeError(
+                        "internal LC replay partitioning error: sectors grouped "
+                        "by initial-label preimage do not preserve the initial set"
+                    )
                 active_sector_ids.append(int(sector_id))
                 relative_permutations.append(tuple(sorted(relative_map.items())))
                 replay_weights.append(
                     _lc_topology_replay_sector_weight(color_plan, sector)
                 )
-            active_set = set(active_sector_ids)
-            if not active_set:
+            if not active_sector_ids:
                 raise RuntimeError(
                     "internal LC replay partitioning error: representative sector "
                     f"{representative} did not produce a non-empty replay block"
@@ -914,7 +942,6 @@ def lc_topology_replay_partitions(
                     replay_weights=tuple(replay_weights),
                 )
             )
-            unassigned -= active_set
     return tuple(partitions)
 
 

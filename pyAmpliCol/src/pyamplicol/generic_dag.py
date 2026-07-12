@@ -324,6 +324,8 @@ class ColorEngine:
         self,
         color_plan: GenericColorPlan,
         model: Model,
+        *,
+        shared_lc_all_ordering_symmetry: bool = False,
     ) -> None:
         self.color_plan = color_plan
         self.model = model
@@ -362,12 +364,37 @@ class ColorEngine:
             color_plan.color_accuracy == "lc"
             and bool(color_plan.sectors)
         )
+        self._shared_lc_all_ordering_symmetry = bool(
+            shared_lc_all_ordering_symmetry
+            and self._shared_lc_orderings
+            and not color_plan.truncated
+        )
+        pure_gluon_process_symmetry = bool(
+            self._shared_lc_all_ordering_symmetry
+            and all(
+                leg.outgoing_pdg is not None
+                and abs(int(leg.outgoing_pdg)) == 21
+                for leg in color_plan.process.legs
+            )
+        )
         self._shared_lc_coloured_labels = set(color_plan.coloured_labels)
         self._shared_lc_singlet_labels = set(color_plan.process.singlet_labels)
+        self._shared_lc_fixed_sink_label = (
+            max(self._shared_lc_coloured_labels)
+            if pure_gluon_process_symmetry
+            and self._shared_lc_coloured_labels
+            else None
+        )
         self._shared_lc_words_by_sector = tuple(
             (
                 sector,
-                tuple(_sector_intermediate_order_words(sector)),
+                tuple(
+                    _lc_word_with_sink_last(
+                        word,
+                        self._shared_lc_fixed_sink_label,
+                    )
+                    for word in _sector_intermediate_order_words(sector)
+                ),
             )
             for sector in color_plan.sectors
         )
@@ -377,11 +404,21 @@ class ColorEngine:
             segments: set[tuple[int, ...]] = set()
             for sector in color_plan.sectors:
                 for word in sector.color_words:
-                    sector_ids_by_word.setdefault(tuple(word), []).append(int(sector.id))
+                    normalized_word = _lc_word_with_sink_last(
+                        word,
+                        self._shared_lc_fixed_sink_label,
+                    )
+                    sector_ids_by_word.setdefault(normalized_word, []).append(
+                        int(sector.id)
+                    )
                 for word in _sector_intermediate_order_words(sector):
-                    for start in range(len(word)):
-                        for stop in range(start + 1, len(word) + 1):
-                            segments.add(tuple(word[start:stop]))
+                    normalized_word = _lc_word_with_sink_last(
+                        word,
+                        self._shared_lc_fixed_sink_label,
+                    )
+                    for start in range(len(normalized_word)):
+                        for stop in range(start + 1, len(normalized_word) + 1):
+                            segments.add(tuple(normalized_word[start:stop]))
             self._shared_lc_sector_ids_by_word = {
                 word: tuple(ids) for word, ids in sector_ids_by_word.items()
             }
@@ -804,6 +841,14 @@ class ColorEngine:
     def shared_lc_orderings(self) -> bool:
         return self._shared_lc_orderings
 
+    @property
+    def shared_lc_all_ordering_symmetry(self) -> bool:
+        return self._shared_lc_all_ordering_symmetry
+
+    @property
+    def shared_lc_fixed_sink_label(self) -> int | None:
+        return self._shared_lc_fixed_sink_label
+
     def _shared_lc_ordered_combination_labels(
         self,
         left_index: CurrentIndex,
@@ -813,6 +858,27 @@ class ColorEngine:
             *left_index.ordered_external_labels,
             *right_index.ordered_external_labels,
         )
+        return self._shared_lc_ordered_proposed_labels(proposed)
+
+    def shared_lc_ordered_proposed_labels(
+        self,
+        proposed: Iterable[int],
+        *,
+        allow_reversed: bool = False,
+    ) -> tuple[int, ...] | None:
+        if not self._shared_lc_orderings:
+            return None
+        return self._shared_lc_ordered_proposed_labels(
+            tuple(proposed),
+            allow_reversed=allow_reversed,
+        )
+
+    def _shared_lc_ordered_proposed_labels(
+        self,
+        proposed: tuple[int, ...],
+        *,
+        allow_reversed: bool = False,
+    ) -> tuple[int, ...] | None:
         coloured_segment = tuple(
             label for label in proposed if label in self._shared_lc_coloured_labels
         )
@@ -824,7 +890,13 @@ class ColorEngine:
         if not coloured_segment:
             return extras
         if coloured_segment not in self._shared_lc_segments:
-            return None
+            reversed_segment = tuple(reversed(coloured_segment))
+            if not (
+                allow_reversed
+                and self.shared_lc_all_ordering_symmetry
+                and reversed_segment in self._shared_lc_segments
+            ):
+                return None
         return (*coloured_segment, *extras)
 
     def _shared_lc_closure_word(
@@ -874,6 +946,8 @@ class GenericDAGCompiler:
         species_reachability_pruning: bool = True,
         ignored_particle_ids: Iterable[int] | None = None,
         ignored_vertex_kinds: Iterable[int] | None = None,
+        selected_source_helicities: Mapping[int, int] | None = None,
+        lc_all_ordering_symmetry: bool = True,
     ) -> None:
         self.model = model or AmplicolSMLeadingColorModel()
         self.color_accuracy = color_accuracy
@@ -908,6 +982,15 @@ class GenericDAGCompiler:
         self.ignored_vertex_kinds = frozenset(
             int(kind) for kind in (ignored_vertex_kinds or ())
         )
+        self.selected_source_helicities = (
+            None
+            if selected_source_helicities is None
+            else {
+                int(label): int(helicity)
+                for label, helicity in selected_source_helicities.items()
+            }
+        )
+        self.lc_all_ordering_symmetry = bool(lc_all_ordering_symmetry)
 
     def compile(self, process: str | CanonicalProcessIR) -> GenericDAG:
         process_ir = (
@@ -967,7 +1050,14 @@ class GenericDAGCompiler:
                 truncated=bool(missing_sector_ids),
                 idenso_required=color_plan.idenso_required,
             )
-        color_engine = ColorEngine(color_plan, self.model)
+        color_engine = ColorEngine(
+            color_plan,
+            self.model,
+            shared_lc_all_ordering_symmetry=(
+                self.lc_all_ordering_symmetry
+                and self.selected_color_sector_ids is None
+            ),
+        )
         table = _CurrentTable(self.model)
         sources = self._build_sources(process_ir, color_engine, table)
         interactions: list[InteractionNode] = []
@@ -988,6 +1078,14 @@ class GenericDAGCompiler:
             bool,
         ] = {}
         full_mask = _labels_mask(leg.label for leg in process_ir.legs)
+        gluon_labels = frozenset(
+            leg.label
+            for leg in process_ir.legs
+            if leg.outgoing_pdg is not None and abs(int(leg.outgoing_pdg)) == 21
+        )
+        shared_lc_all_ordering_symmetry = (
+            color_engine.shared_lc_all_ordering_symmetry
+        )
         closure_candidate_splits = _closure_candidate_splits(
             process_ir,
             self.model,
@@ -1083,6 +1181,10 @@ class GenericDAGCompiler:
             coupling_order_cache[key] = orders
             return orders
 
+        def all_gluon_current(index: CurrentIndex) -> bool:
+            labels = index.external_labels
+            return bool(labels) and all(label in gluon_labels for label in labels)
+
         for mask in _masks_by_size(full_mask):
             if mask & (mask - 1) == 0:
                 continue
@@ -1147,6 +1249,21 @@ class GenericDAGCompiler:
                         right = table.current(right_id)
                         if left.index.overlaps(right.index):
                             continue
+                        left_all_gluon = (
+                            shared_lc_all_ordering_symmetry
+                            and all_gluon_current(left.index)
+                        )
+                        right_all_gluon = (
+                            shared_lc_all_ordering_symmetry
+                            and all_gluon_current(right.index)
+                        )
+                        if (
+                            left_all_gluon
+                            and right_all_gluon
+                            and max(left.index.external_labels)
+                            >= max(right.index.external_labels)
+                        ):
+                            continue
                         if not state_allowed(
                             right_mask,
                             right.index.particle_id,
@@ -1209,8 +1326,46 @@ class GenericDAGCompiler:
                                 right.index,
                                 vertex,
                             )
-                            if ordered_external_labels is None:
+                            if ordered_external_labels is None and not (
+                                left_all_gluon or right_all_gluon
+                            ):
                                 continue
+                            order_variants: tuple[
+                                tuple[tuple[int, ...], tuple[float, float]],
+                                ...,
+                            ]
+                            if left_all_gluon or right_all_gluon:
+                                result_all_gluon = left_all_gluon and right_all_gluon
+                                variants: list[
+                                    tuple[tuple[int, ...], tuple[float, float]]
+                                ] = []
+                                for (
+                                    proposed_labels,
+                                    symmetry_weight,
+                                ) in _lc_all_gluon_symmetry_order_variants(
+                                    left.index.ordered_external_labels,
+                                    right.index.ordered_external_labels,
+                                    left_all_gluon=left_all_gluon,
+                                    right_all_gluon=right_all_gluon,
+                                ):
+                                    projected = (
+                                        color_engine.shared_lc_ordered_proposed_labels(
+                                            proposed_labels,
+                                            allow_reversed=result_all_gluon,
+                                        )
+                                    )
+                                    if projected is None:
+                                        continue
+                                    variants.append((projected, symmetry_weight))
+                                order_variants = tuple(variants)
+                                if not order_variants:
+                                    continue
+                            else:
+                                if ordered_external_labels is None:
+                                    continue
+                                order_variants = (
+                                    (ordered_external_labels, (1.0, 0.0)),
+                                )
                             quantum_flow_key = (
                                 vertex.kind,
                                 vertex.particles,
@@ -1241,82 +1396,94 @@ class GenericDAGCompiler:
                                         self.max_lc_current_line_groups,
                                     ):
                                         continue
-                                    out_index = CurrentIndex(
-                                        particle_id=vertex.particles[2],
-                                        external_mask=mask,
-                                        external_labels=labels,
-                                        ordered_external_labels=ordered_external_labels,
-                                        helicity_ancestry=(
-                                            left.index.helicity_ancestry
-                                            | right.index.helicity_ancestry
-                                        ),
-                                        chirality=quantum_flow.chirality,
-                                        spin_state=quantum_flow.spin_state,
-                                        flavour_flow=quantum_flow.flavour_flow,
-                                        charge_flow=quantum_flow.charge_flow,
-                                        color_state=color_flow.state,
-                                        momentum_mask=(
-                                            left.index.momentum_mask
-                                            | right.index.momentum_mask
-                                        ),
-                                        coupling_orders=coupling_orders,
-                                        auxiliary_kind=self.model.auxiliary_kind(
-                                            vertex.particles[2]
-                                        ),
-                                    )
-                                    if not self.model.current_allowed(out_index):
-                                        continue
-                                    result = table.add_or_get(
-                                        out_index,
-                                        is_source=False,
-                                    )
-                                    key = (
-                                        vertex.kind,
-                                        left_id,
-                                        right_id,
-                                        result.id,
-                                    )
-                                    if key in interaction_keys:
-                                        continue
-                                    interaction_keys.add(key)
-                                    rule = self.model.vertex_lowering_rule(vertex.kind)
-                                    interactions.append(
-                                        InteractionNode(
-                                            id=len(interactions),
-                                            vertex_kind=vertex.kind,
-                                            vertex_particles=vertex.particles,
-                                            left_id=left_id,
-                                            right_id=right_id,
-                                            result_id=result.id,
-                                            coupling=quantum_flow.coupling,
-                                            color_weight=color_flow.weight,
-                                            lowering_backend=rule.backend,
-                                            full_tensor_network_ready=(
-                                                rule.full_tensor_network_ready
+                                    for variant_index, (
+                                        variant_ordered_labels,
+                                        symmetry_weight,
+                                    ) in enumerate(order_variants):
+                                        out_index = CurrentIndex(
+                                            particle_id=vertex.particles[2],
+                                            external_mask=mask,
+                                            external_labels=labels,
+                                            ordered_external_labels=variant_ordered_labels,
+                                            helicity_ancestry=(
+                                                left.index.helicity_ancestry
+                                                | right.index.helicity_ancestry
+                                            ),
+                                            chirality=quantum_flow.chirality,
+                                            spin_state=quantum_flow.spin_state,
+                                            flavour_flow=quantum_flow.flavour_flow,
+                                            charge_flow=quantum_flow.charge_flow,
+                                            color_state=color_flow.state,
+                                            momentum_mask=(
+                                                left.index.momentum_mask
+                                                | right.index.momentum_mask
+                                            ),
+                                            coupling_orders=coupling_orders,
+                                            auxiliary_kind=self.model.auxiliary_kind(
+                                                vertex.particles[2]
                                             ),
                                         )
-                                    )
-                                    if (
-                                        self.max_currents is not None
-                                        and len(table.currents) > self.max_currents
-                                    ):
-                                        truncated = True
-                                        return GenericDAG(
-                                            process=process_ir,
-                                            color_plan=color_plan,
-                                            currents=tuple(table.currents),
-                                            sources=tuple(sources),
-                                            interactions=tuple(interactions),
-                                            amplitude_roots=tuple(
-                                                self._build_amplitude_roots(
-                                                    process_ir,
-                                                    table,
-                                                    color_engine,
-                                                    candidate_splits=closure_candidate_splits,
-                                                )
-                                            ),
-                                            truncated=truncated,
+                                        if not self.model.current_allowed(out_index):
+                                            continue
+                                        result = table.add_or_get(
+                                            out_index,
+                                            is_source=False,
                                         )
+                                        signed_color_weight = _complex_weight_mul(
+                                            color_flow.weight,
+                                            symmetry_weight,
+                                        )
+                                        key = (
+                                            vertex.kind,
+                                            left_id,
+                                            right_id,
+                                            result.id,
+                                            variant_index,
+                                            signed_color_weight,
+                                        )
+                                        if key in interaction_keys:
+                                            continue
+                                        interaction_keys.add(key)
+                                        rule = self.model.vertex_lowering_rule(
+                                            vertex.kind
+                                        )
+                                        interactions.append(
+                                            InteractionNode(
+                                                id=len(interactions),
+                                                vertex_kind=vertex.kind,
+                                                vertex_particles=vertex.particles,
+                                                left_id=left_id,
+                                                right_id=right_id,
+                                                result_id=result.id,
+                                                coupling=quantum_flow.coupling,
+                                                color_weight=signed_color_weight,
+                                                lowering_backend=rule.backend,
+                                                full_tensor_network_ready=(
+                                                    rule.full_tensor_network_ready
+                                                ),
+                                            )
+                                        )
+                                        if (
+                                            self.max_currents is not None
+                                            and len(table.currents) > self.max_currents
+                                        ):
+                                            truncated = True
+                                            return GenericDAG(
+                                                process=process_ir,
+                                                color_plan=color_plan,
+                                                currents=tuple(table.currents),
+                                                sources=tuple(sources),
+                                                interactions=tuple(interactions),
+                                                amplitude_roots=tuple(
+                                                    self._build_amplitude_roots(
+                                                        process_ir,
+                                                        table,
+                                                        color_engine,
+                                                        candidate_splits=closure_candidate_splits,
+                                                    )
+                                                ),
+                                                truncated=truncated,
+                                            )
 
         return GenericDAG(
             process=process_ir,
@@ -1365,6 +1532,13 @@ class GenericDAGCompiler:
                         if not isinstance(spin_state, int):
                             raise TypeError("gluon source spin_state must be an integer")
                         spin_state = -spin_state
+                    if (
+                        self.selected_source_helicities is not None
+                        and (requested_helicity := self.selected_source_helicities.get(leg.label))
+                        is not None
+                        and int(source_helicity) != requested_helicity
+                    ):
+                        continue
                     helicity_ancestry = 1 << next_source_bit
                     next_source_bit += 1
                     index = CurrentIndex(
@@ -1662,6 +1836,8 @@ def compile_generic_dag(
     species_reachability_pruning: bool = True,
     ignored_particle_ids: Iterable[int] | None = None,
     ignored_vertex_kinds: Iterable[int] | None = None,
+    selected_source_helicities: Mapping[int, int] | None = None,
+    lc_all_ordering_symmetry: bool = True,
 ) -> GenericDAG:
     return GenericDAGCompiler(
         model=model,
@@ -1679,6 +1855,8 @@ def compile_generic_dag(
         species_reachability_pruning=species_reachability_pruning,
         ignored_particle_ids=ignored_particle_ids,
         ignored_vertex_kinds=ignored_vertex_kinds,
+        selected_source_helicities=selected_source_helicities,
+        lc_all_ordering_symmetry=lc_all_ordering_symmetry,
     ).compile(process)
 
 
@@ -2518,6 +2696,68 @@ def _ordered_combination_segment(
     return None
 
 
+def _lc_all_gluon_symmetry_order_variants(
+    left: tuple[int, ...],
+    right: tuple[int, ...],
+    *,
+    left_all_gluon: bool,
+    right_all_gluon: bool,
+) -> tuple[tuple[tuple[int, ...], tuple[float, float]], ...]:
+    """Return AmpliCol-style signed pure-gluon LC symmetry variants."""
+
+    n1 = len(left)
+    n2 = len(right)
+    switch1 = 2 if left_all_gluon and n1 >= 2 else 1
+    switch2 = 2 if right_all_gluon and n2 >= 2 else 1
+    switch3 = 2 if left_all_gluon and right_all_gluon else 1
+    result_all_gluon = left_all_gluon and right_all_gluon
+    variants: list[tuple[tuple[int, ...], tuple[float, float]]] = []
+    for i in range(1, switch1 + 1):
+        for j in range(1, switch2 + 1):
+            for k in range(1, switch3 + 1):
+                invert = 0
+                if (i == 2 and k == 1) or (j == 2 and k == 2):
+                    invert |= 1
+                if (i == 2 and k == 2) or (j == 2 and k == 1):
+                    invert |= 2
+                if k == 1:
+                    first = tuple(reversed(left)) if invert & 1 else left
+                    second = tuple(reversed(right)) if invert & 2 else right
+                else:
+                    first = tuple(reversed(right)) if invert & 1 else right
+                    second = tuple(reversed(left)) if invert & 2 else left
+                proposed = (*first, *second)
+                if result_all_gluon and not _lc_all_gluon_symmetry_order_kept(
+                    proposed
+                ):
+                    continue
+                negative = (
+                    (k == 2)
+                    ^ (j == 2 and n2 % 2 == 0)
+                    ^ (i == 2 and n1 % 2 == 0)
+                )
+                variants.append((proposed, (-1.0, 0.0) if negative else (1.0, 0.0)))
+    return tuple(variants)
+
+
+def _lc_all_gluon_symmetry_order_kept(labels: tuple[int, ...]) -> bool:
+    if not labels:
+        return False
+    min_label = min(labels)
+    max_label = max(labels)
+    return labels.index(min_label) < labels.index(max_label)
+
+
+def _complex_weight_mul(
+    left: tuple[float, float],
+    right: tuple[float, float],
+) -> tuple[float, float]:
+    return (
+        left[0] * right[0] - left[1] * right[1],
+        left[0] * right[1] + left[1] * right[0],
+    )
+
+
 def _canonical_lc_ordered_labels(
     labels: Iterable[int],
     sector: LCColorSector,
@@ -2570,6 +2810,24 @@ def _sector_intermediate_order_words(
     return sector.color_words or sector.compatibility_words
 
 
+def _lc_word_with_sink_last(
+    word: Iterable[int],
+    sink_label: int | None,
+) -> tuple[int, ...]:
+    normalized = tuple(int(label) for label in word)
+    if sink_label is None or sink_label not in normalized:
+        return normalized
+    sink_index = normalized.index(sink_label)
+    rotated = (
+        *normalized[sink_index + 1 :],
+        *normalized[: sink_index + 1],
+    )
+    current_word = rotated[:-1]
+    if current_word and not _lc_all_gluon_symmetry_order_kept(current_word):
+        current_word = tuple(reversed(current_word))
+    return (*current_word, rotated[-1])
+
+
 def _line_local_singlet_extras_allowed(
     colored_segment: Iterable[int],
     extras: Iterable[int],
@@ -2620,7 +2878,9 @@ def _closure_candidate_splits(
     splits: list[tuple[int, int]] = []
     split_seen: set[tuple[int, int]] = set()
     sink_labels: list[int] = []
-    if reference_color_order:
+    if color_engine.shared_lc_fixed_sink_label is not None:
+        sink_labels.append(color_engine.shared_lc_fixed_sink_label)
+    if not sink_labels and reference_color_order:
         leg_by_label = {leg.label: leg for leg in process_ir.legs}
         colored_reference_labels: list[int] = []
         ordered_reference_labels: list[int] = []

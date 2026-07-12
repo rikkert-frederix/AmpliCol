@@ -15,6 +15,11 @@ from pyamplicol.generic_dag import (
     infer_minimal_coupling_order_limits,
     prune_dag_to_amplitude_roots,
 )
+from pyamplicol.generic_artifact import (
+    _evaluate_dag_raw_sums_by_warmup,
+    _generic_warmup_phase_space_point,
+    _root_all_sector_weight,
+)
 from pyamplicol.model import AmplicolSMLeadingColorModel
 
 
@@ -165,7 +170,8 @@ def test_generic_dag_can_compile_selected_lc_sector_without_family_branch() -> N
     assert full.color_plan.sector_count == 24
     assert selected.color_plan.sector_count == 1
     assert {current.index.color_state.sector_id for current in selected.currents} == {0}
-    assert len(selected.currents) * 24 == len(full.currents)
+    assert {current.index.color_state.sector_id for current in full.currents} == {0}
+    assert len(full.currents) < len(selected.currents) * full.color_plan.sector_count
     assert len(selected.amplitude_roots) * 24 == len(full.amplitude_roots)
 
 
@@ -186,6 +192,178 @@ def test_generic_dag_can_filter_fixed_source_helicity_roots() -> None:
         for source_id in filtered.sources
     }
     assert source_helicities == {(1, -1), (2, 1), (3, -1), (4, 1)}
+
+
+def test_lc_pure_gluon_all_sector_weights_keep_selected_sector_semantics() -> None:
+    dag = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            "g g > g g",
+            selected_source_helicities={1: -1, 2: -1, 3: -1, 4: -1},
+        )
+    )
+    selected = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            "g g > g g",
+            selected_color_sector_ids={0},
+            selected_source_helicities={1: -1, 2: -1, 3: -1, 4: -1},
+        )
+    )
+
+    assert {root.helicity_weight for root in dag.amplitude_roots} == {1.0}
+    assert {
+        _root_all_sector_weight(dag, root, selected_color_sector_ids=None)
+        for root in dag.amplitude_roots
+    } == {2.0}
+    assert {
+        _root_all_sector_weight(dag, root, selected_color_sector_ids={0})
+        for root in dag.amplitude_roots
+    } == {1.0}
+    assert {
+        _root_all_sector_weight(selected, root, selected_color_sector_ids=None)
+        for root in selected.amplitude_roots
+    } == {1.0}
+
+
+def test_lc_pure_gluon_shared_ordering_symmetry_preserves_raw_sums() -> None:
+    process = "g g > g g g g"
+    source_helicities = {label: -1 for label in range(1, 7)}
+    exact = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            selected_source_helicities=source_helicities,
+            lc_all_ordering_symmetry=False,
+        )
+    )
+    folded = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            selected_source_helicities=source_helicities,
+        )
+    )
+
+    assert len(folded.currents) < len(exact.currents)
+    assert len(folded.interactions) < len(exact.interactions)
+    assert len(folded.amplitude_roots) == len(exact.amplitude_roots)
+
+    model = AmplicolSMLeadingColorModel()
+    points = tuple(
+        _generic_warmup_phase_space_point(exact, model, seed=413 + offset)
+        for offset in range(3)
+    )
+    exact_raw_sums = _evaluate_dag_raw_sums_by_warmup(exact, model, points)
+    assert exact_raw_sums == pytest.approx(
+        tuple(
+            _evaluate_dag_raw_sums_by_warmup(exact, model, (point,))[0]
+            for point in points
+        ),
+        rel=1.0e-13,
+        abs=1.0e-16,
+    )
+    assert _evaluate_dag_raw_sums_by_warmup(
+        folded,
+        model,
+        points,
+    ) == pytest.approx(
+        exact_raw_sums,
+        rel=1.0e-12,
+        abs=1.0e-16,
+    )
+
+    selected = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            selected_color_sector_ids={0},
+            selected_source_helicities=source_helicities,
+        )
+    )
+    selected_without_symmetry = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            selected_color_sector_ids={0},
+            selected_source_helicities=source_helicities,
+            lc_all_ordering_symmetry=False,
+        )
+    )
+    assert len(selected.currents) == len(selected_without_symmetry.currents)
+    assert len(selected.interactions) == len(selected_without_symmetry.interactions)
+
+
+@pytest.mark.parametrize(
+    ("process", "source_helicities"),
+    [
+        (
+            "g g > t t~ g g",
+            {1: -1, 2: -1, 3: -1, 4: -1, 5: 1, 6: 1},
+        ),
+        (
+            "d d~ > z g g",
+            {1: -1, 2: 1, 3: -1, 4: 1, 5: 1},
+        ),
+    ],
+)
+def test_lc_mixed_process_recycles_pure_gluon_subcurrents(
+    process: str,
+    source_helicities: dict[int, int],
+) -> None:
+    exact = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            selected_source_helicities=source_helicities,
+            lc_all_ordering_symmetry=False,
+        )
+    )
+    folded = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            selected_source_helicities=source_helicities,
+        )
+    )
+
+    assert len(folded.currents) < len(exact.currents)
+    assert len(folded.interactions) < len(exact.interactions)
+    assert len(folded.amplitude_roots) == len(exact.amplitude_roots)
+
+    model = AmplicolSMLeadingColorModel()
+    points = tuple(
+        _generic_warmup_phase_space_point(exact, model, seed=503 + offset)
+        for offset in range(3)
+    )
+    assert _evaluate_dag_raw_sums_by_warmup(
+        folded,
+        model,
+        points,
+    ) == pytest.approx(
+        _evaluate_dag_raw_sums_by_warmup(exact, model, points),
+        rel=1.0e-12,
+        abs=1.0e-16,
+    )
+
+
+def test_generic_dag_compiler_prefilters_fixed_source_helicity_states() -> None:
+    selected_helicities = {1: -1, 2: 1, 3: -1, 4: 1}
+    dag = prune_dag_to_amplitude_roots(
+        compile_generic_dag("g g > t t~", selected_color_sector_ids={0})
+    )
+    post_filtered = filter_dag_to_source_helicities(dag, selected_helicities)
+    pre_filtered = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            "g g > t t~",
+            selected_color_sector_ids={0},
+            selected_source_helicities=selected_helicities,
+        )
+    )
+
+    assert len(pre_filtered.currents) == len(post_filtered.currents)
+    assert len(pre_filtered.interactions) == len(post_filtered.interactions)
+    assert len(pre_filtered.amplitude_roots) == len(post_filtered.amplitude_roots)
+    assert len(pre_filtered.currents) < len(dag.currents)
+    assert {
+        (
+            pre_filtered.currents[source_id].source_leg_label,
+            pre_filtered.currents[source_id].source_helicity,
+        )
+        for source_id in pre_filtered.sources
+    } == set(selected_helicities.items())
 
 
 def test_generic_dag_prunes_dead_currents_after_amplitude_closure() -> None:
@@ -433,7 +611,8 @@ def test_generic_dag_carries_arbitrary_quark_line_colour_sectors() -> None:
     assert {
         dag.currents[source_id].index.color_state.sector_id
         for source_id in dag.sources
-    } == set(range(6))
+    } == {0}
+    assert len({root.color_sector_id for root in dag.amplitude_roots}) > 1
     assert all(sector.compatibility_words for sector in dag.color_plan.sectors)
     assert any(
         current.index.ordered_external_labels != current.index.external_labels
@@ -481,12 +660,12 @@ def test_generic_dag_prunes_by_lc_current_line_group_budget() -> None:
     full = compile_generic_dag("d d~ > u u~")
     pruned = compile_generic_dag(
         "d d~ > u u~",
-        max_lc_current_line_groups=1,
+        max_lc_current_line_groups=0,
     )
 
     assert full.has_amplitudes is True
     assert any(
-        len(current.index.color_state.line_groups) > 1
+        len(current.index.color_state.line_groups) > 0
         for current in full.currents
     )
     assert pruned.has_amplitudes is False

@@ -1,14 +1,17 @@
 #![recursion_limit = "256"]
 
+use numpy::IntoPyArray;
 use pyo3::IntoPyObjectExt;
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use symbolica::evaluate::JITCompiledEvaluator;
@@ -20,6 +23,15 @@ use toml::Value as TomlValue;
 
 const MAX_LC_TOPOLOGY_REPLAY_EXPANDED_POINTS: usize = 8192;
 const LC_SECTOR_SELECTOR_PARAMETER: &str = "runtime.lc_sector_id";
+const PROCESS_MANIFEST_READ_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Clone, Debug, Deserialize)]
+struct ProcessManifestHeader {
+    #[serde(default)]
+    schema_version: u32,
+    #[serde(default)]
+    kind: String,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 struct ProcessManifest {
@@ -398,6 +410,11 @@ struct GenericStageManifestV2 {
     input_value_slot_ids: Vec<usize>,
     output_value_slot_ids: Vec<usize>,
     interaction_count: usize,
+    #[serde(default)]
+    interactions_compacted: bool,
+    #[serde(default)]
+    interaction_ids: Vec<usize>,
+    #[serde(default)]
     interactions: Vec<GenericInteractionManifestV2>,
 }
 
@@ -507,6 +524,8 @@ struct GenericAmplitudeRootManifestV2 {
     contraction: String,
     coherent_group_id: Option<Value>,
     helicity_weight: f64,
+    #[serde(default)]
+    all_sector_weight: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -747,26 +766,31 @@ fn parse_generic_schema_v2_manifest(manifest: &Value) -> PyResult<Option<Generic
     Ok(None)
 }
 
+fn read_json_manifest<T: DeserializeOwned>(manifest_path: &Path) -> Result<T, String> {
+    let file = fs::File::open(manifest_path).map_err(|err| {
+        format!(
+            "could not read process manifest {}: {err}",
+            manifest_path.display()
+        )
+    })?;
+    serde_json::from_reader(BufReader::with_capacity(
+        PROCESS_MANIFEST_READ_BUFFER_BYTES,
+        file,
+    ))
+    .map_err(|err| {
+        format!(
+            "could not parse process manifest {}: {err}",
+            manifest_path.display()
+        )
+    })
+}
+
 fn load_generic_schema_v2_manifest(
-    manifest: &Value,
+    manifest: GenericProcessManifestV2,
     root: &Path,
-) -> PyResult<Option<GenericRuntimeV2>> {
-    let schema_version = manifest
-        .get("schema_version")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let kind = manifest.get("kind").and_then(Value::as_str).unwrap_or("");
-    if schema_version == 2 && kind == "pyamplicol-generic-dag-process" {
-        let generic: GenericProcessManifestV2 =
-            serde_json::from_value(manifest.clone()).map_err(|err| {
-                PyValueError::new_err(format!(
-                    "could not parse generic DAG process manifest schema v2: {err}"
-                ))
-            })?;
-        validate_generic_schema_v2_manifest(&generic)?;
-        return Ok(Some(GenericRuntimeV2::load_from_manifest(generic, root)?));
-    }
-    Ok(None)
+) -> PyResult<GenericRuntimeV2> {
+    validate_generic_schema_v2_manifest(&manifest)?;
+    GenericRuntimeV2::load_from_manifest(manifest, root)
 }
 
 fn validate_generic_schema_v2_manifest(manifest: &GenericProcessManifestV2) -> PyResult<()> {
@@ -1241,11 +1265,13 @@ fn validate_generic_stages(manifest: &GenericProcessManifestV2) -> PyResult<()> 
     let current_count = schema.current_storage.current_slots.len();
     let value_count = schema.value_storage.value_slots.len();
     let momentum_count = schema.momentum_slots.len();
+    let input_value_variants =
+        build_input_value_variants(&schema.current_storage, &schema.value_storage)?;
     let mut seen_interactions = 0usize;
+    let mut seen_interaction_ids = BTreeSet::new();
     for (stage_offset, stage) in schema.stages.iter().enumerate() {
         if stage.stage_index != stage_offset + 1
             || stage.stage_kind != "current-combine"
-            || stage.interaction_count != stage.interactions.len()
             || stage.subset_size < 2
         {
             return Err(PyValueError::new_err(format!(
@@ -1253,62 +1279,92 @@ fn validate_generic_stages(manifest: &GenericProcessManifestV2) -> PyResult<()> 
                 stage.stage_index
             )));
         }
-        for id in stage
-            .input_current_ids
-            .iter()
-            .chain(&stage.output_current_ids)
-        {
-            if *id >= current_count {
+        if stage.interactions_compacted {
+            if !stage.interactions.is_empty()
+                || stage.interaction_ids.len() != stage.interaction_count
+            {
                 return Err(PyValueError::new_err(format!(
-                    "generic stage {} references invalid current {id}",
+                    "generic compact stage {} has inconsistent interaction metadata",
                     stage.stage_index
                 )));
             }
-        }
-        for value_id in stage
-            .input_value_slot_ids
-            .iter()
-            .chain(&stage.output_value_slot_ids)
+            for interaction_id in &stage.interaction_ids {
+                if !seen_interaction_ids.insert(*interaction_id) {
+                    return Err(PyValueError::new_err(format!(
+                        "generic compact stage {} repeats interaction {interaction_id}",
+                        stage.stage_index
+                    )));
+                }
+            }
+        } else if stage.interaction_count != stage.interactions.len()
+            || !stage.interaction_ids.is_empty()
         {
-            if *value_id >= value_count {
-                return Err(PyValueError::new_err(format!(
-                    "generic stage {} references invalid value slot {value_id}",
-                    stage.stage_index
-                )));
+            return Err(PyValueError::new_err(format!(
+                "generic stage {} is inconsistent",
+                stage.stage_index
+            )));
+        }
+        let mut input_current_membership = vec![false; current_count];
+        let mut output_current_membership = vec![false; current_count];
+        for (ids, membership) in [
+            (&stage.input_current_ids, &mut input_current_membership),
+            (&stage.output_current_ids, &mut output_current_membership),
+        ] {
+            for id in ids {
+                if *id >= current_count {
+                    return Err(PyValueError::new_err(format!(
+                        "generic stage {} references invalid current {id}",
+                        stage.stage_index
+                    )));
+                }
+                membership[*id] = true;
+            }
+        }
+        let mut input_value_membership = vec![false; value_count];
+        let mut output_value_membership = vec![false; value_count];
+        for (ids, membership) in [
+            (&stage.input_value_slot_ids, &mut input_value_membership),
+            (&stage.output_value_slot_ids, &mut output_value_membership),
+        ] {
+            for value_id in ids {
+                if *value_id >= value_count {
+                    return Err(PyValueError::new_err(format!(
+                        "generic stage {} references invalid value slot {value_id}",
+                        stage.stage_index
+                    )));
+                }
+                membership[*value_id] = true;
             }
         }
         for interaction in &stage.interactions {
+            if !seen_interaction_ids.insert(interaction.interaction_id) {
+                return Err(PyValueError::new_err(format!(
+                    "generic stage {} repeats interaction {}",
+                    stage.stage_index, interaction.interaction_id
+                )));
+            }
             validate_generic_interaction(
                 interaction,
                 &schema.current_storage,
                 &schema.value_storage,
+                &input_value_variants,
                 momentum_count,
             )?;
-            if !stage
-                .input_current_ids
-                .contains(&interaction.left_current_id)
-                || !stage
-                    .input_current_ids
-                    .contains(&interaction.right_current_id)
-                || !stage
-                    .output_current_ids
-                    .contains(&interaction.result_current_id)
+            if !input_current_membership[interaction.left_current_id]
+                || !input_current_membership[interaction.right_current_id]
+                || !output_current_membership[interaction.result_current_id]
             {
                 return Err(PyValueError::new_err(format!(
                     "generic interaction {} is not listed in its stage inputs/outputs",
                     interaction.interaction_id
                 )));
             }
-            if !stage
-                .input_value_slot_ids
-                .contains(&interaction.left_value_slot.value_slot_id)
-                || !stage
-                    .input_value_slot_ids
-                    .contains(&interaction.right_value_slot.value_slot_id)
+            if !input_value_membership[interaction.left_value_slot.value_slot_id]
+                || !input_value_membership[interaction.right_value_slot.value_slot_id]
                 || interaction
                     .result_value_slots
                     .iter()
-                    .any(|slot| !stage.output_value_slot_ids.contains(&slot.value_slot_id))
+                    .any(|slot| !output_value_membership[slot.value_slot_id])
             {
                 return Err(PyValueError::new_err(format!(
                     "generic interaction {} value slots are not listed in its stage inputs/outputs",
@@ -1316,7 +1372,7 @@ fn validate_generic_stages(manifest: &GenericProcessManifestV2) -> PyResult<()> 
                 )));
             }
         }
-        seen_interactions += stage.interactions.len();
+        seen_interactions += stage.interaction_count;
     }
     if seen_interactions != manifest.dag_summary.interaction_count {
         return Err(PyValueError::new_err(
@@ -1330,6 +1386,7 @@ fn validate_generic_interaction(
     interaction: &GenericInteractionManifestV2,
     current_storage: &GenericCurrentStorageManifestV2,
     value_storage: &GenericValueStorageManifestV2,
+    input_value_variants: &[Option<GenericInputValueVariant>],
     momentum_count: usize,
 ) -> PyResult<()> {
     let current_count = current_storage.current_slots.len();
@@ -1364,8 +1421,7 @@ fn validate_generic_interaction(
         &interaction.left_value_slot,
         interaction.left_current_id,
         Some(input_value_variant(
-            current_storage,
-            value_storage,
+            input_value_variants,
             interaction.left_current_id,
         )?),
         value_storage,
@@ -1374,8 +1430,7 @@ fn validate_generic_interaction(
         &interaction.right_value_slot,
         interaction.right_current_id,
         Some(input_value_variant(
-            current_storage,
-            value_storage,
+            input_value_variants,
             interaction.right_current_id,
         )?),
         value_storage,
@@ -1659,11 +1714,15 @@ fn validate_generic_serialized_stage_evaluator(
         )));
     }
     if let Some(runtime_stage) = runtime_stage {
-        let expected_interactions = runtime_stage
-            .interactions
-            .iter()
-            .map(|interaction| interaction.interaction_id)
-            .collect::<Vec<_>>();
+        let expected_interactions = if runtime_stage.interactions_compacted {
+            runtime_stage.interaction_ids.clone()
+        } else {
+            runtime_stage
+                .interactions
+                .iter()
+                .map(|interaction| interaction.interaction_id)
+                .collect::<Vec<_>>()
+        };
         if stage.input_value_slot_ids != runtime_stage.input_value_slot_ids
             || stage.output_value_slot_ids != runtime_stage.output_value_slot_ids
             || stage.interaction_ids != expected_interactions
@@ -1888,40 +1947,80 @@ fn validate_value_slot_ref(
     Ok(())
 }
 
-fn input_value_variant(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenericInputValueVariant {
+    Source,
+    Propagated,
+    Unpropagated,
+}
+
+impl GenericInputValueVariant {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Propagated => "propagated",
+            Self::Unpropagated => "unpropagated",
+        }
+    }
+}
+
+fn build_input_value_variants(
     current_storage: &GenericCurrentStorageManifestV2,
     value_storage: &GenericValueStorageManifestV2,
-    current_id: usize,
-) -> PyResult<&'static str> {
-    let current = current_storage
+) -> PyResult<Vec<Option<GenericInputValueVariant>>> {
+    let mut variants = current_storage
         .current_slots
-        .get(current_id)
-        .ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "generic input value references missing current {current_id}"
-            ))
-        })?;
-    if current.is_source {
-        return Ok("source");
-    }
-    let mut has_unpropagated = false;
+        .iter()
+        .map(|current| {
+            current
+                .is_source
+                .then_some(GenericInputValueVariant::Source)
+        })
+        .collect::<Vec<_>>();
     for slot in &value_storage.value_slots {
-        if slot.current_id != current_id {
+        let current = current_storage
+            .current_slots
+            .get(slot.current_id)
+            .ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "generic value slot references missing current {}",
+                    slot.current_id
+                ))
+            })?;
+        if current.is_source {
             continue;
         }
-        if slot.variant == "propagated" {
-            return Ok("propagated");
-        }
-        if slot.variant == "unpropagated" {
-            has_unpropagated = true;
+        match slot.variant.as_str() {
+            "propagated" => {
+                variants[slot.current_id] = Some(GenericInputValueVariant::Propagated);
+            }
+            "unpropagated"
+                if variants[slot.current_id] != Some(GenericInputValueVariant::Propagated) =>
+            {
+                variants[slot.current_id] = Some(GenericInputValueVariant::Unpropagated);
+            }
+            _ => {}
         }
     }
-    if has_unpropagated {
-        return Ok("unpropagated");
-    }
-    Err(PyValueError::new_err(format!(
-        "generic input value references current {current_id} without an input value slot"
-    )))
+    Ok(variants)
+}
+
+fn input_value_variant(
+    input_value_variants: &[Option<GenericInputValueVariant>],
+    current_id: usize,
+) -> PyResult<&'static str> {
+    let variant = input_value_variants.get(current_id).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "generic input value references missing current {current_id}"
+        ))
+    })?;
+    variant
+        .map(GenericInputValueVariant::as_str)
+        .ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "generic input value references current {current_id} without an input value slot"
+            ))
+        })
 }
 
 fn amplitude_value_variant(
@@ -1998,11 +2097,13 @@ struct EvaluatorGroup {
     evaluators: Vec<LoadedEvaluator>,
     output_len: usize,
     chunk_scratch_f64: Vec<Complex<f64>>,
+    chunk_scratch_native2: Vec<Complex<wide::f64x2>>,
 }
 
 enum F64Evaluator {
     Compiled(CompiledComplexEvaluator),
     Jit(JITCompiledEvaluator<Complex<f64>>),
+    JitNative2(JITCompiledEvaluator<Complex<wide::f64x2>>),
     Interpreted(ExpressionEvaluator<Complex<f64>>),
 }
 
@@ -2120,6 +2221,7 @@ struct RawSumGroup {
     id: i64,
     indices: Vec<usize>,
     weight: f64,
+    all_sector_weight: f64,
     sector_ids: Vec<i64>,
 }
 
@@ -2294,12 +2396,15 @@ struct GenericStageRuntimeV2 {
     input_spans: Vec<(usize, usize, usize)>,
     parameter_scratch_f64: Vec<Complex<f64>>,
     output_scratch_f64: Vec<Complex<f64>>,
+    parameter_scratch_native2: Vec<Complex<wide::f64x2>>,
+    output_scratch_native2: Vec<Complex<wide::f64x2>>,
     evaluator: EvaluatorGroup,
 }
 
 struct GenericAmplitudeRuntimeV2 {
     output_length: usize,
     raw_sum_weights: Vec<f64>,
+    raw_sum_all_sector_weights: Vec<f64>,
     raw_sum_color_sector_ids: Vec<Option<i64>>,
     raw_sum_groups: Vec<RawSumGroup>,
     has_coherent_groups: bool,
@@ -2308,6 +2413,8 @@ struct GenericAmplitudeRuntimeV2 {
     input_spans: Vec<(usize, usize, usize)>,
     parameter_scratch_f64: Vec<Complex<f64>>,
     output_scratch_f64: Vec<Complex<f64>>,
+    parameter_scratch_native2: Vec<Complex<wide::f64x2>>,
+    output_scratch_native2: Vec<Complex<wide::f64x2>>,
     evaluator: EvaluatorGroup,
 }
 
@@ -3660,60 +3767,60 @@ fn load_rusticol_runtime(
     let selection = resolve_process_root(&requested_root, process_key)?;
     let root = selection.root.clone();
     let manifest_path = root.join("process_manifest.json");
-    let manifest_text = fs::read_to_string(&manifest_path).map_err(|err| {
-        PyValueError::new_err(format!(
-            "could not read process manifest {}: {err}",
-            manifest_path.display()
-        ))
-    })?;
-    let manifest_value: Value = serde_json::from_str(&manifest_text).map_err(|err| {
-        PyValueError::new_err(format!(
-            "could not parse process manifest {}: {err}",
-            manifest_path.display()
-        ))
-    })?;
-    if let Some(mut generic_runtime) = load_generic_schema_v2_manifest(&manifest_value, &root)? {
-        if let Some(path) = model_parameters_path {
-            generic_runtime.apply_model_parameter_toml_path(&PathBuf::from(path))?;
+    let generic_result = read_json_manifest::<GenericProcessManifestV2>(&manifest_path);
+    match generic_result {
+        Ok(generic)
+            if generic.schema_version == 2 && generic.kind == "pyamplicol-generic-dag-process" =>
+        {
+            let mut generic_runtime = load_generic_schema_v2_manifest(generic, &root)?;
+            if let Some(path) = model_parameters_path {
+                generic_runtime.apply_model_parameter_toml_path(&PathBuf::from(path))?;
+            }
+            return Ok(Runtime {
+                root,
+                manifest: None,
+                generic_runtime: Some(generic_runtime),
+                selected_process_key: selection.selected_key,
+                selected_process: selection.selected_process,
+                input_crossing_map: selection.input_crossing_map,
+                crossing_alias_of: selection.crossing_alias_of,
+                stages: None,
+                amplitude_stage: None,
+                zero_gluon_stage: None,
+                last_profile: RuntimeProfile::default(),
+            });
         }
-        return Ok(Runtime {
-            root,
-            manifest: None,
-            generic_runtime: Some(generic_runtime),
-            selected_process_key: selection.selected_key,
-            selected_process: selection.selected_process,
-            input_crossing_map: selection.input_crossing_map,
-            crossing_alias_of: selection.crossing_alias_of,
-            stages: None,
-            amplitude_stage: None,
-            zero_gluon_stage: None,
-            last_profile: RuntimeProfile::default(),
-        });
+        Ok(generic) if !allow_legacy_schema_v1 => {
+            return Err(PyValueError::new_err(format!(
+                "Runtime.load only supports schema-v2 generic DAG artifacts; got kind {:?} \
+                 schema_version {}. Schema-v1 Rusticol artifacts are legacy; use \
+                 Runtime.load_legacy(...) for reference artifacts or regenerate with pyAmpliCol \
+                 generate-process.",
+                generic.kind, generic.schema_version
+            )));
+        }
+        Err(generic_error) if !allow_legacy_schema_v1 => {
+            let header = read_json_manifest::<ProcessManifestHeader>(&manifest_path);
+            if let Ok(header) = header {
+                if header.schema_version != 2 || header.kind != "pyamplicol-generic-dag-process" {
+                    return Err(PyValueError::new_err(format!(
+                        "Runtime.load only supports schema-v2 generic DAG artifacts; got kind {:?} \
+                         schema_version {}. Schema-v1 Rusticol artifacts are legacy; use \
+                         Runtime.load_legacy(...) for reference artifacts or regenerate with pyAmpliCol \
+                         generate-process.",
+                        header.kind, header.schema_version
+                    )));
+                }
+            }
+            return Err(PyValueError::new_err(format!(
+                "could not parse generic DAG process manifest schema v2: {generic_error}"
+            )));
+        }
+        Ok(_) | Err(_) => {}
     }
 
-    if !allow_legacy_schema_v1 {
-        let schema_version = manifest_value
-            .get("schema_version")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let kind = manifest_value
-            .get("kind")
-            .and_then(Value::as_str)
-            .unwrap_or("<missing>");
-        return Err(PyValueError::new_err(format!(
-            "Runtime.load only supports schema-v2 generic DAG artifacts; got kind {kind:?} \
-             schema_version {schema_version}. Schema-v1 Rusticol artifacts are legacy; use \
-             Runtime.load_legacy(...) for reference artifacts or regenerate with pyAmpliCol \
-             generate-process."
-        )));
-    }
-
-    let manifest: ProcessManifest = serde_json::from_value(manifest_value).map_err(|err| {
-        PyValueError::new_err(format!(
-            "could not parse process manifest {}: {err}",
-            manifest_path.display()
-        ))
-    })?;
+    let manifest: ProcessManifest =
+        read_json_manifest(&manifest_path).map_err(PyValueError::new_err)?;
     if manifest.schema_version != 1 {
         return Err(PyValueError::new_err(format!(
             "unsupported process manifest schema_version {}",
@@ -4022,13 +4129,9 @@ impl Runtime {
         momenta: &Bound<'py, PyAny>,
         color_sector_ids: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        let selected_color_sector_ids =
-            parse_required_color_sector_ids(color_sector_ids)?;
-        let values = self.evaluate_f64_values_selected(
-            py,
-            momenta,
-            Some(&selected_color_sector_ids),
-        )?;
+        let selected_color_sector_ids = parse_required_color_sector_ids(color_sector_ids)?;
+        let values =
+            self.evaluate_f64_values_selected(py, momenta, Some(&selected_color_sector_ids))?;
         f64_values_to_numpy_or_list(py, values)
     }
 
@@ -4410,7 +4513,7 @@ impl Runtime {
         expected_legs: usize,
     ) -> PyResult<Vec<Vec<[f64; 4]>>> {
         let batch = batch_momenta_dynamic(py, momenta, expected_legs)?;
-        apply_input_crossing_map(&batch, expected_legs, self.input_crossing_map.as_deref())
+        apply_input_crossing_map(batch, expected_legs, self.input_crossing_map.as_deref())
     }
 
     fn generic_batch_double_from_python(
@@ -5188,6 +5291,8 @@ impl GenericStageRuntimeV2 {
             input_spans,
             parameter_scratch_f64: Vec::new(),
             output_scratch_f64: Vec::new(),
+            parameter_scratch_native2: Vec::new(),
+            output_scratch_native2: Vec::new(),
             evaluator,
         })
     }
@@ -5198,6 +5303,9 @@ impl GenericStageRuntimeV2 {
         parameter_count: usize,
         state: &mut [Complex<f64>],
     ) -> PyResult<(f64, f64, f64)> {
+        if self.evaluator.supports_native2() {
+            return self.evaluate_f64_native2_into_state(batch_size, parameter_count, state);
+        }
         let mut input_pack_s = 0.0;
         let eval_start;
         if let Some(input_components) = self.input_components.as_ref() {
@@ -5252,6 +5360,49 @@ impl GenericStageRuntimeV2 {
                         &self.output_scratch_f64[source_start..source_start + *len],
                     );
                 }
+            }
+        }
+        Ok((
+            input_pack_s,
+            evaluator_s,
+            assign_start.elapsed().as_secs_f64(),
+        ))
+    }
+
+    fn evaluate_f64_native2_into_state(
+        &mut self,
+        batch_size: usize,
+        parameter_count: usize,
+        state: &mut [Complex<f64>],
+    ) -> PyResult<(f64, f64, f64)> {
+        let pack_start = Instant::now();
+        pack_native2_parameters(
+            batch_size,
+            parameter_count,
+            self.input_components.as_deref(),
+            state,
+            &mut self.parameter_scratch_native2,
+        )?;
+        let input_pack_s = pack_start.elapsed().as_secs_f64();
+
+        let evaluator_start = Instant::now();
+        self.evaluator.evaluate_native2_into(
+            batch_size.div_ceil(2),
+            &self.parameter_scratch_native2,
+            &mut self.output_scratch_native2,
+        )?;
+        let evaluator_s = evaluator_start.elapsed().as_secs_f64();
+
+        let assign_start = Instant::now();
+        let output_len = self.evaluator.output_len;
+        for row in 0..batch_size {
+            let state_row = row * parameter_count;
+            let native_row = row / 2 * output_len;
+            let lane = row % 2;
+            for (output_column, state_offset) in &self.outputs {
+                let value = self.output_scratch_native2[native_row + *output_column];
+                state[state_row + *state_offset] =
+                    c64(value.re.as_array()[lane], value.im.as_array()[lane]);
             }
         }
         Ok((
@@ -5360,6 +5511,51 @@ impl GenericStageRuntimeV2 {
     }
 }
 
+fn pack_native2_parameters(
+    batch_size: usize,
+    global_parameter_count: usize,
+    input_components: Option<&[usize]>,
+    state: &[Complex<f64>],
+    target: &mut Vec<Complex<wide::f64x2>>,
+) -> PyResult<()> {
+    if batch_size == 0 {
+        return Err(PyValueError::new_err(
+            "native two-lane evaluation requires a non-empty batch",
+        ));
+    }
+    if state.len() != batch_size * global_parameter_count {
+        return Err(PyValueError::new_err(format!(
+            "state buffer has length {}, expected {}",
+            state.len(),
+            batch_size * global_parameter_count
+        )));
+    }
+    let local_parameter_count = input_components
+        .map(|components| components.len())
+        .unwrap_or(global_parameter_count);
+    target.resize(
+        batch_size.div_ceil(2) * local_parameter_count,
+        Complex::new(wide::f64x2::ZERO, wide::f64x2::ZERO),
+    );
+    for native_row in 0..batch_size.div_ceil(2) {
+        let first_row = native_row * 2;
+        let second_row = usize::min(first_row + 1, batch_size - 1);
+        let target_row = native_row * local_parameter_count;
+        for local_index in 0..local_parameter_count {
+            let global_index = input_components
+                .map(|components| components[local_index])
+                .unwrap_or(local_index);
+            let first = state[first_row * global_parameter_count + global_index];
+            let second = state[second_row * global_parameter_count + global_index];
+            target[target_row + local_index] = Complex::new(
+                wide::f64x2::new([first.re, second.re]),
+                wide::f64x2::new([first.im, second.im]),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn contiguous_input_spans(input_components: &[usize]) -> Vec<(usize, usize, usize)> {
     if input_components.is_empty() {
         return Vec::new();
@@ -5439,6 +5635,11 @@ impl GenericAmplitudeRuntimeV2 {
             .iter()
             .map(|root| root.helicity_weight)
             .collect::<Vec<_>>();
+        let raw_sum_all_sector_weights = amplitude_stage
+            .roots
+            .iter()
+            .map(|root| root.all_sector_weight.unwrap_or(root.helicity_weight))
+            .collect::<Vec<_>>();
         let raw_sum_color_sector_ids = amplitude_stage
             .roots
             .iter()
@@ -5454,6 +5655,7 @@ impl GenericAmplitudeRuntimeV2 {
             build_raw_sum_groups(
                 amplitude_stage.output_count,
                 &raw_sum_weights,
+                &raw_sum_all_sector_weights,
                 &raw_sum_group_ids,
                 &raw_sum_color_sector_ids,
             )?
@@ -5478,6 +5680,7 @@ impl GenericAmplitudeRuntimeV2 {
         Ok(Self {
             output_length: amplitude_stage.output_count,
             raw_sum_weights,
+            raw_sum_all_sector_weights,
             raw_sum_color_sector_ids,
             raw_sum_groups,
             has_coherent_groups,
@@ -5486,6 +5689,8 @@ impl GenericAmplitudeRuntimeV2 {
             input_spans,
             parameter_scratch_f64: Vec::new(),
             output_scratch_f64: Vec::new(),
+            parameter_scratch_native2: Vec::new(),
+            output_scratch_native2: Vec::new(),
             evaluator: EvaluatorGroup::load(&stage.evaluator, root)?,
         })
     }
@@ -5495,6 +5700,41 @@ impl GenericAmplitudeRuntimeV2 {
         batch_size: usize,
         state: &[Complex<f64>],
     ) -> PyResult<(f64, f64)> {
+        if self.evaluator.supports_native2() {
+            let global_parameter_count = state
+                .len()
+                .checked_div(batch_size)
+                .ok_or_else(|| PyValueError::new_err("generic amplitude batch size is zero"))?;
+            let pack_start = Instant::now();
+            pack_native2_parameters(
+                batch_size,
+                global_parameter_count,
+                self.input_components.as_deref(),
+                state,
+                &mut self.parameter_scratch_native2,
+            )?;
+            let input_pack_s = pack_start.elapsed().as_secs_f64();
+
+            let eval_start = Instant::now();
+            self.evaluator.evaluate_native2_into(
+                batch_size.div_ceil(2),
+                &self.parameter_scratch_native2,
+                &mut self.output_scratch_native2,
+            )?;
+            self.output_scratch_f64
+                .resize(batch_size * self.evaluator.output_len, c64(0.0, 0.0));
+            for row in 0..batch_size {
+                let native_row = row / 2 * self.evaluator.output_len;
+                let output_row = row * self.evaluator.output_len;
+                let lane = row % 2;
+                for column in 0..self.evaluator.output_len {
+                    let value = self.output_scratch_native2[native_row + column];
+                    self.output_scratch_f64[output_row + column] =
+                        c64(value.re.as_array()[lane], value.im.as_array()[lane]);
+                }
+            }
+            return Ok((input_pack_s, eval_start.elapsed().as_secs_f64()));
+        }
         if let Some(input_components) = self.input_components.as_ref() {
             let local_parameter_count = input_components.len();
             let global_parameter_count = state
@@ -5605,7 +5845,12 @@ impl GenericAmplitudeRuntimeV2 {
                     for index in &group.indices {
                         sum += amplitudes[row_offset + *index];
                     }
-                    raw_sums[row] += group.weight * (sum.re * sum.re + sum.im * sum.im);
+                    let weight = if selected_color_sector_ids.is_none() {
+                        group.all_sector_weight
+                    } else {
+                        group.weight
+                    };
+                    raw_sums[row] += weight * (sum.re * sum.re + sum.im * sum.im);
                 }
                 continue;
             }
@@ -5617,8 +5862,12 @@ impl GenericAmplitudeRuntimeV2 {
                     continue;
                 }
                 let value = amplitudes[row_offset + index];
-                raw_sums[row] +=
-                    self.raw_sum_weights[index] * (value.re * value.re + value.im * value.im);
+                let weight = if selected_color_sector_ids.is_none() {
+                    self.raw_sum_all_sector_weights[index]
+                } else {
+                    self.raw_sum_weights[index]
+                };
+                raw_sums[row] += weight * (value.re * value.re + value.im * value.im);
             }
         }
         Ok(())
@@ -5696,14 +5945,14 @@ impl GenericAmplitudeRuntimeV2 {
                         sum_re += value.re.clone();
                         sum_im += value.im.clone();
                     }
-                    raw_sums[row] +=
-                        T::from(group.weight) * (sum_re.clone() * sum_re + sum_im.clone() * sum_im);
+                    raw_sums[row] += T::from(group.all_sector_weight)
+                        * (sum_re.clone() * sum_re + sum_im.clone() * sum_im);
                 }
                 continue;
             }
             for index in 0..self.output_length {
                 let value = &evaluated[row_offset + index];
-                raw_sums[row] += T::from(self.raw_sum_weights[index])
+                raw_sums[row] += T::from(self.raw_sum_all_sector_weights[index])
                     * (value.re.clone() * value.re.clone() + value.im.clone() * value.im.clone());
             }
         }
@@ -5810,6 +6059,7 @@ impl AmplitudeStage {
         let raw_sum_groups = if has_coherent_groups {
             build_raw_sum_groups(
                 manifest.output_length,
+                &manifest.raw_sum_weights,
                 &manifest.raw_sum_weights,
                 &raw_sum_group_ids,
                 &raw_sum_color_sector_ids,
@@ -5958,10 +6208,12 @@ impl AmplitudeStage {
 fn build_raw_sum_groups(
     output_length: usize,
     weights: &[f64],
+    all_sector_weights: &[f64],
     group_ids: &[Option<i64>],
     color_sector_ids: &[Option<i64>],
 ) -> PyResult<Vec<RawSumGroup>> {
     if weights.len() != output_length
+        || all_sector_weights.len() != output_length
         || group_ids.len() != output_length
         || color_sector_ids.len() != output_length
     {
@@ -5979,12 +6231,14 @@ fn build_raw_sum_groups(
                 id: index as i64,
                 indices: vec![index],
                 weight: weights[index],
+                all_sector_weight: all_sector_weights[index],
                 sector_ids: color_sector_ids[index].into_iter().collect(),
             });
         }
     }
     for (group_id, indices) in grouped {
         let weight = weights[indices[0]];
+        let all_sector_weight = all_sector_weights[indices[0]];
         if indices
             .iter()
             .any(|index| (weights[*index] - weight).abs() > 0.0)
@@ -5993,11 +6247,20 @@ fn build_raw_sum_groups(
                 "coherent amplitude group {group_id} has inconsistent raw-sum weights"
             )));
         }
+        if indices
+            .iter()
+            .any(|index| (all_sector_weights[*index] - all_sector_weight).abs() > 0.0)
+        {
+            return Err(PyValueError::new_err(format!(
+                "coherent amplitude group {group_id} has inconsistent all-sector raw-sum weights"
+            )));
+        }
         groups.push(RawSumGroup {
             id: group_id,
             sector_ids: unique_color_sector_ids(&indices, color_sector_ids),
             indices,
             weight,
+            all_sector_weight,
         });
     }
     Ok(groups)
@@ -6135,6 +6398,7 @@ impl EvaluatorGroup {
             evaluators,
             output_len,
             chunk_scratch_f64: Vec::new(),
+            chunk_scratch_native2: Vec::new(),
         })
     }
 
@@ -6187,6 +6451,54 @@ impl EvaluatorGroup {
                 let dst = row * self.output_len + output_offset;
                 out[dst..dst + evaluator.output_len]
                     .copy_from_slice(&self.chunk_scratch_f64[src..src + evaluator.output_len]);
+            }
+            output_offset += evaluator.output_len;
+        }
+        Ok(())
+    }
+
+    fn supports_native2(&self) -> bool {
+        !self.evaluators.is_empty()
+            && self
+                .evaluators
+                .iter()
+                .all(|evaluator| matches!(&evaluator.eval, F64Evaluator::JitNative2(_)))
+    }
+
+    fn evaluate_native2_into(
+        &mut self,
+        native_rows: usize,
+        params: &[Complex<wide::f64x2>],
+        out: &mut Vec<Complex<wide::f64x2>>,
+    ) -> PyResult<()> {
+        let expected_output_len = native_rows * self.output_len;
+        if out.len() != expected_output_len {
+            out.resize(
+                expected_output_len,
+                Complex::new(wide::f64x2::ZERO, wide::f64x2::ZERO),
+            );
+        }
+        if self.evaluators.len() == 1 {
+            return self.evaluators[0].evaluate_native2_batch(native_rows, params, out);
+        }
+
+        let mut output_offset = 0;
+        for evaluator in &mut self.evaluators {
+            self.chunk_scratch_native2.resize(
+                native_rows * evaluator.output_len,
+                Complex::new(wide::f64x2::ZERO, wide::f64x2::ZERO),
+            );
+            evaluator.evaluate_native2_batch(
+                native_rows,
+                params,
+                &mut self.chunk_scratch_native2,
+            )?;
+            for row in 0..native_rows {
+                let source_start = row * evaluator.output_len;
+                let target_start = row * self.output_len + output_offset;
+                out[target_start..target_start + evaluator.output_len].copy_from_slice(
+                    &self.chunk_scratch_native2[source_start..source_start + evaluator.output_len],
+                );
             }
             output_offset += evaluator.output_len;
         }
@@ -6265,6 +6577,24 @@ impl LoadedEvaluator {
                 eval.evaluate_batch(batch_size, params, out)
                     .map_err(PyRuntimeError::new_err)
             }
+            F64Evaluator::JitNative2(eval) => {
+                if params.len() != batch_size * self.input_len {
+                    return Err(PyValueError::new_err(format!(
+                        "parameter buffer has length {}, expected {}",
+                        params.len(),
+                        batch_size * self.input_len
+                    )));
+                }
+                if out.len() != batch_size * self.output_len {
+                    return Err(PyValueError::new_err(format!(
+                        "output buffer has length {}, expected {}",
+                        out.len(),
+                        batch_size * self.output_len
+                    )));
+                }
+                eval.evaluate_batch(batch_size, params, out)
+                    .map_err(PyRuntimeError::new_err)
+            }
             F64Evaluator::Interpreted(eval) => {
                 if params.len() != batch_size * self.input_len {
                     return Err(PyValueError::new_err(format!(
@@ -6292,12 +6622,44 @@ impl LoadedEvaluator {
             }
         }
     }
+
+    fn evaluate_native2_batch(
+        &mut self,
+        native_rows: usize,
+        params: &[Complex<wide::f64x2>],
+        out: &mut [Complex<wide::f64x2>],
+    ) -> PyResult<()> {
+        if params.len() != native_rows * self.input_len {
+            return Err(PyValueError::new_err(format!(
+                "native parameter buffer has length {}, expected {}",
+                params.len(),
+                native_rows * self.input_len
+            )));
+        }
+        if out.len() != native_rows * self.output_len {
+            return Err(PyValueError::new_err(format!(
+                "native output buffer has length {}, expected {}",
+                out.len(),
+                native_rows * self.output_len
+            )));
+        }
+        match &mut self.eval {
+            F64Evaluator::JitNative2(eval) => {
+                eval.batch_evaluate(params, out, native_rows);
+                Ok(())
+            }
+            _ => Err(PyRuntimeError::new_err(
+                "native two-lane evaluation requested for a non-native evaluator",
+            )),
+        }
+    }
 }
 
 impl ZeroGluonStage {
     fn load(manifest: &ZeroGluonManifest, root: &Path) -> PyResult<Self> {
         let state_path = artifact_path(root, &manifest.evaluator_state_path);
-        let (exact_eval, _jit_complex) = load_evaluator_state(&state_path)?;
+        let (_jit_settings, exact_eval, _jit_complex, _jit_native2) =
+            load_evaluator_state(&state_path)?;
         let eval_complex = exact_eval
             .clone()
             .map_coeff(&|c| Complex::new(c.re.to_f64(), c.im.to_f64()));
@@ -6581,16 +6943,46 @@ fn flatten_evaluators(
             output_len,
             evaluator_state_path,
         } => {
-            let (exact_eval, jit_eval) =
+            let (jit_settings, exact_eval, jit_eval, jit_native2) =
                 load_evaluator_state(&artifact_path(root, evaluator_state_path))?;
-            let eval = jit_eval.ok_or_else(|| {
-                PyValueError::new_err(
-                    "jit-symbolica-evaluator artifact has no saved complex JIT payload; \
-                     evaluate the Symbolica evaluator once before saving it",
-                )
-            })?;
+            let eval = if native_simd_jit_enabled() {
+                F64Evaluator::JitNative2(if native_simd_jit_recompile_enabled() {
+                    exact_eval
+                        .jit_compile::<Complex<wide::f64x2>>(jit_settings.clone())
+                        .map_err(|err| {
+                            PyRuntimeError::new_err(format!(
+                                "could not recompile native two-lane JIT evaluator from {}: {err}",
+                                evaluator_state_path
+                            ))
+                        })?
+                } else {
+                    match jit_native2 {
+                            Some(eval) => eval,
+                            None => exact_eval
+                                .jit_compile::<Complex<wide::f64x2>>(jit_settings.clone())
+                                .map_err(|err| {
+                                    PyRuntimeError::new_err(format!(
+                                        "could not compile native two-lane JIT evaluator from {}: {err}",
+                                        evaluator_state_path
+                                    ))
+                                })?,
+                        }
+                })
+            } else {
+                F64Evaluator::Jit(match jit_eval {
+                    Some(eval) => eval,
+                    None => exact_eval
+                        .jit_compile::<Complex<f64>>(jit_settings)
+                        .map_err(|err| {
+                            PyRuntimeError::new_err(format!(
+                                "could not compile scalar JIT evaluator from {}: {err}",
+                                evaluator_state_path
+                            ))
+                        })?,
+                })
+            };
             output.push(LoadedEvaluator {
-                eval: F64Evaluator::Jit(eval),
+                eval,
                 exact_eval: Some(exact_eval),
                 double_eval: None,
                 arb_eval: None,
@@ -6623,7 +7015,7 @@ fn flatten_evaluators(
             let exact_eval = evaluator_state_path
                 .as_deref()
                 .map(|state_path| {
-                    load_evaluator_state(&artifact_path(root, state_path)).map(|state| state.0)
+                    load_evaluator_state(&artifact_path(root, state_path)).map(|state| state.1)
                 })
                 .transpose()?;
             output.push(LoadedEvaluator {
@@ -6648,9 +7040,19 @@ fn flatten_evaluators(
 fn load_evaluator_state(
     path: &Path,
 ) -> PyResult<(
+    JITCompilationSettings,
     ExpressionEvaluator<Complex<Rational>>,
     Option<JITCompiledEvaluator<Complex<f64>>>,
+    Option<JITCompiledEvaluator<Complex<wide::f64x2>>>,
 )> {
+    type SavedEvaluatorNative2 = (
+        bool,
+        JITCompilationSettings,
+        ExpressionEvaluator<Complex<Rational>>,
+        Option<JITCompiledEvaluator<f64>>,
+        Option<JITCompiledEvaluator<Complex<f64>>>,
+        Option<JITCompiledEvaluator<Complex<wide::f64x2>>>,
+    );
     type SavedEvaluator = (
         bool,
         JITCompilationSettings,
@@ -6671,23 +7073,68 @@ fn load_evaluator_state(
             path.display()
         ))
     })?;
-    match bincode::decode_from_slice::<SavedEvaluator, _>(&bytes, bincode::config::standard()) {
-        Ok(((_, _, evaluator, _, jit_complex), _)) => Ok((evaluator, jit_complex)),
-        Err(new_err) => {
-            let decoded = bincode::decode_from_slice::<LegacySavedEvaluator, _>(
-                &bytes,
-                bincode::config::standard(),
-            )
-            .map_err(|_| {
-                PyValueError::new_err(format!(
-                    "could not decode evaluator state {}: {new_err}",
-                    path.display()
-                ))
-            })?;
-            let (_, evaluator, _, jit_complex) = decoded.0;
-            Ok((evaluator, jit_complex))
+    match bincode::decode_from_slice::<SavedEvaluatorNative2, _>(
+        &bytes,
+        bincode::config::standard(),
+    ) {
+        Ok(((_, settings, evaluator, _, jit_complex, jit_native2), _)) => {
+            Ok((settings, evaluator, jit_complex, jit_native2))
         }
+        Err(native_err) => match bincode::decode_from_slice::<SavedEvaluator, _>(
+            &bytes,
+            bincode::config::standard(),
+        ) {
+            Ok(((_, settings, evaluator, _, jit_complex), _)) => {
+                Ok((settings, evaluator, jit_complex, None))
+            }
+            Err(new_err) => {
+                let decoded = bincode::decode_from_slice::<LegacySavedEvaluator, _>(
+                    &bytes,
+                    bincode::config::standard(),
+                )
+                .map_err(|_| {
+                    PyValueError::new_err(format!(
+                        "could not decode evaluator state {}: {native_err}; {new_err}",
+                        path.display()
+                    ))
+                })?;
+                let (_, evaluator, _, jit_complex) = decoded.0;
+                Ok((
+                    JITCompilationSettings::default(),
+                    evaluator,
+                    jit_complex,
+                    None,
+                ))
+            }
+        },
     }
+}
+
+fn native_simd_jit_enabled() -> bool {
+    if !cfg!(target_arch = "aarch64") {
+        return false;
+    }
+    std::env::var("RUSTICOL_NATIVE_SIMD_JIT")
+        .ok()
+        .map(|value| {
+            !matches!(
+                value.to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        })
+        .unwrap_or(true)
+}
+
+fn native_simd_jit_recompile_enabled() -> bool {
+    std::env::var("RUSTICOL_RECOMPILE_NATIVE_SIMD_JIT")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn artifact_path(root: &Path, value: &str) -> PathBuf {
@@ -6724,12 +7171,12 @@ fn input_crossing_map_to_json(map: &Vec<InputCrossingMapEntry>) -> Vec<(usize, u
 }
 
 fn apply_input_crossing_map(
-    batch: &[Vec<[f64; 4]>],
+    batch: Vec<Vec<[f64; 4]>>,
     expected_legs: usize,
     input_crossing_map: Option<&[InputCrossingMapEntry]>,
 ) -> PyResult<Vec<Vec<[f64; 4]>>> {
     let Some(map) = input_crossing_map else {
-        return Ok(batch.to_vec());
+        return Ok(batch);
     };
     if map.len() != expected_legs {
         return Err(PyValueError::new_err(format!(
@@ -7230,15 +7677,7 @@ fn decimals_to_python<T: std::fmt::Display + std::fmt::LowerExp>(
 }
 
 fn f64_values_to_numpy_or_list(py: Python<'_>, values: Vec<f64>) -> PyResult<Py<PyAny>> {
-    if let Ok(numpy) = py.import("numpy") {
-        let dtype = numpy.getattr("float64")?;
-        return numpy
-            .getattr("array")?
-            .call1((values,))?
-            .call_method1("astype", (dtype,))?
-            .into_py_any(py);
-    }
-    values.into_py_any(py)
+    Ok(values.into_pyarray(py).into_any().unbind())
 }
 
 fn checksum_dict_str<'py>(
@@ -8341,6 +8780,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn native_two_lane_parameter_pack_preserves_component_order_and_odd_tail() {
+        let state = (0..12)
+            .map(|index| c64(index as f64, -(index as f64)))
+            .collect::<Vec<_>>();
+        let mut packed = Vec::new();
+
+        pack_native2_parameters(3, 4, Some(&[3, 1]), &state, &mut packed).unwrap();
+
+        assert_eq!(packed.len(), 4);
+        assert_eq!(packed[0].re.to_array(), [3.0, 7.0]);
+        assert_eq!(packed[0].im.to_array(), [-3.0, -7.0]);
+        assert_eq!(packed[1].re.to_array(), [1.0, 5.0]);
+        assert_eq!(packed[2].re.to_array(), [11.0, 11.0]);
+        assert_eq!(packed[3].re.to_array(), [9.0, 9.0]);
+    }
+
+    #[test]
     fn generic_dynamic_momenta_parser_accepts_more_than_sixteen_legs() {
         let point = vec![vec![0.0, 1.0, 2.0, 3.0]; 17];
         let parsed = batch_momenta_dynamic_from_nested(vec![point], 17).unwrap();
@@ -8388,7 +8844,7 @@ mod tests {
             },
         ];
 
-        let mapped = apply_input_crossing_map(&batch, 3, Some(&map)).unwrap();
+        let mapped = apply_input_crossing_map(batch.clone(), 3, Some(&map)).unwrap();
 
         assert_eq!(mapped[0][0], [-30.0, -7.0, -8.0, -9.0]);
         assert_eq!(mapped[0][1], batch[0][0]);
@@ -8411,7 +8867,7 @@ mod tests {
             },
         ];
 
-        let error = apply_input_crossing_map(&batch, 2, Some(&duplicate)).unwrap_err();
+        let error = apply_input_crossing_map(batch, 2, Some(&duplicate)).unwrap_err();
 
         assert!(error.to_string().contains("duplicate target index"));
     }
@@ -8982,6 +9438,39 @@ mod tests {
     }
 
     #[test]
+    fn generic_input_value_variant_index_preserves_precedence() {
+        let manifest: GenericProcessManifestV2 =
+            serde_json::from_value(minimal_generic_manifest()).unwrap();
+        let current_storage = &manifest.runtime_schema.current_storage;
+        let mut value_storage = manifest.runtime_schema.value_storage.clone();
+
+        let variants = build_input_value_variants(current_storage, &value_storage).unwrap();
+        assert_eq!(input_value_variant(&variants, 0).unwrap(), "source");
+        assert_eq!(input_value_variant(&variants, 2).unwrap(), "unpropagated");
+
+        let mut propagated = value_storage.value_slots[2].clone();
+        propagated.variant = "propagated".to_string();
+        value_storage.value_slots.push(propagated);
+        let variants = build_input_value_variants(current_storage, &value_storage).unwrap();
+        assert_eq!(input_value_variant(&variants, 2).unwrap(), "propagated");
+    }
+
+    #[test]
+    fn generic_input_value_variant_index_reports_missing_slots() {
+        let manifest: GenericProcessManifestV2 =
+            serde_json::from_value(minimal_generic_manifest()).unwrap();
+        let current_storage = &manifest.runtime_schema.current_storage;
+        let mut value_storage = manifest.runtime_schema.value_storage.clone();
+        value_storage
+            .value_slots
+            .retain(|slot| slot.current_id != 2);
+
+        let variants = build_input_value_variants(current_storage, &value_storage).unwrap();
+        let error = input_value_variant(&variants, 2).unwrap_err();
+        assert!(error.to_string().contains("without an input value slot"));
+    }
+
+    #[test]
     fn generic_schema_v2_validator_accepts_serialized_stage_evaluators() {
         let mut payload = minimal_generic_manifest();
         add_minimal_stage_evaluators(&mut payload);
@@ -9094,6 +9583,31 @@ mod tests {
                 .to_string()
                 .contains("generic stage 1 is inconsistent")
         );
+    }
+
+    #[test]
+    fn generic_schema_v2_validator_accepts_compact_stage_interactions() {
+        let mut payload = minimal_generic_manifest();
+        add_minimal_stage_evaluators(&mut payload);
+        payload["runtime_schema"]["stages"][0]["interactions_compacted"] = json!(true);
+        payload["runtime_schema"]["stages"][0]["interaction_ids"] = json!([0]);
+        payload["runtime_schema"]["stages"][0]["interactions"] = json!([]);
+        let manifest: GenericProcessManifestV2 = serde_json::from_value(payload).unwrap();
+
+        validate_generic_schema_v2_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn generic_schema_v2_validator_rejects_bad_compact_stage_interactions() {
+        let mut payload = minimal_generic_manifest();
+        payload["runtime_schema"]["stages"][0]["interactions_compacted"] = json!(true);
+        payload["runtime_schema"]["stages"][0]["interaction_ids"] = json!([]);
+        payload["runtime_schema"]["stages"][0]["interactions"] = json!([]);
+        let manifest: GenericProcessManifestV2 = serde_json::from_value(payload).unwrap();
+
+        let error = validate_generic_schema_v2_manifest(&manifest)
+            .expect_err("bad compact interaction metadata should be rejected");
+        assert!(error.to_string().contains("compact stage 1"));
     }
 
     #[test]

@@ -78,15 +78,34 @@ The generic LC/NLC/full-colour staged-DAG implementation is the production
 \PAC\ workflow.  Process generation writes schema-v2 artifacts loaded by
 \texttt{rusticol}; model parameters are runtime inputs and may be overridden
 from TOML.  The default benchmark route is Rusticol with SymJIT stage
-evaluators, stage-local inputs, output chunk size 128, batch size 64, ten
-Horner iterations, Symbolica's default CPE choice, and enlarged
-Horner/common-pair limits.  The production matrix JIT row uses SymJIT
-\(\mathrm{O}1\) for generation-speed comparisons; dedicated Z-family scans
-also show O3/ASM/C++ variants.  The result matrices are generated as separate
+evaluators and stage-local inputs.  Selected-flow JIT artifacts measure stage
+chunks around base 128 and run at batch 128; all-flow artifacts use uniform
+chunk 8192 and batch 64.  Both use ten Horner iterations, Symbolica's default
+CPE choice, and enlarged Horner/common-pair limits.  The production matrix JIT
+row uses SymJIT \(\mathrm{O}1\) throughout.  Repeated ten-second selected-flow
+checks have not established a consistent, material O3 runtime gain for any
+current matrix cell, so no O3 substitution is shown; dedicated Z-family scans
+still report O3/ASM/C++ variants.  Selected JIT generation benchmarks effective
+chunk sizes 64, 96, 128, 192, 256, and unchunked for each stage, retaining a
+non-default candidate only above a five-percent measured gain.  On AArch64,
+candidate scores count one shared native input pack and sum only evaluator and
+output-unpack work across chunks, matching Rusticol's fused stage call.  Large all-flow
+and backend-comparison artifacts stay uniformly chunked.  The result matrices
+are generated as separate
 \TeX{} inputs, and the benchmark writers refresh \texttt{pyAmpliCol.pdf}
 after each completed cell.  Generic current and colour-sector generation caps
 are disabled by default; long benchmark refreshes rely on the 30 GB watchdog
-rather than truncated colour plans.
+rather than truncated colour plans.  On macOS the watchdog enforces the larger
+of process-tree RSS and compressed physical footprint, including descendants
+that create independent process sessions.
+
+Once runnable stage evaluators are serialized, the saved schema compacts full
+generation-only interaction records to stage interaction IDs and vertex-kind
+counts.  The full records remain available in
+\path{runtime_schema_diagnostics.pickle.gz}; plan-only manifests stay
+detailed, and Rusticol remains backward-compatible with earlier artifacts.  On
+measured all-flow artifacts this removes about 80 percent of manifest bytes
+without changing any evaluator, runtime schedule, or matrix-element value.
 
 \section{The AmpliCol Current Recursion}
 
@@ -557,15 +576,26 @@ process_dir/
   ... evaluator states ...
 \end{lstlisting}
 
-\texttt{rusticol.Runtime.load} validates the schema, checks that the current
-process family is supported, loads every Symbolica evaluator, computes direct
-state offsets for stage outputs, allocates reusable scratch buffers, and builds
-a fixed execution plan.  The optimized f64 path accepts NumPy arrays with shape
+\texttt{rusticol.Runtime.load} streams the typed schema directly from disk,
+validates current/value relationships through precomputed indices, loads every
+Symbolica evaluator, computes direct state offsets for stage outputs, allocates
+reusable scratch buffers, and builds a fixed execution plan.  The optimized f64
+path accepts NumPy arrays with shape
 \texttt{(batch, n\_external, 4)}.  For each batch, Rust fills source
 wavefunctions and momentum sums, executes stage evaluators in topological order,
 writes the returned current components into the contiguous state table, executes
 the amplitude/raw-sum evaluator, applies the Fortran-matched normalization, and
 returns a NumPy array of matrix elements.
+
+On AArch64, the f64 route loads native two-lane complex SymJIT payloads.  A
+stage-local input slice is packed once and reused by every output chunk in that
+stage; this keeps chunking as a code-size control without multiplying input-pack
+cost.  Setting \texttt{RUSTICOL\_NATIVE\_SIMD\_JIT=0} selects the scalar JIT
+fallback for diagnostics.
+Runnable artifacts likewise omit the full per-interaction diagnostic records
+after evaluator serialization, retaining compact IDs and per-kind counts.  The
+trusted local diagnostic sidecar is a gzip-compressed Python protocol-5 pickle;
+it is not part of evaluator loading or execution.
 \Needspace{18\baselineskip}
 \begin{lstlisting}
 for point in batch {
@@ -607,47 +637,48 @@ LC process generation now has two related modes.  For ordinary integration
 benchmarks, \PAC\ times one selected LC ordering per phase-space point.  The
 selected artifact is pruned before Symbolica evaluator construction, so no
 dynamic colour-flow selector remains in those expressions.  For all-flow
-studies, \PAC\ writes an \texttt{lc-replay-partition-schema-v2} artifact: the
-root manifest owns several selected-sector representative sidecars, and each
-sidecar replays an exact block of sibling LC orderings by external-label
-permutation.  The blocks are chosen so the incoming-label set is preserved.
-Thus the union covers the same colour orderings probed by \AC's colour driver,
-without building the old sector-local all-ordering clone.
+fixed-helicity matrix entries, \PAC\ writes a materialized shared all-sector
+artifact: internal currents live in one shared LC sector, while amplitude roots
+retain the full colour-order mapping used for the \AC\ \texttt{imode=2}
+comparison.  This avoids the old sector-local all-ordering clone while keeping
+the runtime result directly value-comparable.
 
-This is an exact partition, not a representative approximation.  For
-\(gg\to t\bar t+5g\), for example, there are \(7!=5040\) LC orderings of the
-seven gluon labels.  They split into 21 replay representatives, each covering
-\(2!\,5!=240\) orderings while keeping the two incoming gluon labels incoming.
-All generated representative outputs are kept on disk, so any block can be
-re-timed or inspected without regenerating the process.
+The shared all-sector mode reuses pure-gluon subcurrents through the usual LC
+reflection relation, with the corresponding sign carried as an interaction
+colour weight.  That sign is applied before current-stage propagation, so the
+shared DAG is numerically equivalent to the sector-specialized artifact while
+avoiding one current table per ordering.  Runtime selection of one LC ordering
+is still available through generated sidecars; \texttt{time-process
+--lc-sector-ids} loads the matching pruned sidecar when it exists.
 
-\Needspace{14\baselineskip}
-\begin{center}
-\begingroup
-\scriptsize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}L{1.35in}rrrrrrr@{}}
-\toprule
-Process & Orders & Reps & \AC\ gen & \PAC\ gen & JIT & Run [s/pt] & Rel. diff. \\
-\midrule
-\(gg\to t\bar t+3g\) & 120 & \(10\times12\) & 6.55 & 8.34 & 3.04 & 0.00204 / 0.00345 & \(8.3\times10^{-13}\) \\
-\(gg\to t\bar t+4g\) & 720 & \(15\times48\) & 27.6 & 31.6 & 13.0 & 0.0358 / 0.0488 & \(8.1\times10^{-13}\) \\
-\(gg\to t\bar t+5g\) & 5040 & \(21\times240\) & 255 & 143 & 57.7 & 0.826 / 1.287 & \(1.1\times10^{-12}\) \\
-\bottomrule
-\end{tabular}
-\endgroup
-\end{center}
+The fixed-helicity workload is selected without constructing an all-helicity
+all-sector artifact.  The matrix driver derives replay-compatible candidates
+from the external source-spin states, evaluates their selected-sector raw sums
+at a deterministic point, and keeps the strongest nonzero candidate.  Exact
+sector-id lookup is indexed, so this setup remains linear in the number of LC
+sectors rather than repeatedly scanning the complete colour plan.
 
-\noindent\footnotesize Runtime entries are \PAC/\AC\ helicity-summed all-flow
-wall time per phase-space point.  The first two \AC\ generation entries come
-from the same generated-library refresh used by the LC matrix.  For
-\(gg\to t\bar t+5g\), the measured
-helicity-summed all-flow workflow is already faster than \AC\ both in
-generation (\(143\) s versus \(255\) s) and runtime (\(0.826\) s per point
-versus \(1.287\) s per point).  The process-matrix tables below use a different
-second runtime slot: all colour flows at one deterministic fixed source
-helicity, while the first runtime slot remains the selected colour flow with
-the usual helicity sum.
+\input{shared_lc_recycling_table.tex}
+
+\noindent\footnotesize The generation column reports \AC/\PAC\ all-flow setup
+time in seconds for the fixed-helicity \texttt{imode=2}-style comparison.  All
+run entries are wall microseconds per phase-space point, \AC/\PAC.  The
+selected-ratio column is the \PAC/\AC\ multiplier for one LC flow with the
+usual helicity sum; the all-run column is the fixed-source-helicity sum over
+all LC flows.  The generated table is refreshed from the LC matrix cache.  At
+\(gg\to t\bar t+6g\), both implementations report 199,042 filtered currents
+and 40,320 amplitudes/orderings; the selected-flow validation agrees to better
+than \(10^{-15}\).  The process-matrix tables below use the same selected- and
+all-flow runtime semantics.
+
+\paragraph{High-multiplicity AArch64 limit.}
+For \(d\bar d\to t\bar t+7g\), an all-flow O1 build hit SymJIT's
+\texttt{x < 4096} assertion because its stack frame exceeded the shifted
+12-bit ADD/SUB immediate.  Patch 0003 splits the adjustment, and its regression
+and the matrix retry passed that point.  The retry later reached
+\texttt{generic\_stage\_9\_subset\_10} but peaked at 30.118 GiB.  The selected
+O1 artifact remains valid at \(5.4\times10^{-14}\) relative difference; the
+all-flow slot is marked \texttt{>30 GB RAM}, with partial outputs retained.
 
 
 \input{result_matrix_table.tex}

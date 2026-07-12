@@ -1,5 +1,13 @@
 # Low-Multiplicity LC Pruning Audit
 
+> **Historical diagnostic:** this snapshot predates the shared all-ordering
+> schema-v2 refresh. It records a selected-sector experiment with numerical
+> zero-current filtering and signature merging enabled. Current production
+> result-matrix runs generate exact all-ordering artifacts without those
+> numerical rewrites, validate the selected-flow sidecar against AmpliCol, and
+> are audited by `audit_result_matrix.py`. The counts below remain useful for
+> provenance, but they are not the settings used by the live PDF tables.
+
 This audit checks whether the generic DAG compiler is missing obvious AmpliCol-style current recycling or helicity pruning for representative low-multiplicity processes.  All Fortran numbers below come from the generated-library workflow (`--library=create`, `make amplicol_generate_library`) and inspect the first generated library module for the same selected leading-colour sector used in the result matrix.  pyAmpliCol counts are the selected-sector generic DAG counts after LC sector filtering, helicity pruning, dead-tree pruning, and the default 10-point numerical current warmup passes.
 
 | process | py currents | py interactions | py roots | py helicity weights | Fortran val_c | Fortran int_c | Fortran amps | status |

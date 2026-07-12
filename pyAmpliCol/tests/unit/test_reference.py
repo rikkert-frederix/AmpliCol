@@ -15,6 +15,7 @@ from pyamplicol.reference import (
     amplicol_process_file_integrals,
     parse_amplicol_probe_points,
     parse_color_probe_components,
+    parse_color_probe_point_count,
     parse_color_probe_raw_components,
     parse_color_probe_value,
     parse_first_phase_space_point,
@@ -648,11 +649,13 @@ def test_reference_adapter_quiet_probe_adds_legacy_quiet_flag(tmp_path: Path) ->
 
 def test_color_probe_parsers_extract_requested_value_and_components() -> None:
     output = """
+points 3
 AMPICOL_COLOR_PROBE_COMPONENTS   1.0000000000000000E+00   8.0000000000000004E-01   8.0000000000000004E-01
 AMPICOL_COLOR_PROBE_RAW_COMPONENTS   9.0000000000000000E+00   7.2000000000000002E+00   7.2000000000000002E+00
 AMPICOL_COLOR_PROBE_VALUE full 1 1   8.0000000000000004E-01
 """
 
+    assert parse_color_probe_point_count(output) == 3
     assert parse_color_probe_value(output) == 0.8
     assert parse_color_probe_components(output) == (1.0, 0.8, 0.8)
     assert parse_color_probe_raw_components(output) == (9.0, 7.2, 7.2)
@@ -660,6 +663,7 @@ AMPICOL_COLOR_PROBE_VALUE full 1 1   8.0000000000000004E-01
 
 def test_reference_adapter_runs_color_probe_with_supplied_momenta(tmp_path: Path) -> None:
     calls: list[tuple[str, ...]] = []
+    environments: list[dict[str, str] | None] = []
 
     def runner(
         args: Sequence[str],
@@ -669,9 +673,15 @@ def test_reference_adapter_runs_color_probe_with_supplied_momenta(tmp_path: Path
         timeout: float | None = None,
     ) -> CommandResult:
         calls.append(tuple(args))
+        environments.append(None if env is None else dict(env))
         stdout = ""
         if tuple(args[:1]) == ("./amplicol_color_probe",):
             stdout = """
+points 3
+AMPICOL_COLOR_PROBE_CURRENTS 123
+AMPICOL_COLOR_PROBE_VERTICES 456
+AMPICOL_COLOR_PROBE_AMPLITUDES 24
+AMPICOL_COLOR_PROBE_COLOR_ORDERS 6
 AMPICOL_COLOR_PROBE_COMPONENTS   1.0E+00   8.0E-01   8.0E-01
 AMPICOL_COLOR_PROBE_RAW_COMPONENTS   9.0E+00   7.2E+00   7.2E+00
 AMPICOL_COLOR_PROBE_VALUE full 1 1   8.0E-01
@@ -697,6 +707,7 @@ total                                   0.000025    100.00%
         particles=particles,
         points=3,
         helicities=[-1, 1, 0, -1],
+        target_runtime=10.0,
     )
 
     assert calls[-2] == ("make", "-j2", "amplicol_color_probe")
@@ -714,8 +725,14 @@ total                                   0.000025    100.00%
         "-1",
     )
     assert result.first_point_matrix_element == 0.8
+    assert result.color_probe_points == 3
     assert result.color_probe_components == (1.0, 0.8, 0.8)
     assert result.color_probe_raw_components == (9.0, 7.2, 7.2)
+    assert result.color_probe_current_count == 123
+    assert result.color_probe_vertex_count == 456
+    assert result.color_probe_amplitude_count == 24
+    assert result.color_probe_color_order_count == 6
+    assert environments[-1] == {"AMPICOL_COLOR_PROBE_TARGET_RUNTIME_S": "10"}
 
 
 def test_reference_adapter_runs_color_library_probe_with_supplied_momenta(

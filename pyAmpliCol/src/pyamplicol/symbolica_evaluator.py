@@ -10,7 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -61,6 +61,8 @@ class SymbolicaEvaluatorSettings:
     compiler_path: str | None = None
     compiler_flags: tuple[str, ...] = ()
     compiled_output_chunk_size: int | None = None
+    output_chunk_strategy: str = "uniform"
+    output_chunk_autotune_batch_size: int = 128
     compiled_chunk_compile_workers: int = 1
     compiled_output_dir: str | None = None
     raw_sum_final_stage: bool = False
@@ -108,6 +110,20 @@ class SymbolicaEvaluatorSettings:
             raise NativeEvaluationError(
                 "symbolica compiled output chunk size must be positive"
             )
+        if self.output_chunk_strategy not in (
+            "auto",
+            "uniform",
+            "tapered-stage",
+            "measured-stage",
+        ):
+            raise NativeEvaluationError(
+                "symbolica output chunk strategy must be 'auto', 'uniform', "
+                "'tapered-stage', or 'measured-stage'"
+            )
+        if self.output_chunk_autotune_batch_size < 1:
+            raise NativeEvaluationError(
+                "symbolica output chunk autotune batch size must be positive"
+            )
         if self.compiled_chunk_compile_workers < 1:
             raise NativeEvaluationError(
                 "symbolica compiled chunk compile workers must be positive"
@@ -146,6 +162,10 @@ class SymbolicaEvaluatorSettings:
             "compiler_flags": list(self.compiler_flags),
             "effective_compiler_flags": list(_compiled_compiler_flags(self)),
             "compiled_output_chunk_size": self.compiled_output_chunk_size,
+            "output_chunk_strategy": self.output_chunk_strategy,
+            "output_chunk_autotune_batch_size": (
+                self.output_chunk_autotune_batch_size
+            ),
             "compiled_chunk_compile_workers": self.compiled_chunk_compile_workers,
             "compiled_output_dir": self.compiled_output_dir,
             "raw_sum_final_stage": self.raw_sum_final_stage,
@@ -178,7 +198,10 @@ def _compile_symbolica_outputs(
         stage=progress_stage,
         item=f"{label} prepare {len(outputs)}",
     )
+    total_started = time.perf_counter()
+    prepare_started = time.perf_counter()
     outputs = tuple(_prepare_symbolica_output(output, settings) for output in outputs)
+    output_prepare_s = time.perf_counter() - prepare_started
     chunk_size = settings.compiled_output_chunk_size
     if chunk_size is not None and len(outputs) > chunk_size:
         chunk_output_dir = (
@@ -227,7 +250,12 @@ def _compile_symbolica_outputs(
                     for chunk_index, start in chunk_ranges
                 ]
                 chunks = [future.result() for future in futures]
-        return _ChunkedSymbolicaEvaluator(tuple(chunks))
+        chunked = _ChunkedSymbolicaEvaluator(tuple(chunks))
+        chunked.build_timing = {
+            "output_prepare_s": output_prepare_s,
+            "symbolica_evaluator_build_s": time.perf_counter() - total_started,
+        }
+        return chunked
     evaluator_kwargs = _symbolica_evaluator_kwargs(
         settings,
         verbose=verbose_evaluator_build,
@@ -254,11 +282,13 @@ def _compile_symbolica_outputs(
             phase="initialize",
             item=f"{label} eval 1/{len(outputs)} p={len(params)}",
         ):
+            evaluator_started = time.perf_counter()
             evaluator = outputs[0].evaluator(
                 params,
                 **alias_kwargs,
                 **evaluator_kwargs,
             )
+            evaluator_construct_s = time.perf_counter() - evaluator_started
         _report_jit_boundary(
             progress_callback,
             settings,
@@ -289,11 +319,13 @@ def _compile_symbolica_outputs(
                 phase="initialize",
                 item=f"{label} merge p={len(params)}",
             ):
+                merge_construct_started = time.perf_counter()
                 other = expression.evaluator(
                     params,
                     **alias_kwargs,
                     **evaluator_kwargs,
                 )
+                evaluator_construct_s += time.perf_counter() - merge_construct_started
             _report_jit_boundary(
                 progress_callback,
                 settings,
@@ -310,6 +342,7 @@ def _compile_symbolica_outputs(
                 ),
             )
         if real_params:
+            real_params_started = time.perf_counter()
             _report_jit_boundary(
                 progress_callback,
                 settings,
@@ -325,7 +358,10 @@ def _compile_symbolica_outputs(
                 real_if_args_real=settings.real_param_real_if_args_real,
                 verbose=verbose_evaluator_build,
             )
-        return _finalize_symbolica_evaluator(
+            real_params_s = time.perf_counter() - real_params_started
+        else:
+            real_params_s = 0.0
+        adapter = _finalize_symbolica_evaluator(
             evaluator,
             settings,
             label,
@@ -333,6 +369,16 @@ def _compile_symbolica_outputs(
             output_len=len(outputs),
             progress_callback=progress_callback,
         )
+        _set_evaluator_build_timing(
+            adapter,
+            {
+                "output_prepare_s": output_prepare_s,
+                "evaluator_construct_s": evaluator_construct_s,
+                "real_params_s": real_params_s,
+                "symbolica_evaluator_build_s": time.perf_counter() - total_started,
+            },
+        )
+        return adapter
 
     from symbolica import Expression
 
@@ -355,12 +401,14 @@ def _compile_symbolica_outputs(
         phase="initialize",
         item=f"{label} out={len(outputs)} p={len(params)}",
     ):
+        evaluator_started = time.perf_counter()
         evaluator = Expression.evaluator_multiple(
             outputs,
             params,
             **alias_kwargs,
             **evaluator_kwargs,
         )
+        evaluator_construct_s = time.perf_counter() - evaluator_started
     _report_jit_boundary(
         progress_callback,
         settings,
@@ -369,6 +417,7 @@ def _compile_symbolica_outputs(
         item=f"{label} out={len(outputs)}",
     )
     if real_params:
+        real_params_started = time.perf_counter()
         _report_jit_boundary(
             progress_callback,
             settings,
@@ -384,7 +433,10 @@ def _compile_symbolica_outputs(
             real_if_args_real=settings.real_param_real_if_args_real,
             verbose=verbose_evaluator_build,
         )
-    return _finalize_symbolica_evaluator(
+        real_params_s = time.perf_counter() - real_params_started
+    else:
+        real_params_s = 0.0
+    adapter = _finalize_symbolica_evaluator(
         evaluator,
         settings,
         label,
@@ -392,6 +444,27 @@ def _compile_symbolica_outputs(
         output_len=len(outputs),
         progress_callback=progress_callback,
     )
+    _set_evaluator_build_timing(
+        adapter,
+        {
+            "output_prepare_s": output_prepare_s,
+            "evaluator_construct_s": evaluator_construct_s,
+            "real_params_s": real_params_s,
+            "symbolica_evaluator_build_s": time.perf_counter() - total_started,
+        },
+    )
+    return adapter
+
+
+def _set_evaluator_build_timing(evaluator: Any, timing: Mapping[str, float]) -> None:
+    try:
+        current = getattr(evaluator, "build_timing", {})
+        if not isinstance(current, dict):
+            current = {}
+        current.update({str(key): float(value) for key, value in timing.items()})
+        setattr(evaluator, "build_timing", current)
+    except Exception:
+        return
 
 
 def _report_jit_boundary(
@@ -587,6 +660,7 @@ def _finalize_symbolica_evaluator(
             label,
             input_len=input_len,
             output_len=output_len,
+            progress_callback=progress_callback,
         )
     if settings.backend in ("compiled-complex", "compiled-complex-4x"):
         _report_progress(
@@ -615,6 +689,7 @@ class _JITSymbolicaEvaluatorAdapter:
         *,
         input_len: int,
         output_len: int,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.input_len = int(input_len)
         self.output_len = int(output_len)
@@ -622,16 +697,45 @@ class _JITSymbolicaEvaluatorAdapter:
         self.settings = settings.to_json_dict()
         self.label = _safe_symbol_name(label)
         self._source_evaluator = evaluator
+        self._progress_callback = progress_callback
         self.evaluator_state_path: Path | None = None
+        self.build_timing: dict[str, float] = {}
 
     def evaluate_complex(self, parameter_rows: Any) -> Any:
         return self._source_evaluator.evaluate_complex(parameter_rows)
+
+    def evaluate_complex_profiled(
+        self, parameter_rows: Any
+    ) -> tuple[Any, tuple[float, float, float]]:
+        return self._evaluate_complex_profiled_prepared(
+            _complex128_parameter_rows(parameter_rows)
+        )
+
+    def supports_complex_profiled(self) -> bool:
+        return callable(
+            getattr(self._source_evaluator, "evaluate_complex_profiled", None)
+        )
 
     def evaluate(self, parameter_rows: Any) -> Any:
         return self._source_evaluator.evaluate(parameter_rows)
 
     def _evaluate_complex_prepared(self, parameter_rows: np.ndarray) -> Any:
         return self._source_evaluator.evaluate_complex(parameter_rows)
+
+    def _evaluate_complex_profiled_prepared(
+        self, parameter_rows: np.ndarray
+    ) -> tuple[Any, tuple[float, float, float]]:
+        profile = getattr(self._source_evaluator, "evaluate_complex_profiled", None)
+        if not callable(profile):
+            raise NativeEvaluationError(
+                "this Symbolica build does not expose native complex profiling"
+            )
+        output, timing = profile(parameter_rows)
+        if not isinstance(timing, tuple) or len(timing) != 3:
+            raise NativeEvaluationError(
+                "Symbolica returned an invalid native complex profile"
+            )
+        return output, tuple(float(value) for value in timing)
 
     def materialize(self) -> None:
         self._ensure_jit_compiled()
@@ -661,22 +765,45 @@ class _JITSymbolicaEvaluatorAdapter:
         instance._source_evaluator = Evaluator.load(
             instance.evaluator_state_path.read_bytes()
         )
+        instance._progress_callback = None
+        instance.build_timing = {}
         return instance
 
     def artifact_manifest(self, artifact_dir: Path) -> dict[str, Any]:
+        _report_progress(
+            self._progress_callback,
+            stage="jit materialize",
+            item=self.label,
+        )
+        materialize_started = time.perf_counter()
         self._ensure_jit_compiled()
+        jit_compile_s = time.perf_counter() - materialize_started
+        _report_progress(
+            self._progress_callback,
+            stage="jit materialized",
+            item=f"{self.label} {jit_compile_s:.3f}s",
+            increment=1,
+        )
         evaluator_dir = _artifact_subdirectory(artifact_dir, "evaluators")
         path = evaluator_dir / f"{self.label}_{uuid.uuid4().hex}.evaluator.bin"
+        save_started = time.perf_counter()
         path.write_bytes(self._source_evaluator.save())
+        evaluator_save_s = time.perf_counter() - save_started
         self.evaluator_state_path = path
+        build_timing = dict(self.build_timing)
+        build_timing["jit_materialize_s"] = jit_compile_s
+        build_timing["evaluator_save_s"] = evaluator_save_s
+        build_timing["artifact_manifest_s"] = jit_compile_s + evaluator_save_s
         return {
             "kind": "jit-symbolica-evaluator",
             "backend": self.backend,
             "label": self.label,
             "input_len": self.input_len,
             "output_len": self.output_len,
+            "jit_payload_layout": _jit_payload_layout(),
             "settings": self.settings,
             "evaluator_state_path": _artifact_path_for_manifest(path, artifact_dir),
+            "build_timing": build_timing,
         }
 
 
@@ -712,6 +839,7 @@ class _CompiledComplexEvaluatorAdapter:
             else "complex"
         )
         self._source_evaluator = evaluator
+        self.build_timing: dict[str, float] = {}
         if settings.compiled_output_dir is None:
             self._tmpdir: tempfile.TemporaryDirectory[str] | None = (
                 tempfile.TemporaryDirectory(prefix="pyamplicol-symbolica-")
@@ -726,9 +854,12 @@ class _CompiledComplexEvaluatorAdapter:
         self.evaluator_state_path: Path | None = path / f"{function_name}.evaluator.bin"
         save = getattr(evaluator, "save", None)
         if callable(save):
+            save_started = time.perf_counter()
             self.evaluator_state_path.write_bytes(save())
+            self.build_timing["evaluator_save_s"] = time.perf_counter() - save_started
         else:
             self.evaluator_state_path = None
+        compile_started = time.perf_counter()
         self._compiled = evaluator.compile(
             function_name,
             str(self.source_path),
@@ -740,6 +871,7 @@ class _CompiledComplexEvaluatorAdapter:
             compiler_path=settings.compiler_path,
             compiler_flags=_compiled_compiler_flags(settings),
         )
+        self.build_timing["cxx_compile_s"] = time.perf_counter() - compile_started
 
     def evaluate_complex(self, parameter_rows: Any) -> Any:
         return self._evaluate_complex_prepared(_complex128_parameter_rows(parameter_rows))
@@ -778,6 +910,7 @@ class _CompiledComplexEvaluatorAdapter:
             if state_path is None
             else _artifact_path_from_manifest(str(state_path), artifact_dir)
         )
+        instance.build_timing = {}
         if instance.number_type == "complex_4x":
             loader = CompiledSimdComplexEvaluator
         elif instance.number_type == "complex":
@@ -819,6 +952,7 @@ class _CompiledComplexEvaluatorAdapter:
                     artifact_dir,
                 )
             ),
+            "build_timing": dict(self.build_timing),
         }
 
 
@@ -839,11 +973,16 @@ def _aarch64_platform() -> bool:
     return machine in {"arm64", "aarch64"}
 
 
+def _jit_payload_layout() -> str:
+    return "native-complex-f64x2" if _aarch64_platform() else "scalar-complex-f64"
+
+
 class _ChunkedSymbolicaEvaluator:
     def __init__(self, evaluators: tuple[Any, ...]) -> None:
         if not evaluators:
             raise NativeEvaluationError("chunked evaluator needs at least one chunk")
         self._evaluators = evaluators
+        self.build_timing: dict[str, float] = {}
 
     def evaluate_complex(self, parameter_rows: Any) -> Any:
         return np.concatenate(self.evaluate_complex_chunks(parameter_rows), axis=1)
@@ -852,6 +991,32 @@ class _ChunkedSymbolicaEvaluator:
         prepared_rows = _complex128_parameter_rows(parameter_rows)
         return tuple(
             _evaluate_prepared_complex(evaluator, prepared_rows)
+            for evaluator in self._evaluators
+        )
+
+    def evaluate_complex_profiled(
+        self, parameter_rows: Any
+    ) -> tuple[tuple[Any, ...], tuple[float, float, float]]:
+        prepared_rows = _complex128_parameter_rows(parameter_rows)
+        outputs: list[Any] = []
+        profiles: list[tuple[float, float, float]] = []
+        for evaluator in self._evaluators:
+            output, profile = _evaluate_prepared_complex_profiled(
+                evaluator, prepared_rows
+            )
+            outputs.append(output)
+            profiles.append(profile)
+        pack_times = sorted(profile[0] for profile in profiles)
+        shared_pack_s = pack_times[len(pack_times) // 2]
+        return tuple(outputs), (
+            shared_pack_s,
+            sum(profile[1] for profile in profiles),
+            sum(profile[2] for profile in profiles),
+        )
+
+    def supports_complex_profiled(self) -> bool:
+        return all(
+            bool(getattr(evaluator, "supports_complex_profiled", lambda: False)())
             for evaluator in self._evaluators
         )
 
@@ -872,12 +1037,45 @@ class _ChunkedSymbolicaEvaluator:
         )
 
     def artifact_manifest(self, artifact_dir: Path) -> dict[str, Any]:
-        return {
-            "kind": "chunked-symbolica-evaluator",
-            "chunks": [
+        worker_counts = []
+        for evaluator in self._evaluators:
+            settings = getattr(evaluator, "settings", None)
+            if isinstance(settings, Mapping):
+                workers = settings.get("compiled_chunk_compile_workers")
+                if isinstance(workers, int):
+                    worker_counts.append(workers)
+        workers = min(max(worker_counts, default=1), len(self._evaluators))
+        if workers <= 1:
+            chunks = [
                 _symbolica_evaluator_artifact_manifest(evaluator, artifact_dir)
                 for evaluator in self._evaluators
-            ],
+            ]
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [
+                    executor.submit(
+                        _symbolica_evaluator_artifact_manifest,
+                        evaluator,
+                        artifact_dir,
+                    )
+                    for evaluator in self._evaluators
+                ]
+                chunks = [future.result() for future in futures]
+        timing_totals = dict(self.build_timing)
+        timing_totals["chunk_count"] = float(len(chunks))
+        for chunk in chunks:
+            chunk_timing = chunk.get("build_timing") if isinstance(chunk, dict) else None
+            if not isinstance(chunk_timing, Mapping):
+                continue
+            for key, value in chunk_timing.items():
+                if isinstance(value, (float, int)):
+                    timing_totals[str(key)] = timing_totals.get(str(key), 0.0) + float(
+                        value
+                    )
+        return {
+            "kind": "chunked-symbolica-evaluator",
+            "chunks": chunks,
+            "build_timing": timing_totals,
         }
 
 
@@ -899,6 +1097,20 @@ def _evaluate_prepared_complex(evaluator: Any, parameter_rows: np.ndarray) -> An
     if callable(evaluate_prepared):
         return evaluate_prepared(parameter_rows)
     return evaluator.evaluate_complex(parameter_rows)
+
+
+def _evaluate_prepared_complex_profiled(
+    evaluator: Any,
+    parameter_rows: np.ndarray,
+) -> tuple[Any, tuple[float, float, float]]:
+    evaluate_profiled = getattr(
+        evaluator, "_evaluate_complex_profiled_prepared", None
+    )
+    if not callable(evaluate_profiled):
+        raise NativeEvaluationError(
+            "evaluator does not expose native complex profiling"
+        )
+    return evaluate_profiled(parameter_rows)
 
 
 def _evaluate_complex_outputs(evaluator: Any, parameter_rows: Any) -> ComplexOutput:

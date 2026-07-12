@@ -1,8 +1,34 @@
 {
   "dependency_patches": [
     {
+      "dependency": "symjit",
+      "path": "dependencies/patches/symjit/0001-fix-aarch64-o3-complex-register-allocation.patch",
+      "sha256": "805635ca033cb3852a8862f64d7a52ce1860c42173cc59c202b7a8f7bdc2e504"
+    },
+    {
+      "dependency": "symjit",
+      "path": "dependencies/patches/symjit/0002-fix-aarch64-external-call-spill-offset.patch",
+      "sha256": "87adc77dc734dbe96ad68e1efcff6829df6d315f51a7f6916f43d24048771123"
+    },
+    {
+      "dependency": "symjit",
+      "path": "dependencies/patches/symjit/0003-fix-aarch64-large-stack-adjustments.patch",
+      "sha256": "1b1b84b7b1e8b66b57e628c06a7d5f2e47cf69597a04b793231eb3d79260dff1"
+    },
+    {
       "dependency": "symbolica",
-      "path": "dependencies/patches/symbolica/0001-fix-complex-export-aarch64.patch"
+      "path": "dependencies/patches/symbolica/0001-fix-complex-export-aarch64.patch",
+      "sha256": "50ebdbfc125f375c83088a1aa280348553ed361f14011f3e89bd31584be49ccc"
+    },
+    {
+      "dependency": "symbolica",
+      "path": "dependencies/patches/symbolica/0002-release-gil-for-multiple-evaluator-build.patch",
+      "sha256": "73148daafa9c39df6bdafea2a1b154d4d96d673d67a87163aedfd512ca7e5660"
+    },
+    {
+      "dependency": "symbolica",
+      "path": "dependencies/patches/symbolica/0003-native-aarch64-complex-jit-and-opt-level-forwarding.patch",
+      "sha256": "df5c9e5fe927d232f497dc5555926375680f7259b2708ce7d67417959700bde8"
     }
   ],
   "gammaloop": {
@@ -17,7 +43,7 @@
     "installed": true,
     "requested": true,
     "source_path": "../rusticol",
-    "source_rev": "8b7bd3d226b1e826ec7f0ac86847f5bed860ac55",
+    "source_rev": "ad0cc3f31a28f28c217ca5992bed7aa89e6771db",
     "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts"
   },
   "schema_version": 1,

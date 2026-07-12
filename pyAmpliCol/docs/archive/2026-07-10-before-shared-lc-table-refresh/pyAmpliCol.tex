@@ -1,0 +1,695 @@
+\documentclass[10pt]{article}
+\pdfobjcompresslevel=0
+\pdfminorversion=5
+
+\usepackage[margin=0.76in]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage[table]{xcolor}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{pdflscape}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{needspace}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!45!black,
+  urlcolor=blue!45!black,
+  citecolor=blue!45!black
+}
+
+\lstdefinestyle{pyamplicol}{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries\color{blue!45!black},
+  commentstyle=\itshape\color{black!55},
+  stringstyle=\color{green!35!black},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  framerule=0.25pt,
+  xleftmargin=1.0em,
+  xrightmargin=1.0em,
+  aboveskip=0.55em,
+  belowskip=0.55em
+}
+\lstset{style=pyamplicol}
+
+\newcommand{\AC}{\textsc{AmpliCol}}
+\newcommand{\PAC}{\textsc{pyAmpliCol}}
+\newcommand{\J}{\mathcal{J}}
+\newcommand{\V}{\mathcal{V}}
+\newcommand{\M}{\mathcal{M}}
+\newcommand{\heplib}{\texttt{hep\_lib}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\definecolor{speedgreen}{HTML}{1A7F37}
+\definecolor{speedorange}{HTML}{BF8700}
+\definecolor{speedred}{HTML}{CF222E}
+\definecolor{refblue}{HTML}{DCEBFF}
+\definecolor{bestgreen}{HTML}{DFF5E4}
+\definecolor{cdaggray}{HTML}{F4F5F7}
+
+\title{\vspace{-2.0em}Current Recursion and Tensor-Network Execution in \PAC}
+\author{}
+\date{\vspace{-3.0em}}
+
+\begin{document}
+\maketitle
+\vspace{-1.2em}
+
+\paragraph{Purpose.}
+This note summarizes the matrix-element generation strategy used by \AC\ and
+the corresponding \PAC\ implementation.  The common idea is to avoid explicit
+Feynman-diagram enumeration.  Instead, matrix elements are assembled from a
+directed acyclic graph (DAG) of off-shell currents.  \AC\ emits Fortran code
+that numerically sweeps this current table.  \PAC\ builds the same logical DAG
+in Python, lowers bounded pieces to tensor-network expressions handled by
+Spenso, compiles the resulting parametric scalar/vector expressions with
+Symbolica evaluators, and can now execute the staged sweep from Rust through
+the PyO3 runtime \texttt{rusticol}.
+
+\paragraph{Current status.}
+The generic LC/NLC/full-colour staged-DAG implementation is the production
+\PAC\ workflow.  Process generation writes schema-v2 artifacts loaded by
+\texttt{rusticol}; model parameters are runtime inputs and may be overridden
+from TOML.  The default benchmark route is Rusticol with SymJIT stage
+evaluators, stage-local inputs, output chunk size 128, batch size 64, ten
+Horner iterations, Symbolica's default CPE choice, and enlarged
+Horner/common-pair limits.  The production matrix JIT row uses SymJIT
+\(\mathrm{O}1\) for generation-speed comparisons; dedicated Z-family scans
+also show O3/ASM/C++ variants.  The result matrices are generated as separate
+\TeX{} inputs, and the benchmark writers refresh \texttt{pyAmpliCol.pdf}
+after each completed cell.  Generic current and colour-sector generation caps
+are disabled by default; long benchmark refreshes rely on the 30 GB watchdog
+rather than truncated colour plans.
+
+\section{The AmpliCol Current Recursion}
+
+For a fixed leading-color ordering, a current is labelled by the external
+subset it contains, the particle type carried by the off-shell line, and any
+spin/chirality information.  Schematically, if $I$ is a set or ordered interval
+of external colored legs, a current is computed as
+\begin{equation}
+  \J^\alpha_{t,\chi}(I)
+  =
+  P^\alpha{}_\beta(t, p_I)
+  \sum_{\substack{I=A\cup B\\A\cap B=\emptyset}}
+  \V^\beta{}_{\gamma\delta}(t_A,t_B\to t)\,
+  \J^\gamma_{t_A,\chi_A}(A)\,
+  \J^\delta_{t_B,\chi_B}(B).
+  \label{eq:current-recursion}
+\end{equation}
+Here $t$ is the current type (gluon, quark, auxiliary tensor, etc.),
+$\chi$ is the Weyl chirality where relevant, $p_I=\sum_{i\in I}p_i$, $P$ is
+the propagator, and $\V$ is the appropriate Feynman-rule tensor.  The
+four-gluon vertex is treated through the auxiliary antisymmetric tensor route,
+so it is still represented by cubic current combinations.
+
+\AC's optimized mode does not loop over full helicity configurations as
+independent computations.  It weaves helicity information into the current
+table itself.  Each external helicity state is a source current with a unique
+bit in an \texttt{ext\_cur}-style bitset.  An internal current is identified by
+\begin{equation}
+  K(\J)=\bigl(t,\chi,\mathrm{bin}(I),\mathrm{ext\_cur}\bigr),
+  \label{eq:current-key}
+\end{equation}
+where $\mathrm{bin}(I)$ records the external subset and $\mathrm{ext\_cur}$ is
+the union of the source-current bits feeding the current.  When a new vertex
+contribution produces the same key as an existing current, \AC\ appends that
+vertex to the existing current rather than creating a duplicate node.  After
+all currents are constructed, \texttt{curr2amp} records the two endpoint
+currents whose contraction gives each retained helicity amplitude.
+
+\Needspace{18\baselineskip}
+The generated Fortran library has the same layered structure:
+\begin{lstlisting}[language=Fortran]
+subroutine evaluate_amp(p, amps)
+  complex(kind=8) :: val_c(1:6, n_cur)
+  complex(kind=8) :: int_c(1:6, n_vert)
+
+  call compute_external_currents(pp, val_c)
+  do size = 2, n_external_minus_one
+    call compute_vertices_size(pp, val_c, int_c)
+    call compute_currents_size(pp, val_c, int_c)
+  end do
+  call compute_amps(amps, val_c)
+end subroutine
+\end{lstlisting}
+The arrays \texttt{val\_c} and \texttt{int\_c} are the numerical current and
+interaction tables.  This is the performance-critical idea that \PAC\ keeps:
+one topological sweep produces all retained amplitudes, and shared parent
+currents are evaluated once.
+
+\section{The pyAmpliCol DAG}
+
+\PAC\ first builds an explicit Python representation of the same current table.
+In the generic compiler, a current is identified by a model-driven physics
+index rather than by a process-family name.  The identity used for
+deduplication is
+\begin{equation}
+  K_{\PAC} =
+  \bigl(
+    \mathrm{particle\_id}, L, H, \chi, S, F, Q, C, P, A
+  \bigr),
+  \label{eq:pyamplicol-current-index}
+\end{equation}
+where $L$ is the sorted tuple of external labels, $H$ is the
+\AC-style helicity-source ancestry bitset, $\chi$ is chirality, $S$ is any
+spin-state tag needed by the source or propagator, $F$ is flavour flow, $Q$ is
+charge flow, $C$ is the leading-color state, $P$ is the momentum mask, and $A$
+is an optional auxiliary kind such as the antisymmetric tensor used for the
+four-gluon vertex.  The implementation also carries
+\texttt{ordered\_external\_labels}.  That field is leading-color ordering
+metadata used by the color engine and amplitude grouping, but it is deliberately
+not part of equality or hashing.  Deduplication is therefore exactly equality
+of Eq.~\eqref{eq:pyamplicol-current-index}; no rule is allowed to ask whether
+the process is ``$Z$ plus jets'' or any other family.
+
+\begin{center}
+\begin{tabular}{@{}L{1.45in}L{4.95in}@{}}
+\toprule
+\textbf{field} & \textbf{role in the current identity} \\
+\midrule
+\texttt{particle\_id} & Model/UFO particle id, e.g. $21$, $23$, $1$, $-1$, or an auxiliary id. \\
+\texttt{external\_labels} and \texttt{external\_mask} & Which external legs are contained in the current.  The mask is the bit representation of the labels. \\
+\texttt{helicity\_ancestry} & Bitwise union of the source-current helicity bits feeding this current.  This is how helicity configurations are woven into one shared DAG. \\
+\texttt{chirality} and \texttt{spin\_state} & Local spin information, especially for Weyl fermions and massive-vector sources. \\
+\texttt{flavour\_flow} and \texttt{charge\_flow} & Quantum-number flow checked locally by model vertices, e.g. $u\to d W^+$ or $e^+e^-\to\gamma/Z$. \\
+\texttt{color\_state} & Colour-ordered open-line or trace state used to build the amplitude vector.  LC, NLC and full colour differ in the final sparse colour contraction over this vector. \\
+\texttt{momentum\_mask} & Which all-outgoing momenta are summed for propagators and momentum-dependent vertices. \\
+\texttt{auxiliary\_kind} & Optional tag distinguishing auxiliary tensor currents from ordinary particles. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\Needspace{20\baselineskip}
+Source currents are built from external leg metadata.  Internal currents are
+then generated by increasing current size, with all interactions that feed the
+same current index attached to one node.
+
+\begin{lstlisting}[language=Python]
+for external helicity source s:
+    add_current(key=(pdg_s, labels_s, chirality_s, bit_s), is_source=True)
+
+for current_size in increasing_sizes:
+    for compatible split A | B:
+        result_key = combine_key(key[A], key[B], vertex_kind)
+        result = add_or_reuse_current(result_key)
+        add_interaction(left=A, right=B, result=result, vertex=vertex_kind)
+
+for retained helicity ancestry:
+    add_amplitude(left=current_with_Z_and_gluons, right=anti_current)
+
+prune_dead_currents_after_helicity_filter()
+\end{lstlisting}
+
+At runtime, \PAC\ mirrors the Fortran table layout with contiguous arrays:
+\[
+  C_{s,i,c}\equiv\texttt{current\_rows}[s,i,c],
+  \qquad
+  T_{s,v,c}\equiv\texttt{interaction\_rows}[s,v,c],
+\]
+where $s$ is the phase-space sample in the current batch, $i$ is a current id,
+$v$ is an interaction id, and $c$ is a component index.  External wavefunctions
+fill source-current rows once per sample.  Bounded evaluator blocks then fill
+interactions and derived currents stage by stage:
+\Needspace{13\baselineskip}
+\begin{lstlisting}[language=Python]
+fill_source_currents(current_rows, momenta, helicity_sources)
+
+for stage in current_size_layers:
+    state = ParamBuilder.pack(current_rows, interaction_rows, momenta)
+    interaction_rows[:, stage.vertices] = vertex_eval[stage](state)
+    current_rows[:, stage.currents]     = current_eval[stage](state)
+
+amps = amplitude_eval(ParamBuilder.pack(current_rows, momenta))
+me2  = normalization * sum(weight[h] * abs(amps[h])**2 for h in retained_h)
+\end{lstlisting}
+This is why the evaluator-only benchmark is meaningful: the expensive
+recursion is inside compiled evaluator calls, while Python only performs source
+wavefunction construction, parameter packing, and table transfers.
+
+\section{Spenso Tensor Networks and \texttt{hep\_lib}}
+
+Spenso is used to express Lorentz, spinor, auxiliary-tensor, and eventually
+color contractions in a representation-aware way.  A tensor-network expression
+contains named tensors with typed slots:
+\[
+  \V_{\mu\nu}^{\phantom{\mu\nu}\rho}(p_A,p_B)\,
+  A^\mu\,B^\nu,
+  \qquad
+  \text{or in code: }
+  \texttt{V(m("a"),m("b"),m("out")) * A(m("a")) * B(m("b"))}.
+\]
+\Needspace{36\baselineskip}
+The expression is not expanded.  It is a compact product of tensor factors with
+shared representation labels.  The library \heplib\ is the dictionary that
+tells Spenso what each tensor name means: dense model tensors, metric tensors,
+momentum-dependent propagators, and parametric rank-one tensors representing
+runtime inputs.
+
+\begin{lstlisting}[language=Python]
+library = model.build_tensor_library()      # returns TensorLibrary.hep_lib_atom()
+builder = ParamBuilder()
+mink = Representation.mink(4)
+
+builder.register_rank1_tensor(
+    library,
+    tensor_name="current_A",
+    representation=mink,
+    head=("stage", "A"),
+    length=4,
+    role="block_current",
+)
+builder.register_rank1_tensor(
+    library,
+    tensor_name="p_A",
+    representation=mink,
+    head=("stage", "pA"),
+    length=4,
+    role="block_momentum",
+    real_valued=True,
+)
+
+raw = V3g(mink("a"), mink("b"), mink("out"), p_A="p_A", p_B="p_B") \
+    * TensorName("current_A")(mink("a")).to_expression() \
+    * TensorName("current_B")(mink("b")).to_expression()
+
+network = TensorNetwork(raw, library)
+network.execute(library=library)
+out_tensor = network.result_tensor(library)
+evaluator = out_tensor.evaluator(params=builder.parameter_symbols())
+\end{lstlisting}
+
+The important point is that \heplib\ stays fixed during the execution.  New
+graph currents are not registered as permanent physics tensors.  Instead, the
+current values are runtime parameters for a bounded block.  Spenso executes the
+factorized tensor network, contracts the representation indices, and returns a
+parametric output tensor.  Symbolica then compiles that parametric tensor to an
+evaluator.  For high multiplicity, \PAC\ interleaves this process: after a
+current or current-size layer is contracted, its numerical output is written
+back into the current table and becomes an input parameter for later blocks.
+This avoids one giant scalar expression and keeps the DAG close to \AC's
+execution model.
+
+The current NLC/full-colour implementation keeps the kinematic DAG
+colour-ordered and applies a sparse colour matrix to the amplitude vector.  For
+open-line sectors, including arbitrary many quark lines with gluons distributed
+on the lines, \PAC\ contracts the product of left colour strings with the
+conjugated right strings into closed fundamental traces.  Those small colour
+trace expressions are simplified separately from the kinematic DAG; NLC is
+obtained by keeping the leading and first \(1/N_c^2\)-suppressed powers, while
+full colour keeps the complete sparse metric.  If a later implementation puts
+explicit colour tensors inside a Spenso block, colour simplification still
+belongs before Spenso execution:
+\[
+  \texttt{raw} \leftarrow \texttt{idenso.simplify\_color(raw)} ,
+  \qquad
+  \text{then build } \texttt{TensorNetwork(raw, hep\_lib)}.
+\]
+For the present NLC/full-colour milestone, colour algebra is confined to the
+small colour-basis overlap problem and the Rusticol final contraction, not to
+expanded kinematic expressions.  Fortran AmpliCol is the direct reference for
+zero, one and two quark-line colour matrices; beyond that, pyAmpliCol's generic
+open-line metric is validated through raw-amplitude probes and internal colour
+consistency checks.
+
+\section{Example: \texorpdfstring{$d\bar d\to Zgg$}{d dbar -> Z g g}}
+
+This section spells out one concrete DAG so that the split between compiled
+current contractions and Rust-interpreted scheduling is explicit.  The
+user-level process is
+\[
+  d(p_1)\,\bar d(p_2)\to Z(p_3)\,g(p_4)\,g(p_5).
+\]
+\PAC\ stores the process in the all-outgoing convention.  Thus labels
+$1,\ldots,5$ carry the fields
+\[
+  \bar d_1,\quad d_2,\quad Z_3,\quad g_4,\quad g_5,
+\]
+with momenta $-p_1$, $-p_2$, $p_3$, $p_4$, and $p_5$, respectively.  A
+label set such as $\{2,4,5\}$ is represented by
+$L=(2,4,5)$ and by the mask
+\[
+  m(2,4,5)=2^{2-1}+2^{4-1}+2^{5-1}=26.
+\]
+The momentum mask is the same bit pattern in this example, and it tells
+Rusticol which stored momentum sum must be passed to the next compiled
+evaluator.
+
+For one leading-color sector, the colored ordered labels are
+\[
+  O=(2,4,5,1),
+\]
+with the color-singlet $Z_3$ allowed to attach anywhere on the quark line.
+The color engine may also provide the sector $O=(2,5,4,1)$.  Nothing in the
+DAG builder special-cases this as a ``$Z+2g$'' process: source currents are
+ordinary external-leg currents and all later currents are discovered from
+model vertices.
+
+\subsection*{Source current indices}
+
+For a fixed retained source helicity choice, the source entries look as follows.
+The bit $b_i$ denotes the unique helicity-source bit assigned to that external
+state.
+\begin{center}
+\begin{tabular}{@{}c L{1.4in} L{0.85in} L{2.85in}@{}}
+\toprule
+\textbf{source} & \textbf{current} & \textbf{mask} & \textbf{index payload} \\
+\midrule
+$S_1$ & $\J_{\bar d}(\{1\})$ & $1$ &
+$(\mathrm{pid}=-1,L=(1),H=b_1,\chi,S,F=(-1),Q,C_{\bar q},P=1)$ \\
+$S_2$ & $\J_d(\{2\})$ & $2$ &
+$(\mathrm{pid}=1,L=(2),H=b_2,\chi,S,F=(1),Q,C_q,P=2)$ \\
+$S_3$ & $\epsilon_Z(\{3\})$ & $4$ &
+$(\mathrm{pid}=23,L=(3),H=b_3,S=h_Z,C_{\mathrm{singlet}},P=4)$ \\
+$S_4$ & $\epsilon_g(\{4\})$ & $8$ &
+$(\mathrm{pid}=21,L=(4),H=b_4,S=h_4,C_g,P=8)$ \\
+$S_5$ & $\epsilon_g(\{5\})$ & $16$ &
+$(\mathrm{pid}=21,L=(5),H=b_5,S=h_5,C_g,P=16)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The actual stored index also contains the exact leading-color sector id,
+line-group metadata, and the current dimension.  For this example the quark
+and anti-quark source currents have Weyl-spinor components, gluons and the
+$Z$ have Lorentz-vector components, and auxiliary tensor currents have the
+antisymmetric tensor components required by the cubicized four-gluon rule.
+
+\subsection*{What each compiled stage computes}
+
+The generic stage compiler groups interactions by the size of the result
+current.  For each group it emits a multi-output Symbolica evaluator.  That
+evaluator is compiled once and receives only parent-current components,
+momentum sums, and real couplings as parameters.  It returns the components of
+all result currents in the stage.
+
+For the sector $O=(2,4,5,1)$, the schematic stage contents are:
+\begin{align}
+E_2:\quad
+  \J_g(4,5) &=
+    P_g(p_{45})\,\V_{3g}\bigl(S_4,S_5;p_4,p_5\bigr),\\
+  \J_T(4,5) &=
+    \V_{ggT}\bigl(S_4,S_5\bigr),\\
+  \J_d(2,4) &=
+    P_q(p_{24})\,\V_{qgq}\bigl(S_2,S_4;p_2,p_4\bigr),\\
+  \J_d(2,3) &=
+    P_q(p_{23})\,\V_{qZq}\bigl(S_2,S_3;p_2,p_3\bigr),
+    \label{eq:e2-stage}
+\end{align}
+plus the analogous allowed currents for the other color sector and for the
+anti-quark side.  The notation $E_2$ means a compiled evaluator for all
+two-label result currents, not a Python function that loops over these
+formulas component by component.
+
+The next stage consumes the rows written by $E_2$:
+\begin{align}
+E_3:\quad
+  \J_d(2,4,5) &=
+    P_q(p_{245})\left[
+      \V_{qgq}\bigl(\J_d(2,4),S_5\bigr)
+      + \V_{qgq}\bigl(S_2,\J_g(4,5)\bigr)
+    \right],\\
+  \J_d(2,3,4) &=
+    P_q(p_{234})\left[
+      \V_{qZq}\bigl(\J_d(2,4),S_3\bigr)
+      + \V_{qgq}\bigl(\J_d(2,3),S_4\bigr)
+    \right].
+    \label{eq:e3-stage}
+\end{align}
+The stage compiler does not expand these expressions into diagrams.  It
+collects all interaction records whose output index is the same current and
+compiles the sum into the output components of that current.  If two different
+splits produce the same current index, their contributions are accumulated
+inside the same compiled stage output.
+
+The four-label stage then builds the endpoint current used by the closure:
+\begin{align}
+E_4:\quad
+  \J_d(2,3,4,5) =
+    P_q(p_{2345})
+    \sum_{\text{compatible splits}}
+      \V\bigl(\J_{\mathrm{left}},\J_{\mathrm{right}}\bigr).
+    \label{eq:e4-stage}
+\end{align}
+The sum includes, for example, gluon-first and $Z$-insertion contributions such
+as
+\[
+  \V_{qZq}\bigl(\J_d(2,4,5),S_3\bigr),\qquad
+  \V_{qgq}\bigl(\J_d(2,3,4),S_5\bigr),\qquad
+  \V_{qgq}\bigl(\J_d(2,3),\J_g(4,5)\bigr).
+\]
+Those are still local vertex applications selected by the model and color
+engine.  The result is one stored current row, identified by the full
+CurrentIndex and by its value-slot range in the artifact.
+
+Finally, a compiled amplitude evaluator returns raw complex roots:
+\begin{equation}
+  E_{\mathrm{amp}}:\quad
+  R_a =
+  \V_{\mathrm{close}}\bigl(\J_d(2,3,4,5),S_1\bigr),
+  \label{eq:amplitude-stage}
+\end{equation}
+with one output for each retained root.  Roots with the same
+$(H,\mathrm{color\ sector},O)$ coherent-group key are summed before squaring.
+The reported leading-color matrix element is
+\begin{equation}
+  |\M|^2_{\mathrm{LC}}
+  =
+  \mathcal{N}_{\mathrm{AC}}
+  \sum_{\mathrm{groups}\ g}
+  w_g\,
+  \left|\sum_{a\in g} R_a\right|^2 .
+  \label{eq:lc-final-reduction}
+\end{equation}
+
+\Needspace{31\baselineskip}
+\subsection*{The same example as a DAG}
+
+A stripped-down adjacency-list representation of this example is:
+\begin{lstlisting}
+sources interpreted by Rusticol:
+  S1 = J(pid=-1, labels={1}, H=b1, color=qbar-line)
+  S2 = J(pid= 1, labels={2}, H=b2, color=q-line)
+  S3 = J(pid=23, labels={3}, H=b3, color=singlet)
+  S4 = J(pid=21, labels={4}, H=b4, color=line gluon)
+  S5 = J(pid=21, labels={5}, H=b5, color=line gluon)
+
+compiled stage E2, subset_size=2:
+  I0: S4 + S5 -- V3g, Pg --> J(pid=21, labels={4,5})
+  I1: S4 + S5 -- VggT    --> J(aux=T, labels={4,5})
+  I2: S2 + S4 -- Vqgq,Pq --> J(pid=1, labels={2,4})
+  I3: S2 + S3 -- VqZq,Pq --> J(pid=1, labels={2,3})
+
+compiled stage E3, subset_size=3:
+  I4: J(2,4) + S5     -- Vqgq,Pq --> J(pid=1, labels={2,4,5})
+  I5: S2     + J(4,5) -- Vqgq,Pq --> J(pid=1, labels={2,4,5})
+  I6: J(2,4) + S3     -- VqZq,Pq --> J(pid=1, labels={2,3,4})
+  I7: J(2,3) + S4     -- Vqgq,Pq --> J(pid=1, labels={2,3,4})
+
+compiled stage E4, subset_size=4:
+  I8: J(2,4,5) + S3     -- VqZq,Pq --> J(pid=1, labels={2,3,4,5})
+  I9: J(2,3,4) + S5     -- Vqgq,Pq --> J(pid=1, labels={2,3,4,5})
+  I10:J(2,3)   + J(4,5) -- Vqgq,Pq --> J(pid=1, labels={2,3,4,5})
+
+compiled amplitude stage:
+  A0: J(pid=1, labels={2,3,4,5}) + S1 -- close --> R0
+\end{lstlisting}
+This listing is schematic: the real artifact contains all retained helicity
+ancestries, both leading-color sectors, source dimensions, output component
+ranges, momentum-slot ids, couplings, and color weights.  The important point
+is the division of labor.  The evaluator $E_s$ performs the tensor contractions
+and the algebraic sum over interactions in stage $s$.  Rusticol interprets the
+DAG schedule: fill sources, compute momentum sums, call $E_2$, scatter its
+outputs into current storage, call $E_3$, scatter again, and so on until
+$E_{\mathrm{amp}}$ and the final coherent square-sum.
+
+
+\section{Rusticol: the Implemented Rust Runtime}
+
+The previous staged \PAC\ runtime proved that the shared-current DAG could
+match Fortran \AC\ numerically, but its Python loop still moved current tables
+between many evaluator calls.  The current implementation keeps Python as the
+process generator and validation driver, but moves the hot eager-DAG sweep into
+a PyO3 extension named \texttt{rusticol}.  The generated artifact is now a
+self-contained process directory used by both runtimes:
+\Needspace{12\baselineskip}
+\begin{lstlisting}[language=Python]
+rt_py = pyamplicol.load_process(process_dir, runtime="python")
+values_py = rt_py.evaluate(momenta)
+
+import rusticol
+rt = rusticol.Runtime.load(process_dir)
+values = rt.evaluate(momenta)
+profile = rt.profile(momenta)
+\end{lstlisting}
+The Python and Rust runtimes read the same \texttt{process\_manifest.json}, the
+same Symbolica evaluator manifests, and the same validation momenta.  The
+Python path is kept as a transparent reference implementation.  The Rust path is
+the performance path.
+
+A process directory contains four classes of data.  First, it records process
+and model metadata: external PDG order, momentum conventions, particle and
+vertex tables, couplings, masses, symmetry factors, and leading-color
+normalization.  Second, it stores the shared-current DAG: source currents,
+current ids, dimensions, interaction stages, output slots, retained amplitude
+records, helicity weights, and color factors.  Third, it stores the compiled
+Symbolica evaluator artifacts for each stage and for the final amplitude/raw-sum
+stage.  Fourth, it contains standalone validation assets:
+\texttt{validation\_momenta.json} with decimal-string momenta and a
+\texttt{check\_standalone.py} script that imports only \texttt{rusticol}, plus
+\texttt{numpy} when available for the optimized f64 input path.
+
+\Needspace{13\baselineskip}
+\begin{lstlisting}[language=Python]
+# Generated by pyAmpliCol.
+process_dir/
+  process_manifest.json
+  manifest.json
+  validation_momenta.json
+  check_standalone.py
+  compiled/              # C++/ASM shared libraries when present
+  ... evaluator states ...
+\end{lstlisting}
+
+\texttt{rusticol.Runtime.load} validates the schema, checks that the current
+process family is supported, loads every Symbolica evaluator, computes direct
+state offsets for stage outputs, allocates reusable scratch buffers, and builds
+a fixed execution plan.  The optimized f64 path accepts NumPy arrays with shape
+\texttt{(batch, n\_external, 4)}.  For each batch, Rust fills source
+wavefunctions and momentum sums, executes stage evaluators in topological order,
+writes the returned current components into the contiguous state table, executes
+the amplitude/raw-sum evaluator, applies the Fortran-matched normalization, and
+returns a NumPy array of matrix elements.
+\Needspace{18\baselineskip}
+\begin{lstlisting}
+for point in batch {
+    fill_source_currents(state_row, point);
+    fill_momentum_sums(state_row, point);
+}
+
+for stage in stages {
+    evaluated = stage.evaluator.evaluate_batch(state);
+    assign_stage_outputs(state, evaluated, stage.output_offsets);
+}
+
+raw = amplitude_stage.evaluate_raw_sums(state);
+me2 = normalization * raw;
+\end{lstlisting}
+The \texttt{profile} API reports the same split used in the benchmarks: source
+fill, momentum setup, stage evaluator time, output assignment, amplitude
+evaluator time, final reduction, total wall time, and memory snapshots where the
+platform exposes them.
+
+The precision API follows Symbolica's model.  \texttt{evaluate} and
+\texttt{evaluate\_with\_prec(..., 16)} use the specialized native f64 path.
+\texttt{evaluate\_with\_prec(..., 32)} maps the serialized exact evaluator state
+to Symbolica's \texttt{DoubleFloat} coefficients.  Other positive precisions map
+to arbitrary-precision \texttt{Float} evaluators.  The high-precision routes
+share the same stage orchestration code through generic Rust traits, while the
+f64 route remains specialized and avoids high-precision allocation overhead.
+
+The artifact schema is process-generic.  The staged execution format no longer
+needs a Rust-side process-family branch: each process directory supplies the
+source layout, current slots, stage records, amplitude roots, coherent groups,
+and evaluator artifacts needed by Rusticol.  If a model vertex or color rule is
+not implemented yet, generation fails with an explicit unsupported-kernel
+diagnostic rather than falling back to a hidden family path.
+
+\section{Shared LC Ordering Recycling}
+
+LC process generation now has two related modes.  For ordinary integration
+benchmarks, \PAC\ times one selected LC ordering per phase-space point.  The
+selected artifact is pruned before Symbolica evaluator construction, so no
+dynamic colour-flow selector remains in those expressions.  For all-flow
+fixed-helicity matrix entries, \PAC\ writes a materialized shared all-sector
+artifact: internal currents live in one shared LC sector, while amplitude roots
+retain the full colour-order mapping used for the \AC\ \texttt{imode=2}
+comparison.  This avoids the old sector-local all-ordering clone while keeping
+the runtime result directly value-comparable.
+
+The shared all-sector mode reuses pure-gluon subcurrents through the usual LC
+reflection relation, with the corresponding sign carried as an interaction
+colour weight.  That sign is applied before current-stage propagation, so the
+shared DAG is numerically equivalent to the sector-specialized artifact while
+avoiding one current table per ordering.  Runtime selection of one LC ordering
+is still available through generated sidecars; \texttt{time-process
+--lc-sector-ids} loads the matching pruned sidecar when it exists.
+
+\Needspace{14\baselineskip}
+\begin{center}
+\begingroup
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}L{1.2in}rrrrrrr@{}}
+\toprule
+Process & Orders & Curr. & \AC/\PAC\ gen & JIT frac. & Sel. run & All run & Rel. diff. \\
+\midrule
+\(gg\to t\bar t+g\) & 6 & 29 & 0.115 / 0.174 & 0.34 & \(1.86\times\) & 1.57 / 0.924 & \(1.9\times10^{-13}\) \\
+\(gg\to t\bar t+2g\) & 24 & 118 & 0.122 / 0.277 & 0.59 & \(1.52\times\) & 4.70 / 4.11 & \(2.8\times10^{-13}\) \\
+\(gg\to t\bar t+3g\) & 120 & 592 & 0.148 / 1.27 & 0.77 & \(1.71\times\) & 26.4 / 39.5 & \(6.5\times10^{-13}\) \\
+\(gg\to t\bar t+4g\) & 720 & 3554 & 0.426 / 10.5 & 0.82 & \(1.98\times\) & 203 / 307 & \(2.5\times10^{-13}\) \\
+\(gg\to t\bar t+5g\) & 5040 & 24880 & 5.87 / 124 & 0.87 & \(2.26\times\) & 3394 / 3526 & \(1.5\times10^{-13}\) \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{center}
+
+\noindent\footnotesize The generation column reports \AC/\PAC\ all-flow setup
+time in seconds for the fixed-helicity \texttt{imode=2}-style comparison.  All
+run entries are wall microseconds per phase-space point, \AC/\PAC.  The
+selected-run column is the \PAC/\AC\ multiplier for one LC flow with the usual
+helicity sum; the all-run column is the fixed-source-helicity sum over all LC
+flows.  The \(gg\to t\bar t+6g\) attempt was capped at 45 minutes under the
+30 GB watchdog; \AC\ built the library but did not finish the one-point
+\texttt{imode=2} colour probe before the cap, so the confirmed ladder stops at
+\(gg\to t\bar t+5g\).  The process-matrix tables below use the same selected
+and all-flow runtime semantics.
+
+
+\input{result_matrix_table.tex}
+\input{z_performance_table.tex}
+\input{result_matrix_nlc_table.tex}
+\input{result_matrix_full_table.tex}
+
+\paragraph{Archived low-multiplicity validation fixture.}
+The \(n\le4\) LC/NLC/full-colour validation cells are mirrored in
+\path{tests/fixtures/result_matrix_references.json}.  The integration test
+checks those cached same-point \AC/\PAC\ values without a local Fortran run;
+\path{scripts/refresh_result_matrix_fixtures.py} refreshes the fixture from the
+matrix caches.
+
+
+\section{Why This Matches AmpliCol but Remains Python-Friendly}
+
+The Python layer owns graph construction, process metadata, deterministic
+phase-space steering, artifact generation, evaluator caching, and validation
+against \AC.  It does not perform the hot current recursion component by
+component in production.  The two production execution routes are now:
+\begin{align*}
+  \text{Python staged route:}&\quad
+  \text{source fill} \to \text{bounded stage evaluators} \to
+  \text{amplitude/raw-sum evaluator},\\
+  \text{Rusticol route:}&\quad
+  \text{one PyO3 call} \to \text{Rust source fill and staged sweep} \to
+  \text{amplitude/raw-sum evaluator}.
+\end{align*}
+Thus \PAC\ keeps \AC's essential optimization - shared currents across helicity
+parents and a topological current-table sweep - while replacing generated
+Fortran subroutines by saved Spenso/Symbolica evaluator artifacts.  The
+\texttt{rusticol} path removes the remaining Python orchestration cost by
+loading the same process directory and executing the sweep in Rust.
+
+The old fully monolithic compiled-DAG route is now deprecated and kept only as
+reference code.  Its alias-based design was useful for exploring whole-graph
+compilation, but the production target is the staged DAG: Python generation plus
+a Rust eager-DAG runtime over saved Symbolica stage evaluators.  This keeps the
+runtime schedule close to \AC's current-table library while leaving the graph
+compiler model-driven and process-generic.
+
+\end{document}

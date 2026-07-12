@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import gzip
 import json
 import math
+import pickle
+import threading
 from pathlib import Path
 
 import pytest
+import pyamplicol.generic_artifact as generic_artifact_module
 
 from pyamplicol.generic_artifact import (
     GENERIC_DAG_PROCESS_ARTIFACT_KIND,
@@ -26,6 +30,7 @@ from pyamplicol.generic_artifact import (
     _current_signature_relation,
     _drop_currents_from_dag,
     _merge_currents_in_dag,
+    _generic_runtime_schema_payload,
     _validate_numerical_rewrite_preserves_raw_sums,
     _json_safe_bigints,
 )
@@ -102,6 +107,30 @@ def test_generic_process_manifest_keeps_physical_and_outgoing_pdg_orders() -> No
     assert runtime_schema["normalization"]["average_factor"] == 36
     assert runtime_schema["normalization"]["couplings_in_stage_evaluators"] is True
     assert runtime_schema["current_storage"]["component_count"] > 0
+
+
+def test_runtime_schema_reports_progress_for_long_interaction_passes() -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > z g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    events: list[tuple[str, int, int]] = []
+
+    _generic_runtime_schema_payload(
+        manifest.dag,
+        manifest.model,
+        progress_callback=lambda phase, completed, total: events.append(
+            (phase, completed, total)
+        ),
+    )
+
+    interaction_total = len(manifest.dag.interactions)
+    for phase in ("usage scan", "stage grouping", "interaction records"):
+        phase_events = [event for event in events if event[0] == phase]
+        assert phase_events
+        assert phase_events[-1][1:] == (interaction_total, interaction_total)
 
 
 def test_zero_current_filter_prunes_massive_top_chirality_currents() -> None:
@@ -282,6 +311,7 @@ def test_lc_gluon_flavour_flow_aggregation_matches_amplicol_current_buckets() ->
     assert aggregation["merged_current_count"] == 60
     assert aggregation["deduplicated_interaction_count"] == 512
     assert aggregation["validation"]["accepted"] is True
+    assert aggregation["duration_s"] >= 0.0
     assert len(manifest.dag.currents) == 378
     assert len(manifest.dag.interactions) == 1590
     assert len(manifest.dag.amplitude_roots) == 128
@@ -301,10 +331,12 @@ def test_zero_current_filter_can_be_disabled_in_artifact(tmp_path: Path) -> None
 
     assert payload == raw
     assert report == {
+        "duration_s": 0.0,
         "enabled": False,
         "reason": "disabled by --no-numerical-filter-current",
     }
     assert merge_report == {
+        "duration_s": 0.0,
         "enabled": False,
         "reason": "disabled by --no-numerical-current-merging",
     }
@@ -723,6 +755,8 @@ def test_generic_stage_blueprint_defaults_to_global_layout_but_supports_local_in
     assert local_blueprint.amplitude_stage.parameter_count < (
         default_blueprint.parameter_count
     )
+    assert local_blueprint.parameter_count == default_blueprint.parameter_count
+    assert local_blueprint.parameter_symbols == ()
 
 
 def test_generic_parameter_builder_accepts_empty_global_value_storage() -> None:
@@ -1426,6 +1460,81 @@ def test_generic_dag_process_artifact_can_embed_stage_evaluator_manifests(
     assert str(
         stage_evaluators["amplitude_stage"]["evaluator"]["evaluator_state_path"]
     ).startswith("evaluators/")
+    runtime_stage = raw["runtime_schema"]["stages"][0]
+    assert raw["runtime_schema"]["serialized_stage_metadata_compacted"] is True
+    assert runtime_stage["interactions_compacted"] is True
+    assert runtime_stage["interactions"] == []
+    assert len(runtime_stage["interaction_ids"]) == runtime_stage["interaction_count"]
+    assert sum(
+        count for _vertex_kind, count in runtime_stage["interaction_vertex_kind_counts"]
+    ) == runtime_stage["interaction_count"]
+    stage_compiler = raw["compiled"]["stage_compiler"]
+    assert stage_compiler["serialized_metadata_compacted"] is True
+    assert "stages" not in stage_compiler
+    assert "amplitude_stage" not in stage_compiler
+    diagnostics = raw["compiled"]["diagnostic_runtime_schema"]
+    diagnostics_path = tmp_path / diagnostics["path"]
+    assert diagnostics["compression"] == "gzip"
+    assert diagnostics["format"] == (
+        "python-pickle-protocol-5-full-runtime-schema-v2"
+    )
+    assert diagnostics["interaction_count"] == raw["dag_summary"][
+        "interaction_count"
+    ]
+    assert diagnostics["size_bytes"] == diagnostics_path.stat().st_size
+    with gzip.open(diagnostics_path, mode="rb") as stream:
+        detailed_runtime_schema = pickle.load(stream)
+    assert detailed_runtime_schema["stages"][0]["interactions"]
+
+
+def test_large_runtime_schema_diagnostics_overlap_stage_compilation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer_threads: list[str] = []
+    original_writer = generic_artifact_module._write_runtime_schema_diagnostics
+
+    def recording_writer(runtime_schema, output_dir):
+        writer_threads.append(threading.current_thread().name)
+        return original_writer(runtime_schema, output_dir)
+
+    def fake_compiler(stage, params, real_inputs):
+        return {
+            "kind": "jit-symbolica-evaluator",
+            "label": stage.evaluator_label,
+            "input_len": len(params),
+            "output_len": len(stage.output_expressions),
+            "real_input_count": len(real_inputs),
+            "evaluator_state_path": f"evaluators/{stage.evaluator_label}.bin",
+        }
+
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_MIN_INTERACTIONS",
+        0,
+    )
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_TRIGGER_STAGE_S",
+        0.0,
+    )
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_write_runtime_schema_diagnostics",
+        recording_writer,
+    )
+
+    manifest_path, _payload = write_generic_dag_process_artifact(
+        "u d~ > e+ ve g",
+        tmp_path,
+        emit_stage_evaluator_artifacts=True,
+        stage_evaluator_compiler=fake_compiler,
+    )
+
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    diagnostics_path = tmp_path / raw["compiled"]["diagnostic_runtime_schema"]["path"]
+    assert diagnostics_path.exists()
+    assert writer_threads == ["pyamplicol-schema-diagnostics_0"]
 
 
 def test_generic_dag_process_artifact_can_omit_lc_runtime_selector(

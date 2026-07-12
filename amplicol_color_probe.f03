@@ -7,14 +7,15 @@ program amplicol_color_probe
   implicit none
 
   type(amplitude_QCD) :: amp
-  integer(kind=8) :: points, ipoint
-  integer :: igroup, iint, argc, n, iacc_request, col_acc
+  integer(kind=8) :: points, ipoint, max_points, requested_points
+  integer :: igroup, iint, argc, n, iacc_request, col_acc, ios
   integer :: irow, i, ic, icol, ioff
   integer,dimension(:),allocatable :: hel
   integer,dimension(:,:),allocatable :: local_part, local_order, spin_init
   real(kind=8),dimension(:,:),allocatable :: p
   real(kind=8),dimension(3) :: matrix2
   real(kind=8) :: t0, t1, t_eval, t_colour, t_total, norm_factor
+  real(kind=8) :: target_runtime, calibration_runtime
   complex(kind=8) :: amp_col_c, amp2_c
   character(len=80) :: process_file, momenta_file
   character(len=32) :: color_arg, color_name
@@ -32,8 +33,18 @@ program amplicol_color_probe
   iint = 1
   print_matrix = .false.
   fixed_helicity = .false.
+  target_runtime = 0d0
   call get_environment_variable('AMPICOL_COLOR_PROBE_MATRIX',env_value)
   if (trim(adjustl(env_value)).eq.'1') print_matrix = .true.
+  env_value = ''
+  call get_environment_variable('AMPICOL_COLOR_PROBE_TARGET_RUNTIME_S',env_value)
+  if (len_trim(env_value) > 0) then
+     read(env_value,*,iostat=ios) target_runtime
+     if (ios /= 0 .or. target_runtime < 0d0) then
+        write (*,*) 'invalid AMPICOL_COLOR_PROBE_TARGET_RUNTIME_S'
+        stop 1
+     endif
+  endif
 
   argc = command_argument_count()
   if (argc >= 1) then
@@ -64,6 +75,7 @@ program amplicol_color_probe
      write (*,*) 'points must be positive'
      stop 1
   endif
+  max_points = points
 
   call parse_color_accuracy()
 
@@ -113,18 +125,44 @@ program amplicol_color_probe
   t_eval = 0d0
   t_colour = 0d0
   call cpu_time(t0)
-  do ipoint=1,points
+  if (target_runtime > 0d0) then
      if (fixed_helicity) then
         call evaluate_current_helicity()
      else
         call loop_helicity(1)
      endif
-  enddo
+     call cpu_time(t1)
+     calibration_runtime = t1 - t0
+     if (calibration_runtime > 0d0) then
+        requested_points = ceiling(target_runtime/calibration_runtime,kind=8)
+        points = max(1_8,min(max_points,requested_points))
+     else
+        points = max_points
+     endif
+     do ipoint=2,points
+        if (fixed_helicity) then
+           call evaluate_current_helicity()
+        else
+           call loop_helicity(1)
+        endif
+     enddo
+  else
+     do ipoint=1,points
+        if (fixed_helicity) then
+           call evaluate_current_helicity()
+        else
+           call loop_helicity(1)
+        endif
+     enddo
+  endif
   call cpu_time(t1)
   t_total = t1 - t0
 
   write (*,'(a)') 'AmpliCol colour probe'
   write (*,'(a,i0)') 'points ',points
+  if (target_runtime > 0d0) then
+     write (*,'(a,es24.16)') 'adaptive_target_runtime ',target_runtime
+  endif
   write (*,'(a,i0)') 'group ',igroup
   write (*,'(a,i0)') 'integral ',iint
   write (*,'(a,a)') 'color_accuracy ',trim(color_name)
@@ -133,7 +171,12 @@ program amplicol_color_probe
   else
      write (*,'(a)') 'helicity_mode summed'
   endif
+  write (*,'(a,i0)') 'AMPICOL_COLOR_PROBE_CURRENTS ',amp%n_cur
+  write (*,'(a,i0)') 'AMPICOL_COLOR_PROBE_VERTICES ',amp%n_vert
+  write (*,'(a,i0)') 'AMPICOL_COLOR_PROBE_AMPLITUDES ',amp%n_amps
+  write (*,'(a,i0)') 'AMPICOL_COLOR_PROBE_COLOR_ORDERS ',amp%nColOrd
   write (*,'(a,i0)') 'color_orders ',amp%nColOrd
+  call print_recursion_counts()
   write (*,'(a,3(1x,es24.16))') 'AMPICOL_COLOR_PROBE_COMPONENTS',&
        norm_factor*matrix2(1)/dble(points),&
        norm_factor*matrix2(2)/dble(points),&
@@ -151,6 +194,51 @@ program amplicol_color_probe
   write (*,'(a)') repeat('-',78)
 
 contains
+
+  subroutine print_recursion_counts()
+    implicit none
+    integer :: isize, current_id, vertex_id
+    integer :: gluon_count, auxiliary_count, other_current_count
+    integer,dimension(0:3) :: vertex_kind_counts
+    integer :: other_vertex_count
+
+    do isize=1,n-1
+       gluon_count = 0
+       auxiliary_count = 0
+       other_current_count = 0
+       do current_id=amp%n_cur_start(isize),amp%n_cur_end(isize)
+          select case (amp%current_list(current_id)%type)
+          case (21)
+             gluon_count = gluon_count + 1
+          case (-21)
+             auxiliary_count = auxiliary_count + 1
+          case default
+             other_current_count = other_current_count + 1
+          end select
+       enddo
+       write (*,'(a,5(1x,i0))') 'AMPICOL_COLOR_PROBE_CURRENT_STAGE',&
+            isize,amp%n_cur_end(isize)-amp%n_cur_start(isize)+1,&
+            gluon_count,auxiliary_count,other_current_count
+    enddo
+
+    do isize=2,n-1
+       vertex_kind_counts = 0
+       other_vertex_count = 0
+       do vertex_id=amp%n_vert_start(isize),amp%n_vert_end(isize)
+          if (amp%interaction_list(vertex_id)%type >= 0 .and.&
+               amp%interaction_list(vertex_id)%type <= 3) then
+             vertex_kind_counts(amp%interaction_list(vertex_id)%type) = &
+                  vertex_kind_counts(amp%interaction_list(vertex_id)%type) + 1
+          else
+             other_vertex_count = other_vertex_count + 1
+          endif
+       enddo
+       write (*,'(a,7(1x,i0))') 'AMPICOL_COLOR_PROBE_VERTEX_STAGE',&
+            isize,amp%n_vert_end(isize)-amp%n_vert_start(isize)+1,&
+            vertex_kind_counts(0),vertex_kind_counts(1),&
+            vertex_kind_counts(2),vertex_kind_counts(3),other_vertex_count
+    enddo
+  end subroutine print_recursion_counts
 
   subroutine parse_color_accuracy()
     implicit none

@@ -132,6 +132,11 @@ class AmplicolWorkflowResult:
     probe_points: tuple["AmplicolProbePoint", ...] = ()
     color_probe_components: tuple[float, float, float] | None = None
     color_probe_raw_components: tuple[float, float, float] | None = None
+    color_probe_points: int | None = None
+    color_probe_current_count: int | None = None
+    color_probe_vertex_count: int | None = None
+    color_probe_amplitude_count: int | None = None
+    color_probe_color_order_count: int | None = None
 
     @property
     def total_command_time_s(self) -> float:
@@ -682,6 +687,7 @@ class AmplicolAdapter:
         process_file: str | Path | None = None,
         options: ProcessOptions | None = None,
         process_list_backend: ProcessListBackend = "python",
+        target_runtime: float | None = None,
     ) -> AmplicolWorkflowResult:
         """Run the direct AmpliCol LC/NLC/full colour reference probe.
 
@@ -718,6 +724,13 @@ class AmplicolAdapter:
         )
         build = self._run(["make", f"-j{self.jobs}", "amplicol_color_probe"])
         build.check_returncode()
+        probe_env = None
+        if target_runtime is not None:
+            if target_runtime < 0.0:
+                raise ValueError("target_runtime must be non-negative")
+            probe_env = {
+                "AMPICOL_COLOR_PROBE_TARGET_RUNTIME_S": f"{target_runtime:.17g}"
+            }
         command = self._run(
             [
                 "./amplicol_color_probe",
@@ -732,7 +745,8 @@ class AmplicolAdapter:
                     if ordered_helicities
                     else []
                 ),
-            ]
+            ],
+            env=probe_env,
         )
         command.check_returncode()
         output = "\n".join([command.stdout, command.stderr])
@@ -743,6 +757,23 @@ class AmplicolAdapter:
             first_point_matrix_element=parse_color_probe_value(output),
             color_probe_components=parse_color_probe_components(output),
             color_probe_raw_components=parse_color_probe_raw_components(output),
+            color_probe_points=parse_color_probe_point_count(output),
+            color_probe_current_count=_parse_color_probe_integer(
+                output,
+                "AMPICOL_COLOR_PROBE_CURRENTS",
+            ),
+            color_probe_vertex_count=_parse_color_probe_integer(
+                output,
+                "AMPICOL_COLOR_PROBE_VERTICES",
+            ),
+            color_probe_amplitude_count=_parse_color_probe_integer(
+                output,
+                "AMPICOL_COLOR_PROBE_AMPLITUDES",
+            ),
+            color_probe_color_order_count=_parse_color_probe_integer(
+                output,
+                "AMPICOL_COLOR_PROBE_COLOR_ORDERS",
+            ),
         )
 
     def run_color_library_probe(
@@ -1044,6 +1075,20 @@ def parse_first_matrix_element(output: str) -> float | None:
     return None if match is None else float(match.group(1))
 
 
+def parse_color_probe_point_count(output: str) -> int | None:
+    match = re.search(r"^\s*points\s+(\d+)\s*$", output, re.MULTILINE)
+    return None if match is None else int(match.group(1))
+
+
+def _parse_color_probe_integer(output: str, label: str) -> int | None:
+    match = re.search(
+        rf"^\s*{re.escape(label)}\s+(\d+)\s*$",
+        output,
+        re.MULTILINE,
+    )
+    return None if match is None else int(match.group(1))
+
+
 def parse_color_probe_value(output: str) -> float | None:
     match = re.search(
         r"^\s*AMPICOL_COLOR_PROBE_VALUE\s+"
@@ -1206,6 +1251,7 @@ __all__ = [
     "amplicol_process_file_entry",
     "amplicol_process_file_integrals",
     "parse_color_probe_components",
+    "parse_color_probe_point_count",
     "parse_color_probe_raw_components",
     "parse_color_probe_value",
     "parse_amplicol_probe_points",

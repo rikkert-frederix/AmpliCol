@@ -35,7 +35,8 @@ def main() -> int:
     )
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--high-ratio", type=float, default=10.0)
+    parser.add_argument("--high-ratio", type=float, default=2.0)
+    parser.add_argument("--high-ratio-min-n", type=int, default=5)
     parser.add_argument("--nonmonotonic-factor", type=float, default=3.0)
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
@@ -44,6 +45,7 @@ def main() -> int:
     findings = audit_matrix(
         data,
         high_ratio=float(args.high_ratio),
+        high_ratio_min_n=max(1, int(args.high_ratio_min_n)),
         nonmonotonic_factor=float(args.nonmonotonic_factor),
     )
     report = render_report(data, findings)
@@ -59,6 +61,7 @@ def audit_matrix(
     data: dict[str, Any],
     *,
     high_ratio: float,
+    high_ratio_min_n: int = 5,
     nonmonotonic_factor: float,
 ) -> list[Finding]:
     findings: list[Finding] = []
@@ -91,6 +94,7 @@ def audit_matrix(
                 process_key,
                 row,
                 threshold=high_ratio,
+                min_n=high_ratio_min_n,
             )
         )
         findings.extend(_audit_row_validation(process_id, process_key, row))
@@ -137,10 +141,20 @@ def _audit_row_monotonicity(
         for mode_key, mode in _iter_modes(case):
             if mode.get("status") != "ok":
                 continue
+            generation_metrics = (
+                (
+                    ("selected_generation_s", "selected-flow generation"),
+                    ("all_flow_generation_s", "all-flow generation"),
+                )
+                if _float(mode.get("selected_generation_s")) is not None
+                else (("generation_s", "generation"),)
+            )
             for metric_key, label in (
-                ("generation_s", "generation"),
+                *generation_metrics,
                 ("runtime_us_per_point", "runtime"),
                 ("wall_us_per_point", "wall runtime"),
+                ("all_flow_runtime_us_per_point", "all-flow runtime"),
+                ("all_flow_wall_us_per_point", "all-flow wall runtime"),
             ):
                 value = _float(mode.get(metric_key))
                 if value is None:
@@ -170,11 +184,14 @@ def _audit_row_ratios(
     row: dict[str, Any],
     *,
     threshold: float,
+    min_n: int,
 ) -> Iterable[Finding]:
     for n_final, case in _iter_cases(row):
+        if n_final < min_n:
+            continue
         reference = _mode(case, "amplicol")
         ref_runtime = _float(reference.get("runtime_us_per_point"))
-        if reference.get("status") != "ok" or not ref_runtime:
+        if reference.get("status") != "ok":
             continue
         for mode_key in ("pyamplicol_jit", "pyamplicol_cpp_o3"):
             mode = _mode(case, mode_key)
@@ -183,18 +200,39 @@ def _audit_row_ratios(
             runtime = _float(mode.get("wall_us_per_point")) or _float(
                 mode.get("runtime_us_per_point")
             )
-            if runtime is None:
+            if runtime is not None and ref_runtime:
+                ratio = runtime / ref_runtime
+                if ratio >= threshold:
+                    yield Finding(
+                        "warning",
+                        process_id,
+                        process_key,
+                        n_final,
+                        f"{mode_key}:selected-flow",
+                        (
+                            f"selected-flow wall/runtime ratio to AmpliCol is "
+                            f"x{ratio:.2g}; inspect current recycling and backend "
+                            "codegen."
+                        ),
+                    )
+            if mode_key != "pyamplicol_jit":
                 continue
-            ratio = runtime / ref_runtime
-            if ratio >= threshold:
+            ref_all_flow = _float(reference.get("all_flow_runtime_us_per_point"))
+            all_flow = _float(mode.get("all_flow_wall_us_per_point")) or _float(
+                mode.get("all_flow_runtime_us_per_point")
+            )
+            if all_flow is not None and ref_all_flow:
+                ratio = all_flow / ref_all_flow
+                if ratio < threshold:
+                    continue
                 yield Finding(
                     "warning",
                     process_id,
                     process_key,
                     n_final,
-                    mode_key,
+                    f"{mode_key}:all-flow",
                     (
-                        f"wall/runtime ratio to AmpliCol is x{ratio:.2g}; "
+                        f"all-flow wall/runtime ratio to AmpliCol is x{ratio:.2g}; "
                         f"inspect current recycling and backend codegen."
                     ),
                 )
@@ -245,7 +283,13 @@ def _audit_row_statuses(
             )
         for mode_key, mode in _iter_modes(case):
             status = str(mode.get("status", ""))
-            if status in {"", "ok", "unsupported", "backend_unsupported"}:
+            if status in {
+                "",
+                "ok",
+                "unsupported",
+                "backend_unsupported",
+                "ram_limit",
+            }:
                 continue
             yield Finding(
                 "error",
@@ -259,13 +303,15 @@ def _audit_row_statuses(
 
 def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
     gate = _gate_summary(data, findings)
-    low_n = _low_n_summary(data, max_n=5)
+    low_n = _low_n_summary(data, max_n=4)
     lines = [
         "# Result Matrix Audit",
         "",
         "This report is generated by `pyAmpliCol/docs/audit_result_matrix.py`.",
         "It flags stale metadata, nonmonotonic timings, large runtime ratios, and",
         "unresolved statuses in `result_matrix_data.json`.",
+        "The default runtime gate covers selected-flow and all-flow wall ratios",
+        "from `n=5` upward at a `2.0x` threshold.",
         "",
         f"Matrix updated at: `{data.get('updated_at', 'unknown')}`",
         "",
@@ -279,6 +325,8 @@ def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
             f"`missing_jit`={gate['missing_jit']}, "
             f"`amplicol_unsupported`={gate['amplicol_unsupported']}, "
             f"`jit_backend_unsupported`={gate['jit_backend_unsupported']}, "
+            f"`jit_ram_limit`={gate['jit_ram_limit']}, "
+            f"`all_flow_ram_limit`={gate['all_flow_ram_limit']}, "
             f"`missing_cpp_o3`={gate['missing_cpp_o3']}."
         ),
         "",
@@ -287,11 +335,15 @@ def render_report(data: dict[str, Any], findings: list[Finding]) -> str:
             "filled only where generation was feasible within the matrix-run "
             "time budget. `amplicol_unsupported` records processes outside "
             "Fortran AmpliCol's supported quark-line range; pyAmpliCol entries "
-            "for those cells are still shown as absolute timings."
+            "for those cells are still shown as absolute timings. "
+            "`jit_ram_limit` records complete JIT cells stopped by the 30 GB "
+            "watchdog. "
+            "`all_flow_ram_limit` records selected-flow cells that remain valid "
+            "while their separate all-flow artifact exceeded 30 GB."
         ),
         "",
         (
-            "Low-multiplicity coverage (`n <= 5`): "
+            "Low-multiplicity coverage (`n <= 4`): "
             f"`cases`={low_n['cases']}, "
             f"`amplicol_ok`={low_n['amplicol_ok']}, "
             f"`jit_ok`={low_n['jit_ok']}, "
@@ -341,6 +393,8 @@ def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, in
     missing_jit = 0
     amplicol_unsupported = 0
     jit_backend_unsupported = 0
+    jit_ram_limit = 0
+    all_flow_ram_limit = 0
     missing_cpp_o3 = 0
     if isinstance(entries, dict):
         for row in entries.values():
@@ -367,6 +421,10 @@ def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, in
                     missing_jit += 1
                 elif jit.get("status") == "backend_unsupported":
                     jit_backend_unsupported += 1
+                elif jit.get("status") == "ram_limit":
+                    jit_ram_limit += 1
+                if jit.get("all_flow_status") == "ram_limit":
+                    all_flow_ram_limit += 1
                 cpp = _mode(case, "pyamplicol_cpp_o3")
                 if not cpp or cpp.get("status") == "missing":
                     missing_cpp_o3 += 1
@@ -379,6 +437,8 @@ def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, in
     documented_limitations = (
         amplicol_unsupported
         + jit_backend_unsupported
+        + jit_ram_limit
+        + all_flow_ram_limit
         + missing_cpp_o3
     )
     if hard_failures:
@@ -395,6 +455,8 @@ def _gate_summary(data: dict[str, Any], findings: list[Finding]) -> dict[str, in
         "missing_jit": missing_jit,
         "amplicol_unsupported": amplicol_unsupported,
         "jit_backend_unsupported": jit_backend_unsupported,
+        "jit_ram_limit": jit_ram_limit,
+        "all_flow_ram_limit": all_flow_ram_limit,
         "missing_cpp_o3": missing_cpp_o3,
     }
 

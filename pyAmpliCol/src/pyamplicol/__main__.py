@@ -1073,7 +1073,7 @@ def _add_evaluator_build_options(
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=64,
+        default=128,
         help="Number of phase-space samples to evaluate together at runtime.",
     )
     parser.add_argument(
@@ -1250,12 +1250,34 @@ def _add_evaluator_build_options(
         ),
     )
     parser.add_argument(
+        "--no-symbolica-output-chunking",
+        dest="symbolica_compiled_output_chunk_size",
+        action="store_const",
+        const=None,
+        default=argparse.SUPPRESS,
+        help=(
+            "Build one Symbolica evaluator per recursion stage without "
+            "splitting its outputs."
+        ),
+    )
+    parser.add_argument(
+        "--symbolica-output-chunk-strategy",
+        choices=("auto", "uniform", "tapered-stage", "measured-stage"),
+        default="auto",
+        help=(
+            "Automatically tune normal selected-flow JIT stages while keeping "
+            "large all-flow outputs uniform, force one output chunk size, "
+            "taper it, or benchmark candidates per stage. A measured candidate "
+            "is retained only when it is at least 5%% faster than uniform."
+        ),
+    )
+    parser.add_argument(
         "--symbolica-compiled-chunk-compile-workers",
         type=int,
         default=1,
         help=(
-            "Number of worker threads used to compile chunked Symbolica "
-            "generated-code evaluators."
+            "Number of worker threads used to construct and materialize "
+            "chunked Symbolica evaluators."
         ),
     )
     parser.add_argument(
@@ -1301,7 +1323,7 @@ def _set_fast_rusticol_dag_defaults(parser: argparse.ArgumentParser) -> None:
         symbolica_compiled_preset="runtime-o3",
         symbolica_n_cores=10,
         symbolica_compiled_chunk_compile_workers=10,
-        batch_size=64,
+        batch_size=128,
         symbolica_stage_local_parameter_layout=(
             _DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT
         ),
@@ -1376,6 +1398,10 @@ def _symbolica_settings_from_runtime_kwargs(
         ),
         compiler_flags=tuple(str(flag) for flag in values["symbolica_compiler_flags"]),
         compiled_output_chunk_size=compiled_output_chunk_size,
+        output_chunk_strategy=str(
+            values.get("symbolica_output_chunk_strategy", "auto")
+        ),
+        output_chunk_autotune_batch_size=int(values.get("batch_size", 128)),
         compiled_chunk_compile_workers=int(
             values["symbolica_compiled_chunk_compile_workers"]
         ),
@@ -1478,6 +1504,9 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
             getattr(args, "symbolica_compiler_flags", ())
         ),
         "symbolica_compiled_output_chunk_size": _compiled_output_chunk_size(args),
+        "symbolica_output_chunk_strategy": str(
+            getattr(args, "symbolica_output_chunk_strategy", "auto")
+        ),
         "symbolica_compiled_chunk_compile_workers": int(
             getattr(args, "symbolica_compiled_chunk_compile_workers", 1)
         ),
@@ -3919,11 +3948,32 @@ def _child_generation_progress_callback(process: str):
     if os.environ.get(_CHILD_PROGRESS_ENV) != "1":
         return None
 
+    last_seen: tuple[str, str] | None = None
+    last_group: str | None = None
+    last_emitted = 0.0
+
     def callback(event: dict[str, object]) -> None:
+        nonlocal last_seen, last_group, last_emitted
+        stage = str(event.get("stage", ""))
+        item = str(event.get("item", ""))
+        now = time.perf_counter()
+        signature = (stage, item)
+        group = _generation_monitor_stage_group(stage)
+        if (
+            group == "evaluator-build"
+            and group == last_group
+            and now - last_emitted < 0.5
+        ):
+            return
+        if signature == last_seen and now - last_emitted < 2.0:
+            return
+        last_seen = signature
+        last_group = group
+        last_emitted = now
         payload: dict[str, object] = {
             "process": process,
-            "stage": str(event.get("stage", "")),
-            "item": str(event.get("item", "")),
+            "stage": stage,
+            "item": item,
         }
         for key in ("increment", "total", "ram", "duration_s"):
             if key in event:
@@ -3940,17 +3990,26 @@ def _child_generation_progress_callback(process: str):
 def _stderr_generation_monitor_callback(process: str):
     started = time.perf_counter()
     last_seen: tuple[str, str] | None = None
+    last_group: str | None = None
     last_emitted = 0.0
 
     def callback(event: dict[str, object]) -> None:
-        nonlocal last_seen, last_emitted
+        nonlocal last_seen, last_group, last_emitted
         stage = str(event.get("stage", ""))[:26]
         item = str(event.get("item", ""))[:66]
         now = time.perf_counter()
         signature = (stage, item)
+        group = _generation_monitor_stage_group(stage)
+        if (
+            group == "evaluator-build"
+            and group == last_group
+            and now - last_emitted < 2.0
+        ):
+            return
         if signature == last_seen and now - last_emitted < 2.0:
             return
         last_seen = signature
+        last_group = group
         last_emitted = now
         wall = time.time()
         millis = int((wall - int(wall)) * 1000.0)
@@ -3978,6 +4037,12 @@ def _stderr_generation_monitor_callback(process: str):
         )
 
     return callback
+
+
+def _generation_monitor_stage_group(stage: str) -> str:
+    if stage.startswith(("jit ", "asm ", "c++ ", "compiled ")):
+        return "evaluator-build"
+    return stage
 
 
 def _combined_progress_callback(
@@ -4101,9 +4166,17 @@ def _drain_child_progress_events(
         now = time.perf_counter()
         if seen is not None:
             previous_stage, previous_item, previous_at = seen.get(pid, ("", "", 0.0))
-            changed_stage = stage != previous_stage
+            stage_group = _generation_monitor_stage_group(stage)
+            previous_group = _generation_monitor_stage_group(previous_stage)
+            changed_stage = stage_group != previous_group
             changed_item = item != previous_item
             has_counter_update = "increment" in event or "total" in event
+            if (
+                stage_group == "evaluator-build"
+                and stage_group == previous_group
+                and now - previous_at < min_interval_s
+            ):
+                continue
             if (
                 not changed_stage
                 and not has_counter_update
@@ -5038,10 +5111,16 @@ def _profile_rusticol_process(
     np_module: Any,
 ) -> dict[str, Any]:
     block_size = max(int(batch_size), 1)
-    estimate_points = _repeat_rusticol_points(points, block_size, np_module)
+    batch = _repeat_rusticol_points(points, block_size, np_module)
+    _rusticol_evaluate(
+        runtime,
+        batch,
+        precision,
+        color_sector_ids=color_sector_ids,
+    )
     last_profile = dict(
         runtime.profile(
-            estimate_points,
+            batch,
             precision=precision,
             include_values=False,
             color_sector_ids=(list(color_sector_ids) if color_sector_ids else None),
@@ -5057,7 +5136,22 @@ def _profile_rusticol_process(
     input_pack_samples: list[float] = []
     elapsed_total_s = 0.0
     while len(samples) < min_block_count or elapsed_total_s < target_elapsed_s:
-        batch = _repeat_rusticol_points(points, block_size, np_module)
+        start = time.perf_counter()
+        _rusticol_evaluate(
+            runtime,
+            batch,
+            precision,
+            color_sector_ids=color_sector_ids,
+        )
+        elapsed_s = time.perf_counter() - start
+        elapsed_total_s += elapsed_s
+        samples.append(elapsed_s / block_size)
+
+    profile_elapsed_total_s = 0.0
+    while (
+        len(core_samples) < min_block_count
+        or profile_elapsed_total_s < target_elapsed_s
+    ):
         start = time.perf_counter()
         last_profile = dict(
             runtime.profile(
@@ -5067,9 +5161,7 @@ def _profile_rusticol_process(
                 color_sector_ids=(list(color_sector_ids) if color_sector_ids else None),
             )
         )
-        elapsed_s = time.perf_counter() - start
-        elapsed_total_s += elapsed_s
-        samples.append(elapsed_s / block_size)
+        profile_elapsed_total_s += time.perf_counter() - start
         core_samples.append(
             (
                 float(last_profile.get("stage_evaluator_time_s", 0.0))
@@ -5112,7 +5204,11 @@ def _profile_rusticol_process(
     return {
         "samples": len(samples) * block_size,
         "block_count": len(samples),
+        "profile_samples": len(core_samples) * block_size,
+        "profile_block_count": len(core_samples),
         "block_size": block_size,
+        "wall_measurement": "runtime.evaluate",
+        "component_measurement": "runtime.profile",
         "lc_sector_ids": list(color_sector_ids or ()),
         "wall_us_per_point": wall_s * 1.0e6,
         "wall_us_per_point_error": wall_error_s * 1.0e6,

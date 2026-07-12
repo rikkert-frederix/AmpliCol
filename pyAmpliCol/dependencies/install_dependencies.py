@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -521,6 +522,7 @@ symbolica = { path = "../symbolica" }
 def dependency_patch_specs() -> tuple[tuple[str, Path, Path], ...]:
     return (
         ("gammaloop", GAMMALOOP_DIR, PATCHES_DIR / "gammaloop"),
+        ("symjit", SYMJIT_DIR, PATCHES_DIR / "symjit"),
         ("symbolica", SYMBOLICA_DIR, PATCHES_DIR / "symbolica"),
         ("symbolica_community", SYMBOLICA_COMMUNITY_DIR, PATCHES_DIR / "symbolica-community"),
     )
@@ -536,9 +538,30 @@ def dependency_patch_manifest_entries() -> list[dict[str, str]]:
                 {
                     "dependency": dependency,
                     "path": display_path(patch_path),
+                    "sha256": hashlib.sha256(patch_path.read_bytes()).hexdigest(),
                 }
             )
     return entries
+
+
+def dependency_patch_is_recorded(patch_path: Path) -> bool:
+    if not DEPENDENCY_MANIFEST.exists():
+        return False
+    try:
+        manifest = json.loads(DEPENDENCY_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    entries = manifest.get("dependency_patches")
+    if not isinstance(entries, list):
+        return False
+    expected_path = display_path(patch_path)
+    expected_sha256 = hashlib.sha256(patch_path.read_bytes()).hexdigest()
+    for raw_entry in entries:
+        if not isinstance(raw_entry, dict) or raw_entry.get("path") != expected_path:
+            continue
+        recorded_sha256 = raw_entry.get("sha256")
+        return recorded_sha256 is None or recorded_sha256 == expected_sha256
+    return False
 
 
 def display_path(path: Path) -> str:
@@ -571,6 +594,13 @@ def apply_dependency_patch(target_dir: Path, patch_path: Path) -> bool:
     )
     if reverse.returncode == 0:
         print(f"Dependency patch already applied: {display_path(patch_path)}")
+        return False
+
+    if dependency_patch_is_recorded(patch_path):
+        print(
+            "Dependency patch recorded as applied despite overlapping later "
+            f"edits: {display_path(patch_path)}"
+        )
         return False
 
     diagnostics = "".join(

@@ -14,8 +14,10 @@ DEFAULT_DATA = DOCS_DIR / "z_performance_data.json"
 DEFAULT_TABLE = DOCS_DIR / "z_performance_table.tex"
 DEFAULT_TARGET_RUNTIME_S = 10.0
 DEFAULT_BATCH_SIZE = 64
+DEFAULT_ALL_FLOW_BATCH_SIZE = 64
 DEFAULT_SYMBOLICA_ITERATIONS = 10
 DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE = 128
+DEFAULT_ALL_FLOW_SYMBOLICA_OUTPUT_CHUNK_SIZE = 8192
 
 MODES: tuple[dict[str, Any], ...] = (
     {
@@ -28,6 +30,7 @@ MODES: tuple[dict[str, Any], ...] = (
         "key": "jit_o1",
         "route": "Rusticol",
         "setup": r"\PAC\ JIT \(\mathrm{O}1\)",
+        "row_color": "bestgreen",
     },
     {
         "key": "asm",
@@ -43,7 +46,6 @@ MODES: tuple[dict[str, Any], ...] = (
         "key": "jit_o3",
         "route": "Rusticol",
         "setup": r"\PAC\ JIT \(\mathrm{O}3\)",
-        "row_color": "bestgreen",
     },
 )
 MODE_KEYS = tuple(str(mode["key"]) for mode in MODES)
@@ -76,6 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="ok",
     )
     record.add_argument("--generation-s", type=float)
+    record.add_argument("--output-dir", default="")
     record.add_argument("--wall-us-per-point", type=float)
     record.add_argument("--runtime-us-per-point", type=float)
     record.add_argument(
@@ -84,8 +87,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
     )
     record.add_argument("--all-flow-generation-s", type=float)
+    record.add_argument("--all-flow-output-dir", default="")
     record.add_argument("--all-flow-wall-us-per-point", type=float)
     record.add_argument("--all-flow-runtime-us-per-point", type=float)
+    record.add_argument("--all-flow-time-batch-size", type=int)
+    record.add_argument("--all-flow-symbolica-output-chunk-size", type=int)
     record.add_argument("--all-flow-notes", default="")
     record.add_argument("--all-flow-error", default="")
     record.add_argument("--notes", default="")
@@ -106,12 +112,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             str(args.mode),
             status=str(args.status),
             generation_s=args.generation_s,
+            output_dir=str(args.output_dir),
             wall_us_per_point=args.wall_us_per_point,
             runtime_us_per_point=args.runtime_us_per_point,
             all_flow_status=args.all_flow_status,
             all_flow_generation_s=args.all_flow_generation_s,
+            all_flow_output_dir=str(args.all_flow_output_dir),
             all_flow_wall_us_per_point=args.all_flow_wall_us_per_point,
             all_flow_runtime_us_per_point=args.all_flow_runtime_us_per_point,
+            all_flow_time_batch_size=args.all_flow_time_batch_size,
+            all_flow_symbolica_output_chunk_size=args.all_flow_symbolica_output_chunk_size,
             all_flow_notes=str(args.all_flow_notes),
             all_flow_error=str(args.all_flow_error),
             notes=str(args.notes),
@@ -159,7 +169,13 @@ def _refresh_metadata(data: dict[str, Any]) -> None:
     data["settings"] = {
         "target_runtime_s": DEFAULT_TARGET_RUNTIME_S,
         "batch_size": DEFAULT_BATCH_SIZE,
+        "selected_runtime_batch_size": DEFAULT_BATCH_SIZE,
+        "all_flow_runtime_batch_size": DEFAULT_ALL_FLOW_BATCH_SIZE,
         "symbolica_output_chunk_size": DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE,
+        "selected_symbolica_output_chunk_size": DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE,
+        "all_flow_symbolica_output_chunk_size": (
+            DEFAULT_ALL_FLOW_SYMBOLICA_OUTPUT_CHUNK_SIZE
+        ),
         "symbolica_stage_local_parameter_layout": True,
         "symbolica_iterations": DEFAULT_SYMBOLICA_ITERATIONS,
         "symbolica_cpe_iterations": None,
@@ -177,12 +193,16 @@ def _record_row(
     *,
     status: str,
     generation_s: float | None,
+    output_dir: str,
     wall_us_per_point: float | None,
     runtime_us_per_point: float | None,
     all_flow_status: str | None,
     all_flow_generation_s: float | None,
+    all_flow_output_dir: str,
     all_flow_wall_us_per_point: float | None,
     all_flow_runtime_us_per_point: float | None,
+    all_flow_time_batch_size: int | None,
+    all_flow_symbolica_output_chunk_size: int | None,
     all_flow_notes: str,
     all_flow_error: str,
     notes: str,
@@ -204,6 +224,8 @@ def _record_row(
     }
     if generation_s is not None:
         row["generation_s"] = float(generation_s)
+    if output_dir:
+        row["output_dir"] = output_dir
     if wall_us_per_point is not None:
         row["wall_us_per_point"] = float(wall_us_per_point)
     if runtime_us_per_point is not None:
@@ -212,10 +234,18 @@ def _record_row(
         row["all_flow_status"] = str(all_flow_status)
     if all_flow_generation_s is not None:
         row["all_flow_generation_s"] = float(all_flow_generation_s)
+    if all_flow_output_dir:
+        row["all_flow_output_dir"] = all_flow_output_dir
     if all_flow_wall_us_per_point is not None:
         row["all_flow_wall_us_per_point"] = float(all_flow_wall_us_per_point)
     if all_flow_runtime_us_per_point is not None:
         row["all_flow_runtime_us_per_point"] = float(all_flow_runtime_us_per_point)
+    if all_flow_time_batch_size is not None:
+        row["all_flow_time_batch_size"] = int(all_flow_time_batch_size)
+    if all_flow_symbolica_output_chunk_size is not None:
+        row["all_flow_symbolica_output_chunk_size"] = int(
+            all_flow_symbolica_output_chunk_size
+        )
     if all_flow_notes:
         row["all_flow_notes"] = all_flow_notes
     if all_flow_error:
@@ -331,48 +361,44 @@ def render_table(data: dict[str, Any]) -> str:
             r"\endgroup",
             r"\par\smallskip",
             (
-                r"\noindent\footnotesize Final-state multiplicity \(n\) means "
-                r"\(d\bar d\to Z+(n-1)g\).  \PAC\ rows use Rusticol, batch size "
-                r"64, output chunk size 128, stage-local evaluator inputs, ten "
-                r"Horner iterations, and \texttt{time-process --target-runtime 10}. "
-                r"The first timing block is one selected LC flow with the helicity "
-                r"sum; the second is the sum over all LC flows for one fixed source "
-                r"helicity.  Generation columns report the artifact used by the "
-                r"corresponding timing block: selected-flow generation on the left "
-                r"and all-flow generation on the right. "
-                r"The green row is the default \PAC\ route, SymJIT O3.  Generated "
-                r"processes are kept under \texttt{docs/.z\_performance\_outputs}; "
-                r"the driver is \texttt{docs/run\_z\_performance\_table.py}."
-            ),
-            r"\par\smallskip",
-            (
-                r"\noindent\footnotesize To reproduce one \PAC\ row, run "
-                r"generation followed by timing.  This example is the \(n=7\) "
-                r"JIT O3 selected-flow block; for the all-flow block, use the "
-                r"same command but replace the sector/order flags with "
-                r"\texttt{--lc-topology-replay --skip-generic-plan "
-                r"--no-runtime-lc-sector-selector --source-helicities "
-                r"1=-1,2=-1,4=1,5=1,6=1,7=1,8=1,9=1}."
+                r"\noindent\footnotesize Reproduce the \(n=7\) JIT O1 selected-flow "
+                r"entry with the following generation and timing commands."
             ),
             r"\begin{lstlisting}[language=bash,basicstyle=\ttfamily\tiny,breaklines=true,breakatwhitespace=true]",
             (
                 "env PYTHONPATH=src dependencies/.venv/bin/python -m pyamplicol generate-process "
-                "'d d~ > z g g g g g g' docs/.z_performance_outputs/manual/n7/jit_o3 "
+                "'d d~ > z g g g g g g' docs/.z_performance_outputs/manual/n7/jit_o1 "
                 "--replace --n_cores 5 --color-accuracy lc --batch-size 64 "
                 "--symbolica-n-cores 5 --symbolica-output-chunk-size 128 "
+                "--symbolica-output-chunk-strategy uniform "
                 "--symbolica-stage-local-parameter-layout --symbolica-iterations 10 "
                 "--symbolica-max-horner-scheme-variables 1000 "
                 "--symbolica-max-common-pair-cache-entries 5000000 "
                 "--symbolica-max-common-pair-distance 1000 --lc-sector-ids 0 "
                 "--reference-color-order 2,4,5,6,7,8,9,1,3 "
-                "--symbolica-evaluator-backend jit --symbolica-jit-optimization-level 3"
+                "--symbolica-evaluator-backend jit --symbolica-jit-optimization-level 1"
             ),
             (
                 "env PYTHONPATH=src dependencies/.venv/bin/python -m pyamplicol time-process "
                 "--target-runtime 10 --batch-size 64 --json "
-                "docs/.z_performance_outputs/manual/n7/jit_o3"
+                "docs/.z_performance_outputs/manual/n7/jit_o1"
             ),
             r"\end{lstlisting}",
+            r"\par\smallskip",
+            (
+                r"\noindent\footnotesize Here \(n\) is final-state multiplicity. "
+                r"Each block reports generation seconds and wall/evaluator "
+                r"microseconds per point: one selected flow with the helicity sum "
+                r"on the left, all flows at one fixed helicity on the right. "
+                r"Wall measures Rusticol's public \texttt{evaluate} call; eval "
+                r"separately profiles evaluator plus input packing.  Both use batch "
+                r"64, stage-local inputs, ten Horner iterations, and a ten-second "
+                r"timing target; output chunks are 128 selected and 8192 all-flow. "
+                r"The green O1 row is the measured default: repeated O3 timings "
+                r"showed no significant Z-family gain.  ASM remains a scalar "
+                r"AArch64 diagnostic.  The driver keeps generated artifacts under "
+                r"\texttt{docs/.z\_performance\_outputs}."
+            ),
             r"\end{landscape}",
             "",
         ]
@@ -561,6 +587,8 @@ def _notes(
     if notes:
         if (
             notes.startswith("generated process kept at ")
+            or notes.startswith("retimed existing process kept at ")
+            or notes.startswith("reused matching O1 all-flow artifact from ")
             or notes == "reused from LC result matrix cache"
         ):
             return ""

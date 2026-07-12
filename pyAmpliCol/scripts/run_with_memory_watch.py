@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import os
 import resource
@@ -13,19 +12,30 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from memory_watch_support import ProcessTreeMemoryMonitor, process_tree_pids
+
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a command while limiting total process-tree RSS."
+        description=(
+            "Run a command while limiting total process-tree memory. On macOS "
+            "this includes compressed physical footprint as well as RSS."
+        )
     )
     parser.add_argument("--limit-gb", type=float, required=True)
     parser.add_argument("--poll-s", type=float, default=1.0)
+    parser.add_argument(
+        "--physical-footprint-poll-s",
+        type=float,
+        default=5.0,
+        help="macOS physical-footprint polling interval (default: 5 seconds).",
+    )
     parser.add_argument("--stop-file", type=Path, default=Path("stop.order"))
     parser.add_argument(
         "--report-json",
         type=Path,
         default=None,
-        help="Optional path where peak RSS and exit status are written as JSON.",
+        help="Optional path where peak memory and exit status are written as JSON.",
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -34,6 +44,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args.command = args.command[1:]
     if not args.command:
         parser.error("missing command after --")
+    if args.poll_s <= 0:
+        parser.error("--poll-s must be positive")
+    if args.physical_footprint_poll_s <= 0:
+        parser.error("--physical-footprint-poll-s must be positive")
     return args
 
 
@@ -45,9 +59,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_new_session=True,
         preexec_fn=lambda: _apply_process_memory_limit(limit_bytes),
     )
-    warned_no_rss = False
-    peak_rss_bytes: int | None = None
-    rss_polling_available = True
+    monitor = ProcessTreeMemoryMonitor(
+        physical_footprint_poll_s=args.physical_footprint_poll_s,
+        physical_footprint_high_watermark_bytes=int(0.8 * limit_bytes),
+    )
+    warned_no_memory = False
     try:
         while True:
             returncode = child.poll()
@@ -56,72 +72,68 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.report_json,
                     limit_gb=args.limit_gb,
                     limit_bytes=limit_bytes,
-                    peak_rss_bytes=peak_rss_bytes,
+                    monitor=monitor,
                     returncode=returncode,
-                    rss_polling_available=rss_polling_available,
                 )
                 return returncode
 
             if args.stop_file.exists():
-                _terminate_group(child.pid, signal.SIGTERM)
-                returncode = _wait_or_kill(child)
+                tracked_pids = _terminate_tree(child.pid, signal.SIGTERM)
+                returncode = _wait_or_kill(child, tracked_pids)
                 _write_report(
                     args.report_json,
                     limit_gb=args.limit_gb,
                     limit_bytes=limit_bytes,
-                    peak_rss_bytes=peak_rss_bytes,
+                    monitor=monitor,
                     returncode=returncode,
-                    rss_polling_available=rss_polling_available,
                 )
                 return returncode
 
-            rss = _process_tree_rss_bytes(child.pid)
-            if rss is None:
-                rss_polling_available = False
-                if not warned_no_rss:
+            sample = monitor.sample(child.pid)
+            memory_bytes = sample.effective_bytes
+            if memory_bytes is None:
+                if not warned_no_memory:
                     print(
-                        "memory watchdog: RSS polling is unavailable; relying on "
-                        "per-process OS memory limits",
+                        "memory watchdog: process-tree memory polling is "
+                        "unavailable; relying on per-process OS memory limits",
                         file=sys.stderr,
                         flush=True,
                     )
-                    warned_no_rss = True
-            else:
-                peak_rss_bytes = (
-                    rss
-                    if peak_rss_bytes is None
-                    else max(peak_rss_bytes, rss)
+                    warned_no_memory = True
+            elif memory_bytes > limit_bytes:
+                metric = (
+                    "physical footprint"
+                    if sample.effective_metric == "physical_footprint"
+                    else "RSS"
                 )
-                if rss > limit_bytes:
-                    print(
-                        f"memory watchdog: RSS {rss / 1024**3:.3f} GiB exceeded "
-                        f"limit {args.limit_gb:.3f} GiB",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                    _terminate_group(child.pid, signal.SIGTERM)
-                    _wait_or_kill(child)
-                    _write_report(
-                        args.report_json,
-                        limit_gb=args.limit_gb,
-                        limit_bytes=limit_bytes,
-                        peak_rss_bytes=peak_rss_bytes,
-                        returncode=137,
-                        rss_polling_available=rss_polling_available,
-                    )
-                    return 137
+                print(
+                    f"memory watchdog: {metric} "
+                    f"{memory_bytes / 1024**3:.3f} GiB exceeded "
+                    f"limit {args.limit_gb:.3f} GiB",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                tracked_pids = _terminate_tree(child.pid, signal.SIGTERM)
+                _wait_or_kill(child, tracked_pids)
+                _write_report(
+                    args.report_json,
+                    limit_gb=args.limit_gb,
+                    limit_bytes=limit_bytes,
+                    monitor=monitor,
+                    returncode=137,
+                )
+                return 137
 
             time.sleep(args.poll_s)
     except KeyboardInterrupt:
-        _terminate_group(child.pid, signal.SIGINT)
-        returncode = _wait_or_kill(child)
+        tracked_pids = _terminate_tree(child.pid, signal.SIGINT)
+        returncode = _wait_or_kill(child, tracked_pids)
         _write_report(
             args.report_json,
             limit_gb=args.limit_gb,
             limit_bytes=limit_bytes,
-            peak_rss_bytes=peak_rss_bytes,
+            monitor=monitor,
             returncode=returncode,
-            rss_polling_available=rss_polling_available,
         )
         return returncode
 
@@ -131,9 +143,8 @@ def _write_report(
     *,
     limit_gb: float,
     limit_bytes: int,
-    peak_rss_bytes: int | None,
+    monitor: ProcessTreeMemoryMonitor,
     returncode: int,
-    rss_polling_available: bool,
 ) -> None:
     if path is None:
         return
@@ -141,22 +152,50 @@ def _write_report(
     payload = {
         "limit_gb": limit_gb,
         "limit_bytes": limit_bytes,
-        "peak_rss_bytes": peak_rss_bytes,
+        "peak_rss_bytes": monitor.peak_rss_bytes,
         "peak_rss_gb": (
-            None if peak_rss_bytes is None else peak_rss_bytes / 1024**3
+            None
+            if monitor.peak_rss_bytes is None
+            else monitor.peak_rss_bytes / 1024**3
         ),
+        "peak_physical_footprint_bytes": monitor.peak_physical_footprint_bytes,
+        "peak_physical_footprint_gb": (
+            None
+            if monitor.peak_physical_footprint_bytes is None
+            else monitor.peak_physical_footprint_bytes / 1024**3
+        ),
+        "peak_memory_bytes": monitor.peak_memory_bytes,
+        "peak_memory_gb": (
+            None
+            if monitor.peak_memory_bytes is None
+            else monitor.peak_memory_bytes / 1024**3
+        ),
+        "peak_memory_metric": monitor.peak_memory_metric,
         "returncode": returncode,
-        "rss_polling_available": rss_polling_available,
+        "rss_polling_available": monitor.rss_polling_available,
+        "physical_footprint_supported": monitor.physical_footprint_supported,
+        "physical_footprint_polling_available": (
+            monitor.physical_footprint_polling_available
+        ),
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _wait_or_kill(child: subprocess.Popen[bytes]) -> int:
+def _wait_or_kill(
+    child: subprocess.Popen[bytes],
+    tracked_pids: Sequence[int],
+) -> int:
     try:
-        return child.wait(timeout=10.0)
+        returncode = child.wait(timeout=10.0)
     except subprocess.TimeoutExpired:
+        _signal_pids(tracked_pids, signal.SIGKILL, exclude=child.pid)
         _terminate_group(child.pid, signal.SIGKILL)
-        return child.wait()
+        returncode = child.wait()
+    else:
+        # A child may have called setsid(), so waiting for the root does not
+        # prove every process sampled by the watchdog has exited.
+        _signal_pids(tracked_pids, signal.SIGKILL, exclude=child.pid)
+    return returncode
 
 
 def _apply_process_memory_limit(limit_bytes: int) -> None:
@@ -185,83 +224,26 @@ def _terminate_group(pid: int, sig: signal.Signals) -> None:
         return
 
 
-def _process_tree_rss_bytes(pid: int) -> int | None:
-    psutil_rss = _process_tree_rss_bytes_psutil(pid)
-    if psutil_rss is not None:
-        return psutil_rss
-    if sys.platform == "darwin":
-        return _process_tree_rss_bytes_ps(pid)
-    return _process_tree_rss_bytes_proc(pid)
+def _terminate_tree(pid: int, sig: signal.Signals) -> tuple[int, ...]:
+    tracked_pids = process_tree_pids(pid)
+    _signal_pids(tracked_pids, sig, exclude=pid)
+    _terminate_group(pid, sig)
+    return tracked_pids
 
 
-def _process_tree_rss_bytes_psutil(pid: int) -> int | None:
-    try:
-        psutil = importlib.import_module("psutil")
-    except ImportError:
-        return None
-    try:
-        root = psutil.Process(pid)
-        processes = [root, *root.children(recursive=True)]
-        return sum(process.memory_info().rss for process in processes)
-    except Exception:
-        return None
-
-
-def _process_tree_rss_bytes_ps(pid: int) -> int | None:
-    try:
-        output = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,rss="],
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    children: dict[int, list[int]] = {}
-    rss_kb: dict[int, int] = {}
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) != 3:
+def _signal_pids(
+    pids: Sequence[int],
+    sig: signal.Signals,
+    *,
+    exclude: int | None = None,
+) -> None:
+    for process_pid in reversed(tuple(pids)):
+        if process_pid == exclude:
             continue
-        proc_pid, parent_pid, rss = (int(part) for part in parts)
-        children.setdefault(parent_pid, []).append(proc_pid)
-        rss_kb[proc_pid] = rss
-
-    total = 0
-    stack = [pid]
-    while stack:
-        current = stack.pop()
-        total += rss_kb.get(current, 0)
-        stack.extend(children.get(current, ()))
-    return total * 1024
-
-
-def _process_tree_rss_bytes_proc(pid: int) -> int | None:
-    proc = Path("/proc")
-    if not proc.exists():
-        return _process_tree_rss_bytes_ps(pid)
-
-    children: dict[int, list[int]] = {}
-    rss_bytes: dict[int, int] = {}
-    page_size = os.sysconf("SC_PAGE_SIZE")
-    for stat_path in proc.glob("[0-9]*/stat"):
         try:
-            stat = stat_path.read_text().split()
-            proc_pid = int(stat[0])
-            parent_pid = int(stat[3])
-            rss_pages = int(stat[23])
-        except (OSError, ValueError, IndexError):
+            os.kill(process_pid, sig)
+        except ProcessLookupError:
             continue
-        children.setdefault(parent_pid, []).append(proc_pid)
-        rss_bytes[proc_pid] = rss_pages * page_size
-
-    total = 0
-    stack = [pid]
-    while stack:
-        current = stack.pop()
-        total += rss_bytes.get(current, 0)
-        stack.extend(children.get(current, ()))
-    return total
 
 
 if __name__ == "__main__":

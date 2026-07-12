@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -55,6 +57,51 @@ def test_dependency_installer_uses_upstream_symbolica_dev_and_skips_gammaloop_by
     assert installer.SYMJIT_VERSION == "2.19.3"
     assert installer.SYMJIT_REF == "7fb09d1cb2a943c25a6fd71a208af44fcc6d813d"
     assert "import gammaloop" not in installer.smoke_test_code(include_gammaloop=False)
+
+
+def test_dependency_patch_specs_include_symjit() -> None:
+    installer = _load_installer_module()
+
+    specs = {
+        dependency: (target_dir, patch_dir)
+        for dependency, target_dir, patch_dir in installer.dependency_patch_specs()
+    }
+
+    assert specs["symjit"] == (
+        installer.SYMJIT_DIR,
+        installer.PATCHES_DIR / "symjit",
+    )
+
+
+def test_recorded_dependency_patch_requires_matching_digest(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer_module()
+    patch = tmp_path / "patches" / "fix.patch"
+    patch.parent.mkdir()
+    patch.write_text("test patch\n", encoding="utf-8")
+    manifest = tmp_path / "install_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "dependency_patches": [
+                    {
+                        "path": "patches/fix.patch",
+                        "sha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(installer, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(installer, "DEPENDENCY_MANIFEST", manifest)
+
+    assert installer.dependency_patch_is_recorded(patch) is True
+
+    patch.write_text("changed patch\n", encoding="utf-8")
+    assert installer.dependency_patch_is_recorded(patch) is False
 
 
 def test_dependency_prerequisite_report_collects_missing_toolchain(

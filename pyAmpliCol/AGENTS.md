@@ -472,7 +472,7 @@ current default and may build a bounded multi-output evaluator in one call,
 which has measured faster generation for the current D-mode path.
 `--merge-evaluators-strategy` remains available as the memory-saving strategy
 and builds bounded evaluator pieces before merging them. `--verbose-evaluator-build`
-may enable progress bars and backend verbosity. `--batch-size` defaults to 16
+may enable progress bars and backend verbosity. `--batch-size` defaults to 128
 and must control how many phase-space samples are sent to evaluator calls
 together. `--no-inlined-helicity-sum` exposes retained raw amplitudes without
 changing the shared-current generation strategy.

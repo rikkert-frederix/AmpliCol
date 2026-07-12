@@ -556,7 +556,8 @@ def test_cli_profile_dag_defaults_to_fast_rusticol_jit_o3() -> None:
     assert kwargs["symbolica_evaluator_backend"] == "jit"
     assert kwargs["symbolica_jit_optimization_level"] == 3
     assert kwargs["symbolica_n_cores"] == 10
-    assert kwargs["batch_size"] == 64
+    assert kwargs["batch_size"] == 128
+    assert kwargs["symbolica_output_chunk_strategy"] == "auto"
 
 
 def test_cli_profile_dag_generate_only_flag_is_available(tmp_path: Path) -> None:
@@ -590,7 +591,8 @@ def test_cli_generate_process_minimal_command_uses_fast_rusticol_jit_defaults(
     assert kwargs["symbolica_evaluator_backend"] == "jit"
     assert kwargs["symbolica_jit_optimization_level"] == 3
     assert kwargs["symbolica_n_cores"] == 10
-    assert kwargs["batch_size"] == 64
+    assert kwargs["batch_size"] == 128
+    assert kwargs["symbolica_output_chunk_strategy"] == "auto"
     assert args.color_accuracy == "lc"
     assert args.append is False
     assert args.replace is False
@@ -702,6 +704,25 @@ def test_cli_generate_process_runtime_o3_uses_default_chunking(
     assert settings.compiled_optimization_level == 3
     assert settings.compiled_output_chunk_size == 128
     assert kwargs["stage_local_parameter_layout"] is True
+
+
+def test_cli_generate_process_can_disable_output_chunking(tmp_path: Path) -> None:
+    output_dir = tmp_path / "process"
+    args = parse_args(
+        [
+            "generate-process",
+            "--no-symbolica-output-chunking",
+            "d d~ > z g g",
+            str(output_dir),
+        ]
+    )
+    kwargs = _runtime_evaluator_kwargs(args)
+    settings = cli._symbolica_settings_from_runtime_kwargs(
+        kwargs,
+        process=args.process,
+    )
+
+    assert settings.compiled_output_chunk_size is None
 
 
 def test_cli_generate_process_explicit_jit_backend_overrides_fast_default(
@@ -1230,6 +1251,51 @@ def test_cli_process_set_child_progress_events_are_throttled(
         "item": "d_dbar_to_z_g:elapsed=1.6s",
         "ram": "1.5GB",
     }
+
+
+def test_cli_non_tty_monitor_coalesces_jit_build_phases(
+    capsys,
+    monkeypatch,
+) -> None:
+    elapsed = iter((0.0, 0.0, 0.1, 0.2, 2.1, 2.2))
+    monkeypatch.setattr(cli.time, "perf_counter", lambda: next(elapsed))
+    monkeypatch.setattr(cli.time, "time", lambda: 1_700_000_000.0)
+    callback = cli._stderr_generation_monitor_callback("d d~ > z g")
+
+    callback({"stage": "jit compile", "item": "stage chunk 1/64"})
+    callback({"stage": "jit initialize", "item": "stage chunk 1/64"})
+    callback({"stage": "jit returned", "item": "stage chunk 1/64"})
+    callback({"stage": "jit ready", "item": "stage chunk 32/64"})
+    callback({"stage": "chunk autotune", "item": "selected=96 gain=12%"})
+
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 3
+    assert "stage=jit compile" in lines[0]
+    assert "stage=jit ready" in lines[1]
+    assert "stage=chunk autotune" in lines[2]
+
+
+def test_cli_child_monitor_coalesces_jit_build_phases(
+    capsys,
+    monkeypatch,
+) -> None:
+    elapsed = iter((0.0, 0.1, 0.2, 0.6))
+    monkeypatch.setenv(cli._CHILD_PROGRESS_ENV, "1")
+    monkeypatch.setattr(cli.time, "perf_counter", lambda: next(elapsed))
+    callback = cli._child_generation_progress_callback("d d~ > z g")
+    assert callback is not None
+
+    callback({"stage": "jit compile", "item": "stage chunk 1/64"})
+    callback({"stage": "jit initialize", "item": "stage chunk 1/64"})
+    callback({"stage": "jit returned", "item": "stage chunk 1/64"})
+    callback({"stage": "jit ready", "item": "stage chunk 32/64"})
+
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 2
+    first = cli._parse_child_progress_event(lines[0])
+    second = cli._parse_child_progress_event(lines[1])
+    assert first is not None and first["stage"] == "jit compile"
+    assert second is not None and second["stage"] == "jit ready"
 
 
 def test_cli_generate_process_expands_builtin_p_to_child_artifacts(
@@ -2068,6 +2134,55 @@ def test_cli_compacts_rusticol_profile_values_for_json_payload() -> None:
     }
 
 
+def test_time_process_wall_uses_evaluate_separately_from_profile() -> None:
+    import numpy as np
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.evaluate_calls = 0
+            self.profile_calls = 0
+
+        def evaluate(self, points):
+            self.evaluate_calls += 1
+            return np.zeros(len(points), dtype=np.float64)
+
+        def profile(self, points, **kwargs):
+            self.profile_calls += 1
+            return {
+                "points": len(points),
+                "stage_evaluator_time_s": 1.28e-4,
+                "stage_evaluator_call_time_s": 1.0e-4,
+                "amplitude_evaluator_time_s": 0.0,
+                "amplitude_evaluator_call_time_s": 0.0,
+                "stage_input_pack_time_s": 2.8e-5,
+                "amplitude_input_pack_time_s": 0.0,
+            }
+
+    runtime = FakeRuntime()
+    points = np.zeros((1, 3, 4), dtype=np.float64)
+
+    profile = cli._profile_rusticol_process(
+        runtime,
+        points,
+        precision=16,
+        target_s=0.0,
+        batch_size=128,
+        color_sector_ids=None,
+        np_module=np,
+    )
+
+    assert runtime.evaluate_calls == 9
+    assert runtime.profile_calls == 9
+    assert profile["block_count"] == 8
+    assert profile["profile_block_count"] == 8
+    assert profile["samples"] == 1024
+    assert profile["profile_samples"] == 1024
+    assert profile["wall_measurement"] == "runtime.evaluate"
+    assert profile["component_measurement"] == "runtime.profile"
+    assert profile["core_evaluator_us_per_point"] == pytest.approx(1.0)
+    assert profile["input_pack_us_per_point"] == pytest.approx(0.21875)
+
+
 def test_cli_rejects_compiled_dag_flags_on_hidden_profile_command() -> None:
     with pytest.raises(SystemExit) as exc:
         parse_args(
@@ -2129,6 +2244,44 @@ def test_cli_generic_stage_uses_tuned_common_pair_defaults() -> None:
     assert staged_kwargs["symbolica_max_common_pair_distance"] == 1000
     assert explicit_kwargs["symbolica_cpe_iterations"] == 5
     assert explicit_kwargs["symbolica_max_common_pair_distance"] == 75
+
+
+def test_cli_accepts_tapered_stage_output_chunking() -> None:
+    args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--symbolica-output-chunk-strategy",
+            "tapered-stage",
+            "d d~ > z g",
+        ]
+    )
+
+    kwargs = _runtime_evaluator_kwargs(args)
+    settings = cli._symbolica_settings_from_runtime_kwargs(
+        kwargs,
+        process="d d~ > z g",
+    )
+
+    assert kwargs["symbolica_output_chunk_strategy"] == "tapered-stage"
+    assert settings.output_chunk_strategy == "tapered-stage"
+
+
+def test_cli_accepts_measured_stage_output_chunking() -> None:
+    args = parse_args(
+        [
+            "profile-dag-evaluator",
+            "--symbolica-output-chunk-strategy",
+            "measured-stage",
+            "d d~ > z g",
+        ]
+    )
+
+    settings = cli._symbolica_settings_from_runtime_kwargs(
+        _runtime_evaluator_kwargs(args),
+        process="d d~ > z g",
+    )
+
+    assert settings.output_chunk_strategy == "measured-stage"
 
 
 def test_cli_generate_writes_metadata_cache(capsys, tmp_path: Path) -> None:
@@ -3005,7 +3158,7 @@ def test_memory_watchdog_allows_small_command() -> None:
             "--",
             "python3",
             "-c",
-            "print('ok')",
+            "import time; print('ok'); time.sleep(0.2)",
         ],
         check=True,
         stdout=subprocess.PIPE,
@@ -3033,7 +3186,7 @@ def test_memory_watchdog_writes_peak_rss_report(tmp_path: Path) -> None:
             "--",
             "python3",
             "-c",
-            "print('ok')",
+            "import time; print('ok'); time.sleep(0.2)",
         ],
         check=True,
         stdout=subprocess.PIPE,
@@ -3047,9 +3200,18 @@ def test_memory_watchdog_writes_peak_rss_report(tmp_path: Path) -> None:
     assert report["limit_gb"] == 30
     assert report["limit_bytes"] == 30 * 1024**3
     assert isinstance(report["rss_polling_available"], bool)
+    assert report["peak_memory_bytes"] is not None
+    assert report["peak_memory_bytes"] > 0
+    assert report["peak_memory_gb"] > 0.0
+    assert report["peak_memory_metric"] in {"rss", "physical_footprint"}
+    assert report["physical_footprint_supported"] is (sys.platform == "darwin")
+    assert isinstance(report["physical_footprint_polling_available"], bool)
     if report["peak_rss_bytes"] is not None:
         assert report["peak_rss_bytes"] > 0
         assert report["peak_rss_gb"] > 0.0
+    if report["physical_footprint_supported"]:
+        assert report["peak_physical_footprint_bytes"] > 0
+        assert report["peak_physical_footprint_gb"] > 0.0
 
 
 def test_cli_version_mode_does_not_import_native_dependencies(capsys) -> None:

@@ -312,8 +312,14 @@ def test_model_propagator_component_expressions_match_native_formulas() -> None:
     momentum = (5.0, 1.0, -2.0, 3.0)
     quark = (1.0 + 2.0j, -0.5 + 0.25j)
 
+    gluon_components = model.propagator_component_expression(
+        21,
+        vector,
+        momentum,
+    )
+    assert all(isinstance(component, complex) for component in gluon_components)
     _assert_components_close(
-        model.propagator_component_expression(21, vector, momentum),
+        gluon_components,
         _gluon_propagator(vector, momentum),
     )
     _assert_components_close(

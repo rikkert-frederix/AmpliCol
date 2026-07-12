@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .generic_artifact import GenericProcessManifest, LC_SECTOR_SELECTOR_PARAMETER
+import numpy as np
+
+from .generic_artifact import (
+    GenericProcessManifest,
+    LC_SECTOR_SELECTOR_PARAMETER,
+    _generic_runtime_schema_payload,
+)
 from .generic_dag import GenericDAG
 from .model import AmplicolSMLeadingColorModel, Model
 from .params import ParamBuilder
@@ -167,6 +173,7 @@ StageEvaluatorCompiler = Callable[
     [GenericCompiledStageBlueprint, tuple[Any, ...], tuple[int, ...]],
     dict[str, object],
 ]
+StageBlueprintProgress = Callable[[str, int, int], None]
 
 
 class _RuntimeParameterizedModel(AmplicolSMLeadingColorModel):
@@ -217,7 +224,9 @@ def build_generic_stage_compiler_blueprint(
     model: Model | None = None,
     selected_color_sector_ids: set[int] | None = None,
     enable_lc_sector_runtime_selector: bool | None = None,
+    runtime_schema: Mapping[str, object] | None = None,
     stage_local_parameter_layout: bool = False,
+    progress_callback: StageBlueprintProgress | None = None,
 ) -> GenericStageCompilerBlueprint:
     """Build evaluator-ready symbolic stage metadata for schema-v2 DAGs.
 
@@ -241,62 +250,98 @@ def build_generic_stage_compiler_blueprint(
     )
     if enable_lc_sector_runtime_selector is None:
         enable_lc_sector_runtime_selector = selected_color_sector_ids is None
-    payload = generic_manifest.to_json_dict(
-        selected_color_sector_ids=selected_color_sector_ids,
-        enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+    schema = _dict(
+        runtime_schema
+        if runtime_schema is not None
+        else _generic_runtime_schema_payload(
+            generic_manifest.dag,
+            generic_manifest.model,
+            selected_color_sector_ids=selected_color_sector_ids,
+            enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+        )
     )
-    schema = _dict(payload["runtime_schema"])
-    builder = _parameter_builder(schema)
-    parameter_symbols = tuple(builder.parameter_symbols())
-    global_value_component_count = int(
-        schema["parameter_layout"]["value_component_count"]
-    )
+    parameter_layout = _dict(schema["parameter_layout"])
+    global_value_component_count = int(parameter_layout["value_component_count"])
     global_momentum_parameter_count = int(
-        schema["parameter_layout"]["momentum_parameter_count"]
+        parameter_layout["momentum_parameter_count"]
     )
     global_model_parameter_count = int(
-        schema["parameter_layout"].get("model_parameter_count", 0)
+        parameter_layout.get("model_parameter_count", 0)
     )
-    value_symbols = parameter_symbols[:global_value_component_count]
-    momentum_start = global_value_component_count
-    momentum_stop = momentum_start + global_momentum_parameter_count
-    momentum_symbols = parameter_symbols[momentum_start:momentum_stop]
-    model_parameter_symbols = parameter_symbols[momentum_stop:]
+    global_parameter_count = (
+        global_value_component_count
+        + global_momentum_parameter_count
+        + global_model_parameter_count
+    )
+    if stage_local_parameter_layout:
+        # Every compiled stage constructs its own compact symbols below. Avoid
+        # materializing the large, otherwise-unused global Symbolica input set.
+        parameter_symbols: tuple[Any, ...] = ()
+        value_symbols: tuple[Any, ...] = ()
+        momentum_symbols: tuple[Any, ...] = ()
+        model_parameter_symbols: tuple[Any, ...] = ()
+        global_real_valued_inputs = tuple(
+            range(global_value_component_count, global_parameter_count)
+        )
+    else:
+        builder = _parameter_builder(schema)
+        parameter_symbols = tuple(builder.parameter_symbols())
+        value_symbols = parameter_symbols[:global_value_component_count]
+        momentum_start = global_value_component_count
+        momentum_stop = momentum_start + global_momentum_parameter_count
+        momentum_symbols = parameter_symbols[momentum_start:momentum_stop]
+        model_parameter_symbols = parameter_symbols[momentum_stop:]
+        global_real_valued_inputs = tuple(
+            int(index) for index in builder.real_valued_inputs
+        )
     model_parameter_records = tuple(
         _dict(item) for item in _list(schema.get("model_parameters", []))
     )
-    model_parameter_symbols_by_name = {
-        str(record["name"]): model_parameter_symbols[int(record["parameter_index"])]
-        for record in model_parameter_records
-    }
+    model_parameter_symbols_by_name = (
+        {}
+        if stage_local_parameter_layout
+        else {
+            str(record["name"]): model_parameter_symbols[
+                int(record["parameter_index"])
+            ]
+            for record in model_parameter_records
+        }
+    )
     expression_model = _RuntimeParameterizedModel(
         selected_model,
         model_parameter_symbols_by_name,
     )
-    global_real_valued_inputs = tuple(int(index) for index in builder.real_valued_inputs)
     value_slots = _value_slots_by_id(schema)
     current_slots = _current_slots_by_id(schema)
     momentum_slots = _momentum_slots_by_id(schema)
-    stages = tuple(
-        _compile_current_stage_blueprint(
-            generic_manifest.dag,
-            expression_model,
-            _dict(stage),
-            value_slots=value_slots,
-            current_slots=current_slots,
-            momentum_slots=momentum_slots,
-            global_value_component_count=global_value_component_count,
-            global_momentum_parameter_count=global_momentum_parameter_count,
-            model_parameter_records=model_parameter_records,
-            global_parameter_symbols=parameter_symbols,
-            global_value_symbols=value_symbols,
-            global_momentum_symbols=momentum_symbols,
-            global_model_parameter_symbols=model_parameter_symbols_by_name,
-            global_real_valued_inputs=global_real_valued_inputs,
-            stage_local_parameter_layout=stage_local_parameter_layout,
+    stage_records = tuple(_dict(stage) for stage in _list(schema["stages"]))
+    stage_total = len(stage_records) + 1
+    compiled_stages: list[GenericCompiledStageBlueprint] = []
+    for stage_index, stage in enumerate(stage_records, start=1):
+        if progress_callback is not None:
+            progress_callback("current stage", stage_index, stage_total)
+        compiled_stages.append(
+            _compile_current_stage_blueprint(
+                generic_manifest.dag,
+                expression_model,
+                stage,
+                value_slots=value_slots,
+                current_slots=current_slots,
+                momentum_slots=momentum_slots,
+                global_value_component_count=global_value_component_count,
+                global_momentum_parameter_count=global_momentum_parameter_count,
+                model_parameter_records=model_parameter_records,
+                global_parameter_symbols=parameter_symbols,
+                global_value_symbols=value_symbols,
+                global_momentum_symbols=momentum_symbols,
+                global_model_parameter_symbols=model_parameter_symbols_by_name,
+                global_real_valued_inputs=global_real_valued_inputs,
+                stage_local_parameter_layout=stage_local_parameter_layout,
+            )
         )
-        for stage in _list(schema["stages"])
-    )
+    stages = tuple(compiled_stages)
+    if progress_callback is not None:
+        progress_callback("amplitude stage", stage_total, stage_total)
     amplitude_stage = _compile_amplitude_stage_blueprint(
         expression_model,
         _dict(schema["amplitude_stage"]),
@@ -318,7 +363,7 @@ def build_generic_stage_compiler_blueprint(
     return GenericStageCompilerBlueprint(
         kind="pyamplicol-generic-stage-compiler-blueprint",
         runtime_available=False,
-        parameter_count=len(parameter_symbols),
+        parameter_count=global_parameter_count,
         value_parameter_count=int(schema["parameter_layout"]["value_component_count"]),
         momentum_parameter_count=global_momentum_parameter_count,
         model_parameter_count=global_model_parameter_count,
@@ -402,10 +447,15 @@ def write_generic_stage_evaluator_artifacts(
         manifest.setdefault("build_timing", {})
         timing = manifest["build_timing"]
         if isinstance(timing, dict):
+            previous_stage_build_s = timing.get("stage_evaluator_build_s")
             timing["stage_evaluator_build_s"] = build_s
-            timing["symbolica_evaluator_build_s"] = build_s
+            if previous_stage_build_s is not None:
+                timing["stage_compiler_wrapper_s"] = build_s - float(
+                    previous_stage_build_s
+                )
+            timing.setdefault("symbolica_evaluator_build_s", build_s)
             if _manifest_uses_jit_evaluator(manifest):
-                timing["jit_compile_s"] = build_s
+                timing.setdefault("jit_compile_s", build_s)
         return manifest
 
     stage_payloads = []
@@ -458,6 +508,32 @@ def write_generic_stage_evaluator_artifacts(
         float(record.get("jit_compile_s") or 0.0)
         for record in stage_timings
     )
+    timing_totals: dict[str, object] = {}
+    non_additive_stage_timing_keys = {
+        "output_chunk_autotune_batch_size",
+        "output_chunk_autotune_baseline_size",
+        "output_chunk_autotune_selected_size",
+        "output_chunk_autotune_baseline_us",
+        "output_chunk_autotune_selected_us",
+        "output_chunk_autotune_gain",
+        "output_chunk_autotune_shared_pack_scoring",
+    }
+    for record in stage_timings:
+        for key, value in record.items():
+            if (
+                key == "evaluator_label"
+                or key == "jit_compile_s"
+                or key in non_additive_stage_timing_keys
+            ):
+                continue
+            if isinstance(value, (float, int)):
+                timing_totals[key] = float(timing_totals.get(key, 0.0)) + float(value)
+    timing_totals["stage_evaluator_build_s"] = total_build_s
+    timing_totals["jit_compile_s"] = jit_compile_s
+    timing_totals["jit_fraction_of_stage_evaluator_build"] = (
+        None if total_build_s <= 0.0 else jit_compile_s / total_build_s
+    )
+    timing_totals["stages"] = stage_timings
     return {
         "kind": "generic-dag-stage-evaluator-artifacts",
         "runtime_available": True,
@@ -481,18 +557,7 @@ def write_generic_stage_evaluator_artifacts(
             else "global-value-momentum"
         ),
         "stage_count": blueprint.stage_count,
-        "build_timing": {
-            "stage_evaluator_build_s": total_build_s,
-            "symbolica_evaluator_build_s": sum(
-                float(record["symbolica_evaluator_build_s"])
-                for record in stage_timings
-            ),
-            "jit_compile_s": jit_compile_s,
-            "jit_fraction_of_stage_evaluator_build": (
-                None if total_build_s <= 0.0 else jit_compile_s / total_build_s
-            ),
-            "stages": stage_timings,
-        },
+        "build_timing": timing_totals,
         "stages": stage_payloads,
         "amplitude_stage": amplitude_payload,
     }
@@ -505,7 +570,7 @@ def _stage_build_timing_record(
     manifest = evaluator_manifest if isinstance(evaluator_manifest, dict) else {}
     raw_timing = manifest.get("build_timing") if isinstance(manifest, dict) else None
     timing = raw_timing if isinstance(raw_timing, dict) else {}
-    return {
+    record: dict[str, object] = {
         "evaluator_label": evaluator_label,
         "stage_evaluator_build_s": float(
             timing.get("stage_evaluator_build_s") or 0.0
@@ -519,6 +584,12 @@ def _stage_build_timing_record(
             else float(timing.get("jit_compile_s") or 0.0)
         ),
     }
+    for key, value in timing.items():
+        if key in record:
+            continue
+        if isinstance(value, (float, int)):
+            record[str(key)] = float(value)
+    return record
 
 
 def _manifest_uses_jit_evaluator(manifest: Mapping[str, object]) -> bool:
@@ -555,19 +626,282 @@ def _compile_default_stage_evaluator(
         _symbolica_evaluator_artifact_manifest,
     )
 
-    settings = symbolica_settings or SymbolicaEvaluatorSettings()
-    evaluator = _compile_symbolica_outputs(
-        stage.output_expressions,
-        list(stage.parameter_symbols),
-        merge_evaluators_strategy=merge_evaluators_strategy,
-        verbose_evaluator_build=verbose_evaluator_build,
-        real_params=stage.real_valued_inputs,
-        symbolica_settings=settings,
-        jit_compile=jit_compile,
-        label=stage.evaluator_label,
-        progress_callback=progress_callback,
+    settings = _stage_symbolica_settings(
+        stage,
+        blueprint,
+        symbolica_settings or SymbolicaEvaluatorSettings(),
     )
-    return _symbolica_evaluator_artifact_manifest(evaluator, artifact_dir)
+    symbolica_started = time.perf_counter()
+    params = list(stage.parameter_symbols)
+
+    def compile_with(candidate_settings: Any, candidate_label: str) -> Any:
+        return _compile_symbolica_outputs(
+            stage.output_expressions,
+            params,
+            merge_evaluators_strategy=merge_evaluators_strategy,
+            verbose_evaluator_build=verbose_evaluator_build,
+            real_params=stage.real_valued_inputs,
+            symbolica_settings=candidate_settings,
+            jit_compile=jit_compile,
+            label=candidate_label,
+            progress_callback=progress_callback,
+        )
+
+    autotune_timing: dict[str, float] = {}
+    if getattr(settings, "output_chunk_strategy", "uniform") == "measured-stage":
+        evaluator, autotune_timing = _compile_measured_stage_output_chunks(
+            settings=settings,
+            output_count=len(stage.output_expressions),
+            parameter_count=len(params),
+            real_params=stage.real_valued_inputs,
+            label=stage.evaluator_label,
+            compile_with=compile_with,
+            progress_callback=progress_callback,
+            jit_compile=jit_compile,
+        )
+    else:
+        evaluator = compile_with(settings, stage.evaluator_label)
+    symbolica_build_s = time.perf_counter() - symbolica_started
+    artifact_started = time.perf_counter()
+    manifest = _symbolica_evaluator_artifact_manifest(evaluator, artifact_dir)
+    artifact_manifest_s = time.perf_counter() - artifact_started
+    timing = manifest.setdefault("build_timing", {})
+    if isinstance(timing, dict):
+        timing.update(autotune_timing)
+        timing["symbolica_evaluator_build_s"] = symbolica_build_s
+        timing["artifact_manifest_s"] = artifact_manifest_s
+        timing["stage_evaluator_build_s"] = symbolica_build_s + artifact_manifest_s
+    return manifest
+
+
+def _compile_measured_stage_output_chunks(
+    *,
+    settings: Any,
+    output_count: int,
+    parameter_count: int,
+    real_params: Sequence[int],
+    label: str,
+    compile_with: Callable[[Any, str], Any],
+    progress_callback: Any | None,
+    jit_compile: bool,
+) -> tuple[Any, dict[str, float]]:
+    base = getattr(settings, "compiled_output_chunk_size", None)
+    if base is None or getattr(settings, "backend", None) != "jit" or not jit_compile:
+        uniform = replace(settings, output_chunk_strategy="uniform")
+        return compile_with(uniform, label), {}
+
+    requested_sizes = (
+        int(base),
+        max(1, int(base) // 2),
+        max(1, 3 * int(base) // 4),
+        max(1, 3 * int(base) // 2),
+        int(base) * 2,
+        None,
+    )
+    effective_sizes: list[int | None] = []
+    for requested in requested_sizes:
+        effective = (
+            None
+            if requested is None or output_count <= int(requested)
+            else int(requested)
+        )
+        if effective not in effective_sizes:
+            effective_sizes.append(effective)
+    baseline_size = (
+        None if output_count <= int(base) else int(base)
+    )
+
+    started = time.perf_counter()
+    candidates: dict[int | None, Any] = {}
+    for chunk_size in effective_sizes:
+        suffix = "none" if chunk_size is None else str(chunk_size)
+        candidate_settings = replace(
+            settings,
+            compiled_output_chunk_size=chunk_size,
+            output_chunk_strategy="uniform",
+        )
+        candidate_label = (
+            label
+            if chunk_size == baseline_size
+            else f"{label}_autotune_chunk_{suffix}"
+        )
+        candidates[chunk_size] = compile_with(candidate_settings, candidate_label)
+
+    autotune_batch_size = int(
+        getattr(settings, "output_chunk_autotune_batch_size", 128)
+    )
+    rows = np.full(
+        (autotune_batch_size, parameter_count),
+        complex(0.75, 0.125),
+        dtype=np.complex128,
+    )
+    if real_params:
+        rows[:, list(real_params)] = 0.75
+
+    materialize_started = time.perf_counter()
+    for evaluator in candidates.values():
+        evaluator.evaluate_complex(rows)
+    materialize_s = time.perf_counter() - materialize_started
+
+    shared_pack_scoring = all(
+        bool(getattr(evaluator, "supports_complex_profiled", lambda: False)())
+        for evaluator in candidates.values()
+    )
+
+    def score_candidate(evaluator: Any) -> float:
+        if shared_pack_scoring:
+            _output, profile = evaluator.evaluate_complex_profiled(rows)
+            return max(sum(float(value) for value in profile), 1.0e-9)
+        probe_started = time.perf_counter()
+        evaluator.evaluate_complex(rows)
+        return max(time.perf_counter() - probe_started, 1.0e-6)
+
+    benchmark_started = time.perf_counter()
+    scores: dict[int | None, float] = {}
+    repeats: dict[int | None, int] = {}
+    for chunk_size, evaluator in candidates.items():
+        probe_s = max(score_candidate(evaluator), 1.0e-6)
+        repeats[chunk_size] = max(1, min(256, int(0.01 / probe_s)))
+        scores[chunk_size] = probe_s
+
+    samples: dict[int | None, list[float]] = {
+        chunk_size: [] for chunk_size in candidates
+    }
+    ordered_sizes = list(candidates)
+    for round_index in range(5):
+        rotated = ordered_sizes[round_index:] + ordered_sizes[:round_index]
+        for chunk_size in rotated:
+            evaluator = candidates[chunk_size]
+            count = repeats[chunk_size]
+            if shared_pack_scoring:
+                samples[chunk_size].append(
+                    sum(score_candidate(evaluator) for _ in range(count)) / count
+                )
+            else:
+                sample_started = time.perf_counter()
+                for _ in range(count):
+                    evaluator.evaluate_complex(rows)
+                samples[chunk_size].append(
+                    (time.perf_counter() - sample_started) / count
+                )
+    scores = {
+        chunk_size: sorted(values)[len(values) // 2]
+        for chunk_size, values in samples.items()
+    }
+    benchmark_s = time.perf_counter() - benchmark_started
+    selected_size = _select_measured_chunk_candidate(
+        scores,
+        baseline_size=baseline_size,
+        minimum_gain=0.05,
+    )
+    selected = candidates[selected_size]
+    baseline_score = scores[baseline_size]
+    selected_score = scores[selected_size]
+    autotune_s = time.perf_counter() - started
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "chunk autotune",
+                "item": (
+                    f"{label} base={baseline_size or 'none'} "
+                    f"selected={selected_size or 'none'} "
+                    f"gain={(1.0 - selected_score / baseline_score):.1%}"
+                    + (" shared-pack" if shared_pack_scoring else "")
+                ),
+            }
+        )
+    evaluator_timing = getattr(selected, "build_timing", None)
+    if isinstance(evaluator_timing, dict):
+        evaluator_timing.update(
+            {
+                "output_chunk_autotune_s": autotune_s,
+                "output_chunk_autotune_materialize_s": materialize_s,
+                "output_chunk_autotune_benchmark_s": benchmark_s,
+                "output_chunk_autotune_candidate_count": float(len(candidates)),
+                "output_chunk_autotune_batch_size": float(autotune_batch_size),
+                "output_chunk_autotune_baseline_size": float(baseline_size or 0),
+                "output_chunk_autotune_selected_size": float(selected_size or 0),
+                "output_chunk_autotune_baseline_us": baseline_score * 1.0e6,
+                "output_chunk_autotune_selected_us": selected_score * 1.0e6,
+                "output_chunk_autotune_gain": 1.0 - selected_score / baseline_score,
+                "output_chunk_autotune_shared_pack_scoring": float(
+                    shared_pack_scoring
+                ),
+            }
+        )
+    return selected, {
+        "output_chunk_autotune_s": autotune_s,
+        "output_chunk_autotune_materialize_s": materialize_s,
+        "output_chunk_autotune_benchmark_s": benchmark_s,
+        "output_chunk_autotune_candidate_count": float(len(candidates)),
+        "output_chunk_autotune_batch_size": float(autotune_batch_size),
+        "output_chunk_autotune_baseline_size": float(baseline_size or 0),
+        "output_chunk_autotune_selected_size": float(selected_size or 0),
+        "output_chunk_autotune_baseline_us": baseline_score * 1.0e6,
+        "output_chunk_autotune_selected_us": selected_score * 1.0e6,
+        "output_chunk_autotune_gain": 1.0 - selected_score / baseline_score,
+        "output_chunk_autotune_shared_pack_scoring": float(shared_pack_scoring),
+    }
+
+
+def _select_measured_chunk_candidate(
+    scores: Mapping[int | None, float],
+    *,
+    baseline_size: int | None,
+    minimum_gain: float,
+) -> int | None:
+    if baseline_size not in scores:
+        raise ValueError("measured chunk scores do not include the baseline")
+    best_size = min(scores, key=scores.__getitem__)
+    if scores[best_size] <= scores[baseline_size] * (1.0 - minimum_gain):
+        return best_size
+    return baseline_size
+
+
+def _stage_symbolica_settings(
+    stage: GenericCompiledStageBlueprint,
+    blueprint: GenericStageCompilerBlueprint,
+    settings: Any,
+) -> Any:
+    """Apply the optional recursion-stage output-chunk taper."""
+
+    strategy = getattr(settings, "output_chunk_strategy", "uniform")
+    if strategy == "auto":
+        base = getattr(settings, "compiled_output_chunk_size", None)
+        strategy = (
+            "measured-stage"
+            if getattr(settings, "backend", None) == "jit"
+            and base is not None
+            and int(base) <= 256
+            else "uniform"
+        )
+        settings = replace(settings, output_chunk_strategy=strategy)
+    if strategy != "tapered-stage":
+        return settings
+    base = getattr(settings, "compiled_output_chunk_size", None)
+    if base is None:
+        return settings
+    if str(stage.stage_kind).startswith("amplitude"):
+        return replace(settings, compiled_output_chunk_size=None)
+
+    try:
+        position = next(
+            index
+            for index, current_stage in enumerate(blueprint.stages)
+            if current_stage.stage_index == stage.stage_index
+        )
+    except StopIteration:
+        return settings
+    remaining = len(blueprint.stages) - position - 1
+    if position < 2:
+        chunk_size = None
+    elif remaining == 0:
+        chunk_size = max(1, int(base) // 2)
+    elif remaining <= 2:
+        chunk_size = int(base)
+    else:
+        chunk_size = int(base) * 2
+    return replace(settings, compiled_output_chunk_size=chunk_size)
 
 
 def _compile_current_stage_blueprint(
@@ -645,6 +979,27 @@ def _compile_current_stage_blueprint(
             int(interaction["result_current_id"]),
             [],
         ).append(interaction)
+    value_components_by_slot_id = {
+        int(slot_id): _value_components(
+            value_slots[int(slot_id)],
+            local_inputs.value_symbols,
+        )
+        for slot_id in input_value_slot_ids
+    }
+    momentum_components_by_slot_id = {
+        int(slot_id): _momentum_components(
+            int(slot_id),
+            local_inputs.momentum_symbols,
+            momentum_slots,
+            by_slot_id=True,
+        )
+        for slot_id in input_momentum_slot_ids
+    }
+    momentum_components_by_mask = {
+        int(slot["momentum_mask"]): momentum_components_by_slot_id[int(slot_id)]
+        for slot_id, slot in momentum_slots.items()
+        if int(slot_id) in momentum_components_by_slot_id
+    }
 
     for current_id in sorted(interactions_by_result):
         current_slot = current_slots[current_id]
@@ -656,11 +1011,9 @@ def _compile_current_stage_blueprint(
                     dag,
                     stage_model,
                     interaction,
-                    value_symbols=local_inputs.value_symbols,
-                    momentum_symbols=local_inputs.momentum_symbols,
+                    value_components_by_slot_id=value_components_by_slot_id,
+                    momentum_components_by_slot_id=momentum_components_by_slot_id,
                     model_parameter_symbols=local_inputs.model_parameter_symbols,
-                    value_slots=value_slots,
-                    momentum_slots=momentum_slots,
                 )
             except ValueError as error:
                 blockers.append(
@@ -676,11 +1029,7 @@ def _compile_current_stage_blueprint(
                     stage_model.propagator_component_expression(
                         int(current_slot["particle_id"]),
                         total,
-                        _momentum_components(
-                            int(current_slot["momentum_mask"]),
-                            local_inputs.momentum_symbols,
-                            momentum_slots,
-                        ),
+                        momentum_components_by_mask[int(current_slot["momentum_mask"])],
                         chirality=int(current_slot["chirality"]),
                     )
                     if variant == "propagated"
@@ -862,21 +1211,19 @@ def _interaction_contribution(
     model: Model,
     interaction: dict[str, Any],
     *,
-    value_symbols: Sequence[Any],
-    momentum_symbols: Sequence[Any],
+    value_components_by_slot_id: Mapping[int, tuple[Any, ...]],
+    momentum_components_by_slot_id: Mapping[int, tuple[Any, ...]],
     model_parameter_symbols: Mapping[str, Any],
-    value_slots: dict[int, dict[str, Any]],
-    momentum_slots: dict[int, dict[str, Any]],
 ) -> tuple[Any, ...]:
     left_slot = _dict(interaction["left_value_slot"])
     right_slot = _dict(interaction["right_value_slot"])
-    left = _value_components(left_slot, value_symbols)
-    right = _value_components(right_slot, value_symbols)
+    left = value_components_by_slot_id[int(left_slot["value_slot_id"])]
+    right = value_components_by_slot_id[int(right_slot["value_slot_id"])]
     momenta = _dict(interaction["momentum_slots"])
     left_current = dag.currents[int(interaction["left_current_id"])]
     right_current = dag.currents[int(interaction["right_current_id"])]
     result_current = dag.currents[int(interaction["result_current_id"])]
-    return model.vertex_component_expression(
+    components = model.vertex_component_expression(
         int(interaction["vertex_kind"]),
         left,
         right,
@@ -885,19 +1232,16 @@ def _interaction_contribution(
         left_chirality=int(left_current.index.chirality),
         right_chirality=int(right_current.index.chirality),
         coupling=_runtime_coupling(interaction, model_parameter_symbols),
-        left_momentum=_momentum_components(
-            int(momenta["left"]),
-            momentum_symbols,
-            momentum_slots,
-            by_slot_id=True,
-        ),
-        right_momentum=_momentum_components(
-            int(momenta["right"]),
-            momentum_symbols,
-            momentum_slots,
-            by_slot_id=True,
-        ),
+        left_momentum=momentum_components_by_slot_id[int(momenta["left"])],
+        right_momentum=momentum_components_by_slot_id[int(momenta["right"])],
     )
+    color_weight = _coupling(interaction.get("color_weight"))
+    if color_weight[1] != 0.0:
+        raise ValueError("complex color weights are not lowered in current stages")
+    weight = color_weight[0]
+    if weight == 1.0:
+        return components
+    return tuple(weight * component for component in components)
 
 
 def _amplitude_root_expression(
@@ -1080,16 +1424,53 @@ def _stage_local_inputs(
     momentum_symbols: dict[int, tuple[Any, ...]] = {}
     model_parameter_symbols: dict[str, Any] = {}
 
-    for value_slot_id in value_slot_ids:
-        slot = value_slots[int(value_slot_id)]
-        start = int(slot["component_start"])
-        stop = int(slot["component_stop"])
-        symbols = builder.add_parameter_list(
-            ("generic_schema_v2_stage", "value", str(value_slot_id)),
-            stop - start,
-            role="generic_stage_value_storage",
+    value_spans = tuple(
+        (
+            int(value_slot_id),
+            int(value_slots[int(value_slot_id)]["component_start"]),
+            int(value_slots[int(value_slot_id)]["component_stop"]),
         )
-        value_symbols[int(value_slot_id)] = symbols
+        for value_slot_id in value_slot_ids
+    )
+    momentum_spans = tuple(
+        (
+            int(momentum_slot_id),
+            int(momentum_slots[int(momentum_slot_id)]["component_start"]),
+            int(momentum_slots[int(momentum_slot_id)]["component_stop"]),
+        )
+        for momentum_slot_id in momentum_slot_ids
+    )
+    sorted_model_parameter_records = tuple(
+        sorted(
+            model_parameter_records,
+            key=lambda item: int(item["parameter_index"]),
+        )
+    )
+    value_parameter_count = sum(stop - start for _, start, stop in value_spans)
+    momentum_parameter_count = sum(
+        stop - start for _, start, stop in momentum_spans
+    )
+    model_parameter_count = len(sorted_model_parameter_records)
+    parameter_count = (
+        value_parameter_count + momentum_parameter_count + model_parameter_count
+    )
+    parameter_symbols = (
+        builder.add_parameter_list(
+            ("generic_schema_v2_stage", "inputs"),
+            parameter_count,
+            role="generic_stage_input_storage",
+        )
+        if parameter_count
+        else ()
+    )
+    real_parameter_start = value_parameter_count
+    builder.real_valued_inputs.extend(range(real_parameter_start, parameter_count))
+    parameter_cursor = 0
+
+    for value_slot_id, start, stop in value_spans:
+        length = stop - start
+        local_symbols = parameter_symbols[parameter_cursor : parameter_cursor + length]
+        value_symbols[value_slot_id] = local_symbols
         parameter_start = len(input_components)
         for component, global_component in enumerate(range(start, stop)):
             input_components.append(
@@ -1102,18 +1483,12 @@ def _stage_local_inputs(
                     real_valued=False,
                 )
             )
+        parameter_cursor += length
 
-    for momentum_slot_id in momentum_slot_ids:
-        slot = momentum_slots[int(momentum_slot_id)]
-        start = int(slot["component_start"])
-        stop = int(slot["component_stop"])
-        symbols = builder.add_parameter_list(
-            ("generic_schema_v2_stage", "momentum", str(momentum_slot_id)),
-            stop - start,
-            role="generic_stage_momentum_storage",
-            real_valued=True,
-        )
-        momentum_symbols[int(momentum_slot_id)] = symbols
+    for momentum_slot_id, start, stop in momentum_spans:
+        length = stop - start
+        local_symbols = parameter_symbols[parameter_cursor : parameter_cursor + length]
+        momentum_symbols[momentum_slot_id] = local_symbols
         parameter_start = len(input_components)
         for component, local_component in enumerate(range(start, stop)):
             input_components.append(
@@ -1126,22 +1501,15 @@ def _stage_local_inputs(
                     real_valued=True,
                 )
             )
+        parameter_cursor += length
 
     model_parameter_global_start = (
         global_value_component_count + global_momentum_parameter_count
     )
-    for record in sorted(
-        model_parameter_records,
-        key=lambda item: int(item["parameter_index"]),
-    ):
+    for record in sorted_model_parameter_records:
         name = str(record["name"])
         parameter_index = int(record["parameter_index"])
-        symbol = builder.add_parameter_list(
-            ("generic_schema_v2_stage", "model_parameter", name),
-            1,
-            role="generic_stage_model_parameter",
-            real_valued=True,
-        )[0]
+        symbol = parameter_symbols[parameter_cursor]
         model_parameter_symbols[name] = symbol
         input_components.append(
             GenericStageInputComponent(
@@ -1153,24 +1521,20 @@ def _stage_local_inputs(
                 real_valued=True,
             )
         )
+        parameter_cursor += 1
+
+    if parameter_cursor != parameter_count:
+        raise RuntimeError("stage-local parameter layout cursor mismatch")
 
     return _StageLocalInputs(
-        parameter_symbols=tuple(builder.parameter_symbols()),
+        parameter_symbols=tuple(parameter_symbols),
         input_components=tuple(input_components),
         value_symbols=value_symbols,
         momentum_symbols=momentum_symbols,
         model_parameter_symbols=model_parameter_symbols,
-        value_parameter_count=sum(
-            int(value_slots[int(value_slot_id)]["component_stop"])
-            - int(value_slots[int(value_slot_id)]["component_start"])
-            for value_slot_id in value_slot_ids
-        ),
-        momentum_parameter_count=sum(
-            int(momentum_slots[int(momentum_slot_id)]["component_stop"])
-            - int(momentum_slots[int(momentum_slot_id)]["component_start"])
-            for momentum_slot_id in momentum_slot_ids
-        ),
-        model_parameter_count=len(model_parameter_records),
+        value_parameter_count=value_parameter_count,
+        momentum_parameter_count=momentum_parameter_count,
+        model_parameter_count=model_parameter_count,
         real_valued_inputs=tuple(int(index) for index in builder.real_valued_inputs),
     )
 

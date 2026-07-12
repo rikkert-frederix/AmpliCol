@@ -52,6 +52,7 @@ class ParamBuilder:
         self.order: list[ParameterHead] = []
         self.ranges: dict[ParameterHead, ParameterRange] = {}
         self.values: list[complex] = []
+        self._symbols: list[Any] = []
         self.real_valued_inputs: list[int] = []
         self.purely_imaginary_valued_inputs: list[int] = []
         self.forced_complex_valued_inputs: list[int] = []
@@ -83,7 +84,12 @@ class ParamBuilder:
         self.values.extend(0j for _ in range(length))
         if real_valued:
             self.real_valued_inputs.extend(range(start, stop))
-        return tuple(self._parameter_symbol(head, index) for index in range(length))
+        safe_head = "::".join(_safe_parameter_part(part) for part in head)
+        parameter_symbols = tuple(
+            symbols.parameter(f"{safe_head}::c{index}") for index in range(length)
+        )
+        self._symbols.extend(parameter_symbols)
+        return parameter_symbols
 
     def register_rank1_tensor(
         self,
@@ -133,11 +139,7 @@ class ParamBuilder:
         self.values[start:stop] = complex_values
 
     def parameter_symbols(self) -> list[Any]:
-        return [
-            self._parameter_symbol(head, index)
-            for head in self.order
-            for index in range(self.positions[head][1] - self.positions[head][0])
-        ]
+        return list(self._symbols)
 
     def get_values(self, *, complexified: bool = False) -> list[complex] | list[float]:
         if not complexified:
@@ -215,10 +217,6 @@ class ParamBuilder:
             data.get("forced_complex_valued_inputs", [])
         )
         return builder
-
-    def _parameter_symbol(self, head: ParameterHead, index: int) -> Any:
-        safe_head = "::".join(_safe_parameter_part(part) for part in head)
-        return symbols.parameter(f"{safe_head}::c{index}")
 
     def _check_values_against_phase_flags(
         self,
