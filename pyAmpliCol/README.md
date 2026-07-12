@@ -86,12 +86,13 @@ stage's local inputs once for all of its output chunks.  Set
 `RUSTICOL_NATIVE_SIMD_JIT=0` only when a scalar-JIT diagnostic comparison is
 needed.
 
-Runnable schema-v2 artifacts compact generation-only interaction records once
-their stage evaluators have been serialized. They retain stage interaction IDs
-and vertex-kind counts, while plan-only manifests keep the full diagnostic
-records in `runtime_schema_diagnostics.pickle.gz`. Rusticol accepts both
-layouts, so existing artifacts remain usable; the compact form reduces
-high-multiplicity manifest size by roughly 80%.
+Large runnable schema-v2 artifacts compact generation-only current/value
+metadata and retain stage interaction IDs plus vertex-kind counts instead of a
+second copy of every interaction. Evaluators are lowered, compiled, and written
+one stage at a time so prior Symbolica expressions can be released. Small
+detailed and plan-only artifacts keep the full records; large diagnostic
+sidecars explicitly identify their compact layout. Rusticol accepts both forms,
+so existing artifacts remain usable.
 
 The generated process directory is self-contained.  It includes a
 `process_manifest.json`, serialized evaluator artifacts under `evaluators/`,

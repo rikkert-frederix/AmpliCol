@@ -310,6 +310,8 @@ struct GenericParameterLayoutManifestV2 {
 struct GenericCurrentStorageManifestV2 {
     component_count: usize,
     number_type: String,
+    #[serde(default)]
+    metadata_compacted: bool,
     current_slots: Vec<GenericCurrentSlotManifestV2>,
 }
 
@@ -322,12 +324,18 @@ struct GenericCurrentSlotManifestV2 {
     is_source: bool,
     particle_id: i32,
     external_mask: u64,
+    #[serde(default)]
     external_labels: Vec<usize>,
+    #[serde(default)]
     helicity_ancestry: Value,
     chirality: i32,
+    #[serde(default)]
     spin_state: Value,
+    #[serde(default)]
     flavour_flow: Vec<i32>,
+    #[serde(default)]
     charge_flow: i32,
+    #[serde(default)]
     color_state: Value,
     momentum_mask: u64,
     auxiliary_kind: Option<String>,
@@ -337,6 +345,8 @@ struct GenericCurrentSlotManifestV2 {
 struct GenericValueStorageManifestV2 {
     component_count: usize,
     number_type: String,
+    #[serde(default)]
+    metadata_compacted: bool,
     value_slots: Vec<GenericValueSlotManifestV2>,
 }
 
@@ -354,6 +364,7 @@ struct GenericValueSlotManifestV2 {
     applies_propagator: bool,
     particle_id: i32,
     external_mask: u64,
+    #[serde(default)]
     external_labels: Vec<usize>,
     momentum_mask: u64,
     chirality: i32,
@@ -1010,29 +1021,36 @@ fn validate_generic_current_storage(manifest: &GenericProcessManifestV2) -> PyRe
                 "generic current slot {index} has invalid physics identity"
             )));
         }
-        if slot.external_labels.is_empty()
-            || !positive_json_integer(&slot.helicity_ancestry)
-            || slot.color_state.is_null()
-        {
-            return Err(PyValueError::new_err(format!(
-                "generic current slot {index} is missing current-index metadata"
-            )));
-        }
-        if slot.chirality.abs() > 1 || slot.flavour_flow.is_empty() {
+        if slot.chirality.abs() > 1 {
             return Err(PyValueError::new_err(format!(
                 "generic current slot {index} has invalid quantum-flow metadata"
             )));
         }
-        if slot.spin_state.is_null()
-            || slot.charge_flow.abs() > 1000
-            || slot
-                .auxiliary_kind
-                .as_ref()
-                .map_or(false, |kind| kind.is_empty())
-        {
-            return Err(PyValueError::new_err(format!(
-                "generic current slot {index} has invalid spin/charge/auxiliary metadata"
-            )));
+        if !storage.metadata_compacted {
+            if slot.external_labels.is_empty()
+                || !positive_json_integer(&slot.helicity_ancestry)
+                || slot.color_state.is_null()
+            {
+                return Err(PyValueError::new_err(format!(
+                    "generic current slot {index} is missing current-index metadata"
+                )));
+            }
+            if slot.flavour_flow.is_empty() {
+                return Err(PyValueError::new_err(format!(
+                    "generic current slot {index} has invalid quantum-flow metadata"
+                )));
+            }
+            if slot.spin_state.is_null()
+                || slot.charge_flow.abs() > 1000
+                || slot
+                    .auxiliary_kind
+                    .as_ref()
+                    .map_or(false, |kind| kind.is_empty())
+            {
+                return Err(PyValueError::new_err(format!(
+                    "generic current slot {index} has invalid spin/charge/auxiliary metadata"
+                )));
+            }
         }
         offset = slot.component_stop;
     }
@@ -1089,7 +1107,7 @@ fn validate_generic_value_storage(manifest: &GenericProcessManifestV2) -> PyResu
             || slot.current_component_stop != current.component_stop
             || slot.particle_id != current.particle_id
             || slot.external_mask != current.external_mask
-            || slot.external_labels != current.external_labels
+            || (!storage.metadata_compacted && slot.external_labels != current.external_labels)
             || slot.momentum_mask != current.momentum_mask
             || slot.chirality != current.chirality
         {
@@ -1289,6 +1307,12 @@ fn validate_generic_stages(manifest: &GenericProcessManifestV2) -> PyResult<()> 
                 )));
             }
             for interaction_id in &stage.interaction_ids {
+                if *interaction_id >= manifest.dag_summary.interaction_count {
+                    return Err(PyValueError::new_err(format!(
+                        "generic compact stage {} references invalid interaction {interaction_id}",
+                        stage.stage_index
+                    )));
+                }
                 if !seen_interaction_ids.insert(*interaction_id) {
                     return Err(PyValueError::new_err(format!(
                         "generic compact stage {} repeats interaction {interaction_id}",
@@ -9438,6 +9462,35 @@ mod tests {
     }
 
     #[test]
+    fn generic_schema_v2_validator_accepts_compact_storage_metadata() {
+        let mut payload = minimal_generic_manifest();
+        payload["runtime_schema"]["current_storage"]["metadata_compacted"] = json!(true);
+        payload["runtime_schema"]["value_storage"]["metadata_compacted"] = json!(true);
+        for slot in payload["runtime_schema"]["current_storage"]["current_slots"]
+            .as_array_mut()
+            .unwrap()
+        {
+            let object = slot.as_object_mut().unwrap();
+            object.remove("external_labels");
+            object.remove("helicity_ancestry");
+            object.remove("spin_state");
+            object.remove("flavour_flow");
+            object.remove("charge_flow");
+            object.remove("color_state");
+            object.remove("auxiliary_kind");
+        }
+        for slot in payload["runtime_schema"]["value_storage"]["value_slots"]
+            .as_array_mut()
+            .unwrap()
+        {
+            slot.as_object_mut().unwrap().remove("external_labels");
+        }
+        let manifest: GenericProcessManifestV2 = serde_json::from_value(payload).unwrap();
+
+        validate_generic_schema_v2_manifest(&manifest).unwrap();
+    }
+
+    #[test]
     fn generic_input_value_variant_index_preserves_precedence() {
         let manifest: GenericProcessManifestV2 =
             serde_json::from_value(minimal_generic_manifest()).unwrap();
@@ -9608,6 +9661,19 @@ mod tests {
         let error = validate_generic_schema_v2_manifest(&manifest)
             .expect_err("bad compact interaction metadata should be rejected");
         assert!(error.to_string().contains("compact stage 1"));
+    }
+
+    #[test]
+    fn generic_schema_v2_validator_rejects_out_of_range_compact_interaction() {
+        let mut payload = minimal_generic_manifest();
+        payload["runtime_schema"]["stages"][0]["interactions_compacted"] = json!(true);
+        payload["runtime_schema"]["stages"][0]["interaction_ids"] = json!([1]);
+        payload["runtime_schema"]["stages"][0]["interactions"] = json!([]);
+        let manifest: GenericProcessManifestV2 = serde_json::from_value(payload).unwrap();
+
+        let error = validate_generic_schema_v2_manifest(&manifest)
+            .expect_err("out-of-range compact interaction should be rejected");
+        assert!(error.to_string().contains("invalid interaction 1"));
     }
 
     #[test]

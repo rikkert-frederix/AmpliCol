@@ -99,13 +99,14 @@ rather than truncated colour plans.  On macOS the watchdog enforces the larger
 of process-tree RSS and compressed physical footprint, including descendants
 that create independent process sessions.
 
-Once runnable stage evaluators are serialized, the saved schema compacts full
-generation-only interaction records to stage interaction IDs and vertex-kind
-counts.  The full records remain available in
-\path{runtime_schema_diagnostics.pickle.gz}; plan-only manifests stay
-detailed, and Rusticol remains backward-compatible with earlier artifacts.  On
-measured all-flow artifacts this removes about 80 percent of manifest bytes
-without changing any evaluator, runtime schedule, or matrix-element value.
+Large runnable artifacts use a compact schema: generation-only current/value
+metadata is omitted, and stages retain interaction IDs and vertex-kind counts
+instead of a second copy of every interaction.  Evaluator generation lowers,
+compiles, and writes one stage at a time, then releases its Symbolica
+expressions before lowering the next stage.  Small detailed and plan-only
+artifacts retain the full records; large diagnostic sidecars explicitly record
+that they contain the compact runtime schema.  Rusticol accepts both layouts
+and remains backward-compatible with earlier artifacts.
 
 \section{The AmpliCol Current Recursion}
 
@@ -592,10 +593,12 @@ stage-local input slice is packed once and reused by every output chunk in that
 stage; this keeps chunking as a code-size control without multiplying input-pack
 cost.  Setting \texttt{RUSTICOL\_NATIVE\_SIMD\_JIT=0} selects the scalar JIT
 fallback for diagnostics.
-Runnable artifacts likewise omit the full per-interaction diagnostic records
-after evaluator serialization, retaining compact IDs and per-kind counts.  The
-trusted local diagnostic sidecar is a gzip-compressed Python protocol-5 pickle;
-it is not part of evaluator loading or execution.
+Large runnable artifacts likewise omit generation-only current metadata and
+full per-interaction records after evaluator serialization, retaining compact
+current/value storage plus stage interaction IDs and per-kind counts.  Small
+or plan-only artifacts may keep the detailed layout.  The trusted local
+diagnostic sidecar is a gzip-compressed Python protocol-5 pickle and identifies
+which layout it stores; it is not part of evaluator loading or execution.
 \Needspace{18\baselineskip}
 \begin{lstlisting}
 for point in batch {
@@ -658,6 +661,19 @@ at a deterministic point, and keeps the strongest nonzero candidate.  Exact
 sector-id lookup is indexed, so this setup remains linear in the number of LC
 sectors rather than repeatedly scanning the complete colour plan.
 
+Large shared artifacts are serialized with compact current/value metadata and
+stage interaction IDs.  Their evaluators are lowered and compiled stage by
+stage, so completed Symbolica expressions do not accumulate in memory.  For
+\(gg\to t\bar t+5g\), these changes reduced the all-flow O1 build from
+122.9 to 71.7 seconds, the process manifest from 376.7 to 45.6 MB, and the
+complete generated directory from about 435 to 121 MB, without changing the
+validated result.  A bounded \(gg\to8g\) validation constructed all 804,970
+currents, 11,371,824 interactions, and 181,440 roots, completed the preceding
+stage, and entered JIT compilation of the 907,200-output stage at a peak
+physical footprint of 13.90 GB (11.96 GB RSS).  The probe was then stopped
+deliberately; the earlier non-streamed build had exceeded the 30 GB watchdog
+while retaining accumulated stage blueprints.
+
 \input{shared_lc_recycling_table.tex}
 
 \noindent\footnotesize The generation column reports \AC/\PAC\ all-flow setup
@@ -669,7 +685,9 @@ all LC flows.  The generated table is refreshed from the LC matrix cache.  At
 \(gg\to t\bar t+6g\), both implementations report 199,042 filtered currents
 and 40,320 amplitudes/orderings; the selected-flow validation agrees to better
 than \(10^{-15}\).  The process-matrix tables below use the same selected- and
-all-flow runtime semantics.
+all-flow runtime semantics.  Fast changed-path cells and the two memory-study
+cases were regenerated with the compact writer; validated expensive entries
+that were unaffected by the writer remain in the cache.
 
 \paragraph{High-multiplicity AArch64 limit.}
 For \(d\bar d\to t\bar t+7g\), an all-flow O1 build hit SymJIT's

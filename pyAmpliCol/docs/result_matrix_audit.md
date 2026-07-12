@@ -6,7 +6,7 @@ unresolved statuses in `result_matrix_data.json`.
 The default runtime gate covers selected-flow and all-flow wall ratios
 from `n=5` upward at a `2.0x` threshold.
 
-Matrix updated at: `2026-07-12T16:55:02.976007+00:00`
+Matrix updated at: `2026-07-12T18:43:24.711958+00:00`
 
 Gate status: **PASS_WITH_LIMITATIONS**.
 

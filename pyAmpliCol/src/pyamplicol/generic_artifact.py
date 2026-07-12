@@ -56,10 +56,68 @@ LC_SECTOR_SELECTOR_PARAMETER = "runtime.lc_sector_id"
 _FULL_COLOR_PLAN_SERIALIZATION_SECTOR_LIMIT = 1000
 _ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_MIN_INTERACTIONS = 100_000
 _ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_TRIGGER_STAGE_S = 1.0
+_COMPACT_RUNTIME_STORAGE_MIN_CURRENTS = 20_000
 _NUMERICAL_REWRITE_VALIDATION_SAMPLE_LIMIT = 3
 _NUMERICAL_REWRITE_VALIDATION_SEED_OFFSET = 1_000_003
 _NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE = 1.0e-10
 _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE = 1.0e-24
+
+
+@dataclass(slots=True)
+class _RuntimeCurrentUsage:
+    interaction_inputs: bytearray
+    amplitude_inputs: bytearray
+
+    def used_as_interaction_input(self, current_id: int) -> bool:
+        return bool(self.interaction_inputs[current_id])
+
+    def used_as_amplitude_input(self, current_id: int) -> bool:
+        return bool(self.amplitude_inputs[current_id])
+
+
+class _RuntimeValueSlotIndex:
+    __slots__ = ("_propagated", "_source", "_unpropagated")
+
+    def __init__(
+        self,
+        value_slots: Sequence[dict[str, object]],
+        current_count: int,
+    ) -> None:
+        self._source: list[dict[str, object] | None] = [None] * current_count
+        self._propagated: list[dict[str, object] | None] = [None] * current_count
+        self._unpropagated: list[dict[str, object] | None] = [None] * current_count
+        for slot in value_slots:
+            current_id = _schema_int(slot["current_id"])
+            target = self._slots_for_variant(str(slot["variant"]))
+            target[current_id] = slot
+
+    def _slots_for_variant(
+        self,
+        variant: str,
+    ) -> list[dict[str, object] | None]:
+        if variant == "source":
+            return self._source
+        if variant == "propagated":
+            return self._propagated
+        if variant == "unpropagated":
+            return self._unpropagated
+        raise KeyError(variant)
+
+    def __getitem__(self, key: tuple[int, str]) -> dict[str, object]:
+        current_id, variant = key
+        slot = self._slots_for_variant(variant)[current_id]
+        if slot is None:
+            raise KeyError(key)
+        return slot
+
+    def get(
+        self,
+        key: tuple[int, str],
+        default: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        current_id, variant = key
+        slot = self._slots_for_variant(variant)[current_id]
+        return default if slot is None else slot
 
 
 @dataclass(frozen=True)
@@ -2952,9 +3010,7 @@ def _generic_warmup_runtime_schema_payload(
     """Build only the runtime records consumed by eager rewrite validation."""
 
     current_slots = _runtime_current_slots(dag)
-    slot_by_current_id = {
-        _schema_int(slot["current_id"]): slot for slot in current_slots
-    }
+    slot_by_current_id = current_slots
     current_usage = _runtime_current_usage(dag)
     value_slots = _runtime_value_slots(
         dag,
@@ -2962,10 +3018,10 @@ def _generic_warmup_runtime_schema_payload(
         current_slots=current_slots,
         current_usage=current_usage,
     )
-    value_slot_by_current_variant = {
-        (_schema_int(slot["current_id"]), str(slot["variant"])): slot
-        for slot in value_slots
-    }
+    value_slot_by_current_variant = _RuntimeValueSlotIndex(
+        value_slots,
+        len(dag.currents),
+    )
     momentum_slots = _runtime_momentum_slots(dag)
     momentum_slot_by_mask = {
         _schema_int(slot["momentum_mask"]): _schema_int(slot["momentum_slot_id"])
@@ -4194,6 +4250,7 @@ def _generic_dag_process_artifact_payload(
     numerical_current_zero_tolerance: float = 1.0e-300,
 ) -> dict[str, object]:
     from .generic_stage_compiler import (
+        build_and_write_generic_stage_evaluator_artifacts,
         build_generic_stage_compiler_blueprint,
         write_generic_stage_evaluator_artifacts,
     )
@@ -4261,17 +4318,55 @@ def _generic_dag_process_artifact_payload(
         "stage blueprint",
         "build",
     )
-    stage_blueprint = build_generic_stage_compiler_blueprint(
-        runtime_manifest,
-        stage_local_parameter_layout=stage_local_parameter_layout,
-        enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
-        runtime_schema=runtime_schema,
-        progress_callback=lambda label, index, total: _emit_generation_progress(
+    current_storage = runtime_schema.get("current_storage")
+    runtime_schema_metadata_compacted = (
+        isinstance(current_storage, Mapping)
+        and bool(current_storage.get("metadata_compacted", False))
+    )
+    stream_stage_evaluators = (
+        stage_evaluator_artifact_dir is not None
+        and color_contraction_message is None
+        and runtime_schema_metadata_compacted
+    )
+    streamed_stage_evaluator_payload: dict[str, object] | None = None
+    blueprint_progress_callback = (
+        lambda label, index, total: _emit_generation_progress(
             progress_callback,
             "stage blueprint",
             f"{label} {index}/{total}",
-        ),
+        )
     )
+    if stream_stage_evaluators:
+        stage_blueprint, streamed_stage_evaluator_payload = (
+            build_and_write_generic_stage_evaluator_artifacts(
+                runtime_manifest,
+                runtime_schema,
+                cast(Path, stage_evaluator_artifact_dir),
+                stage_local_parameter_layout=stage_local_parameter_layout,
+                enable_lc_sector_runtime_selector=(
+                    enable_lc_sector_runtime_selector
+                ),
+                compiler=stage_evaluator_compiler,
+                symbolica_settings=symbolica_settings,
+                merge_evaluators_strategy=merge_evaluators_strategy,
+                verbose_evaluator_build=verbose_evaluator_build,
+                jit_compile=jit_compile,
+                blueprint_progress_callback=blueprint_progress_callback,
+                evaluator_progress_callback=_stage_evaluator_progress_callback(
+                    progress_callback,
+                    completed_steps=3,
+                    trailing_steps=2,
+                ),
+            )
+        )
+    else:
+        stage_blueprint = build_generic_stage_compiler_blueprint(
+            runtime_manifest,
+            stage_local_parameter_layout=stage_local_parameter_layout,
+            enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+            runtime_schema=runtime_schema,
+            progress_callback=blueprint_progress_callback,
+        )
     _emit_generation_progress(
         progress_callback,
         "stage blueprint",
@@ -4368,7 +4463,11 @@ def _generic_dag_process_artifact_payload(
         _emit_generation_progress(
             progress_callback,
             "manifest diagnostics",
-            "full runtime schema gzip",
+            (
+                "compact runtime schema gzip"
+                if runtime_schema_metadata_compacted
+                else "full runtime schema gzip"
+            ),
         )
         diagnostics_executor = ThreadPoolExecutor(
             max_workers=1,
@@ -4379,45 +4478,48 @@ def _generic_dag_process_artifact_payload(
         )
 
     if stage_evaluator_artifact_dir is not None:
-        stage_progress_callback = _stage_evaluator_progress_callback(
-            progress_callback,
-            completed_steps=3,
-            trailing_steps=2,
-        )
-        async_diagnostics = (
-            color_contraction_message is None
-            and len(runtime_manifest.dag.interactions)
-            >= _ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_MIN_INTERACTIONS
-        )
-
-        def evaluator_progress(event: dict[str, object]) -> None:
-            if stage_progress_callback is not None:
-                stage_progress_callback(event)
-            duration_s = event.get("duration_s")
-            if (
-                async_diagnostics
-                and event.get("stage") == "stage complete"
-                and isinstance(duration_s, float | int)
-                and float(duration_s)
-                >= _ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_TRIGGER_STAGE_S
-            ):
-                start_runtime_schema_diagnostics()
-
-        try:
-            stage_evaluator_payload = write_generic_stage_evaluator_artifacts(
-                stage_blueprint,
-                stage_evaluator_artifact_dir,
-                compiler=stage_evaluator_compiler,
-                symbolica_settings=symbolica_settings,
-                merge_evaluators_strategy=merge_evaluators_strategy,
-                verbose_evaluator_build=verbose_evaluator_build,
-                jit_compile=jit_compile,
-                progress_callback=evaluator_progress,
+        if streamed_stage_evaluator_payload is not None:
+            stage_evaluator_payload = streamed_stage_evaluator_payload
+        else:
+            stage_progress_callback = _stage_evaluator_progress_callback(
+                progress_callback,
+                completed_steps=3,
+                trailing_steps=2,
             )
-        except BaseException:
-            if diagnostics_executor is not None:
-                diagnostics_executor.shutdown(wait=True)
-            raise
+            async_diagnostics = (
+                color_contraction_message is None
+                and len(runtime_manifest.dag.interactions)
+                >= _ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_MIN_INTERACTIONS
+            )
+
+            def evaluator_progress(event: dict[str, object]) -> None:
+                if stage_progress_callback is not None:
+                    stage_progress_callback(event)
+                duration_s = event.get("duration_s")
+                if (
+                    async_diagnostics
+                    and event.get("stage") == "stage complete"
+                    and isinstance(duration_s, float | int)
+                    and float(duration_s)
+                    >= _ASYNC_RUNTIME_SCHEMA_DIAGNOSTICS_TRIGGER_STAGE_S
+                ):
+                    start_runtime_schema_diagnostics()
+
+            try:
+                stage_evaluator_payload = write_generic_stage_evaluator_artifacts(
+                    stage_blueprint,
+                    stage_evaluator_artifact_dir,
+                    compiler=stage_evaluator_compiler,
+                    symbolica_settings=symbolica_settings,
+                    merge_evaluators_strategy=merge_evaluators_strategy,
+                    verbose_evaluator_build=verbose_evaluator_build,
+                    jit_compile=jit_compile,
+                    progress_callback=evaluator_progress,
+                )
+            except BaseException:
+                if diagnostics_executor is not None:
+                    diagnostics_executor.shutdown(wait=True)
+                raise
         compiled_payload["stage_evaluators"] = stage_evaluator_payload
         if bool(stage_evaluator_payload.get("runtime_available", False)):
             compiled_payload["runtime_available"] = True
@@ -4435,7 +4537,11 @@ def _generic_dag_process_artifact_payload(
                 compiled_payload["diagnostic_runtime_schema"] = {
                     "path": diagnostics_path.name,
                     "compression": "gzip",
-                    "format": "python-pickle-protocol-5-full-runtime-schema-v2",
+                    "format": (
+                        "python-pickle-protocol-5-compact-runtime-schema-v2"
+                        if runtime_schema_metadata_compacted
+                        else "python-pickle-protocol-5-full-runtime-schema-v2"
+                    ),
                     "size_bytes": diagnostics_path.stat().st_size,
                     "interaction_count": len(runtime_manifest.dag.interactions),
                 }
@@ -4507,6 +4613,8 @@ def _compact_serialized_runtime_metadata(
     if isinstance(stages, list):
         for stage in stages:
             if not isinstance(stage, dict):
+                continue
+            if bool(stage.get("interactions_compacted", False)):
                 continue
             interactions = stage.get("interactions")
             if not isinstance(interactions, list):
@@ -4618,10 +4726,14 @@ def _generic_runtime_schema_payload(
     enable_lc_sector_runtime_selector: bool = True,
     progress_callback: Any | None = None,
 ) -> dict[str, object]:
-    current_slots = _runtime_current_slots(dag)
-    slot_by_current_id = {
-        _schema_int(slot["current_id"]): slot for slot in current_slots
-    }
+    compact_storage_metadata = (
+        len(dag.currents) >= _COMPACT_RUNTIME_STORAGE_MIN_CURRENTS
+    )
+    current_slots = _runtime_current_slots(
+        dag,
+        compact_metadata=compact_storage_metadata,
+    )
+    slot_by_current_id = current_slots
     current_usage = _runtime_current_usage(
         dag,
         selected_color_sector_ids=selected_color_sector_ids,
@@ -4632,11 +4744,12 @@ def _generic_runtime_schema_payload(
         model=model,
         current_slots=current_slots,
         current_usage=current_usage,
+        compact_metadata=compact_storage_metadata,
     )
-    value_slot_by_current_variant = {
-        (_schema_int(slot["current_id"]), str(slot["variant"])): slot
-        for slot in value_slots
-    }
+    value_slot_by_current_variant = _RuntimeValueSlotIndex(
+        value_slots,
+        len(dag.currents),
+    )
     momentum_slots = _runtime_momentum_slots(dag)
     momentum_slot_by_mask = {
         _schema_int(slot["momentum_mask"]): _schema_int(slot["momentum_slot_id"])
@@ -4648,6 +4761,7 @@ def _generic_runtime_schema_payload(
         slot_by_current_id=slot_by_current_id,
         value_slot_by_current_variant=value_slot_by_current_variant,
         momentum_slot_by_mask=momentum_slot_by_mask,
+        compact_interactions=compact_storage_metadata,
         progress_callback=progress_callback,
     )
     amplitude_stage_payload = _runtime_amplitude_stage_payload(
@@ -4659,7 +4773,6 @@ def _generic_runtime_schema_payload(
     model_parameters = _runtime_model_parameter_records(
         dag,
         model,
-        stage_payloads=stage_payloads,
         amplitude_stage_payload=amplitude_stage_payload,
         enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
     )
@@ -4707,6 +4820,7 @@ def _generic_runtime_schema_payload(
                 current_slots[-1]["component_stop"] if current_slots else 0
             ),
             "number_type": "complex",
+            "metadata_compacted": compact_storage_metadata,
             "current_slots": current_slots,
         },
         "value_storage": {
@@ -4714,6 +4828,7 @@ def _generic_runtime_schema_payload(
                 value_slots[-1]["component_stop"] if value_slots else 0
             ),
             "number_type": "complex",
+            "metadata_compacted": compact_storage_metadata,
             "policy": (
                 "current identity is independent of propagator state; runtime "
                 "value slots store source, propagated, and unpropagated variants "
@@ -4831,7 +4946,6 @@ def _runtime_model_parameter_records(
     dag: GenericDAG,
     model: Model,
     *,
-    stage_payloads: Sequence[Mapping[str, object]],
     amplitude_stage_payload: Mapping[str, object],
     enable_lc_sector_runtime_selector: bool = True,
 ) -> list[dict[str, object]]:
@@ -4900,31 +5014,40 @@ def _runtime_model_parameter_records(
                 pdg=int(particle.pdg),
             )
 
+    processed_coupling_signatures: set[
+        tuple[int, tuple[int, ...], tuple[float, ...]]
+    ] = set()
     processed_coupling_name_sets: set[tuple[str | None, ...]] = set()
-    for stage in stage_payloads:
-        for interaction in _schema_list(stage["interactions"]):
-            names = interaction.get("coupling_parameter_names")
-            values = interaction.get("coupling")
-            if not isinstance(names, list) or not isinstance(values, list):
+    for interaction in dag.interactions:
+        signature = (
+            int(interaction.vertex_kind),
+            interaction.vertex_particles,
+            interaction.coupling,
+        )
+        if signature in processed_coupling_signatures:
+            continue
+        processed_coupling_signatures.add(signature)
+        names = _runtime_coupling_parameter_names(
+            interaction.vertex_kind,
+            interaction.vertex_particles,
+            interaction.coupling,
+        )
+        name_key = tuple(None if name is None else str(name) for name in names)
+        if name_key in processed_coupling_name_sets:
+            continue
+        processed_coupling_name_sets.add(name_key)
+        particles = tuple(int(pdg) for pdg in interaction.vertex_particles)
+        for component, name in enumerate(names):
+            if not isinstance(name, str):
                 continue
-            name_key = tuple(
-                None if name is None else str(name) for name in names
+            add_record(
+                name,
+                "coupling_component",
+                float(interaction.coupling[component]),
+                vertex_kind=int(interaction.vertex_kind),
+                vertex_particles=list(particles),
+                component=component,
             )
-            if name_key in processed_coupling_name_sets:
-                continue
-            processed_coupling_name_sets.add(name_key)
-            particles = tuple(int(pdg) for pdg in _schema_list(interaction["vertex_particles"]))
-            for component, name in enumerate(names):
-                if not isinstance(name, str):
-                    continue
-                add_record(
-                    name,
-                    "coupling_component",
-                    float(values[component]),
-                    vertex_kind=int(interaction["vertex_kind"]),
-                    vertex_particles=list(particles),
-                    component=component,
-                )
 
     for root in _schema_list(amplitude_stage_payload["roots"]):
         names = root.get("coupling_parameter_names")
@@ -5032,33 +5155,43 @@ def _electroweak_coupling_power(dag: GenericDAG) -> int:
     return max(1, len(dag.process.singlet_labels))
 
 
-def _runtime_current_slots(dag: GenericDAG) -> list[dict[str, object]]:
+def _runtime_current_slots(
+    dag: GenericDAG,
+    *,
+    compact_metadata: bool = False,
+) -> list[dict[str, object]]:
     offset = 0
     slots: list[dict[str, object]] = []
     for current in dag.currents:
         start = offset
         stop = start + current.dimension
         offset = stop
-        slots.append(
-            {
-                "current_id": current.id,
-                "component_start": start,
-                "component_stop": stop,
-                "dimension": current.dimension,
-                "is_source": current.is_source,
-                "particle_id": current.index.particle_id,
-                "external_mask": current.index.external_mask,
-                "external_labels": list(current.index.external_labels),
-                "momentum_mask": current.index.momentum_mask,
-                "helicity_ancestry": _bigint_json(current.index.helicity_ancestry),
-                "chirality": current.index.chirality,
-                "spin_state": _spin_state_json(current.index.spin_state),
-                "flavour_flow": list(current.index.flavour_flow),
-                "charge_flow": current.index.charge_flow,
-                "color_state": current.index.color_state.to_json_dict(),
-                "auxiliary_kind": current.index.auxiliary_kind,
-            }
-        )
+        slot: dict[str, object] = {
+            "current_id": current.id,
+            "component_start": start,
+            "component_stop": stop,
+            "dimension": current.dimension,
+            "is_source": current.is_source,
+            "particle_id": current.index.particle_id,
+            "external_mask": current.index.external_mask,
+            "momentum_mask": current.index.momentum_mask,
+            "chirality": current.index.chirality,
+        }
+        if not compact_metadata:
+            slot.update(
+                {
+                    "external_labels": list(current.index.external_labels),
+                    "helicity_ancestry": _bigint_json(
+                        current.index.helicity_ancestry
+                    ),
+                    "spin_state": _spin_state_json(current.index.spin_state),
+                    "flavour_flow": list(current.index.flavour_flow),
+                    "charge_flow": current.index.charge_flow,
+                    "color_state": current.index.color_state.to_json_dict(),
+                    "auxiliary_kind": current.index.auxiliary_kind,
+                }
+            )
+        slots.append(slot)
     return slots
 
 
@@ -5081,19 +5214,16 @@ def _runtime_current_usage(
     *,
     selected_color_sector_ids: set[int] | None = None,
     progress_callback: Any | None = None,
-) -> dict[int, dict[str, bool]]:
-    usage = {
-        current.id: {
-            "used_as_interaction_input": False,
-            "used_as_amplitude_input": False,
-        }
-        for current in dag.currents
-    }
+) -> _RuntimeCurrentUsage:
+    usage = _RuntimeCurrentUsage(
+        interaction_inputs=bytearray(len(dag.currents)),
+        amplitude_inputs=bytearray(len(dag.currents)),
+    )
     interaction_total = len(dag.interactions)
     progress_stride = max(1, interaction_total // 100)
     for position, interaction in enumerate(dag.interactions, start=1):
-        usage[interaction.left_id]["used_as_interaction_input"] = True
-        usage[interaction.right_id]["used_as_interaction_input"] = True
+        usage.interaction_inputs[interaction.left_id] = 1
+        usage.interaction_inputs[interaction.right_id] = 1
         if progress_callback is not None and (
             position == interaction_total or position % progress_stride == 0
         ):
@@ -5102,8 +5232,8 @@ def _runtime_current_usage(
         dag,
         selected_color_sector_ids=selected_color_sector_ids,
     ):
-        usage[root.left_id]["used_as_amplitude_input"] = True
-        usage[root.right_id]["used_as_amplitude_input"] = True
+        usage.amplitude_inputs[root.left_id] = 1
+        usage.amplitude_inputs[root.right_id] = 1
     return usage
 
 
@@ -5112,14 +5242,13 @@ def _runtime_value_slots(
     *,
     model: Model,
     current_slots: list[dict[str, object]],
-    current_usage: dict[int, dict[str, bool]],
+    current_usage: _RuntimeCurrentUsage,
+    compact_metadata: bool = False,
 ) -> list[dict[str, object]]:
     offset = 0
     value_slot_id = 0
     value_slots: list[dict[str, object]] = []
-    current_slot_by_id = {
-        _schema_int(slot["current_id"]): slot for slot in current_slots
-    }
+    current_slot_by_id = current_slots
 
     def add_slot(
         current_id: int,
@@ -5130,40 +5259,50 @@ def _runtime_value_slots(
         nonlocal offset, value_slot_id
         current = dag.currents[current_id]
         current_slot = current_slot_by_id[current_id]
-        usage = current_usage[current_id]
+        used_as_interaction_input = current_usage.used_as_interaction_input(
+            current_id
+        )
+        used_as_amplitude_input = current_usage.used_as_amplitude_input(current_id)
         propagator_rule = model.propagator_lowering_rule(
             current.index.particle_id,
             current.index.chirality,
         )
         start = offset
         stop = start + current.dimension
-        value_slots.append(
-            {
-                "value_slot_id": value_slot_id,
-                "current_id": current_id,
-                "variant": variant,
-                "component_start": start,
-                "component_stop": stop,
-                "dimension": current.dimension,
-                "current_component_start": current_slot["component_start"],
-                "current_component_stop": current_slot["component_stop"],
-                "is_source": current.is_source,
-                "applies_propagator": applies_propagator,
-                "propagator": propagator_rule.to_json_dict(),
-                "used_as_interaction_input": usage["used_as_interaction_input"],
-                "used_as_amplitude_input": usage["used_as_amplitude_input"],
-                "particle_id": current.index.particle_id,
-                "external_mask": current.index.external_mask,
-                "external_labels": list(current.index.external_labels),
-                "momentum_mask": current.index.momentum_mask,
-                "chirality": current.index.chirality,
-            }
-        )
+        slot: dict[str, object] = {
+            "value_slot_id": value_slot_id,
+            "current_id": current_id,
+            "variant": variant,
+            "component_start": start,
+            "component_stop": stop,
+            "dimension": current.dimension,
+            "current_component_start": current_slot["component_start"],
+            "current_component_stop": current_slot["component_stop"],
+            "is_source": current.is_source,
+            "applies_propagator": applies_propagator,
+            "particle_id": current.index.particle_id,
+            "external_mask": current.index.external_mask,
+            "momentum_mask": current.index.momentum_mask,
+            "chirality": current.index.chirality,
+        }
+        if not compact_metadata:
+            slot.update(
+                {
+                    "propagator": propagator_rule.to_json_dict(),
+                    "used_as_interaction_input": used_as_interaction_input,
+                    "used_as_amplitude_input": used_as_amplitude_input,
+                    "external_labels": list(current.index.external_labels),
+                }
+            )
+        value_slots.append(slot)
         value_slot_id += 1
         offset = stop
 
     for current in dag.currents:
-        usage = current_usage[current.id]
+        used_as_interaction_input = current_usage.used_as_interaction_input(
+            current.id
+        )
+        used_as_amplitude_input = current_usage.used_as_amplitude_input(current.id)
         if current.is_source:
             add_slot(current.id, variant="source", applies_propagator=False)
             continue
@@ -5172,15 +5311,15 @@ def _runtime_value_slots(
             current.index.chirality,
         )
         needs_propagated = (
-            usage["used_as_interaction_input"]
+            used_as_interaction_input
             and propagator_rule.applies_propagator
         )
-        needs_unpropagated = usage["used_as_amplitude_input"]
+        needs_unpropagated = used_as_amplitude_input
         if (
             needs_unpropagated
             or not needs_propagated
             or (
-                usage["used_as_interaction_input"]
+                used_as_interaction_input
                 and not propagator_rule.applies_propagator
             )
         ):
@@ -5279,17 +5418,20 @@ def _runtime_stage_payloads(
     dag: GenericDAG,
     model: Model,
     *,
-    slot_by_current_id: dict[int, dict[str, object]],
-    value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
+    slot_by_current_id: Sequence[dict[str, object]],
+    value_slot_by_current_variant: _RuntimeValueSlotIndex,
     momentum_slot_by_mask: dict[int, int],
+    compact_interactions: bool = False,
     progress_callback: Any | None = None,
 ) -> list[dict[str, object]]:
     interactions_by_size: dict[int, list[int]] = {}
     interaction_total = len(dag.interactions)
     progress_stride = max(1, interaction_total // 100)
+    current_subset_sizes = [
+        len(current.index.external_labels) for current in dag.currents
+    ]
     for position, interaction in enumerate(dag.interactions, start=1):
-        result = dag.currents[interaction.result_id]
-        size = len(result.index.external_labels)
+        size = current_subset_sizes[interaction.result_id]
         interactions_by_size.setdefault(size, []).append(interaction.id)
         if progress_callback is not None and (
             position == interaction_total or position % progress_stride == 0
@@ -5298,6 +5440,43 @@ def _runtime_stage_payloads(
     stages = []
     coupling_name_cache: dict[tuple[int, tuple[int, ...], tuple[float, ...]], list[str | None]] = {}
     lowering_payload_cache: dict[int, dict[str, object]] = {}
+    compact_input_value_slot_ids: list[int] = []
+    compact_result_value_slot_ids: list[tuple[int, ...]] = []
+    compact_momentum_slot_ids: list[int] = []
+    if compact_interactions:
+        for current in dag.currents:
+            if current.is_source:
+                input_variant = "source"
+            else:
+                propagator = model.propagator_lowering_rule(
+                    current.index.particle_id,
+                    current.index.chirality,
+                )
+                input_variant = (
+                    "propagated"
+                    if propagator.applies_propagator
+                    else "unpropagated"
+                )
+            input_slot = value_slot_by_current_variant.get(
+                (current.id, input_variant)
+            )
+            compact_input_value_slot_ids.append(
+                -1
+                if input_slot is None
+                else _schema_int(input_slot["value_slot_id"])
+            )
+            compact_result_value_slot_ids.append(
+                tuple(
+                    _schema_int(slot["value_slot_id"])
+                    for slot in _result_value_slots(
+                        current,
+                        value_slot_by_current_variant,
+                    )
+                )
+            )
+            compact_momentum_slot_ids.append(
+                momentum_slot_by_mask[current.index.momentum_mask]
+            )
     processed_interactions = 0
     for stage_index, size in enumerate(sorted(interactions_by_size), start=1):
         interaction_ids = interactions_by_size[size]
@@ -5306,37 +5485,88 @@ def _runtime_stage_payloads(
         input_current_ids: set[int] = set()
         input_value_slot_ids: set[int] = set()
         output_value_slot_ids: set[int] = set()
+        input_momentum_slot_ids: set[int] = set()
         for interaction_id in interaction_ids:
-            interaction = _runtime_interaction_record(
-                dag,
-                model,
-                interaction_id=interaction_id,
-                slot_by_current_id=slot_by_current_id,
-                value_slot_by_current_variant=value_slot_by_current_variant,
-                momentum_slot_by_mask=momentum_slot_by_mask,
-                coupling_name_cache=coupling_name_cache,
-                lowering_payload_cache=lowering_payload_cache,
-            )
-            interaction_any = cast(dict[str, Any], interaction)
-            interactions.append(interaction)
-            output_current_ids.add(_schema_int(interaction["result_current_id"]))
-            input_current_ids.add(_schema_int(interaction["left_current_id"]))
-            input_current_ids.add(_schema_int(interaction["right_current_id"]))
-            input_value_slot_ids.add(
-                _schema_int(interaction_any["left_value_slot"]["value_slot_id"])
-            )
-            input_value_slot_ids.add(
-                _schema_int(interaction_any["right_value_slot"]["value_slot_id"])
-            )
-            for slot in interaction_any["result_value_slots"]:
-                output_value_slot_ids.add(_schema_int(slot["value_slot_id"]))
+            node = dag.interactions[interaction_id]
+            output_current_ids.add(node.result_id)
+            input_current_ids.add(node.left_id)
+            input_current_ids.add(node.right_id)
+            if compact_interactions:
+                left_input_slot_id = compact_input_value_slot_ids[node.left_id]
+                right_input_slot_id = compact_input_value_slot_ids[node.right_id]
+                if left_input_slot_id < 0 or right_input_slot_id < 0:
+                    raise ValueError(
+                        f"interaction {interaction_id} references a current "
+                        "without a runtime input value slot"
+                    )
+                input_value_slot_ids.add(left_input_slot_id)
+                input_value_slot_ids.add(right_input_slot_id)
+                output_value_slot_ids.update(
+                    compact_result_value_slot_ids[node.result_id]
+                )
+                input_momentum_slot_ids.update(
+                    (
+                        compact_momentum_slot_ids[node.left_id],
+                        compact_momentum_slot_ids[node.right_id],
+                        compact_momentum_slot_ids[node.result_id],
+                    )
+                )
+            else:
+                left = dag.currents[node.left_id]
+                right = dag.currents[node.right_id]
+                result = dag.currents[node.result_id]
+                left_value_slot = _input_value_slot(
+                    left,
+                    model,
+                    value_slot_by_current_variant,
+                )
+                right_value_slot = _input_value_slot(
+                    right,
+                    model,
+                    value_slot_by_current_variant,
+                )
+                result_value_slots = _result_value_slots(
+                    result,
+                    value_slot_by_current_variant,
+                )
+                input_value_slot_ids.add(
+                    _schema_int(left_value_slot["value_slot_id"])
+                )
+                input_value_slot_ids.add(
+                    _schema_int(right_value_slot["value_slot_id"])
+                )
+                for slot in result_value_slots:
+                    output_value_slot_ids.add(_schema_int(slot["value_slot_id"]))
+                input_momentum_slot_ids.update(
+                    (
+                        momentum_slot_by_mask[left.index.momentum_mask],
+                        momentum_slot_by_mask[right.index.momentum_mask],
+                        momentum_slot_by_mask[result.index.momentum_mask],
+                    )
+                )
+                interactions.append(
+                    _runtime_interaction_record(
+                        dag,
+                        model,
+                        interaction_id=interaction_id,
+                        slot_by_current_id=slot_by_current_id,
+                        value_slot_by_current_variant=value_slot_by_current_variant,
+                        momentum_slot_by_mask=momentum_slot_by_mask,
+                        coupling_name_cache=coupling_name_cache,
+                        lowering_payload_cache=lowering_payload_cache,
+                    )
+                )
             processed_interactions += 1
             if progress_callback is not None and (
                 processed_interactions == interaction_total
                 or processed_interactions % progress_stride == 0
             ):
                 progress_callback(
-                    "interaction records",
+                    (
+                        "interaction indexing"
+                        if compact_interactions
+                        else "interaction records"
+                    ),
                     processed_interactions,
                     interaction_total,
                 )
@@ -5349,7 +5579,10 @@ def _runtime_stage_payloads(
                 "output_current_ids": sorted(output_current_ids),
                 "input_value_slot_ids": sorted(input_value_slot_ids),
                 "output_value_slot_ids": sorted(output_value_slot_ids),
-                "interaction_count": len(interactions),
+                "input_momentum_slot_ids": sorted(input_momentum_slot_ids),
+                "interaction_count": len(interaction_ids),
+                "interaction_ids": interaction_ids if compact_interactions else [],
+                "interactions_compacted": compact_interactions,
                 "interactions": interactions,
             }
         )
@@ -5361,8 +5594,8 @@ def _runtime_interaction_record(
     model: Model,
     *,
     interaction_id: int,
-    slot_by_current_id: dict[int, dict[str, object]],
-    value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
+    slot_by_current_id: Sequence[dict[str, object]],
+    value_slot_by_current_variant: _RuntimeValueSlotIndex,
     momentum_slot_by_mask: dict[int, int],
     coupling_name_cache: dict[tuple[int, tuple[int, ...], tuple[float, ...]], list[str | None]],
     lowering_payload_cache: dict[int, dict[str, object]],
@@ -5441,12 +5674,16 @@ def _runtime_interaction_record(
 def _runtime_amplitude_stage_payload(
     dag: GenericDAG,
     *,
-    slot_by_current_id: dict[int, dict[str, object]],
-    value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
+    slot_by_current_id: Sequence[dict[str, object]],
+    value_slot_by_current_variant: _RuntimeValueSlotIndex,
     selected_color_sector_ids: set[int] | None = None,
 ) -> dict[str, object]:
     roots = []
     selected_roots = _selected_amplitude_roots(
+        dag,
+        selected_color_sector_ids=selected_color_sector_ids,
+    )
+    has_multiple_lc_root_sectors = _has_multiple_lc_root_sectors(
         dag,
         selected_color_sector_ids=selected_color_sector_ids,
     )
@@ -5500,6 +5737,7 @@ def _runtime_amplitude_stage_payload(
                     dag,
                     root,
                     selected_color_sector_ids=selected_color_sector_ids,
+                    has_multiple_lc_root_sectors=has_multiple_lc_root_sectors,
                 ),
             }
         )
@@ -5636,6 +5874,7 @@ def _root_all_sector_weight(
     root,
     *,
     selected_color_sector_ids: set[int] | None,
+    has_multiple_lc_root_sectors: bool | None = None,
 ) -> float:
     weight = float(root.helicity_weight)
     if selected_color_sector_ids is not None:
@@ -5644,11 +5883,12 @@ def _root_all_sector_weight(
         return weight
     if dag.color_plan.process.quark_lines.quark_pair_count != 0:
         return weight
-    root_sector_ids = {
-        _root_color_sector_id(dag, candidate)
-        for candidate in dag.amplitude_roots
-    }
-    if len(root_sector_ids) <= 1:
+    if has_multiple_lc_root_sectors is None:
+        has_multiple_lc_root_sectors = _has_multiple_lc_root_sectors(
+            dag,
+            selected_color_sector_ids=selected_color_sector_ids,
+        )
+    if not has_multiple_lc_root_sectors:
         return weight
     sector = dag.color_plan.sector(_root_color_sector_id(dag, root))
     if sector is None or sector.kind != "single-trace":
@@ -5660,6 +5900,27 @@ def _root_all_sector_weight(
     if rest == tuple(reversed(rest)):
         return weight
     return 2.0 * weight
+
+
+def _has_multiple_lc_root_sectors(
+    dag: GenericDAG,
+    *,
+    selected_color_sector_ids: set[int] | None,
+) -> bool:
+    if selected_color_sector_ids is not None:
+        return False
+    if dag.process.color_accuracy != "lc":
+        return False
+    if dag.color_plan.process.quark_lines.quark_pair_count != 0:
+        return False
+    first_sector_id: int | None = None
+    for root in dag.amplitude_roots:
+        sector_id = _root_color_sector_id(dag, root)
+        if first_sector_id is None:
+            first_sector_id = sector_id
+        elif sector_id != first_sector_id:
+            return True
+    return False
 
 
 def _slot_ref(slot: dict[str, object]) -> dict[str, object]:
@@ -5685,7 +5946,7 @@ def _value_slot_ref(slot: dict[str, object]) -> dict[str, object]:
 def _input_value_slot(
     current,
     model: Model,
-    value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
+    value_slot_by_current_variant: _RuntimeValueSlotIndex,
 ) -> dict[str, object]:
     if current.is_source:
         variant = "source"
@@ -5700,7 +5961,7 @@ def _input_value_slot(
 
 def _result_value_slots(
     current,
-    value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
+    value_slot_by_current_variant: _RuntimeValueSlotIndex,
 ) -> tuple[dict[str, object], ...]:
     slots = []
     for variant in ("unpropagated", "propagated"):
@@ -5714,7 +5975,7 @@ def _result_value_slots(
 
 def _amplitude_value_slot(
     current,
-    value_slot_by_current_variant: dict[tuple[int, str], dict[str, object]],
+    value_slot_by_current_variant: _RuntimeValueSlotIndex,
 ) -> dict[str, object]:
     if current.is_source:
         return value_slot_by_current_variant[(current.id, "source")]
@@ -6079,7 +6340,7 @@ def _dag_propagator_lowering_status(
     for current in dag.currents:
         if current.is_source:
             continue
-        if not usage[current.id]["used_as_interaction_input"]:
+        if not usage.used_as_interaction_input(current.id):
             continue
         rule = model.propagator_lowering_rule(
             current.index.particle_id,

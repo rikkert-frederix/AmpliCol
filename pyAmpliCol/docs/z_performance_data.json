@@ -12,7 +12,7 @@
           "notes": "reused from LC result matrix cache",
           "runtime_us_per_point": 0.0193,
           "status": "ok",
-          "updated_at": "2026-07-11T20:13:32.700112+00:00"
+          "updated_at": "2026-07-12T18:46:40.536326+00:00"
         },
         "asm": {
           "all_flow_generation_s": 0.6723633341025561,
@@ -45,19 +45,21 @@
           "wall_us_per_point": 0.1359345369094805
         },
         "jit_o1": {
-          "all_flow_generation_s": 0.1548055000603199,
-          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/jit_o1_all_flows; time batch 64, output chunk 8192",
-          "all_flow_runtime_us_per_point": 0.01624289926736563,
+          "all_flow_generation_s": 0.1694656671024859,
+          "all_flow_notes": "reused matching O1 all-flow artifact from LC result matrix cache; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_outputs/dd_z_jets/n1/jit/all_flows",
+          "all_flow_runtime_us_per_point": 0.016784940923822187,
           "all_flow_status": "ok",
           "all_flow_symbolica_output_chunk_size": 8192,
           "all_flow_time_batch_size": 64,
-          "all_flow_wall_us_per_point": 0.07870500016186571,
-          "generation_s": 0.17683545895852149,
+          "all_flow_wall_us_per_point": 0.083304938309607,
+          "generation_s": 0.16575591685250401,
           "notes": "generated process kept at pyAmpliCol/docs/.z_performance_outputs/n1/jit_o1",
-          "runtime_us_per_point": 0.034703616916835066,
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_outputs/n1/jit_o1",
+          "runtime_us_per_point": 0.03574673845535973,
           "status": "ok",
-          "updated_at": "2026-07-11T20:14:20.323184+00:00",
-          "wall_us_per_point": 0.13718349029157675
+          "updated_at": "2026-07-12T18:47:03.672536+00:00",
+          "wall_us_per_point": 0.13631024183156698
         },
         "jit_o3": {
           "all_flow_generation_s": 0.1541315419599414,
@@ -671,5 +673,5 @@
     "symbolica_stage_local_parameter_layout": true,
     "target_runtime_s": 10.0
   },
-  "updated_at": "2026-07-11T21:21:51.285745+00:00"
+  "updated_at": "2026-07-12T18:47:04.905085+00:00"
 }

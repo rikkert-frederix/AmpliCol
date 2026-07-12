@@ -43,6 +43,7 @@ from pyamplicol.generic_dag import (
 from pyamplicol.color_plan import build_color_plan
 from pyamplicol.generic_stage_compiler import (
     _parameter_builder,
+    build_and_write_generic_stage_evaluator_artifacts,
     build_generic_stage_compiler_blueprint,
     write_generic_stage_evaluator_artifacts,
 )
@@ -131,6 +132,33 @@ def test_runtime_schema_reports_progress_for_long_interaction_passes() -> None:
         phase_events = [event for event in events if event[0] == phase]
         assert phase_events
         assert phase_events[-1][1:] == (interaction_total, interaction_total)
+
+
+def test_runtime_schema_precomputes_pure_gluon_all_sector_weight_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = build_generic_process_manifest(
+        "g g > g g",
+        selected_source_helicities={1: -1, 2: -1, 3: -1, 4: -1},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    original = generic_artifact_module._root_all_sector_weight
+    contexts: list[bool | None] = []
+
+    def recording_weight(dag, root, **kwargs):
+        contexts.append(kwargs.get("has_multiple_lc_root_sectors"))
+        return original(dag, root, **kwargs)
+
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_root_all_sector_weight",
+        recording_weight,
+    )
+    _generic_runtime_schema_payload(manifest.dag, manifest.model)
+
+    assert len(contexts) == len(manifest.dag.amplitude_roots)
+    assert set(contexts) == {True}
 
 
 def test_zero_current_filter_prunes_massive_top_chirality_currents() -> None:
@@ -1285,6 +1313,53 @@ def test_generic_stage_evaluator_artifact_writer_uses_stage_expressions(
     )
 
 
+def test_streaming_stage_evaluator_writer_releases_consumed_expressions(
+    tmp_path: Path,
+) -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > z g g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+    runtime_schema = _generic_runtime_schema_payload(
+        manifest.dag,
+        manifest.model,
+    )
+    calls: list[tuple[str, int]] = []
+
+    def fake_compiler(stage, params, real_inputs):
+        del params, real_inputs
+        calls.append((stage.evaluator_label, len(stage.output_expressions)))
+        return {
+            "kind": "jit-symbolica-evaluator",
+            "label": stage.evaluator_label,
+            "input_len": stage.parameter_count,
+            "output_len": len(stage.output_expressions),
+            "evaluator_state_path": f"evaluators/{stage.evaluator_label}.bin",
+        }
+
+    blueprint, payload = build_and_write_generic_stage_evaluator_artifacts(
+        manifest,
+        runtime_schema,
+        tmp_path / "streamed-evaluators",
+        stage_local_parameter_layout=True,
+        compiler=fake_compiler,
+    )
+
+    assert all(output_count > 0 for _label, output_count in calls)
+    assert [label for label, _output_count in calls] == [
+        *(stage.evaluator_label for stage in blueprint.stages),
+        blueprint.amplitude_stage.evaluator_label,
+    ]
+    assert all(not stage.output_expressions for stage in blueprint.stages)
+    assert not blueprint.amplitude_stage.output_expressions
+    assert len(payload["stages"]) == len(blueprint.stages)
+    assert payload["amplitude_stage"]["evaluator"]["label"] == (
+        blueprint.amplitude_stage.evaluator_label
+    )
+
+
 def test_generic_stage_evaluator_writer_accepts_four_quark_line_amplitude_stage(
     tmp_path: Path,
 ) -> None:
@@ -1485,6 +1560,96 @@ def test_generic_dag_process_artifact_can_embed_stage_evaluator_manifests(
     with gzip.open(diagnostics_path, mode="rb") as stream:
         detailed_runtime_schema = pickle.load(stream)
     assert detailed_runtime_schema["stages"][0]["interactions"]
+
+
+def test_large_runtime_schema_uses_compact_storage_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_compiler(stage, params, real_inputs):
+        return {
+            "kind": "jit-symbolica-evaluator",
+            "label": stage.evaluator_label,
+            "input_len": len(params),
+            "output_len": len(stage.output_expressions),
+            "real_input_count": len(real_inputs),
+            "evaluator_state_path": f"evaluators/{stage.evaluator_label}.bin",
+        }
+
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_COMPACT_RUNTIME_STORAGE_MIN_CURRENTS",
+        0,
+    )
+    manifest_path, _payload = write_generic_dag_process_artifact(
+        "d d~ > z g g",
+        tmp_path,
+        emit_stage_evaluator_artifacts=True,
+        stage_evaluator_compiler=fake_compiler,
+    )
+
+    runtime_schema = json.loads(manifest_path.read_text())["runtime_schema"]
+    diagnostics = json.loads(manifest_path.read_text())["compiled"][
+        "diagnostic_runtime_schema"
+    ]
+    current_storage = runtime_schema["current_storage"]
+    value_storage = runtime_schema["value_storage"]
+    runtime_stages = runtime_schema["stages"]
+    assert current_storage["metadata_compacted"] is True
+    assert value_storage["metadata_compacted"] is True
+    assert "color_state" not in current_storage["current_slots"][0]
+    assert "helicity_ancestry" not in current_storage["current_slots"][0]
+    assert "propagator" not in value_storage["value_slots"][0]
+    assert "external_labels" not in value_storage["value_slots"][0]
+    assert all(stage["interactions_compacted"] is True for stage in runtime_stages)
+    assert all(stage["interactions"] == [] for stage in runtime_stages)
+    assert all(
+        len(stage["interaction_ids"]) == stage["interaction_count"]
+        for stage in runtime_stages
+    )
+    assert diagnostics["format"] == (
+        "python-pickle-protocol-5-compact-runtime-schema-v2"
+    )
+
+
+def test_compact_interactions_preserve_stage_compiler_expressions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = build_generic_process_manifest(
+        "d d~ > z g g",
+        selected_color_sector_ids={0},
+        numerical_filter_current=False,
+        numerical_current_merging=False,
+    )
+
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_COMPACT_RUNTIME_STORAGE_MIN_CURRENTS",
+        len(manifest.dag.currents) + 1,
+    )
+    verbose = build_generic_stage_compiler_blueprint(
+        manifest,
+        stage_local_parameter_layout=True,
+    )
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_COMPACT_RUNTIME_STORAGE_MIN_CURRENTS",
+        0,
+    )
+    compact = build_generic_stage_compiler_blueprint(
+        manifest,
+        stage_local_parameter_layout=True,
+    )
+
+    assert compact.to_json_dict() == verbose.to_json_dict()
+    for compact_stage, verbose_stage in zip(
+        (*compact.stages, compact.amplitude_stage),
+        (*verbose.stages, verbose.amplitude_stage),
+        strict=True,
+    ):
+        assert tuple(map(str, compact_stage.output_expressions)) == tuple(
+            map(str, verbose_stage.output_expressions)
+        )
 
 
 def test_large_runtime_schema_diagnostics_overlap_stage_compilation(
