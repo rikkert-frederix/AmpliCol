@@ -102,6 +102,8 @@ def test_external_z_table_compares_generation_and_wall_to_builtin_row() -> None:
 
     assert rendered.count(r"\textbf{vs blt-in}") == 8
     assert rendered.count("L{0.42in}") == 4
+    assert "p{0.10in}" in rendered
+    assert r"\textbf{notes}" not in rendered
     assert (
         r"\textbf{gen [s]} & \textbf{vs blt-in} & \textbf{wall [us/pt]} "
         r"& \textbf{vs blt-in} & \textbf{eval [us/pt]}"
@@ -109,6 +111,48 @@ def test_external_z_table_compares_generation_and_wall_to_builtin_row() -> None:
     assert r"\textcolor{speedred}{\texttt{x2.00}}" in rendered
     assert r"\textcolor{speedorange}{\texttt{x1.50}}" in rendered
     assert r"\textcolor{speedgreen}{\texttt{x0.50}}" in rendered
+
+
+def test_amplicol_z_reference_uses_wall_column_without_ratio_na() -> None:
+    table = _load_z_table_module()
+    row = {
+        "status": "ok",
+        "generation_s": 1.0,
+        "runtime_us_per_point": 0.25,
+        "all_flow_status": "ok",
+        "all_flow_generation_s": 2.0,
+        "all_flow_runtime_us_per_point": 0.5,
+    }
+
+    cells = table._render_mode_cells(
+        row,
+        mode_key="amplicol",
+        ref_generation=1.0,
+        ref_runtime=0.25,
+        ref_all_flow_generation=2.0,
+        ref_all_flow_runtime=0.5,
+    )
+
+    na = r"\textcolor{black!45}{\texttt{N/A}}"
+    assert cells == [
+        r"\texttt{1}",
+        r"\texttt{0.25}",
+        na,
+        r"\texttt{2}",
+        r"\texttt{0.5}",
+        na,
+        "",
+    ]
+    assert (
+        table._ratio_against_built_in(
+            row,
+            row,
+            mode_key="amplicol",
+            status_key="status",
+            value_key="generation_s",
+        )
+        == ""
+    )
 
 
 def _write_lc_cache(

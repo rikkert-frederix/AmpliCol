@@ -415,29 +415,33 @@ def render_table(
             + (
                 r"L{0.78in} L{0.40in} L{0.94in} "
                 r"r L{0.42in} r L{0.42in} r "
-                r"r L{0.42in} r L{0.42in} r L{0.58in}@{}}"
+                r"@{}p{0.10in}@{} "
+                r"r L{0.42in} r L{0.42in} r@{}}"
                 if compare_to_built_in
-                else r"L{0.92in} L{0.48in} L{0.86in} r r r r r r L{0.96in}@{}}"
+                else (
+                    r"L{0.92in} L{0.48in} L{0.86in} r r r "
+                    r"@{}p{0.10in}@{} r r r@{}}"
+                )
             )
         ),
         r"\toprule",
         (
             r"\textbf{n} & \textbf{process} & \textbf{route} & \textbf{setup} "
             + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{selected flow, helicity sum}}}} "
+            + r"& "
             + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{all flows, fixed helicity}}}} "
-            r"& \textbf{notes} \\"
+            r"\\"
         ),
         (
             r"& & & & \textbf{gen [s]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
             + r"& \textbf{wall [us/pt]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
-            + r"& \textbf{eval [us/pt]} & \textbf{gen [s]} "
+            + r"& \textbf{eval [us/pt]} & & \textbf{gen [s]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
             + r"& \textbf{wall [us/pt]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
-            + r"& \textbf{eval [us/pt]} "
-            + r"& \\"
+            + r"& \textbf{eval [us/pt]} \\"
         ),
         r"\midrule",
         r"\endfirsthead",
@@ -445,20 +449,20 @@ def render_table(
         (
             r"\textbf{n} & \textbf{process} & \textbf{route} & \textbf{setup} "
             + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{selected flow, helicity sum}}}} "
+            + r"& "
             + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{all flows, fixed helicity}}}} "
-            r"& \textbf{notes} \\"
+            r"\\"
         ),
         (
             r"& & & & \textbf{gen [s]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
             + r"& \textbf{wall [us/pt]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
-            + r"& \textbf{eval [us/pt]} & \textbf{gen [s]} "
+            + r"& \textbf{eval [us/pt]} & & \textbf{gen [s]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
             + r"& \textbf{wall [us/pt]} "
             + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
-            + r"& \textbf{eval [us/pt]} "
-            + r"& \\"
+            + r"& \textbf{eval [us/pt]} \\"
         ),
         r"\midrule",
         r"\endhead",
@@ -539,8 +543,12 @@ def render_table(
                         value_key="all_flow_wall_us_per_point",
                     ),
                     cells[5],
-                    cells[6],
                 ]
+            cells = (
+                [*cells[:5], "", *cells[5:10]]
+                if compare_to_built_in
+                else [*cells[:3], "", *cells[3:6]]
+            )
             lines.append(
                 " & ".join(
                     [
@@ -609,6 +617,15 @@ def render_table(
                 r"showed no significant Z-family gain.  ASM remains a scalar "
                 r"AArch64 diagnostic.  The driver keeps generated artifacts under "
                 + rf"\texttt{{{_latex_escape(output_root)}}}."
+                + (
+                    r"  \AC's generated-library time is reported under wall; its "
+                    r"separate eval metric is N/A."
+                )
+                + (
+                    r"  Its \texttt{vs blt-in} cells are left blank."
+                    if compare_to_built_in
+                    else ""
+                )
                 + (
                     r"  In this external-model table, each \texttt{vs blt-in} entry "
                     r"is the adjacent generation- or wall-time ratio to the matching "
@@ -721,8 +738,8 @@ def _render_mode_cells(
     if mode_key == "amplicol":
         selected = [
             _format_plain(generation),
-            _missing(color="black!45"),
             _format_plain(runtime),
+            _missing(color="black!45"),
         ]
     else:
         selected = [
@@ -783,7 +800,11 @@ def _render_timing_triplet(
     wall = _optional_float(row.get(wall_key))
     runtime = _optional_float(row.get(runtime_key))
     if mode_key == "amplicol":
-        return [_format_plain(generation), _missing(color="black!45"), _format_plain(runtime)]
+        return [
+            _format_plain(generation),
+            _format_plain(runtime),
+            _missing(color="black!45"),
+        ]
     return [
         _format_with_ratio(generation, ref_generation),
         _format_with_ratio(wall, ref_runtime),
@@ -800,7 +821,7 @@ def _ratio_against_built_in(
     value_key: str,
 ) -> str:
     if mode_key == "amplicol":
-        return _missing(color="black!45")
+        return ""
     if row.get(status_key) != "ok" or built_in_row.get(status_key) != "ok":
         return _missing(color="black!45")
     value = _optional_float(row.get(value_key))

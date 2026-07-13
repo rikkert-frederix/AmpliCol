@@ -787,15 +787,15 @@ than \(10^{-15}\).  The process-matrix tables below use the same selected- and
 all-flow runtime semantics.  Fast changed-path cells and the two memory-study
 cases were regenerated with the compact writer; validated expensive entries
 that were unaffected by the writer remain in the cache.
-
-\paragraph{High-multiplicity AArch64 limit.}
-For \(d\bar d\to t\bar t+7g\), an all-flow O1 build hit SymJIT's
-\texttt{x < 4096} assertion because its stack frame exceeded the shifted
-12-bit ADD/SUB immediate.  Patch 0003 splits the adjustment, and its regression
-and the matrix retry passed that point.  The retry later reached
-\texttt{generic\_stage\_9\_subset\_10} but peaked at 30.118 GiB.  The selected
-O1 artifact remains valid at \(5.4\times10^{-14}\) relative difference; the
-all-flow slot is marked \texttt{>30 GB RAM}, with partial outputs retained.
+\paragraph{High-multiplicity AArch64 memory limit.}
+For \(d\bar d\to t\bar t+7g\), the managed SymJIT stack-adjustment patch is
+still required for frames above the shifted 12-bit ADD/SUB range.  The latest
+upstream branch adds paired complex loads/stores but does not yet split that
+adjustment.  With the patch, all-flow O1 generation progressed to
+\texttt{generic\_stage\_9\_subset\_10} before the process tree reached
+30.118 GiB.  The selected artifact remains valid at
+\(5.4\times10^{-14}\) relative difference; the all-flow slot is marked
+\texttt{>30 GB RAM}, with partial outputs retained.
 
 
 \input{result_matrix_table.tex}
