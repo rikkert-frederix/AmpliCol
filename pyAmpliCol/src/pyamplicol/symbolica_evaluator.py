@@ -183,6 +183,7 @@ def _compile_symbolica_outputs(
     merge_evaluators_strategy: bool,
     verbose_evaluator_build: bool,
     aliases: Sequence[tuple[Any, Any]] = (),
+    functions: Mapping[tuple[Any, tuple[Any, ...]], Any] | None = None,
     real_params: Sequence[int] = (),
     symbolica_settings: SymbolicaEvaluatorSettings | None = None,
     jit_compile: bool = True,
@@ -230,6 +231,7 @@ def _compile_symbolica_outputs(
                 merge_evaluators_strategy=merge_evaluators_strategy,
                 verbose_evaluator_build=verbose_evaluator_build,
                 aliases=aliases,
+                functions=functions,
                 real_params=real_params,
                 symbolica_settings=unchunked_settings,
                 jit_compile=jit_compile,
@@ -262,6 +264,7 @@ def _compile_symbolica_outputs(
         jit_compile=jit_compile,
     )
     alias_kwargs = {"aliases": list(aliases)} if aliases else {}
+    function_kwargs = {"functions": dict(functions)} if functions else {}
     if merge_evaluators_strategy:
         _report_progress(
             progress_callback,
@@ -286,6 +289,7 @@ def _compile_symbolica_outputs(
             evaluator = outputs[0].evaluator(
                 params,
                 **alias_kwargs,
+                **function_kwargs,
                 **evaluator_kwargs,
             )
             evaluator_construct_s = time.perf_counter() - evaluator_started
@@ -323,6 +327,7 @@ def _compile_symbolica_outputs(
                 other = expression.evaluator(
                     params,
                     **alias_kwargs,
+                    **function_kwargs,
                     **evaluator_kwargs,
                 )
                 evaluator_construct_s += time.perf_counter() - merge_construct_started
@@ -406,6 +411,7 @@ def _compile_symbolica_outputs(
             outputs,
             params,
             **alias_kwargs,
+            **function_kwargs,
             **evaluator_kwargs,
         )
         evaluator_construct_s = time.perf_counter() - evaluator_started

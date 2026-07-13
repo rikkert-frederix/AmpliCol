@@ -5,12 +5,14 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import pyamplicol
 import pyamplicol.__main__ as cli
 from pyamplicol.__main__ import (
+    _apply_model_generation_symbolica_defaults,
     _attach_native_probe_comparison,
     _attach_rusticol_probe_comparison_from_runtime,
     _generation_build_kwargs,
@@ -79,6 +81,8 @@ def test_cli_help_hides_legacy_non_dag_commands(capsys) -> None:
     assert "generate-process" in help_text
     assert "time-process" in help_text
     assert "process-plan" in help_text
+    assert "inspect-model" in help_text
+    assert "compile-model" in help_text
     assert "validate-z-gluon-family" not in help_text
     assert "benchmark-z-gluon-modes" not in help_text
     assert "profile-tensor-evaluator" not in help_text
@@ -95,6 +99,165 @@ def test_cli_generate_process_help_hides_legacy_backend_options(capsys) -> None:
     assert "--runtime-backend" not in help_text
     assert "numeric-tensor-network" not in help_text
     assert "--symbolica-evaluator-backend" in help_text
+    assert "--run-card" in help_text
+
+
+def test_cli_run_card_supplies_positionals_paths_and_cli_overrides(
+    tmp_path: Path,
+) -> None:
+    card_dir = tmp_path / "cards"
+    card_dir.mkdir()
+    card = card_dir / "run.toml"
+    card.write_text(
+        """
+[arguments]
+process = "d d~ > z g"
+output_dir = "../outputs/card"
+symbolica_iterations = 7
+max_coupling_order = ["QED=1"]
+json = true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    from_card = parse_args(["generate-process", "--run-card", str(card)])
+    assert from_card.process == "d d~ > z g"
+    assert from_card.output_dir == (tmp_path / "outputs" / "card").resolve()
+    assert from_card.symbolica_iterations == 7
+    assert from_card.max_coupling_order == ["QED=1"]
+    assert from_card.json is True
+    assert from_card.symbolica_jit_optimization_level == 3
+
+    overridden = parse_args(
+        [
+            "generate-process",
+            "u d~ > w+ z",
+            str(tmp_path / "cli-output"),
+            "--run-card",
+            str(card),
+            "--symbolica-iterations",
+            "10",
+        ]
+    )
+    assert overridden.process == "u d~ > w+ z"
+    assert overridden.output_dir == tmp_path / "cli-output"
+    assert overridden.symbolica_iterations == 10
+
+
+def test_model_run_card_resolves_model_source_relative_to_card(
+    tmp_path: Path,
+) -> None:
+    card_dir = tmp_path / "cards"
+    card_dir.mkdir()
+    card = card_dir / "inspect.toml"
+    card.write_text(
+        '[arguments]\nmodel = "../models/sm.json"\njson = true\n',
+        encoding="utf-8",
+    )
+
+    args = parse_args(["inspect-model", "--run-card", str(card)])
+
+    assert args.model == str((tmp_path / "models" / "sm.json").resolve())
+    assert args.json is True
+
+
+def test_cli_inspect_and_compile_builtin_model(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    assert (
+        main(
+            [
+                "inspect-model",
+                "--model",
+                "BUILTIN_SM",
+                "--no-model-cache",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    inspected = json.loads(capsys.readouterr().out)
+    assert inspected["name"] == "built-in-sm"
+    assert inspected["supported"] is True
+    assert inspected["capabilities"]["parameter_count"] == 50
+
+    output = tmp_path / "built-in"
+    parameters = tmp_path / "model-parameters.json"
+    assert (
+        main(
+            [
+                "compile-model",
+                "--model",
+                "BUILTIN_SM",
+                "--output",
+                str(output),
+                "--parameter-output",
+                str(parameters),
+                "--no-model-cache",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    compiled = json.loads(capsys.readouterr().out)
+    artifact = Path(compiled["output"])
+    assert artifact.name == "built-in.pyAmplicol-model.json"
+    assert artifact.is_file()
+    assert parameters.is_file()
+    assert json.loads(parameters.read_text(encoding="utf-8"))["alpha_s"] == [
+        0.118,
+        0.0,
+    ]
+
+
+def test_cli_run_card_rejects_unknown_and_missing_arguments(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    unknown = tmp_path / "unknown.toml"
+    unknown.write_text(
+        '[arguments]\nprocess = "d d~ > z"\nnot_an_argument = 1\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit) as exc:
+        parse_args(["processes", "--run-card", str(unknown)])
+    assert exc.value.code == 2
+    assert "not_an_argument" in capsys.readouterr().err
+
+    missing = tmp_path / "missing.toml"
+    missing.write_text("[arguments]\njson = true\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        parse_args(["processes", "--run-card", str(missing)])
+    assert exc.value.code == 2
+    assert "missing required arguments: process" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("command", "card_name"),
+    (
+        ("generate-process", "builtin_sm_generate.toml"),
+        ("generate-process", "ufo_sm_generate.toml"),
+        ("generate-process", "json_sm_generate.toml"),
+        ("compile-model", "compile_sm_model.toml"),
+        ("generate-process", "compiled_sm_generate.toml"),
+        ("time-process", "time_with_parameters.toml"),
+        ("processes", "multiparticle_processes.toml"),
+        ("generate-process", "json_sm_nlc_generate.toml"),
+        ("generate-process", "json_sm_full_generate.toml"),
+    ),
+)
+def test_documented_example_run_cards_parse(
+    command: str,
+    card_name: str,
+) -> None:
+    card = Path(__file__).resolve().parents[2] / "examples" / card_name
+
+    args = parse_args([command, "--run-card", str(card)])
+
+    assert args.command == command
+    assert args.run_card == card.resolve()
 
 
 def test_cli_compare_amplicol_help_hides_legacy_me_test_and_native_backends(
@@ -605,6 +768,92 @@ def test_cli_generate_process_minimal_command_uses_fast_rusticol_jit_defaults(
     assert args.numerical_current_seed == 12345
 
 
+def test_external_models_default_to_symbolica_factor_collection() -> None:
+    args = parse_args(
+        [
+            "generate-process",
+            "--model",
+            "model.json",
+            "d d~ > Z g",
+            "process",
+        ]
+    )
+    kwargs = _runtime_evaluator_kwargs(args)
+
+    assert kwargs["symbolica_collect_factors"] is None
+    _apply_model_generation_symbolica_defaults(kwargs, external_model=True)
+    assert kwargs["symbolica_collect_factors"] is True
+
+    builtin_kwargs = _runtime_evaluator_kwargs(
+        parse_args(["generate-process", "d d~ > z g", "process"])
+    )
+    _apply_model_generation_symbolica_defaults(
+        builtin_kwargs,
+        external_model=False,
+    )
+    assert builtin_kwargs["symbolica_collect_factors"] is False
+
+
+def test_external_single_process_reuses_enumeration_compiled_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    args = parse_args(
+        [
+            "generate-process",
+            "--model",
+            "model.json",
+            "d d~ > z",
+            str(tmp_path / "process"),
+        ]
+    )
+    compiled = SimpleNamespace(
+        name="external-sm",
+        source={"kind": "ufo-model-loader-json"},
+        conversion_seconds=0.25,
+    )
+    entry = SimpleNamespace(
+        key="d_dbar_to_z",
+        process="d d~ > Z",
+        ir=SimpleNamespace(to_json_dict=lambda: {}),
+    )
+    process_set = SimpleNamespace(request="d d~ > z", entries=(entry,))
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        cli,
+        "_model_process_set_from_args",
+        lambda _args: (compiled, {}, process_set),
+    )
+
+    def fake_generate(received_args, received_entry):
+        observed["compiled"] = received_args._compiled_model
+        observed["entry"] = received_entry
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_generate_generic_dag_artifact", fake_generate)
+
+    assert cli._cmd_generate_process(args) == 0
+    assert observed == {"compiled": compiled, "entry": entry}
+
+
+def test_external_model_factor_collection_has_explicit_opt_out() -> None:
+    args = parse_args(
+        [
+            "generate-process",
+            "--model",
+            "model.json",
+            "--no-symbolica-collect-factors",
+            "d d~ > Z g",
+            "process",
+        ]
+    )
+    kwargs = _runtime_evaluator_kwargs(args)
+
+    _apply_model_generation_symbolica_defaults(kwargs, external_model=True)
+    assert kwargs["symbolica_collect_factors"] is False
+
+
 def test_cli_generate_process_disables_numerical_current_passes_for_nlc_default(
     tmp_path: Path,
 ) -> None:
@@ -823,6 +1072,11 @@ def test_cli_generate_process_set_writes_root_manifest(
         for cmd in launched
     )
     assert all(kwargs["start_new_session"] is True for kwargs in launched_kwargs)
+    expected_source = str(Path(cli.__file__).resolve().parents[1])
+    assert all(
+        str(kwargs["env"]["PYTHONPATH"]).split(os.pathsep)[0] == expected_source
+        for kwargs in launched_kwargs
+    )
     assert manifest["default_process_key"] == "d_dbar_to_z_g"
     assert [entry["key"] for entry in manifest["processes"]] == [
         "d_dbar_to_z_g",
@@ -3209,9 +3463,12 @@ def test_memory_watchdog_writes_peak_rss_report(tmp_path: Path) -> None:
     if report["peak_rss_bytes"] is not None:
         assert report["peak_rss_bytes"] > 0
         assert report["peak_rss_gb"] > 0.0
-    if report["physical_footprint_supported"]:
+    if report["physical_footprint_polling_available"]:
         assert report["peak_physical_footprint_bytes"] > 0
         assert report["peak_physical_footprint_gb"] > 0.0
+    else:
+        assert report["peak_physical_footprint_bytes"] is None
+        assert report["peak_physical_footprint_gb"] is None
 
 
 def test_cli_version_mode_does_not_import_native_dependencies(capsys) -> None:

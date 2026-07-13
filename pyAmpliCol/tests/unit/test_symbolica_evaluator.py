@@ -46,6 +46,29 @@ def test_jit_artifact_reports_materialization_progress(tmp_path) -> None:
     assert (tmp_path / manifest["evaluator_state_path"]).is_file()
 
 
+def test_symbolica_output_compiler_forwards_function_definitions() -> None:
+    function, parameter, formal = S("compiled_function", "parameter", "formal")
+    evaluator = _compile_symbolica_outputs(
+        (function(parameter),),
+        [parameter],
+        merge_evaluators_strategy=False,
+        verbose_evaluator_build=False,
+        functions={(function, (formal,)): formal**2 + 1},
+        real_params=(0,),
+        symbolica_settings=SymbolicaEvaluatorSettings(
+            iterations=1,
+            n_cores=1,
+            jit_optimization_level=0,
+        ),
+        jit_compile=True,
+        label="function_definition_probe",
+    )
+
+    result = evaluator.evaluate(np.array([[2.0], [3.0]], dtype=np.float64))
+
+    np.testing.assert_allclose(result, np.array([[5.0], [10.0]]))
+
+
 def test_chunk_artifacts_materialize_concurrently_in_stable_order(tmp_path) -> None:
     barrier = threading.Barrier(3, timeout=2.0)
 

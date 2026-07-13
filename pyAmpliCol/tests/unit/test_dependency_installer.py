@@ -29,6 +29,8 @@ def test_dependency_smoke_test_checks_rusticol_runtime_api() -> None:
     smoke = installer.smoke_test_code(include_gammaloop=False)
 
     assert "import rusticol" in smoke
+    assert "import ufo_model_loader" in smoke
+    assert 'version("ufo-model-loader") != "0.1.7"' in smoke
     assert 'getattr(rusticol, "Runtime", None)' in smoke
     for method in (
         "load",
@@ -47,6 +49,11 @@ def test_dependency_manifest_records_rusticol_source() -> None:
 
     assert installer.RUSTICOL_DIR.name == "rusticol"
     assert installer.RUSTICOL_WHEEL_DIR.name == "rusticol"
+    assert installer.UFO_MODEL_LOADER_DIR.name == "ufo-model-loader"
+    assert installer.UFO_MODEL_LOADER_VERSION == "0.1.7"
+    assert installer.UFO_MODEL_LOADER_REV == (
+        "9cb4deeae40ddd64184049af07ac1d03ce5f6162"
+    )
 
 
 def test_dependency_installer_uses_upstream_symbolica_dev_and_skips_gammaloop_by_default() -> None:
@@ -154,13 +161,16 @@ def test_dependency_build_wheels_installs_rusticol_by_default(monkeypatch) -> No
         calls.append(("install", wheel.parent.name, wheel.name, None))
 
     monkeypatch.setattr(installer, "build_maturin_wheel", fake_build)
+    monkeypatch.setattr(installer, "build_python_wheel", fake_build)
     monkeypatch.setattr(installer, "install_wheel", fake_install)
     monkeypatch.setattr(installer, "ensure_gammaloop_api_absent", lambda: None)
 
     installer.build_wheels_and_install(include_gammaloop=False)
 
     assert ("build", "symbolica-community", "symbolica", True) in calls
+    assert ("build", "ufo-model-loader", "ufo-model-loader", None) in calls
     assert ("build", "rusticol", "rusticol", True) in calls
+    assert ("install", "ufo-model-loader", "ufo-model-loader.whl", None) in calls
     assert ("install", "rusticol", "rusticol.whl", None) in calls
 
 

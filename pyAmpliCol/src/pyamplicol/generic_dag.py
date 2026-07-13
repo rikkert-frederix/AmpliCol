@@ -16,6 +16,45 @@ from .processes import ProcessOptions
 
 ColorAccuracy = Literal["lc", "nlc", "full"]
 
+_LC_FIERZ_SINGLET_BASIS = "lc-fierz-singlet"
+_LC_COLOR_IDENTITY_CLOSURE_PREFIX = "lc-color-identity-closure:"
+
+
+def _lc_color_identity_closure_key(labels: Iterable[int]) -> str:
+    normalized = tuple(sorted(set(int(label) for label in labels)))
+    return _LC_COLOR_IDENTITY_CLOSURE_PREFIX + ",".join(
+        str(label) for label in normalized
+    )
+
+
+def _lc_color_identity_closures(
+    basis_keys: Iterable[str],
+) -> tuple[frozenset[int], ...]:
+    closures: set[frozenset[int]] = set()
+    for key in basis_keys:
+        if not key.startswith(_LC_COLOR_IDENTITY_CLOSURE_PREFIX):
+            continue
+        payload = key.removeprefix(_LC_COLOR_IDENTITY_CLOSURE_PREFIX)
+        try:
+            labels = frozenset(int(label) for label in payload.split(",") if label)
+        except ValueError:
+            return (frozenset(),)
+        if not labels:
+            return (frozenset(),)
+        closures.add(labels)
+    return tuple(sorted(closures, key=lambda labels: tuple(sorted(labels))))
+
+
+def _lc_color_identity_closures_compatible(
+    closures: Iterable[frozenset[int]],
+    sector: LCColorSector,
+) -> bool:
+    groups = tuple(frozenset(group) for group in sector.coloured_label_groups)
+    return all(
+        bool(closure) and any(closure.issubset(group) for group in groups)
+        for closure in closures
+    )
+
 
 @dataclass(frozen=True)
 class ColorState:
@@ -363,6 +402,7 @@ class ColorEngine:
         self._shared_lc_orderings = (
             color_plan.color_accuracy == "lc"
             and bool(color_plan.sectors)
+            and bool(color_plan.coloured_labels)
         )
         self._shared_lc_all_ordering_symmetry = bool(
             shared_lc_all_ordering_symmetry
@@ -399,8 +439,12 @@ class ColorEngine:
             for sector in color_plan.sectors
         )
         self._shared_lc_sector_ids_by_word: dict[tuple[int, ...], tuple[int, ...]] = {}
+        self._shared_lc_sector_ids_by_segment: dict[
+            tuple[int, ...], tuple[int, ...]
+        ] = {}
         if self._shared_lc_orderings:
             sector_ids_by_word: dict[tuple[int, ...], list[int]] = {}
+            sector_ids_by_segment: dict[tuple[int, ...], set[int]] = {}
             segments: set[tuple[int, ...]] = set()
             for sector in color_plan.sectors:
                 for word in sector.color_words:
@@ -418,9 +462,17 @@ class ColorEngine:
                     )
                     for start in range(len(normalized_word)):
                         for stop in range(start + 1, len(normalized_word) + 1):
-                            segments.add(tuple(normalized_word[start:stop]))
+                            segment = tuple(normalized_word[start:stop])
+                            segments.add(segment)
+                            sector_ids_by_segment.setdefault(segment, set()).add(
+                                int(sector.id)
+                            )
             self._shared_lc_sector_ids_by_word = {
                 word: tuple(ids) for word, ids in sector_ids_by_word.items()
+            }
+            self._shared_lc_sector_ids_by_segment = {
+                segment: tuple(sorted(ids))
+                for segment, ids in sector_ids_by_segment.items()
             }
             self._shared_lc_segments = frozenset(segments)
         else:
@@ -469,6 +521,8 @@ class ColorEngine:
         left: ColorState,
         right: ColorState,
         vertex: Vertex,
+        *,
+        ordered_external_labels: tuple[int, ...] = (),
     ) -> tuple[ColorFlow, ...]:
         if left.accuracy != right.accuracy:
             return ()
@@ -498,13 +552,24 @@ class ColorEngine:
             groups = self._lc_combined_line_groups(left, right, vertex)
             if groups is None:
                 return ()
+            projected = self._lc_projected_basis_and_weight(
+                left,
+                right,
+                vertex,
+                ordered_external_labels,
+            )
+            if projected is None:
+                return ()
+            basis_key, weight = projected
             return (
                 ColorFlow(
                     state=ColorState(
                         accuracy=left.accuracy,
                         sector_id=0,
                         line_groups=groups,
-                    )
+                        basis_key=basis_key,
+                    ),
+                    weight=weight,
                 ),
             )
         if left.sector_id != right.sector_id:
@@ -512,15 +577,127 @@ class ColorEngine:
         groups = self._lc_combined_line_groups(left, right, vertex)
         if groups is None:
             return ()
+        projected = self._lc_projected_basis_and_weight(
+            left,
+            right,
+            vertex,
+            ordered_external_labels,
+        )
+        if projected is None:
+            return ()
+        basis_key, weight = projected
         return (
             ColorFlow(
                 state=ColorState(
                     accuracy=left.accuracy,
                     sector_id=left.sector_id,
                     line_groups=groups,
-                )
+                    basis_key=basis_key,
+                ),
+                weight=weight,
             ),
         )
+
+    def _lc_projected_basis_and_weight(
+        self,
+        left: ColorState,
+        right: ColorState,
+        vertex: Vertex,
+        ordered_external_labels: tuple[int, ...],
+    ) -> tuple[tuple[str, ...], tuple[float, float]] | None:
+        basis = set(left.basis_key) | set(right.basis_key)
+        structure = self.model.vertex_color_structure(vertex)
+        reps = tuple(abs(self.model.color_rep(pdg)) for pdg in vertex.particles)
+        has_fierz_singlet = _LC_FIERZ_SINGLET_BASIS in basis
+        weight = (1.0, 0.0)
+
+        if has_fierz_singlet:
+            consumes_singlet_exchange = (
+                structure == "fundamental-generator"
+                and reps[2] == 3
+                and sorted(reps[:2]) == [3, 8]
+            )
+            if not consumes_singlet_exchange:
+                return None
+            basis.remove(_LC_FIERZ_SINGLET_BASIS)
+
+        if (
+            structure == "fundamental-generator"
+            and reps[:2] == (3, 3)
+            and reps[2] == 8
+            and self._lc_labels_close_one_quark_line(ordered_external_labels)
+        ):
+            basis.add(_LC_FIERZ_SINGLET_BASIS)
+            weight = (1.0 / 3.0, 0.0)
+
+        if (
+            self._shared_lc_orderings
+            and structure == "color-identity"
+            and sorted(reps[:2]) == [3, 3]
+            and reps[2] == 1
+        ):
+            colored_labels = tuple(
+                sorted(
+                    label
+                    for label in ordered_external_labels
+                    if label in self._shared_lc_coloured_labels
+                )
+            )
+            if colored_labels:
+                basis.add(_lc_color_identity_closure_key(colored_labels))
+
+        if self._shared_lc_orderings and not self._shared_lc_basis_has_compatible_sector(
+            basis,
+            ordered_external_labels=ordered_external_labels,
+        ):
+            return None
+
+        return tuple(sorted(basis)), weight
+
+    def _shared_lc_basis_has_compatible_sector(
+        self,
+        basis_keys: Iterable[str],
+        *,
+        ordered_external_labels: Iterable[int] = (),
+    ) -> bool:
+        closures = _lc_color_identity_closures(basis_keys)
+        if not closures:
+            return True
+        colored_segment = tuple(
+            label
+            for label in ordered_external_labels
+            if label in self._shared_lc_coloured_labels
+        )
+        sector_ids = (
+            self._shared_lc_sector_ids_by_segment.get(colored_segment, ())
+            if colored_segment
+            else tuple(self._sector_by_id)
+        )
+        return any(
+            sector is not None
+            and _lc_color_identity_closures_compatible(closures, sector)
+            for sector_id in sector_ids
+            for sector in (self._sector_by_id.get(sector_id),)
+        )
+
+    def _lc_labels_close_one_quark_line(
+        self,
+        ordered_external_labels: tuple[int, ...],
+    ) -> bool:
+        colored = tuple(
+            label
+            for label in ordered_external_labels
+            if label in self._shared_lc_coloured_labels
+        )
+        if not colored:
+            return False
+        labels = set(colored)
+        for sector, words in self._shared_lc_words_by_sector:
+            if not any(_word_contains_ordered_segment(word, colored) for word in words):
+                continue
+            if any(labels.issubset(set(group)) for group in sector.line_label_groups):
+                return True
+        return False
 
     def _lc_combined_line_groups(
         self,
@@ -591,6 +768,12 @@ class ColorEngine:
         sector = self._sector_by_id.get(left.sector_id)
         if sector is None:
             return (ColorFlow(state=left),)
+        basis = tuple(sorted(set(left.basis_key) | set(right.basis_key)))
+        if not _lc_color_identity_closures_compatible(
+            _lc_color_identity_closures(basis),
+            sector,
+        ):
+            return ()
         full_labels = set(_mask_labels(full_mask))
         sector_labels = set(sector.singlet_labels)
         for group in sector.line_label_groups:
@@ -643,6 +826,10 @@ class ColorEngine:
             ) is not None
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
         if sector is None:
+            return True
+        if sector.kind == "singlet" and all(
+            not word for word in sector.compatibility_words
+        ):
             return True
         return any(
             _ordered_combination_matches_word(
@@ -769,6 +956,10 @@ class ColorEngine:
         sector = self._sector_by_id.get(left_index.color_state.sector_id)
         if sector is None:
             return True
+        if sector.kind == "singlet" and all(
+            not word for word in sector.compatibility_words
+        ):
+            return True
         return any(
             _closure_combination_matches_word(
                 _labels_projected_to_word(left_index.ordered_external_labels, word),
@@ -822,10 +1013,11 @@ class ColorEngine:
         if not self._shared_lc_orderings:
             return ()
         flows: list[ColorFlow] = []
-        word = self._shared_lc_closure_word(left_index, right_index)
-        if word is None:
+        closure = self._shared_lc_closure(left_index, right_index)
+        if closure is None:
             return ()
-        for sector_id in self._shared_lc_sector_ids_by_word.get(word, ()):
+        _word, sector_ids = closure
+        for sector_id in sector_ids:
             flows.append(
                 ColorFlow(
                     state=ColorState(
@@ -904,6 +1096,14 @@ class ColorEngine:
         left_index: CurrentIndex,
         right_index: CurrentIndex,
     ) -> tuple[int, ...] | None:
+        closure = self._shared_lc_closure(left_index, right_index)
+        return None if closure is None else closure[0]
+
+    def _shared_lc_closure(
+        self,
+        left_index: CurrentIndex,
+        right_index: CurrentIndex,
+    ) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
         word = tuple(
             label
             for label in (
@@ -914,9 +1114,21 @@ class ColorEngine:
         )
         if not word:
             return None
-        if word not in self._shared_lc_sector_ids_by_word:
+        sector_ids = self._shared_lc_sector_ids_by_word.get(word, ())
+        if not sector_ids:
             return None
-        return word
+        closures = _lc_color_identity_closures(
+            (*left_index.color_state.basis_key, *right_index.color_state.basis_key)
+        )
+        compatible_sector_ids = tuple(
+            sector_id
+            for sector_id in sector_ids
+            if (sector := self._sector_by_id.get(sector_id)) is not None
+            and _lc_color_identity_closures_compatible(closures, sector)
+        )
+        if not compatible_sector_ids:
+            return None
+        return word, compatible_sector_ids
 
 
 class GenericDAGCompiler:
@@ -1386,20 +1598,23 @@ class GenericDAGCompiler:
                                 )
                                 quantum_flow_cache[quantum_flow_key] = quantum_flows
                             for quantum_flow in quantum_flows:
-                                for color_flow in color_engine.combine(
-                                    left.index.color_state,
-                                    right.index.color_state,
-                                    vertex,
-                                ):
-                                    if not _lc_line_groups_within_limit(
-                                        color_flow.state,
-                                        self.max_lc_current_line_groups,
+                                for variant_index, (
+                                    variant_ordered_labels,
+                                    symmetry_weight,
+                                ) in enumerate(order_variants):
+                                    for color_flow in color_engine.combine(
+                                        left.index.color_state,
+                                        right.index.color_state,
+                                        vertex,
+                                        ordered_external_labels=(
+                                            variant_ordered_labels
+                                        ),
                                     ):
-                                        continue
-                                    for variant_index, (
-                                        variant_ordered_labels,
-                                        symmetry_weight,
-                                    ) in enumerate(order_variants):
+                                        if not _lc_line_groups_within_limit(
+                                            color_flow.state,
+                                            self.max_lc_current_line_groups,
+                                        ):
+                                            continue
                                         out_index = CurrentIndex(
                                             particle_id=vertex.particles[2],
                                             external_mask=mask,
@@ -1430,7 +1645,13 @@ class GenericDAGCompiler:
                                             is_source=False,
                                         )
                                         signed_color_weight = _complex_weight_mul(
-                                            color_flow.weight,
+                                            _complex_weight_mul(
+                                                color_flow.weight,
+                                                self.model.vertex_color_weight(
+                                                    vertex,
+                                                    color_accuracy=process_ir.color_accuracy,
+                                                ),
+                                            ),
                                             symmetry_weight,
                                         )
                                         key = (
@@ -1677,6 +1898,8 @@ class GenericDAGCompiler:
                                 continue
                             if not color_engine.vertex_allowed(vertex):
                                 continue
+                            if not self.model.vertex_closure_allowed(vertex):
+                                continue
                             coupling_orders = self.model.combine_coupling_orders(
                                 left.index,
                                 right.index,
@@ -1716,7 +1939,13 @@ class GenericDAGCompiler:
                                     kind="vertex-closure",
                                     left_id=left_id,
                                     right_id=right_id,
-                                    color_weight=color_flow.weight,
+                                    color_weight=_complex_weight_mul(
+                                        color_flow.weight,
+                                        self.model.vertex_color_weight(
+                                            vertex,
+                                            color_accuracy=process_ir.color_accuracy,
+                                        ),
+                                    ),
                                     color_sector_id=color_flow.state.sector_id,
                                     vertex_kind=vertex.kind,
                                     vertex_particles=vertex.particles,
@@ -1886,8 +2115,9 @@ def infer_minimal_coupling_order_limits(
     This is an opt-in generation accelerator.  It never recognizes a whole
     process family; it asks the model which local vertices can connect the
     external states, tracks UFO-style coupling orders, and returns the
-    component-wise maximum over all minimal-total-order closure paths.  The
-    returned dictionary can be used as ordinary ``max_coupling_orders``.
+    component-wise maximum over all closure paths with the lowest
+    model-declared hierarchy-weighted order. The returned dictionary can be
+    used as ordinary ``max_coupling_orders``.
     """
 
     active_model = model or AmplicolSMLeadingColorModel()
@@ -1954,11 +2184,19 @@ def infer_minimal_coupling_order_limits(
     )
     if not totals:
         return {}
-    minimum_total_order = min(_coupling_order_degree(total) for total in totals)
+    hierarchies = {
+        str(name).upper(): max(1, int(value))
+        for name, value in active_model.coupling_order_hierarchies().items()
+    }
+    minimum_total_order = min(
+        _coupling_order_degree(total, hierarchies=hierarchies)
+        for total in totals
+    )
     minimal_totals = tuple(
         total
         for total in totals
-        if _coupling_order_degree(total) == minimum_total_order
+        if _coupling_order_degree(total, hierarchies=hierarchies)
+        == minimum_total_order
     )
     return _coupling_order_envelope(minimal_totals)
 
@@ -2174,9 +2412,10 @@ def _global_helicity_flip_equivalence_safe(
         if model.mass(pdg) != 0.0:
             return False
     for interaction in dag.interactions:
-        orders = model.vertex_coupling_orders(
-            Vertex(interaction.vertex_kind, interaction.vertex_particles)
-        )
+        vertex = Vertex(interaction.vertex_kind, interaction.vertex_particles)
+        orders = model.vertex_coupling_orders(vertex)
+        if not orders and model.vertex_is_internal_contact_fragment(vertex):
+            continue
         if not orders or any(name != "QCD" for name, _value in orders):
             return False
     for root in dag.amplitude_roots:
@@ -2608,6 +2847,19 @@ def _positions_contiguous(positions: tuple[int, ...]) -> bool:
     if not positions:
         return True
     return positions == tuple(range(positions[0], positions[-1] + 1))
+
+
+def _word_contains_ordered_segment(
+    word: tuple[int, ...],
+    segment: tuple[int, ...],
+) -> bool:
+    if not segment or len(segment) > len(word):
+        return False
+    width = len(segment)
+    return any(
+        tuple(word[start : start + width]) == segment
+        for start in range(len(word) - width + 1)
+    )
 
 
 def _ordered_combination_matches_word(
@@ -3438,8 +3690,16 @@ def _closure_total_coupling_orders(
     return frozenset(_pareto_minimal_coupling_orders(totals))
 
 
-def _coupling_order_degree(orders: CouplingOrders) -> int:
-    return sum(int(value) for _, value in orders)
+def _coupling_order_degree(
+    orders: CouplingOrders,
+    *,
+    hierarchies: Mapping[str, int] | None = None,
+) -> int:
+    priorities = hierarchies or {}
+    return sum(
+        int(value) * max(1, int(priorities.get(str(name).upper(), 1)))
+        for name, value in orders
+    )
 
 
 def _coupling_order_envelope(orders: Iterable[CouplingOrders]) -> dict[str, int]:

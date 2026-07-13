@@ -1433,8 +1433,9 @@ def test_generic_stage_evaluator_artifact_writer_default_symbolica_bridge(
         jit_compile,
         label,
         progress_callback,
+        functions,
     ):
-        del symbolica_settings, progress_callback
+        del symbolica_settings, progress_callback, functions
         calls.append(
             {
                 "label": label,

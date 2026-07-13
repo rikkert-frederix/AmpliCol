@@ -16,6 +16,7 @@ dependencies = [
     "colorama",
     "tabled",
     "numpy<2.5",
+    "ufo_model_loader @ git+https://github.com/alphal00p/ufo_model_loader.git@9cb4deeae40ddd64184049af07ac1d03ce5f6162",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +33,13 @@ pyamplicol = "pyamplicol.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pyamplicol = ["py.typed"]
+pyamplicol = [
+    "py.typed",
+    "assets/models/**/*.py",
+    "assets/models/**/*.dat",
+    "assets/models/**/*.json",
+    "assets/models/MANIFEST.sha256",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

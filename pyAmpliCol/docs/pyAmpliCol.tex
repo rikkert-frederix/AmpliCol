@@ -76,8 +76,9 @@ the PyO3 runtime \texttt{rusticol}.
 \paragraph{Current status.}
 The generic LC/NLC/full-colour staged-DAG implementation is the production
 \PAC\ workflow.  Process generation writes schema-v2 artifacts loaded by
-\texttt{rusticol}; model parameters are runtime inputs and may be overridden
-from TOML.  The default benchmark route is Rusticol with SymJIT stage
+\texttt{rusticol}.  Run-card arguments may come from TOML, while surviving
+model parameters are runtime inputs supplied through loader-compatible complex
+JSON.  The default benchmark route is Rusticol with SymJIT stage
 evaluators and stage-local inputs.  Selected-flow JIT artifacts measure stage
 chunks around base 128 and run at batch 128; all-flow artifacts use uniform
 chunk 8192 and batch 64.  Both use ten Horner iterations, Symbolica's default
@@ -338,6 +339,104 @@ expanded kinematic expressions.  Fortran AmpliCol is the direct reference for
 zero, one and two quark-line colour matrices; beyond that, pyAmpliCol's generic
 open-line metric is validated through raw-amplitude probes and internal colour
 consistency checks.
+
+\clearpage
+\section{External UFO and JSON Models}
+
+\PAC\ keeps its original hard-coded model under the public name
+\texttt{built-in-sm}, but process generation may instead start from a UFO
+module directory, a JSON serialization produced by
+\href{https://github.com/alphal00p/ufo_model_loader}{\texttt{ufo-model-loader}},
+or an exact-version \texttt{*.pyAmplicol-model.json} file.  UFO and loader JSON
+are two front ends to the same object: the loader first produces its Python
+\texttt{Model}, whose algebraic expressions already use Symbolica syntax.
+A UFO directory is executable Python and is therefore imported in an isolated
+worker only after the user has accepted it as trusted code.  Loader JSON is
+data-only and bypasses that import step.  The conventions follow the
+\href{https://arxiv.org/abs/2304.09883}{UFO 2.0 specification}.
+
+\paragraph{Source compilation.}
+The selected restriction (\texttt{restrict\_default} unless disabled) is
+applied first, followed by loader simplification.  A complete preflight then
+collects unsupported spins, colour representations, functions, form factors,
+counterterms, and fermion-flow cases before expensive tensor lowering starts.
+Particles, parameters, derived couplings, coupling orders, functions,
+propagators, Lorentz tensors, colour tensors, and vertices are normalized into
+an immutable \texttt{CompiledModel}.  Its cache key includes source contents,
+restriction and simplification choices, the compiler version, and dependency
+fingerprints.  Model conversion is measured once and separately from process
+generation; the matrix timings start from this compiled representation.
+
+\Needspace{14\baselineskip}
+\begin{lstlisting}[language=bash]
+env PYTHONPATH=src dependencies/.venv/bin/python -m pyamplicol inspect-model \
+  --model assets/models/json/sm/sm.json
+
+env PYTHONPATH=src dependencies/.venv/bin/python -m pyamplicol compile-model \
+  --model assets/models/ufo/sm \
+  --output outputs/sm.pyAmplicol-model.json
+
+env PYTHONPATH=src dependencies/.venv/bin/python -m pyamplicol generate-process \
+  --model outputs/sm.pyAmplicol-model.json 'd d~ > z g g' outputs/dd_zgg
+\end{lstlisting}
+
+\paragraph{Generic kernel preparation.}
+Each UFO colour--Lorentz--coupling term is processed independently; no rule
+depends on how a particular model author chose tensor names or factorizations.
+UFO indices are converted to typed Spenso indices, then metric, gamma, Lorentz,
+and colour identities are simplified with the Symbolica Community
+Idenso/Spenso routines.  The simplified tensor network is materialized only
+after those algebraic projectors have run.  For every possible output leg,
+\PAC\ orients the resulting rule into a binary current kernel and records its
+parameter names, coupling-order vector, colour weight, source-vertex
+provenance, and propagator contract.
+
+Kernel components remain named functions while the model is assembled, which
+keeps the generic lowering compact and auditable.  Before each stage evaluator
+is constructed, those calls are inlined into the stage expressions so that
+Symbolica can optimize and eliminate common subexpressions across component
+and current boundaries rather than preserving artificial function-call
+boundaries.
+
+The UFO-declared real/complex types are retained during this step.  When a
+coupling's original UFO expression proves it to be purely real or purely
+imaginary, the structurally zero component is removed from each stage-local
+evaluator input; couplings whose phase cannot be proved remain fully complex.
+This preserves runtime parameter variation while avoiding artificial complex
+arithmetic introduced only by serialization.
+
+The oriented fermion rules are projected from four-component Dirac tensors to
+the chiral Weyl basis used by the current table.  Colour is retained exactly
+for full colour; the same simplified generic tensors are projected onto the LC
+and NLC bases, including open fundamental lines, adjoint words, Fierz terms,
+and sparse final colour metrics.  Explicit UFO propagators are preserved.
+Otherwise model-driven scalar, fermion, vector, and spin-2 propagators and
+external wavefunctions are synthesized from particle metadata.  A vertex with
+more than three legs is lowered deterministically into a balanced tree of
+non-propagating auxiliary currents: there is no fictitious pole, the original
+coupling is inserted exactly once, and provenance prevents fragments from
+different contact terms from mixing.  An eager n-ary contraction remains the
+correctness oracle for this decomposition.
+
+\paragraph{From model to process artifact.}
+The compiled particle catalogue resolves process names and multiparticle
+aliases, crosses incoming legs, and supplies the generic DAG compiler with the
+oriented kernels above.  Reachability and coupling-order pruning happen before
+current construction; LC/NLC/full projection, helicity ancestry, shared-order
+recycling, warmup checks, and evaluator compilation then use the same
+model-independent graph machinery described in the preceding sections.  Every
+process directory embeds the exact compiled model and a complete
+\texttt{model-parameters.json}.  Parameters that survive restriction remain
+runtime-adjustable in Rusticol; a partial complex-JSON override may change
+masses, widths, or couplings without rebuilding evaluators, while changing a
+parameter removed by restriction requires recompilation.
+
+For the external-SM matrix comparison, generation also uses
+\texttt{--coupling-order-policy minimal}.  This derives the lowest
+hierarchy-weighted perturbative order from the model's own UFO order metadata
+and applies the resulting per-order caps.  It therefore matches AmpliCol's
+leading-order workload without a process-family table while leaving ordinary
+external-model generation at the explicit \texttt{all} policy.
 
 \section{Example: \texorpdfstring{$d\bar d\to Zgg$}{d dbar -> Z g g}}
 
@@ -710,6 +809,52 @@ The \(n\le4\) LC/NLC/full-colour validation cells are mirrored in
 checks those cached same-point \AC/\PAC\ values without a local Fortran run;
 \path{scripts/refresh_result_matrix_fixtures.py} refreshes the fixture from the
 matrix caches.
+
+\noindent\footnotesize The following tables repeat the same process families,
+colour conventions, and \AC\ references with \PAC\ generated from the bundled
+loader-JSON Standard Model.  At this baseline, numerical validation is complete
+through \(n=4\): all 94 applicable cells agree with the stored built-in/\AC
+same-point references, with maximum relative difference
+\(2.50\times10^{-14}\).  For this first \(n\leq4\) baseline, point-wise
+agreement is the blocking acceptance criterion.  Generation and runtime cells
+record the measured compiled-model runs for context, but their formal
+performance gates are deferred to the next optimization milestone.  Source
+conversion is reported separately and is not charged to each process build.
+The two additional three-quark-line NLC/full-colour timing cells are not among
+the 94 direct-reference comparisons because Fortran \AC\ does not expose that
+colour contraction; they are labelled accordingly in the generated tables.
+Blank cells are not copied built-in measurements.  Majorana/FNV interactions,
+spin $3/2$, sextet external states, loop/counterterm vertices, and opaque
+callbacks remain explicit preflight errors in this milestone; massive spin-2
+support remains experimental.
+\par\smallskip
+
+\subsection*{External-SM shared-LC summary}
+\input{shared_lc_recycling_ufo_sm_table.tex}
+\paragraph{Reproducing the numerical fixture.}
+The validation driver regenerates every applicable LC/NLC/full-colour case at
+the exact archived phase-space point and with a matched runtime parameter card.
+For the reduced observable it requires
+\[
+  \frac{|M_{\mathrm{UFO}}-M_{\mathrm{ref}}|}
+       {\max(|M_{\mathrm{UFO}}|,|M_{\mathrm{ref}}|,10^{-300})}
+  \leq 10^{-10}.
+\]
+It writes the cumulative report after every case and preserves superseded
+process directories in the same output tree.  The portable report committed
+with this note is \path{docs/ufo_sm_n4_validation_report.json}.
+\begin{lstlisting}[language=bash,basicstyle=\ttfamily\scriptsize,breaklines=true,breakatwhitespace=true]
+env PYTHONPATH=src dependencies/.venv/bin/python \
+  scripts/run_with_memory_watch.py --limit-gb 30 -- \
+  dependencies/.venv/bin/python scripts/validate_ufo_sm_fixture.py \
+  --min-n 1 --max-n 4 --color-accuracy all --n-cores 5 \
+  --tolerance 1e-10 --regenerate --keep-going \
+  --output-root .ufo_support_outputs/ufo_sm_fixture_validation_v1
+\end{lstlisting}
+\input{result_matrix_ufo_sm_table.tex}
+\input{z_performance_ufo_sm_table.tex}
+\input{result_matrix_ufo_sm_nlc_table.tex}
+\input{result_matrix_ufo_sm_full_table.tex}
 
 
 \section{Why This Matches AmpliCol but Remains Python-Friendly}

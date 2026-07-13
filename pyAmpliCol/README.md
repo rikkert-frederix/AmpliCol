@@ -23,6 +23,14 @@ processes.  Unsupported requests fail explicitly with diagnostics that name the
 missing layer, such as colour expansion, current closure, or a missing
 vertex/propagator lowering.
 
+The first external-model baseline regenerates 94 LC/NLC/full-colour Standard
+Model cases through final-state multiplicity four from the bundled loader JSON.
+At identical stored phase-space points and matched parameters, all 94 agree
+with the built-in/AmpliCol references at `1e-10` tolerance; the largest observed
+relative difference is `2.50e-14`.  The portable case report is
+`docs/ufo_sm_n4_validation_report.json`; generated process artifacts are
+retained under `.ufo_support_outputs/ufo_sm_fixture_validation_v1`.
+
 ## Installation
 
 From this directory, install the managed Python and native dependencies:
@@ -72,6 +80,64 @@ runtime:
 ./pyamplicol.sh time-process outputs/dd_z_4g
 ```
 
+## Models And Run Cards
+
+The default model is the hard-coded Standard Model, named `built-in-sm`.
+`BUILTIN_SM` and `builtin_sm` remain accepted aliases.  The same commands also
+accept a trusted UFO directory, a JSON model serialized by
+[`ufo-model-loader`](https://github.com/alphal00p/ufo_model_loader), or an
+exact-version `*.pyAmplicol-model.json` artifact:
+
+```sh
+./pyamplicol.sh inspect-model --model assets/models/json/sm/sm.json
+./pyamplicol.sh compile-model --model assets/models/ufo/sm \
+  --output outputs/models/sm.pyAmplicol-model.json
+./pyamplicol.sh generate-process \
+  --model outputs/models/sm.pyAmplicol-model.json \
+  'd d~ > z g' outputs/external_sm_dd_z_g
+```
+
+UFO directories are executable Python and must be trusted.  pyAmpliCol imports
+them in an isolated worker, applies the requested UFO restriction and
+simplification, lowers their tensors into its native model IR, and caches the
+result by source contents and dependency fingerprint.  Loader JSON starts at
+the same post-import representation.  Compiled pyAmpliCol models are portable
+data rather than machine code, but deliberately require the exact matching
+compiler/dependency fingerprint; regenerate one after upgrading pyAmpliCol or
+its managed dependencies.  The implementation follows the
+[UFO 2.0 specification](https://arxiv.org/abs/2304.09883).  The dependency
+installer pins the tested `ufo-model-loader` 0.1.7 revision rather than relying
+on the GammaLoop reference checkout.
+
+Generic kernel components use named Symbolica functions during model lowering.
+Process generation inlines those calls into each evaluator stage before
+optimization, allowing common-subexpression elimination to work across current
+and component boundaries.
+
+Every public subcommand accepts `--run-card PATH`.  A card contains one
+`[arguments]` table whose keys are argparse destination names, including
+positionals.  Relative paths are resolved from the card directory.  Explicit
+CLI options override card values:
+
+```toml
+[arguments]
+model = "../assets/models/json/sm/sm.json"
+process = "d d~ > z g"
+output_dir = "../outputs/external_sm_dd_z_g"
+color_accuracy = "lc"
+symbolica_iterations = 10
+```
+
+```sh
+./pyamplicol.sh generate-process --run-card examples/ufo_sm_generate.toml \
+  --symbolica-iterations 20
+```
+
+Unknown keys, arguments belonging to another subcommand, and missing required
+inputs are errors.  The cards under `examples/` cover the built-in, UFO, loader
+JSON, compiled-model, runtime-parameter, multiparticle, and colour-accuracy
+workflows.
+
 For normal selected-flow JIT artifacts, the CLI uses batch 128 and measures
 stage output chunks around the base size 128.  A candidate replaces uniform
 chunk 128 only when its stage microbenchmark is at least 5% faster. On AArch64,
@@ -106,18 +172,20 @@ python3 check_standalone.py --precision 16 --profile
 Masses, widths, normalization inputs, and model couplings remain runtime
 parameters.  Their exact names and defaults are listed under
 `runtime_schema.model_parameters` in the process manifest.  Override any used
-subset with a TOML file:
+subset with a loader-compatible complex JSON file:
 
-```toml
-"normalization.alpha_s_me_check" = 0.118
-"particle.23.mass" = 91.188
-"particle.23.width" = 2.441404
-"coupling.10.1_23_1.component_0" = -1.0244420275940371
+```json
+{
+  "normalization.alpha_s_me_check": [0.118, 0.0],
+  "particle.23.mass": [91.188, 0.0],
+  "particle.23.width": [2.441404, 0.0],
+  "coupling.10.1_23_1.component_0": [-1.0244420275940371, 0.0]
+}
 ```
 
 ```sh
 ./pyamplicol.sh time-process outputs/dd_z_4g \
-  --model-parameters model-parameters.toml
+  --model-parameters model-parameters.json
 ```
 
 Rusticol rejects unknown parameter names instead of silently baking or

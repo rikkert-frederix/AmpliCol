@@ -21,7 +21,7 @@
 \scriptsize
 \setlength{\tabcolsep}{2.2pt}
 \renewcommand{\arraystretch}{1.13}
-\noindent\footnotesize Cell format: generation time above runtime per phase-space point; slots are \AC, \PAC\ SymJIT O1 selected flow, and \PAC\ SymJIT O1 all flows. \AC\ uses generated-library timings. Conventions and gaps are summarized after the table.
+Cell format: generation time above runtime per phase-space point; slots are \AC, \PAC\ SymJIT O1 selected flow, and \PAC\ SymJIT O1 all flows. \AC\ uses generated-library timings. Conventions and gaps are summarized after the table.
 \par\smallskip
 \begin{longtable}{@{}r@{\hspace{0.055in}}L{1.42in}@{\hspace{0.075in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{}}
 \toprule
@@ -207,7 +207,7 @@
 \bottomrule
 \end{longtable}
 \endgroup
-\noindent\scriptsize Each \AC\ pair is selected-flow/helicity-summed then all-flow/fixed-helicity; \PAC\ SymJIT O1 uses matching pruned and shared artifacts.  Entries are generation seconds above runtime wall microseconds per point; \PAC-only cells are absolute. Green/orange/red means below one/below two/at least two.  Summaries are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. \texttt{>30 GB RAM} marks only the affected selected/all-flow workload. A \textbf{VALIDATION FAILED} marker means the same-point difference exceeds \(10^{-8}\).
+\noindent\scriptsize Each \AC\ pair is selected-flow/helicity-summed then all-flow/fixed-helicity; \PAC\ SymJIT O1 uses matching pruned and shared artifacts.  Entries are generation seconds above runtime wall microseconds per point; \PAC-only cells are absolute. Green/orange/red means below one/below two/at least two.  Summaries are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. \texttt{>30 GB RAM} marks only the affected selected/all-flow workload. A \textbf{VALIDATION FAILED} marker means the same-point difference exceeds the tolerance recorded for that validation result.
 \par\vspace{0.15em}
 \paragraph{Settings.}
 \noindent\scriptsize \path{docs/result_matrix.py} (\texttt{--color-accuracy lc}) writes this table and its JSON cache. \AC\ uses its generated library for the selected workload and the fixed-helicity \texttt{imode=2} colour probe for all flows. \PAC\ writes separate \texttt{selected\_flow} and shared \texttt{all\_flows} artifacts. \PAC\ uses Rusticol double precision; selected/all-flow batches are 128/64.  Selected JIT stages measure chunks around base 128; all-flow outputs use uniform chunk 8192.  Stage-local inputs, ten Horner iterations, default CPE rounds, expanded optimization limits, SymJIT O1, and \texttt{--target-runtime 10} are used. The two LC workloads are displayed side by side.

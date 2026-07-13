@@ -776,7 +776,6 @@ dependencies = [
  "serde",
  "serde_json",
  "symbolica",
- "toml",
  "wide 1.5.0",
 ]
 

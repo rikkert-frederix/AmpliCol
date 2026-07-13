@@ -9,6 +9,7 @@ import time
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
 
@@ -1215,6 +1216,10 @@ def write_generic_dag_process_artifact(
             numerical_current_relative_tolerance=numerical_current_relative_tolerance,
             numerical_current_zero_tolerance=numerical_current_zero_tolerance,
         )
+        sidecar_payload["model_artifact"] = _write_embedded_model_artifacts(
+            sidecar_manifest.model,
+            sidecar_dir,
+        )
         sidecar_manifest_path = sidecar_dir / "process_manifest.json"
         sidecar_manifest_path.write_text(
             json.dumps(sidecar_payload, separators=(",", ":"), sort_keys=True),
@@ -1247,6 +1252,10 @@ def write_generic_dag_process_artifact(
     if sidecar_metadata:
         compiled_payload = cast(dict[str, Any], payload["compiled"])
         compiled_payload["runtime_lc_sector_artifacts"] = sidecar_metadata
+    payload["model_artifact"] = _write_embedded_model_artifacts(
+        generic_manifest.model,
+        output_path,
+    )
     manifest_path = output_path / "process_manifest.json"
     phase_started = time.perf_counter()
     manifest_path.write_text(
@@ -1266,6 +1275,34 @@ def write_generic_dag_process_artifact(
     )
     _write_generic_validation_momenta(generic_manifest, output_path)
     return manifest_path, payload
+
+
+def _write_embedded_model_artifacts(
+    model: Model,
+    output_path: Path,
+) -> dict[str, object]:
+    compiled = getattr(model, "compiled", None)
+    if compiled is None:
+        compiled = _compiled_builtin_model_artifact()
+    model_path = compiled.write(output_path / "compiled.pyAmplicol-model.json")
+    parameter_path = compiled.write_parameter_card(
+        output_path / "model-parameters.json"
+    )
+    return {
+        "kind": "embedded-pyamplicol-model",
+        "name": compiled.name,
+        "compiled_model": model_path.name,
+        "model_parameters": parameter_path.name,
+        "source": dict(compiled.source),
+        "producer": dict(compiled.producer),
+    }
+
+
+@lru_cache(maxsize=1)
+def _compiled_builtin_model_artifact():
+    from .model_source import compile_model_source
+
+    return compile_model_source("BUILTIN_SM", use_cache=False)
 
 
 def write_lc_topology_replay_partition_artifact(
@@ -1571,6 +1608,10 @@ def write_lc_topology_replay_partition_artifact(
             "truncated": False,
         },
     }
+    payload["model_artifact"] = _write_embedded_model_artifacts(
+        model,
+        output_path,
+    )
     manifest_path = output_path / "process_manifest.json"
     manifest_path.write_text(
         json.dumps(payload, separators=(",", ":"), sort_keys=True),
@@ -2678,10 +2719,15 @@ def _evaluate_current_warmup(
     signature_parts: dict[int, list[tuple[complex, ...]]] = (
         {current.id: [] for current in dag.currents} if collect_signatures else {}
     )
+    model_parameter_values = _warmup_model_parameter_values(
+        model,
+        runtime_schema=schema,
+    )
+    evaluation_model = _warmup_parameterized_model(model, model_parameter_values)
     for point in points:
         values = [0j for _ in range(value_count)]
         momenta = [0j for _ in range(momentum_count)]
-        _fill_warmup_sources(schema, model, values, point)
+        _fill_warmup_sources(schema, evaluation_model, values, point)
         _fill_warmup_momenta(schema, momenta, point)
         momentum_components_by_slot_id = {
             slot_id: _momentum_components(
@@ -2709,13 +2755,13 @@ def _evaluate_current_warmup(
                 for interaction in interactions_by_result[current_id]:
                     contribution = _interaction_contribution(
                         dag,
-                        model,
+                        evaluation_model,
                         interaction,
                         value_components_by_slot_id=value_components_by_slot_id,
                         momentum_components_by_slot_id=(
                             momentum_components_by_slot_id
                         ),
-                        model_parameter_symbols={},
+                        model_parameter_symbols=model_parameter_values,
                     )
                     total = _sum_components(total, contribution)
                 total_signature = tuple(complex(component) for component in total)
@@ -2723,7 +2769,7 @@ def _evaluate_current_warmup(
                     signature_parts[current_id].append(total_signature)
                 for slot in output_value_slots_by_current.get(current_id, ()):
                     components = (
-                        model.propagator_component_expression(
+                        evaluation_model.propagator_component_expression(
                             int(current_slot["particle_id"]),
                             total,
                             _momentum_components(
@@ -2846,8 +2892,6 @@ def _evaluate_dag_raw_sums_by_warmup(
     if not points:
         return ()
 
-    import numpy as np
-
     from .generic_stage_compiler import (
         _amplitude_root_expression,
         _interaction_contribution,
@@ -2904,85 +2948,6 @@ def _evaluate_dag_raw_sums_by_warmup(
                 output_value_slots_by_current,
             )
         )
-    point_count = len(points)
-    values = np.zeros((value_count, point_count), dtype=np.complex128)
-    momenta = np.zeros((momentum_count, point_count), dtype=np.complex128)
-    for point_index, point in enumerate(points):
-        scalar_values = [0j for _ in range(value_count)]
-        scalar_momenta = [0j for _ in range(momentum_count)]
-        _fill_warmup_sources(schema, model, scalar_values, point)
-        _fill_warmup_momenta(schema, scalar_momenta, point)
-        values[:, point_index] = scalar_values
-        momenta[:, point_index] = scalar_momenta
-
-    momentum_components_by_slot_id = {
-        slot_id: _momentum_components(
-            slot_id,
-            momenta,
-            momentum_slots,
-            by_slot_id=True,
-        )
-        for slot_id in momentum_slots
-    }
-    for (
-        input_value_slot_ids,
-        current_ids,
-        interactions_by_result,
-        output_value_slots_by_current,
-    ) in stage_runtime:
-        value_components_by_slot_id = {
-            slot_id: _value_components(value_slots[slot_id], values)
-            for slot_id in input_value_slot_ids
-        }
-        for current_id in current_ids:
-            current_slot = current_slots[current_id]
-            dimension = int(current_slot["dimension"])
-            total = tuple(
-                np.zeros(point_count, dtype=np.complex128)
-                for _ in range(dimension)
-            )
-            for interaction in interactions_by_result[current_id]:
-                contribution = _interaction_contribution(
-                    dag,
-                    model,
-                    interaction,
-                    value_components_by_slot_id=value_components_by_slot_id,
-                    momentum_components_by_slot_id=momentum_components_by_slot_id,
-                    model_parameter_symbols={},
-                )
-                total = _sum_components(total, contribution)
-            for slot in output_value_slots_by_current.get(current_id, ()):
-                components = (
-                    model.propagator_component_expression(
-                        int(current_slot["particle_id"]),
-                        total,
-                        _momentum_components(
-                            int(current_slot["momentum_mask"]),
-                            momenta,
-                            momentum_slots,
-                        ),
-                        chirality=int(current_slot["chirality"]),
-                    )
-                    if str(slot["variant"]) == "propagated"
-                    else total
-                )
-                start = int(slot["component_start"])
-                for offset, component in enumerate(components):
-                    values[start + offset, :] = component
-
-    amplitude_vectors = tuple(
-        np.asarray(
-            _amplitude_root_expression(
-                model,
-                root,
-                value_symbols=values,
-                model_parameter_symbols={},
-                value_slots=value_slots,
-            ),
-            dtype=np.complex128,
-        )
-        for root in roots
-    )
     weights = tuple(float(root["helicity_weight"]) for root in roots)
     group_ids = tuple(
         None
@@ -2990,17 +2955,178 @@ def _evaluate_dag_raw_sums_by_warmup(
         else int(root["coherent_group_id"])
         for root in roots
     )
-    return tuple(
-        _coherent_weighted_abs2_sum(
-            tuple(
-                complex(vector if vector.ndim == 0 else vector[point_index])
-                for vector in amplitude_vectors
-            ),
-            weights,
-            group_ids,
-        )
-        for point_index in range(point_count)
+    model_parameter_values = _warmup_model_parameter_values(
+        model,
+        runtime_schema=schema,
     )
+    evaluation_model = _warmup_parameterized_model(model, model_parameter_values)
+    raw_sums: list[float] = []
+    for point in points:
+        values = [0j for _ in range(value_count)]
+        momenta = [0j for _ in range(momentum_count)]
+        _fill_warmup_sources(schema, evaluation_model, values, point)
+        _fill_warmup_momenta(schema, momenta, point)
+        momentum_components_by_slot_id = {
+            slot_id: _momentum_components(
+                slot_id,
+                momenta,
+                momentum_slots,
+                by_slot_id=True,
+            )
+            for slot_id in momentum_slots
+        }
+        for (
+            input_value_slot_ids,
+            current_ids,
+            interactions_by_result,
+            output_value_slots_by_current,
+        ) in stage_runtime:
+            value_components_by_slot_id = {
+                slot_id: _value_components(value_slots[slot_id], values)
+                for slot_id in input_value_slot_ids
+            }
+            for current_id in current_ids:
+                current_slot = current_slots[current_id]
+                dimension = int(current_slot["dimension"])
+                total = tuple(0j for _ in range(dimension))
+                for interaction in interactions_by_result[current_id]:
+                    contribution = _interaction_contribution(
+                        dag,
+                        evaluation_model,
+                        interaction,
+                        value_components_by_slot_id=value_components_by_slot_id,
+                        momentum_components_by_slot_id=(
+                            momentum_components_by_slot_id
+                        ),
+                        model_parameter_symbols=model_parameter_values,
+                    )
+                    total = _sum_components(total, contribution)
+                for slot in output_value_slots_by_current.get(current_id, ()):
+                    components = (
+                        evaluation_model.propagator_component_expression(
+                            int(current_slot["particle_id"]),
+                            total,
+                            _momentum_components(
+                                int(current_slot["momentum_mask"]),
+                                momenta,
+                                momentum_slots,
+                            ),
+                            chirality=int(current_slot["chirality"]),
+                        )
+                        if str(slot["variant"]) == "propagated"
+                        else total
+                    )
+                    start = int(slot["component_start"])
+                    for offset, component in enumerate(components):
+                        values[start + offset] = _warmup_complex(component)
+        amplitudes = tuple(
+            _warmup_complex(
+                _amplitude_root_expression(
+                    evaluation_model,
+                    root,
+                    value_symbols=values,
+                    model_parameter_symbols=model_parameter_values,
+                    value_slots=value_slots,
+                )
+            )
+            for root in roots
+        )
+        raw_sums.append(
+            _coherent_weighted_abs2_sum(amplitudes, weights, group_ids)
+        )
+    return tuple(raw_sums)
+
+
+def _warmup_complex(value: object) -> complex:
+    if hasattr(value, "evaluate"):
+        return complex(value.evaluate({}))
+    return complex(value)
+
+
+def _warmup_model_parameter_values(
+    model: Model,
+    *,
+    runtime_schema: Mapping[str, Any] | None = None,
+) -> dict[str, complex]:
+    requested_external_names: set[str] | None = None
+    requested_derived_names: set[str] | None = None
+    if runtime_schema is not None:
+        requested_external_names = set()
+        requested_derived_names = set()
+        warmup_names = runtime_schema.get("warmup_model_parameter_names")
+        if isinstance(warmup_names, list):
+            requested_external_names.update(str(name) for name in warmup_names)
+            requested_derived_names.update(str(name) for name in warmup_names)
+        for record in _schema_list(runtime_schema.get("model_parameters", [])):
+            kind = str(record.get("kind", ""))
+            if kind not in {
+                "external_parameter",
+                "external_parameter_component",
+                "derived_parameter_component",
+            }:
+                continue
+            runtime_name = str(record.get("runtime_name", record.get("name", "")))
+            if not runtime_name:
+                continue
+            if kind == "derived_parameter_component":
+                requested_derived_names.add(runtime_name)
+            else:
+                requested_external_names.add(runtime_name)
+    values: dict[str, complex] = {}
+    defaults_provider = getattr(model, "runtime_parameter_defaults", None)
+    if callable(defaults_provider):
+        for name, value in defaults_provider().items():
+            if (
+                requested_external_names is not None
+                and str(name) not in requested_external_names
+            ):
+                continue
+            values[str(name)] = _warmup_complex_parameter(value)
+    derived_subset_provider = getattr(
+        model,
+        "runtime_derived_parameter_defaults_for",
+        None,
+    )
+    if requested_derived_names is not None and callable(derived_subset_provider):
+        derived_values = derived_subset_provider(
+            tuple(sorted(requested_derived_names))
+        )
+    else:
+        derived_defaults_provider = getattr(
+            model,
+            "runtime_derived_parameter_defaults",
+            None,
+        )
+        derived_values = (
+            derived_defaults_provider()
+            if callable(derived_defaults_provider)
+            else {}
+        )
+    for name, value in derived_values.items():
+        if (
+            requested_derived_names is None
+            or str(name) in requested_derived_names
+        ):
+            values[str(name)] = _warmup_complex_parameter(value)
+    return values
+
+
+def _warmup_complex_parameter(value: object) -> complex:
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        if len(value) != 2:
+            raise ValueError("complex runtime parameter must contain two components")
+        return complex(float(value[0]), float(value[1]))
+    return complex(value)
+
+
+def _warmup_parameterized_model(
+    model: Model,
+    parameters: Mapping[str, complex],
+) -> Model:
+    provider = getattr(model, "with_runtime_parameters", None)
+    if callable(provider):
+        return cast(Model, provider(parameters))
+    return model
 
 
 def _generic_warmup_runtime_schema_payload(
@@ -3110,6 +3236,30 @@ def _generic_warmup_runtime_schema_payload(
             }
         )
 
+    amplitude_stage = _runtime_amplitude_stage_payload(
+        dag,
+        model=model,
+        slot_by_current_id=slot_by_current_id,
+        value_slot_by_current_variant=value_slot_by_current_variant,
+    )
+    warmup_model_parameter_names = {
+        name
+        for interaction in dag.interactions
+        for name in _runtime_coupling_parameter_names(
+            interaction.vertex_kind,
+            interaction.vertex_particles,
+            interaction.coupling,
+            model=model,
+        )
+        if isinstance(name, str)
+    }
+    for root in _schema_list(amplitude_stage["roots"]):
+        names = root.get("coupling_parameter_names")
+        if isinstance(names, list):
+            warmup_model_parameter_names.update(
+                str(name) for name in names if isinstance(name, str)
+            )
+
     return {
         "momentum_conventions": _runtime_momentum_conventions(dag),
         "parameter_layout": {
@@ -3124,6 +3274,7 @@ def _generic_warmup_runtime_schema_payload(
             "sources": [
                 _runtime_source_record(
                     dag,
+                    model=model,
                     current_id=source_id,
                     source_index=source_index,
                     current_slot=slot_by_current_id[source_id],
@@ -3134,11 +3285,8 @@ def _generic_warmup_runtime_schema_payload(
         },
         "momentum_slots": momentum_slots,
         "stages": stages,
-        "amplitude_stage": _runtime_amplitude_stage_payload(
-            dag,
-            slot_by_current_id=slot_by_current_id,
-            value_slot_by_current_variant=value_slot_by_current_variant,
-        ),
+        "amplitude_stage": amplitude_stage,
+        "warmup_model_parameter_names": sorted(warmup_model_parameter_names),
     }
 
 
@@ -3238,6 +3386,7 @@ def _warmup_source_wavefunction(
         momentum = tuple(-component for component in momentum)
     dimension = int(source["dimension"])
     particle_id = int(source["particle_id"])
+    wavefunction_kind = str(source.get("wavefunction_kind", ""))
     helicity = int(source["source_helicity"])
     chirality = int(source["chirality"])
     if dimension == 1:
@@ -3249,16 +3398,30 @@ def _warmup_source_wavefunction(
             else _ext_quark_weyl_filter(momentum, helicity, chirality)
         )
     if dimension == 4:
-        if _is_fermion_pdg(particle_id):
+        if wavefunction_kind == "fermion" or (
+            not wavefunction_kind and _is_fermion_pdg(particle_id)
+        ):
             mass = _model_mass(model, particle_id)
             return (
                 _ext_antiquark_dirac_massive(momentum, helicity, mass)
                 if particle_id < 0
                 else _ext_quark_dirac_massive(momentum, helicity, mass)
             )
-        if abs(particle_id) == 21 or particle_id == 22:
+        if (
+            wavefunction_kind == "vector"
+            and _model_mass(model, particle_id) == 0.0
+        ) or (
+            not wavefunction_kind
+            and (abs(particle_id) == 21 or particle_id == 22)
+        ):
             return _ext_gluon_filter(momentum, helicity)
         return _ext_massive_vector_filter(
+            momentum,
+            helicity,
+            _model_mass(model, particle_id),
+        )
+    if dimension == 16 and wavefunction_kind == "spin2":
+        return _ext_spin2_filter(
             momentum,
             helicity,
             _model_mass(model, particle_id),
@@ -3453,6 +3616,64 @@ def _ext_massive_vector_filter(
         wf1 = complex(-hel * sqh)
         wf2 = complex(0.0, nsvahl * _fortran_sign(sqh, pz))
     return wf0, wf1, wf2, wf3
+
+
+def _ext_spin2_filter(
+    momentum: Sequence[float],
+    helicity: int,
+    mass: float,
+) -> tuple[complex, ...]:
+    if mass == 0.0:
+        if helicity not in {-2, 2}:
+            raise NativeEvaluationError(
+                "massless spin-2 sources only support helicities -2 and 2"
+            )
+        vector = _ext_gluon_filter(momentum, helicity // 2)
+        return _spin2_outer(vector, vector)
+    if helicity not in {-2, -1, 0, 1, 2}:
+        raise NativeEvaluationError(f"unsupported massive spin-2 helicity {helicity}")
+    plus = _ext_massive_vector_filter(momentum, 1, mass)
+    minus = _ext_massive_vector_filter(momentum, -1, mass)
+    longitudinal = _ext_massive_vector_filter(momentum, 0, mass)
+    if helicity == 2:
+        return _spin2_outer(plus, plus)
+    if helicity == -2:
+        return _spin2_outer(minus, minus)
+    if helicity == 1:
+        return _spin2_linear_combination(
+            (_spin2_outer(plus, longitudinal), 1.0 / math.sqrt(2.0)),
+            (_spin2_outer(longitudinal, plus), 1.0 / math.sqrt(2.0)),
+        )
+    if helicity == -1:
+        return _spin2_linear_combination(
+            (_spin2_outer(minus, longitudinal), 1.0 / math.sqrt(2.0)),
+            (_spin2_outer(longitudinal, minus), 1.0 / math.sqrt(2.0)),
+        )
+    return _spin2_linear_combination(
+        (_spin2_outer(plus, minus), 1.0 / math.sqrt(6.0)),
+        (_spin2_outer(minus, plus), 1.0 / math.sqrt(6.0)),
+        (_spin2_outer(longitudinal, longitudinal), 2.0 / math.sqrt(6.0)),
+    )
+
+
+def _spin2_outer(
+    left: Sequence[complex],
+    right: Sequence[complex],
+) -> tuple[complex, ...]:
+    if len(left) != 4 or len(right) != 4:
+        raise ValueError("spin-2 vector products require four components")
+    return tuple(left[mu] * right[nu] for mu in range(4) for nu in range(4))
+
+
+def _spin2_linear_combination(
+    *terms: tuple[Sequence[complex], float],
+) -> tuple[complex, ...]:
+    if not terms or any(len(tensor) != 16 for tensor, _weight in terms):
+        raise ValueError("spin-2 combinations require sixteen-component tensors")
+    return tuple(
+        sum((weight * tensor[index] for tensor, weight in terms), 0j)
+        for index in range(16)
+    )
 
 
 def _ext_quark_dirac_massive(
@@ -4253,6 +4474,7 @@ def _generic_dag_process_artifact_payload(
         build_and_write_generic_stage_evaluator_artifacts,
         build_generic_stage_compiler_blueprint,
         write_generic_stage_evaluator_artifacts,
+        write_model_parameter_evaluator_artifact,
     )
 
     _emit_generation_progress(
@@ -4521,6 +4743,17 @@ def _generic_dag_process_artifact_payload(
                     diagnostics_executor.shutdown(wait=True)
                 raise
         compiled_payload["stage_evaluators"] = stage_evaluator_payload
+        model_parameter_evaluator = write_model_parameter_evaluator_artifact(
+            runtime_manifest.model,
+            runtime_schema,
+            stage_evaluator_artifact_dir,
+            symbolica_settings=symbolica_settings,
+            jit_compile=jit_compile,
+        )
+        if model_parameter_evaluator is not None:
+            compiled_payload["model_parameter_evaluator"] = (
+                model_parameter_evaluator
+            )
         if bool(stage_evaluator_payload.get("runtime_available", False)):
             compiled_payload["runtime_available"] = True
             compiled_payload["runtime_unavailable_message"] = None
@@ -4766,6 +4999,7 @@ def _generic_runtime_schema_payload(
     )
     amplitude_stage_payload = _runtime_amplitude_stage_payload(
         dag,
+        model=model,
         slot_by_current_id=slot_by_current_id,
         value_slot_by_current_variant=value_slot_by_current_variant,
         selected_color_sector_ids=selected_color_sector_ids,
@@ -4789,7 +5023,7 @@ def _generic_runtime_schema_payload(
         "color_accuracy": dag.process.color_accuracy,
         "external_particles": _runtime_external_particles(dag),
         "momentum_conventions": _runtime_momentum_conventions(dag),
-        "model": _runtime_model_payload(model),
+        "model": _runtime_model_payload(model, dag=dag),
         "normalization": _runtime_normalization_payload(dag, model),
         "parameter_layout": {
             "source_component_parameter_count": source_component_count,
@@ -4841,6 +5075,7 @@ def _generic_runtime_schema_payload(
             "sources": [
                 _runtime_source_record(
                     dag,
+                    model=model,
                     current_id=source_id,
                     source_index=source_index,
                     current_slot=slot_by_current_id[source_id],
@@ -4891,7 +5126,28 @@ def _runtime_momentum_conventions(dag: GenericDAG) -> dict[str, object]:
     }
 
 
-def _runtime_model_payload(model: Model) -> dict[str, object]:
+def _runtime_model_payload(
+    model: Model,
+    *,
+    dag: GenericDAG | None = None,
+) -> dict[str, object]:
+    particle_ids = (
+        None
+        if dag is None
+        else {int(current.index.particle_id) for current in dag.currents}
+    )
+    vertex_kinds = (
+        None
+        if dag is None
+        else {
+            int(interaction.vertex_kind) for interaction in dag.interactions
+        }
+        | {
+            int(root.vertex_kind)
+            for root in dag.amplitude_roots
+            if root.vertex_kind is not None
+        }
+    )
     return {
         "name": model.name,
         "parameters": {
@@ -4908,6 +5164,16 @@ def _runtime_model_payload(model: Model) -> dict[str, object]:
                 "color_rep": particle.color_rep,
                 "mass": particle.mass,
                 "width": particle.width,
+                "mass_parameter": _runtime_particle_parameter_reference(
+                    model,
+                    particle.pdg,
+                    "mass",
+                ),
+                "width_parameter": _runtime_particle_parameter_reference(
+                    model,
+                    particle.pdg,
+                    "width",
+                ),
                 "charge": particle.charge,
                 "weak_isospin": list(particle.weak_isospin),
                 "weak_hypercharge": list(particle.weak_hypercharge),
@@ -4916,6 +5182,7 @@ def _runtime_model_payload(model: Model) -> dict[str, object]:
                 model.particles.values(),
                 key=lambda item: item.pdg,
             )
+            if particle_ids is None or int(particle.pdg) in particle_ids
         ],
         "vertices": [
             {
@@ -4938,8 +5205,25 @@ def _runtime_model_payload(model: Model) -> dict[str, object]:
                 ),
             }
             for vertex in model.vertices
+            if vertex_kinds is None or int(vertex.kind) in vertex_kinds
         ],
     }
+
+
+def _runtime_particle_parameter_reference(
+    model: Model,
+    pdg: int,
+    field: str,
+) -> str | None:
+    resolver = getattr(model, f"runtime_{field}_parameter_name", None)
+    if callable(resolver):
+        value = resolver(int(pdg))
+        return None if value is None else str(value)
+    if field == "mass" and float(model.mass(pdg)) != 0.0:
+        return _runtime_particle_parameter_name(pdg, field)
+    if field == "width" and float(model.width(pdg)) != 0.0:
+        return _runtime_particle_parameter_name(pdg, field)
+    return None
 
 
 def _runtime_model_parameter_records(
@@ -4971,6 +5255,33 @@ def _runtime_model_parameter_records(
             }
         )
 
+    def add_complex_parameter(
+        name: str,
+        value: object,
+        *,
+        kind: str = "external_parameter_component",
+        **metadata: object,
+    ) -> None:
+        if isinstance(value, complex):
+            real, imaginary = value.real, value.imag
+        elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
+            if len(value) != 2:
+                raise ValueError(
+                    f"runtime model parameter {name!r} must have real/imaginary components"
+                )
+            real, imaginary = value
+        else:
+            real, imaginary = value, 0.0
+        for component, default in (("real", real), ("imag", imaginary)):
+            add_record(
+                f"{name}.{component}",
+                kind,
+                float(default),
+                runtime_name=name,
+                complex_component=component,
+                **metadata,
+            )
+
     alpha_s = getattr(model, "alpha_s_me_check", None)
     if alpha_s is not None:
         add_record(
@@ -4997,6 +5308,106 @@ def _runtime_model_parameter_records(
             control="lc_sector_id",
             mode="minus_one_means_all",
         )
+
+    runtime_parameter_defaults = getattr(model, "runtime_parameter_defaults", None)
+    if callable(runtime_parameter_defaults):
+        parameter_type = getattr(model, "runtime_parameter_type", None)
+        for name, value in sorted(runtime_parameter_defaults().items()):
+            name = str(name)
+            declared_type = (
+                str(parameter_type(name)).lower()
+                if callable(parameter_type)
+                else "complex"
+            )
+            if declared_type == "complex":
+                add_complex_parameter(name, value)
+                continue
+            if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+                if len(value) != 2:
+                    raise ValueError(
+                        f"runtime model parameter {name!r} must have real/imaginary components"
+                    )
+                real, imaginary = value
+            elif isinstance(value, complex):
+                real, imaginary = value.real, value.imag
+            else:
+                real, imaginary = value, 0.0
+            if float(imaginary) != 0.0:
+                raise ValueError(
+                    f"real runtime model parameter {name!r} has a nonzero imaginary default"
+                )
+            add_record(
+                name,
+                "external_parameter",
+                float(real),
+                parameter_type=declared_type,
+            )
+        derived_defaults = getattr(model, "runtime_derived_parameter_defaults", None)
+        if callable(derived_defaults):
+            domains_provider = getattr(
+                model,
+                "runtime_derived_parameter_domains",
+                None,
+            )
+            used_names = {
+                name
+                for interaction in dag.interactions
+                for name in _runtime_coupling_parameter_names(
+                    interaction.vertex_kind,
+                    interaction.vertex_particles,
+                    interaction.coupling,
+                    model=model,
+                )
+                if isinstance(name, str)
+            }
+            for root in _schema_list(amplitude_stage_payload["roots"]):
+                names = root.get("coupling_parameter_names")
+                if isinstance(names, list):
+                    used_names.update(
+                        str(name) for name in names if isinstance(name, str)
+                    )
+            defaults_subset_provider = getattr(
+                model,
+                "runtime_derived_parameter_defaults_for",
+                None,
+            )
+            derived_values = (
+                defaults_subset_provider(tuple(sorted(used_names)))
+                if callable(defaults_subset_provider)
+                else {
+                    name: value
+                    for name, value in derived_defaults().items()
+                    if name in used_names
+                }
+            )
+            domains_subset_provider = getattr(
+                model,
+                "runtime_derived_parameter_domains_for",
+                None,
+            )
+            if callable(domains_subset_provider):
+                domain_values = domains_subset_provider(tuple(sorted(used_names)))
+            elif callable(domains_provider):
+                domain_values = domains_provider()
+            else:
+                domain_values = {}
+            derived_domains = {
+                str(name): str(domain) for name, domain in domain_values.items()
+            }
+            for name, value in sorted(derived_values.items()):
+                domain = derived_domains.get(name, "complex")
+                if domain not in {"real", "imaginary", "complex"}:
+                    raise ValueError(
+                        f"unsupported runtime parameter domain {domain!r} for {name!r}"
+                    )
+                add_complex_parameter(
+                    name,
+                    value,
+                    kind="derived_parameter_component",
+                    derived=True,
+                    complex_domain=domain,
+                )
+        return records
 
     for particle in sorted(model.particles.values(), key=lambda item: item.pdg):
         if float(particle.mass) != 0.0:
@@ -5031,6 +5442,7 @@ def _runtime_model_parameter_records(
             interaction.vertex_kind,
             interaction.vertex_particles,
             interaction.coupling,
+            model=model,
         )
         name_key = tuple(None if name is None else str(name) for name in names)
         if name_key in processed_coupling_name_sets:
@@ -5082,7 +5494,12 @@ def _runtime_coupling_parameter_names(
     vertex_kind: int,
     vertex_particles: Sequence[int],
     coupling: Sequence[object],
+    *,
+    model: Model | None = None,
 ) -> list[str | None]:
+    runtime_names = getattr(model, "runtime_parameter_names_for_vertex", None)
+    if callable(runtime_names):
+        return [str(name) for name in runtime_names(int(vertex_kind))]
     base = _runtime_coupling_parameter_base(vertex_kind, vertex_particles)
     names: list[str | None] = []
     for component, value in enumerate(coupling):
@@ -5108,6 +5525,9 @@ def _runtime_normalization_payload(
     dag: GenericDAG,
     model: Model,
 ) -> dict[str, object]:
+    model_normalization = getattr(model, "runtime_normalization_payload", None)
+    if callable(model_normalization):
+        return dict(model_normalization(dag))
     external_pdgs = [
         int(pdg)
         for pdg in (*dag.process.initial_pdgs, *dag.process.final_pdgs)
@@ -5340,6 +5760,7 @@ def _runtime_value_slots(
 def _runtime_source_record(
     dag: GenericDAG,
     *,
+    model: Model,
     current_id: int,
     source_index: int,
     current_slot: dict[str, object],
@@ -5371,6 +5792,9 @@ def _runtime_source_record(
         "outgoing_pdg": current.index.particle_id,
         "particle_id": current.index.particle_id,
         "source_kind": "external-wavefunction",
+        "wavefunction_kind": model.source_wavefunction_kind(
+            current.index.particle_id
+        ),
         "source_helicity": current.source_helicity,
         "chirality": current.index.chirality,
         "spin_state": _spin_state_json(current.index.spin_state),
@@ -5630,6 +6054,7 @@ def _runtime_interaction_record(
             interaction.vertex_kind,
             interaction.vertex_particles,
             interaction.coupling,
+            model=model,
         )
         coupling_name_cache[coupling_key] = coupling_parameter_names
     lowering_payload = lowering_payload_cache.get(int(interaction.vertex_kind))
@@ -5674,6 +6099,7 @@ def _runtime_interaction_record(
 def _runtime_amplitude_stage_payload(
     dag: GenericDAG,
     *,
+    model: Model,
     slot_by_current_id: Sequence[dict[str, object]],
     value_slot_by_current_variant: _RuntimeValueSlotIndex,
     selected_color_sector_ids: set[int] | None = None,
@@ -5726,6 +6152,7 @@ def _runtime_amplitude_stage_payload(
                         int(root.vertex_kind),
                         tuple(int(pdg) for pdg in root.vertex_particles),
                         root.coupling,
+                        model=model,
                     )
                 ),
                 "color_weight": list(root.color_weight),

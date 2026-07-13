@@ -149,14 +149,34 @@ def _write_report(
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    fallback_peak_rss_bytes = _child_peak_rss_bytes()
+    peak_rss_bytes = (
+        monitor.peak_rss_bytes
+        if monitor.peak_rss_bytes is not None
+        else fallback_peak_rss_bytes
+    )
+    peak_memory_bytes = (
+        monitor.peak_memory_bytes
+        if monitor.peak_memory_bytes is not None
+        else fallback_peak_rss_bytes
+    )
+    peak_memory_metric = (
+        monitor.peak_memory_metric
+        if monitor.peak_memory_bytes is not None
+        else (
+            "rss"
+            if fallback_peak_rss_bytes is not None
+            else None
+        )
+    )
     payload = {
         "limit_gb": limit_gb,
         "limit_bytes": limit_bytes,
-        "peak_rss_bytes": monitor.peak_rss_bytes,
+        "peak_rss_bytes": peak_rss_bytes,
         "peak_rss_gb": (
             None
-            if monitor.peak_rss_bytes is None
-            else monitor.peak_rss_bytes / 1024**3
+            if peak_rss_bytes is None
+            else peak_rss_bytes / 1024**3
         ),
         "peak_physical_footprint_bytes": monitor.peak_physical_footprint_bytes,
         "peak_physical_footprint_gb": (
@@ -164,13 +184,22 @@ def _write_report(
             if monitor.peak_physical_footprint_bytes is None
             else monitor.peak_physical_footprint_bytes / 1024**3
         ),
-        "peak_memory_bytes": monitor.peak_memory_bytes,
+        "peak_memory_bytes": peak_memory_bytes,
         "peak_memory_gb": (
             None
-            if monitor.peak_memory_bytes is None
-            else monitor.peak_memory_bytes / 1024**3
+            if peak_memory_bytes is None
+            else peak_memory_bytes / 1024**3
         ),
-        "peak_memory_metric": monitor.peak_memory_metric,
+        "peak_memory_metric": peak_memory_metric,
+        "peak_rss_source": (
+            "process_tree_polling"
+            if monitor.peak_rss_bytes is not None
+            else (
+                "rusage_children_maxrss"
+                if fallback_peak_rss_bytes is not None
+                else None
+            )
+        ),
         "returncode": returncode,
         "rss_polling_available": monitor.rss_polling_available,
         "physical_footprint_supported": monitor.physical_footprint_supported,
@@ -179,6 +208,16 @@ def _write_report(
         ),
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _child_peak_rss_bytes() -> int | None:
+    try:
+        peak = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+    except (OSError, ValueError):
+        return None
+    if peak <= 0:
+        return None
+    return peak if sys.platform == "darwin" else peak * 1024
 
 
 def _wait_or_kill(

@@ -21,7 +21,7 @@
 \scriptsize
 \setlength{\tabcolsep}{2.2pt}
 \renewcommand{\arraystretch}{1.23}
-\noindent\footnotesize Cell format: generation time above runtime per phase-space point; slots are \AC, \PAC\ JIT O1, and \PAC\ C++ O3. \AC\ uses raw generated-library colour probes. Conventions and gaps are summarized after the table.
+Cell format: generation time above runtime per phase-space point; slots are \AC, \PAC\ JIT O1, and \PAC\ C++ O3. \AC\ uses raw generated-library colour probes. Conventions and gaps are summarized after the table.
 \par\smallskip
 \begin{longtable}{@{}r@{\hspace{0.055in}}L{1.42in}@{\hspace{0.075in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{}}
 \toprule
@@ -135,7 +135,7 @@
 \bottomrule
 \end{longtable}
 \endgroup
-\noindent\scriptsize Each cell is raw-library \AC, \PAC\ JIT O1, and \PAC\ C++ O3.  Entries are generation seconds above runtime microseconds per point; \PAC\ runtime shows coloured wall and black pure-evaluator ratios, or absolute time without an \AC\ reference. Green/orange/red means below one/below two/at least two.  Summaries are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. A \textbf{VALIDATION FAILED} marker means the same-point difference exceeds \(10^{-8}\).
+\noindent\scriptsize Each cell is raw-library \AC, \PAC\ JIT O1, and \PAC\ C++ O3.  Entries are generation seconds above runtime microseconds per point; \PAC\ runtime shows coloured wall and black pure-evaluator ratios, or absolute time without an \AC\ reference. Green/orange/red means below one/below two/at least two.  Summaries are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. A \textbf{VALIDATION FAILED} marker means the same-point difference exceeds the tolerance recorded for that validation result.
 \par\vspace{0.15em}
 \paragraph{Settings.}
 \noindent\scriptsize \path{docs/result_matrix.py} (\texttt{--color-accuracy full}) writes this table and its JSON cache. \AC\ uses the raw generated-library path \texttt{amplicol\_generate --library=create-raw} followed by \texttt{amplicol\_color\_library\_probe}, preserving NLC/full colour-order interferences. \PAC\ uses Rusticol double precision, batch size 64, output chunk size 128,  Stage-local inputs, ten Horner iterations, default CPE rounds, expanded optimization limits, SymJIT O1, and \texttt{--target-runtime 10} are used. Only C++ O3 generation is subject to the 15-minute compile cap.

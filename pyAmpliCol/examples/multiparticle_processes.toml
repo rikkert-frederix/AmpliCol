@@ -1,0 +1,5 @@
+[arguments]
+model = "../assets/models/json/sm/sm.json"
+process = "lightjet lightjet > z g"
+multiparticle = ["lightjet=g,d,d~,u,u~"]
+json = true

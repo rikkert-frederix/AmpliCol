@@ -1,0 +1,4 @@
+[arguments]
+model = "../assets/models/json/sm/sm.json"
+output = "../outputs/examples/sm.pyAmplicol-model.json"
+parameter_output = "../outputs/examples/sm-parameters.json"

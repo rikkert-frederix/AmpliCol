@@ -19,7 +19,6 @@ use symbolica::prelude::{
     BatchEvaluator, CompiledComplexEvaluator, Complex, DoubleFloat, EvaluationDomain,
     ExpressionEvaluator, Float, JITCompilationSettings, Rational, Real, RealLike,
 };
-use toml::Value as TomlValue;
 
 const MAX_LC_TOPOLOGY_REPLAY_EXPANDED_POINTS: usize = 8192;
 const LC_SECTOR_SELECTOR_PARAMETER: &str = "runtime.lc_sector_id";
@@ -96,7 +95,25 @@ struct GenericCompiledManifestV2 {
     runtime_unavailable_message: Option<String>,
     #[serde(default)]
     lc_topology_replay: Option<LcTopologyReplayManifestV2>,
+    #[serde(default)]
+    model_parameter_evaluator: Option<GenericModelParameterEvaluatorManifestV2>,
     stage_evaluators: Option<GenericStageEvaluatorArtifactsManifestV2>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GenericModelParameterEvaluatorManifestV2 {
+    kind: String,
+    input_parameter_indices: Vec<usize>,
+    outputs: Vec<GenericDerivedParameterOutputManifestV2>,
+    evaluator: EvaluatorManifest,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GenericDerivedParameterOutputManifestV2 {
+    runtime_name: String,
+    output_index: usize,
+    real_parameter_index: usize,
+    imag_parameter_index: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -264,6 +281,10 @@ struct GenericRuntimeModelParameterManifestV2 {
     default: f64,
     #[serde(default)]
     pdg: Option<i32>,
+    #[serde(default)]
+    runtime_name: Option<String>,
+    #[serde(default)]
+    complex_component: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -271,6 +292,8 @@ struct GenericRuntimeParticleManifestV2 {
     pdg: i32,
     #[serde(default)]
     mass: f64,
+    #[serde(default)]
+    mass_parameter: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -393,6 +416,8 @@ struct GenericSourceRecordManifestV2 {
     outgoing_pdg: i32,
     particle_id: i32,
     source_kind: String,
+    #[serde(default)]
+    wavefunction_kind: String,
     source_helicity: i32,
     chirality: i32,
     spin_state: Value,
@@ -952,11 +977,24 @@ fn validate_generic_parameter_layout(schema: &GenericRuntimeSchemaManifestV2) ->
         ));
     }
     let mut seen_model_parameters = BTreeSet::new();
+    let mut seen_model_parameter_names = BTreeSet::new();
     for parameter in &schema.model_parameters {
         if parameter.name.is_empty()
             || parameter.parameter_index >= layout.model_parameter_count
             || !parameter.default.is_finite()
             || !seen_model_parameters.insert(parameter.parameter_index)
+            || !seen_model_parameter_names.insert(parameter.name.clone())
+            || parameter
+                .runtime_name
+                .as_ref()
+                .is_some_and(|name| name.is_empty())
+            || match (
+                &parameter.runtime_name,
+                parameter.complex_component.as_deref(),
+            ) {
+                (Some(_), Some("real" | "imag")) | (None, None) => false,
+                _ => true,
+            }
         {
             return Err(PyValueError::new_err(
                 "generic runtime schema contains invalid model-parameter metadata",
@@ -1211,10 +1249,15 @@ fn validate_generic_sources(manifest: &GenericProcessManifestV2) -> PyResult<()>
                 source.side
             )));
         }
+        let max_helicity = if source.wavefunction_kind == "spin2" {
+            2
+        } else {
+            1
+        };
         if source.physical_pdg == 0
             || source.outgoing_pdg != source.particle_id
             || source.chirality.abs() > 1
-            || source.source_helicity.abs() > 1
+            || source.source_helicity.abs() > max_helicity
             || source.spin_state.is_null()
             || !positive_json_integer(&source.helicity_ancestry)
             || source.color_state.is_null()
@@ -2398,6 +2441,7 @@ struct GenericRuntimeV2 {
     momentum_slots: Vec<GenericMomentumSlotManifestV2>,
     external_is_initial: Vec<bool>,
     particle_masses: BTreeMap<i32, f64>,
+    particle_mass_parameter_names: BTreeMap<i32, String>,
     normalization_factor: f64,
     normalization_color_factor: f64,
     normalization_average_factor: f64,
@@ -2406,11 +2450,25 @@ struct GenericRuntimeV2 {
     normalization_electroweak_coupling_power: usize,
     model_parameters: Vec<GenericRuntimeModelParameterManifestV2>,
     model_parameter_name_to_index: BTreeMap<String, usize>,
+    model_parameter_runtime_slots: BTreeMap<String, GenericRuntimeParameterSlots>,
     model_parameter_values_f64: Vec<f64>,
+    model_parameter_evaluator: Option<GenericModelParameterEvaluatorRuntimeV2>,
     stages: Option<Vec<GenericStageRuntimeV2>>,
     amplitude_stage: Option<GenericAmplitudeRuntimeV2>,
     state_scratch_f64: Vec<Complex<f64>>,
     values_scratch_f64: Vec<f64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GenericRuntimeParameterSlots {
+    real: usize,
+    imaginary: Option<usize>,
+}
+
+struct GenericModelParameterEvaluatorRuntimeV2 {
+    input_parameter_indices: Vec<usize>,
+    outputs: Vec<GenericDerivedParameterOutputManifestV2>,
+    evaluator: EvaluatorGroup,
 }
 
 struct GenericStageRuntimeV2 {
@@ -2530,38 +2588,119 @@ fn build_lc_topology_replay_mappings(
     Ok((mappings, weights))
 }
 
-fn collect_toml_numeric_overrides(
-    prefix: &str,
-    value: &TomlValue,
-    out: &mut BTreeMap<String, f64>,
-) -> PyResult<()> {
-    match value {
-        TomlValue::Table(table) => {
-            for (key, child) in table {
-                let child_prefix = if prefix.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{prefix}.{key}")
-                };
-                collect_toml_numeric_overrides(&child_prefix, child, out)?;
-            }
-            Ok(())
+fn parse_complex_parameter_overrides(
+    text: &str,
+    path: &Path,
+) -> PyResult<BTreeMap<String, (f64, f64)>> {
+    let value = serde_json::from_str::<Value>(text).map_err(|err| {
+        PyValueError::new_err(format!(
+            "could not parse model-parameter JSON {}: {err}",
+            path.display()
+        ))
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "model-parameter JSON {} must contain an object",
+            path.display()
+        ))
+    })?;
+    let mut overrides = BTreeMap::new();
+    for (name, value) in object {
+        let components = value.as_array().ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "model-parameter JSON entry {name:?} must be [real, imaginary]"
+            ))
+        })?;
+        if components.len() != 2 {
+            return Err(PyValueError::new_err(format!(
+                "model-parameter JSON entry {name:?} must have exactly two components"
+            )));
         }
-        TomlValue::Integer(value) => {
-            out.insert(prefix.to_owned(), *value as f64);
-            Ok(())
+        let real = components[0].as_f64().ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "model-parameter JSON entry {name:?} has a non-numeric real component"
+            ))
+        })?;
+        let imaginary = components[1].as_f64().ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "model-parameter JSON entry {name:?} has a non-numeric imaginary component"
+            ))
+        })?;
+        if !real.is_finite() || !imaginary.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "model-parameter JSON entry {name:?} must contain finite values"
+            )));
         }
-        TomlValue::Float(value) => {
-            out.insert(prefix.to_owned(), *value);
-            Ok(())
-        }
-        TomlValue::String(_)
-        | TomlValue::Boolean(_)
-        | TomlValue::Datetime(_)
-        | TomlValue::Array(_) => Err(PyValueError::new_err(format!(
-            "model-parameter TOML key {prefix:?} must be a numeric value"
-        ))),
+        overrides.insert(name.clone(), (real, imaginary));
     }
+    Ok(overrides)
+}
+
+fn build_runtime_parameter_slots(
+    parameters: &[GenericRuntimeModelParameterManifestV2],
+) -> PyResult<BTreeMap<String, GenericRuntimeParameterSlots>> {
+    let mut direct = BTreeMap::new();
+    let mut complex_components: BTreeMap<String, (Option<usize>, Option<usize>)> = BTreeMap::new();
+    for parameter in parameters {
+        if parameter.kind == "derived_parameter_component" {
+            continue;
+        }
+        if let Some(runtime_name) = &parameter.runtime_name {
+            let slots = complex_components
+                .entry(runtime_name.clone())
+                .or_insert((None, None));
+            match parameter.complex_component.as_deref() {
+                Some("real") if slots.0.replace(parameter.parameter_index).is_none() => {}
+                Some("imag") if slots.1.replace(parameter.parameter_index).is_none() => {}
+                Some(component) => {
+                    return Err(PyValueError::new_err(format!(
+                        "runtime model parameter {runtime_name:?} has duplicate or invalid component {component:?}"
+                    )));
+                }
+                None => {
+                    return Err(PyValueError::new_err(format!(
+                        "runtime model parameter {runtime_name:?} is missing component metadata"
+                    )));
+                }
+            }
+        } else if direct
+            .insert(
+                parameter.name.clone(),
+                GenericRuntimeParameterSlots {
+                    real: parameter.parameter_index,
+                    imaginary: None,
+                },
+            )
+            .is_some()
+        {
+            return Err(PyValueError::new_err(format!(
+                "duplicate runtime model parameter name {:?}",
+                parameter.name
+            )));
+        }
+    }
+    for (name, (real, imaginary)) in complex_components {
+        let (Some(real), Some(imaginary)) = (real, imaginary) else {
+            return Err(PyValueError::new_err(format!(
+                "runtime model parameter {name:?} requires real and imaginary slots"
+            )));
+        };
+        if direct
+            .insert(
+                name.clone(),
+                GenericRuntimeParameterSlots {
+                    real,
+                    imaginary: Some(imaginary),
+                },
+            )
+            .is_some()
+        {
+            return Err(PyValueError::new_err(format!(
+                "duplicate runtime model parameter name {name:?}"
+            )));
+        }
+    }
+    Ok(direct)
 }
 
 impl GenericRuntimeV2 {
@@ -2589,6 +2728,23 @@ impl GenericRuntimeV2 {
                     .collect::<BTreeMap<_, _>>()
             })
             .unwrap_or_default();
+        let particle_mass_parameter_names = manifest
+            .runtime_schema
+            .model
+            .as_ref()
+            .map(|model| {
+                model
+                    .particles
+                    .iter()
+                    .filter_map(|particle| {
+                        particle
+                            .mass_parameter
+                            .as_ref()
+                            .map(|name| (particle.pdg, name.clone()))
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
         let mut model_parameters = manifest.runtime_schema.model_parameters.clone();
         model_parameters.sort_by_key(|parameter| parameter.parameter_index);
         let model_parameter_values_f64 = model_parameters
@@ -2599,6 +2755,7 @@ impl GenericRuntimeV2 {
             .iter()
             .map(|parameter| (parameter.name.clone(), parameter.parameter_index))
             .collect::<BTreeMap<_, _>>();
+        let model_parameter_runtime_slots = build_runtime_parameter_slots(&model_parameters)?;
         let color_factor_in_contraction = manifest
             .runtime_schema
             .amplitude_stage
@@ -2705,6 +2862,7 @@ impl GenericRuntimeV2 {
             momentum_slots: manifest.runtime_schema.momentum_slots,
             external_is_initial,
             particle_masses,
+            particle_mass_parameter_names,
             normalization_factor,
             normalization_color_factor,
             normalization_average_factor,
@@ -2713,7 +2871,9 @@ impl GenericRuntimeV2 {
             normalization_electroweak_coupling_power,
             model_parameters,
             model_parameter_name_to_index,
+            model_parameter_runtime_slots,
             model_parameter_values_f64,
+            model_parameter_evaluator: None,
             stages: None,
             amplitude_stage: None,
             state_scratch_f64: Vec::new(),
@@ -2723,8 +2883,23 @@ impl GenericRuntimeV2 {
 
     fn load_from_manifest(manifest: GenericProcessManifestV2, root: &Path) -> PyResult<Self> {
         let stage_evaluators = manifest.compiled.stage_evaluators.clone();
+        let model_parameter_evaluator = manifest.compiled.model_parameter_evaluator.clone();
         let amplitude_stage_manifest = manifest.runtime_schema.amplitude_stage.clone();
         let mut runtime = Self::from_manifest(manifest)?;
+        if let Some(manifest) = model_parameter_evaluator {
+            if manifest.kind != "generic-model-parameter-evaluator" {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported model-parameter evaluator kind {:?}",
+                    manifest.kind
+                )));
+            }
+            runtime.model_parameter_evaluator = Some(GenericModelParameterEvaluatorRuntimeV2 {
+                input_parameter_indices: manifest.input_parameter_indices,
+                outputs: manifest.outputs,
+                evaluator: EvaluatorGroup::load(&manifest.evaluator, root)?,
+            });
+            runtime.refresh_derived_model_parameters()?;
+        }
         if let Some(stage_evaluators) = stage_evaluators {
             let stages = stage_evaluators
                 .stages
@@ -2759,55 +2934,104 @@ impl GenericRuntimeV2 {
         ))
     }
 
-    fn apply_model_parameter_toml_path(&mut self, path: &Path) -> PyResult<()> {
+    fn apply_model_parameter_json_path(&mut self, path: &Path) -> PyResult<()> {
         let text = fs::read_to_string(path).map_err(|err| {
             PyValueError::new_err(format!(
-                "could not read model-parameter TOML {}: {err}",
+                "could not read model-parameter JSON {}: {err}",
                 path.display()
             ))
         })?;
-        let value = toml::from_str::<TomlValue>(&text).map_err(|err| {
-            PyValueError::new_err(format!(
-                "could not parse model-parameter TOML {}: {err}",
-                path.display()
-            ))
-        })?;
-        let mut overrides = BTreeMap::new();
-        collect_toml_numeric_overrides("", &value, &mut overrides)?;
-        let stripped_parameter_overrides = overrides
-            .iter()
-            .filter_map(|(key, value)| {
-                key.strip_prefix("parameters.")
-                    .map(|stripped| (stripped.to_owned(), *value))
-            })
-            .collect::<Vec<_>>();
-        overrides.retain(|key, _| !key.starts_with("parameters."));
-        for (key, value) in stripped_parameter_overrides {
-            overrides.insert(key, value);
-        }
+        let overrides = parse_complex_parameter_overrides(&text, path)?;
         self.apply_model_parameter_overrides(&overrides)
     }
 
     fn apply_model_parameter_overrides(
         &mut self,
-        overrides: &BTreeMap<String, f64>,
+        overrides: &BTreeMap<String, (f64, f64)>,
     ) -> PyResult<()> {
-        for (name, value) in overrides {
-            let Some(index) = self.model_parameter_name_to_index.get(name).copied() else {
+        for (name, (real, imaginary)) in overrides {
+            let Some(slots) = self.model_parameter_runtime_slots.get(name).copied() else {
                 return Err(PyValueError::new_err(format!(
                     "model-parameter override {name:?} is not used by process {}",
                     self.process
                 )));
             };
-            if index >= self.model_parameter_values_f64.len() || !value.is_finite() {
+            if slots.real >= self.model_parameter_values_f64.len()
+                || !real.is_finite()
+                || !imaginary.is_finite()
+            {
                 return Err(PyValueError::new_err(format!(
-                    "model-parameter override {name:?} has invalid value {value}",
+                    "model-parameter override {name:?} has invalid value [{real}, {imaginary}]",
                 )));
             }
-            self.model_parameter_values_f64[index] = *value;
+            self.model_parameter_values_f64[slots.real] = *real;
+            if let Some(index) = slots.imaginary {
+                if index >= self.model_parameter_values_f64.len() {
+                    return Err(PyValueError::new_err(format!(
+                        "model-parameter override {name:?} has an invalid imaginary slot"
+                    )));
+                }
+                self.model_parameter_values_f64[index] = *imaginary;
+            } else if *imaginary != 0.0 {
+                return Err(PyValueError::new_err(format!(
+                    "real model parameter {name:?} cannot receive a nonzero imaginary component"
+                )));
+            }
         }
+        self.refresh_derived_model_parameters()?;
         self.refresh_particle_mass_parameters();
         self.refresh_normalization_factor();
+        Ok(())
+    }
+
+    fn refresh_derived_model_parameters(&mut self) -> PyResult<()> {
+        let Some(runtime) = self.model_parameter_evaluator.as_mut() else {
+            return Ok(());
+        };
+        let parameters = runtime
+            .input_parameter_indices
+            .iter()
+            .map(|index| {
+                self.model_parameter_values_f64
+                    .get(*index)
+                    .copied()
+                    .map(|value| c64(value, 0.0))
+                    .ok_or_else(|| {
+                        PyValueError::new_err(format!(
+                            "model-parameter evaluator input index {index} is out of range"
+                        ))
+                    })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let evaluated = runtime.evaluator.evaluate_batch(1, &parameters)?;
+        for output in &runtime.outputs {
+            let value = evaluated.get(output.output_index).ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "model-parameter evaluator output {} for {:?} is absent",
+                    output.output_index, output.runtime_name
+                ))
+            })?;
+            let Some(real) = self
+                .model_parameter_values_f64
+                .get_mut(output.real_parameter_index)
+            else {
+                return Err(PyValueError::new_err(format!(
+                    "derived model-parameter real slot {} is out of range",
+                    output.real_parameter_index
+                )));
+            };
+            *real = value.re;
+            let Some(imaginary) = self
+                .model_parameter_values_f64
+                .get_mut(output.imag_parameter_index)
+            else {
+                return Err(PyValueError::new_err(format!(
+                    "derived model-parameter imaginary slot {} is out of range",
+                    output.imag_parameter_index
+                )));
+            };
+            *imaginary = value.im;
+        }
         Ok(())
     }
 
@@ -2822,6 +3046,14 @@ impl GenericRuntimeV2 {
                         self.particle_masses.insert(pdg, *value);
                     }
                 }
+            }
+        }
+        for (pdg, name) in &self.particle_mass_parameter_names {
+            let Some(slots) = self.model_parameter_runtime_slots.get(name) else {
+                continue;
+            };
+            if let Some(value) = self.model_parameter_values_f64.get(slots.real) {
+                self.particle_masses.insert(*pdg, *value);
             }
         }
     }
@@ -3615,14 +3847,20 @@ impl GenericRuntimeV2 {
                     out.len()
                 )));
             }
-            let wave = if is_fermion_pdg(source.particle_id) {
+            let wave = if source.wavefunction_kind == "fermion"
+                || (source.wavefunction_kind.is_empty() && is_fermion_pdg(source.particle_id))
+            {
                 let mass = particle_mass_from_map(particle_masses, source.particle_id);
                 if source.particle_id < 0 {
                     ext_antiquark_dirac_massive(momentum, source.source_helicity, mass)
                 } else {
                     ext_quark_dirac_massive(momentum, source.source_helicity, mass)
                 }
-            } else if source.particle_id.abs() == 21 || source.particle_id == 22 {
+            } else if (source.wavefunction_kind == "vector"
+                && particle_mass_from_map(particle_masses, source.particle_id) == 0.0)
+                || (source.wavefunction_kind.is_empty()
+                    && (source.particle_id.abs() == 21 || source.particle_id == 22))
+            {
                 ext_gluon(momentum, source.source_helicity)
             } else {
                 ext_massive_vector(
@@ -3631,6 +3869,22 @@ impl GenericRuntimeV2 {
                     particle_mass_from_map(particle_masses, source.particle_id),
                 )
             };
+            out.copy_from_slice(&wave);
+            return Ok(());
+        }
+        if source.dimension == 16 && source.wavefunction_kind == "spin2" {
+            if out.len() != 16 {
+                return Err(PyValueError::new_err(format!(
+                    "generic source {} expected dimension 16 but slot has length {}",
+                    source.source_id,
+                    out.len()
+                )));
+            }
+            let wave = ext_spin2(
+                momentum,
+                source.source_helicity,
+                particle_mass_from_map(particle_masses, source.particle_id),
+            )?;
             out.copy_from_slice(&wave);
             return Ok(());
         }
@@ -3708,7 +3962,9 @@ impl GenericRuntimeV2 {
                     out.len()
                 )));
             }
-            let wave = if is_fermion_pdg(source.particle_id) {
+            let wave = if source.wavefunction_kind == "fermion"
+                || (source.wavefunction_kind.is_empty() && is_fermion_pdg(source.particle_id))
+            {
                 let mass = particle_mass_from_map(particle_masses, source.particle_id);
                 if mass != 0.0 {
                     return Err(PyValueError::new_err(
@@ -3720,7 +3976,11 @@ impl GenericRuntimeV2 {
                 } else {
                     ext_quark_dirac_generic(&momentum, source.source_helicity)
                 }
-            } else if source.particle_id.abs() == 21 || source.particle_id == 22 {
+            } else if (source.wavefunction_kind == "vector"
+                && particle_mass_from_map(particle_masses, source.particle_id) == 0.0)
+                || (source.wavefunction_kind.is_empty()
+                    && (source.particle_id.abs() == 21 || source.particle_id == 22))
+            {
                 ext_gluon_generic(&momentum, source.source_helicity)
             } else {
                 ext_massive_vector_generic(
@@ -3729,6 +3989,22 @@ impl GenericRuntimeV2 {
                     T::from(particle_mass_from_map(particle_masses, source.particle_id)),
                 )
             };
+            out.clone_from_slice(&wave);
+            return Ok(());
+        }
+        if source.dimension == 16 && source.wavefunction_kind == "spin2" {
+            if out.len() != 16 {
+                return Err(PyValueError::new_err(format!(
+                    "generic source {} expected dimension 16 but slot has length {}",
+                    source.source_id,
+                    out.len()
+                )));
+            }
+            let wave = ext_spin2_generic(
+                &momentum,
+                source.source_helicity,
+                T::from(particle_mass_from_map(particle_masses, source.particle_id)),
+            )?;
             out.clone_from_slice(&wave);
             return Ok(());
         }
@@ -3798,7 +4074,7 @@ fn load_rusticol_runtime(
         {
             let mut generic_runtime = load_generic_schema_v2_manifest(generic, &root)?;
             if let Some(path) = model_parameters_path {
-                generic_runtime.apply_model_parameter_toml_path(&PathBuf::from(path))?;
+                generic_runtime.apply_model_parameter_json_path(&PathBuf::from(path))?;
             }
             return Ok(Runtime {
                 root,
@@ -3872,7 +4148,7 @@ fn load_rusticol_runtime(
     if manifest.compiled.kind == "zero-gluon-symbolic-scalar" {
         if model_parameters_path.is_some() {
             return Err(PyValueError::new_err(
-                "model-parameter TOML overrides are only supported for schema-v2 generic DAG artifacts",
+                "model-parameter JSON overrides are only supported for schema-v2 generic DAG artifacts",
             ));
         }
         if manifest.gluon_count != 0 || manifest.external_pdg_order.len() != 3 {
@@ -3979,7 +4255,7 @@ fn load_rusticol_runtime(
     }
     if model_parameters_path.is_some() {
         return Err(PyValueError::new_err(
-            "model-parameter TOML overrides are only supported for schema-v2 generic DAG artifacts",
+            "model-parameter JSON overrides are only supported for schema-v2 generic DAG artifacts",
         ));
     }
     let stages = manifest
@@ -4082,9 +4358,9 @@ impl Runtime {
             dict.set_item(
                 "model_parameter_names",
                 generic
-                    .model_parameters
-                    .iter()
-                    .map(|parameter| parameter.name.clone())
+                    .model_parameter_runtime_slots
+                    .keys()
+                    .cloned()
                     .collect::<Vec<_>>(),
             )?;
             dict.set_item("current_count", generic.current_count)?;
@@ -8484,6 +8760,124 @@ where
     [wf0, wf1, wf2, wf3]
 }
 
+fn spin2_outer(left: &[Complex<f64>; 4], right: &[Complex<f64>; 4]) -> [Complex<f64>; 16] {
+    std::array::from_fn(|index| left[index / 4] * right[index % 4])
+}
+
+fn ext_spin2(momentum: [f64; 4], helicity: i32, mass: f64) -> PyResult<[Complex<f64>; 16]> {
+    if mass == 0.0 {
+        if ![-2, 2].contains(&helicity) {
+            return Err(PyValueError::new_err(
+                "massless spin-2 sources only support helicities -2 and 2",
+            ));
+        }
+        let vector = ext_gluon(momentum, helicity / 2);
+        return Ok(spin2_outer(&vector, &vector));
+    }
+    if ![-2, -1, 0, 1, 2].contains(&helicity) {
+        return Err(PyValueError::new_err(format!(
+            "unsupported massive spin-2 helicity {helicity}"
+        )));
+    }
+    let plus = ext_massive_vector(momentum, 1, mass);
+    let minus = ext_massive_vector(momentum, -1, mass);
+    let longitudinal = ext_massive_vector(momentum, 0, mass);
+    let plus_plus = spin2_outer(&plus, &plus);
+    let minus_minus = spin2_outer(&minus, &minus);
+    if helicity == 2 {
+        return Ok(plus_plus);
+    }
+    if helicity == -2 {
+        return Ok(minus_minus);
+    }
+    let inverse_sqrt_two = 1.0 / 2.0f64.sqrt();
+    if helicity == 1 {
+        let first = spin2_outer(&plus, &longitudinal);
+        let second = spin2_outer(&longitudinal, &plus);
+        return Ok(std::array::from_fn(|index| {
+            (first[index] + second[index]) * inverse_sqrt_two
+        }));
+    }
+    if helicity == -1 {
+        let first = spin2_outer(&minus, &longitudinal);
+        let second = spin2_outer(&longitudinal, &minus);
+        return Ok(std::array::from_fn(|index| {
+            (first[index] + second[index]) * inverse_sqrt_two
+        }));
+    }
+    let plus_minus = spin2_outer(&plus, &minus);
+    let minus_plus = spin2_outer(&minus, &plus);
+    let zero_zero = spin2_outer(&longitudinal, &longitudinal);
+    let inverse_sqrt_six = 1.0 / 6.0f64.sqrt();
+    Ok(std::array::from_fn(|index| {
+        (plus_minus[index] + minus_plus[index] + c64(2.0, 0.0) * zero_zero[index])
+            * inverse_sqrt_six
+    }))
+}
+
+fn spin2_outer_generic<T>(left: &[Complex<T>; 4], right: &[Complex<T>; 4]) -> [Complex<T>; 16]
+where
+    T: Real + RealLike + From<f64> + Clone,
+{
+    std::array::from_fn(|index| left[index / 4].clone() * right[index % 4].clone())
+}
+
+fn ext_spin2_generic<T>(momentum: &[T; 4], helicity: i32, mass: T) -> PyResult<[Complex<T>; 16]>
+where
+    T: Real + RealLike + From<f64> + PartialOrd + Clone,
+{
+    if is_zero(&mass) {
+        if ![-2, 2].contains(&helicity) {
+            return Err(PyValueError::new_err(
+                "massless spin-2 sources only support helicities -2 and 2",
+            ));
+        }
+        let vector = ext_gluon_generic(momentum, helicity / 2);
+        return Ok(spin2_outer_generic(&vector, &vector));
+    }
+    if ![-2, -1, 0, 1, 2].contains(&helicity) {
+        return Err(PyValueError::new_err(format!(
+            "unsupported massive spin-2 helicity {helicity}"
+        )));
+    }
+    let plus = ext_massive_vector_generic(momentum, 1, mass.clone());
+    let minus = ext_massive_vector_generic(momentum, -1, mass.clone());
+    let longitudinal = ext_massive_vector_generic(momentum, 0, mass.clone());
+    if helicity == 2 {
+        return Ok(spin2_outer_generic(&plus, &plus));
+    }
+    if helicity == -2 {
+        return Ok(spin2_outer_generic(&minus, &minus));
+    }
+    let inverse_sqrt_two = mass.one() / mass.from_i64(2).sqrt();
+    let weight_two = c_generic(inverse_sqrt_two, T::new_zero());
+    if helicity == 1 {
+        let first = spin2_outer_generic(&plus, &longitudinal);
+        let second = spin2_outer_generic(&longitudinal, &plus);
+        return Ok(std::array::from_fn(|index| {
+            (first[index].clone() + second[index].clone()) * weight_two.clone()
+        }));
+    }
+    if helicity == -1 {
+        let first = spin2_outer_generic(&minus, &longitudinal);
+        let second = spin2_outer_generic(&longitudinal, &minus);
+        return Ok(std::array::from_fn(|index| {
+            (first[index].clone() + second[index].clone()) * weight_two.clone()
+        }));
+    }
+    let plus_minus = spin2_outer_generic(&plus, &minus);
+    let minus_plus = spin2_outer_generic(&minus, &plus);
+    let zero_zero = spin2_outer_generic(&longitudinal, &longitudinal);
+    let two = c_generic(mass.from_i64(2), T::new_zero());
+    let inverse_sqrt_six = c_generic(mass.one() / mass.from_i64(6).sqrt(), T::new_zero());
+    Ok(std::array::from_fn(|index| {
+        (plus_minus[index].clone()
+            + minus_plus[index].clone()
+            + two.clone() * zero_zero[index].clone())
+            * inverse_sqrt_six.clone()
+    }))
+}
+
 fn ext_gluon(momentum: [f64; 4], helicity: i32) -> [Complex<f64>; 4] {
     let [energy, px, py, pz] = momentum;
     let sqh = 0.5f64.sqrt();
@@ -8818,6 +9212,62 @@ mod tests {
         assert_eq!(packed[1].re.to_array(), [1.0, 5.0]);
         assert_eq!(packed[2].re.to_array(), [11.0, 11.0]);
         assert_eq!(packed[3].re.to_array(), [9.0, 9.0]);
+    }
+
+    #[test]
+    fn derived_model_parameter_components_are_not_user_overrides() {
+        let parameters =
+            serde_json::from_value::<Vec<GenericRuntimeModelParameterManifestV2>>(json!([
+                {
+                    "name": "aS.real",
+                    "kind": "external_parameter_component",
+                    "parameter_index": 0,
+                    "runtime_name": "aS",
+                    "complex_component": "real"
+                },
+                {
+                    "name": "aS.imag",
+                    "kind": "external_parameter_component",
+                    "parameter_index": 1,
+                    "runtime_name": "aS",
+                    "complex_component": "imag"
+                },
+                {
+                    "name": "derived_coupling_75.real",
+                    "kind": "derived_parameter_component",
+                    "parameter_index": 2,
+                    "runtime_name": "derived_coupling_75",
+                    "complex_component": "real"
+                },
+                {
+                    "name": "derived_coupling_75.imag",
+                    "kind": "derived_parameter_component",
+                    "parameter_index": 3,
+                    "runtime_name": "derived_coupling_75",
+                    "complex_component": "imag"
+                }
+            ]))
+            .unwrap();
+
+        let slots = build_runtime_parameter_slots(&parameters).unwrap();
+
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots["aS"].real, 0);
+        assert_eq!(slots["aS"].imaginary, Some(1));
+        assert!(!slots.contains_key("derived_coupling_75"));
+    }
+
+    #[test]
+    fn complex_model_parameter_json_uses_real_imaginary_pairs() {
+        let path = Path::new("model-parameters.json");
+        let parsed = parse_complex_parameter_overrides(
+            r#"{"aS":[0.118,0.0],"complex_mass":[173.0,-1.5]}"#,
+            path,
+        )
+        .unwrap();
+
+        assert_eq!(parsed["aS"], (0.118, 0.0));
+        assert_eq!(parsed["complex_mass"], (173.0, -1.5));
     }
 
     #[test]

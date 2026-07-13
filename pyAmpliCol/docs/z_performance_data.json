@@ -655,6 +655,9 @@
       "process": "d d~ > Z + (9-1)*g"
     }
   },
+  "model_label": "built-in-sm",
+  "model_profile": "built-in-sm",
+  "model_source": "BUILTIN_SM",
   "multiplicity_convention": "final_state",
   "process_family": "d d~ > z + (n-1)g",
   "schema_version": 1,
@@ -673,5 +676,5 @@
     "symbolica_stage_local_parameter_layout": true,
     "target_runtime_s": 10.0
   },
-  "updated_at": "2026-07-12T18:47:04.905085+00:00"
+  "updated_at": "2026-07-13T17:04:30.638102+00:00"
 }

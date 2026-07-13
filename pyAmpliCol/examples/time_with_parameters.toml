@@ -1,0 +1,5 @@
+[arguments]
+process_dir = "../outputs/examples/json_sm_dd_z_g"
+model_parameters = "external_sm_parameters.json"
+target_runtime = 10.0
+batch_size = 128

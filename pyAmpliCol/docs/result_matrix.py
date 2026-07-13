@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import os
@@ -30,6 +31,15 @@ DEFAULT_NLC_TABLE = DOCS_DIR / "result_matrix_nlc_table.tex"
 DEFAULT_FULL_DATA = DOCS_DIR / "result_matrix_full_data.json"
 DEFAULT_FULL_TABLE = DOCS_DIR / "result_matrix_full_table.tex"
 DEFAULT_OUTPUT_ROOT = DOCS_DIR / ".result_matrix_outputs"
+DEFAULT_UFO_SM_SOURCE = PYAMPLICOL_DIR / "assets" / "models" / "json" / "sm" / "sm.json"
+DEFAULT_UFO_SM_DATA = DOCS_DIR / "result_matrix_ufo_sm_data.json"
+DEFAULT_UFO_SM_TABLE = DOCS_DIR / "result_matrix_ufo_sm_table.tex"
+DEFAULT_UFO_SM_SHARED_LC_TABLE = DOCS_DIR / "shared_lc_recycling_ufo_sm_table.tex"
+DEFAULT_UFO_SM_NLC_DATA = DOCS_DIR / "result_matrix_ufo_sm_nlc_data.json"
+DEFAULT_UFO_SM_NLC_TABLE = DOCS_DIR / "result_matrix_ufo_sm_nlc_table.tex"
+DEFAULT_UFO_SM_FULL_DATA = DOCS_DIR / "result_matrix_ufo_sm_full_data.json"
+DEFAULT_UFO_SM_FULL_TABLE = DOCS_DIR / "result_matrix_ufo_sm_full_table.tex"
+DEFAULT_UFO_SM_OUTPUT_ROOT = DOCS_DIR / ".result_matrix_ufo_sm_outputs"
 DEFAULT_TIME_LIMIT_S = 900.0
 DEFAULT_TARGET_RUNTIME_S = 10.0
 DEFAULT_AMPLICOL_POINTS = 10000
@@ -52,6 +62,9 @@ MEMORY_NEAR_LIMIT_POLL_S = 0.25
 MEMORY_HIGH_WATERMARK_FRACTION = 0.8
 VALIDATION_ABS_TOL = 1.0e-16
 _FIXED_HELICITY_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+QCD_ONLY_EXTERNAL_SM_FAMILIES = frozenset(
+    ("gg_tt_jets", "dd_tt_jets", "gg_gluons", "dd_3q_lines", "dd_4q_lines")
+)
 
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -293,9 +306,49 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="lc",
         help="Colour accuracy represented by the generated matrix table.",
     )
+    parser.add_argument(
+        "--model",
+        default="BUILTIN_SM",
+        metavar="SOURCE",
+        help=(
+            "SM model source used by pyAmpliCol: BUILTIN_SM, a UFO directory, "
+            "loader JSON, or compiled pyAmpliCol model. AmpliCol remains the "
+            "common external reference."
+        ),
+    )
+    parser.add_argument(
+        "--model-label",
+        default=None,
+        help="Concise source label used in the generated table heading.",
+    )
+    parser.add_argument(
+        "--reference-data",
+        type=Path,
+        default=None,
+        help=(
+            "Seed only AmpliCol records and process metadata from another matrix "
+            "cache. This permits matched external-model runs without relabeling "
+            "built-in pyAmpliCol timings."
+        ),
+    )
+    parser.add_argument(
+        "--validation-report",
+        type=Path,
+        default=None,
+        help=(
+            "Optional validate_ufo_sm_fixture.py report whose matched numerical "
+            "results are attached to seeded cells."
+        ),
+    )
     parser.add_argument("--data", type=Path, default=None)
     parser.add_argument("--table", type=Path, default=None)
-    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument(
+        "--shared-lc-table",
+        type=Path,
+        default=None,
+        help="Override the generated shared-LC summary table path.",
+    )
     parser.add_argument(
         "--generate-data",
         nargs="*",
@@ -448,8 +501,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         args.skip_amplicol = True
     color_accuracy = str(args.color_accuracy).lower()
-    data_path = args.data or _default_data_path(color_accuracy)
-    table_path = args.table or _default_table_path(color_accuracy)
+    model_source = _normalized_model_source(args.model)
+    model_profile = _matrix_model_profile(model_source)
+    model_label = str(args.model_label or _matrix_model_label(model_profile))
+    data_path = args.data or _default_data_path(color_accuracy, model_profile=model_profile)
+    table_path = args.table or _default_table_path(
+        color_accuracy,
+        model_profile=model_profile,
+    )
+    output_root = (
+        args.output_root
+        or (
+            DEFAULT_OUTPUT_ROOT
+            if model_profile == "built-in-sm"
+            else DEFAULT_UFO_SM_OUTPUT_ROOT
+        )
+    ).expanduser().resolve()
+    shared_lc_table_path = args.shared_lc_table or (
+        DEFAULT_SHARED_LC_TABLE
+        if model_profile == "built-in-sm"
+        else DEFAULT_UFO_SM_SHARED_LC_TABLE
+    )
 
     data = _load_data(data_path)
     if args.reset_cache:
@@ -457,8 +529,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"[dry-run] would reset {data_path} and {table_path}")
         else:
             data = {}
+    if args.reference_data is not None and not args.dry_run:
+        _seed_reference_cache(
+            data,
+            _load_data(args.reference_data),
+            color_accuracy=color_accuracy,
+            validation_report=args.validation_report,
+        )
     generate_ns = _parse_n_values(args.generate_data)
     show_ns = _parse_n_values(args.show_data)
+    benchmark_model_source = model_source
+    model_preparation: dict[str, Any] | None = None
+    if generate_ns and not args.dry_run and model_profile != "built-in-sm":
+        benchmark_model_source, model_preparation = _prepare_benchmark_model_source(
+            model_source,
+            output_root=output_root,
+        )
     selected_base_keys = {str(key) for key in args.base_process}
     try:
         selected_process_ids = set(_parse_process_ids(args.process_ids))
@@ -469,6 +555,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if not args.dry_run:
         _refresh_data_metadata(data, color_accuracy=color_accuracy)
+        data["model_profile"] = model_profile
+        data["model_label"] = model_label
+        data["model_source"] = model_source
+        if model_preparation is not None:
+            data["compiled_model_source"] = benchmark_model_source
+            data["model_preparation"] = model_preparation
 
     if generate_ns:
         work_items: list[tuple[BaseProcess, int, str]] = []
@@ -529,7 +621,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         base,
                         n_final,
                         process,
-                        output_root=args.output_root,
+                        output_root=output_root,
                         time_limit=None if args.time_limit <= 0 else args.time_limit,
                         target_runtime=args.target_runtime,
                         amplicol_points=args.amplicol_points,
@@ -545,6 +637,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         validate=args.validate,
                         clean_output_artifacts=args.clean_output_artifacts,
                         color_accuracy=color_accuracy,
+                        model_source=benchmark_model_source,
+                        model_profile=model_profile,
                     )
                     for base, n_final, process in work_items
                 ]
@@ -557,6 +651,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         show_ns,
                         columns_per_table=args.columns_per_table,
                         color_accuracy=color_accuracy,
+                        shared_lc_table_path=shared_lc_table_path,
                         refresh_pdf=not args.no_recompile,
                     )
         elif work_items:
@@ -566,7 +661,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     base,
                     n_final,
                     process,
-                    output_root=args.output_root,
+                    output_root=output_root,
                     time_limit=None if args.time_limit <= 0 else args.time_limit,
                     target_runtime=args.target_runtime,
                     amplicol_points=args.amplicol_points,
@@ -582,6 +677,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     validate=args.validate,
                     clean_output_artifacts=args.clean_output_artifacts,
                     color_accuracy=color_accuracy,
+                    model_source=benchmark_model_source,
+                    model_profile=model_profile,
                 )
                 _write_table_data_and_maybe_pdf(
                     data_path,
@@ -590,6 +687,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     show_ns,
                     columns_per_table=args.columns_per_table,
                     color_accuracy=color_accuracy,
+                    shared_lc_table_path=shared_lc_table_path,
                     refresh_pdf=not args.no_recompile,
                 )
 
@@ -600,6 +698,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         show_ns,
         columns_per_table=args.columns_per_table,
         color_accuracy=color_accuracy,
+        shared_lc_table_path=shared_lc_table_path,
         refresh_pdf=not args.no_recompile,
     )
     return 0
@@ -613,6 +712,7 @@ def _write_table_data_and_maybe_pdf(
     *,
     columns_per_table: int,
     color_accuracy: str,
+    shared_lc_table_path: Path,
     refresh_pdf: bool,
 ) -> None:
     table = render_latex_table(
@@ -625,8 +725,8 @@ def _write_table_data_and_maybe_pdf(
     table_path.write_text(table, encoding="utf-8")
     if color_accuracy == "lc":
         shared_lc_table = render_shared_lc_recycling_table(data)
-        DEFAULT_SHARED_LC_TABLE.write_text(shared_lc_table, encoding="utf-8")
-        print(f"wrote {DEFAULT_SHARED_LC_TABLE}")
+        shared_lc_table_path.write_text(shared_lc_table, encoding="utf-8")
+        print(f"wrote {shared_lc_table_path}")
     _write_data(data_path, data)
     print(f"wrote {table_path}")
     print(f"wrote {data_path}")
@@ -639,6 +739,9 @@ def _refresh_pyamplicol_pdf(table_path: Path) -> None:
         DEFAULT_TABLE.resolve(),
         DEFAULT_NLC_TABLE.resolve(),
         DEFAULT_FULL_TABLE.resolve(),
+        DEFAULT_UFO_SM_TABLE.resolve(),
+        DEFAULT_UFO_SM_NLC_TABLE.resolve(),
+        DEFAULT_UFO_SM_FULL_TABLE.resolve(),
     }
     if table_path.resolve() not in known_tables:
         print(
@@ -701,6 +804,8 @@ def _generate_case(
     validate: bool,
     clean_output_artifacts: bool,
     color_accuracy: str,
+    model_source: str,
+    model_profile: str,
 ) -> None:
     case = _case_payload(data, base, n_final)
     case["process"] = process
@@ -809,6 +914,8 @@ def _generate_case(
         reference_color_order=reference_color_order,
         base=pyamplicol_base,
         color_accuracy=color_accuracy,
+        model_source=model_source,
+        model_profile=model_profile,
     )
     if sector_selection_error is not None and _ok(_mode(case, "amplicol")):
         sector_error_payload = _error_payload(
@@ -834,6 +941,8 @@ def _generate_case(
                 reference_color_order=reference_color_order,
                 base=pyamplicol_base,
                 color_accuracy=color_accuracy,
+                model_source=model_source,
+                model_profile=model_profile,
             )
             if _should_run_mode(
                 case,
@@ -888,6 +997,8 @@ def _generate_case(
                 reference_color_order=reference_color_order,
                 matrix_settings=jit_settings,
                 color_accuracy=color_accuracy,
+                model_source=model_source,
+                model_profile=model_profile,
                 reuse_lc_all_flow=reuse_lc_all_flow,
                 existing_mode=existing_jit_mode,
             )
@@ -915,6 +1026,8 @@ def _generate_case(
         reference_color_order=reference_color_order,
         base=pyamplicol_base,
         color_accuracy=color_accuracy,
+        model_source=model_source,
+        model_profile=model_profile,
     )
     if not skip_cpp_o3 and _should_run_mode(
         case,
@@ -953,6 +1066,8 @@ def _generate_case(
                 reference_color_order=reference_color_order,
                 matrix_settings=cpp_o3_settings,
                 color_accuracy=color_accuracy,
+                model_source=model_source,
+                model_profile=model_profile,
             )
         if clean_output_artifacts:
             shutil.rmtree(cpp_o3_output_dir, ignore_errors=True)
@@ -2338,6 +2453,8 @@ def _run_pyamplicol_case(
     reference_color_order: Sequence[int] | None,
     matrix_settings: dict[str, Any],
     color_accuracy: str,
+    model_source: str,
+    model_profile: str,
     reuse_lc_all_flow: bool = False,
     existing_mode: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -2372,11 +2489,25 @@ def _run_pyamplicol_case(
         str(n_cores),
         "--json",
         "--monitor",
+        "--model",
+        model_source,
         "--symbolica-output-chunk-size",
         str(DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE),
         "--symbolica-output-chunk-strategy",
         "auto" if color_accuracy == "lc" else "uniform",
     ]
+    if (
+        model_profile != "built-in-sm"
+        and base.key in QCD_ONLY_EXTERNAL_SM_FAMILIES
+    ):
+        generate.extend(["--max-coupling-order", "QED=0"])
+    if model_profile != "built-in-sm":
+        # AmpliCol's matrix workloads retain the hierarchy-preferred lowest
+        # perturbative order. Derive the corresponding cap from model metadata
+        # rather than encoding a process-family order table here.
+        generate.extend(["--coupling-order-policy", "minimal"])
+        model_cache_dir = (output_dir / ".model_cache").resolve()
+        generate.extend(["--model-cache-dir", str(model_cache_dir)])
     if DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT:
         generate.append("--symbolica-stage-local-parameter-layout")
     else:
@@ -2526,10 +2657,12 @@ def _run_pyamplicol_case(
 
     try:
         _preserve_generated_output(selected_output_dir)
-        selected_gen = _run_json_command(
+        selected_gen = _run_generation_json_command(
             selected_generate,
             timeout=_remaining(deadline_started, time_limit),
             log_path=_progress_log_path(selected_output_dir, "generate"),
+            output_dir=selected_output_dir,
+            median_samples=3,
         )
         all_flow_gen: dict[str, Any] | None = None
         all_flow_failure: dict[str, Any] | None = None
@@ -2541,10 +2674,12 @@ def _run_pyamplicol_case(
         ):
             _preserve_generated_output(all_flow_output_dir)
             try:
-                all_flow_gen = _run_json_command(
+                all_flow_gen = _run_generation_json_command(
                     all_flow_generate,
                     timeout=_remaining(deadline_started, time_limit),
                     log_path=_progress_log_path(all_flow_output_dir, "generate"),
+                    output_dir=all_flow_output_dir,
+                    median_samples=3,
                 )
             except MemoryLimitExceeded as exc:
                 all_flow_failure = _error_payload(exc)
@@ -3101,8 +3236,9 @@ def _preserve_timing_log(log_path: Path) -> None:
     log_path.rename(preserved)
 
 
-def _preserve_generated_output(output_dir: Path) -> None:
+def _preserve_generated_output(output_dir: Path) -> Path | None:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    preserved_output: Path | None = None
     if output_dir.exists():
         preserved = output_dir.with_name(f"{output_dir.name}_before_{stamp}")
         counter = 1
@@ -3112,6 +3248,7 @@ def _preserve_generated_output(output_dir: Path) -> None:
             )
             counter += 1
         output_dir.rename(preserved)
+        preserved_output = preserved
         print(f"[matrix] preserved {output_dir} as {preserved}", flush=True)
     for suffix in ("generate.log", "time.log", "time_all_flows.log"):
         log_path = output_dir.with_name(f"{output_dir.name}.{suffix}")
@@ -3127,6 +3264,7 @@ def _preserve_generated_output(output_dir: Path) -> None:
             )
             counter += 1
         log_path.rename(preserved_log)
+    return preserved_output
 
 
 def _restore_reused_lc_all_flow_fields(
@@ -3216,6 +3354,71 @@ def _replace_command_option(command: list[str], option: str, value: str) -> None
         command.append(value)
     else:
         command[index + 1] = value
+
+
+def _run_generation_json_command(
+    args: Sequence[str],
+    *,
+    timeout: float | None,
+    log_path: Path,
+    output_dir: Path,
+    median_samples: int,
+    median_max_s: float = 90.0,
+) -> dict[str, Any]:
+    requested_samples = max(1, int(median_samples))
+    payloads = [
+        _run_json_command(
+            args,
+            timeout=timeout,
+            log_path=log_path,
+        )
+    ]
+    artifact_dirs: list[str | None] = []
+    first_elapsed = _optional_float(payloads[0].get("_command_elapsed_s"))
+    effective_samples = (
+        requested_samples
+        if first_elapsed is not None and first_elapsed < float(median_max_s)
+        else 1
+    )
+    for _sample_index in range(1, effective_samples):
+        preserved = _preserve_generated_output(output_dir)
+        artifact_dirs.append(None if preserved is None else str(preserved))
+        payloads.append(
+            _run_json_command(
+                args,
+                timeout=timeout,
+                log_path=log_path,
+            )
+        )
+    artifact_dirs.append(str(output_dir))
+    median_index = sorted(
+        range(len(payloads)),
+        key=lambda index: float(payloads[index]["_command_elapsed_s"]),
+    )[len(payloads) // 2]
+    selected = dict(payloads[median_index])
+    artifact_payload = payloads[-1]
+    selected["_generation_samples"] = [
+        {
+            "sample_index": index + 1,
+            "artifact_dir": artifact_dirs[index],
+            "command_elapsed_s": _optional_float(
+                payload.get("_command_elapsed_s")
+            ),
+            "internal_generation_s": _optional_float(payload.get("generation_s")),
+            "jit_compile_s": _optional_float(payload.get("jit_compile_s")),
+        }
+        for index, payload in enumerate(payloads)
+    ]
+    selected["_generation_sample_count"] = len(payloads)
+    selected["_generation_median_sample_index"] = median_index + 1
+    selected["_artifact_sample_index"] = len(payloads)
+    selected["_artifact_command_elapsed_s"] = _optional_float(
+        artifact_payload.get("_command_elapsed_s")
+    )
+    selected["_artifact_internal_generation_s"] = _optional_float(
+        artifact_payload.get("generation_s")
+    )
+    return selected
 
 
 def _run_json_command(
@@ -3517,7 +3720,9 @@ def render_latex_table(
     if not isinstance(entries, dict):
         entries = {}
     validation_summary = _validation_summary(entries, shown)
-    title = _matrix_title(color_accuracy)
+    model_profile = str(data.get("model_profile", "built-in-sm"))
+    model_label = str(data.get("model_label", _matrix_model_label(model_profile)))
+    title = _matrix_title(color_accuracy, model_profile=model_profile)
     for chunk_index, chunk in enumerate(chunks):
         multiplicity_columns = (
             r"@{\hspace{0.055in}}".join("L{2.51in}" for _ in chunk)
@@ -3544,7 +3749,13 @@ def render_latex_table(
             ]
         )
         if chunk_index == 0:
-            lines.extend(_matrix_short_intro_latex(color_accuracy))
+            lines.extend(
+                _matrix_short_intro_latex(
+                    color_accuracy,
+                    model_label=model_label,
+                    model_profile=model_profile,
+                )
+            )
         lines.extend(
             [
                 r"\begin{longtable}{" + colspec + "}",
@@ -3591,7 +3802,14 @@ def render_latex_table(
             ]
         )
         if chunk_index == len(chunks) - 1:
-            lines.extend(_matrix_long_intro_latex(color_accuracy, validation_summary))
+            lines.extend(
+                _matrix_long_intro_latex(
+                    color_accuracy,
+                    validation_summary,
+                    model_label=model_label,
+                    model_profile=model_profile,
+                )
+            )
             lines.extend(_matrix_run_settings_latex(color_accuracy))
             lines.extend(
                 _matrix_status_notes_latex(
@@ -3720,15 +3938,27 @@ def render_shared_lc_recycling_table(data: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _matrix_title(color_accuracy: str) -> str:
+def _matrix_title(
+    color_accuracy: str,
+    *,
+    model_profile: str = "built-in-sm",
+) -> str:
+    prefix = "External-SM " if model_profile != "built-in-sm" else "Generic "
     if color_accuracy == "nlc":
-        return "Generic NLC Performance Matrix"
+        return f"{prefix}NLC Performance Matrix"
     if color_accuracy == "full":
-        return "Generic Full-Colour Performance Matrix"
-    return "Generic LC Performance Matrix (SymJIT O1)"
+        return f"{prefix}Full-Colour Performance Matrix"
+    return f"{prefix}LC Performance Matrix (SymJIT O1)"
 
 
-def _matrix_short_intro_latex(color_accuracy: str) -> list[str]:
+def _matrix_short_intro_latex(
+    color_accuracy: str,
+    *,
+    model_label: str | None = None,
+    model_profile: str = "built-in-sm",
+) -> list[str]:
+    if model_label is None:
+        model_label = _matrix_model_label(model_profile)
     reference = (
         r"\AC\ uses raw generated-library colour probes. "
         if color_accuracy in {"nlc", "full"}
@@ -3742,7 +3972,13 @@ def _matrix_short_intro_latex(color_accuracy: str) -> list[str]:
     )
     return [
         (
-            r"\noindent\footnotesize Cell format: generation time above runtime "
+            rf"\noindent\footnotesize \PAC\ model source: \texttt{{{_latex_escape(model_label)}}}. "
+            if model_profile != "built-in-sm"
+            else ""
+        )
+        +
+        (
+            r"Cell format: generation time above runtime "
             r"per phase-space point; "
             + slot_text
             + reference
@@ -3755,7 +3991,12 @@ def _matrix_short_intro_latex(color_accuracy: str) -> list[str]:
 def _matrix_long_intro_latex(
     color_accuracy: str,
     validation_summary: dict[str, Any],
+    *,
+    model_label: str | None = None,
+    model_profile: str = "built-in-sm",
 ) -> list[str]:
+    if model_label is None:
+        model_label = _matrix_model_label(model_profile)
     if color_accuracy == "lc":
         description = (
             r"\noindent\scriptsize Each \AC\ pair is selected-flow/helicity-summed "
@@ -3772,6 +4013,13 @@ def _matrix_long_intro_latex(
         )
     return [
         description
+        + (
+            rf"The \PAC\ entries use the compiled \texttt{{{_latex_escape(model_label)}}} "
+            r"source; the \AC\ columns are the same matched external reference used by "
+            r"the built-in-SM table. "
+            if model_profile != "built-in-sm"
+            else ""
+        )
         + r"Green/orange/red means below one/below two/at least two.  Summaries "
         r"are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. "
         + (
@@ -3781,7 +4029,7 @@ def _matrix_long_intro_latex(
             else ""
         )
         + r"A \textbf{VALIDATION FAILED} marker means the same-point difference "
-        r"exceeds \(10^{-8}\).",
+        r"exceeds the tolerance recorded for that validation result.",
         r"\par\vspace{0.15em}",
     ]
 
@@ -4106,7 +4354,8 @@ def _validation_summary(
 def _validation_summary_latex(summary: dict[str, Any]) -> str:
     return (
         r"\noindent\footnotesize A red \textbf{VALIDATION FAILED} marker is shown "
-        r"next to any validated entry whose relative difference exceeds \(10^{-8}\)."
+        r"next to any validated entry whose relative difference exceeds its "
+        r"recorded tolerance."
     )
 
 
@@ -5127,6 +5376,8 @@ def _pyamplicol_matrix_settings(
     reference_color_order: Sequence[int] | None,
     base: BaseProcess,
     color_accuracy: str,
+    model_source: str = "built-in-sm",
+    model_profile: str = "built-in-sm",
     selected_jit_opt_level: int = 1,
 ) -> dict[str, Any]:
     numerical_current_passes = _matrix_uses_numerical_current_passes(
@@ -5135,6 +5386,17 @@ def _pyamplicol_matrix_settings(
     )
     settings: dict[str, Any] = {
         "runtime": "rusticol",
+        "model_source": str(model_source),
+        "model_profile": str(model_profile),
+        "coupling_order_policy": (
+            "minimal" if model_profile != "built-in-sm" else "all"
+        ),
+        "external_sm_qcd_only_cap": (
+            "QED=0"
+            if model_profile != "built-in-sm"
+            and base.key in QCD_ONLY_EXTERNAL_SM_FAMILIES
+            else None
+        ),
         "precision": 16,
         "color_accuracy": color_accuracy,
         "target_runtime_s": float(target_runtime),
@@ -5266,7 +5528,65 @@ def _record_not_applicable(data: dict[str, Any], base: BaseProcess, n_final: int
     )
 
 
-def _default_data_path(color_accuracy: str) -> Path:
+def _matrix_model_profile(model_source: str | Path) -> str:
+    return (
+        "built-in-sm"
+        if str(model_source).casefold() in {"builtin_sm", "built-in-sm"}
+        else "external-sm"
+    )
+
+
+def _normalized_model_source(model_source: str | Path) -> str:
+    text = str(model_source)
+    if text.casefold() in {"builtin_sm", "built-in-sm"}:
+        return "BUILTIN_SM"
+    return str(Path(text).expanduser().resolve())
+
+
+def _prepare_benchmark_model_source(
+    model_source: str,
+    *,
+    output_root: Path,
+) -> tuple[str, dict[str, Any]]:
+    from pyamplicol.model_source import compile_model_source
+
+    started = time.perf_counter()
+    compiled = compile_model_source(
+        model_source,
+        cache_dir=output_root / ".model_cache",
+        use_cache=True,
+        require_supported=True,
+    )
+    compiled_path = compiled.write(
+        output_root / "external-sm.pyAmplicol-model.json"
+    ).resolve()
+    wall_s = time.perf_counter() - started
+    print(
+        f"[matrix] external model ready in {wall_s:.3f}s: {compiled_path}",
+        flush=True,
+    )
+    return str(compiled_path), {
+        "source": model_source,
+        "compiled_model": str(compiled_path),
+        "load_or_compile_wall_s": wall_s,
+        "source_conversion_s": float(compiled.conversion_seconds),
+        "phase_timings": dict(compiled.phase_timings),
+        "compiled_model_name": compiled.name,
+        "source_metadata": dict(compiled.source),
+    }
+
+
+def _matrix_model_label(model_profile: str) -> str:
+    return "built-in-sm" if model_profile == "built-in-sm" else "external UFO/JSON SM"
+
+
+def _default_data_path(color_accuracy: str, *, model_profile: str) -> Path:
+    if model_profile != "built-in-sm":
+        if color_accuracy == "nlc":
+            return DEFAULT_UFO_SM_NLC_DATA
+        if color_accuracy == "full":
+            return DEFAULT_UFO_SM_FULL_DATA
+        return DEFAULT_UFO_SM_DATA
     if color_accuracy == "nlc":
         return DEFAULT_NLC_DATA
     if color_accuracy == "full":
@@ -5274,12 +5594,84 @@ def _default_data_path(color_accuracy: str) -> Path:
     return DEFAULT_DATA
 
 
-def _default_table_path(color_accuracy: str) -> Path:
+def _default_table_path(color_accuracy: str, *, model_profile: str) -> Path:
+    if model_profile != "built-in-sm":
+        if color_accuracy == "nlc":
+            return DEFAULT_UFO_SM_NLC_TABLE
+        if color_accuracy == "full":
+            return DEFAULT_UFO_SM_FULL_TABLE
+        return DEFAULT_UFO_SM_TABLE
     if color_accuracy == "nlc":
         return DEFAULT_NLC_TABLE
     if color_accuracy == "full":
         return DEFAULT_FULL_TABLE
     return DEFAULT_TABLE
+
+
+def _seed_reference_cache(
+    target: dict[str, Any],
+    reference: dict[str, Any],
+    *,
+    color_accuracy: str,
+    validation_report: Path | None,
+) -> None:
+    reference_entries = reference.get("entries", {})
+    if not isinstance(reference_entries, dict):
+        raise TypeError("reference matrix data 'entries' must be a JSON object")
+    target_entries = target.setdefault("entries", {})
+    if not isinstance(target_entries, dict):
+        raise TypeError("target matrix data 'entries' must be a JSON object")
+    fixture_results = _validation_report_results(validation_report)
+    for base_key, raw_base_entries in reference_entries.items():
+        if not isinstance(raw_base_entries, dict):
+            continue
+        seeded_base = target_entries.setdefault(str(base_key), {})
+        if not isinstance(seeded_base, dict):
+            raise TypeError(f"target entry for {base_key!r} must be a JSON object")
+        for n_text, raw_case in raw_base_entries.items():
+            if not isinstance(raw_case, dict):
+                continue
+            seeded_case = seeded_base.setdefault(str(n_text), {})
+            if not isinstance(seeded_case, dict):
+                raise TypeError(
+                    f"target entry for {base_key!r}, n={n_text!r} must be an object"
+                )
+            for key in ("base_key", "n_final", "process"):
+                if key in raw_case:
+                    seeded_case[key] = copy.deepcopy(raw_case[key])
+            amplicol = raw_case.get("amplicol")
+            if isinstance(amplicol, dict):
+                seeded_case["amplicol"] = copy.deepcopy(amplicol)
+            fixture = fixture_results.get(
+                f"{color_accuracy}:{base_key}:n{n_text}"
+            )
+            if fixture is not None:
+                relative = _optional_float(fixture.get("relative_difference"))
+                seeded_case["validation"] = {
+                    "status": str(fixture.get("status", "unknown")),
+                    "kind": "ufo-sm-vs-archived-built-in-same-point",
+                    "max_relative_difference": relative,
+                    "relative_differences": {"pyamplicol_jit": relative},
+                    "tolerance": _optional_float(fixture.get("tolerance"))
+                    or 1.0e-10,
+                    "source_report": str(validation_report),
+                }
+            if "status" not in seeded_case:
+                seeded_case["status"] = "reference_seeded"
+
+
+def _validation_report_results(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None:
+        return {}
+    report = _load_data(path)
+    raw_results = report.get("results", ())
+    if not isinstance(raw_results, list):
+        raise TypeError("validation report 'results' must be a JSON array")
+    return {
+        str(result["id"]): result
+        for result in raw_results
+        if isinstance(result, dict) and "id" in result
+    }
 
 
 def _case_payload(data: dict[str, Any], base: BaseProcess, n_final: int) -> dict[str, Any]:
@@ -5426,6 +5818,12 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "runtime_lc_sector_artifact",
         "_command_elapsed_s",
         "_progress_log",
+        "_generation_samples",
+        "_generation_sample_count",
+        "_generation_median_sample_index",
+        "_artifact_sample_index",
+        "_artifact_command_elapsed_s",
+        "_artifact_internal_generation_s",
         "runtime_available",
         "runtime_backend",
         "runtime_unavailable_message",

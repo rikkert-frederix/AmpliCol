@@ -3,12 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from symbolica import S
 
 from pyamplicol.generic_artifact import build_generic_process_manifest
 from pyamplicol.generic_dag import ColorState, CurrentIndex, CurrentNode
 from pyamplicol.generic_stage_compiler import (
     _interaction_contribution,
     _select_measured_chunk_candidate,
+    _specialize_stage_symbolica_functions,
     _stage_symbolica_settings,
     build_generic_stage_compiler_blueprint,
 )
@@ -73,7 +75,7 @@ def test_interaction_contribution_applies_current_stage_color_weight() -> None:
     assert contribution == (-17.0, 6.0)
 
 
-def test_interaction_contribution_rejects_complex_current_stage_color_weight() -> None:
+def test_interaction_contribution_applies_complex_current_stage_color_weight() -> None:
     dag = SimpleNamespace(currents=(_current(0), _current(1), _current(2)))
     interaction = {
         "left_value_slot": {"value_slot_id": 10},
@@ -87,21 +89,140 @@ def test_interaction_contribution_rejects_complex_current_stage_color_weight() -
         "color_weight": [1.0, 1.0],
     }
 
-    with pytest.raises(ValueError, match="complex color weights"):
-        _interaction_contribution(
-            dag,
-            _ToyModel(),
-            interaction,
-            value_components_by_slot_id={
-                10: (3.0, 5.0),
-                11: (7.0, 11.0),
-            },
-            momentum_components_by_slot_id={
-                20: (0.0, 0.0, 0.0, 0.0),
-                21: (0.0, 0.0, 0.0, 0.0),
-            },
-            model_parameter_symbols={},
-        )
+    contribution = _interaction_contribution(
+        dag,
+        _ToyModel(),
+        interaction,
+        value_components_by_slot_id={
+            10: (3.0, 5.0),
+            11: (7.0, 11.0),
+        },
+        momentum_components_by_slot_id={
+            20: (0.0, 0.0, 0.0, 0.0),
+            21: (0.0, 0.0, 0.0, 0.0),
+        },
+        model_parameter_symbols={},
+    )
+
+    assert contribution == pytest.approx((17.0 + 17.0j, -6.0 - 6.0j))
+
+
+def test_stage_function_specialization_inlines_single_use_calls() -> None:
+    function, left, right, formal_left, formal_right = S(
+        "stage_function",
+        "left",
+        "right",
+        "formal_left",
+        "formal_right",
+    )
+
+    outputs, definitions = _specialize_stage_symbolica_functions(
+        (function(left, right),),
+        ((function, (formal_left, formal_right), formal_left**2 + formal_right),),
+    )
+
+    assert outputs == (left**2 + right,)
+    assert definitions == ()
+
+
+def test_stage_function_specialization_inlines_distinct_calls_of_same_head() -> None:
+    repeated, unused, left, right, formal_left, formal_right = S(
+        "repeated_stage_function",
+        "unused_stage_function",
+        "left",
+        "right",
+        "formal_left",
+        "formal_right",
+    )
+    repeated_definition = (
+        repeated,
+        (formal_left, formal_right),
+        formal_left**2 + formal_right,
+    )
+    unused_definition = (unused, (formal_left,), formal_left + 1)
+    original_outputs = (repeated(left, right), repeated(right, left))
+
+    outputs, definitions = _specialize_stage_symbolica_functions(
+        original_outputs,
+        (repeated_definition, unused_definition),
+    )
+
+    assert outputs == (left**2 + right, left + right**2)
+    assert definitions == ()
+
+
+def test_stage_function_specialization_inlines_identical_repeated_calls() -> None:
+    function, left, right, formal_left, formal_right = S(
+        "repeated_concrete_stage_function",
+        "left",
+        "right",
+        "formal_left",
+        "formal_right",
+    )
+    definition = (
+        function,
+        (formal_left, formal_right),
+        formal_left**2 + formal_right,
+    )
+    original_outputs = (function(left, right), function(left, right))
+
+    outputs, definitions = _specialize_stage_symbolica_functions(
+        original_outputs,
+        (definition,),
+    )
+
+    assert outputs == (left**2 + right, left**2 + right)
+    assert definitions == ()
+
+
+def test_stage_function_specialization_inlines_mixed_concrete_calls() -> None:
+    function, left, right, formal_left, formal_right = S(
+        "partially_repeated_stage_function",
+        "left",
+        "right",
+        "formal_left",
+        "formal_right",
+    )
+    definition = (
+        function,
+        (formal_left, formal_right),
+        formal_left**2 + formal_right,
+    )
+
+    outputs, definitions = _specialize_stage_symbolica_functions(
+        (
+            function(left, right),
+            function(left, right) + function(right, left),
+        ),
+        (definition,),
+    )
+
+    assert outputs == (
+        left**2 + right,
+        left + left**2 + right + right**2,
+    )
+    assert definitions == ()
+
+
+def test_stage_function_specialization_inlines_nested_calls() -> None:
+    outer, inner, value, formal_outer, formal_inner = S(
+        "outer_stage_function",
+        "inner_stage_function",
+        "value",
+        "formal_outer",
+        "formal_inner",
+    )
+
+    outputs, definitions = _specialize_stage_symbolica_functions(
+        (outer(value),),
+        (
+            (outer, (formal_outer,), inner(formal_outer) + 1),
+            (inner, (formal_inner,), formal_inner**2),
+        ),
+    )
+
+    assert outputs == (value**2 + 1,)
+    assert definitions == ()
 
 
 def test_stage_blueprint_reports_each_current_and_amplitude_stage() -> None:
@@ -173,7 +294,11 @@ def test_measured_chunk_selection_requires_minimum_gain() -> None:
 
 
 def test_auto_chunk_strategy_tunes_normal_jit_but_not_large_all_flow_chunks() -> None:
-    stage = SimpleNamespace(stage_index=1, stage_kind="current-combine")
+    stage = SimpleNamespace(
+        stage_index=1,
+        stage_kind="current-combine",
+        output_length=256,
+    )
     blueprint = SimpleNamespace(stages=(stage,))
 
     selected = _stage_symbolica_settings(
@@ -197,3 +322,23 @@ def test_auto_chunk_strategy_tunes_normal_jit_but_not_large_all_flow_chunks() ->
 
     assert selected.output_chunk_strategy == "measured-stage"
     assert all_flow.output_chunk_strategy == "uniform"
+
+
+def test_auto_chunk_strategy_skips_tuning_when_stage_already_fits() -> None:
+    stage = SimpleNamespace(
+        stage_index=1,
+        stage_kind="current-combine",
+        output_length=128,
+    )
+
+    selected = _stage_symbolica_settings(
+        stage,
+        SimpleNamespace(stages=(stage,)),
+        SymbolicaEvaluatorSettings(
+            backend="jit",
+            compiled_output_chunk_size=128,
+            output_chunk_strategy="auto",
+        ),
+    )
+
+    assert selected.output_chunk_strategy == "uniform"

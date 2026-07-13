@@ -18,9 +18,18 @@ SRC_DIR = PROJECT_DIR / "src"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 PYTHON = PROJECT_DIR / "dependencies" / ".venv" / "bin" / "python"
 Z_DATA = DOCS_DIR / "z_performance_data.json"
+Z_TABLE = DOCS_DIR / "z_performance_table.tex"
 LC_MATRIX_DATA = DOCS_DIR / "result_matrix_data.json"
 OUTPUT_ROOT = DOCS_DIR / ".z_performance_outputs"
 TABLE_SCRIPT = DOCS_DIR / "z_performance_table.py"
+UFO_SM_DATA = DOCS_DIR / "z_performance_ufo_sm_data.json"
+UFO_SM_TABLE = DOCS_DIR / "z_performance_ufo_sm_table.tex"
+UFO_SM_LC_MATRIX_DATA = DOCS_DIR / "result_matrix_ufo_sm_data.json"
+UFO_SM_OUTPUT_ROOT = DOCS_DIR / ".z_performance_ufo_sm_outputs"
+MODEL_SOURCE = "BUILTIN_SM"
+MODEL_ORIGIN = "BUILTIN_SM"
+MODEL_PROFILE = "built-in-sm"
+MODEL_LABEL = "built-in-sm"
 
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_CHUNK_SIZE = 128
@@ -36,6 +45,8 @@ MEMORY_POLL_S = 1.0
 
 MODE_KEYS = ("amplicol", "jit_o1", "asm", "cpp_o3", "jit_o3")
 
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -76,6 +87,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=("1-9",),
         help="Final-state multiplicities to run, e.g. 1-6 or 7 8 9.",
     )
+    parser.add_argument(
+        "--model",
+        default="BUILTIN_SM",
+        help="SM source passed to pyAmpliCol (BUILTIN_SM, UFO, loader JSON, or compiled model).",
+    )
+    parser.add_argument("--model-label", default=None)
+    parser.add_argument("--data", type=Path, default=None)
+    parser.add_argument("--table", type=Path, default=None)
+    parser.add_argument("--lc-matrix-data", type=Path, default=None)
+    parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument(
         "--modes",
         nargs="*",
@@ -138,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    _configure_paths_and_model(args)
     if args.retime_existing and args.force_pyamplicol_regeneration:
         parser.error(
             "--retime-existing and --force-pyamplicol-regeneration are mutually exclusive"
@@ -154,7 +176,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 continue
             can_seed_mode = mode == "amplicol" or (
-                mode == "jit_o1" and not args.force_pyamplicol_regeneration
+                mode == "jit_o1"
+                and MODEL_PROFILE == "built-in-sm"
+                and not args.force_pyamplicol_regeneration
             )
             if not args.no_seed_lc_cache and can_seed_mode:
                 if _seed_from_lc_cache(n_final, mode, args=args):
@@ -172,6 +196,86 @@ def main(argv: Sequence[str] | None = None) -> int:
             _run_pyamplicol_mode(n_final, mode, args)
     _render_table()
     return 0
+
+
+def _configure_paths_and_model(args: argparse.Namespace) -> None:
+    global LC_MATRIX_DATA, MODEL_LABEL, MODEL_ORIGIN, MODEL_PROFILE, MODEL_SOURCE
+    global OUTPUT_ROOT, Z_DATA, Z_TABLE
+
+    raw_model = str(args.model)
+    MODEL_PROFILE = (
+        "built-in-sm"
+        if raw_model.casefold() in {"builtin_sm", "built-in-sm"}
+        else "external-sm"
+    )
+    MODEL_LABEL = str(
+        args.model_label
+        or ("built-in-sm" if MODEL_PROFILE == "built-in-sm" else "external UFO/JSON SM")
+    )
+    MODEL_ORIGIN = (
+        "BUILTIN_SM"
+        if MODEL_PROFILE == "built-in-sm"
+        else str(Path(raw_model).expanduser().resolve())
+    )
+    Z_DATA = (
+        args.data
+        or (Z_DATA if MODEL_PROFILE == "built-in-sm" else UFO_SM_DATA)
+    ).expanduser().resolve()
+    Z_TABLE = (
+        args.table
+        or (Z_TABLE if MODEL_PROFILE == "built-in-sm" else UFO_SM_TABLE)
+    ).expanduser().resolve()
+    LC_MATRIX_DATA = (
+        args.lc_matrix_data
+        or (
+            LC_MATRIX_DATA
+            if MODEL_PROFILE == "built-in-sm"
+            else UFO_SM_LC_MATRIX_DATA
+        )
+    ).expanduser().resolve()
+    OUTPUT_ROOT = (
+        args.output_root
+        or (
+            OUTPUT_ROOT
+            if MODEL_PROFILE == "built-in-sm"
+            else UFO_SM_OUTPUT_ROOT
+        )
+    ).expanduser().resolve()
+    MODEL_SOURCE = MODEL_ORIGIN
+    if MODEL_PROFILE == "built-in-sm":
+        return
+
+    from pyamplicol.model_source import compile_model_source
+
+    started = time.perf_counter()
+    compiled = compile_model_source(
+        MODEL_ORIGIN,
+        cache_dir=OUTPUT_ROOT / ".model_cache",
+        use_cache=True,
+        require_supported=True,
+    )
+    compiled_path = compiled.write(
+        OUTPUT_ROOT / "external-sm.pyAmplicol-model.json"
+    ).resolve()
+    MODEL_SOURCE = str(compiled_path)
+    preparation = {
+        "model_origin": MODEL_ORIGIN,
+        "compiled_model": MODEL_SOURCE,
+        "load_or_compile_wall_s": time.perf_counter() - started,
+        "source_conversion_s": float(compiled.conversion_seconds),
+        "phase_timings": dict(compiled.phase_timings),
+        "source_metadata": dict(compiled.source),
+    }
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    (OUTPUT_ROOT / "model_preparation.json").write_text(
+        json.dumps(preparation, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(
+        f"[z-table] external model ready in "
+        f"{preparation['load_or_compile_wall_s']:.3f}s: {MODEL_SOURCE}",
+        flush=True,
+    )
 
 
 def process_for_n(n_final: int) -> str:
@@ -236,6 +340,9 @@ def _retime_pyamplicol_mode(
             existing.get("all_flow_generation_s")
         ),
         "all_flow_output_dir": str(all_flow_output_dir),
+        "all_flow_generation_measurement": existing.get(
+            "all_flow_generation_measurement"
+        ),
         "all_flow_time_batch_size": int(args.all_flow_batch_size),
         "all_flow_symbolica_output_chunk_size": int(
             args.all_flow_output_chunk_size
@@ -285,6 +392,7 @@ def _retime_pyamplicol_mode(
         runtime_us_per_point=_optional_float(
             profile.get("core_evaluator_us_per_point")
         ),
+        generation_measurement=existing.get("generation_measurement"),
         **all_flow_record,
         notes=(
             f"retimed existing process kept at {_display_path(output_dir)}"
@@ -415,17 +523,19 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
         else float(args.cpp_time_limit)
     )
     try:
-        gen = _run_json_command(
+        gen = _run_generation_json_command(
             generate,
             timeout=timeout,
             log_path=output_dir.with_name(f"{output_dir.name}.generate.log"),
+            output_dir=output_dir,
+            median_samples=3,
         )
     except MemoryLimitExceeded as exc:
         _record_row(
             n_final,
             mode,
             status="ram_limit",
-            notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+            notes=f"generated process kept at {_display_path(output_dir)}",
             error=str(exc),
         )
         print(f"[z-table] RAM limit n={n_final} mode={mode}: {exc}", flush=True)
@@ -435,7 +545,7 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
             n_final,
             mode,
             status="timeout",
-            notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+            notes=f"generated process kept at {_display_path(output_dir)}",
         )
         print(f"[z-table] timeout n={n_final} mode={mode}", flush=True)
         return
@@ -466,7 +576,7 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
             n_final,
             mode,
             status="ram_limit",
-            notes=f"generated process kept at pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}",
+            notes=f"generated process kept at {_display_path(output_dir)}",
             error=str(exc),
         )
         print(f"[z-table] timing RAM limit n={n_final} mode={mode}: {exc}", flush=True)
@@ -492,8 +602,7 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
         "all_flow_status": "missing",
         "all_flow_output_dir": str(all_flow_output_dir),
         "all_flow_notes": (
-            f"generated process kept at "
-            f"pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}_all_flows; "
+            f"generated process kept at {_display_path(all_flow_output_dir)}; "
             f"time batch {int(args.all_flow_batch_size)}, output chunk "
             f"{int(args.all_flow_output_chunk_size)}"
         ),
@@ -506,12 +615,14 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
     else:
         try:
             _preserve_generated_output(all_flow_output_dir)
-            all_flow_gen = _run_json_command(
+            all_flow_gen = _run_generation_json_command(
                 all_flow_generate,
                 timeout=timeout,
                 log_path=all_flow_output_dir.with_name(
                     f"{all_flow_output_dir.name}.generate.log"
                 ),
+                output_dir=all_flow_output_dir,
+                median_samples=3,
             )
             all_flow_timed = _run_json_command(
                 [
@@ -554,6 +665,9 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
                     "all_flow_symbolica_output_chunk_size": int(
                         args.all_flow_output_chunk_size
                     ),
+                    "all_flow_generation_measurement": _generation_measurement(
+                        all_flow_gen
+                    ),
                 }
             )
         except MemoryLimitExceeded as exc:
@@ -589,10 +703,10 @@ def _run_pyamplicol_mode(n_final: int, mode: str, args: argparse.Namespace) -> N
         output_dir=str(output_dir),
         wall_us_per_point=wall,
         runtime_us_per_point=runtime,
+        generation_measurement=_generation_measurement(gen),
         **all_flow_record,
         notes=(
-            f"generated process kept at "
-            f"pyAmpliCol/docs/.z_performance_outputs/n{n_final}/{mode}"
+            f"generated process kept at {_display_path(output_dir)}"
         ),
     )
     print(
@@ -636,6 +750,8 @@ def _generate_command(
         str(n_cores),
         "--json",
         "--monitor",
+        "--model",
+        MODEL_SOURCE,
         "--symbolica-output-chunk-size",
         str(output_chunk_size),
         "--symbolica-output-chunk-strategy",
@@ -650,6 +766,15 @@ def _generate_command(
         "--symbolica-max-common-pair-distance",
         "1000",
     ]
+    if MODEL_PROFILE != "built-in-sm":
+        command.extend(
+            [
+                "--coupling-order-policy",
+                "minimal",
+                "--model-cache-dir",
+                str((output_dir / ".model_cache").resolve()),
+            ]
+        )
     if all_flows:
         fixed_helicity = _fixed_helicity_choice(process)
         command.extend(
@@ -669,6 +794,8 @@ def _generate_command(
                 ",".join(str(item) for item in sector_ids),
                 "--reference-color-order",
                 ",".join(str(item) for item in reference_order),
+                "--skip-generic-plan",
+                "--no-runtime-lc-sector-selector",
             ]
         )
     if mode == "jit_o1":
@@ -815,6 +942,12 @@ def _seed_from_lc_cache(
             row.get("all_flow_symbolica_output_chunk_size")
         ),
         all_flow_notes="reused from LC result matrix cache",
+        generation_measurement=_generation_measurement(
+            row.get("selected_generate_payload")
+        ),
+        all_flow_generation_measurement=_generation_measurement(
+            row.get("all_flow_generate_payload")
+        ),
         notes="reused from LC result matrix cache",
     )
     print(f"[z-table] seeded n={n_final} mode=jit_o1 from LC cache", flush=True)
@@ -863,6 +996,9 @@ def _jit_o1_all_flow_record_from_lc(
         "all_flow_symbolica_output_chunk_size": int(
             args.all_flow_output_chunk_size
         ),
+        "all_flow_generation_measurement": _generation_measurement(
+            row.get("all_flow_generate_payload")
+        ),
         "all_flow_notes": (
             "reused matching O1 all-flow artifact from LC result matrix cache; "
             f"time batch {int(args.all_flow_batch_size)}, output chunk "
@@ -871,8 +1007,9 @@ def _jit_o1_all_flow_record_from_lc(
     }
 
 
-def _preserve_generated_output(output_dir: Path) -> None:
+def _preserve_generated_output(output_dir: Path) -> Path | None:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    preserved_output: Path | None = None
     if output_dir.exists():
         preserved = output_dir.with_name(f"{output_dir.name}_before_{stamp}")
         counter = 1
@@ -882,6 +1019,7 @@ def _preserve_generated_output(output_dir: Path) -> None:
             )
             counter += 1
         output_dir.rename(preserved)
+        preserved_output = preserved
         print(f"[z-table] preserved {output_dir} as {preserved}", flush=True)
     for suffix in ("generate.log", "time.log"):
         log_path = output_dir.with_name(f"{output_dir.name}.{suffix}")
@@ -897,6 +1035,88 @@ def _preserve_generated_output(output_dir: Path) -> None:
             )
             counter += 1
         log_path.rename(preserved_log)
+    return preserved_output
+
+
+def _run_generation_json_command(
+    command: Sequence[str],
+    *,
+    timeout: float | None,
+    log_path: Path,
+    output_dir: Path,
+    median_samples: int,
+    median_max_s: float = 90.0,
+) -> dict[str, Any]:
+    requested_samples = max(1, int(median_samples))
+    payloads = [
+        _run_json_command(command, timeout=timeout, log_path=log_path)
+    ]
+    artifact_dirs: list[str | None] = []
+    first_elapsed = _optional_float(payloads[0].get("_command_elapsed_s"))
+    effective_samples = (
+        requested_samples
+        if first_elapsed is not None and first_elapsed < float(median_max_s)
+        else 1
+    )
+    for _sample_index in range(1, effective_samples):
+        preserved = _preserve_generated_output(output_dir)
+        artifact_dirs.append(None if preserved is None else str(preserved))
+        payloads.append(
+            _run_json_command(command, timeout=timeout, log_path=log_path)
+        )
+    artifact_dirs.append(str(output_dir))
+    median_index = sorted(
+        range(len(payloads)),
+        key=lambda index: float(payloads[index]["_command_elapsed_s"]),
+    )[len(payloads) // 2]
+    selected = dict(payloads[median_index])
+    artifact_payload = payloads[-1]
+    selected["_generation_samples"] = [
+        {
+            "sample_index": index + 1,
+            "artifact_dir": artifact_dirs[index],
+            "command_elapsed_s": _optional_float(
+                payload.get("_command_elapsed_s")
+            ),
+            "internal_generation_s": _optional_float(payload.get("generation_s")),
+            "jit_compile_s": _optional_float(payload.get("jit_compile_s")),
+        }
+        for index, payload in enumerate(payloads)
+    ]
+    selected["_generation_sample_count"] = len(payloads)
+    selected["_generation_median_sample_index"] = median_index + 1
+    selected["_artifact_sample_index"] = len(payloads)
+    selected["_artifact_command_elapsed_s"] = _optional_float(
+        artifact_payload.get("_command_elapsed_s")
+    )
+    selected["_artifact_internal_generation_s"] = _optional_float(
+        artifact_payload.get("generation_s")
+    )
+    return selected
+
+
+def _generation_measurement(payload: object) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    samples = payload.get("_generation_samples")
+    if not isinstance(samples, list):
+        return None
+    return {
+        "samples": samples,
+        "sample_count": int(payload.get("_generation_sample_count", len(samples))),
+        "median_sample_index": int(
+            payload.get("_generation_median_sample_index", 1)
+        ),
+        "artifact_sample_index": int(payload.get("_artifact_sample_index", 1)),
+        "artifact_command_elapsed_s": _optional_float(
+            payload.get("_artifact_command_elapsed_s")
+        ),
+        "artifact_internal_generation_s": _optional_float(
+            payload.get("_artifact_internal_generation_s")
+        ),
+        "median_internal_generation_s": _optional_float(payload.get("generation_s")),
+        "median_jit_compile_s": _optional_float(payload.get("jit_compile_s")),
+    }
 
 
 def _selected_generation_from_lc_row(row: dict[str, Any]) -> float | None:
@@ -959,11 +1179,13 @@ def _record_row(
     output_dir: str = "",
     wall_us_per_point: float | None = None,
     runtime_us_per_point: float | None = None,
+    generation_measurement: dict[str, Any] | None = None,
     all_flow_status: str | None = None,
     all_flow_generation_s: float | None = None,
     all_flow_output_dir: str = "",
     all_flow_wall_us_per_point: float | None = None,
     all_flow_runtime_us_per_point: float | None = None,
+    all_flow_generation_measurement: dict[str, Any] | None = None,
     all_flow_time_batch_size: int | None = None,
     all_flow_symbolica_output_chunk_size: int | None = None,
     all_flow_notes: str = "",
@@ -974,6 +1196,16 @@ def _record_row(
     command = [
         str(PYTHON),
         str(TABLE_SCRIPT),
+        "--data",
+        str(Z_DATA),
+        "--table",
+        str(Z_TABLE),
+        "--model-source",
+        MODEL_ORIGIN,
+        "--model-profile",
+        MODEL_PROFILE,
+        "--model-label",
+        MODEL_LABEL,
         "record",
         "--n",
         str(n_final),
@@ -994,6 +1226,13 @@ def _record_row(
         command.extend(["--wall-us-per-point", str(wall_us_per_point)])
     if runtime_us_per_point is not None:
         command.extend(["--runtime-us-per-point", str(runtime_us_per_point)])
+    if generation_measurement is not None:
+        command.extend(
+            [
+                "--generation-measurement-json",
+                json.dumps(generation_measurement, separators=(",", ":"), sort_keys=True),
+            ]
+        )
     if all_flow_status is not None:
         command.extend(["--all-flow-status", str(all_flow_status)])
     if all_flow_generation_s is not None:
@@ -1005,6 +1244,17 @@ def _record_row(
     if all_flow_runtime_us_per_point is not None:
         command.extend(
             ["--all-flow-runtime-us-per-point", str(all_flow_runtime_us_per_point)]
+        )
+    if all_flow_generation_measurement is not None:
+        command.extend(
+            [
+                "--all-flow-generation-measurement-json",
+                json.dumps(
+                    all_flow_generation_measurement,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            ]
         )
     if all_flow_time_batch_size is not None:
         command.extend(["--all-flow-time-batch-size", str(all_flow_time_batch_size)])
@@ -1023,7 +1273,23 @@ def _record_row(
 
 
 def _render_table() -> None:
-    _run_checked([str(PYTHON), str(TABLE_SCRIPT), "render"])
+    _run_checked(
+        [
+            str(PYTHON),
+            str(TABLE_SCRIPT),
+            "--data",
+            str(Z_DATA),
+            "--table",
+            str(Z_TABLE),
+            "--model-source",
+            MODEL_ORIGIN,
+            "--model-profile",
+            MODEL_PROFILE,
+            "--model-label",
+            MODEL_LABEL,
+            "render",
+        ]
+    )
 
 
 def _run_checked(command: Sequence[str]) -> None:

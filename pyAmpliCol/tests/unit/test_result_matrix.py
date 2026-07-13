@@ -224,6 +224,57 @@ def test_matrix_preserves_generated_output_and_logs(tmp_path: Path) -> None:
     assert preserved_logs[0].read_text() == "old\n"
 
 
+def test_jit_generation_uses_median_of_three_and_preserves_every_artifact(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    result_matrix = _load_result_matrix_module()
+    output_dir = tmp_path / "selected_flow"
+    log_path = tmp_path / "selected_flow.generate.log"
+    elapsed = iter((0.2, 0.1, 0.3))
+    calls = 0
+
+    def fake_run(_args, *, timeout, log_path):
+        nonlocal calls
+        assert timeout is None
+        calls += 1
+        output_dir.mkdir(parents=True)
+        (output_dir / "process_manifest.json").write_text(f"{calls}\n")
+        log_path.write_text(f"sample {calls}\n")
+        return {
+            "_command_elapsed_s": next(elapsed),
+            "generation_s": float(calls),
+            "jit_compile_s": calls / 10.0,
+        }
+
+    monkeypatch.setattr(result_matrix, "_run_json_command", fake_run)
+
+    payload = result_matrix._run_generation_json_command(
+        ["pyamplicol", "generate-process"],
+        timeout=None,
+        log_path=log_path,
+        output_dir=output_dir,
+        median_samples=3,
+    )
+
+    assert calls == 3
+    assert payload["_command_elapsed_s"] == 0.2
+    assert payload["generation_s"] == 1.0
+    assert payload["_generation_median_sample_index"] == 1
+    assert payload["_artifact_sample_index"] == 3
+    assert payload["_artifact_internal_generation_s"] == 3.0
+    assert (output_dir / "process_manifest.json").read_text() == "3\n"
+    sample_dirs = [
+        Path(sample["artifact_dir"])
+        for sample in payload["_generation_samples"]
+    ]
+    assert all(path.is_dir() for path in sample_dirs)
+    assert [
+        (path / "process_manifest.json").read_text().strip()
+        for path in sample_dirs
+    ] == ["1", "2", "3"]
+
+
 def test_matrix_retime_preserves_generation_and_validates_both_workloads(
     monkeypatch,
     tmp_path: Path,

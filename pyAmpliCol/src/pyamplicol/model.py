@@ -167,6 +167,7 @@ class VertexLoweringCoverageReport:
 @dataclass
 class Model:
     name: str
+    compiled: Any | None = field(default=None, repr=False, compare=False)
     particles: dict[int, Particle] = field(default_factory=dict)
     vertices: tuple[Vertex, ...] = ()
 
@@ -407,6 +408,18 @@ class Model:
             )
         return (SourceSpinState(helicity=0, chirality=0, spin_state=0),)
 
+    def source_wavefunction_kind(self, particle_id: int) -> str:
+        dimension = self.current_dimension(particle_id)
+        if self.is_fermion(particle_id):
+            return "fermion"
+        if dimension == 1:
+            return "scalar"
+        if dimension in {2, 4}:
+            return "vector"
+        if dimension == 16:
+            return "spin2"
+        return "unknown"
+
     def allowed_quantum_flows(
         self,
         vertex: Vertex,
@@ -560,6 +573,16 @@ class Model:
 
         return False
 
+    def vertex_closure_allowed(self, vertex: Vertex) -> bool:
+        """Return whether a scalar vertex result represents a vacuum closure.
+
+        The legacy built-in model uses auxiliary scalar result particles for a
+        few contact interactions. Generic UFO particles are ordinary currents
+        unless their compiled lowering explicitly introduces such an auxiliary.
+        """
+
+        return True
+
     def vertex_coupling_orders(self, vertex: Vertex) -> CouplingOrders:
         """Return model-generic coupling-order increments for one vertex.
 
@@ -569,6 +592,41 @@ class Model:
         """
 
         return (("QED", 1),)
+
+    def coupling_order_hierarchies(self) -> dict[str, int]:
+        """Return UFO-style priorities used by minimal-order generation.
+
+        A lower hierarchy value is preferred. Models without explicit order
+        metadata conservatively assign equal priority to every observed order.
+        """
+
+        return {}
+
+    def vertex_color_weight(
+        self,
+        vertex: Vertex,
+        *,
+        color_accuracy: str,
+    ) -> tuple[float, float]:
+        """Return the model-owned coefficient for one projected color vertex."""
+
+        del vertex, color_accuracy
+        return (1.0, 0.0)
+
+    def vertex_color_structure(self, vertex: Vertex) -> str:
+        """Return the model-level color tensor family for local projection.
+
+        Built-in kernels already encode their projected color algebra. External
+        tensor models override this hook so the generic color engine can apply
+        flow-dependent identities without recognizing particles or processes.
+        """
+
+        del vertex
+        return "model-defined"
+
+    def vertex_is_internal_contact_fragment(self, vertex: Vertex) -> bool:
+        del vertex
+        return False
 
     def combine_coupling_orders(
         self,
@@ -727,6 +785,9 @@ class AmplicolSMLeadingColorModel(Model):
         if vertex.kind in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}:
             return (("QCD", 1),)
         return (("QED", 1),)
+
+    def coupling_order_hierarchies(self) -> dict[str, int]:
+        return {"QCD": 1, "QED": 2}
 
     def build_tensor_library(self) -> Any:
         from symbolica.community.spenso import (

@@ -1,0 +1,1387 @@
+{
+  "created_by": "pyAmpliCol/docs/z_performance_table.py",
+  "entries": {
+    "1": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.10117983301089704,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 0.8586,
+          "all_flow_status": "ok",
+          "generation_s": 1.873424582881853,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.0193,
+          "status": "ok",
+          "updated_at": "2026-07-13T11:39:32.350699+00:00"
+        },
+        "asm": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 1.0366026668343693,
+            "artifact_internal_generation_s": 0.8674552920274436,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.8671232080087066,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_all_flows_before_20260713T114023Z",
+                "command_elapsed_s": 1.1516469998750836,
+                "internal_generation_s": 0.9114401249680668,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_all_flows_before_20260713T114024Z",
+                "command_elapsed_s": 1.040066041983664,
+                "internal_generation_s": 0.8671232080087066,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_all_flows",
+                "command_elapsed_s": 1.0366026668343693,
+                "internal_generation_s": 0.8674552920274436,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 1.040066041983664,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_all_flows",
+          "all_flow_runtime_us_per_point": 0.035469577983049304,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.1066022566774355,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 1.0178563338704407,
+            "artifact_internal_generation_s": 0.8566341658588499,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.8566341658588499,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_before_20260713T113958Z",
+                "command_elapsed_s": 1.342319875024259,
+                "internal_generation_s": 1.1808222918771207,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm_before_20260713T113959Z",
+                "command_elapsed_s": 1.0123062920756638,
+                "internal_generation_s": 0.8546317499130964,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm",
+                "command_elapsed_s": 1.0178563338704407,
+                "internal_generation_s": 0.8566341658588499,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 1.0178563338704407,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/asm",
+          "runtime_us_per_point": 0.1128458021588788,
+          "status": "ok",
+          "updated_at": "2026-07-13T11:40:48.191737+00:00",
+          "wall_us_per_point": 0.21159775834085698
+        },
+        "cpp_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 1.432403416838497,
+            "artifact_internal_generation_s": 1.246118666836992,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.8911816668696702,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_all_flows_before_20260713T114116Z",
+                "command_elapsed_s": 1.1211263749282807,
+                "internal_generation_s": 0.8911816668696702,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_all_flows_before_20260713T114117Z",
+                "command_elapsed_s": 1.0623676248360425,
+                "internal_generation_s": 0.8892714169342071,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_all_flows",
+                "command_elapsed_s": 1.432403416838497,
+                "internal_generation_s": 1.246118666836992,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 1.1211263749282807,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.029525246637319997,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.10642740956779258,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 1.194722541840747,
+            "artifact_internal_generation_s": 0.9887233329936862,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.0105812908150256,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_before_20260713T114050Z",
+                "command_elapsed_s": 1.2295255828648806,
+                "internal_generation_s": 1.0105812908150256,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3_before_20260713T114052Z",
+                "command_elapsed_s": 1.3316190829500556,
+                "internal_generation_s": 1.1566765001043677,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3",
+                "command_elapsed_s": 1.194722541840747,
+                "internal_generation_s": 0.9887233329936862,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 1.2295255828648806,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/cpp_o3",
+          "runtime_us_per_point": 0.04669053412777451,
+          "status": "ok",
+          "updated_at": "2026-07-13T11:41:42.483760+00:00",
+          "wall_us_per_point": 0.15169776498764354
+        },
+        "jit_o1": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.17510795779526234,
+            "artifact_internal_generation_s": 0.018887167098000646,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.01956599997356534,
+            "median_jit_compile_s": 0.0018931669183075428,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n1/jit/all_flows_before_20260713T113057Z_1",
+                "command_elapsed_s": 0.18152137496508658,
+                "internal_generation_s": 0.01956599997356534,
+                "jit_compile_s": 0.0018931669183075428,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n1/jit/all_flows_before_20260713T113057Z_2",
+                "command_elapsed_s": 0.1851000830065459,
+                "internal_generation_s": 0.019173291977494955,
+                "jit_compile_s": 0.0017790407873690128,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n1/jit/all_flows",
+                "command_elapsed_s": 0.17510795779526234,
+                "internal_generation_s": 0.018887167098000646,
+                "jit_compile_s": 0.0017861248925328255,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.18152137496508658,
+          "all_flow_notes": "reused matching O1 all-flow artifact from LC result matrix cache; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n1/jit/all_flows",
+          "all_flow_runtime_us_per_point": 0.017086912117017967,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.08307798070105946,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.22618254204280674,
+            "artifact_internal_generation_s": 0.039625207893550396,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.04579200013540685,
+            "median_jit_compile_s": 0.0076188340317457914,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o1_before_20260713T120418Z_1",
+                "command_elapsed_s": 0.2285287908744067,
+                "internal_generation_s": 0.04579200013540685,
+                "jit_compile_s": 0.0076188340317457914,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o1_before_20260713T120418Z_2",
+                "command_elapsed_s": 0.252552832942456,
+                "internal_generation_s": 0.035713582998141646,
+                "jit_compile_s": 0.0021296662744134665,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o1",
+                "command_elapsed_s": 0.22618254204280674,
+                "internal_generation_s": 0.039625207893550396,
+                "jit_compile_s": 0.002734124893322587,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.2285287908744067,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o1",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o1",
+          "runtime_us_per_point": 0.03808599753043592,
+          "status": "ok",
+          "updated_at": "2026-07-13T12:04:41.432788+00:00",
+          "wall_us_per_point": 0.14597611058880555
+        },
+        "jit_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.18667087494395673,
+            "artifact_internal_generation_s": 0.019774291897192597,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.019774291897192597,
+            "median_jit_compile_s": 0.0018621250055730343,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_all_flows_before_20260713T114207Z_1",
+                "command_elapsed_s": 0.23851200006902218,
+                "internal_generation_s": 0.01988304196856916,
+                "jit_compile_s": 0.0015573748387396336,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_all_flows_before_20260713T114207Z_2",
+                "command_elapsed_s": 0.1835543338675052,
+                "internal_generation_s": 0.019003709079697728,
+                "jit_compile_s": 0.0016314159147441387,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_all_flows",
+                "command_elapsed_s": 0.18667087494395673,
+                "internal_generation_s": 0.019774291897192597,
+                "jit_compile_s": 0.0018621250055730343,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.18667087494395673,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.016519338399029086,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.08577220407079486,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.24010316701605916,
+            "artifact_internal_generation_s": 0.06115654204040766,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.06115654204040766,
+            "median_jit_compile_s": 0.002142708981409669,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_before_20260713T114144Z",
+                "command_elapsed_s": 0.2808397919870913,
+                "internal_generation_s": 0.061357541009783745,
+                "jit_compile_s": 0.0022522499784827232,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3_before_20260713T114144Z_1",
+                "command_elapsed_s": 0.23216812498867512,
+                "internal_generation_s": 0.05915879178792238,
+                "jit_compile_s": 0.0019399591255933046,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3",
+                "command_elapsed_s": 0.24010316701605916,
+                "internal_generation_s": 0.06115654204040766,
+                "jit_compile_s": 0.002142708981409669,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.24010316701605916,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n1/jit_o3",
+          "runtime_us_per_point": 0.036308215045493315,
+          "status": "ok",
+          "updated_at": "2026-07-13T11:42:31.118916+00:00",
+          "wall_us_per_point": 0.14382904691921192
+        }
+      },
+      "process": "d d~ > Z + (1-1)*g"
+    },
+    "2": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.101735249745965,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 0.9678000000000001,
+          "all_flow_status": "ok",
+          "generation_s": 1.9959650826640427,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.1152,
+          "status": "ok",
+          "updated_at": "2026-07-13T12:34:52.373913+00:00"
+        },
+        "asm": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 1.3362588749732822,
+            "artifact_internal_generation_s": 1.1721877499949187,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.1989525000099093,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_all_flows_before_20260713T123543Z",
+                "command_elapsed_s": 1.475025082938373,
+                "internal_generation_s": 1.2385988337919116,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_all_flows_before_20260713T123544Z",
+                "command_elapsed_s": 1.3625096660107374,
+                "internal_generation_s": 1.1989525000099093,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_all_flows",
+                "command_elapsed_s": 1.3362588749732822,
+                "internal_generation_s": 1.1721877499949187,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 1.3625096660107374,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_all_flows",
+          "all_flow_runtime_us_per_point": 0.19389251260099274,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.3004423954633863,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 1.7917422910686582,
+            "artifact_internal_generation_s": 1.5844609579071403,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.5844609579071403,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_before_20260713T123517Z",
+                "command_elapsed_s": 1.8227047910913825,
+                "internal_generation_s": 1.61613345798105,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm_before_20260713T123519Z",
+                "command_elapsed_s": 1.4965170831419528,
+                "internal_generation_s": 1.3261326251085848,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm",
+                "command_elapsed_s": 1.7917422910686582,
+                "internal_generation_s": 1.5844609579071403,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 1.7917422910686582,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/asm",
+          "runtime_us_per_point": 0.7387781870041904,
+          "status": "ok",
+          "updated_at": "2026-07-13T12:36:07.692008+00:00",
+          "wall_us_per_point": 0.9470532670154358
+        },
+        "cpp_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 1.5602469998411834,
+            "artifact_internal_generation_s": 1.3471657088957727,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.3471657088957727,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_all_flows_before_20260713T123637Z",
+                "command_elapsed_s": 1.4998202919960022,
+                "internal_generation_s": 1.2848129998892546,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_all_flows_before_20260713T123639Z",
+                "command_elapsed_s": 1.8028294588439167,
+                "internal_generation_s": 1.567844209028408,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_all_flows",
+                "command_elapsed_s": 1.5602469998411834,
+                "internal_generation_s": 1.3471657088957727,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 1.5602469998411834,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.08404203537999566,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.18556916573781448,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 1.8184009999968112,
+            "artifact_internal_generation_s": 1.627140791155398,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.627140791155398,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_before_20260713T123611Z",
+                "command_elapsed_s": 2.0488534159958363,
+                "internal_generation_s": 1.7703567501157522,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3_before_20260713T123613Z",
+                "command_elapsed_s": 1.800112250028178,
+                "internal_generation_s": 1.6268493751995265,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3",
+                "command_elapsed_s": 1.8184009999968112,
+                "internal_generation_s": 1.627140791155398,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 1.8184009999968112,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/cpp_o3",
+          "runtime_us_per_point": 0.23542046017752852,
+          "status": "ok",
+          "updated_at": "2026-07-13T12:37:02.769821+00:00",
+          "wall_us_per_point": 0.4149383086358841
+        },
+        "jit_o1": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.20459650014527142,
+            "artifact_internal_generation_s": 0.030400084098801017,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.03422420797869563,
+            "median_jit_compile_s": 0.002995207905769348,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n2/jit/all_flows_before_20260713T120834Z_1",
+                "command_elapsed_s": 0.20661370898596942,
+                "internal_generation_s": 0.03281125007197261,
+                "jit_compile_s": 0.0030169151723384857,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n2/jit/all_flows_before_20260713T120835Z",
+                "command_elapsed_s": 0.20584770804271102,
+                "internal_generation_s": 0.03422420797869563,
+                "jit_compile_s": 0.002995207905769348,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n2/jit/all_flows",
+                "command_elapsed_s": 0.20459650014527142,
+                "internal_generation_s": 0.030400084098801017,
+                "jit_compile_s": 0.003059708047658205,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.20584770804271102,
+          "all_flow_notes": "retimed existing process kept at pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n2/jit/all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/dd_z_jets/n2/jit/all_flows",
+          "all_flow_runtime_us_per_point": 0.049315954307255105,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.1482877789912301,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.31659691710956395,
+            "artifact_internal_generation_s": 0.077909333165735,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.10940866684541106,
+            "median_jit_compile_s": 0.01455983379855752,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o1_before_20260713T123452Z",
+                "command_elapsed_s": 0.2884172908961773,
+                "internal_generation_s": 0.10940866684541106,
+                "jit_compile_s": 0.01455983379855752,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o1_before_20260713T123453Z",
+                "command_elapsed_s": 0.2702653338201344,
+                "internal_generation_s": 0.09055129089392722,
+                "jit_compile_s": 0.008819039911031723,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o1",
+                "command_elapsed_s": 0.31659691710956395,
+                "internal_generation_s": 0.077909333165735,
+                "jit_compile_s": 0.00572737492620945,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.2884172908961773,
+          "notes": "retimed existing process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o1",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o1",
+          "runtime_us_per_point": 0.16127216742119246,
+          "status": "ok",
+          "updated_at": "2026-07-13T12:44:46.651461+00:00",
+          "wall_us_per_point": 0.34044369826962895
+        },
+        "jit_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.20549137494526803,
+            "artifact_internal_generation_s": 0.02887708297930658,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.02887708297930658,
+            "median_jit_compile_s": 0.0029669576324522495,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_all_flows_before_20260713T123726Z",
+                "command_elapsed_s": 0.2525630828458816,
+                "internal_generation_s": 0.02891145902685821,
+                "jit_compile_s": 0.0026184169109910727,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_all_flows_before_20260713T123726Z_1",
+                "command_elapsed_s": 0.199860957916826,
+                "internal_generation_s": 0.029665458016097546,
+                "jit_compile_s": 0.003123415866866708,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_all_flows",
+                "command_elapsed_s": 0.20549137494526803,
+                "internal_generation_s": 0.02887708297930658,
+                "jit_compile_s": 0.0029669576324522495,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.20549137494526803,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.05250025536595907,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.15117361511732783,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.24949600012041628,
+            "artifact_internal_generation_s": 0.0806499170139432,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.0794049168471247,
+            "median_jit_compile_s": 0.006059292238205671,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_before_20260713T123704Z",
+                "command_elapsed_s": 0.3374365409836173,
+                "internal_generation_s": 0.08431079192087054,
+                "jit_compile_s": 0.006529416888952255,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3_before_20260713T123704Z_1",
+                "command_elapsed_s": 0.252245832933113,
+                "internal_generation_s": 0.0794049168471247,
+                "jit_compile_s": 0.006059292238205671,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3",
+                "command_elapsed_s": 0.24949600012041628,
+                "internal_generation_s": 0.0806499170139432,
+                "jit_compile_s": 0.006652458803728223,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.252245832933113,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n2/jit_o3",
+          "runtime_us_per_point": 0.17780062692609874,
+          "status": "ok",
+          "updated_at": "2026-07-13T12:37:49.151901+00:00",
+          "wall_us_per_point": 0.38763427151841895
+        }
+      },
+      "process": "d d~ > Z + (2-1)*g"
+    },
+    "3": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.09440862576797604,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 1.144,
+          "all_flow_status": "ok",
+          "generation_s": 1.9580540829338133,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 0.42360000000000003,
+          "status": "ok",
+          "updated_at": "2026-07-13T13:08:06.146031+00:00"
+        },
+        "asm": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 2.2995634998660535,
+            "artifact_internal_generation_s": 2.076209041988477,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 2.076209041988477,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_all_flows_before_20260713T130900Z",
+                "command_elapsed_s": 2.376428165938705,
+                "internal_generation_s": 2.05022899992764,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_all_flows_before_20260713T130902Z",
+                "command_elapsed_s": 2.248129083076492,
+                "internal_generation_s": 2.01126579195261,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_all_flows",
+                "command_elapsed_s": 2.2995634998660535,
+                "internal_generation_s": 2.076209041988477,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 2.2995634998660535,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_all_flows",
+          "all_flow_runtime_us_per_point": 0.6844363494366348,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 1.4046874067166388,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 2.9313238749746233,
+            "artifact_internal_generation_s": 2.6755975419655442,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 2.1802395831327885,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_before_20260713T130832Z",
+                "command_elapsed_s": 2.4597022091038525,
+                "internal_generation_s": 2.1802395831327885,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm_before_20260713T130834Z",
+                "command_elapsed_s": 1.9704899159260094,
+                "internal_generation_s": 1.7798351249657571,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm",
+                "command_elapsed_s": 2.9313238749746233,
+                "internal_generation_s": 2.6755975419655442,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 2.4597022091038525,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/asm",
+          "runtime_us_per_point": 2.385873575927371,
+          "status": "ok",
+          "updated_at": "2026-07-13T13:09:25.598085+00:00",
+          "wall_us_per_point": 4.617781093956414
+        },
+        "cpp_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 1.9332257499918342,
+            "artifact_internal_generation_s": 1.7468810840509832,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.762385625159368,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_all_flows_before_20260713T130959Z",
+                "command_elapsed_s": 2.0927535421214998,
+                "internal_generation_s": 1.813258333131671,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_all_flows_before_20260713T131001Z",
+                "command_elapsed_s": 1.962104083970189,
+                "internal_generation_s": 1.762385625159368,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_all_flows",
+                "command_elapsed_s": 1.9332257499918342,
+                "internal_generation_s": 1.7468810840509832,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 1.962104083970189,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.2314070324502761,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.38189029446634615,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 2.973506374983117,
+            "artifact_internal_generation_s": 2.764103083172813,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 2.764103083172813,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_before_20260713T130930Z",
+                "command_elapsed_s": 3.429107583127916,
+                "internal_generation_s": 3.1827750408556312,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3_before_20260713T130933Z",
+                "command_elapsed_s": 2.9731497920583934,
+                "internal_generation_s": 2.780981041956693,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3",
+                "command_elapsed_s": 2.973506374983117,
+                "internal_generation_s": 2.764103083172813,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 2.973506374983117,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/cpp_o3",
+          "runtime_us_per_point": 0.7790389900320059,
+          "status": "ok",
+          "updated_at": "2026-07-13T13:10:24.350664+00:00",
+          "wall_us_per_point": 1.0293468252418074
+        },
+        "jit_o1": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.23026629094965756,
+            "artifact_internal_generation_s": 0.04314895812422037,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.04249837505631149,
+            "median_jit_compile_s": 0.007077667163684964,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_all_flows_before_20260713T131323Z",
+                "command_elapsed_s": 0.298183707986027,
+                "internal_generation_s": 0.04655241617001593,
+                "jit_compile_s": 0.007353916065767407,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_all_flows_before_20260713T131323Z_1",
+                "command_elapsed_s": 0.23578066704794765,
+                "internal_generation_s": 0.04249837505631149,
+                "jit_compile_s": 0.007077667163684964,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_all_flows",
+                "command_elapsed_s": 0.23026629094965756,
+                "internal_generation_s": 0.04314895812422037,
+                "jit_compile_s": 0.006946666864678264,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.23578066704794765,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 0.15953697282581306,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.3179760545831651,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.39744908292777836,
+            "artifact_internal_generation_s": 0.19575870805419981,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.20983754214830697,
+            "median_jit_compile_s": 0.01893291575834155,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_before_20260713T131301Z",
+                "command_elapsed_s": 0.4740008329972625,
+                "internal_generation_s": 0.23163429205305874,
+                "jit_compile_s": 0.028254415607079864,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1_before_20260713T131301Z_1",
+                "command_elapsed_s": 0.4029882908798754,
+                "internal_generation_s": 0.20983754214830697,
+                "jit_compile_s": 0.01893291575834155,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1",
+                "command_elapsed_s": 0.39744908292777836,
+                "internal_generation_s": 0.19575870805419981,
+                "jit_compile_s": 0.01859979168511927,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.4029882908798754,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o1",
+          "runtime_us_per_point": 0.4971216397812507,
+          "status": "ok",
+          "updated_at": "2026-07-13T13:13:44.875100+00:00",
+          "wall_us_per_point": 0.8261069304113601
+        },
+        "jit_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.22559104207903147,
+            "artifact_internal_generation_s": 0.04272799985483289,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.04272799985483289,
+            "median_jit_compile_s": 0.0067536679562181234,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_all_flows_before_20260713T131048Z",
+                "command_elapsed_s": 0.3162756669335067,
+                "internal_generation_s": 0.044979291036725044,
+                "jit_compile_s": 0.006841417169198394,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_all_flows_before_20260713T131048Z_1",
+                "command_elapsed_s": 0.22188287507742643,
+                "internal_generation_s": 0.04102395894005895,
+                "jit_compile_s": 0.0062480829656124115,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_all_flows",
+                "command_elapsed_s": 0.22559104207903147,
+                "internal_generation_s": 0.04272799985483289,
+                "jit_compile_s": 0.0067536679562181234,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.22559104207903147,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.15883823310448192,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.31965852331672034,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.4354981661308557,
+            "artifact_internal_generation_s": 0.22877170890569687,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.2263794168829918,
+            "median_jit_compile_s": 0.019193999702110887,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_before_20260713T131026Z",
+                "command_elapsed_s": 0.47923316597007215,
+                "internal_generation_s": 0.22670758399181068,
+                "jit_compile_s": 0.020093917846679688,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3_before_20260713T131026Z_1",
+                "command_elapsed_s": 0.4663981660269201,
+                "internal_generation_s": 0.2263794168829918,
+                "jit_compile_s": 0.019193999702110887,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3",
+                "command_elapsed_s": 0.4354981661308557,
+                "internal_generation_s": 0.22877170890569687,
+                "jit_compile_s": 0.021026623900979757,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.4663981660269201,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n3/jit_o3",
+          "runtime_us_per_point": 0.5033267468075076,
+          "status": "ok",
+          "updated_at": "2026-07-13T13:11:10.057858+00:00",
+          "wall_us_per_point": 0.8253329980614592
+        }
+      },
+      "process": "d d~ > Z + (3-1)*g"
+    },
+    "4": {
+      "modes": {
+        "amplicol": {
+          "all_flow_generation_s": 0.09609212492842972,
+          "all_flow_notes": "reused from LC result matrix cache",
+          "all_flow_runtime_us_per_point": 1.9537999999999998,
+          "all_flow_status": "ok",
+          "generation_s": 2.0557844159193337,
+          "notes": "reused from LC result matrix cache",
+          "runtime_us_per_point": 1.3714000000000002,
+          "status": "ok",
+          "updated_at": "2026-07-13T09:05:44.061929+00:00"
+        },
+        "asm": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 1.8631545421667397,
+            "artifact_internal_generation_s": 1.7068706250283867,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 1.674298166995868,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 1,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_all_flows_before_20260713T165918Z",
+                "command_elapsed_s": 1.837920333025977,
+                "internal_generation_s": 1.674298166995868,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_all_flows_before_20260713T165920Z",
+                "command_elapsed_s": 1.8220287091098726,
+                "internal_generation_s": 1.665632916847244,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_all_flows",
+                "command_elapsed_s": 1.8631545421667397,
+                "internal_generation_s": 1.7068706250283867,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 1.837920333025977,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_all_flows",
+          "all_flow_runtime_us_per_point": 2.062724133274906,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 2.302836017470251,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 2.28036145796068,
+            "artifact_internal_generation_s": 2.11527991713956,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 2.2142318750265986,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_before_20260713T165852Z",
+                "command_elapsed_s": 2.724250040948391,
+                "internal_generation_s": 2.5650245831348,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm_before_20260713T165854Z",
+                "command_elapsed_s": 2.375906249973923,
+                "internal_generation_s": 2.2142318750265986,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm",
+                "command_elapsed_s": 2.28036145796068,
+                "internal_generation_s": 2.11527991713956,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 2.375906249973923,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/asm",
+          "runtime_us_per_point": 5.751367405185759,
+          "status": "ok",
+          "updated_at": "2026-07-13T16:59:42.783196+00:00",
+          "wall_us_per_point": 6.15484073597711
+        },
+        "cpp_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 2.6888628751039505,
+            "artifact_internal_generation_s": 2.5245235830079764,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 2.524422457907349,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_all_flows_before_20260713T170025Z",
+                "command_elapsed_s": 2.6722670421004295,
+                "internal_generation_s": 2.513790499884635,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_all_flows_before_20260713T170027Z",
+                "command_elapsed_s": 2.685489583062008,
+                "internal_generation_s": 2.524422457907349,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_all_flows",
+                "command_elapsed_s": 2.6888628751039505,
+                "internal_generation_s": 2.5245235830079764,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 2.685489583062008,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.7910173244878801,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 1.0177713508354194,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 6.105857416987419,
+            "artifact_internal_generation_s": 5.943291457835585,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 5.877447834005579,
+            "median_jit_compile_s": 0.0,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_before_20260713T165950Z",
+                "command_elapsed_s": 5.965526125160977,
+                "internal_generation_s": 5.808429667027667,
+                "jit_compile_s": 0.0,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3_before_20260713T165956Z",
+                "command_elapsed_s": 6.0447122091427445,
+                "internal_generation_s": 5.877447834005579,
+                "jit_compile_s": 0.0,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3",
+                "command_elapsed_s": 6.105857416987419,
+                "internal_generation_s": 5.943291457835585,
+                "jit_compile_s": 0.0,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 6.0447122091427445,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/cpp_o3",
+          "runtime_us_per_point": 2.3214724088137473,
+          "status": "ok",
+          "updated_at": "2026-07-13T17:00:51.039909+00:00",
+          "wall_us_per_point": 2.781476424419355
+        },
+        "jit_o1": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.2597968331538141,
+            "artifact_internal_generation_s": 0.059892334043979645,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.0705634169280529,
+            "median_jit_compile_s": 0.021311583230271935,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_all_flows_before_20260713T165826Z",
+                "command_elapsed_s": 0.28994379192590714,
+                "internal_generation_s": 0.06529445783235133,
+                "jit_compile_s": 0.02030579186975956,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_all_flows_before_20260713T165827Z",
+                "command_elapsed_s": 0.2806102498434484,
+                "internal_generation_s": 0.0705634169280529,
+                "jit_compile_s": 0.021311583230271935,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_all_flows",
+                "command_elapsed_s": 0.2597968331538141,
+                "internal_generation_s": 0.059892334043979645,
+                "jit_compile_s": 0.018356289947405457,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.2806102498434484,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_all_flows",
+          "all_flow_runtime_us_per_point": 0.4990403523535392,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.797433673776124,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.6363895840477198,
+            "artifact_internal_generation_s": 0.44231120916083455,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.44231120916083455,
+            "median_jit_compile_s": 0.05533054214902222,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_before_20260713T165804Z",
+                "command_elapsed_s": 0.6910447909031063,
+                "internal_generation_s": 0.48067062511108816,
+                "jit_compile_s": 0.05388833303004503,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1_before_20260713T165805Z",
+                "command_elapsed_s": 0.6321338750422001,
+                "internal_generation_s": 0.44615187495946884,
+                "jit_compile_s": 0.056517250603064895,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1",
+                "command_elapsed_s": 0.6363895840477198,
+                "internal_generation_s": 0.44231120916083455,
+                "jit_compile_s": 0.05533054214902222,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.6363895840477198,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o1",
+          "runtime_us_per_point": 1.402326210658178,
+          "status": "ok",
+          "updated_at": "2026-07-13T16:58:47.990654+00:00",
+          "wall_us_per_point": 2.0020580215138724
+        },
+        "jit_o3": {
+          "all_flow_generation_measurement": {
+            "artifact_command_elapsed_s": 0.21099429088644683,
+            "artifact_internal_generation_s": 0.05583770805969834,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.05583770805969834,
+            "median_jit_compile_s": 0.01750816567800939,
+            "median_sample_index": 3,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_all_flows_before_20260713T170114Z",
+                "command_elapsed_s": 0.21215775003656745,
+                "internal_generation_s": 0.05508162500336766,
+                "jit_compile_s": 0.017187457997351885,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_all_flows_before_20260713T170114Z_1",
+                "command_elapsed_s": 0.21008724998682737,
+                "internal_generation_s": 0.05484795803204179,
+                "jit_compile_s": 0.017240085173398256,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_all_flows",
+                "command_elapsed_s": 0.21099429088644683,
+                "internal_generation_s": 0.05583770805969834,
+                "jit_compile_s": 0.01750816567800939,
+                "sample_index": 3
+              }
+            ]
+          },
+          "all_flow_generation_s": 0.21099429088644683,
+          "all_flow_notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_all_flows; time batch 64, output chunk 8192",
+          "all_flow_output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_all_flows",
+          "all_flow_runtime_us_per_point": 0.5012414737286389,
+          "all_flow_status": "ok",
+          "all_flow_symbolica_output_chunk_size": 8192,
+          "all_flow_time_batch_size": 64,
+          "all_flow_wall_us_per_point": 0.7775810049293073,
+          "generation_measurement": {
+            "artifact_command_elapsed_s": 0.5814950000494719,
+            "artifact_internal_generation_s": 0.41736670886166394,
+            "artifact_sample_index": 3,
+            "median_internal_generation_s": 0.41904237517155707,
+            "median_jit_compile_s": 0.052142125088721514,
+            "median_sample_index": 2,
+            "sample_count": 3,
+            "samples": [
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_before_20260713T170052Z",
+                "command_elapsed_s": 0.5730937500484288,
+                "internal_generation_s": 0.41281462484039366,
+                "jit_compile_s": 0.0524845018517226,
+                "sample_index": 1
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3_before_20260713T170053Z",
+                "command_elapsed_s": 0.5792799999471754,
+                "internal_generation_s": 0.41904237517155707,
+                "jit_compile_s": 0.052142125088721514,
+                "sample_index": 2
+              },
+              {
+                "artifact_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3",
+                "command_elapsed_s": 0.5814950000494719,
+                "internal_generation_s": 0.41736670886166394,
+                "jit_compile_s": 0.05245754332281649,
+                "sample_index": 3
+              }
+            ]
+          },
+          "generation_s": 0.5792799999471754,
+          "notes": "generated process kept at pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3",
+          "output_dir": "/Users/vjhirsch/HEP_programs/pyAmpliCol/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/n4/jit_o3",
+          "runtime_us_per_point": 1.4005366077302097,
+          "status": "ok",
+          "updated_at": "2026-07-13T17:01:35.661261+00:00",
+          "wall_us_per_point": 2.0153813311829096
+        }
+      },
+      "process": "d d~ > Z + (4-1)*g"
+    }
+  },
+  "model_label": "external UFO/JSON SM",
+  "model_profile": "external-sm",
+  "model_source": "assets/models/json/sm/sm.json",
+  "multiplicity_convention": "final_state",
+  "process_family": "d d~ > z + (n-1)g",
+  "schema_version": 1,
+  "settings": {
+    "all_flow_runtime_batch_size": 64,
+    "all_flow_symbolica_output_chunk_size": 8192,
+    "batch_size": 64,
+    "selected_runtime_batch_size": 64,
+    "selected_symbolica_output_chunk_size": 128,
+    "symbolica_cpe_iterations": null,
+    "symbolica_iterations": 10,
+    "symbolica_max_common_pair_cache_entries": 5000000,
+    "symbolica_max_common_pair_distance": 1000,
+    "symbolica_max_horner_scheme_variables": 1000,
+    "symbolica_output_chunk_size": 128,
+    "symbolica_stage_local_parameter_layout": true,
+    "target_runtime_s": 10.0
+  },
+  "updated_at": "2026-07-13T17:09:58.261148+00:00"
+}

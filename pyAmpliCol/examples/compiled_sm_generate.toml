@@ -1,0 +1,7 @@
+[arguments]
+model = "../outputs/examples/sm.pyAmplicol-model.json"
+process = "d d~ > z g"
+output_dir = "../outputs/examples/compiled_sm_dd_z_g"
+color_accuracy = "lc"
+symbolica_evaluator_backend = "jit"
+symbolica_jit_optimization_level = 3

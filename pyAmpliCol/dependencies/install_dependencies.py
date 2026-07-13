@@ -24,12 +24,14 @@ PATCHES_DIR = DEPS_DIR / "patches"
 SYMBOLICA_WHEEL_DIR = WHEEL_DIR / "symbolica"
 GAMMALOOP_WHEEL_DIR = WHEEL_DIR / "gammaloop"
 RUSTICOL_WHEEL_DIR = WHEEL_DIR / "rusticol"
+UFO_MODEL_LOADER_WHEEL_DIR = WHEEL_DIR / "ufo-model-loader"
 
 SYMBOLICA_COMMUNITY_DIR = DEPS_DIR / "symbolica-community"
 SYMBOLICA_DIR = DEPS_DIR / "symbolica"
 SYMJIT_DIR = DEPS_DIR / "symjit"
 GAMMALOOP_DIR = DEPS_DIR / "gammaloop"
 XSIMD_DIR = DEPS_DIR / "xsimd"
+UFO_MODEL_LOADER_DIR = DEPS_DIR / "ufo-model-loader"
 RUSTICOL_DIR = AMPLICOL_ROOT / "rusticol"
 
 SYMBOLICA_COMMUNITY_URL = "https://github.com/symbolica-dev/symbolica-community.git"
@@ -41,6 +43,9 @@ SYMJIT_REV = "7fb09d1cb2a943c25a6fd71a208af44fcc6d813d"
 SYMJIT_VERSION = "2.19.3"
 GAMMALOOP_URL = "https://github.com/alphal00p/gammaloop.git"
 XSIMD_URL = "https://github.com/xtensor-stack/xsimd.git"
+UFO_MODEL_LOADER_URL = "https://github.com/alphal00p/ufo_model_loader.git"
+UFO_MODEL_LOADER_REV = "9cb4deeae40ddd64184049af07ac1d03ce5f6162"
+UFO_MODEL_LOADER_VERSION = "0.1.7"
 SYMBOLICA_COMMUNITY_REF = "main"
 XSIMD_REF = "master"
 DEFAULT_GAMMALOOP_REF = "db79edc84f6a1580decbcc4ede7ea0b1c79d9a08"
@@ -58,6 +63,8 @@ BOOTSTRAP_REQUIREMENTS = (
     "colorama",
     "progressbar2",
     "tabled",
+    "setuptools>=70",
+    "wheel",
 )
 BOOTSTRAP_IMPORTS = (
     "pip",
@@ -69,6 +76,8 @@ BOOTSTRAP_IMPORTS = (
     "colorama",
     "progressbar",
     "tabled",
+    "setuptools",
+    "wheel",
 )
 
 MANAGED_PATHS = (
@@ -80,6 +89,7 @@ MANAGED_PATHS = (
     SYMJIT_DIR,
     GAMMALOOP_DIR,
     XSIMD_DIR,
+    UFO_MODEL_LOADER_DIR,
 )
 
 
@@ -427,6 +437,12 @@ def ensure_sources(*, update_existing: bool) -> None:
         XSIMD_DIR,
         update_existing=update_existing,
     )
+    ensure_ref_checkout(
+        UFO_MODEL_LOADER_URL,
+        UFO_MODEL_LOADER_REV,
+        UFO_MODEL_LOADER_DIR,
+        update_existing=update_existing,
+    )
 
 
 def xsimd_headers_are_ready() -> bool:
@@ -685,6 +701,14 @@ def write_dependency_manifest(
             "source_url": XSIMD_URL,
             "usage": "header-only include path for Symbolica complex_4x compiled evaluators",
         },
+        "ufo_model_loader": {
+            "requested": True,
+            "installed": python_package_is_installed("ufo-model-loader"),
+            "version": UFO_MODEL_LOADER_VERSION,
+            "source_path": str(UFO_MODEL_LOADER_DIR.relative_to(REPO_ROOT)),
+            "source_rev": optional_git_head(UFO_MODEL_LOADER_DIR),
+            "source_url": UFO_MODEL_LOADER_URL,
+        },
         "rusticol": {
             "requested": True,
             "installed": python_package_is_installed("rusticol"),
@@ -811,6 +835,20 @@ def pin_symbolica_symjit(source_dir: Path) -> None:
 
 
 BASE_SMOKE_TEST = """
+import importlib.metadata
+import ufo_model_loader
+from ufo_model_loader.commands import load_model
+
+if importlib.metadata.version("ufo-model-loader") != "0.1.7":
+    raise SystemExit("ufo-model-loader 0.1.7 is required")
+
+# Load once before importing the other native extensions. Raw UFO loading is
+# isolated in pyAmpliCol proper; this ordering also avoids mixing native symbol
+# registries during this single-process installer smoke test.
+loader_model, loader_card = load_model("scalars", "full", False)
+if len(loader_model.particles) != 3 or not loader_card:
+    raise SystemExit("ufo-model-loader bundled-model smoke test failed")
+
 import symbolica
 import symbolica.community.idenso
 import symbolica.community.spenso
@@ -1034,6 +1072,30 @@ def install_wheel(
     run(command, env=env)
 
 
+def build_python_wheel(project_dir: Path, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for wheel in output_dir.glob("*.whl"):
+        wheel.unlink()
+    run(
+        [
+            venv_python(),
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            output_dir,
+            project_dir,
+        ],
+        env=venv_environment(),
+    )
+    wheels = sorted(output_dir.glob("*.whl"), key=lambda path: path.stat().st_mtime)
+    if not wheels:
+        raise DependencySetupError(f"No wheel was produced in {output_dir}")
+    return wheels[-1]
+
+
 def build_wheels_and_install(*, include_gammaloop: bool) -> None:
     symbolica_wheel = build_maturin_wheel(
         SYMBOLICA_COMMUNITY_DIR,
@@ -1041,6 +1103,12 @@ def build_wheels_and_install(*, include_gammaloop: bool) -> None:
         release=True,
     )
     install_wheel(symbolica_wheel, force_reinstall=True, no_deps=True)
+
+    loader_wheel = build_python_wheel(
+        UFO_MODEL_LOADER_DIR,
+        UFO_MODEL_LOADER_WHEEL_DIR,
+    )
+    install_wheel(loader_wheel, force_reinstall=True, no_deps=True)
 
     rusticol_wheel = build_maturin_wheel(
         RUSTICOL_DIR,
@@ -1144,6 +1212,14 @@ def main(argv: list[str] | None = None) -> int:
                 XSIMD_URL,
                 XSIMD_REF,
                 XSIMD_DIR,
+                update_existing=False,
+            )
+        if not UFO_MODEL_LOADER_DIR.exists():
+            require_tool("git")
+            ensure_ref_checkout(
+                UFO_MODEL_LOADER_URL,
+                UFO_MODEL_LOADER_REV,
+                UFO_MODEL_LOADER_DIR,
                 update_existing=False,
             )
 

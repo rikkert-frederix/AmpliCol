@@ -6,7 +6,7 @@ This document separates three layers that are easy to conflate:
   subprocesses, colour orders, phase-space groups, multichannel partners, and
   symmetry factors.
 - **Canonical process IR**: the typed, all-outgoing description shared by
-  process-support diagnostics and the planned model-driven DAG builder.  It
+  process-support diagnostics and the model-driven DAG builder.  It
   keeps both physical incoming/final legs and crossed all-outgoing particles,
   records PDG orders, labels gluons/leptons/vectors/Higgs legs, and summarizes
   arbitrary quark-line balance.
@@ -22,12 +22,16 @@ This document separates three layers that are easy to conflate:
 | Feature | Status | Notes |
 |---|---|---|
 | Legacy particle vocabulary | Implemented in process/model metadata | QCD partons, `a`, `z`, `w+`, `w-`, charged leptons, neutrinos, and `h`. |
+| Model sources | Implemented for the built-in SM, trusted UFO directories, loader JSON, and exact-version compiled models | `--model` resolves each source into the same immutable `CompiledModel`; UFO imports run in an isolated worker, while data-only JSON starts after import. |
+| Generic UFO lowering | External SM validated point-wise through `n <= 4` | Loader tensors are normalized, simplified through Idenso/Spenso, projected to the Weyl and LC/NLC/full-colour bases, oriented into current kernels, and inlined before evaluator construction. Unsupported model features fail during aggregate preflight. |
+| Run cards and runtime parameters | Implemented | Every public subcommand accepts an `[arguments]` TOML run card with explicit CLI overrides. Generated artifacts carry a complete complex-JSON parameter card; Rusticol accepts validated partial overrides at runtime. |
+| Compiled-model artifacts and cache | Implemented | `compile-model` writes portable `*.pyAmplicol-model.json` data and process generation embeds the exact model. Dependency fingerprints and source/restriction content keys prevent stale reuse. |
 | Process sets with `PROC | PROC` | Implemented in parser/CLI artifacts | Multi-entry generation writes a root `process_set_manifest.json`, a root standalone checker wrapper, and nested subprocess artifacts. |
 | Crossing-equivalent subprocess reuse | Implemented for process-set artifacts | Subprocesses with the same all-outgoing PDG multiset share the first generated representative artifact; the process-set manifest records `crossing_alias_of` and an input momentum crossing/permutation map for Rusticol. |
 | Built-in `p` and `j` labels | Implemented | Both use the active massless-QCD flavour scheme, matching legacy AmpliCol. |
 | Anonymous labels such as `[d g]` | Implemented in parser/enumerator | Anonymous slots expand by cartesian product; invalid charge/flavour combinations are skipped. |
 | Repetition syntax such as `4*g` and `3*[d g]` | Implemented | Repeated anonymous slots are independent. |
-| Canonical process IR | Implemented for parser/support layers | `process_ir.py` is the stable process description intended to feed generic current construction and Rusticol schema v2. |
+| Canonical process IR | Implemented for parser, generation, and runtime layers | `process_ir.py` is the stable process description consumed by generic current construction and serialized into Rusticol schema v2. |
 | Generic colour-flow planning | Implemented for production LC and initial NLC/full artifacts | `color_plan.py` enumerates leading-colour open-line sectors for arbitrary balanced quark-pair counts and pure-gluon single-trace sectors.  For NLC/full, it keeps the additional trace/open-line orderings needed by the sparse colour-contraction plan for Fortran-supported 0/1/2 quark-line classes. |
 | Generic DAG reachability | Implemented for production LC artifacts | `generic_dag.py` builds source currents, model-vertex interactions, external-subset closures, stage buckets, and lowering-readiness summaries from `CurrentIndex` physics state rather than process-family tags. |
 | Generic current-plan facade | Unified with production DAG | `current_plan.py` is now a compatibility view over `GenericDAGCompiler`; it no longer owns a second simplified recursion or weak process-family-shaped current key. |
@@ -356,7 +360,7 @@ pyAmpliCol/scripts/run_with_memory_watch.py --limit-gb 30 \
 
 ## Model Lowering Coverage
 
-The model now exposes `vertex_lowering_coverage()` so process-support
+The built-in model exposes `vertex_lowering_coverage()` so process-support
 diagnostics and generic DAG construction can identify blockers from the
 legacy vertex table itself.  The current split is:
 
@@ -369,6 +373,12 @@ legacy vertex table itself.  The current split is:
 Future model extensions should continue adding missing physics through
 model-owned lowering rules instead of process-family branches.
 
+External UFO/JSON models use the parallel `CompiledModel` route. Its preflight
+reports unsupported particles, tensors, functions, propagators, and fermion
+flows together; accepted terms are oriented into model-owned kernels before
+the same DAG compiler is entered. The bundled external SM currently passes the
+94-case LC/NLC/full-colour fixture through `n <= 4`.
+
 The generic colour planner and current planner already use the canonical
 all-outgoing process IR.  The colour planner enumerates leading-colour open
 quark-line sectors, including arbitrary balanced quark-pair counts and ordered
@@ -377,12 +387,13 @@ the same planner retains the additional non-folded pure-gluon trace orderings
 and open-line block permutations needed for sparse colour contractions.  The
 current sparse metric contracts generic products of open fundamental strings,
 so arbitrary balanced quark-line sectors with gluons are represented by the
-same colour-flow trace-overlap rule.  The generic DAG
-compiler uses those LC sector ids in `CurrentIndex`, duplicates source/current
-tables per sector, rejects cross-sector current combinations, and lets coloured
-currents span several open line groups inside one LC sector when model vertices
-and colour flow allow it.  Colourless singlet labels remain attachable to any
-compatible colour line.  As a result, low-multiplicity multi-quark examples
+same colour-flow trace-overlap rule.  The generic DAG compiler keeps sector and
+ordering metadata on amplitude roots while sharing reusable currents by their
+physics state and ordered coloured word. Selected-flow sidecars prune the
+unused roots before evaluator construction. The compiler rejects invalid
+cross-line combinations and lets coloured currents span several open line
+groups when model vertices and colour flow allow it. Colourless singlet labels
+remain attachable to any compatible colour line. As a result, low-multiplicity multi-quark examples
 such as `d d~ > u u~` and guarded larger examples such as
 `d d~ > u u~ s s~` now find amplitude closures in the generic planning layer.
 The normal unit suite also checks a selected leading-colour sector for the

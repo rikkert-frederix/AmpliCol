@@ -41,3 +41,12 @@ tmp/
 
 # Rust build outputs
 /rusticol/target/
+
+# Locally retained UFO-support generation and timing artifacts
+/pyAmpliCol/.ufo_support_outputs/
+/pyAmpliCol/docs/.result_matrix_ufo_sm_outputs/
+/pyAmpliCol/docs/.z_performance_ufo_sm_outputs/
+
+# Installer-managed dependency checkout and listener log
+/pyAmpliCol/dependencies/ufo-model-loader/
+/pyAmpliCol/run.log

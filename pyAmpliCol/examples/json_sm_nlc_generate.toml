@@ -1,0 +1,7 @@
+[arguments]
+model = "../assets/models/json/sm/sm.json"
+process = "d d~ > z g"
+output_dir = "../outputs/examples/json_sm_dd_z_g_nlc"
+color_accuracy = "nlc"
+symbolica_evaluator_backend = "jit"
+symbolica_jit_optimization_level = 3

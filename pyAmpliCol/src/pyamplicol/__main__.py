@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from decimal import Decimal
 from pathlib import Path
 from pprint import pprint
@@ -161,7 +162,7 @@ if __name__ == "__main__":
 '''
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="pyamplicol matrix-element generation and validation tooling."
     )
@@ -177,6 +178,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "inspect",
         help="Inspect the managed Symbolica/spenso/idenso environment.",
     )
+
+    inspect_model = subparsers.add_parser(
+        "inspect-model",
+        help="Inspect a built-in, UFO, loader-JSON, or compiled model.",
+    )
+    _add_model_source_options(inspect_model)
+    inspect_model.add_argument("--json", action="store_true")
+
+    compile_model = subparsers.add_parser(
+        "compile-model",
+        help="Compile a model into an exact-version pyAmpliCol model artifact.",
+    )
+    _add_model_source_options(compile_model)
+    compile_model.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="Output path; .pyAmplicol-model.json is appended when absent.",
+    )
+    compile_model.add_argument(
+        "--parameter-output",
+        type=Path,
+        metavar="PATH",
+        help="Optionally write the complete complex model-parameter JSON card.",
+    )
+    compile_model.add_argument("--json", action="store_true")
 
     processes = subparsers.add_parser(
         "processes",
@@ -547,8 +575,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--model-parameters",
         type=Path,
         help=(
-            "TOML file with runtime model-parameter overrides consumed by "
-            "Rusticol. Keys must match the artifact model_parameter_names metadata."
+            "JSON file with runtime model-parameter overrides consumed by "
+            "Rusticol. Each value is [real, imaginary], and keys must match "
+            "the artifact model_parameter_names metadata."
         ),
     )
     time_process.add_argument(
@@ -584,7 +613,291 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ):
         _hide_subcommand_from_help(subparsers, legacy_command)
 
-    return parser.parse_args(argv)
+    for command_parser in subparsers.choices.values():
+        command_parser.add_argument(
+            "--run-card",
+            type=Path,
+            help=(
+                "TOML card containing an [arguments] table. Card values are "
+                "applied after parser defaults and before explicit CLI values."
+            ),
+        )
+
+    return parser
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    parser = _build_parser()
+    run_card_path = _run_card_path_from_argv(raw_argv)
+    if run_card_path is None:
+        return parser.parse_args(raw_argv)
+
+    card_path = run_card_path.expanduser().resolve()
+    card_arguments = _load_run_card_arguments(card_path)
+    action_state = _relax_parser_actions_for_run_card(parser)
+    explicit = parser.parse_args(raw_argv)
+    command = getattr(explicit, "command", None)
+    if command is None:
+        parser.error("--run-card requires a subcommand")
+    command_parser = _subcommand_parser(parser, command)
+    merged = _run_card_defaults(parser, action_state)
+    merged.update(_run_card_defaults(command_parser, action_state))
+    merged.update(
+        _validated_run_card_arguments(
+            command_parser,
+            card_arguments,
+            card_path=card_path,
+            parser=parser,
+        )
+    )
+    explicit_destinations = _explicit_cli_destinations(command_parser, raw_argv)
+    merged.update(
+        {
+            key: value
+            for key, value in vars(explicit).items()
+            if key in explicit_destinations and value != argparse.SUPPRESS
+        }
+    )
+    merged["command"] = command
+    merged["run_card"] = card_path
+    _validate_required_run_card_arguments(
+        command_parser,
+        merged,
+        action_state=action_state,
+        parser=parser,
+    )
+    return argparse.Namespace(**merged)
+
+
+def _run_card_path_from_argv(argv: Sequence[str]) -> Path | None:
+    for index, token in enumerate(argv):
+        if token == "--run-card":
+            if index + 1 >= len(argv):
+                raise ValueError("--run-card expects a path")
+            return Path(argv[index + 1])
+        if token.startswith("--run-card="):
+            return Path(token.split("=", 1)[1])
+    return None
+
+
+def _load_run_card_arguments(path: Path) -> dict[str, object]:
+    try:
+        payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"could not load run card {path}: {exc}") from exc
+    arguments = payload.get("arguments")
+    if not isinstance(arguments, dict):
+        raise ValueError(f"run card {path} must contain an [arguments] table")
+    extra_sections = sorted(key for key in payload if key != "arguments")
+    if extra_sections:
+        raise ValueError(
+            f"run card {path} contains unsupported top-level keys: "
+            + ", ".join(extra_sections)
+        )
+    return {str(key): value for key, value in arguments.items()}
+
+
+def _subcommand_parser(
+    parser: argparse.ArgumentParser,
+    command: str,
+) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            try:
+                return action.choices[command]
+            except KeyError as exc:
+                raise ValueError(f"unknown subcommand: {command}") from exc
+    raise ValueError("pyamplicol parser has no subcommands")
+
+
+def _relax_parser_actions_for_run_card(
+    parser: argparse.ArgumentParser,
+) -> dict[int, tuple[object, object, bool]]:
+    state: dict[int, tuple[object, object, bool]] = {}
+    parsers = [parser]
+    parsers.extend(
+        action_parser
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+        for action_parser in action.choices.values()
+    )
+    for action_parser in parsers:
+        for action in action_parser._actions:
+            state[id(action)] = (action.default, action.nargs, action.required)
+            if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
+                continue
+            action.default = None if not action.option_strings else argparse.SUPPRESS
+            action.required = False
+            if not action.option_strings and action.nargs is None:
+                action.nargs = "?"
+            elif not action.option_strings and action.nargs == "+":
+                action.nargs = "*"
+    return state
+
+
+def _explicit_cli_destinations(
+    command_parser: argparse.ArgumentParser,
+    argv: Sequence[str],
+) -> set[str]:
+    option_destinations = {
+        option: action.dest
+        for action in command_parser._actions
+        for option in action.option_strings
+    }
+    explicit: set[str] = set()
+    for token in argv:
+        option = token.split("=", 1)[0]
+        destination = option_destinations.get(option)
+        if destination is not None:
+            explicit.add(destination)
+    # Relaxed positionals use None when absent, so values parsed from the CLI
+    # can be distinguished from card-provided values.
+    parsed = command_parser.parse_known_args(
+        list(argv[1:]) if argv and argv[0] in command_parser.prog else list(argv)
+    )[0]
+    for action in command_parser._actions:
+        if action.option_strings:
+            continue
+        value = getattr(parsed, action.dest, None)
+        if value is not None and value != argparse.SUPPRESS:
+            explicit.add(action.dest)
+    return explicit
+
+
+def _run_card_defaults(
+    parser: argparse.ArgumentParser,
+    action_state: Mapping[int, tuple[object, object, bool]],
+) -> dict[str, object]:
+    defaults: dict[str, object] = dict(parser._defaults)
+    for action in parser._actions:
+        if action.dest in ("help", "command", "run_card"):
+            continue
+        if action.default is not argparse.SUPPRESS:
+            defaults.setdefault(action.dest, action.default)
+    # Defaults were suppressed for parsing, so recover them from the marker
+    # installed by _relax_parser_actions_for_run_card.
+    for action in parser._actions:
+        original = action_state.get(id(action))
+        if original is not None and original[0] is not argparse.SUPPRESS:
+            defaults.setdefault(action.dest, original[0])
+    return defaults
+
+
+def _validated_run_card_arguments(
+    command_parser: argparse.ArgumentParser,
+    arguments: Mapping[str, object],
+    *,
+    card_path: Path,
+    parser: argparse.ArgumentParser,
+) -> dict[str, object]:
+    actions = {
+        action.dest: action
+        for action in command_parser._actions
+        if action.dest not in ("help", "run_card")
+    }
+    unknown = sorted(set(arguments) - set(actions))
+    if unknown:
+        parser.error(
+            f"run card {card_path} has arguments not valid for "
+            f"{command_parser.prog}: {', '.join(unknown)}"
+        )
+    converted: dict[str, object] = {}
+    for destination, value in arguments.items():
+        try:
+            converted[destination] = _convert_run_card_value(
+                actions[destination],
+                value,
+                base_dir=card_path.parent,
+            )
+        except (TypeError, ValueError) as exc:
+            parser.error(
+                f"invalid run-card value for {destination!r} in {card_path}: {exc}"
+            )
+    return converted
+
+
+def _convert_run_card_value(
+    action: argparse.Action,
+    value: object,
+    *,
+    base_dir: Path,
+) -> object:
+    if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
+        if not isinstance(value, bool):
+            raise TypeError("expected a boolean")
+        return value
+    expects_sequence = isinstance(action, argparse._AppendAction) or action.nargs in (
+        "+",
+        "*",
+    ) or isinstance(action.nargs, int)
+    values = value if isinstance(value, list) else [value]
+    if expects_sequence and not isinstance(value, list):
+        raise TypeError("expected a TOML array")
+    converted = [
+        _convert_run_card_scalar(action, item, base_dir=base_dir) for item in values
+    ]
+    result: object = converted if expects_sequence else converted[0]
+    choices = action.choices
+    if choices is not None:
+        for item in converted:
+            if item not in choices:
+                raise ValueError(
+                    f"{item!r} is not one of {', '.join(map(str, choices))}"
+                )
+    return result
+
+
+def _convert_run_card_scalar(
+    action: argparse.Action,
+    value: object,
+    *,
+    base_dir: Path,
+) -> object:
+    converter = action.type
+    if action.dest == "model":
+        if not isinstance(value, str):
+            raise TypeError("expected a model keyword or path string")
+        if value.lower() in {"builtin_sm", "built-in-sm"}:
+            converted = value
+        else:
+            path = Path(value).expanduser()
+            converted = str(path if path.is_absolute() else (base_dir / path).resolve())
+    elif converter is None:
+        converted = value
+    elif converter is Path:
+        if not isinstance(value, str):
+            raise TypeError("expected a path string")
+        path = Path(value).expanduser()
+        converted = path if path.is_absolute() else (base_dir / path).resolve()
+    else:
+        try:
+            converted = converter(value)
+        except Exception as exc:
+            raise TypeError(str(exc)) from exc
+    return converted
+
+
+def _validate_required_run_card_arguments(
+    command_parser: argparse.ArgumentParser,
+    values: Mapping[str, object],
+    *,
+    action_state: Mapping[int, tuple[object, object, bool]],
+    parser: argparse.ArgumentParser,
+) -> None:
+    missing: list[str] = []
+    for action in command_parser._actions:
+        original = action_state.get(id(action))
+        if original is None:
+            continue
+        _default, original_nargs, original_required = original
+        positional_required = not action.option_strings and original_nargs is None
+        if (positional_required or original_required) and values.get(action.dest) is None:
+            missing.append(action.dest)
+    if missing:
+        parser.error(
+            f"run card and CLI are missing required arguments: {', '.join(missing)}"
+        )
 
 
 def _hide_subcommand_from_help(
@@ -610,6 +923,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command in (None, "inspect"):
         return _cmd_inspect()
+    if args.command == "inspect-model":
+        return _cmd_inspect_model(args)
+    if args.command == "compile-model":
+        return _cmd_compile_model(args)
     if args.command == "processes":
         return _cmd_processes(args)
     if args.command == "process-plan":
@@ -638,6 +955,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _add_process_options(parser: argparse.ArgumentParser) -> None:
+    _add_model_source_options(parser)
     parser.add_argument("-FS", "--flavour-scheme", type=int, default=5)
     parser.add_argument("-3", "--include-3qqbar", action="store_true")
     parser.add_argument("-cc", "--include-cc", action="store_true")
@@ -646,6 +964,50 @@ def _add_process_options(parser: argparse.ArgumentParser) -> None:
         "--parallel-process-enumeration",
         action="store_true",
         help="Record that legacy-compatible enumeration may be parallelized later.",
+    )
+    parser.add_argument(
+        "--multiparticle",
+        action="append",
+        default=[],
+        metavar="NAME=ITEM,ITEM",
+        help=(
+            "Define or override a model-owned multiparticle alias. Repeat for "
+            "additional aliases. SM models provide explicit p and j defaults."
+        ),
+    )
+
+
+def _add_model_source_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        default="BUILTIN_SM",
+        metavar="SOURCE",
+        help=(
+            "BUILTIN_SM, a UFO module directory, a ufo-model-loader JSON file, "
+            "or an exact-version .pyAmplicol-model.json artifact."
+        ),
+    )
+    parser.add_argument(
+        "--model-restriction",
+        default="default",
+        metavar="NAME",
+        help="UFO restriction: default, none, or a named restrict_NAME card.",
+    )
+    parser.add_argument(
+        "--model-simplify",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Simplify the loader model after applying its restriction.",
+    )
+    parser.add_argument(
+        "--model-cache-dir",
+        type=Path,
+        help="Override the content-addressed compiled-model cache directory.",
+    )
+    parser.add_argument(
+        "--no-model-cache",
+        action="store_true",
+        help="Load and compile the source without reading or writing the model cache.",
     )
 
 
@@ -1174,8 +1536,13 @@ def _add_evaluator_build_options(
     )
     parser.add_argument(
         "--symbolica-collect-factors",
-        action="store_true",
-        help="Call collect_factors() on each block output before evaluator building.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Call collect_factors() on each block output before evaluator building. "
+            "Enabled by default for compiled UFO/JSON models and disabled for "
+            "the built-in SM."
+        ),
     )
     parser.add_argument(
         "--symbolica-compiled-preset",
@@ -1347,10 +1714,19 @@ def _generation_build_kwargs(
     return build_kwargs
 
 
+def _apply_model_generation_symbolica_defaults(
+    build_kwargs: dict[str, Any],
+    *,
+    external_model: bool,
+) -> None:
+    if build_kwargs.get("symbolica_collect_factors") is None:
+        build_kwargs["symbolica_collect_factors"] = bool(external_model)
+
+
 def _symbolica_settings_from_runtime_kwargs(
     values: dict[str, Any],
     *,
-    process: str | None = None,
+    process: Any | None = None,
 ):
     from .symbolica_evaluator import (
         SymbolicaEvaluatorSettings,
@@ -1414,10 +1790,10 @@ def _symbolica_settings_from_runtime_kwargs(
     )
 
 
-def _external_gluon_count(process: str) -> int:
+def _external_gluon_count(process: Any) -> int:
     from .process_ir import build_process_ir
 
-    ir = build_process_ir(process)
+    ir = process if hasattr(process, "outgoing_pdgs") else build_process_ir(process)
     return sum(1 for pdg in ir.outgoing_pdgs if abs(int(pdg)) == 21)
 
 
@@ -1484,8 +1860,10 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
             getattr(args, "symbolica_max_common_pair_cache_entries", 5_000_000)
         ),
         "symbolica_max_common_pair_distance": int(common_pair_distance),
-        "symbolica_collect_factors": bool(
-            getattr(args, "symbolica_collect_factors", False)
+        "symbolica_collect_factors": getattr(
+            args,
+            "symbolica_collect_factors",
+            None,
         ),
         "symbolica_compiled_preset": str(
             getattr(args, "symbolica_compiled_preset", "adaptive")
@@ -1585,7 +1963,8 @@ def _max_quark_lines(args: argparse.Namespace) -> int | None:
 def _generic_dag_pruning_kwargs(
     args: argparse.Namespace,
     *,
-    process: str | None = None,
+    process: Any | None = None,
+    model: Any | None = None,
 ) -> dict[str, Any]:
     color_accuracy = str(getattr(args, "color_accuracy", "lc")).lower()
     numerical_filter_current = getattr(args, "numerical_filter_current", None)
@@ -1690,6 +2069,7 @@ def _generic_dag_pruning_kwargs(
 
         inferred_limits = infer_minimal_coupling_order_limits(
             process,
+            model=model,
             color_accuracy=str(getattr(args, "color_accuracy", "lc")),
             options=_process_options(args),
             max_color_sectors=int(getattr(args, "max_color_sectors", -1)),
@@ -1868,7 +2248,7 @@ def _split_cli_list(value: str) -> tuple[str, ...]:
 
 
 def _lc_topology_representative_ids(
-    process: str,
+    process: Any,
     args: argparse.Namespace,
 ) -> set[int]:
     from .color_plan import build_color_plan, lc_topology_replay_safe_groups
@@ -1886,7 +2266,7 @@ def _lc_topology_representative_ids(
 
 
 def _lc_line_pairing_representative_ids(
-    process: str,
+    process: Any,
     args: argparse.Namespace,
 ) -> set[int]:
     from .color_plan import build_color_plan, lc_line_pairing_representative_ids
@@ -1920,7 +2300,153 @@ def _cmd_inspect() -> int:
     return 0
 
 
+def _cmd_inspect_model(args: argparse.Namespace) -> int:
+    try:
+        compiled = _compile_model_from_args(args, require_supported=False)
+    except ValueError as exc:
+        return _model_command_error(args, exc)
+    payload = _model_inspection_payload(compiled)
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    print(f"Model: {payload['name']}")
+    source = cast(Mapping[str, object], payload["source"])
+    source_text = str(source.get("kind"))
+    if source.get("path"):
+        source_text += f" ({source['path']})"
+    print(f"Source: {source_text}")
+    print(f"Supported: {'yes' if payload['supported'] else 'no'}")
+    capabilities = cast(Mapping[str, object], payload["capabilities"])
+    print(
+        "Contents: "
+        f"{capabilities['particle_count']} particles, "
+        f"{capabilities['parameter_count']} parameters, "
+        f"{capabilities['vertex_count']} vertices, "
+        f"maximum valence {capabilities['max_vertex_valence']}"
+    )
+    print(
+        "Representations: spins "
+        + ", ".join(str(value) for value in capabilities["spins"])
+        + "; colors "
+        + ", ".join(
+            str(value) for value in capabilities["color_representations"]
+        )
+    )
+    issues = cast(Sequence[Mapping[str, object]], payload["issues"])
+    if issues:
+        print("Compatibility:")
+        for issue in issues:
+            context = f" ({issue['context']})" if issue.get("context") else ""
+            print(
+                f"  [{str(issue['severity']).upper()}] {issue['code']}: "
+                f"{issue['message']}{context}"
+            )
+    else:
+        print("Compatibility: no issues found")
+    return 0 if payload["supported"] else 1
+
+
+def _cmd_compile_model(args: argparse.Namespace) -> int:
+    try:
+        compiled = _compile_model_from_args(args, require_supported=True)
+        model_path = compiled.write(args.output)
+        parameter_path = (
+            compiled.write_parameter_card(args.parameter_output)
+            if args.parameter_output is not None
+            else None
+        )
+    except ValueError as exc:
+        return _model_command_error(args, exc)
+    payload = {
+        "model": compiled.name,
+        "supported": compiled.supported,
+        "output": str(model_path),
+        "parameter_output": None if parameter_path is None else str(parameter_path),
+        "conversion_seconds": compiled.conversion_seconds,
+        "phase_timings": dict(compiled.phase_timings),
+        "source": dict(compiled.source),
+        "capabilities": dict(compiled.capabilities),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"Compiled {compiled.name} -> {model_path}")
+        if parameter_path is not None:
+            print(f"Model parameters -> {parameter_path}")
+        print(f"Model conversion: {compiled.conversion_seconds:.6f} s")
+        for phase, elapsed in compiled.phase_timings.items():
+            if phase != "total":
+                print(f"  {phase.replace('_', ' ')}: {elapsed:.6f} s")
+    return 0
+
+
+def _compile_model_from_args(
+    args: argparse.Namespace,
+    *,
+    require_supported: bool,
+):
+    from .model_source import compile_model_source
+
+    return compile_model_source(
+        args.model,
+        restriction=str(args.model_restriction),
+        simplify=bool(args.model_simplify),
+        cache_dir=args.model_cache_dir,
+        use_cache=not bool(args.no_model_cache),
+        require_supported=require_supported,
+    )
+
+
+def _model_inspection_payload(compiled: object) -> dict[str, object]:
+    model = cast(Mapping[str, object], getattr(compiled, "model"))
+    particles = [
+        {
+            "name": item.get("name"),
+            "antiname": item.get("antiname"),
+            "pdg_code": item.get("pdg_code"),
+            "spin": item.get("spin"),
+            "color": item.get("color"),
+            "mass": item.get("mass"),
+            "width": item.get("width"),
+        }
+        for item in model.get("particles", [])
+        if isinstance(item, Mapping)
+    ]
+    orders = [
+        str(item.get("name"))
+        for item in model.get("orders", [])
+        if isinstance(item, Mapping)
+    ]
+    return {
+        "name": getattr(compiled, "name"),
+        "supported": getattr(compiled, "supported"),
+        "source": dict(getattr(compiled, "source")),
+        "producer": dict(getattr(compiled, "producer")),
+        "capabilities": dict(getattr(compiled, "capabilities")),
+        "issues": [issue.to_dict() for issue in getattr(compiled, "issues")],
+        "conversion_seconds": getattr(compiled, "conversion_seconds"),
+        "phase_timings": dict(getattr(compiled, "phase_timings")),
+        "contents": {
+            "orders": orders,
+            "particles": particles,
+            "runtime_parameter_names": sorted(getattr(compiled, "parameter_defaults")),
+        },
+    }
+
+
+def _model_command_error(args: argparse.Namespace, error: ValueError) -> int:
+    payload = {"available": False, "error": str(error), "model": str(args.model)}
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"error: {error}", file=sys.stderr)
+    return 1
+
+
 def _cmd_processes(args: argparse.Namespace) -> int:
+    if not _uses_builtin_process_enumerator(args):
+        return _cmd_model_processes(args)
     try:
         process_set = enumerate_process_set(args.process, _process_options(args))
     except ValueError as exc:
@@ -1960,7 +2486,125 @@ def _cmd_processes(args: argparse.Namespace) -> int:
     return 0
 
 
+def _uses_builtin_process_enumerator(args: argparse.Namespace) -> bool:
+    return (
+        _uses_builtin_model(args)
+        and not getattr(args, "multiparticle", ())
+    )
+
+
+def _uses_builtin_model(args: argparse.Namespace) -> bool:
+    return str(getattr(args, "model", "BUILTIN_SM")).lower() in {
+        "builtin_sm",
+        "built-in-sm",
+    }
+
+
+def _model_process_set_from_args(args: argparse.Namespace):
+    from .model_processes import (
+        ModelParticleCatalog,
+        ModelProcessSet,
+        ModelProcessSetEntry,
+        build_model_process_ir,
+        expand_model_processes,
+        parse_multiparticle_definitions,
+    )
+
+    compiled = _compile_model_from_args(args, require_supported=True)
+    catalog = ModelParticleCatalog(compiled.name, compiled.ir.particles)
+    aliases = parse_multiparticle_definitions(args.multiparticle, catalog)
+    processes = expand_model_processes(
+        args.process,
+        catalog,
+        multiparticles=aliases,
+    )
+    entries = tuple(
+        ModelProcessSetEntry(
+            key=process_ir.key,
+            process=process_ir.process,
+            ir=process_ir,
+        )
+        for process_ir in (
+            build_model_process_ir(
+                process,
+                compiled.ir,
+                color_accuracy=args.color_accuracy,
+            )
+            for process in processes
+        )
+    )
+    return (
+        compiled,
+        aliases,
+        ModelProcessSet(
+            request=args.process,
+            options=_process_options(args),
+            entries=entries,
+        ),
+    )
+
+
+def _cmd_model_processes(args: argparse.Namespace) -> int:
+    try:
+        compiled, aliases, process_set = _model_process_set_from_args(args)
+        process_irs = tuple(entry.ir for entry in process_set.entries)
+    except ValueError as exc:
+        payload = {
+            "available": False,
+            "error": str(exc),
+            "process": args.process,
+            "model": str(args.model),
+            "runtime_backend": "rusticol",
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    if args.legacy_output is not None:
+        raise ValueError(
+            "--legacy-output is only available with the built-in SM enumerator"
+        )
+    entries = [
+        {
+            "key": process_ir.key,
+            "process": process_ir.process,
+            "ir": process_ir.to_json_dict(),
+            "n_unique_processes": 1,
+            "n_groups": 1,
+            "n_records": 1,
+        }
+        for process_ir in process_irs
+    ]
+    payload = {
+        "available": True,
+        "request": args.process,
+        "model": compiled.name,
+        "model_source": dict(compiled.source),
+        "model_conversion_seconds": compiled.conversion_seconds,
+        "default_key": process_irs[0].key,
+        "n_entries": len(entries),
+        "n_unique_processes": len(entries),
+        "n_groups": len(entries),
+        "n_records": len(entries),
+        "multiparticles": {
+            name: list(values) for name, values in sorted(aliases.items())
+        },
+        "entries": entries,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(
+            f"{args.process}: {len(entries)} concrete process entries in "
+            f"model {compiled.name}"
+        )
+    return 0
+
+
 def _cmd_process_plan(args: argparse.Namespace) -> int:
+    if not _uses_builtin_process_enumerator(args):
+        return _cmd_model_process_plan(args)
     from .generic_artifact import (
         build_generic_process_set_manifest,
         write_generic_process_manifest,
@@ -2051,6 +2695,115 @@ def _cmd_process_plan(args: argparse.Namespace) -> int:
                     ]
                 )
         _display(args).print_table("Generic Process Plan", _kv_columns(), rows)
+    return 0
+
+
+def _cmd_model_process_plan(args: argparse.Namespace) -> int:
+    from .generic_artifact import (
+        build_generic_process_manifest,
+        write_generic_process_manifest,
+    )
+    from .ufo_model import CompiledUFOModel
+
+    try:
+        compiled, aliases, process_set = _model_process_set_from_args(args)
+        model = (
+            None
+            if compiled.source.get("kind") == "built-in-sm"
+            else CompiledUFOModel(compiled)
+        )
+        output_dir = Path(args.output_dir).expanduser()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        plan_entries: list[dict[str, object]] = []
+        for entry in process_set.entries:
+            manifest = build_generic_process_manifest(
+                entry.ir,
+                model=model,
+                options=_process_options(args),
+                color_accuracy=str(args.color_accuracy),
+                max_currents=int(args.max_currents),
+                max_color_sectors=int(args.max_color_sectors),
+                **_generic_dag_pruning_kwargs(
+                    args,
+                    process=entry.ir,
+                    model=model,
+                ),
+            )
+            target = (
+                output_dir
+                if len(process_set.entries) == 1
+                else output_dir / "subprocesses" / entry.key
+            )
+            path = write_generic_process_manifest(manifest, target)
+            manifest_payload = manifest.to_json_dict()
+            plan_entries.append(
+                {
+                    "key": entry.key,
+                    "process": entry.process,
+                    "manifest": str(path),
+                    "planning_status": manifest_payload["planning_status"],
+                    "lowering_status": manifest_payload["lowering_status"],
+                }
+            )
+        model_path = compiled.write(
+            output_dir / "compiled.pyAmplicol-model.json"
+        )
+        parameter_path = compiled.write_parameter_card(
+            output_dir / "model-parameters.json"
+        )
+    except ValueError as exc:
+        return _model_command_error(args, exc)
+
+    if len(plan_entries) == 1:
+        payload = {
+            "available": True,
+            "kind": "pyamplicol-generic-process-plan",
+            **plan_entries[0],
+        }
+    else:
+        set_manifest = output_dir / "generic_process_set_manifest.json"
+        set_payload = {
+            "schema_version": 2,
+            "kind": "pyamplicol-generic-process-set-plan",
+            "request": process_set.request,
+            "model": compiled.name,
+            "default_process_key": plan_entries[0]["key"],
+            "color_accuracy": str(args.color_accuracy),
+            "multiparticles": {
+                name: list(values) for name, values in sorted(aliases.items())
+            },
+            "processes": plan_entries,
+        }
+        set_manifest.write_text(
+            json.dumps(set_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        payload = {
+            "available": True,
+            **set_payload,
+            "manifest": str(set_manifest),
+            "n_processes": len(plan_entries),
+        }
+    payload["model_artifact"] = {
+        "compiled_model": str(model_path),
+        "model_parameters": str(parameter_path),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _display(args).print_table(
+            "Generic Model Process Plan",
+            _kv_columns(),
+            [
+                DisplayRow(
+                    {"metric": "Request", "value": process_set.request},
+                    "bold",
+                ),
+                {"metric": "Model", "value": compiled.name},
+                {"metric": "Processes", "value": len(plan_entries)},
+                {"metric": "Manifest", "value": payload["manifest"]},
+            ],
+        )
     return 0
 
 
@@ -2705,6 +3458,8 @@ def _cmd_profile_dag_evaluator(args: argparse.Namespace) -> int:
 
 
 def _cmd_generate_process(args: argparse.Namespace) -> int:
+    if not _uses_builtin_process_enumerator(args):
+        return _cmd_generate_model_process(args)
     try:
         max_quark_lines = _max_quark_lines(args)
         display = _display(args)
@@ -2767,6 +3522,62 @@ def _cmd_generate_process(args: argparse.Namespace) -> int:
         args.process = process_set.entries[0].process
         return _cmd_generate_generic_dag_artifact(args, process_set.entries[0])
 
+    return _cmd_generate_process_set(args, process_set)
+
+
+def _cmd_generate_model_process(args: argparse.Namespace) -> int:
+    try:
+        compiled, aliases, process_set = _model_process_set_from_args(args)
+    except ValueError as exc:
+        return _model_command_error(args, exc)
+    payload = {
+        "available": bool(process_set.entries),
+        "kind": "pyamplicol-model-process-selection-report",
+        "request": process_set.request,
+        "model": compiled.name,
+        "model_source": dict(compiled.source),
+        "model_conversion_seconds": compiled.conversion_seconds,
+        "multiparticles": {
+            name: list(values) for name, values in sorted(aliases.items())
+        },
+        "entries": [
+            {
+                "key": entry.key,
+                "process": entry.process,
+                "ir": entry.ir.to_json_dict(),
+            }
+            for entry in process_set.entries
+        ],
+    }
+    if bool(getattr(args, "dry_run", False)):
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            _display(args).print_table(
+                "Model Process Enumeration Dry Run",
+                [
+                    DisplayColumn("key", "Key"),
+                    DisplayColumn("process", "Process"),
+                ],
+                payload["entries"],
+            )
+        return 0
+    if getattr(args, "output_dir", None) is None:
+        print(
+            "generate-process requires OUTPUT_DIR unless --dry-run is set",
+            file=sys.stderr,
+        )
+        return 2
+    if not process_set.entries:
+        return _model_command_error(
+            args,
+            ValueError(f"no valid processes found for {args.process!r}"),
+        )
+    if len(process_set.entries) == 1:
+        args._compiled_model = compiled
+        args.process = process_set.entries[0].process
+        return _cmd_generate_generic_dag_artifact(args, process_set.entries[0])
+    args._compiled_model = compiled
     return _cmd_generate_process_set(args, process_set)
 
 
@@ -2913,7 +3724,7 @@ def _rusticol_artifact_support_report(
 
 def _cmd_generate_generic_dag_artifact(
     args: argparse.Namespace,
-    entry: ProcessSetEntry,
+    entry: Any,
 ) -> int:
     from .generic_artifact import (
         write_generic_dag_process_artifact,
@@ -2923,11 +3734,33 @@ def _cmd_generate_generic_dag_artifact(
     output_dir = Path(args.output_dir).expanduser()
     if bool(getattr(args, "replace", False)) and output_dir.exists():
         shutil.rmtree(output_dir)
+    process_input: Any = getattr(entry, "ir", entry.process)
+    compiled_model = getattr(args, "_compiled_model", None)
+    if _uses_builtin_model(args):
+        from .model import AmplicolSMLeadingColorModel
+        from .model_source import compile_model_source
+
+        if compiled_model is None:
+            compiled_model = compile_model_source("BUILTIN_SM", use_cache=False)
+        generation_model = AmplicolSMLeadingColorModel()
+        generation_model.compiled = compiled_model
+    elif hasattr(entry, "ir"):
+        from .ufo_model import CompiledUFOModel
+
+        if compiled_model is None:
+            compiled_model = _compile_model_from_args(args, require_supported=True)
+        generation_model = CompiledUFOModel(compiled_model)
+    else:
+        generation_model = None
     generation_start = time.perf_counter()
     build_kwargs = _generation_build_kwargs(args, "rusticol", output_dir)
+    _apply_model_generation_symbolica_defaults(
+        build_kwargs,
+        external_model=generation_model is not None,
+    )
     symbolica_settings = _symbolica_settings_from_runtime_kwargs(
         build_kwargs,
-        process=entry.process,
+        process=process_input,
     )
     display = _display(args)
     with display.stage_progress(
@@ -2940,7 +3773,11 @@ def _cmd_generate_generic_dag_artifact(
             progress.callback,
             monitor_callback,
         )
-        pruning_kwargs = _generic_dag_pruning_kwargs(args, process=entry.process)
+        pruning_kwargs = _generic_dag_pruning_kwargs(
+            args,
+            process=process_input,
+            model=generation_model,
+        )
         explicit_lc_sector_ids = _parse_int_list(
             str(getattr(args, "lc_sector_ids", "")),
             option="--lc-sector-ids",
@@ -2969,8 +3806,9 @@ def _cmd_generate_generic_dag_artifact(
                 ),
             }
         manifest_path, manifest = writer(
-            entry.process,
+            process_input,
             output_dir,
+            model=generation_model,
             options=_process_options(args),
             color_accuracy=str(getattr(args, "color_accuracy", "lc")),
             max_currents=int(getattr(args, "max_currents", -1)),
@@ -3195,12 +4033,13 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
     subprocess_root = root / "subprocesses"
     subprocess_root.mkdir(parents=True, exist_ok=True)
     generation_metadata = _generic_process_set_generation_metadata(args)
-    entries = cast(list[ProcessSetEntry], list(getattr(process_set, "entries")))
-    work_items: list[tuple[ProcessSetEntry, Path]] = []
-    representative_by_signature: dict[tuple[int, ...], ProcessSetEntry] = {}
-    representative_for_key: dict[str, ProcessSetEntry] = {}
+    entries = list(getattr(process_set, "entries"))
+    model_owned_entries = any(hasattr(entry, "ir") for entry in entries)
+    work_items: list[tuple[Any, Path]] = []
+    representative_by_signature: dict[tuple[int, ...], Any] = {}
+    representative_for_key: dict[str, Any] = {}
     crossing_signature_by_key: dict[str, tuple[int, ...]] = {}
-    for existing_entry in existing_entries.values():
+    for existing_entry in (() if model_owned_entries else existing_entries.values()):
         if existing_entry.get("crossing_alias_of") is not None:
             continue
         existing_process = existing_entry.get("process")
@@ -3222,12 +4061,20 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
                 ),
             )
     for entry in entries:
-        signature = _process_crossing_reuse_signature(
-            entry.process,
-            color_accuracy=str(getattr(args, "color_accuracy", "lc")),
-            options=_process_options(args),
+        signature = (
+            (len(representative_for_key),)
+            if model_owned_entries
+            else _process_crossing_reuse_signature(
+                entry.process,
+                color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+                options=_process_options(args),
+            )
         )
-        representative = representative_by_signature.setdefault(signature, entry)
+        representative = (
+            entry
+            if model_owned_entries
+            else representative_by_signature.setdefault(signature, entry)
+        )
         representative_for_key[entry.key] = representative
         crossing_signature_by_key[entry.key] = signature
         if entry.key in existing_entries and args.append and not args.replace:
@@ -3439,7 +4286,7 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
     for entry in entries:
         if entry.key in existing_entries and args.append and not args.replace:
             continue
-        alias_representative: ProcessSetEntry | None = representative_for_key.get(
+        alias_representative: Any | None = representative_for_key.get(
             entry.key
         )
         if alias_representative is None or alias_representative.key == entry.key:
@@ -3666,6 +4513,21 @@ def _generate_process_child_command(
         f"--max-currents={int(getattr(args, 'max_currents', -1))}",
         f"--max-color-sectors={int(getattr(args, 'max_color_sectors', -1))}",
     ]
+    command.extend(
+        [
+            "--model",
+            str(getattr(args, "model", "BUILTIN_SM")),
+            "--model-restriction",
+            str(getattr(args, "model_restriction", "default")),
+        ]
+    )
+    if not bool(getattr(args, "model_simplify", True)):
+        command.append("--no-model-simplify")
+    if bool(getattr(args, "no_model_cache", False)):
+        command.append("--no-model-cache")
+    model_cache_dir = getattr(args, "model_cache_dir", None)
+    if model_cache_dir is not None:
+        command.extend(["--model-cache-dir", str(model_cache_dir)])
     if bool(getattr(args, "skip_main_runtime_evaluator", False)):
         command.append("--skip-main-runtime-evaluator")
     runtime_selector = getattr(args, "runtime_lc_sector_selector", None)
@@ -3805,8 +4667,11 @@ def _generate_process_child_command(
         command.extend(["--symbolica-compiler-path", str(compiler_path)])
     for flag in getattr(args, "symbolica_compiler_flags", ()) or ():
         command.extend(["--symbolica-compiler-flag", str(flag)])
-    if bool(getattr(args, "symbolica_collect_factors", False)):
+    collect_factors = getattr(args, "symbolica_collect_factors", None)
+    if collect_factors is True:
         command.append("--symbolica-collect-factors")
+    elif collect_factors is False:
+        command.append("--no-symbolica-collect-factors")
     if bool(getattr(args, "symbolica_split_vertex_current_stages", False)):
         command.append("--symbolica-split-vertex-current-stages")
     if bool(
@@ -3920,7 +4785,7 @@ def _external_all_outgoing_legs(process_ir: Any) -> list[dict[str, int]]:
 
 def _child_generation_environment() -> dict[str, str]:
     env = dict(os.environ)
-    source_path = str(Path(__file__).resolve().parents[2])
+    source_path = str(Path(__file__).resolve().parents[1])
     current = env.get("PYTHONPATH")
     if current:
         env["PYTHONPATH"] = f"{source_path}{os.pathsep}{current}"

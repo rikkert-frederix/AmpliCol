@@ -93,6 +93,13 @@ class GenericCompiledStageBlueprint:
         repr=False,
         compare=False,
     )
+    symbolica_functions: tuple[
+        tuple[Any, tuple[Any, ...], Any], ...
+    ] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
 
     def to_json_dict(self) -> dict[str, object]:
         return {
@@ -117,6 +124,7 @@ class GenericCompiledStageBlueprint:
             "expression_ready": self.expression_ready,
             "blockers": list(self.blockers),
             "first_output_previews": list(self.first_output_previews),
+            "symbolica_function_count": len(self.symbolica_functions),
         }
 
 
@@ -307,16 +315,23 @@ def build_generic_stage_compiler_blueprint(
     model_parameter_symbols_by_name = (
         {}
         if stage_local_parameter_layout
-        else {
-            str(record["name"]): model_parameter_symbols[
-                int(record["parameter_index"])
-            ]
-            for record in model_parameter_records
-        }
+        else _logical_model_parameter_symbols(
+            model_parameter_records,
+            {
+                str(record["name"]): model_parameter_symbols[
+                    int(record["parameter_index"])
+                ]
+                for record in model_parameter_records
+            },
+        )
     )
-    expression_model = _RuntimeParameterizedModel(
-        selected_model,
-        model_parameter_symbols_by_name,
+    expression_model = (
+        selected_model.with_runtime_parameters(model_parameter_symbols_by_name)
+        if hasattr(selected_model, "with_runtime_parameters")
+        else _RuntimeParameterizedModel(
+            selected_model,
+            model_parameter_symbols_by_name,
+        )
     )
     value_slots = _value_slots_by_id(schema)
     current_slots = _current_slots_by_id(schema)
@@ -351,6 +366,7 @@ def build_generic_stage_compiler_blueprint(
                 compiled_stage,
                 parameter_symbols=(),
                 output_expressions=(),
+                symbolica_functions=(),
             )
         compiled_stages.append(compiled_stage)
     stages = tuple(compiled_stages)
@@ -376,6 +392,7 @@ def build_generic_stage_compiler_blueprint(
             amplitude_stage,
             parameter_symbols=(),
             output_expressions=(),
+            symbolica_functions=(),
         )
     blockers = tuple(
         blocker
@@ -498,6 +515,166 @@ def write_generic_stage_evaluator_artifacts(
         stage_timings=stage_timings,
         build_started=build_started,
     )
+
+
+def write_model_parameter_evaluator_artifact(
+    model: Model,
+    runtime_schema: Mapping[str, object],
+    artifact_dir: str | Path,
+    *,
+    symbolica_settings: Any | None = None,
+    jit_compile: bool = True,
+) -> dict[str, object] | None:
+    schema = _dict(runtime_schema)
+    records = tuple(
+        sorted(
+            (_dict(item) for item in _list(schema.get("model_parameters", []))),
+            key=lambda item: int(item["parameter_index"]),
+        )
+    )
+    input_records = tuple(
+        record
+        for record in records
+        if str(record.get("kind"))
+        in {"external_parameter", "external_parameter_component"}
+    )
+    derived_components: dict[str, dict[str, int]] = {}
+    for record in records:
+        if str(record.get("kind")) != "derived_parameter_component":
+            continue
+        runtime_name = record.get("runtime_name")
+        component = record.get("complex_component")
+        if isinstance(runtime_name, str) and component in {"real", "imag"}:
+            derived_components.setdefault(runtime_name, {})[str(component)] = int(
+                record["parameter_index"]
+            )
+    requested_output_names = tuple(
+        name
+        for name, components in sorted(
+            derived_components.items(),
+            key=lambda item: min(item[1].values()),
+        )
+        if set(components) == {"real", "imag"}
+    )
+    if not requested_output_names:
+        return None
+
+    definitions_provider = getattr(
+        model,
+        "runtime_derived_parameter_definitions",
+        None,
+    )
+    if not callable(definitions_provider):
+        return None
+    definitions_subset_provider = getattr(
+        model,
+        "runtime_derived_parameter_definitions_for",
+        None,
+    )
+    definition_values = (
+        definitions_subset_provider(requested_output_names)
+        if callable(definitions_subset_provider)
+        else definitions_provider()
+    )
+    definitions = {
+        str(name): str(expression)
+        for name, expression in definition_values.items()
+        if str(name) in requested_output_names
+    }
+    output_names = tuple(
+        name for name in requested_output_names if name in definitions
+    )
+    if not output_names:
+        return None
+
+    from symbolica import E, S
+
+    builder = ParamBuilder()
+    parameter_symbols = tuple(
+        builder.add_parameter_list(
+            ("generic_schema_v2", "external_model_parameters"),
+            len(input_records),
+            role="generic_external_model_parameters",
+            real_valued=True,
+        )
+    )
+    slot_symbols = {
+        str(record["name"]): parameter_symbols[index]
+        for index, record in enumerate(input_records)
+    }
+    logical_symbols = _logical_model_parameter_symbols(
+        input_records,
+        slot_symbols,
+    )
+    outputs = []
+    for name in output_names:
+        expression = E(definitions[name])
+        for parameter_name, symbol in logical_symbols.items():
+            expression = expression.replace(S(f"UFO::{parameter_name}"), symbol)
+        outputs.append(expression)
+
+    stage = GenericCompiledStageBlueprint(
+        stage_index=0,
+        stage_kind="model-parameter-derivation",
+        subset_size=None,
+        evaluator_label="generic_model_parameter_derivation",
+        parameter_layout="external-model-parameters",
+        output_length=len(outputs),
+        output_slots=(),
+        input_value_slot_ids=(),
+        output_value_slot_ids=(),
+        interaction_ids=(),
+        input_components=(),
+        parameter_count=len(parameter_symbols),
+        value_parameter_count=0,
+        momentum_parameter_count=0,
+        model_parameter_count=len(parameter_symbols),
+        real_valued_inputs=tuple(range(len(parameter_symbols))),
+        expression_ready=True,
+        blockers=(),
+        first_output_previews=tuple(
+            expression.to_canonical_string()[:_EXPRESSION_PREVIEW_LIMIT]
+            for expression in outputs[:3]
+        ),
+        parameter_symbols=parameter_symbols,
+        output_expressions=tuple(outputs),
+    )
+    parameter_evaluator_settings = (
+        None
+        if symbolica_settings is None
+        else replace(
+            symbolica_settings,
+            compiled_output_chunk_size=None,
+            output_chunk_strategy="uniform",
+        )
+    )
+    evaluator = _compile_stage_evaluator_artifact(
+        stage,
+        Path(artifact_dir).expanduser(),
+        compiler=None,
+        blueprint=None,
+        symbolica_settings=parameter_evaluator_settings,
+        merge_evaluators_strategy=False,
+        verbose_evaluator_build=False,
+        jit_compile=jit_compile,
+        progress_callback=None,
+    )
+    return {
+        "kind": "generic-model-parameter-evaluator",
+        "input_parameter_indices": [
+            int(record["parameter_index"]) for record in input_records
+        ],
+        "outputs": [
+            {
+                "runtime_name": name,
+                "output_index": output_index,
+                "real_parameter_index": derived_components[name]["real"],
+                "imag_parameter_index": derived_components[name]["imag"],
+            }
+            for output_index, name in enumerate(output_names)
+        ],
+        "evaluator": evaluator,
+    }
 
 
 def _finalize_stage_evaluator_payload(
@@ -834,6 +1011,10 @@ def _compile_default_stage_evaluator(
             jit_compile=jit_compile,
             label=candidate_label,
             progress_callback=progress_callback,
+            functions={
+                (function, arguments): body
+                for function, arguments, body in stage.symbolica_functions
+            },
         )
 
     autotune_timing: dict[str, float] = {}
@@ -1060,11 +1241,19 @@ def _stage_symbolica_settings(
     strategy = getattr(settings, "output_chunk_strategy", "uniform")
     if strategy == "auto":
         base = getattr(settings, "compiled_output_chunk_size", None)
+        output_count = int(
+            getattr(
+                stage,
+                "output_length",
+                0 if base is None else int(base) + 1,
+            )
+        )
         strategy = (
             "measured-stage"
             if getattr(settings, "backend", None) == "jit"
             and base is not None
             and int(base) <= 256
+            and output_count > int(base)
             else "uniform"
         )
         settings = replace(settings, output_chunk_strategy=strategy)
@@ -1182,13 +1371,13 @@ def _compile_current_stage_blueprint(
             model_parameter_symbols=global_model_parameter_symbols,
             value_parameter_count=global_value_component_count,
             momentum_parameter_count=len(global_momentum_symbols),
-            model_parameter_count=len(global_model_parameter_symbols),
+            model_parameter_count=len(model_parameter_records),
             real_valued_inputs=global_real_valued_inputs,
         )
     )
     stage_model = (
         model.with_runtime_parameters(local_inputs.model_parameter_symbols)
-        if isinstance(model, _RuntimeParameterizedModel)
+        if hasattr(model, "with_runtime_parameters")
         else _RuntimeParameterizedModel(model, local_inputs.model_parameter_symbols)
     )
     interactions_by_result: dict[int, list[dict[str, Any] | int]] = {}
@@ -1308,6 +1497,12 @@ def _compile_current_stage_blueprint(
                 )
             )
 
+    specialized_outputs, symbolica_functions = (
+        _specialize_stage_symbolica_functions(
+            outputs,
+            _model_symbolica_functions(stage_model),
+        )
+    )
     return GenericCompiledStageBlueprint(
         stage_index=int(stage["stage_index"]),
         stage_kind=str(stage["stage_kind"]),
@@ -1333,9 +1528,10 @@ def _compile_current_stage_blueprint(
         real_valued_inputs=local_inputs.real_valued_inputs,
         expression_ready=not blockers,
         blockers=tuple(blockers),
-        first_output_previews=_expression_previews(outputs),
+        first_output_previews=_expression_previews(specialized_outputs),
         parameter_symbols=local_inputs.parameter_symbols,
-        output_expressions=tuple(outputs),
+        output_expressions=specialized_outputs,
+        symbolica_functions=symbolica_functions,
     )
 
 
@@ -1390,13 +1586,13 @@ def _compile_amplitude_stage_blueprint(
             model_parameter_symbols=global_model_parameter_symbols,
             value_parameter_count=global_value_component_count,
             momentum_parameter_count=0,
-            model_parameter_count=len(global_model_parameter_symbols),
+            model_parameter_count=len(model_parameter_records),
             real_valued_inputs=global_real_valued_inputs,
         )
     )
     stage_model = (
         model.with_runtime_parameters(local_inputs.model_parameter_symbols)
-        if isinstance(model, _RuntimeParameterizedModel)
+        if hasattr(model, "with_runtime_parameters")
         else _RuntimeParameterizedModel(model, local_inputs.model_parameter_symbols)
     )
     lc_sector_selector = local_inputs.model_parameter_symbols.get(
@@ -1492,11 +1688,9 @@ def _interaction_contribution(
         right_momentum=momentum_components_by_slot_id[int(momenta["right"])],
     )
     color_weight = _coupling(interaction.get("color_weight"))
-    if color_weight[1] != 0.0:
-        raise ValueError("complex color weights are not lowered in current stages")
-    weight = color_weight[0]
-    if weight == 1.0:
+    if color_weight == (1.0, 0.0):
         return components
+    weight = color_weight[0] + 1j * color_weight[1]
     return tuple(weight * component for component in components)
 
 
@@ -1537,6 +1731,7 @@ def _compact_interaction_contribution(
             interaction.vertex_kind,
             interaction.vertex_particles,
             interaction.coupling,
+            model=model,
         )
         for index, name in enumerate(names):
             if isinstance(name, str) and name in model_parameter_symbols:
@@ -1560,11 +1755,10 @@ def _compact_interaction_contribution(
         ],
     )
     color_weight = tuple(interaction.color_weight)
-    if color_weight[1] != 0.0:
-        raise ValueError("complex color weights are not lowered in current stages")
-    if color_weight[0] == 1.0:
+    if color_weight == (1.0, 0.0):
         return components
-    return tuple(color_weight[0] * component for component in components)
+    weight = color_weight[0] + 1j * color_weight[1]
+    return tuple(weight * component for component in components)
 
 
 def _amplitude_root_expression(
@@ -1581,9 +1775,7 @@ def _amplitude_root_expression(
     contraction = str(root.get("contraction", ""))
     coupling = _runtime_coupling(root, model_parameter_symbols)
     color_weight = _coupling(root.get("color_weight"))
-    weight = color_weight[0]
-    if color_weight[1] != 0.0:
-        raise ValueError("complex color weights are not lowered in LC stage blueprint")
+    weight = color_weight[0] + 1j * color_weight[1]
     if kind == "direct-contraction":
         return weight * _contract_components(contraction, left, right)
     if kind == "vertex-closure":
@@ -1663,6 +1855,7 @@ def _current_stage_model_parameter_records(
                     interaction.vertex_kind,
                     interaction.vertex_particles,
                     interaction.coupling,
+                    model=model,
                 )
                 if isinstance(name, str)
             )
@@ -1732,6 +1925,9 @@ def _coupling_parameter_names_used_by_records(
 
 
 def _particle_model_parameter_names(model: Model, pdg: int) -> tuple[str, ...]:
+    runtime_names = getattr(model, "runtime_parameter_names_for_particle", None)
+    if callable(runtime_names):
+        return tuple(str(name) for name in runtime_names(int(pdg)))
     try:
         particle = model.particle(pdg)
     except KeyError:
@@ -1752,8 +1948,54 @@ def _filter_model_parameter_records(
             model_parameter_records,
             key=lambda item: int(item["parameter_index"]),
         )
-        if str(record["name"]) in used_names
+        if str(record.get("runtime_name", record["name"])) in used_names
+        and not (
+            record.get("complex_domain") == "real"
+            and record.get("complex_component") == "imag"
+        )
+        and not (
+            record.get("complex_domain") == "imaginary"
+            and record.get("complex_component") == "real"
+        )
     )
+
+
+def _logical_model_parameter_symbols(
+    model_parameter_records: Sequence[dict[str, Any]],
+    slot_symbols: Mapping[str, Any],
+) -> dict[str, Any]:
+    logical_symbols: dict[str, Any] = {}
+    complex_components: dict[str, dict[str, Any]] = {}
+    complex_domains: dict[str, str] = {}
+    for record in model_parameter_records:
+        slot_name = str(record["name"])
+        symbol = slot_symbols[slot_name]
+        runtime_name = record.get("runtime_name")
+        component = record.get("complex_component")
+        if isinstance(runtime_name, str) and component in {"real", "imag"}:
+            complex_components.setdefault(runtime_name, {})[str(component)] = symbol
+            domain = str(record.get("complex_domain", "complex"))
+            previous = complex_domains.setdefault(runtime_name, domain)
+            if previous != domain:
+                raise ValueError(
+                    f"runtime model parameter {runtime_name!r} has conflicting domains"
+                )
+        else:
+            logical_symbols[slot_name] = symbol
+    for runtime_name, components in complex_components.items():
+        domain = complex_domains[runtime_name]
+        if "real" not in components and domain == "imaginary":
+            components["real"] = 0.0
+        if "imag" not in components and domain == "real":
+            components["imag"] = 0.0
+        if set(components) != {"real", "imag"}:
+            raise ValueError(
+                f"runtime model parameter {runtime_name!r} is missing a real or imaginary slot"
+            )
+        logical_symbols[runtime_name] = (
+            components["real"] + 1j * components["imag"]
+        )
+    return logical_symbols
 
 
 def _stage_local_inputs(
@@ -1770,7 +2012,7 @@ def _stage_local_inputs(
     input_components: list[GenericStageInputComponent] = []
     value_symbols: dict[int, tuple[Any, ...]] = {}
     momentum_symbols: dict[int, tuple[Any, ...]] = {}
-    model_parameter_symbols: dict[str, Any] = {}
+    model_parameter_slot_symbols: dict[str, Any] = {}
 
     value_spans = tuple(
         (
@@ -1858,7 +2100,7 @@ def _stage_local_inputs(
         name = str(record["name"])
         parameter_index = int(record["parameter_index"])
         symbol = parameter_symbols[parameter_cursor]
-        model_parameter_symbols[name] = symbol
+        model_parameter_slot_symbols[name] = symbol
         input_components.append(
             GenericStageInputComponent(
                 kind="model_parameter",
@@ -1873,6 +2115,11 @@ def _stage_local_inputs(
 
     if parameter_cursor != parameter_count:
         raise RuntimeError("stage-local parameter layout cursor mismatch")
+
+    model_parameter_symbols = _logical_model_parameter_symbols(
+        sorted_model_parameter_records,
+        model_parameter_slot_symbols,
+    )
 
     return _StageLocalInputs(
         parameter_symbols=tuple(parameter_symbols),
@@ -1944,6 +2191,107 @@ def _manifest_model(manifest: GenericProcessManifest | GenericDAG) -> Model:
     if isinstance(manifest, GenericProcessManifest):
         return manifest.model
     return AmplicolSMLeadingColorModel()
+
+
+def _model_symbolica_functions(
+    model: Model,
+) -> tuple[tuple[Any, tuple[Any, ...], Any], ...]:
+    getter = getattr(model, "symbolica_function_definitions", None)
+    if not callable(getter):
+        return ()
+    definitions = getter()
+    if not isinstance(definitions, Mapping):
+        raise TypeError("model Symbolica function definitions must be a mapping")
+    return tuple(
+        (function, tuple(arguments), body)
+        for (function, arguments), body in definitions.items()
+    )
+
+
+def _specialize_stage_symbolica_functions(
+    outputs: Sequence[Any],
+    definitions: Sequence[tuple[Any, tuple[Any, ...], Any]],
+) -> tuple[
+    tuple[Any, ...],
+    tuple[tuple[Any, tuple[Any, ...], Any], ...],
+]:
+    """Inline model-kernel calls before constructing a stage evaluator."""
+
+    output_expressions = tuple(outputs)
+    function_definitions = tuple(definitions)
+    if not output_expressions or not function_definitions:
+        return output_expressions, ()
+
+    from symbolica import Replacement, S
+
+    replacements: list[Any] = []
+    for definition_index, (function, arguments, body) in enumerate(
+        function_definitions
+    ):
+        wildcards = tuple(
+            S(
+                "pyamplicol_inline_function_"
+                f"{definition_index}_argument_{argument_index}_"
+            )
+            for argument_index in range(len(arguments))
+        )
+        pattern = function(*wildcards)
+        replacement = body
+        for argument, wildcard in zip(arguments, wildcards, strict=True):
+            replacement = replacement.replace(
+                argument,
+                wildcard,
+                allow_new_wildcards_on_rhs=True,
+            )
+        replacements.append(
+            Replacement(
+                pattern,
+                replacement,
+                allow_new_wildcards_on_rhs=True,
+            )
+        )
+
+    rewritten = tuple(
+        expression.replace_multiple(replacements, repeat=True)
+        for expression in output_expressions
+    )
+
+    function_names = {function for function, _arguments, _body in function_definitions}
+    required = {
+        symbol
+        for expression in rewritten
+        for symbol in _expression_symbols(expression, enter_functions=True)
+        if symbol in function_names
+    }
+    while True:
+        dependencies = {
+            symbol
+            for function, _arguments, body in function_definitions
+            if function in required
+            for symbol in _expression_symbols(body, enter_functions=True)
+            if symbol in function_names
+        }
+        expanded = required | dependencies
+        if expanded == required:
+            break
+        required = expanded
+    retained = tuple(
+        definition
+        for definition in function_definitions
+        if definition[0] in required
+    )
+    return rewritten, retained
+
+
+def _expression_symbols(
+    expression: Any,
+    *,
+    enter_functions: bool,
+) -> set[Any]:
+    getter = getattr(expression, "get_all_symbols", None)
+    if not callable(getter):
+        return set()
+    return set(getter(enter_functions))
 
 
 def _value_components(
