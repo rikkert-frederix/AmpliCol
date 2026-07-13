@@ -61,7 +61,7 @@ def test_z_table_reproduction_uses_latest_completed_jit_o1_row() -> None:
     assert "manual/n7/jit_o1" not in rendered
 
 
-def test_external_z_table_compares_wall_times_to_matching_builtin_row() -> None:
+def test_external_z_table_compares_generation_and_wall_to_builtin_row() -> None:
     table = _load_z_table_module()
     external = {
         "model_profile": "external-sm",
@@ -71,8 +71,10 @@ def test_external_z_table_compares_wall_times_to_matching_builtin_row() -> None:
                 "modes": {
                     "jit_o1": {
                         "status": "ok",
+                        "generation_s": 6.0,
                         "wall_us_per_point": 3.0,
                         "all_flow_status": "ok",
+                        "all_flow_generation_s": 4.0,
                         "all_flow_wall_us_per_point": 5.0,
                     }
                 }
@@ -85,8 +87,10 @@ def test_external_z_table_compares_wall_times_to_matching_builtin_row() -> None:
                 "modes": {
                     "jit_o1": {
                         "status": "ok",
+                        "generation_s": 3.0,
                         "wall_us_per_point": 2.0,
                         "all_flow_status": "ok",
+                        "all_flow_generation_s": 8.0,
                         "all_flow_wall_us_per_point": 10.0,
                     }
                 }
@@ -96,7 +100,13 @@ def test_external_z_table_compares_wall_times_to_matching_builtin_row() -> None:
 
     rendered = table.render_table(external, built_in_data=built_in)
 
-    assert rendered.count(r"\textbf{vs built-in}") == 4
+    assert rendered.count(r"\textbf{vs blt-in}") == 8
+    assert rendered.count("L{0.42in}") == 4
+    assert (
+        r"\textbf{gen [s]} & \textbf{vs blt-in} & \textbf{wall [us/pt]} "
+        r"& \textbf{vs blt-in} & \textbf{eval [us/pt]}"
+    ) in rendered
+    assert r"\textcolor{speedred}{\texttt{x2.00}}" in rendered
     assert r"\textcolor{speedorange}{\texttt{x1.50}}" in rendered
     assert r"\textcolor{speedgreen}{\texttt{x0.50}}" in rendered
 

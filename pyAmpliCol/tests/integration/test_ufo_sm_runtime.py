@@ -150,6 +150,59 @@ def _validation_momenta(process_dir: Path) -> np.ndarray:
     )
 
 
+def test_compiled_builtin_model_generates_with_hardcoded_kernels(
+    tmp_path: Path,
+) -> None:
+    environment = dict(
+        os.environ,
+        PYTHONPATH=str(Path(pyamplicol.__file__).resolve().parents[1]),
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyamplicol",
+            "compile-model",
+            "--model",
+            "BUILTIN_SM",
+            "--output",
+            str(tmp_path / "builtin-sm"),
+            "--no-model-cache",
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+    model_path = Path(json.loads(completed.stdout)["output"])
+    output = tmp_path / "compiled-builtin-process"
+
+    generated = _generate_process(
+        output,
+        model=model_path,
+        process="d d~ > z",
+    )
+
+    assert generated["runtime_available"] is True
+    assert generated["lowering_status"]["amplitude_root_count"] > 0
+
+    rusticol = pytest.importorskip("rusticol")
+    if rusticol.build_profile() != "release":
+        pytest.skip("runtime parity requires a release Rusticol extension")
+    direct_output = tmp_path / "direct-builtin-process"
+    _generate_process(direct_output, process="d d~ > z")
+    momenta = _validation_momenta(output)
+    serialized_value = rusticol.Runtime.load(str(output)).evaluate(momenta)
+    direct_value = rusticol.Runtime.load(str(direct_output)).evaluate(momenta)
+    np.testing.assert_allclose(
+        serialized_value,
+        direct_value,
+        rtol=1.0e-13,
+        atol=0.0,
+    )
+
+
 def test_ufo_sm_z_gluon_matches_builtin_and_refreshes_derived_parameters(
     tmp_path: Path,
 ) -> None:

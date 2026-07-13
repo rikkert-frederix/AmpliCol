@@ -65,7 +65,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--built-in-data",
         type=Path,
         default=DEFAULT_DATA,
-        help="Built-in-SM Z-table cache used for external-model wall-time ratios.",
+        help=(
+            "Built-in-SM Z-table cache used for external-model generation- and "
+            "wall-time ratios."
+        ),
     )
     parser.add_argument("--model-source", default="BUILTIN_SM")
     parser.add_argument(
@@ -410,7 +413,9 @@ def render_table(
         (
             r"\begin{longtable}{@{}r "
             + (
-                r"L{0.78in} L{0.40in} L{0.94in} r r r r r r r r L{0.58in}@{}}"
+                r"L{0.78in} L{0.40in} L{0.94in} "
+                r"r L{0.42in} r L{0.42in} r "
+                r"r L{0.42in} r L{0.42in} r L{0.58in}@{}}"
                 if compare_to_built_in
                 else r"L{0.92in} L{0.48in} L{0.86in} r r r r r r L{0.96in}@{}}"
             )
@@ -418,16 +423,20 @@ def render_table(
         r"\toprule",
         (
             r"\textbf{n} & \textbf{process} & \textbf{route} & \textbf{setup} "
-            + rf"& \multicolumn{{{4 if compare_to_built_in else 3}}}{{c}}{{\textbf{{selected flow, helicity sum}}}} "
-            + rf"& \multicolumn{{{4 if compare_to_built_in else 3}}}{{c}}{{\textbf{{all flows, fixed helicity}}}} "
+            + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{selected flow, helicity sum}}}} "
+            + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{all flows, fixed helicity}}}} "
             r"& \textbf{notes} \\"
         ),
         (
-            r"& & & & \textbf{gen [s]} & \textbf{wall [us/pt]} "
-            r"& \textbf{eval [us/pt]} "
-            + (r"& \textbf{vs built-in} " if compare_to_built_in else "")
-            + r"& \textbf{gen [s]} & \textbf{wall [us/pt]} & \textbf{eval [us/pt]} "
-            + (r"& \textbf{vs built-in} " if compare_to_built_in else "")
+            r"& & & & \textbf{gen [s]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{wall [us/pt]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{eval [us/pt]} & \textbf{gen [s]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{wall [us/pt]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{eval [us/pt]} "
             + r"& \\"
         ),
         r"\midrule",
@@ -435,16 +444,20 @@ def render_table(
         r"\toprule",
         (
             r"\textbf{n} & \textbf{process} & \textbf{route} & \textbf{setup} "
-            + rf"& \multicolumn{{{4 if compare_to_built_in else 3}}}{{c}}{{\textbf{{selected flow, helicity sum}}}} "
-            + rf"& \multicolumn{{{4 if compare_to_built_in else 3}}}{{c}}{{\textbf{{all flows, fixed helicity}}}} "
+            + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{selected flow, helicity sum}}}} "
+            + rf"& \multicolumn{{{5 if compare_to_built_in else 3}}}{{c}}{{\textbf{{all flows, fixed helicity}}}} "
             r"& \textbf{notes} \\"
         ),
         (
-            r"& & & & \textbf{gen [s]} & \textbf{wall [us/pt]} "
-            r"& \textbf{eval [us/pt]} "
-            + (r"& \textbf{vs built-in} " if compare_to_built_in else "")
-            + r"& \textbf{gen [s]} & \textbf{wall [us/pt]} & \textbf{eval [us/pt]} "
-            + (r"& \textbf{vs built-in} " if compare_to_built_in else "")
+            r"& & & & \textbf{gen [s]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{wall [us/pt]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{eval [us/pt]} & \textbf{gen [s]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{wall [us/pt]} "
+            + (r"& \textbf{vs blt-in} " if compare_to_built_in else "")
+            + r"& \textbf{eval [us/pt]} "
             + r"& \\"
         ),
         r"\midrule",
@@ -492,20 +505,40 @@ def render_table(
                 if not isinstance(built_in_row, dict):
                     built_in_row = {}
                 cells = [
-                    *cells[:3],
-                    _wall_ratio_against_built_in(
+                    cells[0],
+                    _ratio_against_built_in(
                         row,
                         built_in_row,
                         mode_key=mode_key,
-                        all_flows=False,
+                        status_key="status",
+                        value_key="generation_s",
                     ),
-                    *cells[3:6],
-                    _wall_ratio_against_built_in(
+                    cells[1],
+                    _ratio_against_built_in(
                         row,
                         built_in_row,
                         mode_key=mode_key,
-                        all_flows=True,
+                        status_key="status",
+                        value_key="wall_us_per_point",
                     ),
+                    cells[2],
+                    cells[3],
+                    _ratio_against_built_in(
+                        row,
+                        built_in_row,
+                        mode_key=mode_key,
+                        status_key="all_flow_status",
+                        value_key="all_flow_generation_s",
+                    ),
+                    cells[4],
+                    _ratio_against_built_in(
+                        row,
+                        built_in_row,
+                        mode_key=mode_key,
+                        status_key="all_flow_status",
+                        value_key="all_flow_wall_us_per_point",
+                    ),
+                    cells[5],
                     cells[6],
                 ]
             lines.append(
@@ -577,9 +610,11 @@ def render_table(
                 r"AArch64 diagnostic.  The driver keeps generated artifacts under "
                 + rf"\texttt{{{_latex_escape(output_root)}}}."
                 + (
-                    r"  In this external-model table, each \texttt{vs built-in} "
-                    r"entry is the wall-time ratio to the matching built-in-SM row "
-                    r"at the same multiplicity, backend, and flow/helicity workload."
+                    r"  In this external-model table, each \texttt{vs blt-in} entry "
+                    r"is the adjacent generation- or wall-time ratio to the matching "
+                    r"built-in-SM row at the same multiplicity, backend, and "
+                    r"flow/helicity workload; values below one mean that the external "
+                    r"model is faster."
                     if compare_to_built_in
                     else ""
                 )
@@ -756,21 +791,20 @@ def _render_timing_triplet(
     ]
 
 
-def _wall_ratio_against_built_in(
+def _ratio_against_built_in(
     row: dict[str, Any],
     built_in_row: dict[str, Any],
     *,
     mode_key: str,
-    all_flows: bool,
+    status_key: str,
+    value_key: str,
 ) -> str:
     if mode_key == "amplicol":
         return _missing(color="black!45")
-    status_key = "all_flow_status" if all_flows else "status"
-    wall_key = "all_flow_wall_us_per_point" if all_flows else "wall_us_per_point"
     if row.get(status_key) != "ok" or built_in_row.get(status_key) != "ok":
         return _missing(color="black!45")
-    value = _optional_float(row.get(wall_key))
-    reference = _optional_float(built_in_row.get(wall_key))
+    value = _optional_float(row.get(value_key))
+    reference = _optional_float(built_in_row.get(value_key))
     if value is None or reference is None or reference <= 0.0:
         return _missing(color="black!45")
     ratio = value / reference

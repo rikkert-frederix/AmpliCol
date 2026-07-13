@@ -584,10 +584,20 @@ def _built_in_model_payload() -> tuple[dict[str, object], dict[str, tuple[float,
         "alpha_ew": (1.0 / 132.507, 0.0),
     }
     for _key, particle in sorted(model.particles.items()):
-        mass_name = f"mass_{particle.pdg}"
-        width_name = f"width_{particle.pdg}"
-        parameters[mass_name] = (float(particle.mass), 0.0)
-        parameters[width_name] = (float(particle.width), 0.0)
+        mass_name = (
+            _built_in_parameter_name("mass", particle.pdg)
+            if float(particle.mass) != 0.0
+            else "ZERO"
+        )
+        width_name = (
+            _built_in_parameter_name("width", particle.pdg)
+            if float(particle.width) != 0.0
+            else "ZERO"
+        )
+        if mass_name != "ZERO":
+            parameters[mass_name] = (float(particle.mass), 0.0)
+        if width_name != "ZERO":
+            parameters[width_name] = (float(particle.width), 0.0)
         for pdg in dict.fromkeys((particle.pdg, particle.anti_pdg)):
             is_antiparticle = pdg != particle.pdg
             anti_pdg = particle.pdg if is_antiparticle else particle.anti_pdg
@@ -661,6 +671,11 @@ def _built_in_model_payload() -> tuple[dict[str, object], dict[str, tuple[float,
         },
         parameters,
     )
+
+
+def _built_in_parameter_name(field: str, pdg: int) -> str:
+    pdg_token = f"m{abs(int(pdg))}" if int(pdg) < 0 else str(int(pdg))
+    return f"{field}_{pdg_token}"
 
 
 def _built_in_particle_name(pdg: int) -> str:

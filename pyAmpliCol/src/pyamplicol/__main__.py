@@ -3736,7 +3736,12 @@ def _cmd_generate_generic_dag_artifact(
         shutil.rmtree(output_dir)
     process_input: Any = getattr(entry, "ir", entry.process)
     compiled_model = getattr(args, "_compiled_model", None)
-    if _uses_builtin_model(args):
+    compiled_source = getattr(compiled_model, "source", {})
+    compiled_is_builtin = (
+        isinstance(compiled_source, Mapping)
+        and str(compiled_source.get("kind", "")).lower() == "built-in-sm"
+    )
+    if _uses_builtin_model(args) or compiled_is_builtin:
         from .model import AmplicolSMLeadingColorModel
         from .model_source import compile_model_source
 

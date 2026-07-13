@@ -13,6 +13,7 @@ from pyamplicol.model_source import (
     load_compiled_model,
     preflight_model,
 )
+from pyamplicol.ufo_model import CompiledUFOModel
 
 
 @pytest.mark.parametrize("alias", ["BUILTIN_SM", "builtin_sm", "built-in-sm"])
@@ -61,6 +62,15 @@ def test_compiled_model_round_trip_and_parameter_card(tmp_path: Path) -> None:
     assert load_compiled_model(model_path) == compiled
     payload = json.loads(parameter_path.read_text(encoding="utf-8"))
     assert payload["alpha_s"] == [0.118, 0.0]
+
+
+def test_compiled_builtin_uses_symbolica_safe_runtime_parameters() -> None:
+    compiled = compile_model_source("BUILTIN_SM", use_cache=False)
+    model = CompiledUFOModel(compiled)
+
+    assert all("-" not in name for name in compiled.parameter_defaults)
+    assert model.runtime_parameter_names_for_particle(-21) == ()
+    assert model.runtime_derived_parameter_domains() == {}
 
 
 def test_compile_model_source_parses_compiled_json_once(
