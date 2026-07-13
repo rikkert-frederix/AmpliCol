@@ -461,4 +461,64 @@ contains
 
   end subroutine cs_map
 
+
+  subroutine cs_born_pushback_weight(p, ptilde, ijk, mass_real, mass_parent, weight, info)
+    ! Reciprocal four-dimensional CS radiation measure used to embed a
+    ! mapped Born contribution in an (m+1)-body integration.  The II
+    ! expression uses vbar=vtilde/(1-x), so its (1-x) conversion is part
+    ! of the Jacobian.  No local-dipole 1/x factor belongs here.  For a
+    ! massive emitter or spectator this is only the local measure: the
+    ! mass-dependent radiation-domain volume is not included, so those
+    ! mappings are not used as unit-normalized Born-recycling histories.
+    real(dp), intent(in) :: p(0:,:), ptilde(0:,:), mass_real(:), mass_parent
+    integer, intent(in) :: ijk(3)
+    real(dp), intent(out) :: weight
+    integer, intent(out) :: info
+    integer :: i,j,k,ni,nk
+    real(dp) :: den,x,y,jac,pi
+    real(dp) :: mi,mj,mk,mp,q(0:3),q2,a,lam
+
+    weight=0.0_dp
+    info=0
+    pi=acos(-1.0_dp)
+    i=ijk(1); j=ijk(2); k=ijk(3)
+    if (size(p,1).ne.4 .or. size(ptilde,1).ne.4 .or. size(mass_real).ne.size(p,2)) then
+       info=-1; return
+    endif
+    ni=new_index(i,j); nk=new_index(k,j)
+    if (ni.le.0 .or. nk.le.0 .or. j.le.2) then
+       info=-2; return
+    endif
+
+    if (i.gt.2 .and. k.gt.2) then
+       den=dot4(p(:,i),p(:,j))+dot4(p(:,i),p(:,k))+dot4(p(:,j),p(:,k))
+       if (den.le.tiny_kin) then; info=-10; return; endif
+       y=dot4(p(:,i),p(:,j))/den
+       mi=mass_real(i); mj=mass_real(j); mk=mass_real(k); mp=mass_parent
+       if (mi.gt.0.0_dp .or. mj.gt.0.0_dp .or. mk.gt.0.0_dp .or. mp.gt.0.0_dp) then
+          q=p(:,i)+p(:,j)+p(:,k); q2=dot4(q,q)
+          if (q2.le.tiny_kin) then; info=-11; return; endif
+          mi=mi/sqrt(q2); mj=mj/sqrt(q2); mk=mk/sqrt(q2); mp=mp/sqrt(q2)
+          a=1.0_dp-mi*mi-mj*mj-mk*mk
+          lam=1.0_dp+mp**4+mk**4-2.0_dp*(mp*mp+mk*mk+mp*mp*mk*mk)
+          if (a.le.tiny_kin .or. lam.le.tiny_kin .or. 1.0_dp-y.le.tiny_kin) then
+             info=-12; return
+          endif
+          jac=q2/(16.0_dp*pi*pi)*a*a/sqrt(lam)*(1.0_dp-y)
+       else
+          jac=2.0_dp*dot4(ptilde(:,ni),ptilde(:,nk))/(16.0_dp*pi*pi)*(1.0_dp-y)
+       endif
+    elseif (i.gt.2) then
+       jac=2.0_dp*dot4(ptilde(:,ni),p(:,k))/(16.0_dp*pi*pi)
+    elseif (k.gt.2) then
+       jac=2.0_dp*dot4(ptilde(:,nk),p(:,i))/(16.0_dp*pi*pi)
+    else
+       den=dot4(p(:,i),p(:,k))
+       x=(den-dot4(p(:,j),p(:,i))-dot4(p(:,j),p(:,k)))/den
+       jac=2.0_dp*den/(16.0_dp*pi*pi)*(1.0_dp-x)
+    endif
+    if (jac.le.tiny_kin) then; info=-20; return; endif
+    weight=1.0_dp/jac
+  end subroutine cs_born_pushback_weight
+
 end module cs_dipole_mappings

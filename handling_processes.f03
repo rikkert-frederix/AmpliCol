@@ -19,7 +19,9 @@ module handling_processes
      real(kind=8) :: lc_weight=1d0
      type(amplitude_QCD) :: amp
      real(kind=8),dimension(0:3) :: p_mapped_ij
+     real(kind=8),dimension(:,:),allocatable :: p_mapped
      logical :: active=.true.,alpha_active=.true.,passes_cuts=.true.
+     real(kind=8),dimension(:),allocatable :: recycling_history_weight
      integer,dimension(:),allocatable :: rho_lookup_ih1,rho_lookup_ih2
      logical :: rho_lookup_upper=.false.,rho_hermitian_checked=.false.
    contains
@@ -41,7 +43,7 @@ module handling_processes
      integer,dimension(:,:),allocatable :: processes,color_orders
      integer,dimension(:),allocatable :: iden_iproc,phase_space_orders,nhel
      integer :: nproc
-     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor
+     real(kind=8),dimension(:,:),allocatable :: val_procs,idenCOandMAPfactor,recycling_history_multiplicity
      integer,dimension(:,:,:),allocatable :: iden_processes,same_flavour
      integer(kind=4),dimension(:,:),allocatable :: spin,hel_fac
      integer(kind=8),dimension(:),allocatable :: iden
@@ -692,6 +694,8 @@ contains
     if (allocated(di%process_r)) deallocate(di%process_r)
     if (allocated(di%dip_map)) deallocate(di%dip_map)
     if (allocated(di%reduced_color_order)) deallocate(di%reduced_color_order)
+    if (allocated(di%p_mapped)) deallocate(di%p_mapped)
+    if (allocated(di%recycling_history_weight)) deallocate(di%recycling_history_weight)
     if (allocated(di%rho_lookup_ih1)) deallocate(di%rho_lookup_ih1)
     if (allocated(di%rho_lookup_ih2)) deallocate(di%rho_lookup_ih2)
     call finalize_amplitude_QCD(di%amp)
@@ -734,6 +738,7 @@ contains
     if (allocated(pgl%phase_space_orders)) deallocate(pgl%phase_space_orders)
     if (allocated(pgl%val_procs)) deallocate(pgl%val_procs)
     if (allocated(pgl%idenCOandMAPfactor)) deallocate(pgl%idenCOandMAPfactor)
+    if (allocated(pgl%recycling_history_multiplicity)) deallocate(pgl%recycling_history_multiplicity)
     if (allocated(pgl%iden_processes)) deallocate(pgl%iden_processes)
     if (allocated(pgl%spin)) deallocate(pgl%spin)
     if (allocated(pgl%iden)) deallocate(pgl%iden)

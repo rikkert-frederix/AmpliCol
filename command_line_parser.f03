@@ -2,7 +2,7 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       limit_test,timing,timing_sample,accuracy,alpha_dipole,subtracted_real)
+       limit_test,timing,timing_sample,accuracy,alpha_dipole,subtracted_real,recycle_born,born_only)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -10,7 +10,7 @@ contains
     character(len=80) :: filename,library,tag,timing
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta,limit_test,subtracted_real
+    logical :: read_momenta,limit_test,subtracted_real,recycle_born,born_only
     integer :: me_points,timing_sample
     real(kind=8) :: accuracy,alpha_dipole(4)
 
@@ -26,6 +26,8 @@ contains
     read_momenta=.false.
     limit_test=.false.
     subtracted_real=.false.
+    recycle_born=.false.
+    born_only=.false.
     timing='basic'
     timing_sample=100
     accuracy=0d0
@@ -62,6 +64,13 @@ contains
           limit_test=.true.
        elseif (arg.eq."--subtracted-real") then
           subtracted_real=.true.
+       elseif (arg.eq."--subtracted-real-born") then
+          subtracted_real=.true.
+          recycle_born=.true.
+       elseif (arg.eq."--subtracted-real-born-only") then
+          subtracted_real=.true.
+          recycle_born=.true.
+          born_only=.true.
        elseif (index(arg, "--timing=").eq.1) then
           timing = arg(index(arg, "=")+1:)
        elseif (index(arg, "--timing-sample=").eq.1) then
@@ -102,6 +111,8 @@ contains
             "with [X] points tested (single PS kinematics)"
        write (*,'(a)') "  --limit_test,     -lt      : Test soft and collinear CS limits and exit."
        write (*,'(a)') "  --subtracted-real         : Integrate the local real contribution R-sum(D); requires --accuracy."
+       write (*,'(a)') "  --subtracted-real-born    : Integrate B + R-sum(D) through CS mapped Born points."
+       write (*,'(a)') "  --subtracted-real-born-only : Integrate only B through CS mapped Born points."
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&

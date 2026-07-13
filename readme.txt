@@ -132,6 +132,31 @@ number of real final-state jet legs. Each mapped dipole is cut independently
 at parton level: every reduced final-state jet must pass `pTj_min`, `etaj_max`,
 and `DRjj_min`.
 
+`--subtracted-real-born` adds a tree Born contribution evaluated at the same
+mapped Catani-Seymour Born points, including the mapping push-back Jacobian,
+mapped PDFs, and mapped Born normalisation. `--subtracted-real-born-only`
+uses exactly that machinery but integrates only the recycled Born term; it is
+intended as a closure check against a normal standalone Born integration. Both
+modes require `--accuracy`, `--alpha=1`, and gen23 phase space
+(`--phasespace=1` or `4`). They do not support event generation, libraries, or
+the limit-test mode. Dipoles whose combined `ij` parent is the U1 gluon
+(PDG 99) are excluded from Born recycling.  At a real point, the recycled
+Born term is partitioned uniformly over its alpha-active mapped dipoles; an
+independent multiplicity-weighted history normalization partitions equivalent
+real subprocess channels that reduce to the same physical Born process and
+coloured-leg order. Permutations of colour singlets are phase-space
+multichannel copies and are counted only once. Matrix-element flavour-map
+factors remain in the physical contribution and are not used as history
+multiplicities.
+Only mappings with massless emitters, emitted partons, parents, and spectators
+are used as Born-recycling histories. Massive CS mappings have
+mass-dependent radiation-coordinate domains whose volume is not yet included
+in the push-back normalization. Initialization verifies that the retained
+massless mappings cover every reduced Born channel and stops with an error
+rather than silently omitting a channel if they do not.
+Recycled modes sample without generator-level cuts; the real and mapped Born
+measurement cuts are applied explicitly to their respective contributions.
+
 For the number of events, it is best to require somewhere between
 100000-1000000 events per run. Requiring too few, and then combining
 many separate runs together might undersample some phase-space regions

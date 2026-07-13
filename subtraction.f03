@@ -10,7 +10,8 @@ module subtraction
   private
   public :: initialise_subtraction, test_limits_integrand, generate_limit_phase_space_point
   public :: print_limit_failure_fractions, compute_the_amps, square_the_amps
-  public :: evaluate_real_dipoles
+  public :: evaluate_real_dipoles, evaluate_recycled_born, compute_the_dipole_amps, square_the_dipole_amps
+  public :: initialise_recycling_history_weights
 contains
   subroutine initialise_subtraction(igroup,iamp)
     implicit none
@@ -69,10 +70,144 @@ contains
             pgl(igroup)%spin(0:3,pgl(igroup)%dpl(iamp)%dl(idip)%dip_map(1:n-1)), &
             pgl(igroup)%dpl(iamp)%dl(idip)%reduced_color_order,&
             phys_model)
+       allocate(pgl(igroup)%dpl(iamp)%dl(idip)%p_mapped(0:3,n-1))
        call initialise_rho_lookup(pgl(igroup)%dpl(iamp)%dl(idip))
     enddo
 !!$    call print_dipoles(pgl(igroup)%processes(:,iamp),pgl(igroup)%color_orders(:,iamp),pgl(igroup)%dpl(iamp)%dl)
   end subroutine initialise_subtraction
+
+  subroutine initialise_recycling_history_weights()
+    ! A physical Born subprocess can be reached from several real crossing
+    ! channels and flavour replicas.  Partition those histories according to
+    ! their process-file multiplicity within each reduced process and coloured
+    ! ordering.  The remaining local CS-projection partition is evaluated
+    ! point by point in evaluate_recycled_born.
+    integer :: ig,ip,idip,iiden,jg,jp,jdip,jiden
+    integer,allocatable :: process_r(:),process_r_other(:)
+    logical :: history_matches,target_supported
+    real(kind=8) :: history_norm
+    do ig=1,ngroups
+       do ip=1,pgl(ig)%nproc
+          do idip=1,pgl(ig)%dpl(ip)%ndip
+             associate(dip => pgl(ig)%dpl(ip)%dl(idip))
+             if (dip%dip_r_ijk_f(1).eq.99) cycle
+             target_supported=dipole_has_unit_recycling_measure(dip)
+             if (target_supported) allocate(dip%recycling_history_weight(pgl(ig)%iden_iproc(ip)))
+             allocate(process_r(size(dip%process_r)))
+             do iiden=1,pgl(ig)%iden_iproc(ip)
+                call reduced_process_for_dipole(dip,pgl(ig)%iden_processes(:,iiden,ip),process_r)
+                history_norm=0d0
+                do jg=1,ngroups
+                   do jp=1,pgl(jg)%nproc
+                      if (jg.ne.representative_recycling_group(jg,jp)) cycle
+                      do jiden=1,pgl(jg)%iden_iproc(jp)
+                         if (pgl(jg)%idenCOandMAPfactor(jiden,jp).eq.0d0) cycle
+                         history_matches=.false.
+                         do jdip=1,pgl(jg)%dpl(jp)%ndip
+                            associate(dip_other => pgl(jg)%dpl(jp)%dl(jdip))
+                            if (.not.dipole_has_unit_recycling_measure(dip_other)) cycle
+                            allocate(process_r_other(size(dip_other%process_r)))
+                            call reduced_process_for_dipole(dip_other,&
+                                 pgl(jg)%iden_processes(:,jiden,jp),process_r_other)
+                            history_matches=same_recycled_born_key(dip,process_r,dip_other,process_r_other)
+                            deallocate(process_r_other)
+                            if (history_matches) exit
+                            end associate
+                         enddo
+                         if (history_matches) history_norm=history_norm+ &
+                              abs(pgl(jg)%recycling_history_multiplicity(jiden,jp))
+                      enddo
+                   enddo
+                enddo
+                if (history_norm.eq.0d0) then
+                   write (*,*) 'ERROR: no massless recycling history for reduced Born process'
+                   write (*,*) process_r
+                   write (*,*) 'Massive radiation-volume normalization is not implemented for Born recycling.'
+                   stop 1
+                endif
+                if (target_supported) dip%recycling_history_weight(iiden)=1d0/history_norm
+             enddo
+             deallocate(process_r)
+             end associate
+          enddo
+       enddo
+    enddo
+  end subroutine initialise_recycling_history_weights
+
+  integer function representative_recycling_group(igroup,iproc)
+    ! The same physical subprocess is present in every phase-space channel
+    ! listed for its multichannel group.  Count it only in the lowest-numbered
+    ! explicit channel; compute_multichannel_weight combines the other copies.
+    integer,intent(in) :: igroup,iproc
+    integer :: ichannelgroup,ichannel,nchannels,iunique,igroup_other
+    logical :: contains_self
+    ichannelgroup=pgl(igroup)%multichan%map_proc_to_channelgroup(iproc)
+    nchannels=pgl(igroup)%multichan%unique_channelgroup_list(0,ichannelgroup)
+    if (nchannels.lt.1) then
+       write (*,*) 'ERROR: empty recycling multichannel group',igroup,iproc
+       stop 1
+    endif
+    representative_recycling_group=huge(0)
+    contains_self=.false.
+    do ichannel=1,nchannels
+       iunique=pgl(igroup)%multichan%unique_channelgroup_list(ichannel,ichannelgroup)
+       igroup_other=pgl(igroup)%multichan%unique_channel_list(iunique)
+       if (igroup_other.lt.1 .or. igroup_other.gt.ngroups) then
+          write (*,*) 'ERROR: invalid recycling multichannel group',igroup_other
+          stop 1
+       endif
+       representative_recycling_group=min(representative_recycling_group,igroup_other)
+       contains_self=contains_self .or. igroup_other.eq.igroup
+    enddo
+    if (.not.contains_self) then
+       write (*,*) 'ERROR: recycling multichannel group omits source group',igroup,iproc
+       stop 1
+    endif
+  end function representative_recycling_group
+
+  logical function same_recycled_born_key(dip_a,process_a,dip_b,process_b)
+    ! Colour-singlet permutations are phase-space multichannel copies, not
+    ! distinct Born histories.  Preserve the order of coloured legs while
+    ! removing every singlet from the comparison.
+    type(dipole),intent(in) :: dip_a,dip_b
+    integer,intent(in) :: process_a(:),process_b(:)
+    integer :: i,leg,ncol_a,ncol_b
+    integer,dimension(size(process_a)) :: coloured_order_a,coloured_order_b
+    same_recycled_born_key=.false.
+    if (size(process_a).ne.size(process_b)) return
+    if (.not.all(process_a.eq.process_b)) return
+    if (size(dip_a%reduced_color_order).ne.size(dip_b%reduced_color_order)) return
+    ncol_a=0
+    do i=1,size(dip_a%reduced_color_order)
+       leg=dip_a%reduced_color_order(i)
+       if (phys_model%is_singlet(process_a(leg))) cycle
+       ncol_a=ncol_a+1
+       coloured_order_a(ncol_a)=leg
+    enddo
+    ncol_b=0
+    do i=1,size(dip_b%reduced_color_order)
+       leg=dip_b%reduced_color_order(i)
+       if (phys_model%is_singlet(process_b(leg))) cycle
+       ncol_b=ncol_b+1
+       coloured_order_b(ncol_b)=leg
+    enddo
+    if (ncol_a.ne.ncol_b) return
+    same_recycled_born_key=all(coloured_order_a(1:ncol_a).eq.coloured_order_b(1:ncol_b))
+  end function same_recycled_born_key
+
+  logical function dipole_has_unit_recycling_measure(dip)
+    ! The current push-back weight normalises the massless CS radiation cube.
+    ! Massive emitters or spectators have mass-dependent radiation bounds and
+    ! therefore cannot be used as independent Born-recycling histories.
+    type(dipole),intent(in) :: dip
+    dipole_has_unit_recycling_measure=.false.
+    if (dip%dip_r_ijk_f(1).eq.99) return
+    if (phys_model%get_mass(dip%dip_ijk_f(1)).ne.0d0) return
+    if (phys_model%get_mass(dip%dip_ijk_f(2)).ne.0d0) return
+    if (phys_model%get_mass(dip%dip_ijk_f(3)).ne.0d0) return
+    if (phys_model%get_mass(dip%dip_r_ijk_f(1)).ne.0d0) return
+    dipole_has_unit_recycling_measure=.true.
+  end function dipole_has_unit_recycling_measure
 
   subroutine add_dipole_candidate(dip_i,dip_j,dip_k,reverse,candidates,reverses,ncandidates)
     implicit none
@@ -848,6 +983,7 @@ contains
        call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info, &
             mass_real=mass_real, &
             mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
+       pgl(ichan)%dpl(iint)%dl(idip)%p_mapped=ps_mapped
        pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij(0:3)= &
             ps_mapped(0:3,pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1))
        if (info.ne.0) then
@@ -873,6 +1009,223 @@ contains
     call compute_the_dipole_amps(iint,ichan)
     call square_the_dipole_amps(iint,ichan,amp2_dip)
   end subroutine evaluate_real_dipoles
+
+  subroutine evaluate_recycled_born(iint,ichan,vol,multichannel_weight,born_value)
+    ! Evaluate the tree Born contribution through the mapped points that were
+    ! already evaluated for the CS dipoles.  The real phase-space Jacobian
+    ! (including its flux) is kept outside the mapping; for initial-state
+    ! maps the Bjorken and flux ratios cancel, leaving precisely 1/J_CS.
+    use cs_dipole_mappings, only: cs_born_pushback_weight
+    use scales
+    use math_functions, only: factorial8
+    use common
+    implicit none
+    integer,intent(in) :: iint,ichan
+    real(kind=8),intent(in) :: vol,multichannel_weight
+    real(kind=8),intent(out) :: born_value
+    integer :: idip,info,ip,mapped_initial
+    real(kind=8) :: pushback,born2,scale_born,as_born,coupling,luminosity,xborn_initial
+    real(kind=8),dimension(pgl(ichan)%next) :: mass_real
+    real(kind=8),parameter :: pi=3.14159265358979323846d0,conv=389379660d0
+    real(kind=8),external :: alphaspdf
+
+    born_value=0d0
+    do ip=1,pgl(ichan)%next
+       mass_real(ip)=phys_model%get_mass(pgl(ichan)%processes(ip,iint))
+    enddo
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       associate(dip => pgl(ichan)%dpl(iint)%dl(idip))
+       if (.not.dipole_has_unit_recycling_measure(dip) .or. .not.dip%active) cycle
+       call cs_born_pushback_weight(pgl(ichan)%ps(1)%p,dip%p_mapped,dip%dip_ijk,mass_real, &
+            phys_model%get_mass(dip%dip_r_ijk_f(1)),pushback,info)
+       if (info.ne.0) then
+          write (*,*) 'error computing CS Born push-back weight',info
+          stop 1
+       endif
+       if (dip%dip_ijk(1).le.2 .or. dip%dip_ijk(3).le.2) then
+          if (dip%dip_ijk(1).le.2) then
+             mapped_initial=dip%dip_r_ijk(1)
+          else
+             mapped_initial=dip%dip_r_ijk(2)
+          endif
+          xborn_initial=2d0*dip%p_mapped(0,mapped_initial)/sqrts
+          if (xborn_initial.lt.1d0) pushback=pushback/(1d0-xborn_initial)
+       endif
+       born2=dipole_born_square(dip)
+       call set_scale(scale_choice,size(dip%process_r),dip%p_mapped,dip%process_r,scale_born)
+       if (use_lhapdf) then
+          as_born=alphaspdf(scale_born)
+       else
+          as_born=alphas_Q(scale_born,2,alphas_MZ)
+       endif
+       coupling=1d0
+       if (dip%amp%n_sing(1).lt.size(dip%process_r)-2) then
+          coupling=coupling*(4d0*pi*as_born)**(size(dip%process_r)-2-dip%amp%n_sing(1))
+       endif
+       if (dip%amp%n_sing(1).ge.1) coupling=coupling*(2d0*4d0*pi*alphaEW)**dip%amp%n_sing(1)
+       luminosity=reduced_process_luminosity(ichan,iint,dip,scale_born)
+       born_value=born_value+pushback*born2*coupling*luminosity
+       end associate
+    enddo
+    born_value=born_value*vol*pgl(ichan)%ps(1)%jac*conv*multichannel_weight
+  end subroutine evaluate_recycled_born
+
+  real(kind=8) function dipole_born_square(dip)
+    type(dipole),intent(in) :: dip
+    integer :: ih
+    dipole_born_square=0d0
+    if (use_real_gluons .and. all(dip%amp%n_qqbar(1:1).eq.0)) then
+       do ih=1,dip%amp%n_amps
+          dipole_born_square=dipole_born_square+dip%amp%amps_r(ih)*dip%col_fac*dip%amp%amps_r(ih)
+       enddo
+    else
+       do ih=1,dip%amp%n_amps
+          dipole_born_square=dipole_born_square+dble(dip%amp%amps(ih)*dip%col_fac*dconjg(dip%amp%amps(ih)))
+       enddo
+    endif
+  end function dipole_born_square
+
+  real(kind=8) function reduced_process_luminosity(ichan,iint,dip,scale)
+    integer,intent(in) :: ichan,iint
+    type(dipole),intent(in) :: dip
+    real(kind=8),intent(in) :: scale
+    integer :: ip,nlocal
+    integer,dimension(size(dip%process_r)) :: process_r
+    real(kind=8),dimension(2) :: xborn
+    reduced_process_luminosity=0d0
+    xborn(1)=2d0*dip%p_mapped(0,1)/sqrts
+    xborn(2)=2d0*dip%p_mapped(0,2)/sqrts
+    if (any(xborn.le.0d0) .or. any(xborn.ge.1d0+1d-12)) return
+    xborn=min(1d0,xborn)
+    do ip=1,pgl(ichan)%iden_iproc(iint)
+       call reduced_process_for_dipole(dip,pgl(ichan)%iden_processes(:,ip,iint),process_r)
+       if (.not.allocated(dip%recycling_history_weight)) then
+          write (*,*) 'ERROR: recycling history weights were not initialised'
+          stop 1
+       endif
+       nlocal=count_local_recycling_projections(ichan,iint,ip,dip,process_r)
+       if (nlocal.eq.0) then
+          write (*,*) 'ERROR: no local recycling projection for active dipole'
+          stop 1
+       endif
+       reduced_process_luminosity=reduced_process_luminosity+dip%recycling_history_weight(ip)* &
+            pgl(ichan)%idenCOandMAPfactor(ip,iint)* &
+            pdf_for_pdg(process_r(1),xborn(1),scale)*pdf_for_pdg(process_r(2),xborn(2),scale)/ &
+            (dble(process_normalisation(process_r))*dble(nlocal))
+    enddo
+  end function reduced_process_luminosity
+
+  integer function count_local_recycling_projections(ichan,iint,iiden,dip,process_r)
+    integer,intent(in) :: ichan,iint,iiden
+    type(dipole),intent(in) :: dip
+    integer,intent(in) :: process_r(:)
+    integer :: idip
+    integer,dimension(size(process_r)) :: process_r_other
+    count_local_recycling_projections=0
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       associate(dip_other => pgl(ichan)%dpl(iint)%dl(idip))
+       if (.not.dipole_has_unit_recycling_measure(dip_other) .or. .not.dip_other%active) cycle
+       call reduced_process_for_dipole(dip_other,pgl(ichan)%iden_processes(:,iiden,iint),process_r_other)
+       if (same_recycled_born_key(dip,process_r,dip_other,process_r_other)) &
+            count_local_recycling_projections=count_local_recycling_projections+1
+       end associate
+    enddo
+  end function count_local_recycling_projections
+
+  subroutine reduced_process_for_dipole(dip,process,process_r)
+    type(dipole),intent(in) :: dip
+    integer,intent(in) :: process(:)
+    integer,intent(out) :: process_r(:)
+    integer :: old,new,parent
+    if (size(process_r).ne.size(process)-1) then
+       write (*,*) 'invalid reduced-process storage'
+       stop 1
+    endif
+    if (phys_model%is_gluon(process(dip%dip_ijk(2)))) then
+       parent=process(dip%dip_ijk(1))
+    elseif (phys_model%is_gluon(process(dip%dip_ijk(1)))) then
+       parent=phys_model%get_antipart(process(dip%dip_ijk(2)))
+    else
+       ! The stored canonical parent is sufficient to fix whether the
+       ! colour line is the ordinary or U1 gluon for flavour replicas.
+       parent=dip%dip_r_ijk_f(1)
+    endif
+    new=0
+    do old=1,size(process)
+       if (old.eq.dip%dip_ijk(2)) cycle
+       new=new+1
+       process_r(new)=process(old)
+       if (old.eq.dip%dip_ijk(1)) process_r(new)=parent
+    enddo
+  end subroutine reduced_process_for_dipole
+
+  integer(kind=8) function process_normalisation(process)
+    use math_functions, only: factorial8
+    integer,intent(in) :: process(:)
+    integer :: i,j,nkind
+    integer,dimension(size(process),2) :: kinds
+    process_normalisation=1_8
+    do i=1,2
+       if (process(i).eq.21) then
+          process_normalisation=process_normalisation*16_8
+       elseif (abs(process(i)).ge.1 .and. abs(process(i)).le.6) then
+          process_normalisation=process_normalisation*6_8
+       else
+          process_normalisation=process_normalisation*2_8
+       endif
+    enddo
+    nkind=0
+    do i=3,size(process)
+       do j=1,nkind
+          if (kinds(j,1).eq.process(i)) then
+             kinds(j,2)=kinds(j,2)+1
+             exit
+          endif
+       enddo
+       if (j.eq.nkind+1) then
+          nkind=nkind+1
+          kinds(nkind,1)=process(i)
+          kinds(nkind,2)=1
+       endif
+    enddo
+    do i=1,nkind
+       process_normalisation=process_normalisation*factorial8(kinds(i,2))
+    enddo
+  end function process_normalisation
+
+  real(kind=8) function pdf_for_pdg(pdg,x,scale)
+    use common
+    integer,intent(in) :: pdg
+    real(kind=8),intent(in) :: x,scale
+    real(kind=8),dimension(-6:7) :: pdf
+    logical,dimension(-6:7) :: all_flavours
+    integer :: index
+    pdf_for_pdg=0d0
+    if (.not.include_pdf) then
+       pdf_for_pdg=1d0
+       return
+    endif
+    if (x.le.0d0 .or. x.gt.1d0) return
+    if (pdg.eq.21) then
+       index=0
+    elseif (pdg.eq.22) then
+       index=7
+    elseif (pdg.ge.-6 .and. pdg.le.6) then
+       index=pdg
+    else
+       return
+    endif
+    if (use_lhapdf) then
+       call evolvePDF(x,scale,pdf(-6))
+       pdf_for_pdg=pdf(index)/x
+    else
+       ! The internal driver has the same flavour layout.  Ask for all
+       ! flavours here because mapped initial states vary per dipole.
+       all_flavours=.true.
+       call PDF_eval(1,all_flavours,x,scale,pdf(-6))
+       pdf_for_pdg=pdf(index)
+    endif
+  end function pdf_for_pdg
 
   subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched,nalpha_selected)
     use cs_lc_spin_dipoles

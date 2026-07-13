@@ -23,11 +23,13 @@ program amplicol_generate
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
+  real(kind=8),dimension(:),allocatable :: recycling_pt_cut,recycling_eta_cut
+  real(kind=8),dimension(:,:),allocatable :: recycling_pair_cut
   character(len=80) :: filename,logfile,limit_logfile,tag
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
-  logical,dimension(1) :: to_write
+  logical,dimension(1) :: to_write,point_passes_cuts
   integer,dimension(:),allocatable :: nintegrals
   integer :: ichan,iint,itmax,ncalls0,iamp
   integer :: limit_point
@@ -42,7 +44,7 @@ program amplicol_generate
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,subtracted_real
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,subtracted_real,recycle_born,born_only
   logical :: limits_ok
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
@@ -116,12 +118,31 @@ program amplicol_generate
      ! Initialise the phase-space parametrisation
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call setup_cuts_for_each_particle(pgl(igroup),igroup)
+     if (recycle_born) then
+        ! Explicit real and mapped cuts are applied in the integrand.  Keep the
+        ! sampling map cut-free so every inverse CS-radiation domain is covered.
+        allocate(recycling_pt_cut(pgl(igroup)%next),recycling_eta_cut(pgl(igroup)%next))
+        allocate(recycling_pair_cut(pgl(igroup)%next,pgl(igroup)%next))
+        recycling_pt_cut=-1d0
+        recycling_eta_cut=-1d0
+        recycling_pair_cut=-1d0
+     endif
      if (PS_choice.ge.1 .and. PS_choice.le.3) then
-        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
+        if (recycle_born) then
+           call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
+                recycling_pt_cut,recycling_eta_cut,recycling_pair_cut,recycling_pair_cut,.false.,include_pdf)
+        else
+           call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
+                pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.false.,include_pdf)
+        endif
      elseif (PS_choice.eq.4) then
-        call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
-             pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.true.,include_pdf)
+        if (recycle_born) then
+           call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
+                recycling_pt_cut,recycling_eta_cut,recycling_pair_cut,recycling_pair_cut,.true.,include_pdf)
+        else
+           call pgl(igroup)%phase_space%init(sqrts,pgl(igroup)%next,mass,pgl(igroup)%phase_space_orders,&
+                pgl(igroup)%pt_min,pgl(igroup)%eta_max,pgl(igroup)%DR_min,pgl(igroup)%sqrt_s_min,.true.,include_pdf)
+        endif
      endif
      pgl(igroup)%ndim_extra=pgl(igroup)%phase_space%ndim_extra
      allocate(pgl(igroup)%ps(1))
@@ -133,6 +154,7 @@ program amplicol_generate
      endif
      deallocate(mass)
      deallocate(width)
+     if (recycle_born) deallocate(recycling_pt_cut,recycling_eta_cut,recycling_pair_cut)
 
      if (use_amplitude_library) cycle
      
@@ -204,6 +226,8 @@ program amplicol_generate
      pgl(igroup)%hel_fac=1
 
   enddo ! loop over phase-space-order groups
+
+  if (recycle_born) call initialise_recycling_history_weights()
 
   if (use_amplitude_library) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
@@ -308,9 +332,9 @@ program amplicol_generate
         endif
      endif
      
-     call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
+     call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1),point_passes_cuts(1))
      if (time_detail_point) call cpu_time(tSampleBefore)
-     call simple_integrator%fill_points(1,f_abs,f,to_write,done)
+     call simple_integrator%fill_points(1,f_abs,f,to_write,done,point_passes_cuts)
      if (time_detail_point) then
         call cpu_time(tSampleAfter)
         t_Int_fill=t_Int_fill+(tSampleAfter-tSampleBefore)*dble(timing_sample)
@@ -461,7 +485,7 @@ contains
     if (sampled) residual_note='residual'
   end function residual_note
 
-  subroutine integrand(ichan,iint,x,vol,f,f_abs)
+  subroutine integrand(ichan,iint,x,vol,f,f_abs,point_passes_cuts)
     use scales
     use amp_lib
     implicit none
@@ -469,11 +493,12 @@ contains
     real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
+    logical,intent(out) :: point_passes_cuts
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc
+    integer :: ih,iproc,idip
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real(kind=8) :: amp2_integrand,amp2_dip
+    real(kind=8) :: amp2_integrand,amp2_dip,born_value
     logical :: done,time_physics,real_pass
     real(kind=8),external :: alphaspdf
     time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
@@ -494,6 +519,7 @@ contains
     f=0d0
     f_abs=0d0
     val_abs=0d0
+    point_passes_cuts=.false.
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (time_physics) call cpu_time(tBefore)
@@ -524,24 +550,27 @@ contains
        endif
     endif
     pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
+    if (.not.subtracted_real) point_passes_cuts=.true.
     call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
     if (time_physics) then
        call cpu_time(tAfter)
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
-    call compute_the_amps(iint,ichan,use_amplitude_library)
-    if (time_physics) then
-       call cpu_time(tAfter)
-       t_amp=t_amp+(tAfter-tBefore)*dble(timing_sample)
-       tBefore=tAfter
+    if (.not.born_only) then
+       call compute_the_amps(iint,ichan,use_amplitude_library)
+       if (time_physics) then
+          call cpu_time(tAfter)
+          t_amp=t_amp+(tAfter-tBefore)*dble(timing_sample)
+          tBefore=tAfter
+       endif
+       call square_the_amps(iint,ichan)
+       if (time_physics) then
+          call cpu_time(tAfter)
+          t_mat=t_mat+(tAfter-tBefore)*dble(timing_sample)
+       endif
     endif
-    call square_the_amps(iint,ichan)
-    if (time_physics) then
-       call cpu_time(tAfter)
-       t_mat=t_mat+(tAfter-tBefore)*dble(timing_sample)
-    endif
-    if ((.not. use_amplitude_library) &
+    if ((.not.born_only) .and. (.not. use_amplitude_library) &
          .and. pgl(ichan)%passed(iint).le.nevent_hel_filter &
          .and. optimise_amplitudes) then
        if (time_physics) tBefore=tAfter
@@ -553,21 +582,44 @@ contains
        if (done) return
     endif
 
-    if (read_momenta) then
+    if (read_momenta .and. .not.born_only) then
         call perform_check(iint,ichan)
         if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
     endif
 
     real_pass=.true.
     if (subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
-    amp2_integrand=pgl(ichan)%amp2(1)
+    amp2_integrand=0d0
+    if (.not.born_only) amp2_integrand=pgl(ichan)%amp2(1)
     if (subtracted_real) then
-       call evaluate_real_dipoles(iint,ichan,amp2_dip)
-       if (real_pass) then
-          amp2_integrand=amp2_integrand-amp2_dip
-       else
-          amp2_integrand=-amp2_dip
+       call compute_the_dipole_amps(iint,ichan)
+       point_passes_cuts=real_pass
+       do idip=1,pgl(ichan)%dpl(iint)%ndip
+          point_passes_cuts=point_passes_cuts .or. pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts
+       enddo
+       if (.not.born_only) then
+          call square_the_dipole_amps(iint,ichan,amp2_dip)
+          if (real_pass) then
+             amp2_integrand=amp2_integrand-amp2_dip
+          else
+             amp2_integrand=-amp2_dip
+          endif
        endif
+    endif
+
+    if (recycle_born) then
+       call evaluate_recycled_born(iint,ichan,vol,colour_singlet_multichannel_weight(iint),born_value)
+       if (born_only) then
+          f=born_value
+          f_abs=abs(born_value)
+          if (time_physics) then
+             call cpu_time(tAfter)
+             t_weight=t_weight+(tAfter-tBefore)*dble(timing_sample)
+          endif
+          return
+       endif
+    else
+       born_value=0d0
     endif
 
     ! set scales and update alphaS
@@ -600,6 +652,10 @@ contains
        call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
        f_abs=sum(val_abs(1:1))
        f=sum(val(1:1))
+       if (recycle_born) then
+          f=f+born_value
+          f_abs=abs(f)
+       endif
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
        val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
@@ -753,7 +809,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,subtracted_real)
+         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,subtracted_real,recycle_born,born_only)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -783,6 +839,7 @@ contains
        stop 1
     endif
     timing_sample=timing_sample_arg
+    call set_use_soft_bounds_as_actual_limits(.not.subtracted_real)
 
     if (subtracted_real) then
        if (.not.keep_processes_separate) then
@@ -796,6 +853,20 @@ contains
        if (library.ne.'none') then
           write (*,*) '--subtracted-real is not available with --library=create or --library=use'
           stop 1
+       endif
+       if (recycle_born) then
+          if (any(abs(alpha_dipole-1d0).gt.1d-12)) then
+             write (*,*) '--subtracted-real-born modes require --alpha=1'
+             stop 1
+          endif
+          if (PS_choice.ne.1 .and. PS_choice.ne.4) then
+             write (*,*) '--subtracted-real-born modes require gen23 phase space (1 or 4)'
+             stop 1
+          endif
+          if (limit_test .or. read_momenta) then
+             write (*,*) '--subtracted-real-born modes are integration-only'
+             stop 1
+          endif
        endif
     endif
 

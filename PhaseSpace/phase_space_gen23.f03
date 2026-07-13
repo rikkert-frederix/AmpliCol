@@ -24,9 +24,17 @@ module phase_space_gen23_mod
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
   ! If true, the cut-aware bounds are used as the actual integration limits.
-  logical,parameter :: use_soft_bounds_as_actual_limits=.false.
+  logical :: use_soft_bounds_as_actual_limits=.false.
+
+  public :: set_use_soft_bounds_as_actual_limits
 
 contains
+  subroutine set_use_soft_bounds_as_actual_limits(flag)
+    implicit none
+    logical,intent(in) :: flag
+    use_soft_bounds_as_actual_limits=flag
+  end subroutine set_use_soft_bounds_as_actual_limits
+
   pure elemental real(kind=8) function sqrt0(x)
     implicit none
     real(kind=8),intent(in) :: x
@@ -740,9 +748,9 @@ contains
       ! back-to-back incoming particles. The mass of i is fixed.
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
-      real(kind=8) :: phi,pt2,mass_tol
+      real(kind=8) :: phi,pt2,mass_tol,den_t,den_ir,den_scale
       real(kind=8),dimension(1:2) :: tmin,tmax,pzmax,Eimax,yr
-      logical :: soft_ok
+      logical :: soft_ok,massless_collinear_limit
       if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
@@ -804,8 +812,24 @@ contains
       if (debug) then
          write (*,*) 'dt- i+ia',i+ia,invm(i+ia),tmin,tmax
       endif
+      den_t=invm(i)-invm(i+ia)
+      den_ir=sqrtshat**2+invm(i+ia)-invm(i)
+      den_scale=max(1d0,abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
+      massless_collinear_limit=abs(den_t).le.vtiny*den_scale .and. &
+           abs(invm(i)).le.vtiny*den_scale .and. &
+           maxval(this%ETmin(i,1:2)).le.vtiny*sqrt(den_scale)
+      if (abs(den_ir).le.vtiny*den_scale .or. &
+           (abs(den_t).le.vtiny*den_scale .and. .not.massless_collinear_limit)) then
+         ps%jac=-2d0
+         if (debug) write (*,*) 'singular double_t constraint',den_t,den_ir
+         return
+      endif
       tmin(1:2)=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir,1:2)
-      tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
+      if (massless_collinear_limit) then
+         tmax(1:2)=0d0
+      else
+         tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/den_t
+      endif
       where (this%invm_max(ir+ib,1:2).ne.0d0)
          tmax(1:2) = min(tmax(1:2), this%invm_max(ir+ib,1:2))
       end where
@@ -814,8 +838,10 @@ contains
       end where
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      tmin(1:2)=max(tmin(1:2),invm(i)-sqrtshat**2*(1-this%ETmin(ir,1:2)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
-      tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/(invm(i)-invm(i+ia))))
+      tmin(1:2)=max(tmin(1:2),invm(i)-sqrtshat**2*(1-this%ETmin(ir,1:2)**2/den_ir))
+      if (.not.massless_collinear_limit) then
+         tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/den_t))
+      endif
       if (tmin(1).ge.tmax(1)) then
          ps%jac=-2d0
          if (debug) write (*,*) 'tmin.ge.tmax',tmin,tmax
@@ -872,7 +898,7 @@ contains
       ! doi:10.1103/PhysRev.187.2008.  Assumes massless incoming particles.
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
-      real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot
+      real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot,delta_ir,delta_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       if (popcnt(i).gt.1) then
@@ -968,7 +994,7 @@ contains
       where (this%invm_max(i+im1,1:2).ne.0d0)
          smax(1:2)=min(smax_S,this%invm_max(i+im1,1:2))
       end where
-     if (im1.gt.2) then
+      if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
          if ((pp(0,im1)+pp(3,im1))*(pp(0,im1)-pp(3,im1)).le.vtiny) then
             ps%jac=-35d0
@@ -982,8 +1008,27 @@ contains
          call rotz(piirr,-phi_rot,piir)
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
-         etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
-              this%ETmin(ir,1:2))
+         delta_ir=invm(ir)-invm(ir+ib)
+         delta_scale=max(1d0,abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
+         if (abs(pib(0)).le.vtiny*max(1d0,sqrtshat)) then
+            ps%jac=-34d0
+            if (debug) write (*,*) 'unphysical Eir constraint',delta_ir,pib(0)
+            return
+         endif
+         if (abs(delta_ir).le.vtiny*delta_scale) then
+            ! For delta->0- the max has the finite limit ETmin(ir).  The
+            ! same holds for a zero transverse bound from either side.
+            if (delta_ir.le.0d0 .or. maxval(this%ETmin(ir,1:2)).le.vtiny*sqrt(delta_scale)) then
+               etminir(1:2)=this%ETmin(ir,1:2)
+            else
+               ps%jac=-34d0
+               if (debug) write (*,*) 'positive singular Eir constraint',delta_ir,pib(0)
+               return
+            endif
+         else
+            etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/delta_ir+delta_ir/(4d0*pib(0)),&
+                 this%ETmin(ir,1:2))
+         endif
          rad=(piir(0)-etminir(1:2))**2-invm(i)
          if (any(rad.lt.0d0)) then
             ps%jac=-34d0
@@ -1830,9 +1875,9 @@ contains
     subroutine double_t_inverse(i,ir,ia,ib)
       implicit none
       integer(kind=4),intent(in) :: i,ir,ia,ib
-      real(kind=8) :: phi,mass_tol
+      real(kind=8) :: phi,mass_tol,den_t,den_ir,den_scale
       real(kind=8),dimension(1:2) :: tmin,tmax,yr,Eimax,pzmax
-      logical :: soft_ok
+      logical :: soft_ok,massless_collinear_limit
       if (popcnt(i).ne.1 .or. popcnt(ir).le.1) then
          write (*,*) 'Subroutine only for i is a single particle '&
               //'and ir is more than 1',i,ir,popcnt(i),popcnt(ir)
@@ -1892,8 +1937,24 @@ contains
       ix=ix+1
       call var_to_random(invm(i+ia),ip_dt,tmin,tmax,ps%x(ix),ps%jac)
       if (bad_inverse_jac()) return
+      den_t=invm(i)-invm(i+ia)
+      den_ir=sqrtshat**2+invm(i+ia)-invm(i)
+      den_scale=max(1d0,abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
+      massless_collinear_limit=abs(den_t).le.vtiny*den_scale .and. &
+           abs(invm(i)).le.vtiny*den_scale .and. &
+           maxval(this%ETmin(i,1:2)).le.vtiny*sqrt(den_scale)
+      if (abs(den_ir).le.vtiny*den_scale .or. &
+           (abs(den_t).le.vtiny*den_scale .and. .not.massless_collinear_limit)) then
+         ps%jac=-2d0
+         if (debug) write (*,*) 'singular inverse double_t constraint',den_t,den_ir
+         return
+      endif
       tmin(1:2)=-invm(ia+ib)-invm(i+ia)+invm(i)+this%invm_min(ir,1:2)
-      tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/(invm(i)-invm(i+ia))
+      if (massless_collinear_limit) then
+         tmax(1:2)=0d0
+      else
+         tmax(1:2)=invm(i)*(invm(i)-invm(ia+ib)-invm(i+ia))/den_t
+      endif
       where (this%invm_max(ir+ib,1:2).ne.0d0)
          tmax(1:2) = min(tmax(1:2), this%invm_max(ir+ib,1:2))
       end where
@@ -1902,8 +1963,10 @@ contains
       end where
       ! Additional constraints on tmin and tmax due to pp(0,i) and pp(0,ir)
       ! being larger than ETmin(i) and ETmin(ir), respectively:
-      tmin(1:2)=max(tmin(1:2),invm(i)-sqrtshat**2*(1-this%ETmin(ir,1:2)**2/(sqrtshat**2+invm(i+ia)-invm(i))))
-      tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/(invm(i)-invm(i+ia))))
+      tmin(1:2)=max(tmin(1:2),invm(i)-sqrtshat**2*(1-this%ETmin(ir,1:2)**2/den_ir))
+      if (.not.massless_collinear_limit) then
+         tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/den_t))
+      endif
       if (tmin(1).ge.tmax(1)) then
          write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
          stop 1
@@ -1939,7 +2002,7 @@ contains
     subroutine gen23_one_step_inverse(i,ir,ib,im1)
       implicit none
       integer(kind=4),intent(in) :: im1,i,ir,ib
-      real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot
+      real(kind=8) :: tmin_S,tmax_S,smin_S,smax_S,phi1,phi2,gram4,V,sqrtGG,y,phi_rot,delta_ir,delta_scale
       real(kind=8),dimension(1:2) :: shatmin,shatmax,tmin,tmax,etminir,etmini,base,root,smin,smax,rad
       real(kind=8),dimension(0:3) :: pi1,pr1,ppibir1,pi2,pr2,ppibir2,piir,pib,pim1,piirr,pim1r
       if (popcnt(i).gt.1) then
@@ -2027,7 +2090,7 @@ contains
       where (this%invm_max(i+im1,1:2).ne.0d0)
          smax(1:2)=min(smax_S,this%invm_max(i+im1,1:2))
       end where
-     if (im1.gt.2) then
+      if (im1.gt.2) then
          ! Boost and rotate in z-direction such that pp(:,im1) goes in the x-direction.
          if ((pp(0,im1)+pp(3,im1))*(pp(0,im1)-pp(3,im1)).le.vtiny) then
             ps%jac=-35d0
@@ -2041,8 +2104,25 @@ contains
          call rotz(piirr,-phi_rot,piir)
          call rotz(pim1r,-phi_rot,pim1)
          ! Eir > Etmin(ir) + constraint coming from t
-         etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/(invm(ir)-invm(ir+ib))+(invm(ir)-invm(ir+ib))/(4d0*pib(0)),&
-              this%ETmin(ir,1:2))
+         delta_ir=invm(ir)-invm(ir+ib)
+         delta_scale=max(1d0,abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
+         if (abs(pib(0)).le.vtiny*max(1d0,sqrtshat)) then
+            ps%jac=-34d0
+            if (debug) write (*,*) 'unphysical inverse Eir constraint',delta_ir,pib(0)
+            return
+         endif
+         if (abs(delta_ir).le.vtiny*delta_scale) then
+            if (delta_ir.le.0d0 .or. maxval(this%ETmin(ir,1:2)).le.vtiny*sqrt(delta_scale)) then
+               etminir(1:2)=this%ETmin(ir,1:2)
+            else
+               ps%jac=-34d0
+               if (debug) write (*,*) 'positive singular inverse Eir constraint',delta_ir,pib(0)
+               return
+            endif
+         else
+            etminir(1:2)=max(pib(0)*this%ETmin(ir,1:2)**2/delta_ir+delta_ir/(4d0*pib(0)),&
+                 this%ETmin(ir,1:2))
+         endif
          rad=(piir(0)-etminir(1:2))**2-invm(i)
          if (any(rad.lt.0d0)) then
             ps%jac=-34d0

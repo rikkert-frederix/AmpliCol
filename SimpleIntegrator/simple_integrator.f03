@@ -62,7 +62,7 @@
 !              ! integ%wgt(ip) is the grid Jacobian/volume factor.
 !              ! Compute f_abs(ip) >= 0 and f(ip), including integ%wgt(ip).
 !           end do
-!           call integ%fill_points(npoints, f_abs, f, to_write, done)
+!           call integ%fill_points(npoints, f_abs, f, to_write, done, accepted)
 !           ! If to_write(ip) is true, write/store the corresponding event now.
 !        end do
 !
@@ -85,7 +85,9 @@
 ! f_abs is the non-negative target used for grid adaptation, maximum-weight
 ! estimates, and unweighting.  f is the signed contribution to the physical
 ! integral.  In many event generators f_abs=abs(f), but callers may choose a
-! different positive envelope if needed.
+! different positive envelope if needed.  The optional accepted array records
+! points that pass the caller's cuts; accepted zero-weight points count towards
+! the per-iteration statistics, while rejected points do not.
 !
 ! compute_wgt_from_x can be used when an external multichannel combination needs
 ! the current adaptive-grid weight for a point already known in a specific
@@ -472,13 +474,14 @@ contains
   
   ! Return evaluated values for the most recent batch and trigger iteration
   ! finalisation when all active channels/integrals have enough statistics.
-  subroutine fill_points(this,npoints,f_abs,f,to_write,done)
+  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: npoints
     real(kind=8),dimension(npoints),intent(in) :: f,f_abs
     logical,dimension(npoints),intent(out) :: to_write
     logical,intent(out) :: done
+    logical,dimension(npoints),intent(in),optional :: accepted
     integer :: i
     done=.false.
     if (this%npoints_gen.eq.0) then
@@ -494,7 +497,11 @@ contains
        stop 1
     endif
     do i=1,npoints
-       call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i))
+       if (present(accepted)) then
+          call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),accepted(i))
+       else
+          call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),f_abs(i).gt.0d0)
+       endif
     enddo
     this%npoints_gen=0
     if (all(this%channels%done)) then
@@ -1174,32 +1181,34 @@ contains
   end subroutine integral_update_result_iter
   
   ! Add one evaluated point to a channel grid and to its active integral.
-  subroutine channel_add_point(this,x,wgt,f_abs,f,to_write)
+  subroutine channel_add_point(this,x,wgt,f_abs,f,to_write,accepted)
     implicit none
     class(channel),intent(inout) :: this
     real(kind=8),dimension(this%ndim),intent(in) :: x
     real(kind=8),intent(in) :: f_abs,f,wgt
     logical,intent(out) :: to_write
+    logical,intent(in) :: accepted
     integer :: i
     this%npoints_iter=this%npoints_iter+1
     do i=1,this%ndim
        call this%grids(i,this%current_iter)%add_point(x(i),f_abs)
     enddo
-    call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write)
+    call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write,accepted)
     if (all(this%integrals%done)) this%done=.true.
   end subroutine channel_add_point
 
   ! Accumulate one point in an integral and optionally save it as a candidate
   ! event for later final unweighting.
-  subroutine integral_add_point(this,x,wgt,f_abs,f,to_write)
+  subroutine integral_add_point(this,x,wgt,f_abs,f,to_write,accepted)
     implicit none
     class(integral),intent(inout) :: this
     real(kind=8),intent(in) :: f_abs,f,wgt
     real(kind=8),dimension(this%ndim),intent(in) :: x
     logical,intent(out) :: to_write
+    logical,intent(in) :: accepted
     logical :: enough
     this%npoints_iter=this%npoints_iter+1
-    if (f_abs.gt.0d0) this%npoints_nonzero=this%npoints_nonzero+1
+    if (accepted) this%npoints_nonzero=this%npoints_nonzero+1
     this%accum(1)=this%accum(1)+f_abs
     this%accum(2)=this%accum(2)+f
     this%accum2(1)=this%accum2(1)+f_abs**2
