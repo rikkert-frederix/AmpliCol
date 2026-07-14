@@ -140,8 +140,9 @@ symbolica_iterations = 10
 Unknown keys, arguments belonging to another subcommand, and missing required
 inputs are errors.  The cards under `examples/` cover the built-in, UFO, loader
 JSON, compiled-model, runtime-parameter, multiparticle, colour-accuracy,
-massless-scalar, and scalar-gravity workflows.  The colorless-model validation
-ladder and its generated TeX tables are maintained by `docs/model_results.py`;
+massless-scalar, and scalar-gravity workflows. The contact-only, uncapped
+all-scalar-tree, and scalar-gravity validation ladders and their generated TeX
+tables are maintained by `docs/model_results.py`;
 all process outputs are retained under `.ufo_support_outputs/model_matrices`.
 
 For normal selected-flow JIT artifacts, the CLI uses batch 128 and measures

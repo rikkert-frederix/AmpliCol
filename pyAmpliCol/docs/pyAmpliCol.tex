@@ -875,11 +875,14 @@ input to process generation.  Because every particle is a colour singlet, LC,
 NLC, and full colour all reduce to the unit colour metric.  A dedicated runtime
 regression checks that equality together with UFO/JSON/compiled-source parity.
 
-The scalar ladder contains direct vertices through valence ten.  Each contact
-is decomposed into balanced, non-propagating auxiliary currents, and the
-ten-point result is independently checked against an eager contraction of the
-original n-ary UFO tensor.  For scalar gravity, a massless graviton helicity
-tensor is built from equal-helicity transverse vector products:
+The contact-oracle ladder isolates direct vertices through valence ten. Each
+contact is decomposed into balanced, non-propagating auxiliary currents, and
+the ten-point result is independently checked against an eager contraction of
+the original n-ary UFO tensor. A second, uncapped ladder retains every allowed
+scalar tree and internal propagator; it completes through seven final scalars,
+with the largest row using the documented one-hour generation allowance. For
+scalar gravity, a massless graviton helicity tensor is built from equal-helicity
+transverse vector products:
 \[
   \epsilon^{\mu\nu}_{\pm2}=\epsilon^\mu_\pm\epsilon^\nu_\pm .
 \]
@@ -888,8 +891,17 @@ the formula-level arbitrary-precision tests.  Large tensor components stay in
 the Symbolica function map described above, avoiding repeated expression
 expansion during stage construction.
 
+The zero-current and identical-current warmups use the same ten points.  When
+zero filtering leaves the DAG unchanged, \PAC\ now reuses its current
+signatures for merging; reuse is disabled if filtering changes the graph or
+the estimated cache exceeds 64 MiB.  This removes a duplicated spin-2
+contraction without weakening either numerical rewrite check or changing
+high-multiplicity SM memory policy.
+
 \input{scalars_model_table.tex}
 \clearpage
+\input{scalars_full_model_table.tex}
+\Needspace{16\baselineskip}
 \input{scalar_gravity_model_table.tex}
 \end{landscape}
 

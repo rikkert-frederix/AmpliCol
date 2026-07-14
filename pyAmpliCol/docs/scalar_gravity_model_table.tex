@@ -4,22 +4,25 @@
 \scriptsize
 \setlength{\tabcolsep}{4pt}
 \renewcommand{\arraystretch}{1.12}
-\begin{longtable}{@{}rL{2.75in}rrrrL{0.85in}rr@{}}
+\begin{longtable}{@{}rL{2.35in}rrrrL{0.78in}rrr@{}}
 \toprule
-$n$ & process & gen [s] & JIT [s] & currents & interactions & value & wall [$\mu$s] & rel. 50d \\
+$n$ & process & gen [s] & JIT [s] & currents & interactions & value & eval [$\mu$s] & wall [$\mu$s] & rel. 50d \\
 \midrule
 \endfirsthead
 \toprule
-$n$ & process & gen [s] & JIT [s] & currents & interactions & value & wall [$\mu$s] & rel. 50d \\
+$n$ & process & gen [s] & JIT [s] & currents & interactions & value & eval [$\mu$s] & wall [$\mu$s] & rel. 50d \\
 \midrule
 \endhead
-2 & $\phi_0\,\phi_0\to G\,G$ & 0.2367 & 0.01262 & 14 & 12 & \texttt{1.1963663e+09} & 0.5659 & $1.99\times10^{-16}$ \\
-3 & $\phi_0\,\phi_0\to G\,G\,G$ & 98.28 & 40.64 & 104 & 292 & \texttt{5.2311638e+11} & 1081 & $1.40\times10^{-15}$ \\
-4 & $\phi_0\,\phi_0\to G\,G\,G\,G$ & \multicolumn{7}{c}{\textcolor{speedred}{t/o $>5$ min}} \\
+2 & $\phi_0\,\phi_0\to G\,G$ & 0.2367 & 0.01262 & 14 & 12 & \texttt{1.1963663e+09} & 0.1835 & 0.5659 & $1.99\times10^{-16}$ \\
+3 & $\phi_0\,\phi_0\to G\,G\,G$ & 73.75 & 42.66 & 104 & 292 & \texttt{5.2311638e+11} & 1074 & 1117 & $1.40\times10^{-15}$ \\
+4 & $\phi_0\,\phi_0\to G\,G\,G\,G$ & 880.6 & 603.3 & 378 & 2,168 & \texttt{6.9756678e+13} & 3.53e+04 & 3.53e+04 & $3.58\times10^{-15}$ \\
 \bottomrule
 \end{longtable}
 \noindent UFO conversion: \texttt{33.29 s}; \quad JSON conversion: \texttt{33.73 s}; \quad compiled load: \texttt{0.1585 s}.
-\par\smallskip\noindent\textit{Limit note.} DAG construction completed in 3.681 s; numerical zero filtering took 271.669 s, and the five-minute attempt timed out during current merging.
+
 \par\smallskip
-\noindent Values use identical deterministic phase-space points. Generation starts from the compiled model and uses SymJIT O1, batch/chunk size 128, a 30 GB watchdog, and a five-minute cap. Runtime uses Rusticol double precision and \texttt{--target-runtime 10}; the final column compares the same double point with a 50-digit reevaluation. Superseded process directories are archived beside the active output.
+\noindent\textit{Full-model ladder.} The scalar-gravity entries retain the complete tree-level model, including internal scalar and graviton propagators.
+ Values use the retained RAMBO point generated with seed 101 at $\sqrt{s}=1\,\mathrm{TeV}$. Generation starts from the compiled model and uses SymJIT O1, batch/chunk size 128 and a 30 GB watchdog.
+ The ordinary generation cap is five minutes; the four-graviton entry is allowed one hour.
+ The eval column isolates generated evaluators; wall includes Rusticol orchestration. Runtime uses double precision and \texttt{--target-runtime 10}; the final column compares the same point with a 50-digit reevaluation. Superseded process directories are archived beside the active output.
 \endgroup

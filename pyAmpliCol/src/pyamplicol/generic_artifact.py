@@ -62,6 +62,7 @@ _NUMERICAL_REWRITE_VALIDATION_SAMPLE_LIMIT = 3
 _NUMERICAL_REWRITE_VALIDATION_SEED_OFFSET = 1_000_003
 _NUMERICAL_REWRITE_VALIDATION_RELATIVE_TOLERANCE = 1.0e-10
 _NUMERICAL_REWRITE_VALIDATION_ZERO_TOLERANCE = 1.0e-24
+_NUMERICAL_WARMUP_SIGNATURE_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -119,6 +120,16 @@ class _RuntimeValueSlotIndex:
         current_id, variant = key
         slot = self._slots_for_variant(variant)[current_id]
         return default if slot is None else slot
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentWarmupCache:
+    dag: GenericDAG
+    sample_count: int
+    seed: int
+    estimated_bytes: int
+    maxima: dict[int, float]
+    signatures: dict[int, tuple[tuple[complex, ...], ...]]
 
 
 @dataclass(frozen=True)
@@ -423,6 +434,7 @@ def build_generic_process_manifest(
         duration_s=phase_duration_s,
     )
     zero_current_filter: Mapping[str, object] | None = None
+    current_warmup_cache: _CurrentWarmupCache | None = None
     if numerical_filter_current:
         _emit_generation_progress(
             progress_callback,
@@ -430,13 +442,16 @@ def build_generic_process_manifest(
             f"{numerical_current_samples} samples",
         )
         phase_started = time.perf_counter()
-        dag, zero_current_filter = _filter_zero_currents_by_warmup(
-            dag,
-            model,
-            sample_count=numerical_current_samples,
-            seed=numerical_current_seed,
-            relative_tolerance=numerical_current_relative_tolerance,
-            zero_tolerance=numerical_current_zero_tolerance,
+        dag, zero_current_filter, current_warmup_cache = (
+            _filter_zero_currents_by_warmup(
+                dag,
+                model,
+                sample_count=numerical_current_samples,
+                seed=numerical_current_seed,
+                relative_tolerance=numerical_current_relative_tolerance,
+                zero_tolerance=numerical_current_zero_tolerance,
+                retain_signatures=numerical_current_merging,
+            )
         )
         phase_duration_s = time.perf_counter() - phase_started
         zero_current_filter = {
@@ -465,10 +480,18 @@ def build_generic_process_manifest(
         )
     current_merging: Mapping[str, object] | None = None
     if numerical_current_merging:
+        reuse_current_warmup = (
+            current_warmup_cache is not None
+            and current_warmup_cache.dag is dag
+        )
         _emit_generation_progress(
             progress_callback,
             "current merge",
-            f"{numerical_current_samples} samples",
+            (
+                "reusing zero-filter signatures"
+                if reuse_current_warmup
+                else f"{numerical_current_samples} samples"
+            ),
         )
         phase_started = time.perf_counter()
         dag, current_merging = _merge_identical_currents_by_warmup(
@@ -478,6 +501,9 @@ def build_generic_process_manifest(
             seed=numerical_current_seed,
             relative_tolerance=numerical_current_relative_tolerance,
             zero_tolerance=numerical_current_zero_tolerance,
+            warmup_cache=(
+                current_warmup_cache if reuse_current_warmup else None
+            ),
         )
         phase_duration_s = time.perf_counter() - phase_started
         current_merging = {
@@ -2284,7 +2310,8 @@ def _filter_zero_currents_by_warmup(
     seed: int,
     relative_tolerance: float,
     zero_tolerance: float,
-) -> tuple[GenericDAG, dict[str, object]]:
+    retain_signatures: bool,
+) -> tuple[GenericDAG, dict[str, object], _CurrentWarmupCache | None]:
     before = _dag_count_payload(dag)
     report: dict[str, object] = {
         "enabled": True,
@@ -2303,7 +2330,7 @@ def _filter_zero_currents_by_warmup(
                 "after": before,
             }
         )
-        return dag, report
+        return dag, report, None
     if not dag.interactions:
         report.update(
             {
@@ -2315,14 +2342,44 @@ def _filter_zero_currents_by_warmup(
                 "after": before,
             }
         )
-        return dag, report
+        return dag, report, None
 
+    estimated_cache_bytes = _estimated_current_warmup_signature_bytes(
+        dag,
+        sample_count=sample_count,
+    )
+    collect_signatures = (
+        retain_signatures
+        and estimated_cache_bytes
+        <= _NUMERICAL_WARMUP_SIGNATURE_CACHE_LIMIT_BYTES
+    )
+    report["signature_cache"] = {
+        "requested": bool(retain_signatures),
+        "retained": bool(collect_signatures),
+        "estimated_bytes": estimated_cache_bytes,
+        "limit_bytes": _NUMERICAL_WARMUP_SIGNATURE_CACHE_LIMIT_BYTES,
+    }
+    warmup_cache: _CurrentWarmupCache | None = None
     try:
         points = tuple(
             _generic_warmup_phase_space_point(dag, model, seed=seed + offset)
             for offset in range(sample_count)
         )
-        maxima = _evaluate_current_component_maxima(dag, model, points)
+        maxima, signatures = _evaluate_current_warmup(
+            dag,
+            model,
+            points,
+            collect_signatures=collect_signatures,
+        )
+        if collect_signatures:
+            warmup_cache = _CurrentWarmupCache(
+                dag=dag,
+                sample_count=sample_count,
+                seed=seed,
+                estimated_bytes=estimated_cache_bytes,
+                maxima=maxima,
+                signatures=signatures,
+            )
     except Exception as error:  # noqa: BLE001 - filtering must be conservative.
         report.update(
             {
@@ -2331,7 +2388,7 @@ def _filter_zero_currents_by_warmup(
                 "after": before,
             }
         )
-        return dag, report
+        return dag, report, None
 
     source_ids = set(dag.sources)
     global_max = max(maxima.values(), default=0.0)
@@ -2354,7 +2411,7 @@ def _filter_zero_currents_by_warmup(
                 "after": before,
             }
         )
-        return dag, report
+        return dag, report, warmup_cache
 
     filtered = _drop_currents_from_dag(dag, zero_ids)
     if not filtered.amplitude_roots:
@@ -2371,7 +2428,7 @@ def _filter_zero_currents_by_warmup(
                 "after": before,
             }
         )
-        return dag, report
+        return dag, report, warmup_cache
 
     after = _dag_count_payload(filtered)
     validation = _validate_numerical_rewrite_preserves_raw_sums(
@@ -2398,7 +2455,7 @@ def _filter_zero_currents_by_warmup(
                 "after": before,
             }
         )
-        return dag, report
+        return dag, report, warmup_cache
 
     report.update(
         {
@@ -2418,7 +2475,7 @@ def _filter_zero_currents_by_warmup(
             "after": after,
         }
     )
-    return filtered, report
+    return filtered, report, None
 
 
 def _merge_identical_currents_by_warmup(
@@ -2429,6 +2486,7 @@ def _merge_identical_currents_by_warmup(
     seed: int,
     relative_tolerance: float,
     zero_tolerance: float,
+    warmup_cache: _CurrentWarmupCache | None = None,
 ) -> tuple[GenericDAG, dict[str, object]]:
     before = _dag_count_payload(dag)
     report: dict[str, object] = {
@@ -2464,21 +2522,38 @@ def _merge_identical_currents_by_warmup(
         )
         return dag, report
 
-    try:
-        points = tuple(
-            _generic_warmup_phase_space_point(dag, model, seed=seed + offset)
-            for offset in range(sample_count)
-        )
-        maxima, signatures = _evaluate_current_warmup(dag, model, points)
-    except Exception as error:  # noqa: BLE001 - merging must be conservative.
-        report.update(
-            {
-                "skipped": True,
-                "reason": f"numeric warmup evaluation failed: {error}",
-                "after": before,
-            }
-        )
-        return dag, report
+    reuse_warmup = (
+        warmup_cache is not None
+        and warmup_cache.dag is dag
+        and warmup_cache.sample_count == sample_count
+        and warmup_cache.seed == seed
+    )
+    report["warmup_reused_from_zero_filter"] = reuse_warmup
+    if reuse_warmup:
+        assert warmup_cache is not None
+        maxima = warmup_cache.maxima
+        signatures = warmup_cache.signatures
+        report["warmup_signature_estimated_bytes"] = warmup_cache.estimated_bytes
+    else:
+        try:
+            points = tuple(
+                _generic_warmup_phase_space_point(
+                    dag,
+                    model,
+                    seed=seed + offset,
+                )
+                for offset in range(sample_count)
+            )
+            maxima, signatures = _evaluate_current_warmup(dag, model, points)
+        except Exception as error:  # noqa: BLE001 - merging must be conservative.
+            report.update(
+                {
+                    "skipped": True,
+                    "reason": f"numeric warmup evaluation failed: {error}",
+                    "after": before,
+                }
+            )
+            return dag, report
 
     global_max = max(maxima.values(), default=0.0)
     threshold = max(float(zero_tolerance), abs(float(relative_tolerance)) * global_max)
@@ -2646,18 +2721,15 @@ def _generic_warmup_phase_space_point(
     )
 
 
-def _evaluate_current_component_maxima(
+def _estimated_current_warmup_signature_bytes(
     dag: GenericDAG,
-    model: Model,
-    points: Sequence[Sequence[ExternalMomentum]],
-) -> dict[int, float]:
-    maxima, _ = _evaluate_current_warmup(
-        dag,
-        model,
-        points,
-        collect_signatures=False,
-    )
-    return maxima
+    *,
+    sample_count: int,
+) -> int:
+    component_count = sum(int(current.dimension) for current in dag.currents)
+    # Approximate a Python complex plus its tuple reference and per-point tuple.
+    per_sample = 40 * component_count + 64 * len(dag.currents)
+    return max(0, int(sample_count)) * per_sample
 
 
 def _evaluate_current_warmup(

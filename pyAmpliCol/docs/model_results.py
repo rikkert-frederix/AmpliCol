@@ -18,11 +18,13 @@ DOCS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DOCS_DIR.parent
 DEFAULT_DATA = DOCS_DIR / "model_results_data.json"
 DEFAULT_SCALARS_TABLE = DOCS_DIR / "scalars_model_table.tex"
+DEFAULT_SCALARS_FULL_TABLE = DOCS_DIR / "scalars_full_model_table.tex"
 DEFAULT_GRAVITY_TABLE = DOCS_DIR / "scalar_gravity_model_table.tex"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / ".ufo_support_outputs" / "model_matrices"
 DEFAULT_TARGET_RUNTIME_S = 10.0
 DEFAULT_MEMORY_LIMIT_GB = 30.0
 DEFAULT_GENERATION_TIMEOUT_S = 300
+DEFAULT_TIMING_TIMEOUT_S = 600
 DEFAULT_BATCH_SIZE = 128
 
 
@@ -35,7 +37,7 @@ class ModelProfile:
     maximum_n: int
 
     def process(self, n_final: int) -> str:
-        if self.key == "scalars":
+        if self.source_name == "scalars":
             final_state = " ".join("scalar_0" for _ in range(n_final))
             return f"scalar_0 scalar_0 > {final_state}"
         final_state = " ".join("graviton" for _ in range(n_final))
@@ -54,6 +56,13 @@ MODEL_PROFILES = {
         source_name="scalars",
         minimum_n=2,
         maximum_n=8,
+    ),
+    "scalars-full": ModelProfile(
+        key="scalars_full",
+        label="massless scalar all-tree model",
+        source_name="scalars",
+        minimum_n=2,
+        maximum_n=7,
     ),
     "scalar-gravity": ModelProfile(
         key="scalar_gravity",
@@ -80,12 +89,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
         description=(
-            "Generate and render the concise scalar and scalar-gravity UFO "
-            "validation matrices."
+            "Generate and render the contact-scalar, full-scalar, and "
+            "scalar-gravity UFO validation matrices."
         ),
     )
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--scalars-table", type=Path, default=DEFAULT_SCALARS_TABLE)
+    parser.add_argument(
+        "--scalars-full-table",
+        type=Path,
+        default=DEFAULT_SCALARS_FULL_TABLE,
+    )
     parser.add_argument(
         "--scalar-gravity-table",
         type=Path,
@@ -95,7 +109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-recompile", action="store_true")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("render", help="Render both tables from the JSON cache.")
+    subparsers.add_parser("render", help="Render all tables from the JSON cache.")
 
     run = subparsers.add_parser(
         "run",
@@ -107,6 +121,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--target-runtime",
         type=float,
         default=DEFAULT_TARGET_RUNTIME_S,
+    )
+    run.add_argument(
+        "--generation-timeout",
+        type=int,
+        default=DEFAULT_GENERATION_TIMEOUT_S,
+        help=(
+            "Per-process generation timeout in seconds (default: 300). "
+            "All generation remains subject to the 30 GB memory watchdog."
+        ),
+    )
+    run.add_argument(
+        "--timing-timeout",
+        type=int,
+        default=DEFAULT_TIMING_TIMEOUT_S,
+        help=(
+            "Timeout in seconds for timing and 50-digit validation of an "
+            "already generated artifact (default: 600)."
+        ),
     )
     run.add_argument(
         "--reuse-existing",
@@ -151,6 +183,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 int(args.n),
                 output_root=args.output_root,
                 target_runtime_s=float(args.target_runtime),
+                generation_timeout_s=int(args.generation_timeout),
+                timing_timeout_s=int(args.timing_timeout),
                 reuse_existing=bool(args.reuse_existing),
                 generation_s=args.generation_s,
                 jit_compile_s=args.jit_compile_s,
@@ -169,6 +203,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             data,
             data_path=args.data,
             scalars_table=args.scalars_table,
+            scalars_full_table=args.scalars_full_table,
             gravity_table=args.scalar_gravity_table,
             refresh_pdf=not args.no_recompile,
         )
@@ -231,6 +266,8 @@ def _run_case(
     *,
     output_root: Path,
     target_runtime_s: float,
+    generation_timeout_s: int,
+    timing_timeout_s: int,
     reuse_existing: bool,
     generation_s: float | None,
     jit_compile_s: float | None,
@@ -254,9 +291,12 @@ def _run_case(
         "output_dir": str(output_dir.relative_to(PROJECT_ROOT)),
         "model_artifact": str(model_artifact.relative_to(PROJECT_ROOT)),
         "target_runtime_s": target_runtime_s,
+        "generation_timeout_s": generation_timeout_s,
+        "timing_timeout_s": timing_timeout_s,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     entries[str(n_final)] = entry
+    active_phase = "generation"
 
     try:
         if reuse_existing:
@@ -294,7 +334,7 @@ def _run_case(
                         output_dir=output_dir,
                         model_artifact=model_artifact,
                     ),
-                    timeout_s=DEFAULT_GENERATION_TIMEOUT_S,
+                    timeout_s=generation_timeout_s,
                 )
             )
             entry["generation_s"] = float(generation["generation_s"])
@@ -310,10 +350,11 @@ def _run_case(
             "interactions": int(dag["interaction_count"]),
             "roots": int(dag["amplitude_root_count"]),
         }
+        active_phase = "timing"
         timing = _run_json(
             _watched_command(
                 _timing_command(output_dir, target_runtime_s=target_runtime_s),
-                timeout_s=max(60, int(math.ceil(target_runtime_s * 4.0))),
+                timeout_s=timing_timeout_s,
             )
         )
         timing_profile = timing["profile"]
@@ -332,7 +373,11 @@ def _run_case(
             "batch_size": int(timing_profile["block_size"]),
         }
         double_value = float(timing["values"][0])
-        high_precision_value = _high_precision_value(output_dir)
+        active_phase = "50-digit validation"
+        high_precision_value = _high_precision_value(
+            output_dir,
+            timeout_s=timing_timeout_s,
+        )
         denominator = max(abs(double_value), abs(high_precision_value), 1.0e-300)
         relative_difference = abs(double_value - high_precision_value) / denominator
         entry["value"] = {
@@ -360,6 +405,7 @@ def _run_case(
         entry["status"] = "ok"
     except Exception as exc:
         entry["status"] = _failure_status(exc)
+        entry["failure_phase"] = active_phase
         entry["error"] = _failure_message(exc)
         raise
     finally:
@@ -422,7 +468,7 @@ def _timing_command(output_dir: Path, *, target_runtime_s: float) -> list[str]:
     ]
 
 
-def _high_precision_value(output_dir: Path) -> float:
+def _high_precision_value(output_dir: Path, *, timeout_s: int) -> float:
     command = _watched_command(
         [
             sys.executable,
@@ -430,7 +476,7 @@ def _high_precision_value(output_dir: Path) -> float:
             "--precision",
             "50",
         ],
-        timeout_s=60,
+        timeout_s=timeout_s,
     )
     completed = _run_command(command)
     match = re.search(r"^values:\s*\[([^,\]]+)", completed.stdout, re.MULTILINE)
@@ -600,7 +646,14 @@ def _failure_status(error: Exception) -> str:
 def _failure_message(error: Exception) -> str:
     if not isinstance(error, CommandFailure):
         return str(error)
-    phase = "generate-process" if "generate-process" in error.command else "subprocess"
+    if "generate-process" in error.command:
+        phase = "generate-process"
+    elif "time-process" in error.command:
+        phase = "time-process"
+    elif "check_standalone.py" in error.command:
+        phase = "50-digit validation"
+    else:
+        phase = "subprocess"
     if error.returncode == 124:
         return f"{phase} exceeded its configured timeout"
     if error.returncode in {137, -9}:
@@ -613,6 +666,7 @@ def _write_results(
     *,
     data_path: Path,
     scalars_table: Path,
+    scalars_full_table: Path,
     gravity_table: Path,
     refresh_pdf: bool,
 ) -> None:
@@ -621,12 +675,17 @@ def _write_results(
         render_model_table(data, MODEL_PROFILES["scalars"]),
         encoding="utf-8",
     )
+    scalars_full_table.write_text(
+        render_model_table(data, MODEL_PROFILES["scalars-full"]),
+        encoding="utf-8",
+    )
     gravity_table.write_text(
         render_model_table(data, MODEL_PROFILES["scalar-gravity"]),
         encoding="utf-8",
     )
     print(f"wrote {data_path}")
     print(f"wrote {scalars_table}")
+    print(f"wrote {scalars_full_table}")
     print(f"wrote {gravity_table}")
     if refresh_pdf:
         _refresh_pdf()
@@ -643,11 +702,19 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def render_model_table(data: dict[str, Any], profile: ModelProfile) -> str:
-    model = data.get("models", {}).get(profile.key, {})
+    models = data.get("models", {})
+    model = models.get(profile.key, {}) if isinstance(models, dict) else {}
     entries = model.get("entries", {}) if isinstance(model, dict) else {}
     measurements = (
         model.get("source_measurements", {}) if isinstance(model, dict) else {}
     )
+    if profile.key == "scalars_full" and not measurements:
+        contact_model = models.get("scalars", {}) if isinstance(models, dict) else {}
+        measurements = (
+            contact_model.get("source_measurements", {})
+            if isinstance(contact_model, dict)
+            else {}
+        )
     lines = [
         "% Generated by docs/model_results.py; edit model_results_data.json instead.",
         rf"\subsection*{{{_tex(profile.label.title())} Validation Ladder}}",
@@ -655,15 +722,15 @@ def render_model_table(data: dict[str, Any], profile: ModelProfile) -> str:
         r"\scriptsize",
         r"\setlength{\tabcolsep}{4pt}",
         r"\renewcommand{\arraystretch}{1.12}",
-        r"\begin{longtable}{@{}rL{2.75in}rrrrL{0.85in}rr@{}}",
+        r"\begin{longtable}{@{}rL{2.35in}rrrrL{0.78in}rrr@{}}",
         r"\toprule",
         r"$n$ & process & gen [s] & JIT [s] & currents & interactions "
-        r"& value & wall [$\mu$s] & rel. 50d \\",
+        r"& value & eval [$\mu$s] & wall [$\mu$s] & rel. 50d \\",
         r"\midrule",
         r"\endfirsthead",
         r"\toprule",
         r"$n$ & process & gen [s] & JIT [s] & currents & interactions "
-        r"& value & wall [$\mu$s] & rel. 50d \\",
+        r"& value & eval [$\mu$s] & wall [$\mu$s] & rel. 50d \\",
         r"\midrule",
         r"\endhead",
     ]
@@ -677,13 +744,19 @@ def render_model_table(data: dict[str, Any], profile: ModelProfile) -> str:
             _render_source_measurements(measurements),
             _render_entry_notes(entries),
             r"\par\smallskip",
+            _render_model_method(profile),
             (
-                r"\noindent Values use identical deterministic phase-space points. "
+                r" Values use the retained RAMBO point generated with seed 101 at "
+                r"$\sqrt{s}=1\,\mathrm{TeV}$. "
                 r"Generation starts from the compiled model and uses SymJIT O1, "
-                r"batch/chunk size 128, a 30 GB watchdog, and a five-minute cap. "
-                r"Runtime uses Rusticol double precision and "
-                r"\texttt{--target-runtime 10}; the final column compares the same "
-                r"double point with a 50-digit reevaluation. Superseded process "
+                r"batch/chunk size 128 and a 30 GB watchdog."
+            ),
+            _render_generation_limit(profile),
+            (
+                r" The eval column isolates generated evaluators; wall includes "
+                r"Rusticol orchestration. Runtime uses double precision and "
+                r"\texttt{--target-runtime 10}; the final column compares the "
+                r"same point with a 50-digit reevaluation. Superseded process "
                 r"directories are archived beside the active output."
             ),
             r"\endgroup",
@@ -699,14 +772,14 @@ def _render_entry(
     entry: object,
 ) -> str:
     if not isinstance(entry, dict) or not entry:
-        return rf"{n_final} & ${_tex_process(profile.process(n_final))}$ & \multicolumn{{7}}{{c}}{{\textcolor{{black!45}}{{not run}}}} \\"
+        return rf"{n_final} & ${_tex_process(profile.process(n_final))}$ & \multicolumn{{8}}{{c}}{{\textcolor{{black!45}}{{not run}}}} \\"
     status = str(entry.get("status", "not_run"))
     if status != "ok":
         label = {
-            "timeout": r"t/o $>5$ min",
+            "timeout": _timeout_label(entry),
             "ram_limit_or_killed": r"$>30$ GB RAM",
         }.get(status, _tex(status))
-        return rf"{n_final} & ${_tex_process(profile.process(n_final))}$ & \multicolumn{{7}}{{c}}{{\textcolor{{speedred}}{{{label}}}}} \\"
+        return rf"{n_final} & ${_tex_process(profile.process(n_final))}$ & \multicolumn{{8}}{{c}}{{\textcolor{{speedred}}{{{label}}}}} \\"
     dag = entry["dag"]
     runtime = entry["runtime"]
     value = entry["value"]
@@ -719,10 +792,66 @@ def _render_entry(
             f"{int(dag['currents']):,}",
             f"{int(dag['interactions']):,}",
             _format_value(float(value["double"])),
+            _format_number(float(runtime["pure_evaluator_us_per_point"])),
             _format_number(float(runtime["wall_us_per_point"])),
             _format_scientific(float(value["relative_difference"])),
         )
     ) + r" \\"
+
+
+def _timeout_label(entry: dict[str, Any]) -> str:
+    phase = str(entry.get("failure_phase", "generation"))
+    if phase == "generation":
+        timeout_s = int(
+            entry.get("generation_timeout_s", DEFAULT_GENERATION_TIMEOUT_S)
+        )
+        prefix = ""
+    else:
+        timeout_s = int(entry.get("timing_timeout_s", DEFAULT_TIMING_TIMEOUT_S))
+        prefix = "run " if phase == "timing" else "50d "
+    if timeout_s % 60 == 0:
+        return rf"{prefix}t/o $>{timeout_s // 60}$ min"
+    return rf"{prefix}t/o $>{timeout_s}$ s"
+
+
+def _render_model_method(profile: ModelProfile) -> str:
+    if profile.key == "scalars":
+        return (
+            r"\noindent\textit{Contact oracle.} The scalar ladder explicitly "
+            r"sets \texttt{--max-coupling-order QCD=1}. With $\lambda=1$ this "
+            r"retains only the direct $(n+2)$-point vertex, so no propagator "
+            r"denominator enters and the identical-final-state normalization "
+            r"gives $1/n!$. It tests generic high-rank contact decomposition, "
+            r"not the sum of all scalar-model tree diagrams; the uncapped "
+            r"all-tree ladder below provides that complementary test."
+        )
+    if profile.key == "scalars_full":
+        return (
+            r"\noindent\textit{Complete scalar trees.} These entries omit the "
+            r"coupling-order cap and therefore sum the direct contact term with "
+            r"every allowed multi-vertex tree and internal scalar propagator. "
+            r"They use the same model parameters and phase-space convention as "
+            r"the contact oracle above."
+        )
+    return (
+        r"\noindent\textit{Full-model ladder.} The scalar-gravity entries retain "
+        r"the complete tree-level model, including internal scalar and graviton "
+        r"propagators."
+    )
+
+
+def _render_generation_limit(profile: ModelProfile) -> str:
+    if profile.key == "scalar_gravity":
+        return (
+            r" The ordinary generation cap is five minutes; the four-graviton "
+            r"entry is allowed one hour."
+        )
+    if profile.key == "scalars_full":
+        return (
+            r" The ordinary generation cap is five minutes; the seven-scalar "
+            r"entry is allowed one hour."
+        )
+    return r" The scalar rows use the ordinary five-minute generation cap."
 
 
 def _render_source_measurements(measurements: object) -> str:

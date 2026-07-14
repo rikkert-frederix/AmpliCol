@@ -110,6 +110,29 @@ def test_generic_process_manifest_keeps_physical_and_outgoing_pdg_orders() -> No
     assert runtime_schema["current_storage"]["component_count"] > 0
 
 
+def test_numerical_current_merge_reuses_unchanged_zero_filter_warmup() -> None:
+    manifest = build_generic_process_manifest("d d~ > z g")
+
+    assert manifest.zero_current_filter["removed_current_count"] == 0
+    assert manifest.zero_current_filter["signature_cache"]["retained"] is True
+    assert manifest.current_merging["warmup_reused_from_zero_filter"] is True
+
+
+def test_numerical_current_warmup_cache_respects_memory_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        generic_artifact_module,
+        "_NUMERICAL_WARMUP_SIGNATURE_CACHE_LIMIT_BYTES",
+        0,
+    )
+
+    manifest = build_generic_process_manifest("d d~ > z g")
+
+    assert manifest.zero_current_filter["signature_cache"]["retained"] is False
+    assert manifest.current_merging["warmup_reused_from_zero_filter"] is False
+
+
 def test_runtime_schema_reports_progress_for_long_interaction_passes() -> None:
     manifest = build_generic_process_manifest(
         "d d~ > z g",
