@@ -1330,6 +1330,82 @@ def _contact_tree_final_component_expressions(
     )
 
 
+def eager_color_singlet_vertex_term_components(
+    term: CompiledVertexTerm,
+    particles: Sequence[CompiledParticleRecord],
+    *,
+    result_leg: int,
+    input_components: Mapping[int, Sequence[Expression]],
+    input_momenta: Mapping[int, Sequence[Expression]],
+    coupling: Expression | None = None,
+) -> tuple[Expression, ...]:
+    """Contract one original color-singlet n-ary term without its lowered tree."""
+
+    if not _contact_term_is_color_singlet(term):
+        raise ValueError("the eager n-ary oracle currently requires a color singlet")
+    if not 0 <= result_leg < term.valence:
+        raise ValueError(f"result leg {result_leg} is outside valence {term.valence}")
+    particle_by_name = {particle.name: particle for particle in particles}
+    source_particles = tuple(particle_by_name[name] for name in term.particles)
+    input_legs = set(range(term.valence)) - {result_leg}
+    if set(input_components) != input_legs or set(input_momenta) != input_legs:
+        raise ValueError(
+            "eager n-ary inputs must provide every non-result leg exactly once"
+        )
+
+    library = TensorLibrary.hep_lib_atom()
+    expression = E(term.lorentz_expression)
+    momentum_by_leg: dict[int, tuple[Expression, ...]] = {}
+    for leg in sorted(input_legs):
+        components = tuple(input_components[leg])
+        expected_dimension = _spin_dimension(source_particles[leg].spin)
+        if len(components) != expected_dimension:
+            raise ValueError(
+                f"input leg {leg} has {len(components)} components, "
+                f"expected {expected_dimension}"
+            )
+        momentum = tuple(input_momenta[leg])
+        if len(momentum) != 4:
+            raise ValueError(f"input leg {leg} momentum must have four components")
+        momentum_by_leg[leg] = momentum
+        expression *= _contact_tree_physical_tensor_expression(
+            library,
+            kind=term.id,
+            leg=leg,
+            spin=source_particles[leg].spin,
+            components=components,
+        )
+
+    momentum_by_leg[result_leg] = tuple(
+        -sum(
+            (momentum[component] for momentum in momentum_by_leg.values()),
+            E("0"),
+        )
+        for component in range(4)
+    )
+    minkowski = Representation.mink(4)
+    for leg, momentum in momentum_by_leg.items():
+        library.register(
+            LibraryTensor.dense(
+                TensorName(f"pyamplicol::ufo_momentum_{leg + 1}")(minkowski),
+                momentum,
+            )
+        )
+    if coupling is not None:
+        expression *= coupling
+    result = _execute_dense_tensor(expression, library)
+    expected_dimension = _spin_dimension(source_particles[result_leg].spin)
+    if len(result) != expected_dimension:
+        raise ValueError(
+            f"eager n-ary term {term.vertex}/{term.id} produced {len(result)} "
+            f"components, expected {expected_dimension}"
+        )
+    return tuple(
+        _replace_evaluator_constants(_as_expression(result[index]))
+        for index in range(len(result))
+    )
+
+
 def _contact_tree_payload_by_leg(
     kind: int,
     side: str,
@@ -2598,4 +2674,5 @@ __all__ = [
     "CompiledVertexTerm",
     "compile_builtin_model_ir",
     "compile_ufo_model_ir",
+    "eager_color_singlet_vertex_term_components",
 ]

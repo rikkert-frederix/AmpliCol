@@ -245,6 +245,8 @@ def _pure_gluon_color_factor(
 ) -> float:
     iper = _coloured_word(left)
     jper = _coloured_word(right)
+    if n_ord == 0:
+        return 1.0 if not iper and not jper else 0.0
     if accuracy == "lc":
         return float(NC**n_ord) if iper == jper else 0.0
     if accuracy == "nlc":

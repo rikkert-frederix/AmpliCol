@@ -18,6 +18,7 @@ from .model import AmplicolSMLeadingColorModel, Model
 from .params import ParamBuilder
 
 _EXPRESSION_PREVIEW_LIMIT = 512
+_MODEL_FUNCTION_INLINE_MAX_BYTES = 1024
 
 
 @dataclass(frozen=True)
@@ -2228,6 +2229,8 @@ def _specialize_stage_symbolica_functions(
     for definition_index, (function, arguments, body) in enumerate(
         function_definitions
     ):
+        if int(body.get_byte_size()) > _MODEL_FUNCTION_INLINE_MAX_BYTES:
+            continue
         wildcards = tuple(
             S(
                 "pyamplicol_inline_function_"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Iterable, Literal, Mapping, Sequence, cast
 
@@ -2574,6 +2575,29 @@ def _right_particles_by_left(
     }
 
 
+def _closure_right_particles_by_left(
+    model: Model,
+    *,
+    color_accuracy: str,
+) -> dict[int, tuple[int, ...]]:
+    """Return sparse vertex and direct-contraction partners by left species."""
+
+    rights = {
+        left: set(right_particles)
+        for left, right_particles in _right_particles_by_left(
+            model,
+            color_accuracy=color_accuracy,
+        ).items()
+    }
+    for particle in model.particles.values():
+        rights.setdefault(particle.pdg, set()).add(particle.anti_pdg)
+        rights.setdefault(particle.anti_pdg, set()).add(particle.pdg)
+    return {
+        left: tuple(sorted(right_particles))
+        for left, right_particles in rights.items()
+    }
+
+
 def contributing_color_sector_ids(dag: GenericDAG) -> tuple[int, ...]:
     """Return LC colour sectors that actually contribute amplitude roots."""
 
@@ -3306,6 +3330,7 @@ def _submasks_for_labels(labels: Iterable[int]) -> tuple[int, ...]:
 
 
 UsefulStateMap = dict[int, dict[int, frozenset[CouplingOrders]]]
+_ReachabilityState = tuple[int, int, CouplingOrders]
 
 
 def _useful_states_by_mask(
@@ -3344,20 +3369,15 @@ def _useful_states_by_mask(
             set(),
         ).add(())
 
-    transitions: list[
-        tuple[
-            int,
-            int,
-            CouplingOrders,
-            int,
-            int,
-            CouplingOrders,
-            int,
-            int,
-            CouplingOrders,
-        ]
-    ] = []
+    reverse_transitions: dict[
+        _ReachabilityState,
+        set[tuple[_ReachabilityState, _ReachabilityState]],
+    ] = {}
     vertices_by_input: dict[tuple[int, int], tuple[Vertex, ...]] = {}
+    right_particles_by_left = _right_particles_by_left(
+        model,
+        color_accuracy=process_ir.color_accuracy,
+    )
     for mask in _masks_by_size(full_mask):
         if mask & (mask - 1) == 0 or mask == full_mask:
             continue
@@ -3386,7 +3406,10 @@ def _useful_states_by_mask(
             if not left_species or not right_species:
                 continue
             for left_particle, left_orders_set in tuple(left_species.items()):
-                for right_particle, right_orders_set in tuple(right_species.items()):
+                for right_particle in right_particles_by_left.get(left_particle, ()):
+                    right_orders_set = right_species.get(right_particle)
+                    if not right_orders_set:
+                        continue
                     vertex_key = (left_particle, right_particle)
                     vertices = vertices_by_input.get(vertex_key)
                     if vertices is None:
@@ -3421,20 +3444,20 @@ def _useful_states_by_mask(
                                     result_particle,
                                     set(),
                                 ).add(coupling_orders)
-                                transitions.append(
+                                reverse_transitions.setdefault(
+                                    (mask, result_particle, coupling_orders),
+                                    set(),
+                                ).add(
                                     (
-                                        left_mask,
-                                        left_particle,
-                                        left_orders,
-                                        right_mask,
-                                        right_particle,
-                                        right_orders,
-                                        mask,
-                                        result_particle,
-                                        coupling_orders,
+                                        (left_mask, left_particle, left_orders),
+                                        (right_mask, right_particle, right_orders),
                                     )
-                            )
+                                )
 
+    closure_right_particles_by_left = _closure_right_particles_by_left(
+        model,
+        color_accuracy=process_ir.color_accuracy,
+    )
     useful: dict[int, dict[int, set[CouplingOrders]]] = {}
     for left_mask, right_mask in closure_candidate_splits:
         left_species = possible.get(left_mask)
@@ -3442,7 +3465,13 @@ def _useful_states_by_mask(
         if not left_species or not right_species:
             continue
         for left_particle, left_orders_set in left_species.items():
-            for right_particle, right_orders_set in right_species.items():
+            for right_particle in closure_right_particles_by_left.get(
+                left_particle,
+                (),
+            ):
+                right_orders_set = right_species.get(right_particle)
+                if not right_orders_set:
+                    continue
                 if _species_direct_contraction_kind(model, left_particle, right_particle):
                     for left_orders in left_orders_set:
                         for right_orders in right_orders_set:
@@ -3500,36 +3529,27 @@ def _useful_states_by_mask(
                                 set(),
                             ).add(right_orders)
 
-    changed = True
-    while changed:
-        changed = False
-        for (
-            left_mask,
-            left_particle,
-            left_orders,
-            right_mask,
-            right_particle,
-            right_orders,
-            mask,
-            result_particle,
-            result_orders,
-        ) in reversed(transitions):
-            if result_orders not in useful.get(mask, {}).get(result_particle, ()):
-                continue
-            left_useful = useful.setdefault(left_mask, {}).setdefault(
-                left_particle,
-                set(),
-            )
-            if left_orders not in left_useful:
-                left_useful.add(left_orders)
-                changed = True
-            right_useful = useful.setdefault(right_mask, {}).setdefault(
-                right_particle,
-                set(),
-            )
-            if right_orders not in right_useful:
-                right_useful.add(right_orders)
-                changed = True
+    pending = deque(
+        (mask, particle, orders)
+        for mask, species_orders in useful.items()
+        for particle, order_set in species_orders.items()
+        for orders in order_set
+    )
+    while pending:
+        result_state = pending.popleft()
+        for left_state, right_state in reverse_transitions.get(result_state, ()):
+            for parent_mask, parent_particle, parent_orders in (
+                left_state,
+                right_state,
+            ):
+                parent_useful = useful.setdefault(parent_mask, {}).setdefault(
+                    parent_particle,
+                    set(),
+                )
+                if parent_orders in parent_useful:
+                    continue
+                parent_useful.add(parent_orders)
+                pending.append((parent_mask, parent_particle, parent_orders))
 
     return {
         mask: {
@@ -3570,6 +3590,10 @@ def _closure_total_coupling_orders(
         ).add(())
 
     vertices_by_input: dict[tuple[int, int], tuple[Vertex, ...]] = {}
+    right_particles_by_left = _right_particles_by_left(
+        model,
+        color_accuracy=process_ir.color_accuracy,
+    )
     for mask in _masks_by_size(full_mask):
         if mask & (mask - 1) == 0 or mask == full_mask:
             continue
@@ -3598,7 +3622,10 @@ def _closure_total_coupling_orders(
             if not left_species or not right_species:
                 continue
             for left_particle, left_orders_set in tuple(left_species.items()):
-                for right_particle, right_orders_set in tuple(right_species.items()):
+                for right_particle in right_particles_by_left.get(left_particle, ()):
+                    right_orders_set = right_species.get(right_particle)
+                    if not right_orders_set:
+                        continue
                     vertex_key = (left_particle, right_particle)
                     vertices = vertices_by_input.get(vertex_key)
                     if vertices is None:
@@ -3639,6 +3666,10 @@ def _closure_total_coupling_orders(
                             _pareto_minimal_coupling_orders(order_bucket)
                         )
 
+    closure_right_particles_by_left = _closure_right_particles_by_left(
+        model,
+        color_accuracy=process_ir.color_accuracy,
+    )
     totals: set[CouplingOrders] = set()
     for left_mask, right_mask in closure_candidate_splits:
         left_species = possible.get(left_mask)
@@ -3646,7 +3677,13 @@ def _closure_total_coupling_orders(
         if not left_species or not right_species:
             continue
         for left_particle, left_orders_set in left_species.items():
-            for right_particle, right_orders_set in right_species.items():
+            for right_particle in closure_right_particles_by_left.get(
+                left_particle,
+                (),
+            ):
+                right_orders_set = right_species.get(right_particle)
+                if not right_orders_set:
+                    continue
                 if _species_direct_contraction_kind(model, left_particle, right_particle):
                     for left_orders in left_orders_set:
                         for right_orders in right_orders_set:

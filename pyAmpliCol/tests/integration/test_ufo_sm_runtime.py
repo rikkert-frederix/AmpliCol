@@ -150,6 +150,76 @@ def _validation_momenta(process_dir: Path) -> np.ndarray:
     )
 
 
+@pytest.mark.parametrize(
+    ("card_name", "process", "model_name", "expected_value"),
+    (
+        (
+            "scalars_generate.toml",
+            "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0",
+            "scalars",
+            1.0 / math.factorial(3),
+        ),
+        (
+            "scalar_gravity_generate.toml",
+            "scalar_0 scalar_0 > graviton graviton",
+            "scalar_gravity",
+            None,
+        ),
+    ),
+)
+def test_colorless_model_example_cards_generate_runnable_artifacts(
+    tmp_path: Path,
+    card_name: str,
+    process: str,
+    model_name: str,
+    expected_value: float | None,
+) -> None:
+    output = tmp_path / model_name
+    card = Path(pyamplicol.__file__).resolve().parents[2] / "examples" / card_name
+    environment = dict(
+        os.environ,
+        PYTHONPATH=str(Path(pyamplicol.__file__).resolve().parents[1]),
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyamplicol",
+            "generate-process",
+            process,
+            str(output),
+            "--run-card",
+            str(card),
+            "--symbolica-n-cores",
+            "1",
+            "--n-cores",
+            "1",
+            "--model-cache-dir",
+            str(tmp_path / "model-cache"),
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+    manifest = json.loads(
+        (output / "process_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["model"]["name"] == model_name
+
+    rusticol = pytest.importorskip("rusticol")
+    if rusticol.build_profile() != "release":
+        pytest.skip("runtime card validation requires a release Rusticol extension")
+    momenta = _validation_momenta(output)
+    value = float(rusticol.Runtime.load(str(output)).evaluate(momenta)[0])
+    assert math.isfinite(value)
+    assert value != 0.0
+    if expected_value is not None:
+        assert value == pytest.approx(expected_value, rel=1.0e-12)
+
+
 def test_compiled_builtin_model_generates_with_hardcoded_kernels(
     tmp_path: Path,
 ) -> None:
@@ -474,6 +544,76 @@ def test_five_scalar_contact_tree_matches_direct_ufo_normalization(
     momenta = _validation_momenta(output)
     value = float(rusticol.Runtime.load(str(output)).evaluate(momenta)[0])
     assert value == pytest.approx(1.0 / math.factorial(3), rel=1.0e-12)
+
+
+def test_scalar_sources_and_color_modes_have_identical_runtime_value(
+    tmp_path: Path,
+) -> None:
+    json_source = bundled_model_path("scalars", "json")
+    environment = dict(
+        os.environ,
+        PYTHONPATH=str(Path(pyamplicol.__file__).resolve().parents[1]),
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyamplicol",
+            "compile-model",
+            "--model",
+            str(json_source),
+            "--output",
+            str(tmp_path / "scalars"),
+            "--no-model-cache",
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+    compiled_source = Path(json.loads(completed.stdout)["output"])
+    sources = {
+        "ufo-lc": bundled_model_path("scalars", "ufo"),
+        "json-lc": json_source,
+        "compiled-lc": compiled_source,
+    }
+    outputs: dict[str, Path] = {}
+    for label, source in sources.items():
+        output = tmp_path / label
+        _generate_process(
+            output,
+            model=source,
+            process="scalar_0 scalar_0 > scalar_0 scalar_0",
+            max_coupling_orders=("QCD=1",),
+        )
+        outputs[label] = output
+    for color_accuracy in ("nlc", "full"):
+        output = tmp_path / f"json-{color_accuracy}"
+        _generate_process(
+            output,
+            model=json_source,
+            process="scalar_0 scalar_0 > scalar_0 scalar_0",
+            color_accuracy=color_accuracy,
+            max_coupling_orders=("QCD=1",),
+        )
+        outputs[f"json-{color_accuracy}"] = output
+
+    rusticol = pytest.importorskip("rusticol")
+    if rusticol.build_profile() != "release":
+        pytest.skip("runtime source parity requires a release Rusticol extension")
+    momenta = _validation_momenta(outputs["json-lc"])
+    values = {
+        label: float(rusticol.Runtime.load(str(output)).evaluate(momenta)[0])
+        for label, output in outputs.items()
+    }
+    assert values["json-lc"] == pytest.approx(
+        1.0 / math.factorial(2), rel=1.0e-12
+    )
+    assert all(
+        value == pytest.approx(values["json-lc"], rel=1.0e-12)
+        for value in values.values()
+    )
 
 
 def test_custom_scalar_propagator_runs_through_generated_stage(

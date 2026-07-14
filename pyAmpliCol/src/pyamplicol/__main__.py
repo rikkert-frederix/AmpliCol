@@ -791,11 +791,16 @@ def _validated_run_card_arguments(
     card_path: Path,
     parser: argparse.ArgumentParser,
 ) -> dict[str, object]:
-    actions = {
-        action.dest: action
-        for action in command_parser._actions
-        if action.dest not in ("help", "run_card")
-    }
+    actions: dict[str, tuple[argparse.Action, bool]] = {}
+    for action in command_parser._actions:
+        if action.dest in ("help", "run_card"):
+            continue
+        actions.setdefault(action.dest, (action, False))
+        for option in action.option_strings:
+            if option.startswith("--"):
+                option_key = option[2:].replace("-", "_")
+                actions.setdefault(option_key, (action, option_key != action.dest))
+
     unknown = sorted(set(arguments) - set(actions))
     if unknown:
         parser.error(
@@ -803,16 +808,29 @@ def _validated_run_card_arguments(
             f"{command_parser.prog}: {', '.join(unknown)}"
         )
     converted: dict[str, object] = {}
-    for destination, value in arguments.items():
-        try:
-            converted[destination] = _convert_run_card_value(
-                actions[destination],
-                value,
-                base_dir=card_path.parent,
+    for card_key, value in arguments.items():
+        action, is_option_alias = actions[card_key]
+        destination = action.dest
+        if destination in converted:
+            parser.error(
+                f"run card {card_path} specifies {destination!r} more than once"
             )
+        try:
+            if is_option_alias and isinstance(action, argparse._StoreConstAction):
+                if not isinstance(value, bool):
+                    raise TypeError("expected a boolean")
+                if not value:
+                    continue
+                converted[destination] = action.const
+            else:
+                converted[destination] = _convert_run_card_value(
+                    action,
+                    value,
+                    base_dir=card_path.parent,
+                )
         except (TypeError, ValueError) as exc:
             parser.error(
-                f"invalid run-card value for {destination!r} in {card_path}: {exc}"
+                f"invalid run-card value for {card_key!r} in {card_path}: {exc}"
             )
     return converted
 

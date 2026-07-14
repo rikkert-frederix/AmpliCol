@@ -29,6 +29,23 @@ def test_one_quark_line_nlc_and_full_factor_match_amplicol_convention() -> None:
     assert amplicol_color_factors(plan, sector, sector) == (9.0, 8.0, 8.0)
 
 
+def test_color_singlet_metric_is_unity_at_every_accuracy() -> None:
+    for color_accuracy in ("lc", "nlc", "full"):
+        plan = build_color_plan("z z > h h", color_accuracy=color_accuracy)
+        sector = plan.sectors[0]
+
+        assert amplicol_color_factors(plan, sector, sector) == (1.0, 1.0, 1.0)
+        contraction = build_color_contraction_plan(
+            plan,
+            _groups_for_plan("z z > h h", color_accuracy=color_accuracy),
+        )
+        if color_accuracy == "lc":
+            assert contraction is None
+        else:
+            assert contraction is not None
+            assert tuple(entry.weight_re for entry in contraction.entries) == (1.0,)
+
+
 def test_pure_gluon_full_colour_builds_sparse_off_diagonal_metric() -> None:
     plan = build_color_plan("g g > g g", color_accuracy="full")
     contraction = build_color_contraction_plan(

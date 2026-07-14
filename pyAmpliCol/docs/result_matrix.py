@@ -4444,12 +4444,8 @@ def _matrix_short_intro_latex(
         r"slots are \AC, \PAC\ SymJIT O1 selected flow, "
         r"and \PAC\ SymJIT O1 all flows. "
         if color_accuracy == "lc"
-        else (
-            r"slots are \AC\ and \PAC\ JIT O1; \PAC\ C++ O3 is also shown "
-            r"only through $n=3$. "
-            if color_accuracy == "nlc"
-            else r"slots are \AC, \PAC\ JIT O1, and \PAC\ C++ O3. "
-        )
+        else r"slots are \AC\ and \PAC\ JIT O1; \PAC\ C++ O3 is also shown "
+        r"only through $n=3$. "
     )
     return [
         (
@@ -4485,20 +4481,13 @@ def _matrix_long_intro_latex(
             r"and shared artifacts.  Entries are generation seconds above runtime wall "
             r"microseconds per point; \PAC-only cells are absolute. "
         )
-    elif color_accuracy == "nlc":
+    elif color_accuracy in {"nlc", "full"}:
         description = (
             r"\noindent\scriptsize Each cell is raw-library \AC\ and \PAC\ JIT O1; "
             r"the optional \PAC\ C++ O3 slot is shown only through $n=3$.  Entries "
             r"are generation seconds above runtime microseconds per point; \PAC\ "
             r"runtime shows coloured wall and black pure-evaluator ratios, or "
             r"absolute time without an \AC\ reference. "
-        )
-    else:
-        description = (
-            r"\noindent\scriptsize Each cell is raw-library \AC, \PAC\ JIT O1, "
-            r"and \PAC\ C++ O3.  Entries are generation seconds above runtime "
-            r"microseconds per point; \PAC\ runtime shows coloured wall and "
-            r"black pure-evaluator ratios, or absolute time without an \AC\ reference. "
         )
     return [
         description
@@ -4567,12 +4556,8 @@ def _matrix_run_settings_latex(color_accuracy: str) -> list[str]:
             + (
                 r"The two LC workloads are displayed side by side."
                 if color_accuracy == "lc"
-                else (
-                    r"C++ O3 is displayed only through $n=3$; its generation alone "
-                    r"is subject to the 15-minute compile cap."
-                    if color_accuracy == "nlc"
-                    else r"Only C++ O3 generation is subject to the 15-minute compile cap."
-                )
+                else r"C++ O3 is displayed only through $n=3$; its generation alone "
+                r"is subject to the 15-minute compile cap."
             )
             + (
                 r" The timer-free \AC\ \texttt{imode=2} references are refreshed "
@@ -4642,7 +4627,7 @@ def _matrix_status_notes_latex(
                 ("pyamplicol_cpp_o3", r"\PAC\ C++ O3"),
             ):
                 if (
-                    color_accuracy == "nlc"
+                    color_accuracy in {"nlc", "full"}
                     and key == "pyamplicol_cpp_o3"
                     and n_final > 3
                 ):
@@ -4916,7 +4901,9 @@ def _latex_cell(case: dict[str, Any], *, color_accuracy: str) -> str:
             _absolute_runtime_pair(jit),
             _absolute_runtime_pair(cpp),
         )
-    hide_cpp = color_accuracy == "nlc" and int(case.get("n_final", 0)) > 3
+    hide_cpp = color_accuracy in {"nlc", "full"} and int(
+        case.get("n_final", 0)
+    ) > 3
     if hide_cpp:
         cell = (
             rf"\matrixcellnonlcnocpp{{{gen[0]}}}{{{gen[1]}}}"

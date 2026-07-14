@@ -9,6 +9,7 @@
 \providecommand{\matrixslot}[2]{\makebox[#1][l]{#2}}
 \providecommand{\matrixcell}[6]{\begin{tabular}[t]{@{}l@{\hspace{0.012in}}l@{\hspace{0.012in}}l@{}}\matrixslot{1.30in}{#1}&\matrixslot{0.53in}{#2}&\matrixslot{0.53in}{#3}\\\matrixslot{1.30in}{#4}&\matrixslot{0.53in}{#5}&\matrixslot{0.53in}{#6}\end{tabular}}
 \providecommand{\matrixcellnonlc}[6]{\begin{tabular}[t]{@{}l@{\hspace{0.012in}}l@{\hspace{0.012in}}l@{}}\matrixslot{0.52in}{#1}&\matrixslot{0.94in}{#2}&\matrixslot{0.94in}{#3}\\\matrixslot{0.52in}{#4}&\matrixslot{0.94in}{#5}&\matrixslot{0.94in}{#6}\end{tabular}}
+\providecommand{\matrixcellnonlcnocpp}[4]{\begin{tabular}[t]{@{}l@{\hspace{0.012in}}l@{}}\matrixslot{0.52in}{#1}&\matrixslot{0.94in}{#2}\\\matrixslot{0.52in}{#3}&\matrixslot{0.94in}{#4}\end{tabular}}
 \providecommand{\matrixrefslot}[1]{\makebox[0.59in][l]{#1}}
 \providecommand{\matrixrefpair}[2]{\begin{tabular}[t]{@{}l@{\hspace{0.012in}\matrixpunct{/}\hspace{0.012in}}l@{}}\matrixrefslot{#1}&\matrixrefslot{#2}\end{tabular}}
 \providecommand{\matrixsummarycell}[2]{\begin{tabular}[t]{@{}l@{}}#1\\#2\end{tabular}}
@@ -21,7 +22,7 @@
 \scriptsize
 \setlength{\tabcolsep}{2.2pt}
 \renewcommand{\arraystretch}{1.23}
-Cell format: generation time above runtime per phase-space point; slots are \AC, \PAC\ JIT O1, and \PAC\ C++ O3. \AC\ uses raw generated-library colour probes. Conventions and gaps are summarized after the table.
+Cell format: generation time above runtime per phase-space point; slots are \AC\ and \PAC\ JIT O1; \PAC\ C++ O3 is also shown only through $n=3$. \AC\ uses raw generated-library colour probes. Conventions and gaps are summarized after the table.
 \par\smallskip
 \begin{longtable}{@{}r@{\hspace{0.055in}}L{1.42in}@{\hspace{0.075in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{}}
 \toprule
@@ -83,67 +84,67 @@ Cell format: generation time above runtime per phase-space point; slots are \AC,
 \scriptsize
 \setlength{\tabcolsep}{2.2pt}
 \renewcommand{\arraystretch}{1.23}
-\begin{longtable}{@{}r@{\hspace{0.055in}}L{1.42in}@{\hspace{0.075in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{}}
+\begin{longtable}{@{}r@{\hspace{0.055in}}L{1.42in}@{\hspace{0.075in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{\hspace{0.055in}}L{2.51in}@{}}
 \toprule
-\textbf{ID} & \textbf{base process} & \textbf{n=4} & \textbf{n=5} \\
+\textbf{ID} & \textbf{base process} & \textbf{n=4} & \textbf{n=5} & \textbf{n=6} \\
 \specialrule{0.85pt}{0pt}{0pt}
 \endfirsthead
 \toprule
-\textbf{ID} & \textbf{base process} & \textbf{n=4} & \textbf{n=5} \\
+\textbf{ID} & \textbf{base process} & \textbf{n=4} & \textbf{n=5} & \textbf{n=6} \\
 \specialrule{0.85pt}{0pt}{0pt}
 \endhead
 \rowcolor{refblue}
-\texttt{1} & $d\bar d\to Z+(n-1)g$ & \matrixcellnonlc{\texttt{2.615}}{\matrixratio{speedgreen}{0.285}}{\matrixnaratio{speedred}}{\texttt{14.86}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.04}&\matrixevalratio{0.716}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{4.981}}{\matrixratio{speedorange}{1.92}}{\matrixnaratio{speedred}}{\texttt{208}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.18}&\matrixevalratio{0.895}\end{tabular}}{\matrixnaratio{speedred}} \\
+\texttt{1} & $d\bar d\to Z+(n-1)g$ & \matrixcellnonlcnocpp{\texttt{2.615}}{\matrixratio{speedgreen}{0.285}}{\texttt{14.86}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.04}&\matrixevalratio{0.716}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{4.981}}{\matrixratio{speedorange}{1.92}}{\texttt{208}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.18}&\matrixevalratio{0.895}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
-\texttt{2} & $u\bar d\to W^++(n-1)g$ & \matrixcellnonlc{\texttt{2.334}}{\matrixratio{speedgreen}{0.228}}{\matrixnaratio{speedred}}{\texttt{8.097}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.12}&\matrixevalratio{0.808}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{3.718}}{\matrixratio{speedorange}{1.67}}{\matrixnaratio{speedred}}{\texttt{122}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.43}&\matrixevalratio{1.11}\end{tabular}}{\matrixnaratio{speedred}} \\
-\addlinespace[0.22em]
-\rowcolor{refblue}
-\texttt{3} & $d\bar d\to e^+e^-+(n-2)g$ & \matrixcellnonlc{\texttt{2.211}}{\matrixratio{speedgreen}{0.093}}{\matrixnaratio{speedred}}{\texttt{2.355}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.58}&\matrixevalratio{0.378}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{3.252}}{\matrixratio{speedgreen}{0.222}}{\matrixnaratio{speedred}}{\texttt{20.64}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.603}&\matrixevalratio{0.452}\end{tabular}}{\matrixnaratio{speedred}} \\
-\addlinespace[0.22em]
-\texttt{4} & $u\bar d\to e^+\nu_e+(n-2)g$ & \matrixcellnonlc{\texttt{2.135}}{\matrixratio{speedgreen}{0.078}}{\matrixnaratio{speedred}}{\texttt{1.126}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.618}&\matrixevalratio{0.367}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{2.773}}{\matrixratio{speedgreen}{0.155}}{\matrixnaratio{speedred}}{\texttt{9.978}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.621}&\matrixevalratio{0.455}\end{tabular}}{\matrixnaratio{speedred}} \\
+\texttt{2} & $u\bar d\to W^++(n-1)g$ & \matrixcellnonlcnocpp{\texttt{2.334}}{\matrixratio{speedgreen}{0.228}}{\texttt{8.097}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.12}&\matrixevalratio{0.808}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{3.718}}{\matrixratio{speedorange}{1.67}}{\texttt{122}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.43}&\matrixevalratio{1.11}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
 \rowcolor{refblue}
-\texttt{5} & $d\bar d\to ZZ+(n-2)g$ & \matrixcellnonlc{\texttt{2.353}}{\matrixratio{speedgreen}{0.182}}{\matrixnaratio{speedred}}{\texttt{6.147}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.936}&\matrixevalratio{0.676}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{4.413}}{\matrixratio{speedgreen}{0.605}}{\matrixnaratio{speedred}}{\texttt{56.7}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.23}&\matrixevalratio{0.932}\end{tabular}}{\matrixnaratio{speedred}} \\
+\texttt{3} & $d\bar d\to e^+e^-+(n-2)g$ & \matrixcellnonlcnocpp{\texttt{2.211}}{\matrixratio{speedgreen}{0.093}}{\texttt{2.355}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.58}&\matrixevalratio{0.378}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{3.252}}{\matrixratio{speedgreen}{0.222}}{\texttt{20.64}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.603}&\matrixevalratio{0.452}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
-\texttt{6} & $gg\to t\bar t+(n-2)g$ & \matrixcellnonlc{\texttt{4.316}}{\matrixratio{speedorange}{1.13}}{\matrixnaratio{speedred}}{\texttt{129}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.36}&\matrixevalratio{0.97}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{28.64}}{\matrixratio{speedred}{8.23}}{\matrixnaratio{speedred}}{\texttt{3.05e+03}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.20}&\matrixevalratio{0.82}\end{tabular}}{\matrixnaratio{speedred}} \\
-\addlinespace[0.22em]
-\rowcolor{refblue}
-\texttt{7} & $d\bar d\to t\bar t+(n-2)g$ & \matrixcellnonlc{\texttt{3.93}}{\matrixratio{speedgreen}{0.283}}{\matrixnaratio{speedred}}{\texttt{32.46}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.08}&\matrixevalratio{0.676}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{16.78}}{\matrixratio{speedorange}{1.16}}{\matrixnaratio{speedred}}{\texttt{510}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.39}&\matrixevalratio{0.972}\end{tabular}}{\matrixnaratio{speedred}} \\
-\addlinespace[0.22em]
-\texttt{8} & $gg\to gg+(n-2)g$ & \matrixcellnonlc{\texttt{13.65}}{\matrixratio{speedred}{2.22}}{\matrixnaratio{speedred}}{\texttt{1.43e+03}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.621}&\matrixevalratio{0.454}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{168}}{\matrixratio{speedred}{12.4}}{\matrixnaratio{speedred}}{\texttt{5.47e+04}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.494}&\matrixevalratio{0.206}\end{tabular}}{\matrixnaratio{speedred}} \\
+\texttt{4} & $u\bar d\to e^+\nu_e+(n-2)g$ & \matrixcellnonlcnocpp{\texttt{2.135}}{\matrixratio{speedgreen}{0.078}}{\texttt{1.126}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.618}&\matrixevalratio{0.367}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{2.773}}{\matrixratio{speedgreen}{0.155}}{\texttt{9.978}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.621}&\matrixevalratio{0.455}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
 \rowcolor{refblue}
-\texttt{9} & $d\bar d\to ZZZ+(n-3)g$ & \matrixcellnonlc{\texttt{3.121}}{\matrixratio{speedgreen}{0.143}}{\matrixnaratio{speedred}}{\texttt{6.077}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.915}&\matrixevalratio{0.68}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{6.556}}{\matrixratio{speedgreen}{0.297}}{\matrixnaratio{speedred}}{\texttt{32.49}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.12}&\matrixevalratio{0.894}\end{tabular}}{\matrixnaratio{speedred}} \\
+\texttt{5} & $d\bar d\to ZZ+(n-2)g$ & \matrixcellnonlcnocpp{\texttt{2.353}}{\matrixratio{speedgreen}{0.182}}{\texttt{6.147}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.936}&\matrixevalratio{0.676}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{4.413}}{\matrixratio{speedgreen}{0.605}}{\texttt{56.7}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.23}&\matrixevalratio{0.932}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
-\texttt{10} & $d\bar d\to e^+e^-ZH+(n-4)g$ & \matrixcellnonlc{\texttt{3.994}}{\matrixratio{speedgreen}{0.056}}{\matrixnaratio{speedred}}{\texttt{1.532}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.01}&\matrixevalratio{0.689}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{4.835}}{\matrixratio{speedgreen}{0.062}}{\matrixnaratio{speedred}}{\texttt{3.345}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.851}&\matrixevalratio{0.637}\end{tabular}}{\matrixnaratio{speedred}} \\
-\addlinespace[0.22em]
-\rowcolor{refblue}
-\texttt{11} & $d\bar d\to t\bar t ZH+(n-4)g$ & \matrixcellnonlc{\texttt{2.794}}{\matrixratio{speedgreen}{0.115}}{\matrixnaratio{speedred}}{\texttt{4.357}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.86}&\matrixevalratio{0.624}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{4.391}}{\matrixratio{speedgreen}{0.287}}{\matrixnaratio{speedred}}{\texttt{23.72}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.12}&\matrixevalratio{0.899}\end{tabular}}{\matrixnaratio{speedred}} \\
-\addlinespace[0.22em]
-\texttt{12} & $d\bar d\to e^+e^-e^+e^-+(n-4)g$ & \matrixcellnonlc{\texttt{4.13}}{\matrixratio{speedgreen}{0.053}}{\matrixnaratio{speedred}}{\texttt{2.892}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.502}&\matrixevalratio{0.351}\end{tabular}}{\matrixnaratio{speedred}} & \matrixcellnonlc{\texttt{5.311}}{\matrixratio{speedgreen}{0.055}}{\matrixnaratio{speedred}}{\texttt{6.453}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.412}&\matrixevalratio{0.312}\end{tabular}}{\matrixnaratio{speedred}} \\
+\texttt{6} & $gg\to t\bar t+(n-2)g$ & \matrixcellnonlcnocpp{\texttt{4.316}}{\matrixratio{speedorange}{1.13}}{\texttt{129}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.36}&\matrixevalratio{0.97}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{28.64}}{\matrixratio{speedred}{8.23}}{\texttt{3.05e+03}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.20}&\matrixevalratio{0.82}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
 \rowcolor{refblue}
-\texttt{13} & $d\bar d\to u\bar{u}\,s\bar{s}+(n-4)g$ & \matrixcellnonlc{\matrixna{black!45}}{\texttt{0.269}}{\matrixna{speedred}}{\matrixna{black!45}}{\matrixpunct{(}\texttt{3.38}\matrixpunct{)}}{\matrixna{speedred}} & \matrixcellnonlc{\matrixna{black!45}}{\texttt{1.413}}{\matrixna{speedred}}{\matrixna{black!45}}{\matrixpunct{(}\texttt{42.4}\matrixpunct{)}}{\matrixna{speedred}} \\
+\texttt{7} & $d\bar d\to t\bar t+(n-2)g$ & \matrixcellnonlcnocpp{\texttt{3.93}}{\matrixratio{speedgreen}{0.283}}{\texttt{32.46}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.08}&\matrixevalratio{0.676}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{16.78}}{\matrixratio{speedorange}{1.16}}{\texttt{510}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.39}&\matrixevalratio{0.972}\end{tabular}} & \matrixna{speedred} \\
 \addlinespace[0.22em]
-\texttt{14} & $d\bar d\to u\bar{u}\,s\bar{s}\,c\bar{c}+(n-6)g$ & \matrixna{black!45} & \matrixna{black!45} \\
+\texttt{8} & $gg\to gg+(n-2)g$ & \matrixcellnonlcnocpp{\texttt{13.65}}{\matrixratio{speedred}{2.22}}{\texttt{1.43e+03}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.621}&\matrixevalratio{0.454}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{168}}{\matrixratio{speedred}{12.4}}{\texttt{5.47e+04}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.494}&\matrixevalratio{0.206}\end{tabular}} & \matrixna{speedred} \\
+\addlinespace[0.22em]
+\rowcolor{refblue}
+\texttt{9} & $d\bar d\to ZZZ+(n-3)g$ & \matrixcellnonlcnocpp{\texttt{3.121}}{\matrixratio{speedgreen}{0.143}}{\texttt{6.077}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.915}&\matrixevalratio{0.68}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{6.556}}{\matrixratio{speedgreen}{0.297}}{\texttt{32.49}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.12}&\matrixevalratio{0.894}\end{tabular}} & \matrixna{speedred} \\
+\addlinespace[0.22em]
+\texttt{10} & $d\bar d\to e^+e^-ZH+(n-4)g$ & \matrixcellnonlcnocpp{\texttt{3.994}}{\matrixratio{speedgreen}{0.056}}{\texttt{1.532}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.01}&\matrixevalratio{0.689}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{4.835}}{\matrixratio{speedgreen}{0.062}}{\texttt{3.345}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.851}&\matrixevalratio{0.637}\end{tabular}} & \matrixna{speedred} \\
+\addlinespace[0.22em]
+\rowcolor{refblue}
+\texttt{11} & $d\bar d\to t\bar t ZH+(n-4)g$ & \matrixcellnonlcnocpp{\texttt{2.794}}{\matrixratio{speedgreen}{0.115}}{\texttt{4.357}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.86}&\matrixevalratio{0.624}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{4.391}}{\matrixratio{speedgreen}{0.287}}{\texttt{23.72}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedorange}{1.12}&\matrixevalratio{0.899}\end{tabular}} & \matrixna{speedred} \\
+\addlinespace[0.22em]
+\texttt{12} & $d\bar d\to e^+e^-e^+e^-+(n-4)g$ & \matrixcellnonlcnocpp{\texttt{4.13}}{\matrixratio{speedgreen}{0.053}}{\texttt{2.892}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.502}&\matrixevalratio{0.351}\end{tabular}} & \matrixcellnonlcnocpp{\texttt{5.311}}{\matrixratio{speedgreen}{0.055}}{\texttt{6.453}}{\begin{tabular}[t]{@{}l@{\hspace{0.006in}}l@{}}\matrixratio{speedgreen}{0.412}&\matrixevalratio{0.312}\end{tabular}} & \matrixna{speedred} \\
+\addlinespace[0.22em]
+\rowcolor{refblue}
+\texttt{13} & $d\bar d\to u\bar{u}\,s\bar{s}+(n-4)g$ & \matrixcellnonlcnocpp{\matrixna{black!45}}{\texttt{0.269}}{\matrixna{black!45}}{\matrixpunct{(}\texttt{3.38}\matrixpunct{)}} & \matrixcellnonlcnocpp{\matrixna{black!45}}{\texttt{1.413}}{\matrixna{black!45}}{\matrixpunct{(}\texttt{42.4}\matrixpunct{)}} & \matrixna{speedred} \\
+\addlinespace[0.22em]
+\texttt{14} & $d\bar d\to u\bar{u}\,s\bar{s}\,c\bar{c}+(n-6)g$ & \matrixna{black!45} & \matrixna{black!45} & \matrixna{speedred} \\
 \addlinespace[0.22em]
 \specialrule{1.05pt}{0.25em}{0.20em}
-\multicolumn{2}{@{}L{1.74in}@{\hspace{0.075in}}}{\textbf{summary: gen}} & \matrixsummarycell{\matrixsummaryfour{\texttt{2.14}}{\texttt{13.6}}{\texttt{3.97}}{\texttt{2.96}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.053}}}{\textcolor{speedred}{\texttt{x2.22}}}{\textcolor{speedgreen}{\texttt{x0.405}}}{\textcolor{speedgreen}{\texttt{x0.162}}}{\textcolor{speedgreen}{\texttt{x0.83}}}} & \matrixsummarycell{\matrixsummaryfour{\texttt{2.77}}{\texttt{168}}{\texttt{21.1}}{\texttt{4.91}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.055}}}{\textcolor{speedred}{\texttt{x12.4}}}{\textcolor{speedred}{\texttt{x2.25}}}{\textcolor{speedgreen}{\texttt{x0.451}}}{\textcolor{speedred}{\texttt{x9.30}}}} \\
+\multicolumn{2}{@{}L{1.74in}@{\hspace{0.075in}}}{\textbf{summary: gen}} & \matrixsummarycell{\matrixsummaryfour{\texttt{2.14}}{\texttt{13.6}}{\texttt{3.97}}{\texttt{2.96}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.053}}}{\textcolor{speedred}{\texttt{x2.22}}}{\textcolor{speedgreen}{\texttt{x0.405}}}{\textcolor{speedgreen}{\texttt{x0.162}}}{\textcolor{speedgreen}{\texttt{x0.83}}}} & \matrixsummarycell{\matrixsummaryfour{\texttt{2.77}}{\texttt{168}}{\texttt{21.1}}{\texttt{4.91}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.055}}}{\textcolor{speedred}{\texttt{x12.4}}}{\textcolor{speedred}{\texttt{x2.25}}}{\textcolor{speedgreen}{\texttt{x0.451}}}{\textcolor{speedred}{\texttt{x9.30}}}} & \matrixsummarycell{\matrixna{speedred}}{\matrixna{speedred}} \\
 \addlinespace[0.16em]
-\multicolumn{2}{@{}L{1.74in}@{\hspace{0.075in}}}{\textbf{summary: run}} & \matrixsummarycell{\matrixsummaryfour{\texttt{1.13}}{\texttt{1.43e3}}{\texttt{136}}{\texttt{6.11}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.502}}}{\textcolor{speedorange}{\texttt{x1.36}}}{\textcolor{speedgreen}{\texttt{x0.887}}}{\textcolor{speedgreen}{\texttt{x0.925}}}{\textcolor{speedgreen}{\texttt{x0.698}}}} & \matrixsummarycell{\matrixsummaryfour{\texttt{3.35}}{\texttt{5.47e4}}{\texttt{4.9e3}}{\texttt{44.6}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.412}}}{\textcolor{speedorange}{\texttt{x1.43}}}{\textcolor{speedgreen}{\texttt{x0.971}}}{\textcolor{speedorange}{\texttt{x1.12}}}{\textcolor{speedgreen}{\texttt{x0.544}}}} \\
+\multicolumn{2}{@{}L{1.74in}@{\hspace{0.075in}}}{\textbf{summary: run}} & \matrixsummarycell{\matrixsummaryfour{\texttt{1.13}}{\texttt{1.43e3}}{\texttt{136}}{\texttt{6.11}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.502}}}{\textcolor{speedorange}{\texttt{x1.36}}}{\textcolor{speedgreen}{\texttt{x0.887}}}{\textcolor{speedgreen}{\texttt{x0.925}}}{\textcolor{speedgreen}{\texttt{x0.698}}}} & \matrixsummarycell{\matrixsummaryfour{\texttt{3.35}}{\texttt{5.47e4}}{\texttt{4.9e3}}{\texttt{44.6}}}{\matrixsummaryfive{\textcolor{speedgreen}{\texttt{x0.412}}}{\textcolor{speedorange}{\texttt{x1.43}}}{\textcolor{speedgreen}{\texttt{x0.971}}}{\textcolor{speedorange}{\texttt{x1.12}}}{\textcolor{speedgreen}{\texttt{x0.544}}}} & \matrixsummarycell{\matrixna{speedred}}{\matrixna{speedred}} \\
 \addlinespace[0.12em]
 \bottomrule
 \end{longtable}
 \endgroup
-\noindent\scriptsize Each cell is raw-library \AC, \PAC\ JIT O1, and \PAC\ C++ O3.  Entries are generation seconds above runtime microseconds per point; \PAC\ runtime shows coloured wall and black pure-evaluator ratios, or absolute time without an \AC\ reference. Green/orange/red means below one/below two/at least two.  Summaries are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. A \textbf{VALIDATION FAILED} marker means the same-point difference exceeds the tolerance recorded for that validation result.
+\noindent\scriptsize Each cell is raw-library \AC\ and \PAC\ JIT O1; the optional \PAC\ C++ O3 slot is shown only through $n=3$.  Entries are generation seconds above runtime microseconds per point; \PAC\ runtime shows coloured wall and black pure-evaluator ratios, or absolute time without an \AC\ reference. Green/orange/red means below one/below two/at least two.  Summaries are \texttt{min|max|avg|med|sum}; \texttt{sum} compares paired totals. A \textbf{VALIDATION FAILED} marker means the same-point difference exceeds the tolerance recorded for that validation result.
 \par\vspace{0.15em}
 \paragraph{Settings.}
-\noindent\scriptsize \path{docs/result_matrix.py} (\texttt{--color-accuracy full}) writes this table and its JSON cache. \AC\ uses the raw generated-library path \texttt{amplicol\_generate --library=create-raw} followed by \texttt{amplicol\_color\_library\_probe}.  One raw evaluator call returns every stored helicity amplitude for a phase-space point; the probe then applies the requested sparse NLC/full colour contractions without reevaluating those amplitudes. \PAC\ uses Rusticol double precision, batch size 64, output chunk size 128,  Stage-local inputs, ten Horner iterations, default CPE rounds, expanded optimization limits, SymJIT O1, and \texttt{--target-runtime 10} are used. Only C++ O3 generation is subject to the 15-minute compile cap.
+\noindent\scriptsize \path{docs/result_matrix.py} (\texttt{--color-accuracy full}) writes this table and its JSON cache. \AC\ uses the raw generated-library path \texttt{amplicol\_generate --library=create-raw} followed by \texttt{amplicol\_color\_library\_probe}.  One raw evaluator call returns every stored helicity amplitude for a phase-space point; the probe then applies the requested sparse NLC/full colour contractions without reevaluating those amplitudes. \PAC\ uses Rusticol double precision, batch size 64, output chunk size 128,  Stage-local inputs, ten Horner iterations, default CPE rounds, expanded optimization limits, SymJIT O1, and \texttt{--target-runtime 10} are used. C++ O3 is displayed only through $n=3$; its generation alone is subject to the 15-minute compile cap.
 \par\vspace{0.15em}
 \paragraph{Fortran reference gaps.}
 \noindent\scriptsize 2 completed \PAC\ cells have no direct Fortran colour reference because that path stops above two quark lines; they are shown as absolute timings.
 \par\vspace{0.15em}
 \paragraph{C++ O3 gaps.}
-\noindent\scriptsize 43 optional cells were not run and 0 exceeded the 15-minute compile budget; completed \AC/JIT data remain shown.
+\noindent\scriptsize 19 optional cells were not run and 0 exceeded the 15-minute compile budget; completed \AC/JIT data remain shown.
 \par\vspace{0.15em}
 \end{landscape}

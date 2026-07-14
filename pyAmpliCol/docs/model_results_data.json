@@ -1,0 +1,365 @@
+{
+  "created_by": "pyAmpliCol/docs/model_results.py",
+  "generation_timeout_s": 300,
+  "memory_limit_gb": 30.0,
+  "models": {
+    "scalar_gravity": {
+      "entries": {
+        "2": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 14,
+            "interactions": 12,
+            "roots": 2
+          },
+          "generation_measurement": "reused preserved artifact",
+          "generation_s": 0.2367,
+          "jit_compile_s": 0.012616376392543316,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalar_gravity.pyAmplicol-model.json",
+          "n_final": 2,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalar_gravity/n2_lc",
+          "process": "scalar_0 scalar_0 > graviton graviton",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 3.956827143893807e-05,
+            "pure_evaluator_us_per_point": 0.18352871858664968,
+            "samples": 17670528,
+            "wall_error_us_per_point": 0.00019765820588606278,
+            "wall_us_per_point": 0.5659154230934852
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:26:30.488975+00:00",
+          "value": {
+            "double": 1196366329.6425493,
+            "precision_50": 1196366329.642549,
+            "relative_difference": 1.9928559772557062e-16
+          }
+        },
+        "3": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 104,
+            "interactions": 292,
+            "roots": 8
+          },
+          "generation_measurement": "reused preserved artifact",
+          "generation_s": 98.276,
+          "jit_compile_s": 40.644701208220795,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalar_gravity.pyAmplicol-model.json",
+          "n_final": 3,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalar_gravity/n3_lc",
+          "process": "scalar_0 scalar_0 > graviton graviton graviton",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 4.555659698754027,
+            "pure_evaluator_us_per_point": 1063.5838346706082,
+            "samples": 9344,
+            "wall_error_us_per_point": 9.7954832433309,
+            "wall_us_per_point": 1081.333726364242
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:27:05.720171+00:00",
+          "value": {
+            "double": 523116380555.1997,
+            "precision_50": 523116380555.199,
+            "relative_difference": 1.400112675161611e-15
+          }
+        },
+        "4": {
+          "color_accuracy": "lc",
+          "error": "generate-process exceeded its configured timeout",
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalar_gravity.pyAmplicol-model.json",
+          "n_final": 4,
+          "notes": "DAG construction completed in 3.681 s; numerical zero filtering took 271.669 s, and the five-minute attempt timed out during current merging.",
+          "output_dir": ".ufo_support_outputs/model_matrices/scalar_gravity/n4_lc",
+          "process": "scalar_0 scalar_0 > graviton graviton graviton graviton",
+          "status": "timeout",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:32:27.710940+00:00"
+        }
+      },
+      "label": "scalar-gravity model",
+      "source_measurements": {
+        "compiled": {
+          "measurement": "compile_model_source after Python imports",
+          "output": ".ufo_support_outputs/model_matrices/models/scalar_gravity.pyAmplicol-model.json",
+          "seconds": 0.1585432500578463,
+          "status": "ok"
+        },
+        "json": {
+          "digest": "226e72fc0db5d4e444f19ed72e30fb465db7a84691a1da9bb615628c406a8dec",
+          "output": ".ufo_support_outputs/model_matrices/models/source_measurements/scalar_gravity-json.pyAmplicol-model.json",
+          "seconds": 33.73175820801407,
+          "status": "ok"
+        },
+        "ufo": {
+          "digest": "9d51970ca760c12c3867caef33f58b73a406ca852b24a11e469e5f57326717d5",
+          "output": ".ufo_support_outputs/model_matrices/models/source_measurements/scalar_gravity-ufo.pyAmplicol-model.json",
+          "seconds": 33.29135762504302,
+          "status": "ok"
+        }
+      }
+    },
+    "scalars": {
+      "entries": {
+        "2": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 8,
+            "interactions": 6,
+            "roots": 1
+          },
+          "generation_measurement": "fresh watched generation",
+          "generation_s": 0.18125670799054205,
+          "jit_compile_s": 0.0024783748667687178,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 2,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n2_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 5.312598455333221e-06,
+            "pure_evaluator_us_per_point": 0.008497861995752072,
+            "samples": 91825664,
+            "wall_error_us_per_point": 1.4449630208728502e-05,
+            "wall_us_per_point": 0.10890212931741068
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:16:49.897999+00:00",
+          "value": {
+            "double": 0.5,
+            "expected": 0.5,
+            "expected_relative_difference": 0.0,
+            "precision_50": 0.5,
+            "relative_difference": 0.0
+          }
+        },
+        "3": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 18,
+            "interactions": 18,
+            "roots": 1
+          },
+          "generation_measurement": "fresh watched generation",
+          "generation_s": 0.2672699170652777,
+          "jit_compile_s": 0.0024083752650767565,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 3,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n3_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 3.886717101898737e-06,
+            "pure_evaluator_us_per_point": 0.015552695004695805,
+            "samples": 65553280,
+            "wall_error_us_per_point": 2.273226318852364e-05,
+            "wall_us_per_point": 0.15254771990865185
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:18:40.647469+00:00",
+          "value": {
+            "double": 0.16666666666666666,
+            "expected": 0.16666666666666666,
+            "expected_relative_difference": 0.0,
+            "precision_50": 0.16666666666666666,
+            "relative_difference": 0.0
+          }
+        },
+        "4": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 37,
+            "interactions": 60,
+            "roots": 1
+          },
+          "generation_measurement": "fresh watched generation",
+          "generation_s": 0.6285572501365095,
+          "jit_compile_s": 0.003183000721037388,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 4,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n4_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 8.362025390905994e-06,
+            "pure_evaluator_us_per_point": 0.03094408531027706,
+            "samples": 31225088,
+            "wall_error_us_per_point": 8.917383975603799e-05,
+            "wall_us_per_point": 0.32025634914994494
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:19:14.824013+00:00",
+          "value": {
+            "double": 0.041666666666666664,
+            "expected": 0.041666666666666664,
+            "expected_relative_difference": 0.0,
+            "precision_50": 0.041666666666666664,
+            "relative_difference": 0.0
+          }
+        },
+        "5": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 78,
+            "interactions": 170,
+            "roots": 1
+          },
+          "generation_measurement": "fresh watched generation",
+          "generation_s": 1.9743611249141395,
+          "jit_compile_s": 0.003889665240421891,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 5,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n5_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0 scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 1.6282454465273124e-05,
+            "pure_evaluator_us_per_point": 0.059935598683455715,
+            "samples": 19903616,
+            "wall_error_us_per_point": 0.00016437691451004933,
+            "wall_us_per_point": 0.5024213335009112
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:19:50.566879+00:00",
+          "value": {
+            "double": 0.008333333333333333,
+            "expected": 0.008333333333333333,
+            "expected_relative_difference": 0.0,
+            "precision_50": 0.008333333333333333,
+            "relative_difference": 0.0
+          }
+        },
+        "6": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 142,
+            "interactions": 413,
+            "roots": 1
+          },
+          "generation_measurement": "fresh watched generation",
+          "generation_s": 6.584991584066302,
+          "jit_compile_s": 0.006382207153365016,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 6,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n6_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0 scalar_0 scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 4.020398381201347e-05,
+            "pure_evaluator_us_per_point": 0.12352073429369036,
+            "samples": 8899072,
+            "wall_error_us_per_point": 0.0005245346351088003,
+            "wall_us_per_point": 1.1237261394780027
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:20:27.608652+00:00",
+          "value": {
+            "double": 0.001388888888888889,
+            "expected": 0.001388888888888889,
+            "expected_relative_difference": 0.0,
+            "precision_50": 0.001388888888888889,
+            "relative_difference": 0.0
+          }
+        },
+        "7": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 262,
+            "interactions": 1022,
+            "roots": 1
+          },
+          "generation_measurement": "reused preserved artifact",
+          "generation_s": 21.402976416051388,
+          "jit_compile_s": 0.264429165283218,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 7,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n7_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0 scalar_0 scalar_0 scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 8.900982145792946e-05,
+            "pure_evaluator_us_per_point": 0.26658244424400684,
+            "samples": 6960512,
+            "wall_error_us_per_point": 0.0008067405775773846,
+            "wall_us_per_point": 1.4366992599043227
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:21:08.535366+00:00",
+          "value": {
+            "double": 0.0001984126984126984,
+            "expected": 0.0001984126984126984,
+            "expected_relative_difference": 0.0,
+            "precision_50": 0.0001984126984126984,
+            "relative_difference": 0.0
+          }
+        },
+        "8": {
+          "color_accuracy": "lc",
+          "dag": {
+            "currents": 491,
+            "interactions": 2538,
+            "roots": 1
+          },
+          "generation_measurement": "reused preserved artifact",
+          "generation_s": 74.71936416719109,
+          "jit_compile_s": 0.20298771024681628,
+          "model_artifact": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "n_final": 8,
+          "output_dir": ".ufo_support_outputs/model_matrices/scalars/n8_lc",
+          "process": "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0 scalar_0 scalar_0 scalar_0 scalar_0 scalar_0",
+          "runtime": {
+            "batch_size": 128,
+            "pure_evaluator_error_us_per_point": 0.0011148054324922982,
+            "pure_evaluator_us_per_point": 0.797892507669965,
+            "samples": 2186240,
+            "wall_error_us_per_point": 0.0022295981668063033,
+            "wall_us_per_point": 4.574201329994226
+          },
+          "status": "ok",
+          "target_runtime_s": 10.0,
+          "updated_at": "2026-07-14T01:21:50.651234+00:00",
+          "value": {
+            "double": 2.48015873015873e-05,
+            "expected": 2.48015873015873e-05,
+            "expected_relative_difference": 0.0,
+            "precision_50": 2.48015873015873e-05,
+            "relative_difference": 0.0
+          }
+        }
+      },
+      "label": "massless scalar contact model",
+      "source_measurements": {
+        "compiled": {
+          "measurement": "compile_model_source after Python imports",
+          "output": ".ufo_support_outputs/model_matrices/models/scalars.pyAmplicol-model.json",
+          "seconds": 0.07456441596150398,
+          "status": "ok"
+        },
+        "json": {
+          "digest": "b8cb0624ba08289e98ae09f61e0c599655bce293573ed8c74c523e172e130781",
+          "output": ".ufo_support_outputs/model_matrices/models/source_measurements/scalars-json.pyAmplicol-model.json",
+          "seconds": 0.3503173750359565,
+          "status": "ok"
+        },
+        "ufo": {
+          "digest": "15195d51ba870b4913f46049d54b055a37d336c6630dd4d6c163c2bb41cc9ea0",
+          "output": ".ufo_support_outputs/model_matrices/models/source_measurements/scalars-ufo.pyAmplicol-model.json",
+          "seconds": 0.3597809160128236,
+          "status": "ok"
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "target_runtime_s": 10.0,
+  "updated_at": "2026-07-14T02:23:04.441002+00:00"
+}

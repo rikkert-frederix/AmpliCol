@@ -113,14 +113,16 @@ installer pins the tested `ufo-model-loader` 0.1.7 revision rather than relying
 on the GammaLoop reference checkout.
 
 Generic kernel components use named Symbolica functions during model lowering.
-Process generation inlines those calls into each evaluator stage before
-optimization, allowing common-subexpression elimination to work across current
-and component boundaries.
+Before optimization, process generation inlines component bodies up to 1 KiB,
+allowing common-subexpression elimination across current boundaries.  Larger
+spin-2 and high-rank bodies remain in Symbolica's stable `functions` map so
+stage construction does not replicate them throughout the expression tree.
 
 Every public subcommand accepts `--run-card PATH`.  A card contains one
-`[arguments]` table whose keys are argparse destination names, including
-positionals.  Relative paths are resolved from the card directory.  Explicit
-CLI options override card values:
+`[arguments]` table whose keys may be argparse destination names or normalized
+public long-option names (`--symbolica-output-chunk-size` becomes
+`symbolica_output_chunk_size`), including positionals.  Relative paths are
+resolved from the card directory.  Explicit CLI options override card values:
 
 ```toml
 [arguments]
@@ -138,8 +140,10 @@ symbolica_iterations = 10
 
 Unknown keys, arguments belonging to another subcommand, and missing required
 inputs are errors.  The cards under `examples/` cover the built-in, UFO, loader
-JSON, compiled-model, runtime-parameter, multiparticle, and colour-accuracy
-workflows.
+JSON, compiled-model, runtime-parameter, multiparticle, colour-accuracy,
+massless-scalar, and scalar-gravity workflows.  The colorless-model validation
+ladder and its generated TeX tables are maintained by `docs/model_results.py`;
+all process outputs are retained under `.ufo_support_outputs/model_matrices`.
 
 For normal selected-flow JIT artifacts, the CLI uses batch 128 and measures
 stage output chunks around the base size 128.  A candidate replaces uniform

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,12 +9,34 @@ import pytest
 from pyamplicol.model_assets import bundled_model_path
 from pyamplicol.model_source import (
     COMPILED_MODEL_KIND,
+    CompiledModel,
     compile_model_source,
     detect_model_source,
     load_compiled_model,
     preflight_model,
 )
 from pyamplicol.ufo_model import CompiledUFOModel
+
+
+_BUNDLED_MODEL_STRUCTURE_SHA256 = {
+    "scalars": "04f4611426abc396ec28feed5fdb0fa90cfa58cd5bc083ad014b13085fad4827",
+    "scalar_gravity": "ffab5001bf75cf33f470a06f7b7a332a517d0d16e0fb7edb472a8d19d158841a",
+}
+
+
+def _compiled_ir_structure_sha256(compiled: CompiledModel) -> str:
+    ir = compiled.ir.to_dict()
+    for kernel in ir["oriented_kernels"]:
+        # Symbolica may print equivalent large sums in a different term order.
+        expressions = kernel.pop("component_expressions")
+        kernel["component_expression_count"] = len(expressions)
+    payload = json.dumps(
+        ir,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 @pytest.mark.parametrize("alias", ["BUILTIN_SM", "builtin_sm", "built-in-sm"])
@@ -50,6 +73,11 @@ def test_bundled_models_load_and_pass_preflight(
     assert compiled.capabilities["particle_count"] > 0
     assert compiled.capabilities["vertex_count"] > 0
     assert compiled.parameter_defaults
+    if name in _BUNDLED_MODEL_STRUCTURE_SHA256:
+        assert (
+            _compiled_ir_structure_sha256(compiled)
+            == _BUNDLED_MODEL_STRUCTURE_SHA256[name]
+        )
 
 
 def test_compiled_model_round_trip_and_parameter_card(tmp_path: Path) -> None:

@@ -1,0 +1,12 @@
+[arguments]
+model = "../assets/models/json/scalar_gravity/scalar_gravity.json"
+process = "scalar_0 scalar_0 > graviton graviton"
+output_dir = "../outputs/examples/scalar_gravity_two_gravitons"
+color_accuracy = "lc"
+symbolica_evaluator_backend = "jit"
+symbolica_jit_optimization_level = 1
+symbolica_n_cores = 5
+n_cores = 1
+batch_size = 128
+symbolica_output_chunk_size = 128
+monitor = true

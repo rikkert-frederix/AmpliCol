@@ -114,6 +114,7 @@ def test_cli_run_card_supplies_positionals_paths_and_cli_overrides(
 process = "d d~ > z g"
 output_dir = "../outputs/card"
 symbolica_iterations = 7
+symbolica_output_chunk_size = 96
 max_coupling_order = ["QED=1"]
 json = true
 """.strip()
@@ -125,6 +126,7 @@ json = true
     assert from_card.process == "d d~ > z g"
     assert from_card.output_dir == (tmp_path / "outputs" / "card").resolve()
     assert from_card.symbolica_iterations == 7
+    assert from_card.symbolica_compiled_output_chunk_size == 96
     assert from_card.max_coupling_order == ["QED=1"]
     assert from_card.json is True
     assert from_card.symbolica_jit_optimization_level == 3
@@ -160,6 +162,28 @@ def test_model_run_card_resolves_model_source_relative_to_card(
 
     assert args.model == str((tmp_path / "models" / "sm.json").resolve())
     assert args.json is True
+
+
+def test_cli_run_card_accepts_normalized_negated_switch_names(
+    tmp_path: Path,
+) -> None:
+    card = tmp_path / "disabled.toml"
+    card.write_text(
+        """
+[arguments]
+process = "d d~ > z"
+output_dir = "output"
+no_symbolica_output_chunking = true
+symbolica_no_compiled_native = true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    args = parse_args(["generate-process", "--run-card", str(card)])
+
+    assert args.symbolica_compiled_output_chunk_size is None
+    assert args.symbolica_compiled_native is False
 
 
 def test_cli_inspect_and_compile_builtin_model(
@@ -246,6 +270,8 @@ def test_cli_run_card_rejects_unknown_and_missing_arguments(
         ("processes", "multiparticle_processes.toml"),
         ("generate-process", "json_sm_nlc_generate.toml"),
         ("generate-process", "json_sm_full_generate.toml"),
+        ("generate-process", "scalars_generate.toml"),
+        ("generate-process", "scalar_gravity_generate.toml"),
     ),
 )
 def test_documented_example_run_cards_parse(

@@ -210,7 +210,7 @@ def test_amplicol_all_flow_setup_uses_explicit_imode2_timing_row() -> None:
     assert setup == 0.125
 
 
-def test_nlc_hides_cached_cpp_o3_slots_above_n3() -> None:
+def test_non_lc_tables_hide_cached_cpp_o3_slots_above_n3() -> None:
     result_matrix = _load_result_matrix_module()
     base_case = {
         "amplicol": {"status": "ok", "generation_s": 10.0, "runtime_us_per_point": 10.0},
@@ -228,11 +228,18 @@ def test_nlc_hides_cached_cpp_o3_slots_above_n3() -> None:
         },
     }
 
-    n3 = result_matrix._latex_cell({**base_case, "n_final": 3}, color_accuracy="nlc")
-    n4 = result_matrix._latex_cell({**base_case, "n_final": 4}, color_accuracy="nlc")
+    for color_accuracy in ("nlc", "full"):
+        n3 = result_matrix._latex_cell(
+            {**base_case, "n_final": 3},
+            color_accuracy=color_accuracy,
+        )
+        n4 = result_matrix._latex_cell(
+            {**base_case, "n_final": 4},
+            color_accuracy=color_accuracy,
+        )
 
-    assert r"\matrixcellnonlc{" in n3
-    assert r"\matrixcellnonlcnocpp{" in n4
+        assert r"\matrixcellnonlc{" in n3
+        assert r"\matrixcellnonlcnocpp{" in n4
 
 
 def test_lc_ram_limit_is_not_hidden_by_unsupported_reference() -> None:

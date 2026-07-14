@@ -225,6 +225,25 @@ def test_stage_function_specialization_inlines_nested_calls() -> None:
     assert definitions == ()
 
 
+def test_stage_function_specialization_retains_large_kernel_abbreviation() -> None:
+    function, value, formal_value = S(
+        "large_stage_function",
+        "value",
+        "formal_value",
+    )
+    body = sum(formal_value**power for power in range(1, 400))
+    definition = (function, (formal_value,), body)
+
+    outputs, definitions = _specialize_stage_symbolica_functions(
+        (function(value),),
+        (definition,),
+    )
+
+    assert body.get_byte_size() > 1024
+    assert outputs == (function(value),)
+    assert definitions == (definition,)
+
+
 def test_stage_blueprint_reports_each_current_and_amplitude_stage() -> None:
     manifest = build_generic_process_manifest(
         "d d~ > z g",

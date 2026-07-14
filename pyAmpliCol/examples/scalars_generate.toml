@@ -1,0 +1,13 @@
+[arguments]
+model = "../assets/models/json/scalars/scalars.json"
+process = "scalar_0 scalar_0 > scalar_0 scalar_0 scalar_0"
+output_dir = "../outputs/examples/scalars_five_point"
+color_accuracy = "lc"
+max_coupling_order = ["QCD=1"]
+symbolica_evaluator_backend = "jit"
+symbolica_jit_optimization_level = 1
+symbolica_n_cores = 5
+n_cores = 1
+batch_size = 128
+symbolica_output_chunk_size = 128
+monitor = true

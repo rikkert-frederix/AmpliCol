@@ -20,7 +20,7 @@ from pyamplicol.generic_artifact import (
     _generic_warmup_phase_space_point,
     _root_all_sector_weight,
 )
-from pyamplicol.model import AmplicolSMLeadingColorModel
+from pyamplicol.model import AmplicolSMLeadingColorModel, Vertex
 
 
 def test_current_index_is_full_physics_state_identity() -> None:
@@ -469,6 +469,39 @@ def test_generic_dag_species_reachability_prunes_dead_particle_branches() -> Non
     )
     assert len(with_reachability.currents) == len(backward_pruned.currents)
     assert len(with_reachability.interactions) == len(backward_pruned.interactions)
+
+
+def test_species_reachability_only_probes_sparse_model_partners() -> None:
+    class TrackingModel(AmplicolSMLeadingColorModel):
+        def __post_init__(self) -> None:
+            super().__post_init__()
+            self.vertex_lookups: list[tuple[int, int, bool]] = []
+
+        def vertices_accepting(
+            self,
+            left_pdg: int,
+            right_pdg: int,
+            *,
+            color_accuracy: str = "lc",
+        ) -> tuple[Vertex, ...]:
+            vertices = super().vertices_accepting(
+                left_pdg,
+                right_pdg,
+                color_accuracy=color_accuracy,
+            )
+            self.vertex_lookups.append((left_pdg, right_pdg, bool(vertices)))
+            return vertices
+
+    model = TrackingModel()
+
+    dag = compile_generic_dag("d d~ > h h z", model=model)
+
+    assert dag.has_amplitudes is True
+    assert model.vertex_lookups
+    assert all(
+        has_vertex or model.anti_particle(left_pdg) == right_pdg
+        for left_pdg, right_pdg, has_vertex in model.vertex_lookups
+    )
 
 
 def test_generic_dag_prunes_by_model_coupling_order_budget() -> None:

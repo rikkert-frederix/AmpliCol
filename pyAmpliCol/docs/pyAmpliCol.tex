@@ -393,10 +393,12 @@ provenance, and propagator contract.
 
 Kernel components remain named functions while the model is assembled, which
 keeps the generic lowering compact and auditable.  Before each stage evaluator
-is constructed, those calls are inlined into the stage expressions so that
-Symbolica can optimize and eliminate common subexpressions across component
-and current boundaries rather than preserving artificial function-call
-boundaries.
+is constructed, small component bodies are inlined so that Symbolica can
+eliminate common subexpressions across current boundaries.  Bodies above
+1 KiB remain explicit entries in Symbolica's \texttt{functions} map.  This
+prevents spin-2 and high-rank contact tensors from being expanded repeatedly
+while retaining stable evaluator-call abbreviations; production generation
+does not depend on Symbolica aliases.
 
 The UFO-declared real/complex types are retained during this step.  When a
 coupling's original UFO expression proves it to be purely real or purely
@@ -857,6 +859,37 @@ env PYTHONPATH=src dependencies/.venv/bin/python \
 \input{z_performance_ufo_sm_table.tex}
 \input{result_matrix_ufo_sm_nlc_table.tex}
 \input{result_matrix_ufo_sm_full_table.tex}
+
+
+\clearpage
+\begin{landscape}
+\section{Colorless UFO Models}
+
+The bundled \texttt{scalars} and \texttt{scalar\_gravity} examples exercise the
+same source and process pipeline without Standard-Model-specific kernels.
+Their UFO directories and loader JSON serializations compile to identical
+canonical IR fingerprints; an exact-version compiled model is then the common
+input to process generation.  Because every particle is a colour singlet, LC,
+NLC, and full colour all reduce to the unit colour metric.  A dedicated runtime
+regression checks that equality together with UFO/JSON/compiled-source parity.
+
+The scalar ladder contains direct vertices through valence ten.  Each contact
+is decomposed into balanced, non-propagating auxiliary currents, and the
+ten-point result is independently checked against an eager contraction of the
+original n-ary UFO tensor.  For scalar gravity, a massless graviton helicity
+tensor is built from equal-helicity transverse vector products:
+\[
+  \epsilon^{\mu\nu}_{\pm2}=\epsilon^\mu_\pm\epsilon^\nu_\pm .
+\]
+The resulting states are symmetric, transverse, traceless, and normalized by
+the formula-level arbitrary-precision tests.  Large tensor components stay in
+the Symbolica function map described above, avoiding repeated expression
+expansion during stage construction.
+
+\input{scalars_model_table.tex}
+\clearpage
+\input{scalar_gravity_model_table.tex}
+\end{landscape}
 
 
 \section{Why This Matches AmpliCol but Remains Python-Friendly}

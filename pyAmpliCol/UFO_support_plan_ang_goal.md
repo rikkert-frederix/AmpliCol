@@ -159,6 +159,7 @@ Implement model-general pyAmpliCol support on `pyamplicol_ufo_support`: retain t
 - After the numerical-only `n<=4` baseline, stop progression and investigate whenever the numerical gate, 20% generation gate, or 10% runtime gate fails.
 - Extend the external-SM ladder through `n<=6` as the second delivery milestone, again advancing multiplicity only after every lower applicable class is green; refresh the PDF, commit, and push once the complete `n<=6` milestone passes.
 - Before attempting any external-SM process above `n=6`, validate increasing-multiplicity scalar and scalar-gravity processes, including a case exercising the ten-point contact. Keep each documented generation attempt to five minutes or less, and build concise model-specific result matrices rather than mirroring the full SM campaign.
+- Do not rerun broad built-in or external-SM matrix multiplicities above `n=6` until the final external-SM campaign. Correct blocking implementation or validation defects immediately, but prefer targeted probes over benchmark refreshes during the scalar/scalar-gravity milestone.
 - Confirm UFO, loader JSON, compiled model, eager n-ary, and decomposed DAG agreement.
 - Confirm LC/NLC/full equality for colorless models.
 - Record UFO, loader-JSON, and compiled-model conversion/loading costs separately.
@@ -169,6 +170,8 @@ Implement model-general pyAmpliCol support on `pyamplicol_ufo_support`: retain t
 - Archive the current PDF, TeX tables, and JSON caches before adding UFO-derived results.
 - Retain complete built-in-SM matrices and add complete UFO-SM matrices for every currently populated LC/NLC/full and Z-family cell.
 - Populate and publish the external-SM matrices in staged `n<=4`, then `n<=6`, then `n>6` milestones; the scalar and scalar-gravity matrices must be completed between the `n<=6` and `n>6` SM stages.
+- Keep C++ matrix comparisons only through `n<=3`; invalidate or hide stale C++ cells above `n=3` rather than regenerating them.
+- Keep both built-in and external-SM dedicated Z-family tables complete and current through at least `n=6` throughout the remaining UFO work.
 - Add separate concise scalar and scalar-gravity process-result matrices to the PDF, using representative increasing-multiplicity processes and a five-minute maximum generation time per documented case.
 - Use separate generated JSON/TeX files per model source and color mode.
 - Regenerate results in increasing multiplicity order while preserving selected-flow/helicity-summed and all-flow/fixed-helicity semantics.

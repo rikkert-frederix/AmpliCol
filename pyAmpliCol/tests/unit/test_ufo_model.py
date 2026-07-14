@@ -36,6 +36,7 @@ from pyamplicol.ufo_ir import (
     _minkowski_dot,
     _transverse_yang_mills_three_vector_components,
     compile_ufo_model_ir,
+    eager_color_singlet_vertex_term_components,
 )
 from pyamplicol.ufo_model import CompiledUFOModel
 
@@ -763,6 +764,34 @@ def test_scalar_contacts_use_complete_balanced_provenance_trees() -> None:
         scalar_pdg,
         color_accuracy="full",
     ) == model.vertices_for_inputs(scalar_pdg, scalar_pdg)
+
+
+def test_ten_scalar_contact_has_independent_eager_nary_oracle() -> None:
+    compiled = compile_model_source(
+        bundled_model_path("scalars", "json"),
+        use_cache=False,
+    )
+    term = next(
+        candidate
+        for candidate in compiled.ir.vertex_terms
+        if candidate.valence == 10
+        and candidate.particles == ("scalar_0",) * 10
+    )
+    input_legs = set(range(term.valence)) - {0}
+
+    components = eager_color_singlet_vertex_term_components(
+        term,
+        compiled.ir.particles,
+        result_leg=0,
+        input_components={leg: (E("1"),) for leg in input_legs},
+        input_momenta={
+            leg: (E("1"), E("0"), E("0"), E("0"))
+            for leg in input_legs
+        },
+        coupling=E("1𝑖"),
+    )
+
+    assert components == (E("1𝑖"),)
 
 
 def test_model_parameter_evaluator_maps_external_inputs_to_derived_slots(
