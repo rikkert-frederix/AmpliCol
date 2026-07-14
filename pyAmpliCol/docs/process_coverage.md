@@ -23,7 +23,7 @@ This document separates three layers that are easy to conflate:
 |---|---|---|
 | Legacy particle vocabulary | Implemented in process/model metadata | QCD partons, `a`, `z`, `w+`, `w-`, charged leptons, neutrinos, and `h`. |
 | Model sources | Implemented for the built-in SM, trusted UFO directories, loader JSON, and exact-version compiled models | `--model` resolves each source into the same immutable `CompiledModel`; UFO imports run in an isolated worker, while data-only JSON starts after import. |
-| Generic UFO lowering | External SM validated point-wise through `n <= 4` | Loader tensors are normalized, simplified through Idenso/Spenso, projected to the Weyl and LC/NLC/full-colour bases, oriented into current kernels, and inlined before evaluator construction. Unsupported model features fail during aggregate preflight. |
+| Generic UFO lowering | External SM validated point-wise through every populated reference at `n <= 6` | Loader tensors are normalized, simplified through Idenso/Spenso, projected to the Weyl and LC/NLC/full-colour bases, oriented into current kernels, and inlined before evaluator construction. The 144-case fixture covers all three colour modes through `n=5` and LC at `n=6`; unsupported model features fail during aggregate preflight. |
 | Run cards and runtime parameters | Implemented | Every public subcommand accepts an `[arguments]` TOML run card with explicit CLI overrides. Generated artifacts carry a complete complex-JSON parameter card; Rusticol accepts validated partial overrides at runtime. |
 | Compiled-model artifacts and cache | Implemented | `compile-model` writes portable `*.pyAmplicol-model.json` data and process generation embeds the exact model. Dependency fingerprints and source/restriction content keys prevent stale reuse. |
 | Process sets with `PROC | PROC` | Implemented in parser/CLI artifacts | Multi-entry generation writes a root `process_set_manifest.json`, a root standalone checker wrapper, and nested subprocess artifacts. |
@@ -376,8 +376,10 @@ model-owned lowering rules instead of process-family branches.
 External UFO/JSON models use the parallel `CompiledModel` route. Its preflight
 reports unsupported particles, tensors, functions, propagators, and fermion
 flows together; accepted terms are oriented into model-owned kernels before
-the same DAG compiler is entered. The bundled external SM currently passes the
-94-case LC/NLC/full-colour fixture through `n <= 4`.
+the same DAG compiler is entered. The bundled external SM currently passes all
+144 populated LC/NLC/full-colour fixture cases through `n <= 6`; the `n=6`
+fixture currently contains LC references because the built-in NLC/full matrix
+caches stop at `n=5`.
 
 The generic colour planner and current planner already use the canonical
 all-outgoing process IR.  The colour planner enumerates leading-colour open

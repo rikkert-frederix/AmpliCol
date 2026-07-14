@@ -193,3 +193,42 @@ def test_bootstrap_tools_ready_requires_maturin_cli(monkeypatch, tmp_path: Path)
 
     assert installer.bootstrap_tools_are_ready() is False
     assert any("maturin" in command for command in calls)
+
+
+def test_ensure_maturin_reuses_complete_managed_toolchain(monkeypatch) -> None:
+    installer = _load_installer_module()
+    calls: list[list[object]] = []
+
+    monkeypatch.setattr(installer, "create_venv", lambda: None)
+    monkeypatch.setattr(installer, "bootstrap_tools_are_ready", lambda: True)
+    monkeypatch.setattr(installer, "venv_python", lambda: Path("managed-python"))
+    monkeypatch.setattr(installer, "venv_environment", lambda: {})
+    monkeypatch.setattr(
+        installer,
+        "run",
+        lambda command, **_kwargs: calls.append(command),
+    )
+
+    installer.ensure_maturin()
+
+    assert calls == [[Path("managed-python"), "-m", "maturin", "--version"]]
+
+
+def test_ensure_maturin_recompile_only_requires_maturin_cli(monkeypatch) -> None:
+    installer = _load_installer_module()
+    calls: list[list[object]] = []
+
+    monkeypatch.setattr(installer, "create_venv", lambda: None)
+    monkeypatch.setattr(installer, "bootstrap_tools_are_ready", lambda: False)
+    monkeypatch.setattr(installer, "maturin_cli_is_ready", lambda: True)
+    monkeypatch.setattr(installer, "venv_python", lambda: Path("managed-python"))
+    monkeypatch.setattr(installer, "venv_environment", lambda: {})
+    monkeypatch.setattr(
+        installer,
+        "run",
+        lambda command, **_kwargs: calls.append(command),
+    )
+
+    installer.ensure_maturin(require_complete_bootstrap=False)
+
+    assert calls == [[Path("managed-python"), "-m", "maturin", "--version"]]

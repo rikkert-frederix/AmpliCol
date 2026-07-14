@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -174,11 +176,15 @@ def _validate_case(
 
     case_id = str(case["id"])
     process_output = output_root / "processes" / case_id.replace(":", "_")
+    generation_log = output_root / "logs" / f"{case_id.replace(':', '_')}.generate.log"
     if regenerate and process_output.exists():
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        archive = output_root / "archive" / stamp / process_output.name
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(process_output), str(archive))
+        archive = _archive_process_output(output_root, process_output)
+        print(f"    archived existing process output at {archive}", flush=True)
+    elif process_output.exists() and not (
+        process_output / "process_manifest.json"
+    ).is_file():
+        archive = _archive_process_output(output_root, process_output)
+        print(f"    archived incomplete process output at {archive}", flush=True)
     if not (process_output / "process_manifest.json").is_file():
         command = _generation_command(
             case,
@@ -188,16 +194,12 @@ def _validate_case(
             n_cores=n_cores,
         )
         environment = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
-        completed = subprocess.run(
+        _run_generation_command(
             command,
             cwd=ROOT,
             env=environment,
-            text=True,
-            capture_output=True,
+            log_path=generation_log,
         )
-        if completed.returncode:
-            detail = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(f"generation failed ({completed.returncode}): {detail}")
     point = np.asarray(
         [
             [
@@ -232,7 +234,57 @@ def _validate_case(
         "tolerance": tolerance,
         "process_output": os.path.relpath(process_output.resolve(), ROOT),
         "model_parameters": os.path.relpath(parameter_card.resolve(), ROOT),
+        "generation_log": (
+            os.path.relpath(generation_log.resolve(), ROOT)
+            if generation_log.is_file()
+            else None
+        ),
     }
+
+
+def _archive_process_output(output_root: Path, process_output: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    archive = output_root / "archive" / stamp / process_output.name
+    archive.parent.mkdir(parents=True, exist_ok=False)
+    shutil.move(str(process_output), str(archive))
+    return archive
+
+
+def _run_generation_command(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    log_path: Path,
+) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    tail: deque[str] = deque(maxlen=80)
+    with log_path.open("w", encoding="utf-8") as log:
+        log.write(f"$ {shlex.join(command)}\n")
+        log.flush()
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            log.write(line)
+            log.flush()
+            tail.append(line)
+            if line.strip():
+                print(f"    {line}", end="", flush=True)
+        returncode = process.wait()
+    if returncode:
+        detail = "".join(tail).strip()
+        raise RuntimeError(
+            f"generation failed ({returncode}); log={log_path}"
+            + (f": {detail}" if detail else "")
+        )
 
 
 def _generation_command(
@@ -262,9 +314,14 @@ def _generation_command(
         "--symbolica-n-cores",
         str(n_cores),
         "--batch-size",
-        "16",
+        "128" if color == "lc" else "64",
+        "--symbolica-output-chunk-size",
+        "128",
+        "--symbolica-output-chunk-strategy",
+        "auto" if color == "lc" else "uniform",
         "--model-cache-dir",
         str(model_cache),
+        "--monitor",
         "--json",
     ]
     base_key = str(case["base_key"])

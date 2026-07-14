@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import os
+import shlex
 import signal
 import shutil
 import subprocess
@@ -340,6 +341,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             "results are attached to seeded cells."
         ),
     )
+    parser.add_argument(
+        "--reuse-validation-artifacts",
+        action="store_true",
+        help=(
+            "For matching external-model NLC/full JIT cells, reuse and retime "
+            "completed process artifacts recorded by --validation-report when "
+            "their retained generation log proves that the matrix settings match."
+        ),
+    )
+    parser.add_argument(
+        "--reuse-validation-min-generation",
+        type=float,
+        default=90.0,
+        metavar="SECONDS",
+        help=(
+            "Only reuse validation artifacts whose recorded generation time is "
+            "at least this value; faster cells retain the median-of-three matrix "
+            "generation policy (default: 90)."
+        ),
+    )
     parser.add_argument("--data", type=Path, default=None)
     parser.add_argument("--table", type=Path, default=None)
     parser.add_argument("--output-root", type=Path, default=None)
@@ -435,6 +456,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--retime-amplicol-all-flow",
+        action="store_true",
+        help=(
+            "Retime only the existing LC AmpliCol all-flow/fixed-helicity "
+            "reference with the direct imode=2 probe. Selected-flow generation "
+            "and runtime records, pyAmpliCol modes, and validation are preserved."
+        ),
+    )
+    parser.add_argument(
         "--only-missing",
         action="store_true",
         help="Only run requested modes whose current table entry is missing or failed.",
@@ -490,6 +520,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.reuse_validation_artifacts and args.validation_report is None:
+        parser.error("--reuse-validation-artifacts requires --validation-report")
+    if args.reuse_validation_min_generation < 0.0:
+        parser.error("--reuse-validation-min-generation must be non-negative")
     if args.retime_existing and args.clean_output_artifacts:
         parser.error("--retime-existing cannot be combined with --clean-output-artifacts")
     if args.retime_existing and args.only_missing:
@@ -501,6 +535,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         args.skip_amplicol = True
     color_accuracy = str(args.color_accuracy).lower()
+    if args.retime_amplicol_all_flow and color_accuracy != "lc":
+        parser.error("--retime-amplicol-all-flow is available only for LC tables")
+    if args.retime_amplicol_all_flow and args.retime_existing:
+        parser.error(
+            "--retime-amplicol-all-flow cannot be combined with --retime-existing"
+        )
+    if args.retime_amplicol_all_flow:
+        args.skip_jit = True
+        args.skip_cpp_o3 = True
+        args.skip_amplicol = False
     model_source = _normalized_model_source(args.model)
     model_profile = _matrix_model_profile(model_source)
     model_label = str(args.model_label or _matrix_model_label(model_profile))
@@ -536,6 +580,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             color_accuracy=color_accuracy,
             validation_report=args.validation_report,
         )
+    validation_artifacts = (
+        _validation_report_results(args.validation_report)
+        if args.reuse_validation_artifacts
+        else {}
+    )
     generate_ns = _parse_n_values(args.generate_data)
     show_ns = _parse_n_values(args.show_data)
     benchmark_model_source = model_source
@@ -633,12 +682,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                         skip_cpp_o3=args.skip_cpp_o3,
                         reuse_lc_all_flow=args.reuse_lc_all_flow,
                         retime_existing=args.retime_existing,
+                        retime_amplicol_all_flow=args.retime_amplicol_all_flow,
                         only_missing=args.only_missing,
                         validate=args.validate,
                         clean_output_artifacts=args.clean_output_artifacts,
                         color_accuracy=color_accuracy,
                         model_source=benchmark_model_source,
                         model_profile=model_profile,
+                        validation_artifact=validation_artifacts.get(
+                            f"{color_accuracy}:{base.key}:n{n_final}"
+                        ),
+                        reuse_validation_artifacts=args.reuse_validation_artifacts,
+                        reuse_validation_min_generation=(
+                            args.reuse_validation_min_generation
+                        ),
                     )
                     for base, n_final, process in work_items
                 ]
@@ -673,12 +730,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                     skip_cpp_o3=args.skip_cpp_o3,
                     reuse_lc_all_flow=args.reuse_lc_all_flow,
                     retime_existing=args.retime_existing,
+                    retime_amplicol_all_flow=args.retime_amplicol_all_flow,
                     only_missing=args.only_missing,
                     validate=args.validate,
                     clean_output_artifacts=args.clean_output_artifacts,
                     color_accuracy=color_accuracy,
                     model_source=benchmark_model_source,
                     model_profile=model_profile,
+                    validation_artifact=validation_artifacts.get(
+                        f"{color_accuracy}:{base.key}:n{n_final}"
+                    ),
+                    reuse_validation_artifacts=args.reuse_validation_artifacts,
+                    reuse_validation_min_generation=(
+                        args.reuse_validation_min_generation
+                    ),
                 )
                 _write_table_data_and_maybe_pdf(
                     data_path,
@@ -800,12 +865,16 @@ def _generate_case(
     skip_cpp_o3: bool,
     reuse_lc_all_flow: bool,
     retime_existing: bool,
+    retime_amplicol_all_flow: bool,
     only_missing: bool,
     validate: bool,
     clean_output_artifacts: bool,
     color_accuracy: str,
     model_source: str,
     model_profile: str,
+    validation_artifact: Mapping[str, Any] | None,
+    reuse_validation_artifacts: bool,
+    reuse_validation_min_generation: float,
 ) -> None:
     case = _case_payload(data, base, n_final)
     case["process"] = process
@@ -867,6 +936,21 @@ def _generate_case(
         jobs=jobs,
         color_accuracy=color_accuracy,
     )
+    if retime_amplicol_all_flow:
+        existing_reference = dict(_mode(case, "amplicol"))
+        case["amplicol"] = _retime_amplicol_all_flow_case(
+            existing_reference,
+            process=process,
+            base=base,
+            n_final=n_final,
+            output_root=output_root,
+            target_runtime=target_runtime,
+            max_points=amplicol_points,
+            jobs=jobs,
+        )
+        case["status"] = "done"
+        case["updated_at"] = _now()
+        return
     if not skip_amplicol and _should_run_mode(
         case,
         "amplicol",
@@ -982,26 +1066,39 @@ def _generate_case(
                 color_accuracy=color_accuracy,
             )
         else:
-            refreshed_jit_mode = _run_pyamplicol_case(
-                process,
-                base=pyamplicol_base,
+            refreshed_jit_mode = _reuse_validation_jit_artifact(
+                validation_artifact,
+                process=process,
+                base=base,
                 n_final=n_final,
-                backend_key="jit",
-                output_dir=jit_output_dir,
-                deadline_started=time.monotonic(),
-                time_limit=None,
                 target_runtime=target_runtime,
-                n_cores=n_cores,
-                selected_jit_opt_level=selected_jit_opt_level,
-                selected_lc_sector_ids=selected_lc_sector_ids,
-                reference_color_order=reference_color_order,
                 matrix_settings=jit_settings,
                 color_accuracy=color_accuracy,
-                model_source=model_source,
                 model_profile=model_profile,
-                reuse_lc_all_flow=reuse_lc_all_flow,
-                existing_mode=existing_jit_mode,
+                minimum_generation_s=reuse_validation_min_generation,
+                enabled=reuse_validation_artifacts,
             )
+            if refreshed_jit_mode is None:
+                refreshed_jit_mode = _run_pyamplicol_case(
+                    process,
+                    base=pyamplicol_base,
+                    n_final=n_final,
+                    backend_key="jit",
+                    output_dir=jit_output_dir,
+                    deadline_started=time.monotonic(),
+                    time_limit=None,
+                    target_runtime=target_runtime,
+                    n_cores=n_cores,
+                    selected_jit_opt_level=selected_jit_opt_level,
+                    selected_lc_sector_ids=selected_lc_sector_ids,
+                    reference_color_order=reference_color_order,
+                    matrix_settings=jit_settings,
+                    color_accuracy=color_accuracy,
+                    model_source=model_source,
+                    model_profile=model_profile,
+                    reuse_lc_all_flow=reuse_lc_all_flow,
+                    existing_mode=existing_jit_mode,
+                )
         if reuse_lc_all_flow and not retime_existing:
             refresh_validation = _selected_refresh_validation(
                 existing_jit_mode,
@@ -1491,6 +1588,165 @@ def _run_amplicol_all_flow_probe(
     return run, probe_points
 
 
+def _retime_amplicol_all_flow_case(
+    existing: dict[str, Any],
+    *,
+    process: str,
+    base: BaseProcess,
+    n_final: int,
+    output_root: Path,
+    target_runtime: float,
+    max_points: int,
+    jobs: int,
+) -> dict[str, Any]:
+    if not _ok(existing):
+        print(
+            f"[matrix] no successful AmpliCol reference for {base.key} n={n_final}; "
+            "leaving the reference unchanged",
+            flush=True,
+        )
+        return existing
+    if existing.get("all_flow_runtime_us_per_point") is None:
+        print(
+            f"[matrix] no retained AmpliCol all-flow timing for {base.key} n={n_final}; "
+            "leaving the reference unchanged",
+            flush=True,
+        )
+        return existing
+
+    stored_helicities = existing.get("all_flow_amplicol_helicities")
+    if isinstance(stored_helicities, list) and stored_helicities:
+        helicities = tuple(int(value) for value in stored_helicities)
+    else:
+        helicities = tuple(
+            int(value)
+            for value in _fixed_helicity_choice(process, base)["amplicol_helicities"]
+        )
+    point = generic_validation_point(process)
+    retained_dir = output_root / base.key / f"n{n_final}" / "amplicol_all_flow"
+    retained_dir.mkdir(parents=True, exist_ok=True)
+    process_file = retained_dir / "processes.txt"
+    (retained_dir / "momenta.json").write_text(
+        json.dumps(
+            [
+                {"pdg": int(momentum.pdg), "momentum": list(momentum.momentum)}
+                for momentum in point
+            ],
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    print(
+        f"[matrix] retiming AmpliCol imode=2 all-flow reference: {process} "
+        f"(max {max_points} points, target {target_runtime:g}s)",
+        flush=True,
+    )
+    adapter = AmplicolAdapter(REPO_ROOT, jobs=jobs, timeout=None)
+    run, probe_points = _run_amplicol_all_flow_probe(
+        adapter,
+        process,
+        base=base,
+        process_file=process_file,
+        point=point,
+        helicities=helicities,
+        target_runtime=target_runtime,
+        amplicol_points=max_points,
+        process_list_backend="python",
+    )
+    runtime_s = _color_probe_runtime_per_point(run, probe_points)
+    if runtime_s is None:
+        raise RuntimeError("AmpliCol imode=2 retime did not report a total runtime")
+    setup_s = _amplicol_color_probe_setup_s_from_run(run)
+
+    payload = dict(existing)
+    old_reference_value = _optional_float(existing.get("all_flow_reference_value"))
+    new_reference_value = _optional_float(run.first_point_matrix_element)
+    payload.update(
+        {
+            "all_flow_generation_s": setup_s,
+            "all_flow_generation_source": (
+                "amplicol_color_probe_imode2_explicit_setup"
+            ),
+            "all_flow_runtime_us_per_point": 1.0e6 * runtime_s,
+            "all_flow_runtime_probe_points": int(probe_points),
+            "all_flow_runtime_probe_max_points": int(max_points),
+            "all_flow_runtime_probe_target_runtime_s": float(target_runtime),
+            "all_flow_reference_value": new_reference_value,
+            "all_flow_current_count": run.color_probe_current_count,
+            "all_flow_vertex_count": run.color_probe_vertex_count,
+            "all_flow_amplitude_count": run.color_probe_amplitude_count,
+            "all_flow_color_order_count": run.color_probe_color_order_count,
+            "all_flow_color_probe_components": (
+                None
+                if run.color_probe_components is None
+                else list(run.color_probe_components)
+            ),
+            "all_flow_color_probe_raw_components": (
+                None
+                if run.color_probe_raw_components is None
+                else list(run.color_probe_raw_components)
+            ),
+            "all_flow_timing_rows": [
+                {"label": row.label, "seconds": row.seconds, "note": row.note}
+                for row in run.timing_rows
+            ],
+            "all_flow_process_file": str(run.process_file),
+            "all_flow_retimed_at": _now(),
+            "all_flow_timing_instrumentation": "timer-free-combined-outer-loop-v2",
+            "all_flow_retime_validation": {
+                "status": (
+                    "ok"
+                    if old_reference_value is None
+                    or new_reference_value is None
+                    or _relative_difference(old_reference_value, new_reference_value)
+                    <= VALIDATION_REL_TOL
+                    else "failed"
+                ),
+                "previous_value": old_reference_value,
+                "retimed_value": new_reference_value,
+                "relative_difference": (
+                    None
+                    if old_reference_value is None or new_reference_value is None
+                    else _relative_difference(old_reference_value, new_reference_value)
+                ),
+                "tolerance": VALIDATION_REL_TOL,
+            },
+        }
+    )
+    retained_commands = [
+        command
+        for command in existing.get("commands", [])
+        if not _command_is_amplicol_color_probe(command)
+    ]
+    new_commands = [
+        {
+            "args": command.args,
+            "elapsed_s": command.elapsed_s,
+            "returncode": command.returncode,
+        }
+        for command in run.commands
+    ]
+    payload["commands"] = [*retained_commands, *new_commands]
+    payload["commands_s"] = [
+        elapsed
+        for command in payload["commands"]
+        if (elapsed := _command_record_elapsed_s(command)) is not None
+    ]
+    return payload
+
+
+def _command_is_amplicol_color_probe(command: Any) -> bool:
+    args = _command_record_args(command)
+    if not args:
+        return False
+    if args[0] == "./amplicol_color_probe":
+        return True
+    return args[0] == "make" and "amplicol_color_probe" in args[1:]
+
+
 def _fixed_helicity_choice(
     process: str,
     base: BaseProcess,
@@ -1967,7 +2223,12 @@ def _amplicol_color_probe_setup_s_from_records(
     commands: Sequence[Any],
     timing_rows: Sequence[Any],
 ) -> float | None:
-    """Return the imode=2 colour-probe setup/build cost outside the timed loop."""
+    """Return the process-specific imode=2 setup cost outside the timed loop."""
+
+    for row in timing_rows:
+        label = row.get("label") if isinstance(row, dict) else getattr(row, "label", "")
+        if str(label).strip().lower() == "generation setup":
+            return _timing_row_seconds(row)
 
     probe_index: int | None = None
     probe_elapsed: float | None = None
@@ -1980,23 +2241,16 @@ def _amplicol_color_probe_setup_s_from_records(
                 probe_elapsed = elapsed
     if probe_index is None or probe_elapsed is None:
         return None
-    build_elapsed = 0.0
-    for command in commands[:probe_index]:
-        args = _command_record_args(command)
-        if (
-            args
-            and str(args[0]) == "make"
-            and any(str(arg) == "amplicol_color_probe" for arg in args[1:])
-        ):
-            elapsed = _command_record_elapsed_s(command)
-            if elapsed is not None:
-                build_elapsed = elapsed
     timed_total = _timing_total_seconds(timing_rows)
     if timed_total is None:
-        return build_elapsed if build_elapsed > 0.0 else None
-    setup_elapsed = max(0.0, probe_elapsed - timed_total)
-    total = build_elapsed + setup_elapsed
-    return total if total > 0.0 else None
+        return None
+    diagnostic_elapsed = sum(
+        max(0.0, _timing_row_seconds(row) or 0.0)
+        for row in timing_rows
+        if "outer-loop-diagnostic" in _timing_row_note(row)
+    )
+    setup_elapsed = max(0.0, probe_elapsed - timed_total - diagnostic_elapsed)
+    return setup_elapsed if setup_elapsed > 0.0 else None
 
 
 def _command_record_args(command: Any) -> list[str]:
@@ -2014,6 +2268,16 @@ def _command_record_elapsed_s(command: Any) -> float | None:
         else getattr(command, "elapsed_s", None)
     )
     return _optional_float(value)
+
+
+def _timing_row_seconds(row: Any) -> float | None:
+    value = row.get("seconds") if isinstance(row, dict) else getattr(row, "seconds", None)
+    return _optional_float(value)
+
+
+def _timing_row_note(row: Any) -> str:
+    value = row.get("note", "") if isinstance(row, dict) else getattr(row, "note", "")
+    return str(value)
 
 
 def _timing_total_seconds(timing_rows: Sequence[Any]) -> float | None:
@@ -2975,6 +3239,211 @@ def _run_pyamplicol_case(
     return payload
 
 
+def _reuse_validation_jit_artifact(
+    record: Mapping[str, Any] | None,
+    *,
+    process: str,
+    base: BaseProcess,
+    n_final: int,
+    target_runtime: float,
+    matrix_settings: dict[str, Any],
+    color_accuracy: str,
+    model_profile: str,
+    minimum_generation_s: float,
+    enabled: bool,
+) -> dict[str, Any] | None:
+    if (
+        not enabled
+        or record is None
+        or model_profile == "built-in-sm"
+        or color_accuracy == "lc"
+        or str(record.get("status")) != "ok"
+    ):
+        return None
+    expected_id = f"{color_accuracy}:{base.key}:n{n_final}"
+    if str(record.get("id")) != expected_id or str(record.get("process")) != process:
+        return None
+    raw_output = record.get("process_output")
+    raw_log = record.get("generation_log")
+    if not isinstance(raw_output, str) or not isinstance(raw_log, str):
+        return None
+    output_dir = _validation_report_path(raw_output)
+    generation_log = _validation_report_path(raw_log)
+    if not (output_dir / "process_manifest.json").is_file() or not generation_log.is_file():
+        return None
+
+    log_text = generation_log.read_text(encoding="utf-8")
+    try:
+        generation = _parse_json_output(log_text)
+        command = _validation_generation_command(log_text)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    generation_s = _optional_float(generation.get("generation_s"))
+    if generation_s is None or generation_s < float(minimum_generation_s):
+        return None
+    if not _validation_generation_matches_matrix(
+        command,
+        process=process,
+        color_accuracy=color_accuracy,
+        base=base,
+    ):
+        print(
+            f"[matrix] validation artifact settings do not match {expected_id}; "
+            "regenerating",
+            flush=True,
+        )
+        return None
+
+    print(
+        f"[matrix] reusing validated artifact for {expected_id}: {output_dir} "
+        f"(recorded generation {generation_s:.3f}s)",
+        flush=True,
+    )
+    timing_log = _progress_log_path(output_dir, "matrix_time")
+    _preserve_timing_log(timing_log)
+    timed = _time_existing_pyamplicol_artifact(
+        output_dir,
+        target_runtime=target_runtime,
+        batch_size=DEFAULT_NON_LC_BATCH_SIZE,
+        log_path=timing_log,
+    )
+    profile = timed.get("profile", {})
+    if not isinstance(profile, dict):
+        profile = {}
+    lowering_status = generation.get("lowering_status", {})
+    if not isinstance(lowering_status, dict):
+        lowering_status = {}
+    generation = dict(generation)
+    generation["_command_args"] = command
+    generation["_command_elapsed_s"] = generation_s
+    generation["_progress_log"] = str(generation_log)
+    generation["_generation_samples"] = [
+        {
+            "sample_index": 1,
+            "artifact_dir": str(output_dir),
+            "command_elapsed_s": generation_s,
+            "internal_generation_s": generation_s,
+            "jit_compile_s": _optional_float(generation.get("jit_compile_s")),
+        }
+    ]
+    generation["_generation_sample_count"] = 1
+    generation["_generation_median_sample_index"] = 1
+    generation["_artifact_sample_index"] = 1
+    generation["_artifact_command_elapsed_s"] = generation_s
+    generation["_artifact_internal_generation_s"] = generation_s
+    return {
+        "mode": "pyAmpliCol - staged-DAG | JIT",
+        "status": "ok",
+        "started_at": _now(),
+        "finished_at": _now(),
+        "output_dir": str(output_dir),
+        "selected_output_dir": str(output_dir),
+        "all_flow_output_dir": None,
+        "generation_s": generation_s,
+        "selected_generation_s": generation_s,
+        "all_flow_generation_s": None,
+        "internal_generation_s": generation_s,
+        "selected_internal_generation_s": generation_s,
+        "all_flow_internal_generation_s": None,
+        "jit_compile_s": _optional_float(generation.get("jit_compile_s")),
+        "jit_fraction_of_generation": _optional_float(
+            generation.get("jit_fraction_of_generation")
+        ),
+        "current_count": lowering_status.get("current_count"),
+        "interaction_count": lowering_status.get("interaction_count"),
+        "amplitude_root_count": lowering_status.get("amplitude_root_count"),
+        "amplitude_color_sector_count": lowering_status.get(
+            "amplitude_color_sector_count"
+        ),
+        "internal_current_color_sector_count": lowering_status.get(
+            "internal_current_color_sector_count"
+        ),
+        "runtime_us_per_point": _optional_float(
+            profile.get("core_evaluator_us_per_point")
+        ),
+        "wall_us_per_point": _optional_float(profile.get("wall_us_per_point")),
+        "samples": profile.get("samples"),
+        "selected_jit_optimization_level": 1,
+        "runtime_lc_sector_ids": None,
+        "selected_lc_sector_ids": None,
+        "reference_color_order": None,
+        "generate_payload": _compact_payload(generation),
+        "selected_generate_payload": _compact_payload(generation),
+        "all_flow_generate_payload": None,
+        "time_payload": _compact_payload(timed),
+        "all_flow_time_payload": None,
+        "generate_log": str(generation_log),
+        "selected_generate_log": str(generation_log),
+        "all_flow_generate_log": None,
+        "time_log": timed.get("_progress_log"),
+        "all_flow_time_log": None,
+        "matrix_settings": matrix_settings,
+        "validation_artifact_reuse": {
+            "source_report_id": expected_id,
+            "process_output": str(output_dir),
+            "generation_log": str(generation_log),
+            "numerical_status": str(record.get("status")),
+            "relative_difference": _optional_float(
+                record.get("relative_difference")
+            ),
+        },
+    }
+
+
+def _validation_report_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    return path.resolve() if path.is_absolute() else (PYAMPLICOL_DIR / path).resolve()
+
+
+def _validation_generation_command(log_text: str) -> list[str]:
+    first_line = log_text.splitlines()[0].strip()
+    if not first_line.startswith("$"):
+        raise ValueError("validation generation log has no command preamble")
+    return shlex.split(first_line[1:].strip())
+
+
+def _validation_generation_matches_matrix(
+    command: Sequence[str],
+    *,
+    process: str,
+    color_accuracy: str,
+    base: BaseProcess,
+) -> bool:
+    required = {
+        "--color-accuracy": color_accuracy,
+        "--symbolica-evaluator-backend": "jit",
+        "--symbolica-jit-optimization-level": "1",
+        "--batch-size": str(DEFAULT_NON_LC_BATCH_SIZE),
+        "--symbolica-output-chunk-size": str(DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE),
+        "--symbolica-output-chunk-strategy": "uniform",
+    }
+    if any(_command_option(command, option) != value for option, value in required.items()):
+        return False
+    if base.key in QCD_ONLY_EXTERNAL_SM_FAMILIES and not _command_has_pair(
+        command,
+        "--max-coupling-order",
+        "QED=0",
+    ):
+        return False
+    return process in command
+
+
+def _command_option(command: Sequence[str], option: str) -> str | None:
+    for index, value in enumerate(command):
+        if value == option and index + 1 < len(command):
+            return str(command[index + 1])
+        if value.startswith(f"{option}="):
+            return value.split("=", 1)[1]
+    return None
+
+
+def _command_has_pair(command: Sequence[str], option: str, value: str) -> bool:
+    return any(
+        item == option and index + 1 < len(command) and command[index + 1] == value
+        for index, item in enumerate(command)
+    ) or f"{option}={value}" in command
+
+
 def _retime_pyamplicol_case(
     existing_mode: Mapping[str, Any],
     *,
@@ -3688,6 +4157,13 @@ def render_latex_table(
             r"\matrixslot{0.94in}{#6}"
             r"\end{tabular}}"
         ),
+        (
+            r"\providecommand{\matrixcellnonlcnocpp}[4]{"
+            r"\begin{tabular}[t]{@{}l@{\hspace{0.012in}}l@{}}"
+            r"\matrixslot{0.52in}{#1}&\matrixslot{0.94in}{#2}\\"
+            r"\matrixslot{0.52in}{#3}&\matrixslot{0.94in}{#4}"
+            r"\end{tabular}}"
+        ),
         r"\providecommand{\matrixrefslot}[1]{\makebox[0.59in][l]{#1}}",
         (
             r"\providecommand{\matrixrefpair}[2]{"
@@ -3968,7 +4444,12 @@ def _matrix_short_intro_latex(
         r"slots are \AC, \PAC\ SymJIT O1 selected flow, "
         r"and \PAC\ SymJIT O1 all flows. "
         if color_accuracy == "lc"
-        else r"slots are \AC, \PAC\ JIT O1, and \PAC\ C++ O3. "
+        else (
+            r"slots are \AC\ and \PAC\ JIT O1; \PAC\ C++ O3 is also shown "
+            r"only through $n=3$. "
+            if color_accuracy == "nlc"
+            else r"slots are \AC, \PAC\ JIT O1, and \PAC\ C++ O3. "
+        )
     )
     return [
         (
@@ -4003,6 +4484,14 @@ def _matrix_long_intro_latex(
             r"then all-flow/fixed-helicity; \PAC\ SymJIT O1 uses matching pruned "
             r"and shared artifacts.  Entries are generation seconds above runtime wall "
             r"microseconds per point; \PAC-only cells are absolute. "
+        )
+    elif color_accuracy == "nlc":
+        description = (
+            r"\noindent\scriptsize Each cell is raw-library \AC\ and \PAC\ JIT O1; "
+            r"the optional \PAC\ C++ O3 slot is shown only through $n=3$.  Entries "
+            r"are generation seconds above runtime microseconds per point; \PAC\ "
+            r"runtime shows coloured wall and black pure-evaluator ratios, or "
+            r"absolute time without an \AC\ reference. "
         )
     else:
         description = (
@@ -4046,8 +4535,10 @@ def _matrix_run_settings_latex(color_accuracy: str) -> list[str]:
         reference_text = (
             r"\AC\ uses the raw generated-library path "
             r"\texttt{amplicol\_generate --library=create-raw} followed by "
-            r"\texttt{amplicol\_color\_library\_probe}, preserving NLC/full "
-            r"colour-order interferences."
+            r"\texttt{amplicol\_color\_library\_probe}.  One raw evaluator call "
+            r"returns every stored helicity amplitude for a phase-space point; "
+            r"the probe then applies the requested sparse NLC/full colour "
+            r"contractions without reevaluating those amplitudes."
         )
     lines = [
         r"\paragraph{Settings.}",
@@ -4076,7 +4567,19 @@ def _matrix_run_settings_latex(color_accuracy: str) -> list[str]:
             + (
                 r"The two LC workloads are displayed side by side."
                 if color_accuracy == "lc"
-                else r"Only C++ O3 generation is subject to the 15-minute compile cap."
+                else (
+                    r"C++ O3 is displayed only through $n=3$; its generation alone "
+                    r"is subject to the 15-minute compile cap."
+                    if color_accuracy == "nlc"
+                    else r"Only C++ O3 generation is subject to the 15-minute compile cap."
+                )
+            )
+            + (
+                r" The timer-free \AC\ \texttt{imode=2} references are refreshed "
+                r"through $n=6$; retained $n=7\ldots9$ measurements await the final "
+                r"high-multiplicity pass."
+                if color_accuracy == "lc"
+                else ""
             )
         ),
         r"\par\vspace{0.15em}",
@@ -4138,6 +4641,12 @@ def _matrix_status_notes_latex(
                 ("pyamplicol_jit", r"\PAC\ JIT"),
                 ("pyamplicol_cpp_o3", r"\PAC\ C++ O3"),
             ):
+                if (
+                    color_accuracy == "nlc"
+                    and key == "pyamplicol_cpp_o3"
+                    and n_final > 3
+                ):
+                    continue
                 mode = _mode(case, key)
                 status = str(mode.get("status", ""))
                 error = str(mode.get("error", ""))
@@ -4407,10 +4916,17 @@ def _latex_cell(case: dict[str, Any], *, color_accuracy: str) -> str:
             _absolute_runtime_pair(jit),
             _absolute_runtime_pair(cpp),
         )
-    cell = (
-        rf"\matrixcellnonlc{{{gen[0]}}}{{{gen[1]}}}{{{gen[2]}}}"
-        rf"{{{run[0]}}}{{{run[1]}}}{{{run[2]}}}"
-    )
+    hide_cpp = color_accuracy == "nlc" and int(case.get("n_final", 0)) > 3
+    if hide_cpp:
+        cell = (
+            rf"\matrixcellnonlcnocpp{{{gen[0]}}}{{{gen[1]}}}"
+            rf"{{{run[0]}}}{{{run[1]}}}"
+        )
+    else:
+        cell = (
+            rf"\matrixcellnonlc{{{gen[0]}}}{{{gen[1]}}}{{{gen[2]}}}"
+            rf"{{{run[0]}}}{{{run[1]}}}{{{run[2]}}}"
+        )
     marker = _validation_cell_marker(case)
     if marker:
         return rf"\begin{{tabular}}[t]{{@{{}}l@{{}}}}{cell}\\[-0.1em]{marker}\end{{tabular}}"

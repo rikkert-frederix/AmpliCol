@@ -863,14 +863,13 @@ def write_generic_process_manifest(
     output_path = Path(output_dir).expanduser()
     output_path.mkdir(parents=True, exist_ok=True)
     manifest_path = output_path / filename
-    manifest_path.write_text(
-        json.dumps(
+    with manifest_path.open("w", encoding="utf-8") as stream:
+        json.dump(
             _json_safe_bigints(manifest.to_json_dict()),
+            stream,
             separators=(",", ":"),
             sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
+        )
     return manifest_path
 
 
@@ -888,10 +887,13 @@ def write_generic_process_set_manifest(
             output_path / "subprocesses" / subprocess_manifest.key,
         )
     manifest_path = output_path / filename
-    manifest_path.write_text(
-        json.dumps(_json_safe_bigints(manifest.to_json_dict()), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    with manifest_path.open("w", encoding="utf-8") as stream:
+        json.dump(
+            _json_safe_bigints(manifest.to_json_dict()),
+            stream,
+            indent=2,
+            sort_keys=True,
+        )
     return manifest_path
 
 
@@ -6450,9 +6452,13 @@ def _json_safe_bigints(value: object) -> object:
     if isinstance(value, int):
         return value if value.bit_length() <= 63 else hex(value)
     if isinstance(value, dict):
-        return {key: _json_safe_bigints(item) for key, item in value.items()}
+        for key, item in value.items():
+            value[key] = _json_safe_bigints(item)
+        return value
     if isinstance(value, list):
-        return [_json_safe_bigints(item) for item in value]
+        for index, item in enumerate(value):
+            value[index] = _json_safe_bigints(item)
+        return value
     if isinstance(value, tuple):
         return [_json_safe_bigints(item) for item in value]
     return value

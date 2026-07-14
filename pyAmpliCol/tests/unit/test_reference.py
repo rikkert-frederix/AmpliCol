@@ -791,6 +791,57 @@ total                                   0.000025    100.00%
     assert result.color_probe_raw_components == (9.0, 7.2, 7.2)
 
 
+def test_color_library_probe_caches_and_indexes_helicities_before_timing() -> None:
+    source = (
+        Path(__file__).resolve().parents[3] / "amplicol_color_library_probe.f03"
+    ).read_text(encoding="utf-8")
+    point_loop = source[
+        source.index("do ipoint=1,points") : source.index("enddo\n  call cpu_time(t1)")
+    ]
+    helicity_lookup = source[
+        source.index("subroutine build_helicity_lookup") : source.index(
+            "end subroutine build_helicity_lookup"
+        )
+    ]
+    helicity_contraction = source[
+        source.index("subroutine contract_all_helicities") : source.index(
+            "end subroutine contract_all_helicities"
+        )
+    ]
+
+    assert point_loop.index("call evaluate_colour_order_amplitudes()") < point_loop.index(
+        "call contract_all_helicities()"
+    )
+    assert "call cpu_time(" not in point_loop
+    assert "find_helicity_index" in helicity_lookup
+    assert "find_helicity_index" not in helicity_contraction
+    assert "call evaluate_amp(" not in helicity_contraction
+    assert "call cpu_time(" not in helicity_contraction
+
+
+def test_direct_color_probe_times_fixed_helicity_components_in_outer_loops() -> None:
+    source = (
+        Path(__file__).resolve().parents[3] / "amplicol_color_probe.f03"
+    ).read_text(encoding="utf-8")
+    combined = source[
+        source.index("subroutine evaluate_current_helicity") : source.index(
+            "end subroutine evaluate_current_helicity"
+        )
+    ]
+    contraction = source[
+        source.index("subroutine accumulate_colour") : source.index(
+            "end subroutine accumulate_colour"
+        )
+    ]
+
+    assert "call amp%evaluate" in combined
+    assert "call accumulate_colour" in combined
+    assert "call cpu_time(" not in combined
+    assert "call cpu_time(" not in contraction
+    assert "do ipoint=1,points" in source
+    assert "matrix2_result = matrix2" in source
+
+
 def test_parse_first_matrix_element_returns_none_when_missing() -> None:
     assert parse_first_matrix_element("no matrix element here") is None
 

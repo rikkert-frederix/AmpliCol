@@ -4,15 +4,15 @@
     "1": {
       "modes": {
         "amplicol": {
-          "all_flow_generation_s": 0.10117983301089704,
+          "all_flow_generation_s": 5.7e-05,
           "all_flow_notes": "reused from LC result matrix cache",
-          "all_flow_runtime_us_per_point": 0.8586,
+          "all_flow_runtime_us_per_point": 0.053772,
           "all_flow_status": "ok",
-          "generation_s": 1.873424582881853,
+          "generation_s": 2.646870583994314,
           "notes": "reused from LC result matrix cache",
-          "runtime_us_per_point": 0.0193,
+          "runtime_us_per_point": 0.0220238,
           "status": "ok",
-          "updated_at": "2026-07-12T18:46:40.536326+00:00"
+          "updated_at": "2026-07-13T23:52:40.304215+00:00"
         },
         "asm": {
           "all_flow_generation_s": 0.6723633341025561,
@@ -82,15 +82,15 @@
     "2": {
       "modes": {
         "amplicol": {
-          "all_flow_generation_s": 0.101735249745965,
+          "all_flow_generation_s": 8.4e-05,
           "all_flow_notes": "reused from LC result matrix cache",
-          "all_flow_runtime_us_per_point": 0.9678000000000001,
+          "all_flow_runtime_us_per_point": 0.12076500000000001,
           "all_flow_status": "ok",
           "generation_s": 1.9959650826640427,
           "notes": "reused from LC result matrix cache",
           "runtime_us_per_point": 0.1152,
           "status": "ok",
-          "updated_at": "2026-07-11T20:16:45.384384+00:00"
+          "updated_at": "2026-07-13T23:52:43.092243+00:00"
         },
         "asm": {
           "all_flow_generation_s": 1.021097542019561,
@@ -158,15 +158,15 @@
     "3": {
       "modes": {
         "amplicol": {
-          "all_flow_generation_s": 0.09440862576797604,
+          "all_flow_generation_s": 0.000306,
           "all_flow_notes": "reused from LC result matrix cache",
-          "all_flow_runtime_us_per_point": 1.144,
+          "all_flow_runtime_us_per_point": 0.326574,
           "all_flow_status": "ok",
           "generation_s": 1.9580540829338133,
           "notes": "reused from LC result matrix cache",
           "runtime_us_per_point": 0.42360000000000003,
           "status": "ok",
-          "updated_at": "2026-07-11T20:19:48.012808+00:00"
+          "updated_at": "2026-07-13T23:52:44.571008+00:00"
         },
         "asm": {
           "all_flow_generation_s": 1.2259885829407722,
@@ -234,15 +234,15 @@
     "4": {
       "modes": {
         "amplicol": {
-          "all_flow_generation_s": 0.09609212492842972,
+          "all_flow_generation_s": 0.003064,
           "all_flow_notes": "reused from LC result matrix cache",
-          "all_flow_runtime_us_per_point": 1.9537999999999998,
+          "all_flow_runtime_us_per_point": 1.2355381880156309,
           "all_flow_status": "ok",
           "generation_s": 2.0557844159193337,
           "notes": "reused from LC result matrix cache",
           "runtime_us_per_point": 1.3714000000000002,
           "status": "ok",
-          "updated_at": "2026-07-11T20:22:46.786047+00:00"
+          "updated_at": "2026-07-13T23:52:46.054708+00:00"
         },
         "asm": {
           "all_flow_generation_s": 1.5529466660227627,
@@ -310,15 +310,15 @@
     "5": {
       "modes": {
         "amplicol": {
-          "all_flow_generation_s": 0.10899858294337988,
+          "all_flow_generation_s": 0.011329,
           "all_flow_notes": "reused from LC result matrix cache",
-          "all_flow_runtime_us_per_point": 7.353999999999999,
+          "all_flow_runtime_us_per_point": 6.567296573081371,
           "all_flow_status": "ok",
           "generation_s": 2.3201343331020325,
           "notes": "reused from LC result matrix cache",
           "runtime_us_per_point": 4.3557,
           "status": "ok",
-          "updated_at": "2026-07-11T20:25:47.469334+00:00"
+          "updated_at": "2026-07-13T23:52:47.519047+00:00"
         },
         "asm": {
           "all_flow_generation_s": 2.0634471671655774,
@@ -386,15 +386,15 @@
     "6": {
       "modes": {
         "amplicol": {
-          "all_flow_generation_s": 0.21342045786447822,
+          "all_flow_generation_s": 0.106875,
           "all_flow_notes": "reused from LC result matrix cache",
-          "all_flow_runtime_us_per_point": 41.844500000000004,
+          "all_flow_runtime_us_per_point": 41.54048198445718,
           "all_flow_status": "ok",
           "generation_s": 3.1857519168406725,
           "notes": "reused from LC result matrix cache",
           "runtime_us_per_point": 13.933200000000001,
           "status": "ok",
-          "updated_at": "2026-07-11T20:29:07.265556+00:00"
+          "updated_at": "2026-07-13T23:52:49.010566+00:00"
         },
         "asm": {
           "all_flow_generation_s": 4.487807583995163,
@@ -676,5 +676,5 @@
     "symbolica_stage_local_parameter_layout": true,
     "target_runtime_s": 10.0
   },
-  "updated_at": "2026-07-13T17:04:30.638102+00:00"
+  "updated_at": "2026-07-13T23:52:50.473471+00:00"
 }

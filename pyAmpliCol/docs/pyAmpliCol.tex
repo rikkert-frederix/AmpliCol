@@ -803,8 +803,8 @@ adjustment.  With the patch, all-flow O1 generation progressed to
 \input{result_matrix_nlc_table.tex}
 \input{result_matrix_full_table.tex}
 
-\paragraph{Archived low-multiplicity validation fixture.}
-The \(n\le4\) LC/NLC/full-colour validation cells are mirrored in
+\paragraph{Archived validation fixture.}
+Every populated LC/NLC/full-colour validation cell through \(n\le6\) is mirrored in
 \path{tests/fixtures/result_matrix_references.json}.  The integration test
 checks those cached same-point \AC/\PAC\ values without a local Fortran run;
 \path{scripts/refresh_result_matrix_fixtures.py} refreshes the fixture from the
@@ -812,16 +812,16 @@ matrix caches.
 
 \noindent\footnotesize The following tables repeat the same process families,
 colour conventions, and \AC\ references with \PAC\ generated from the bundled
-loader-JSON Standard Model.  At this baseline, numerical validation is complete
-through \(n=4\): all 94 applicable cells agree with the stored built-in/\AC
-same-point references, with maximum relative difference
-\(2.50\times10^{-14}\).  For this first \(n\leq4\) baseline, point-wise
-agreement is the blocking acceptance criterion.  Generation and runtime cells
-record the measured compiled-model runs for context, but their formal
-performance gates are deferred to the next optimization milestone.  Source
+loader-JSON Standard Model.  Numerical validation now covers every populated
+reference through \(n=6\): all 144 applicable cells agree with the stored
+built-in/\AC\ values at identical phase-space points and parameters, with
+maximum relative difference \(9.88\times10^{-13}\).  All three colour modes are
+covered through \(n=5\); at \(n=6\), the fixture follows the currently populated
+LC references while the built-in NLC/full-colour caches remain empty.  The
+generation and runtime cells report measured compiled-model runs, while source
 conversion is reported separately and is not charged to each process build.
 The two additional three-quark-line NLC/full-colour timing cells are not among
-the 94 direct-reference comparisons because Fortran \AC\ does not expose that
+the 144 direct-reference comparisons because Fortran \AC\ does not expose that
 colour contraction; they are labelled accordingly in the generated tables.
 Blank cells are not copied built-in measurements.  Majorana/FNV interactions,
 spin $3/2$, sextet external states, loop/counterterm vertices, and opaque
@@ -841,15 +841,17 @@ For the reduced observable it requires
   \leq 10^{-10}.
 \]
 It writes the cumulative report after every case and preserves superseded
-process directories in the same output tree.  The portable report committed
-with this note is \path{docs/ufo_sm_n4_validation_report.json}.
+process directories in the same output tree.  The committed incremental reports
+are \path{docs/ufo_sm_n4_validation_report.json},
+\path{docs/ufo_sm_n5_validation_report.json}, and
+\path{docs/ufo_sm_n6_validation_report.json}.
 \begin{lstlisting}[language=bash,basicstyle=\ttfamily\scriptsize,breaklines=true,breakatwhitespace=true]
 env PYTHONPATH=src dependencies/.venv/bin/python \
   scripts/run_with_memory_watch.py --limit-gb 30 -- \
   dependencies/.venv/bin/python scripts/validate_ufo_sm_fixture.py \
-  --min-n 1 --max-n 4 --color-accuracy all --n-cores 5 \
+  --min-n 1 --max-n 6 --color-accuracy all --n-cores 5 \
   --tolerance 1e-10 --regenerate --keep-going \
-  --output-root .ufo_support_outputs/ufo_sm_fixture_validation_v1
+  --output-root .ufo_support_outputs/ufo_sm_fixture_validation_n6
 \end{lstlisting}
 \input{result_matrix_ufo_sm_table.tex}
 \input{z_performance_ufo_sm_table.tex}

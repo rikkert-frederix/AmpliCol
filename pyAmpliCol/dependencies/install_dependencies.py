@@ -327,10 +327,19 @@ def create_venv() -> None:
     run([base_python_executable(), "-m", "venv", str(VENV_DIR)])
 
 
-def ensure_maturin() -> None:
+def ensure_maturin(*, require_complete_bootstrap: bool = True) -> None:
     create_venv()
     env = venv_environment()
-    run([venv_python(), "-m", "pip", "install", "--upgrade", *BOOTSTRAP_REQUIREMENTS], env=env)
+    ready = (
+        bootstrap_tools_are_ready()
+        if require_complete_bootstrap
+        else maturin_cli_is_ready()
+    )
+    if not ready:
+        run(
+            [venv_python(), "-m", "pip", "install", "--upgrade", *BOOTSTRAP_REQUIREMENTS],
+            env=env,
+        )
     run([venv_python(), "-m", "maturin", "--version"], env=env)
 
 
@@ -985,6 +994,13 @@ def bootstrap_tools_are_ready(*, verbose: bool = False) -> bool:
             print(completed.stderr, end="", file=sys.stderr)
     if completed.returncode != 0:
         return False
+    return maturin_cli_is_ready(verbose=verbose)
+
+
+def maturin_cli_is_ready(*, verbose: bool = False) -> bool:
+    if not venv_python().exists():
+        return False
+
     maturin = run(
         [venv_python(), "-m", "maturin", "--version"],
         env=venv_environment(),
@@ -1097,12 +1113,7 @@ def build_python_wheel(project_dir: Path, output_dir: Path) -> Path:
 
 
 def build_wheels_and_install(*, include_gammaloop: bool) -> None:
-    symbolica_wheel = build_maturin_wheel(
-        SYMBOLICA_COMMUNITY_DIR,
-        SYMBOLICA_WHEEL_DIR,
-        release=True,
-    )
-    install_wheel(symbolica_wheel, force_reinstall=True, no_deps=True)
+    build_symbolica_wheel_and_install()
 
     loader_wheel = build_python_wheel(
         UFO_MODEL_LOADER_DIR,
@@ -1131,6 +1142,15 @@ def build_wheels_and_install(*, include_gammaloop: bool) -> None:
     )
     install_wheel(gammaloop_wheel)
     install_wheel(gammaloop_wheel, force_reinstall=True, no_deps=True)
+
+
+def build_symbolica_wheel_and_install() -> None:
+    symbolica_wheel = build_maturin_wheel(
+        SYMBOLICA_COMMUNITY_DIR,
+        SYMBOLICA_WHEEL_DIR,
+        release=True,
+    )
+    install_wheel(symbolica_wheel, force_reinstall=True, no_deps=True)
 
 
 def print_activation_hint() -> None:
@@ -1246,7 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
             f"and create/use {VENV_DIR} with {base_python_executable()}."
         )
 
-    ensure_maturin()
+    ensure_maturin(require_complete_bootstrap=not args.recompile)
     if not include_gammaloop:
         ensure_gammaloop_api_absent()
     ensure_sources(update_existing=args.reset)
@@ -1256,7 +1276,10 @@ def main(argv: list[str] | None = None) -> int:
         symbolica_installed=False,
         gammaloop_installed=False,
     )
-    build_wheels_and_install(include_gammaloop=include_gammaloop)
+    if args.recompile:
+        build_symbolica_wheel_and_install()
+    else:
+        build_wheels_and_install(include_gammaloop=include_gammaloop)
 
     if not installed_environment_is_ready(include_gammaloop=include_gammaloop, verbose=True):
         raise DependencySetupError("The installed environment failed the import smoke test.")

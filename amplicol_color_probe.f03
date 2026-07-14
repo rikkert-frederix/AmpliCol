@@ -13,11 +13,11 @@ program amplicol_color_probe
   integer,dimension(:),allocatable :: hel
   integer,dimension(:,:),allocatable :: local_part, local_order, spin_init
   real(kind=8),dimension(:,:),allocatable :: p
-  real(kind=8),dimension(3) :: matrix2
-  real(kind=8) :: t0, t1, t_eval, t_colour, t_total, norm_factor
+  real(kind=8),dimension(3) :: matrix2, matrix2_result
+  real(kind=8) :: t0, t1, t_setup, t_eval, t_colour, t_total, norm_factor
   real(kind=8) :: target_runtime, calibration_runtime
   complex(kind=8) :: amp_col_c, amp2_c
-  character(len=80) :: process_file, momenta_file
+  character(len=1024) :: process_file, momenta_file
   character(len=32) :: color_arg, color_name
   character(len=256) :: arg, env_value
   logical :: print_matrix, fixed_helicity
@@ -114,16 +114,17 @@ program amplicol_color_probe
   spin_init(0,1:n) = 1
   spin_init(1,1:n) = -9
 
+  call cpu_time(t0)
   call amp%init(2,n,1,local_part,spin_init,local_order,phys_model,&
        pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
   call amp%init_col(n,col_acc)
+  call cpu_time(t1)
+  t_setup = t1 - t0
   if (print_matrix) call print_color_matrix()
   norm_factor = (4*pi*alpha_check)**(n-2-amp%n_sing(1))&
        *(2d0*4d0*pi*alphaEW)**amp%n_sing(1)/dble(pgl(igroup)%iden(iint))
 
   matrix2 = 0d0
-  t_eval = 0d0
-  t_colour = 0d0
   call cpu_time(t0)
   if (target_runtime > 0d0) then
      if (fixed_helicity) then
@@ -157,6 +158,36 @@ program amplicol_color_probe
   endif
   call cpu_time(t1)
   t_total = t1 - t0
+  matrix2_result = matrix2
+
+  ! Measure components in outer loops.  Calling CPU_TIME around every
+  ! amplitude and contraction dominates low-multiplicity probes.
+  call cpu_time(t0)
+  do ipoint=1,points
+     if (fixed_helicity) then
+        call evaluate_amplitude_current_helicity()
+     else
+        call loop_helicity_amplitude(1)
+     endif
+  enddo
+  call cpu_time(t1)
+  t_eval = t1 - t0
+
+  if (fixed_helicity) then
+     matrix2 = 0d0
+     call cpu_time(t0)
+     do ipoint=1,points
+        call accumulate_colour()
+     enddo
+     call cpu_time(t1)
+     t_colour = t1 - t0
+  else
+     ! The recursive summed-helicity path does not retain every helicity's
+     ! amplitudes.  Its contraction share is therefore the timer-free total
+     ! minus a separately measured amplitude-only pass.
+     t_colour = max(0d0,t_total-t_eval)
+  endif
+  matrix2 = matrix2_result
 
   write (*,'(a)') 'AmpliCol colour probe'
   write (*,'(a,i0)') 'points ',points
@@ -188,8 +219,13 @@ program amplicol_color_probe
   write (*,'(a)') repeat('-',78)
   write (*,'(a)') 'Timing summary                           seconds    percent  note'
   write (*,'(a)') repeat('-',78)
-  call print_row('amplitude evaluation',t_eval,t_total,'colour-probe')
-  call print_row('colour contraction',t_colour,t_total,'colour-probe')
+  call print_row('generation setup',t_setup,t_total,'outside-runtime')
+  call print_row('amplitude evaluation',t_eval,t_total,'outer-loop-diagnostic')
+  if (fixed_helicity) then
+     call print_row('colour contraction',t_colour,t_total,'outer-loop-diagnostic')
+  else
+     call print_row('colour contraction',t_colour,t_total,'derived-total-minus-eval')
+  endif
   call print_row('total',t_total,t_total,'')
   write (*,'(a)') repeat('-',78)
 
@@ -325,18 +361,30 @@ contains
      enddo
   end subroutine loop_helicity
 
+  recursive subroutine loop_helicity_amplitude(position)
+    implicit none
+    integer,intent(in) :: position
+    integer :: spin_index
+    if (position > n) then
+       call evaluate_amplitude_current_helicity()
+       return
+    endif
+    do spin_index=1,pgl(igroup)%spin(0,position)
+       hel(position) = pgl(igroup)%spin(spin_index,position)
+       call loop_helicity_amplitude(position+1)
+    enddo
+  end subroutine loop_helicity_amplitude
+
   subroutine evaluate_current_helicity()
     implicit none
-    real(kind=8) :: before, after
-    call cpu_time(before)
     call amp%evaluate(n,p,hel,.true.,phys_model)
-    call cpu_time(after)
-    t_eval = t_eval + after - before
-    call cpu_time(before)
     call accumulate_colour()
-    call cpu_time(after)
-    t_colour = t_colour + after - before
   end subroutine evaluate_current_helicity
+
+  subroutine evaluate_amplitude_current_helicity()
+    implicit none
+    call amp%evaluate(n,p,hel,.true.,phys_model)
+  end subroutine evaluate_amplitude_current_helicity
 
   subroutine accumulate_colour()
     implicit none

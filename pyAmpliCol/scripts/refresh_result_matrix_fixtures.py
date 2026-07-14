@@ -40,6 +40,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum final-state multiplicity archived in the fixture.",
     )
     parser.add_argument(
+        "--extend-existing",
+        action="store_true",
+        help=(
+            "When --max-n increases, preserve every existing lower-multiplicity "
+            "record and append only newly covered multiplicities."
+        ),
+    )
+    parser.add_argument(
         "--color-accuracy",
         choices=("lc", "nlc", "full", "all"),
         default="all",
@@ -98,6 +106,11 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     fixture = _build_fixture(colors, max_n=args.max_n)
+    if args.extend_existing and args.output.is_file():
+        fixture = _extend_fixture(
+            _read_json(args.output),
+            fixture,
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
     print(
@@ -223,6 +236,53 @@ def _build_fixture(colors: Iterable[str], *, max_n: int) -> dict[str, Any]:
         "unsupported": unsupported,
         "unvalidated": unvalidated,
     }
+
+
+def _extend_fixture(
+    existing: dict[str, Any],
+    refreshed: dict[str, Any],
+) -> dict[str, Any]:
+    existing_max_n = int(existing.get("max_n", 0))
+    refreshed_max_n = int(refreshed.get("max_n", 0))
+    if existing_max_n < 1 or refreshed_max_n <= existing_max_n:
+        raise ValueError(
+            "--extend-existing requires --max-n to exceed the existing fixture"
+        )
+
+    for key in ("cases", "unsupported", "unvalidated"):
+        retained = [
+            item
+            for item in existing.get(key, [])
+            if int(item["n_final"]) <= existing_max_n
+        ]
+        appended = [
+            item
+            for item in refreshed.get(key, [])
+            if int(item["n_final"]) > existing_max_n
+        ]
+        refreshed[key] = [*retained, *appended]
+
+    refreshed["cases"].sort(
+        key=lambda item: (
+            item["color_accuracy"],
+            item["process_id"],
+            item["n_final"],
+        )
+    )
+    for key in ("unsupported", "unvalidated"):
+        refreshed[key].sort(
+            key=lambda item: (
+                item["color_accuracy"],
+                item.get("process_id") or 0,
+                item["n_final"],
+            )
+        )
+    refreshed["summary"] = _summary(
+        refreshed["cases"],
+        refreshed["unsupported"],
+        refreshed["unvalidated"],
+    )
+    return refreshed
 
 
 def _case_from_entry(

@@ -52,14 +52,14 @@ from pyamplicol.process_ir import build_process_set_ir
 
 
 def test_json_safe_bigints_serializes_large_bitsets_as_hex_strings() -> None:
-    payload = _json_safe_bigints(
-        {
-            "small": 42,
-            "large": 1 << 20000,
-            "nested": [True, 1 << 5000],
-        }
-    )
+    source = {
+        "small": 42,
+        "large": 1 << 20000,
+        "nested": [True, 1 << 5000],
+    }
+    payload = _json_safe_bigints(source)
 
+    assert payload is source
     assert payload["small"] == 42
     assert payload["large"].startswith("0x")
     assert payload["nested"][0] is True

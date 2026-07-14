@@ -23,13 +23,16 @@ processes.  Unsupported requests fail explicitly with diagnostics that name the
 missing layer, such as colour expansion, current closure, or a missing
 vertex/propagator lowering.
 
-The first external-model baseline regenerates 94 LC/NLC/full-colour Standard
-Model cases through final-state multiplicity four from the bundled loader JSON.
-At identical stored phase-space points and matched parameters, all 94 agree
-with the built-in/AmpliCol references at `1e-10` tolerance; the largest observed
-relative difference is `2.50e-14`.  The portable case report is
-`docs/ufo_sm_n4_validation_report.json`; generated process artifacts are
-retained under `.ufo_support_outputs/ufo_sm_fixture_validation_v1`.
+The external-model validation fixture now contains 144 populated
+LC/NLC/full-colour Standard Model cases through final-state multiplicity six
+from the bundled loader JSON.  This covers all three colour modes through
+`n=5` and the currently populated LC references at `n=6`.  At identical stored
+phase-space points and matched parameters, all 144 agree with the
+built-in/AmpliCol references at `1e-10` tolerance; the largest observed relative
+difference is `9.88e-13`.  The incremental portable reports are
+`docs/ufo_sm_n4_validation_report.json`, `docs/ufo_sm_n5_validation_report.json`,
+and `docs/ufo_sm_n6_validation_report.json`; every generated process artifact
+is retained below `.ufo_support_outputs/`.
 
 ## Installation
 
@@ -151,6 +154,17 @@ On AArch64, Rusticol uses native two-lane complex SymJIT payloads and packs a
 stage's local inputs once for all of its output chunks.  Set
 `RUSTICOL_NATIVE_SIMD_JIT=0` only when a scalar-JIT diagnostic comparison is
 needed.
+
+The managed dependency install pins SymJIT `2.19.3` at commit
+`7fb09d1cb2a943c25a6fd71a208af44fcc6d813d` and applies four AArch64 fixes.
+Patch `0001` corrects O3 complex register allocation, including aliased
+operands and ABI-preserved SIMD registers. Patch `0002` materializes external
+call spill addresses beyond the 12-bit immediate range. Patch `0003` splits
+large stack-frame adjustments into encodable instructions. Patch `0004`
+expands out-of-range conditional branches into a short inverted branch plus an
+unconditional long branch. Their regression tests cover the wrong-result,
+invalid spill address, `x < 4096`, and `x.abs() < 1048576` failure modes,
+respectively.
 
 Large runnable schema-v2 artifacts compact generation-only current/value
 metadata and retain stage interaction IDs plus vertex-kind counts instead of a

@@ -16,6 +16,11 @@
       "sha256": "1b1b84b7b1e8b66b57e628c06a7d5f2e47cf69597a04b793231eb3d79260dff1"
     },
     {
+      "dependency": "symjit",
+      "path": "dependencies/patches/symjit/0004-fix-aarch64-long-conditional-branches.patch",
+      "sha256": "c2e0cf9247930f006fbc7280b3ed60319ebc388b4f4137268e8eb3f9b08bd102"
+    },
+    {
       "dependency": "symbolica",
       "path": "dependencies/patches/symbolica/0001-fix-complex-export-aarch64.patch",
       "sha256": "50ebdbfc125f375c83088a1aa280348553ed361f14011f3e89bd31584be49ccc"
@@ -43,7 +48,7 @@
     "installed": true,
     "requested": true,
     "source_path": "../rusticol",
-    "source_rev": "ad0cc3f31a28f28c217ca5992bed7aa89e6771db",
+    "source_rev": "ba16d8beaf42e3ddd25da75d48aee39d4be395fa",
     "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts"
   },
   "schema_version": 1,
@@ -67,6 +72,14 @@
     "source_ref": "main",
     "source_rev": "4daa45e793a3775f13bee33c4ddd2ba7f22ba714",
     "source_url": "https://github.com/symbolica-dev/symbolica-community.git"
+  },
+  "ufo_model_loader": {
+    "installed": true,
+    "requested": true,
+    "source_path": "dependencies/ufo-model-loader",
+    "source_rev": "9cb4deeae40ddd64184049af07ac1d03ce5f6162",
+    "source_url": "https://github.com/alphal00p/ufo_model_loader.git",
+    "version": "0.1.7"
   },
   "xsimd": {
     "installed": true,

@@ -10,13 +10,16 @@ program amplicol_color_library_probe
   type(amplitude_QCD) :: colour_amp
   integer(kind=8) :: points, ipoint
   integer :: igroup, iint, argc, n, nmax, iacc_request, col_acc
+  integer :: n_helicity_combinations
   integer :: irow, i, ic, icol, ioff, max_amp_size
   integer,dimension(:),allocatable :: hel, row_to_integral, lepton_list
   integer,dimension(:,:),allocatable :: local_part, local_order, spin_init, spin_loop
+  integer,dimension(:,:),allocatable :: helicity_table, helicity_amp_index
   real(kind=8),dimension(:,:),allocatable :: p
-  real(kind=8),dimension(3) :: matrix2
+  real(kind=8),dimension(3) :: matrix2, matrix2_result
   real(kind=8) :: t0, t1, t_eval, t_colour, t_total, norm_factor
-  complex(kind=8),dimension(:),allocatable :: colour_amps, order_amps
+  complex(kind=8),dimension(:),allocatable :: colour_amps
+  complex(kind=8),dimension(:,:),allocatable :: order_amps
   complex(kind=8) :: amp_col_c, amp2_c
   character(len=80) :: momenta_file
   character(len=32) :: color_arg, color_name
@@ -101,26 +104,45 @@ program amplicol_color_library_probe
   call colour_amp%init_col(n,col_acc)
   if (print_matrix) call print_color_matrix()
   call build_row_to_integral()
+  call build_helicity_lookup()
 
   max_amp_size = 0
   do i=1,size(pgl(igroup)%amps)
      max_amp_size = max(max_amp_size,size(pgl(igroup)%amps(i)%amps))
   enddo
-  allocate(order_amps(max_amp_size))
+  allocate(order_amps(max_amp_size,colour_amp%nColOrd))
   allocate(colour_amps(colour_amp%nColOrd))
 
   norm_factor = (4*pi*alpha_check)**(n-2-colour_amp%n_sing(1))&
        *(2d0*4d0*pi*alphaEW)**colour_amp%n_sing(1)/dble(pgl(igroup)%iden(iint))
 
   matrix2 = 0d0
-  t_eval = 0d0
-  t_colour = 0d0
   call cpu_time(t0)
   do ipoint=1,points
-     call loop_helicity(1)
+     call evaluate_colour_order_amplitudes()
+     call contract_all_helicities()
   enddo
   call cpu_time(t1)
   t_total = t1 - t0
+  matrix2_result = matrix2
+
+  ! Time the two components in separate outer loops.  Per-point and
+  ! per-helicity CPU_TIME calls dominate low-multiplicity processes.
+  call cpu_time(t0)
+  do ipoint=1,points
+     call evaluate_colour_order_amplitudes()
+  enddo
+  call cpu_time(t1)
+  t_eval = t1 - t0
+
+  matrix2 = 0d0
+  call cpu_time(t0)
+  do ipoint=1,points
+     call contract_all_helicities()
+  enddo
+  call cpu_time(t1)
+  t_colour = t1 - t0
+  matrix2 = matrix2_result
 
   write (*,'(a)') 'AmpliCol generated-library colour probe'
   write (*,'(a,i0)') 'points ',points
@@ -139,8 +161,8 @@ program amplicol_color_library_probe
   write (*,'(a)') repeat('-',78)
   write (*,'(a)') 'Timing summary                           seconds    percent  note'
   write (*,'(a)') repeat('-',78)
-  call print_row('amplitude evaluation',t_eval,t_total,'generated-library-colour')
-  call print_row('colour contraction',t_colour,t_total,'generated-library-colour')
+  call print_row('amplitude evaluation',t_eval,t_total,'outer-loop-diagnostic')
+  call print_row('colour contraction',t_colour,t_total,'outer-loop-diagnostic')
   call print_row('total',t_total,t_total,'')
   write (*,'(a)') repeat('-',78)
 
@@ -275,6 +297,41 @@ contains
     enddo
   end subroutine setup_local_spin_loop
 
+  subroutine build_helicity_lookup()
+    implicit none
+    integer :: combination, position, state, remaining, row, jint, active
+    n_helicity_combinations = 1
+    do position=1,n
+       n_helicity_combinations = n_helicity_combinations*spin_loop(0,position)
+    enddo
+    allocate(helicity_table(n,n_helicity_combinations))
+    allocate(helicity_amp_index(colour_amp%nColOrd,n_helicity_combinations))
+    helicity_amp_index = 0
+    do combination=1,n_helicity_combinations
+       remaining = combination - 1
+       do position=1,n
+          state = mod(remaining,spin_loop(0,position)) + 1
+          remaining = remaining/spin_loop(0,position)
+          helicity_table(position,combination) = spin_loop(state,position)
+       enddo
+       hel(1:n) = helicity_table(1:n,combination)
+       do row=1,colour_amp%nColOrd
+          jint = row_to_integral(row)
+          helicity_amp_index(row,combination) = find_helicity_index(jint)
+       enddo
+    enddo
+    active = 0
+    do combination=1,n_helicity_combinations
+       if (.not.any(helicity_amp_index(:,combination).gt.0)) cycle
+       active = active + 1
+       if (active.ne.combination) then
+          helicity_table(:,active) = helicity_table(:,combination)
+          helicity_amp_index(:,active) = helicity_amp_index(:,combination)
+       endif
+    enddo
+    n_helicity_combinations = active
+  end subroutine build_helicity_lookup
+
   subroutine build_row_to_integral()
     implicit none
     integer :: row, jint
@@ -356,39 +413,28 @@ contains
     enddo
   end function cyclic_order_matches
 
-  recursive subroutine loop_helicity(position)
+  subroutine contract_all_helicities()
     implicit none
-    integer,intent(in) :: position
-    integer :: spin_index
-    real(kind=8) :: before, after
-    if (position > n) then
-       call cpu_time(before)
-       call fill_colour_order_amplitudes()
-       call cpu_time(after)
-       t_eval = t_eval + after - before
-       call cpu_time(before)
+    integer :: combination, row, ih
+    do combination=1,n_helicity_combinations
+       colour_amps = (0d0,0d0)
+       do row=1,colour_amp%nColOrd
+          ih = helicity_amp_index(row,combination)
+          if (ih.gt.0) colour_amps(row) = order_amps(ih,row)
+       enddo
        call accumulate_colour()
-       call cpu_time(after)
-       t_colour = t_colour + after - before
-       return
-    endif
-    do spin_index=1,spin_loop(0,position)
-       hel(position) = spin_loop(spin_index,position)
-       call loop_helicity(position+1)
     enddo
-  end subroutine loop_helicity
+  end subroutine contract_all_helicities
 
-  subroutine fill_colour_order_amplitudes()
+  subroutine evaluate_colour_order_amplitudes()
     implicit none
-    integer :: row, jint, ih
-    colour_amps = (0d0,0d0)
+    integer :: row, jint
+    order_amps = (0d0,0d0)
     do row=1,colour_amp%nColOrd
        jint = row_to_integral(row)
-       call evaluate_amp(igroup,jint,p,order_amps)
-       ih = find_helicity_index(jint)
-       if (ih.gt.0) colour_amps(row) = order_amps(ih)
+       call evaluate_amp(igroup,jint,p,order_amps(:,row))
     enddo
-  end subroutine fill_colour_order_amplitudes
+  end subroutine evaluate_colour_order_amplitudes
 
   integer function find_helicity_index(jint)
     implicit none

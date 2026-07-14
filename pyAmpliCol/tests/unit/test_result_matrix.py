@@ -189,6 +189,52 @@ def test_lc_cell_treats_legacy_null_all_flow_status_as_success() -> None:
     assert r"\texttt{none}" not in cell
 
 
+def test_amplicol_all_flow_setup_uses_explicit_imode2_timing_row() -> None:
+    result_matrix = _load_result_matrix_module()
+    commands = [
+        {"args": ["make", "amplicol_color_probe"], "elapsed_s": 8.0},
+        {"args": ["./amplicol_color_probe"], "elapsed_s": 30.0},
+    ]
+    timing_rows = [
+        {"label": "generation setup", "seconds": 0.125, "note": "outside-runtime"},
+        {"label": "amplitude evaluation", "seconds": 9.0, "note": "outer-loop-diagnostic"},
+        {"label": "colour contraction", "seconds": 1.0, "note": "outer-loop-diagnostic"},
+        {"label": "total", "seconds": 10.0, "note": ""},
+    ]
+
+    setup = result_matrix._amplicol_color_probe_setup_s_from_records(
+        commands,
+        timing_rows,
+    )
+
+    assert setup == 0.125
+
+
+def test_nlc_hides_cached_cpp_o3_slots_above_n3() -> None:
+    result_matrix = _load_result_matrix_module()
+    base_case = {
+        "amplicol": {"status": "ok", "generation_s": 10.0, "runtime_us_per_point": 10.0},
+        "pyamplicol_jit": {
+            "status": "ok",
+            "generation_s": 5.0,
+            "wall_us_per_point": 5.0,
+            "runtime_us_per_point": 4.0,
+        },
+        "pyamplicol_cpp_o3": {
+            "status": "ok",
+            "generation_s": 2.0,
+            "wall_us_per_point": 2.0,
+            "runtime_us_per_point": 1.5,
+        },
+    }
+
+    n3 = result_matrix._latex_cell({**base_case, "n_final": 3}, color_accuracy="nlc")
+    n4 = result_matrix._latex_cell({**base_case, "n_final": 4}, color_accuracy="nlc")
+
+    assert r"\matrixcellnonlc{" in n3
+    assert r"\matrixcellnonlcnocpp{" in n4
+
+
 def test_lc_ram_limit_is_not_hidden_by_unsupported_reference() -> None:
     result_matrix = _load_result_matrix_module()
     case = {
@@ -572,3 +618,133 @@ def test_not_applicable_rows_only_trigger_final_writer(
     )
 
     assert len(writes) == 1
+
+
+def test_reuses_matching_slow_validation_artifact(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    result_matrix = _load_result_matrix_module()
+    base = next(item for item in result_matrix.BASE_PROCESSES if item.key == "gg_gluons")
+    process = "g g > g g g g g"
+    output_dir = tmp_path / "process"
+    output_dir.mkdir()
+    (output_dir / "process_manifest.json").write_text("{}\n", encoding="utf-8")
+    generation_log = tmp_path / "generate.log"
+    command = [
+        "python",
+        "-m",
+        "pyamplicol",
+        "generate-process",
+        "--color-accuracy",
+        "nlc",
+        "--symbolica-evaluator-backend",
+        "jit",
+        "--symbolica-jit-optimization-level",
+        "1",
+        "--batch-size",
+        "64",
+        "--symbolica-output-chunk-size",
+        "128",
+        "--symbolica-output-chunk-strategy",
+        "uniform",
+        "--max-coupling-order",
+        "QED=0",
+        process,
+        str(output_dir),
+    ]
+    generation_log.write_text(
+        "$ "
+        + result_matrix.shlex.join(command)
+        + "\n"
+        + result_matrix.json.dumps(
+            {
+                "generation_s": 120.0,
+                "jit_compile_s": 90.0,
+                "jit_fraction_of_generation": 0.75,
+                "lowering_status": {
+                    "current_count": 10,
+                    "interaction_count": 20,
+                    "amplitude_root_count": 3,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(result_matrix, "_preserve_timing_log", lambda path: None)
+    monkeypatch.setattr(
+        result_matrix,
+        "_time_existing_pyamplicol_artifact",
+        lambda *args, **kwargs: {
+            "profile": {
+                "core_evaluator_us_per_point": 4.0,
+                "wall_us_per_point": 5.0,
+                "samples": 64,
+            },
+            "values": [1.0],
+        },
+    )
+
+    payload = result_matrix._reuse_validation_jit_artifact(
+        {
+            "id": "nlc:gg_gluons:n5",
+            "status": "ok",
+            "process": process,
+            "process_output": str(output_dir),
+            "generation_log": str(generation_log),
+            "relative_difference": 1.0e-13,
+        },
+        process=process,
+        base=base,
+        n_final=5,
+        target_runtime=10.0,
+        matrix_settings={"backend": "jit"},
+        color_accuracy="nlc",
+        model_profile="external-sm",
+        minimum_generation_s=90.0,
+        enabled=True,
+    )
+
+    assert payload is not None
+    assert payload["generation_s"] == 120.0
+    assert payload["wall_us_per_point"] == 5.0
+    assert payload["validation_artifact_reuse"]["source_report_id"] == (
+        "nlc:gg_gluons:n5"
+    )
+
+
+def test_does_not_reuse_fast_validation_artifact(tmp_path: Path) -> None:
+    result_matrix = _load_result_matrix_module()
+    base = next(item for item in result_matrix.BASE_PROCESSES if item.key == "gg_gluons")
+    process = "g g > g g"
+    output_dir = tmp_path / "process"
+    output_dir.mkdir()
+    (output_dir / "process_manifest.json").write_text("{}\n", encoding="utf-8")
+    generation_log = tmp_path / "generate.log"
+    generation_log.write_text(
+        "$ python -m pyamplicol generate-process\n"
+        '{"generation_s": 10.0}\n',
+        encoding="utf-8",
+    )
+
+    payload = result_matrix._reuse_validation_jit_artifact(
+        {
+            "id": "nlc:gg_gluons:n2",
+            "status": "ok",
+            "process": process,
+            "process_output": str(output_dir),
+            "generation_log": str(generation_log),
+        },
+        process=process,
+        base=base,
+        n_final=2,
+        target_runtime=10.0,
+        matrix_settings={},
+        color_accuracy="nlc",
+        model_profile="external-sm",
+        minimum_generation_s=90.0,
+        enabled=True,
+    )
+
+    assert payload is None

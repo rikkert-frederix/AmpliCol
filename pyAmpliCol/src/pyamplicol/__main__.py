@@ -4829,6 +4829,8 @@ def _child_generation_progress_callback(process: str):
         now = time.perf_counter()
         signature = (stage, item)
         group = _generation_monitor_stage_group(stage)
+        if not _generation_monitor_percentage_milestone(item):
+            return
         if (
             group == "evaluator-build"
             and group == last_group
@@ -4870,6 +4872,8 @@ def _stderr_generation_monitor_callback(process: str):
         now = time.perf_counter()
         signature = (stage, item)
         group = _generation_monitor_stage_group(stage)
+        if not _generation_monitor_percentage_milestone(item):
+            return
         if (
             group == "evaluator-build"
             and group == last_group
@@ -4913,6 +4917,17 @@ def _generation_monitor_stage_group(stage: str) -> str:
     if stage.startswith(("jit ", "asm ", "c++ ", "compiled ")):
         return "evaluator-build"
     return stage
+
+
+def _generation_monitor_percentage_milestone(item: str) -> bool:
+    marker = item.rfind("(")
+    if marker < 0 or not item.endswith("%)"):
+        return True
+    try:
+        percentage = int(item[marker + 1 : -2])
+    except ValueError:
+        return True
+    return percentage == 100 or percentage % 10 == 0
 
 
 def _combined_progress_callback(

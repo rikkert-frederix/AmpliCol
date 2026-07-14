@@ -11,7 +11,7 @@ module read_process_file
 contains
   subroutine read_processes_from_file(filename)
     implicit none
-    character(len=80) :: filename
+    character(len=*),intent(in) :: filename
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders

@@ -181,7 +181,7 @@ def test_cli_inspect_and_compile_builtin_model(
     inspected = json.loads(capsys.readouterr().out)
     assert inspected["name"] == "built-in-sm"
     assert inspected["supported"] is True
-    assert inspected["capabilities"]["parameter_count"] == 50
+    assert inspected["capabilities"]["parameter_count"] == 10
 
     output = tmp_path / "built-in"
     parameters = tmp_path / "model-parameters.json"
@@ -1550,6 +1550,15 @@ def test_cli_child_monitor_coalesces_jit_build_phases(
     second = cli._parse_child_progress_event(lines[1])
     assert first is not None and first["stage"] == "jit compile"
     assert second is not None and second["stage"] == "jit ready"
+
+
+def test_cli_non_tty_monitor_keeps_ten_percent_milestones() -> None:
+    keep = cli._generation_monitor_percentage_milestone
+
+    assert keep("usage scan 10/100 (10%)") is True
+    assert keep("usage scan 100/100 (100%)") is True
+    assert keep("usage scan 1/100 (1%)") is False
+    assert keep("stage chunk 1/64") is True
 
 
 def test_cli_generate_process_expands_builtin_p_to_child_artifacts(
