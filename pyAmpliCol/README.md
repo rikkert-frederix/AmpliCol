@@ -117,6 +117,15 @@ allowing common-subexpression elimination across current boundaries.  Larger
 spin-2 and high-rank bodies remain in Symbolica's stable `functions` map so
 stage construction does not replicate them throughout the expression tree.
 
+Compiled models also persist verified kernel-evaluation equivalence classes.
+pyAmpliCol canonicalizes the complete lowered component vector, including its
+coupling, under both input orders and an overall sign. Exact Symbolica equality
+records the class, input permutation, and factor; no particle-name or
+model-family table is used. The generic DAG can then evaluate one canonical
+kernel contribution and fan it out, with the verified sign and colour weight,
+to every target current. For chunked evaluators, target currents with shared
+kernel work are placed in the same output chunks where possible.
+
 Every public subcommand accepts `--run-card PATH`.  A card contains one
 `[arguments]` table whose keys may be argparse destination names or normalized
 public long-option names (`--symbolica-output-chunk-size` becomes

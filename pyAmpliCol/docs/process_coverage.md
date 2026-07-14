@@ -135,6 +135,17 @@ directly.  Pure-gluon reflection symmetry and mixed-process gluon-subcurrent
 reflection reuse carry their signs on interaction edges; selected-sector
 artifacts disable those all-ordering transformations.
 
+Interaction attachments are distinct from kernel evaluations. Every model
+provides a conservative per-kind equivalence class; compiled UFO/JSON models
+broaden those classes only after exact equality of their fully lowered
+Symbolica component vectors has been proved under input exchange and an
+overall sign. The verified class, factor, and input order are serialized in the
+compiled model. DAG interactions with the same class, canonical inputs, output
+state, and coupling share one evaluation group, while retaining independent
+target currents and colour weights. Stage lowering evaluates that group once
+and applies its signed fan-out, and its deterministic output ordering clusters
+shared targets to reduce duplicate work across Symbolica output chunks.
+
 Executable replay validation is available through:
 
 ```sh

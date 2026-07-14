@@ -2672,6 +2672,7 @@ def _dag_count_payload(dag: GenericDAG) -> dict[str, int]:
         "current_count": len(dag.currents),
         "source_count": len(dag.sources),
         "interaction_count": len(dag.interactions),
+        "interaction_evaluation_count": dag.interaction_evaluation_count,
         "amplitude_root_count": len(dag.amplitude_roots),
     }
 
@@ -3279,6 +3280,8 @@ def _generic_warmup_runtime_schema_payload(
                 },
                 "coupling": interaction.coupling,
                 "color_weight": interaction.color_weight,
+                "evaluation_group_id": interaction.evaluation_group_id,
+                "evaluation_factor": interaction.evaluation_factor,
             }
         )
 
@@ -3870,6 +3873,8 @@ def _drop_currents_from_dag(
                 color_weight=interaction.color_weight,
                 lowering_backend=interaction.lowering_backend,
                 full_tensor_network_ready=interaction.full_tensor_network_ready,
+                evaluation_group_id=interaction.evaluation_group_id,
+                evaluation_factor=interaction.evaluation_factor,
             )
         )
     roots: list[AmplitudeRoot] = []
@@ -4069,6 +4074,8 @@ def _merge_currents_in_dag(
                 color_weight=interaction.color_weight,
                 lowering_backend=interaction.lowering_backend,
                 full_tensor_network_ready=interaction.full_tensor_network_ready,
+                evaluation_group_id=interaction.evaluation_group_id,
+                evaluation_factor=interaction.evaluation_factor,
             )
         )
     roots: list[AmplitudeRoot] = []
@@ -4739,6 +4746,9 @@ def _generic_dag_process_artifact_payload(
             "full_current_count": len(manifest.dag.currents),
             "full_source_count": len(manifest.dag.sources),
             "full_interaction_count": len(manifest.dag.interactions),
+            "full_interaction_evaluation_count": (
+                manifest.dag.interaction_evaluation_count
+            ),
             "full_amplitude_root_count": len(manifest.dag.amplitude_roots),
         }
     diagnostics_executor: ThreadPoolExecutor | None = None
@@ -4851,6 +4861,9 @@ def _generic_dag_process_artifact_payload(
                     ),
                     "size_bytes": diagnostics_path.stat().st_size,
                     "interaction_count": len(runtime_manifest.dag.interactions),
+                    "interaction_evaluation_count": (
+                        runtime_manifest.dag.interaction_evaluation_count
+                    ),
                 }
                 _emit_generation_progress(
                     progress_callback,
@@ -4893,6 +4906,15 @@ def _generic_dag_process_artifact_payload(
             "current_count": len(runtime_manifest.dag.currents),
             "source_count": len(runtime_manifest.dag.sources),
             "interaction_count": len(runtime_manifest.dag.interactions),
+            "interaction_evaluation_count": (
+                runtime_manifest.dag.interaction_evaluation_count
+            ),
+            "interaction_fanout_histogram": [
+                [fanout, count]
+                for fanout, count in (
+                    runtime_manifest.dag.interaction_fanout_histogram
+                )
+            ],
             "amplitude_root_count": len(
                 runtime_manifest.dag.amplitude_roots
             ),
@@ -4903,6 +4925,13 @@ def _generic_dag_process_artifact_payload(
             "current_count": len(manifest.dag.currents),
             "source_count": len(manifest.dag.sources),
             "interaction_count": len(manifest.dag.interactions),
+            "interaction_evaluation_count": (
+                manifest.dag.interaction_evaluation_count
+            ),
+            "interaction_fanout_histogram": [
+                [fanout, count]
+                for fanout, count in manifest.dag.interaction_fanout_histogram
+            ],
             "amplitude_root_count": len(manifest.dag.amplitude_roots),
             "required_vertex_kinds": list(manifest.dag.required_vertex_kinds),
             "truncated": manifest.dag.truncated,
@@ -6079,6 +6108,18 @@ def _runtime_stage_payloads(
                 "output_value_slot_ids": sorted(output_value_slot_ids),
                 "input_momentum_slot_ids": sorted(input_momentum_slot_ids),
                 "interaction_count": len(interaction_ids),
+                "interaction_evaluation_count": len(
+                    {
+                        (
+                            "group",
+                            dag.interactions[interaction_id].evaluation_group_id,
+                        )
+                        if dag.interactions[interaction_id].evaluation_group_id
+                        is not None
+                        else ("interaction", interaction_id)
+                        for interaction_id in interaction_ids
+                    }
+                ),
                 "interaction_ids": interaction_ids if compact_interactions else [],
                 "interactions_compacted": compact_interactions,
                 "interactions": interactions,
@@ -6164,6 +6205,8 @@ def _runtime_interaction_record(
         "coupling": list(interaction.coupling),
         "coupling_parameter_names": list(coupling_parameter_names),
         "color_weight": list(interaction.color_weight),
+        "evaluation_group_id": interaction.evaluation_group_id,
+        "evaluation_factor": list(interaction.evaluation_factor),
         "accumulation": "sum-into-result-current",
         "lowering": lowering_payload,
         "full_tensor_network_ready": interaction.full_tensor_network_ready,
@@ -6807,6 +6850,7 @@ def _dag_lowering_status(
         "current_count": len(dag.currents),
         "source_count": len(dag.sources),
         "interaction_count": len(dag.interactions),
+        "interaction_evaluation_count": dag.interaction_evaluation_count,
         "current_color_sectors": list(current_color_sectors),
         "current_color_sector_count": len(current_color_sectors),
         "internal_current_color_sectors": list(internal_current_color_sectors),
@@ -6910,6 +6954,9 @@ def _dag_color_sector_summaries(
                 "color_sector": sector,
                 "current_count": len(sector_dag.currents),
                 "interaction_count": len(sector_dag.interactions),
+                "interaction_evaluation_count": (
+                    sector_dag.interaction_evaluation_count
+                ),
                 "closure_count": len(sector_dag.amplitude_roots),
                 "amplitude_root_count": len(sector_dag.amplitude_roots),
                 "required_vertex_kind_counts": [
@@ -6955,6 +7002,18 @@ def _dag_stage_plan_payload(dag: GenericDAG, model: Model) -> dict[str, object]:
                 "current_ids": sorted(currents_by_size.get(size, ())),
                 "interaction_ids": interactions_by_size[size],
                 "interaction_count": len(interactions_by_size[size]),
+                "interaction_evaluation_count": len(
+                    {
+                        (
+                            "group",
+                            dag.interactions[interaction_id].evaluation_group_id,
+                        )
+                        if dag.interactions[interaction_id].evaluation_group_id
+                        is not None
+                        else ("interaction", interaction_id)
+                        for interaction_id in interactions_by_size[size]
+                    }
+                ),
                 "required_vertex_kind_counts": [
                     [kind, count] for kind, count in sorted(counts.items())
                 ],

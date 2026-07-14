@@ -78,6 +78,40 @@ class VertexLoweringRule:
 
 
 @dataclass(frozen=True)
+class VertexEvaluationEquivalence:
+    """Verified relation between oriented kernels used for evaluation reuse.
+
+    ``factor`` states that the concrete oriented kernel equals ``factor`` times
+    its equivalence-class representative after applying ``input_order``.
+    Keeping this model-owned lets compiled UFO models persist relations proven
+    from their actual lowered Symbolica expressions.
+    """
+
+    class_id: str
+    factor: tuple[float, float] = (1.0, 0.0)
+    input_order: tuple[int, int] = (0, 1)
+    verified: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.class_id:
+            raise ValueError("vertex evaluation equivalence class must be non-empty")
+        if self.input_order not in {(0, 1), (1, 0)}:
+            raise ValueError("vertex evaluation input order must be (0, 1) or (1, 0)")
+        if not all(math.isfinite(component) for component in self.factor):
+            raise ValueError("vertex evaluation equivalence factor must be finite")
+        if self.factor == (0.0, 0.0):
+            raise ValueError("vertex evaluation equivalence factor must be nonzero")
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "class_id": self.class_id,
+            "factor": list(self.factor),
+            "input_order": list(self.input_order),
+            "verified": self.verified,
+        }
+
+
+@dataclass(frozen=True)
 class PropagatorLoweringRule:
     particle_id: int
     chirality: int
@@ -294,6 +328,21 @@ class Model:
 
     def vertex_lowering_rule(self, kind: int) -> VertexLoweringRule:
         raise NotImplementedError
+
+    def vertex_evaluation_equivalence(
+        self,
+        kind: int,
+    ) -> VertexEvaluationEquivalence:
+        """Return a conservative, always-safe evaluation equivalence class.
+
+        Models with compiled symbolic kernels may override this with broader
+        classes.  A class unique to one model type and vertex kind still enables
+        exact fan-out reuse when several DAG attachments use the same kernel and
+        input currents.
+        """
+
+        model_type = f"{type(self).__module__}.{type(self).__qualname__}"
+        return VertexEvaluationEquivalence(class_id=f"{model_type}:{int(kind)}")
 
     def propagator_lowering_rule(
         self,
@@ -2308,5 +2357,6 @@ __all__ = [
     "QuantumFlow",
     "SourceSpinState",
     "Vertex",
+    "VertexEvaluationEquivalence",
     "VertexLoweringRule",
 ]

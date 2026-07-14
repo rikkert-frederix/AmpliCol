@@ -6,8 +6,15 @@ import pytest
 from symbolica import S
 
 from pyamplicol.generic_artifact import build_generic_process_manifest
-from pyamplicol.generic_dag import ColorState, CurrentIndex, CurrentNode
+from pyamplicol.generic_dag import (
+    ColorState,
+    CurrentIndex,
+    CurrentNode,
+    InteractionNode,
+)
 from pyamplicol.generic_stage_compiler import (
+    _compact_interaction_contribution,
+    _fanout_aware_current_order,
     _interaction_contribution,
     _select_measured_chunk_candidate,
     _specialize_stage_symbolica_functions,
@@ -39,7 +46,19 @@ def _current(current_id: int, *, particle_id: int = 21, chirality: int = 0) -> C
 
 
 class _ToyModel:
+    def __init__(self) -> None:
+        self.evaluation_count = 0
+
     def vertex_component_expression(self, _kind, left, right, **_kwargs):
+        self.evaluation_count += 1
+        return (left[0] + 2 * right[0], left[1] - right[1])
+
+
+class _EquivalentToyModel(_ToyModel):
+    def vertex_component_expression(self, kind, left, right, **_kwargs):
+        self.evaluation_count += 1
+        if kind == 7:
+            return (-(right[0] + 2 * left[0]), -(right[1] - left[1]))
         return (left[0] + 2 * right[0], left[1] - right[1])
 
 
@@ -105,6 +124,149 @@ def test_interaction_contribution_applies_complex_current_stage_color_weight() -
     )
 
     assert contribution == pytest.approx((17.0 + 17.0j, -6.0 - 6.0j))
+
+
+def test_compact_interaction_contribution_evaluates_signed_fanout_once() -> None:
+    currents = (_current(0), _current(1), _current(2), _current(3))
+    interactions = tuple(
+        InteractionNode(
+            id=index,
+            vertex_kind=6,
+            vertex_particles=(21, 21, 21),
+            left_id=0,
+            right_id=1,
+            result_id=2 + index,
+            coupling=(1.0, 0.0),
+            color_weight=((1.0, 0.0), (-1.0, 0.0))[index],
+            lowering_backend="toy",
+            full_tensor_network_ready=True,
+            evaluation_group_id=7,
+            evaluation_factor=(1.0, 0.0),
+        )
+        for index in range(2)
+    )
+    dag = SimpleNamespace(currents=currents, interactions=interactions)
+    model = _ToyModel()
+    evaluation_cache = {}
+    common = {
+        "value_components_by_slot_id": {
+            10: (3.0, 5.0),
+            11: (7.0, 11.0),
+        },
+        "input_value_slot_by_current_id": {0: 10, 1: 11},
+        "momentum_components_by_slot_id": {
+            20: (0.0, 0.0, 0.0, 0.0),
+            21: (0.0, 0.0, 0.0, 0.0),
+        },
+        "momentum_slot_by_mask": {1: 20, 2: 21},
+        "model_parameter_symbols": {},
+        "coupling_cache": {},
+        "evaluation_cache": evaluation_cache,
+    }
+
+    positive = _compact_interaction_contribution(dag, model, 0, **common)
+    negative = _compact_interaction_contribution(dag, model, 1, **common)
+
+    assert positive == (17.0, -6.0)
+    assert negative == (-17.0, 6.0)
+    assert model.evaluation_count == 1
+    assert len(evaluation_cache) == 1
+
+
+def test_compact_interaction_contribution_reuses_verified_cross_kind_relation() -> None:
+    currents = (_current(0), _current(1), _current(2), _current(3))
+    interactions = (
+        InteractionNode(
+            id=0,
+            vertex_kind=6,
+            vertex_particles=(21, 21, 21),
+            left_id=0,
+            right_id=1,
+            result_id=2,
+            coupling=(1.0, 0.0),
+            color_weight=(1.0, 0.0),
+            lowering_backend="toy",
+            full_tensor_network_ready=True,
+            evaluation_group_id=7,
+            evaluation_factor=(1.0, 0.0),
+        ),
+        InteractionNode(
+            id=1,
+            vertex_kind=7,
+            vertex_particles=(21, 21, 21),
+            left_id=1,
+            right_id=0,
+            result_id=3,
+            coupling=(1.0, 0.0),
+            color_weight=(1.0, 0.0),
+            lowering_backend="toy",
+            full_tensor_network_ready=True,
+            evaluation_group_id=7,
+            evaluation_factor=(-1.0, 0.0),
+        ),
+    )
+    dag = SimpleNamespace(currents=currents, interactions=interactions)
+    model = _EquivalentToyModel()
+    common = {
+        "value_components_by_slot_id": {
+            10: (3.0, 5.0),
+            11: (7.0, 11.0),
+        },
+        "input_value_slot_by_current_id": {0: 10, 1: 11},
+        "momentum_components_by_slot_id": {
+            20: (0.0, 0.0, 0.0, 0.0),
+            21: (0.0, 0.0, 0.0, 0.0),
+        },
+        "momentum_slot_by_mask": {1: 20, 2: 21},
+        "model_parameter_symbols": {},
+        "coupling_cache": {},
+        "evaluation_cache": {},
+    }
+
+    positive = _compact_interaction_contribution(dag, model, 0, **common)
+    negative = _compact_interaction_contribution(dag, model, 1, **common)
+
+    assert positive == (17.0, -6.0)
+    assert negative == (-17.0, 6.0)
+    assert model.evaluation_count == 1
+
+
+def test_fanout_aware_current_order_reduces_cross_chunk_evaluations() -> None:
+    order, before, after = _fanout_aware_current_order(
+        (0, 1, 2, 3),
+        output_size_by_current={current_id: 2 for current_id in range(4)},
+        evaluation_groups_by_current={
+            0: frozenset((1, 10)),
+            1: frozenset((2, 20)),
+            2: frozenset((1, 30)),
+            3: frozenset((2, 40)),
+        },
+        chunk_size=4,
+    )
+
+    assert order in {(0, 2, 1, 3), (1, 3, 0, 2)}
+    assert before == 8
+    assert after == 6
+
+
+def test_fanout_aware_current_order_scales_to_large_stages() -> None:
+    current_count = 4096
+    group_count = current_count // 2
+    current_ids = tuple(range(current_count))
+
+    order, before, after = _fanout_aware_current_order(
+        current_ids,
+        output_size_by_current={current_id: 1 for current_id in current_ids},
+        evaluation_groups_by_current={
+            current_id: frozenset((current_id % group_count,))
+            for current_id in current_ids
+        },
+        chunk_size=128,
+    )
+
+    assert len(order) == current_count
+    assert set(order) == set(current_ids)
+    assert after < before
 
 
 def test_stage_function_specialization_inlines_single_use_calls() -> None:

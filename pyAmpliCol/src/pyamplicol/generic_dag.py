@@ -11,6 +11,7 @@ from .model import (
     Model,
     QuantumFlow,
     Vertex,
+    VertexEvaluationEquivalence,
 )
 from .process_ir import CanonicalProcessIR, ProcessLegIR, build_process_ir
 from .processes import ProcessOptions
@@ -253,6 +254,8 @@ class InteractionNode:
     color_weight: tuple[float, float]
     lowering_backend: str
     full_tensor_network_ready: bool
+    evaluation_group_id: int | None = None
+    evaluation_factor: tuple[float, float] = (1.0, 0.0)
 
     def to_json_dict(self) -> dict[str, object]:
         return {
@@ -266,6 +269,8 @@ class InteractionNode:
             "color_weight": list(self.color_weight),
             "lowering_backend": self.lowering_backend,
             "full_tensor_network_ready": self.full_tensor_network_ready,
+            "evaluation_group_id": self.evaluation_group_id,
+            "evaluation_factor": list(self.evaluation_factor),
         }
 
 
@@ -331,6 +336,35 @@ class GenericDAG:
             )
         )
 
+    @property
+    def interaction_evaluation_count(self) -> int:
+        return len(
+            {
+                (
+                    "group",
+                    interaction.evaluation_group_id,
+                )
+                if interaction.evaluation_group_id is not None
+                else ("interaction", interaction.id)
+                for interaction in self.interactions
+            }
+        )
+
+    @property
+    def interaction_fanout_histogram(self) -> tuple[tuple[int, int], ...]:
+        group_sizes: dict[tuple[str, int], int] = {}
+        for interaction in self.interactions:
+            group = (
+                ("group", interaction.evaluation_group_id)
+                if interaction.evaluation_group_id is not None
+                else ("interaction", interaction.id)
+            )
+            group_sizes[group] = group_sizes.get(group, 0) + 1
+        histogram: dict[int, int] = {}
+        for size in group_sizes.values():
+            histogram[size] = histogram.get(size, 0) + 1
+        return tuple(sorted(histogram.items()))
+
     def currents_by_external_labels(
         self,
         labels: Iterable[int],
@@ -345,6 +379,11 @@ class GenericDAG:
             "current_count": len(self.currents),
             "source_count": len(self.sources),
             "interaction_count": len(self.interactions),
+            "interaction_evaluation_count": self.interaction_evaluation_count,
+            "interaction_fanout_histogram": [
+                [fanout, count]
+                for fanout, count in self.interaction_fanout_histogram
+            ],
             "amplitude_root_count": len(self.amplitude_roots),
             "truncated": self.truncated,
             "required_vertex_kinds": list(self.required_vertex_kinds),
@@ -1274,7 +1313,11 @@ class GenericDAGCompiler:
         table = _CurrentTable(self.model)
         sources = self._build_sources(process_ir, color_engine, table)
         interactions: list[InteractionNode] = []
-        interaction_keys: set[tuple[int, int, int, int]] = set()
+        interaction_keys: set[tuple[object, ...]] = set()
+        evaluation_group_by_key: dict[tuple[object, ...], int] = {}
+        evaluation_equivalence_by_kind: dict[
+            int, VertexEvaluationEquivalence
+        ] = {}
         vertices_by_input: dict[tuple[int, int], tuple[Vertex, ...]] = {}
         right_particles_by_left = _right_particles_by_left(
             self.model,
@@ -1669,6 +1712,48 @@ class GenericDAGCompiler:
                                         rule = self.model.vertex_lowering_rule(
                                             vertex.kind
                                         )
+                                        equivalence = evaluation_equivalence_by_kind.get(
+                                            vertex.kind
+                                        )
+                                        if equivalence is None:
+                                            equivalence = (
+                                                self.model.vertex_evaluation_equivalence(
+                                                    vertex.kind
+                                                )
+                                            )
+                                            if not equivalence.verified:
+                                                model_type = (
+                                                    f"{type(self.model).__module__}."
+                                                    f"{type(self.model).__qualname__}"
+                                                )
+                                                equivalence = VertexEvaluationEquivalence(
+                                                    class_id=(
+                                                        f"{model_type}:{int(vertex.kind)}"
+                                                    )
+                                                )
+                                            evaluation_equivalence_by_kind[
+                                                vertex.kind
+                                            ] = equivalence
+                                        canonical_inputs = (left_id, right_id)
+                                        if equivalence.input_order == (1, 0):
+                                            canonical_inputs = (right_id, left_id)
+                                        evaluation_key = (
+                                            equivalence.class_id,
+                                            canonical_inputs,
+                                            int(result.index.particle_id),
+                                            int(result.index.chirality),
+                                            quantum_flow.coupling,
+                                        )
+                                        evaluation_group_id = (
+                                            evaluation_group_by_key.get(evaluation_key)
+                                        )
+                                        if evaluation_group_id is None:
+                                            evaluation_group_id = len(
+                                                evaluation_group_by_key
+                                            )
+                                            evaluation_group_by_key[
+                                                evaluation_key
+                                            ] = evaluation_group_id
                                         interactions.append(
                                             InteractionNode(
                                                 id=len(interactions),
@@ -1683,6 +1768,10 @@ class GenericDAGCompiler:
                                                 full_tensor_network_ready=(
                                                     rule.full_tensor_network_ready
                                                 ),
+                                                evaluation_group_id=(
+                                                    evaluation_group_id
+                                                ),
+                                                evaluation_factor=equivalence.factor,
                                             )
                                         )
                                         if (
@@ -2274,6 +2363,8 @@ def prune_dag_to_amplitude_roots(dag: GenericDAG) -> GenericDAG:
             color_weight=interaction.color_weight,
             lowering_backend=interaction.lowering_backend,
             full_tensor_network_ready=interaction.full_tensor_network_ready,
+            evaluation_group_id=interaction.evaluation_group_id,
+            evaluation_factor=interaction.evaluation_factor,
         )
         for interaction in dag.interactions
         if interaction.id in required_interaction_ids
@@ -2735,6 +2826,8 @@ def filter_dag_to_color_sectors(
                 color_weight=interaction.color_weight,
                 lowering_backend=interaction.lowering_backend,
                 full_tensor_network_ready=interaction.full_tensor_network_ready,
+                evaluation_group_id=interaction.evaluation_group_id,
+                evaluation_factor=interaction.evaluation_factor,
             )
         )
 

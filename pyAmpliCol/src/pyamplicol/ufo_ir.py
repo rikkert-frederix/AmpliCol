@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
 from dataclasses import dataclass, replace
@@ -193,6 +195,10 @@ class CompiledOrientedKernel:
     color_projection_coefficient: tuple[float, float] | None = None
     lc_color_normalization_power: int = 0
     term_ids: tuple[int, ...] = ()
+    evaluation_class: str = ""
+    evaluation_factor: tuple[float, float] = (1.0, 0.0)
+    evaluation_input_order: tuple[int, int] = (0, 1)
+    evaluation_equivalence_verified: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -217,6 +223,12 @@ class CompiledOrientedKernel:
             ),
             "lc_color_normalization_power": self.lc_color_normalization_power,
             "term_ids": list(self.term_ids or (self.term_id,)),
+            "evaluation_class": self.evaluation_class,
+            "evaluation_factor": list(self.evaluation_factor),
+            "evaluation_input_order": list(self.evaluation_input_order),
+            "evaluation_equivalence_verified": (
+                self.evaluation_equivalence_verified
+            ),
         }
 
 
@@ -387,6 +399,24 @@ class CompiledModelIR:
                             item.get("term_ids", [int(item["term_id"])])
                         )
                     ),
+                    evaluation_class=str(
+                        item.get(
+                            "evaluation_class",
+                            f"unverified-kernel-{int(item['kind'])}",
+                        )
+                    ),
+                    evaluation_factor=_pair(
+                        item.get("evaluation_factor", (1.0, 0.0))
+                    ),
+                    evaluation_input_order=tuple(
+                        int(value)
+                        for value in _sequence(
+                            item.get("evaluation_input_order", (0, 1))
+                        )
+                    ),
+                    evaluation_equivalence_verified=bool(
+                        item.get("evaluation_equivalence_verified", False)
+                    ),
                 )
                 for item in _mappings(payload.get("oriented_kernels"))
             ),
@@ -526,6 +556,11 @@ def compile_ufo_model_ir(model: Mapping[str, object]) -> CompiledModelIR:
         oriented_kernels,
         particles,
     )
+    oriented_kernels = _annotate_oriented_kernel_evaluation_equivalence(
+        oriented_kernels,
+        particles,
+        terms,
+    )
     return CompiledModelIR(
         name=str(model.get("name", "unnamed-model")),
         orders=tuple(_order(item) for item in _mappings(model.get("orders"))),
@@ -564,6 +599,128 @@ def _annotate_oriented_kernel_color_projections(
             )
         )
     return tuple(annotated)
+
+
+def _annotate_oriented_kernel_evaluation_equivalence(
+    kernels: Sequence[CompiledOrientedKernel],
+    particles: Sequence[CompiledParticleRecord],
+    terms: Sequence[CompiledVertexTerm],
+) -> tuple[CompiledOrientedKernel, ...]:
+    """Prove exact signed/permuted kernel relations from lowered expressions.
+
+    The comparison uses the concrete component expressions after resolving
+    generated coupling aliases.  It is therefore independent of how a UFO
+    author spelled or ordered the source Lorentz/color structures.  Only exact
+    Symbolica canonical equality up to an overall sign and input exchange is
+    recorded; kernels that do not pass that test remain in distinct classes.
+    """
+
+    particle_by_name = {particle.name: particle for particle in particles}
+    term_by_id = {term.id: term for term in terms}
+    annotated: list[CompiledOrientedKernel] = []
+    for kernel in kernels:
+        derived_couplings = {
+            S(f"UFO::{name}"): E(term_by_id[term_id].coupling_expression)
+            for name in kernel.runtime_parameters
+            if name.startswith("derived_coupling_")
+            for term_id in (int(name.rsplit("_", 1)[1]),)
+            if term_id in term_by_id
+        }
+        coupling = _replace_expression_symbols(
+            E(kernel.coupling_expression),
+            derived_couplings,
+        )
+        dimensions = tuple(
+            (
+                particle.component_dimension
+                if particle.component_dimension is not None
+                else _spin_dimension(particle.spin)
+            )
+            for particle in (
+                particle_by_name[kernel.particles[0]],
+                particle_by_name[kernel.particles[1]],
+                particle_by_name[kernel.particles[2]],
+            )
+        )
+        candidates: list[
+            tuple[str, tuple[int, int], tuple[float, float], str]
+        ] = []
+        for input_order, swap_sides in (((0, 1), False), ((1, 0), True)):
+            oriented_components = tuple(
+                _canonicalize_oriented_kernel_component(
+                    _replace_expression_symbols(
+                        _remap_kernel_symbols(
+                            E(component),
+                            old_kind=kernel.kind,
+                            new_kind=0,
+                            swap_sides=swap_sides,
+                        ),
+                        derived_couplings,
+                    )
+                    * coupling
+                )
+                for component in kernel.component_expressions
+            )
+            oriented_dimensions = (
+                dimensions[input_order[0]],
+                dimensions[input_order[1]],
+                dimensions[2],
+            )
+            for sign in (1.0, -1.0):
+                component_strings = tuple(
+                    _canonicalize_oriented_kernel_component(sign * component)
+                    .to_canonical_string()
+                    for component in oriented_components
+                )
+                signature = json.dumps(
+                    {
+                        "input_dimensions": list(oriented_dimensions[:2]),
+                        "output_dimension": oriented_dimensions[2],
+                        "components": list(component_strings),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                candidates.append(
+                    (
+                        signature,
+                        input_order,
+                        (sign, 0.0),
+                        hashlib.sha256(signature.encode("utf-8")).hexdigest(),
+                    )
+                )
+        _signature, input_order, factor, class_digest = min(
+            candidates,
+            key=lambda candidate: candidate[0],
+        )
+        annotated.append(
+            replace(
+                kernel,
+                evaluation_class=f"symbolica-sha256:{class_digest}",
+                evaluation_factor=factor,
+                evaluation_input_order=input_order,
+                evaluation_equivalence_verified=True,
+            )
+        )
+    reference_factor_by_class: dict[str, complex] = {}
+    normalized: list[CompiledOrientedKernel] = []
+    for kernel in annotated:
+        class_factor_complex = complex(*kernel.evaluation_factor)
+        reference_factor = reference_factor_by_class.setdefault(
+            kernel.evaluation_class,
+            class_factor_complex,
+        )
+        relative_factor = class_factor_complex / reference_factor
+        normalized.append(
+            replace(
+                kernel,
+                evaluation_factor=(
+                    float(relative_factor.real),
+                    float(relative_factor.imag),
+                ),
+            )
+        )
+    return tuple(normalized)
 
 
 def compile_builtin_model_ir(model: Mapping[str, object]) -> CompiledModelIR:

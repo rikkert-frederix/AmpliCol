@@ -339,6 +339,28 @@ def test_lc_mixed_process_recycles_pure_gluon_subcurrents(
     )
 
 
+def test_lc_signed_fanout_matches_amplicol_interaction_evaluation_topology() -> None:
+    dag = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            "g g > t t~ g g g",
+            selected_source_helicities={label: -1 for label in range(1, 8)},
+        )
+    )
+
+    assert len(dag.currents) == 592
+    assert len(dag.interactions) == 2705
+    assert dag.interaction_evaluation_count == 1375
+    assert dag.interaction_fanout_histogram == (
+        (1, 345),
+        (2, 880),
+        (4, 150),
+    )
+    assert all(
+        interaction.evaluation_group_id is not None
+        for interaction in dag.interactions
+    )
+
+
 def test_generic_dag_compiler_prefilters_fixed_source_helicity_states() -> None:
     selected_helicities = {1: -1, 2: 1, 3: -1, 4: 1}
     dag = prune_dag_to_amplitude_roots(

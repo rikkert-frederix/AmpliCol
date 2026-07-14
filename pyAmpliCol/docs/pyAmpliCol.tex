@@ -755,6 +755,21 @@ avoiding one current table per ordering.  Runtime selection of one LC ordering
 is still available through generated sidecars; \texttt{time-process
 --lc-sector-ids} loads the matching pruned sidecar when it exists.
 
+The same reuse is now explicit at the primitive-kernel level.  A compiled
+model stores equivalence classes proved from the complete lowered Symbolica
+component vector, including the coupling, after testing both input orders and
+an overall sign.  This is a model-independent algebraic test, not a hard-coded
+SM permutation list.  The DAG retains every signed target attachment but maps
+attachments with the same verified class and canonical inputs to one kernel
+evaluation; stage lowering then applies the sign and colour weight to each
+target.  A fan-out-aware output order also keeps shared targets in the same
+Symbolica chunks where possible.  For the fixed-helicity all-flow
+\(gg\to t\bar t+3g\) check, 2,705 attachments reduce to exactly 1,375 kernel
+evaluations, matching \AC.  With output chunks of 128, cross-chunk evaluation
+occurrences fell from 1,896 to 1,587; the retained target-runtime probe improved
+from 18.86 to 17.48 microseconds per point in pure evaluator time, with an
+unchanged matrix element.
+
 The fixed-helicity workload is selected without constructing an all-helicity
 all-sector artifact.  The matrix driver derives replay-compatible candidates
 from the external source-spin states, evaluates their selected-sector raw sums

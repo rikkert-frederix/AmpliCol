@@ -18,8 +18,8 @@ from .ufo_ir import CompiledModelIR, compile_builtin_model_ir, compile_ufo_model
 
 
 COMPILED_MODEL_KIND = "pyamplicol-compiled-model"
-COMPILED_MODEL_SCHEMA_VERSION = 3
-MODEL_COMPILER_VERSION = 2
+COMPILED_MODEL_SCHEMA_VERSION = 4
+MODEL_COMPILER_VERSION = 3
 BUILTIN_SM_ALIASES = frozenset(("builtin_sm", "built-in-sm"))
 DEFAULT_MODEL_RESTRICTION = "default"
 NO_MODEL_RESTRICTION = "none"
@@ -362,12 +362,33 @@ def compile_model_source(
                 ", ".join(str(term_id) for term_id in sorted(unlowered_contact_term_ids)),
             ),
         )
+    evaluation_class_sizes: dict[str, int] = {}
+    for kernel in model_ir.oriented_kernels:
+        if not kernel.evaluation_equivalence_verified:
+            continue
+        evaluation_class_sizes[kernel.evaluation_class] = (
+            evaluation_class_sizes.get(kernel.evaluation_class, 0) + 1
+        )
     capabilities = {
         **capabilities,
         "compiled_vertex_term_count": len(model_ir.vertex_terms),
         "compiled_contact_term_count": len(lowered_contact_term_ids),
         "unlowered_contact_term_count": len(unlowered_contact_term_ids),
         "compiled_propagator_count": len(model_ir.propagators),
+        "verified_kernel_evaluation_class_count": len(evaluation_class_sizes),
+        "reusable_kernel_evaluation_class_count": sum(
+            size > 1 for size in evaluation_class_sizes.values()
+        ),
+        "signed_kernel_evaluation_relation_count": sum(
+            kernel.evaluation_factor != (1.0, 0.0)
+            for kernel in model_ir.oriented_kernels
+            if kernel.evaluation_equivalence_verified
+        ),
+        "swapped_kernel_evaluation_relation_count": sum(
+            kernel.evaluation_input_order == (1, 0)
+            for kernel in model_ir.oriented_kernels
+            if kernel.evaluation_equivalence_verified
+        ),
     }
     conversion_seconds = time.perf_counter() - started
     phase_timings["total"] = conversion_seconds

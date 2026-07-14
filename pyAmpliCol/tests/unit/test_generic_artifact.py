@@ -351,12 +351,14 @@ def test_lc_gluon_flavour_flow_aggregation_matches_amplicol_current_buckets() ->
         "current_count": 438,
         "source_count": 16,
         "interaction_count": 2102,
+        "interaction_evaluation_count": 2102,
         "amplitude_root_count": 128,
     }
     assert aggregation["after"] == {
         "current_count": 378,
         "source_count": 16,
         "interaction_count": 1590,
+        "interaction_evaluation_count": 1590,
         "amplitude_root_count": 128,
     }
     assert aggregation["merged_current_count"] == 60

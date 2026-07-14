@@ -22,6 +22,7 @@ from .model import (
     QuantumFlow,
     SourceSpinState,
     Vertex,
+    VertexEvaluationEquivalence,
     VertexLoweringRule,
     _expr_antiquark_propagator_dirac,
     _expr_antiquark_propagator_weyl,
@@ -356,6 +357,26 @@ class CompiledUFOModel(Model):
             input_roles=(kernel.particles[0], kernel.particles[1]),
             output_role=kernel.particles[2],
             coupling_mode="external-model-parameters",
+        )
+
+    def vertex_evaluation_equivalence(
+        self,
+        kind: int,
+    ) -> VertexEvaluationEquivalence:
+        kernel = self._kernel(kind)
+        if not kernel.evaluation_equivalence_verified or not kernel.evaluation_class:
+            return super().vertex_evaluation_equivalence(kind)
+        input_order = tuple(int(value) for value in kernel.evaluation_input_order)
+        if input_order not in {(0, 1), (1, 0)}:
+            raise ValueError(
+                f"compiled UFO kernel {kind} has invalid evaluation input order "
+                f"{input_order}"
+            )
+        return VertexEvaluationEquivalence(
+            class_id=kernel.evaluation_class,
+            factor=kernel.evaluation_factor,
+            input_order=input_order,
+            verified=True,
         )
 
     def vertex_coupling_orders(self, vertex: Vertex):

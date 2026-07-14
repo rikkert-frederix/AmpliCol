@@ -30,6 +30,12 @@ def _compiled_ir_structure_sha256(compiled: CompiledModel) -> str:
         # Symbolica may print equivalent large sums in a different term order.
         expressions = kernel.pop("component_expressions")
         kernel["component_expression_count"] = len(expressions)
+        # Evaluation equivalence is derived optimization metadata and does not
+        # change the compiled model's physics/topology structure.
+        kernel.pop("evaluation_class")
+        kernel.pop("evaluation_factor")
+        kernel.pop("evaluation_input_order")
+        kernel.pop("evaluation_equivalence_verified")
     payload = json.dumps(
         ir,
         ensure_ascii=False,

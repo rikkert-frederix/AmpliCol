@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import Counter
 from dataclasses import replace
 
 import pytest
@@ -410,6 +411,52 @@ def test_compiled_model_persists_oriented_kernel_color_projections(
     )
 
     assert model.vertex_color_structure(vertex) == "fundamental-generator"
+
+
+def test_compiled_model_persists_verified_kernel_evaluation_relations() -> None:
+    compiled = compile_model_source(
+        bundled_model_path("sm", "json"),
+        use_cache=False,
+    )
+    round_tripped = CompiledModel.from_dict(compiled.to_dict())
+    kernels = round_tripped.ir.oriented_kernels
+
+    assert kernels
+    assert all(
+        kernel.evaluation_equivalence_verified and kernel.evaluation_class
+        for kernel in kernels
+    )
+    class_sizes = Counter(kernel.evaluation_class for kernel in kernels)
+    assert any(size > 1 for size in class_sizes.values())
+    assert any(kernel.evaluation_factor == (-1.0, 0.0) for kernel in kernels)
+    assert any(kernel.evaluation_input_order == (1, 0) for kernel in kernels)
+    assert (
+        round_tripped.capabilities["verified_kernel_evaluation_class_count"]
+        == len(class_sizes)
+    )
+
+    model = CompiledUFOModel(round_tripped)
+    for kernel in kernels:
+        equivalence = model.vertex_evaluation_equivalence(kernel.kind)
+        assert equivalence.class_id == kernel.evaluation_class
+        assert equivalence.factor == kernel.evaluation_factor
+        assert equivalence.input_order == kernel.evaluation_input_order
+        assert equivalence.verified is True
+
+    process = build_model_process_ir("g g > t t~ g", round_tripped.ir)
+    dag = prune_dag_to_amplitude_roots(
+        compile_generic_dag(
+            process,
+            model=model,
+            selected_source_helicities={label: -1 for label in range(1, 6)},
+        )
+    )
+    assert (
+        len(dag.currents),
+        len(dag.interactions),
+        dag.interaction_evaluation_count,
+        len(dag.amplitude_roots),
+    ) == (29, 51, 36, 6)
 
 
 def test_custom_ufo_scalar_propagator_is_lowered_and_runtime_parameterized(

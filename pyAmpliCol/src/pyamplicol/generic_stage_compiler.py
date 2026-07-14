@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import heapq
 import time
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -84,6 +86,14 @@ class GenericCompiledStageBlueprint:
     expression_ready: bool
     blockers: tuple[str, ...]
     first_output_previews: tuple[str, ...]
+    evaluation_groups_by_current: tuple[tuple[int, tuple[int, ...]], ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
+    fanout_chunk_size: int | None = None
+    fanout_evaluation_occurrences_before: int | None = None
+    fanout_evaluation_occurrences_after: int | None = None
     parameter_symbols: tuple[Any, ...] = field(
         default=(),
         repr=False,
@@ -126,6 +136,20 @@ class GenericCompiledStageBlueprint:
             "blockers": list(self.blockers),
             "first_output_previews": list(self.first_output_previews),
             "symbolica_function_count": len(self.symbolica_functions),
+            "evaluation_fanout": {
+                "strategy": (
+                    "shared-evaluation-affinity"
+                    if self.fanout_chunk_size is not None
+                    else "natural-current-order"
+                ),
+                "chunk_size": self.fanout_chunk_size,
+                "evaluation_occurrences_before": (
+                    self.fanout_evaluation_occurrences_before
+                ),
+                "evaluation_occurrences_after": (
+                    self.fanout_evaluation_occurrences_after
+                ),
+            },
         }
 
 
@@ -417,6 +441,336 @@ def build_generic_stage_compiler_blueprint(
     )
 
 
+def _chunk_evaluation_occurrence_count(
+    current_order: Sequence[int],
+    *,
+    output_size_by_current: Mapping[int, int],
+    evaluation_groups_by_current: Mapping[int, frozenset[int]],
+    chunk_size: int,
+) -> int:
+    chunk_groups: list[set[int]] = []
+    output_offset = 0
+    for current_id in current_order:
+        output_size = int(output_size_by_current[current_id])
+        if output_size <= 0:
+            continue
+        first_chunk = output_offset // chunk_size
+        last_chunk = (output_offset + output_size - 1) // chunk_size
+        while len(chunk_groups) <= last_chunk:
+            chunk_groups.append(set())
+        groups = evaluation_groups_by_current.get(current_id, frozenset())
+        for chunk_index in range(first_chunk, last_chunk + 1):
+            chunk_groups[chunk_index].update(groups)
+        output_offset += output_size
+    return sum(len(groups) for groups in chunk_groups)
+
+
+def _fanout_aware_current_order(
+    current_ids: Sequence[int],
+    *,
+    output_size_by_current: Mapping[int, int],
+    evaluation_groups_by_current: Mapping[int, frozenset[int]],
+    chunk_size: int,
+) -> tuple[tuple[int, ...], int, int]:
+    """Cluster current outputs whose kernel evaluations have shared fan-out.
+
+    Shared evaluation groups form a sparse hypergraph over result currents.
+    Indexed heaps reproduce the overlap/benefit greedy choice without scanning
+    every unplaced current.  Pathologically large fan-outs use a deterministic
+    anchor-group sort, keeping the construction bounded for very large stages.
+    """
+
+    natural_order = tuple(int(current_id) for current_id in current_ids)
+    before = _chunk_evaluation_occurrence_count(
+        natural_order,
+        output_size_by_current=output_size_by_current,
+        evaluation_groups_by_current=evaluation_groups_by_current,
+        chunk_size=chunk_size,
+    )
+    frequencies = Counter(
+        group_id
+        for current_id in natural_order
+        for group_id in evaluation_groups_by_current.get(current_id, frozenset())
+    )
+    shared_groups = {
+        group_id for group_id, frequency in frequencies.items() if frequency > 1
+    }
+    if not shared_groups or len(natural_order) < 2:
+        return natural_order, before, before
+
+    shared_by_current = {
+        current_id: tuple(
+            sorted(
+                group_id
+                for group_id in evaluation_groups_by_current.get(
+                    current_id,
+                    frozenset(),
+                )
+                if group_id in shared_groups
+            )
+        )
+        for current_id in natural_order
+    }
+    members_by_group: dict[int, list[int]] = {
+        group_id: [] for group_id in shared_groups
+    }
+    for current_id, group_ids in shared_by_current.items():
+        for group_id in group_ids:
+            members_by_group[group_id].append(current_id)
+
+    benefit_by_current = {
+        current_id: sum(
+            frequencies[group_id] - 1
+            for group_id in shared_by_current[current_id]
+        )
+        for current_id in natural_order
+    }
+    large_fanout_limit = max(1024, 8 * chunk_size)
+    if max(frequencies.values()) > large_fanout_limit:
+
+        def anchor_key(current_id: int) -> tuple[int, int, int, int, int]:
+            group_ids = shared_by_current[current_id]
+            if not group_ids:
+                return (1, 0, 0, 0, current_id)
+            anchor = min(
+                group_ids,
+                key=lambda group_id: (-frequencies[group_id], group_id),
+            )
+            return (
+                0,
+                -frequencies[anchor],
+                anchor,
+                -benefit_by_current[current_id],
+                current_id,
+            )
+
+        candidate_order = tuple(sorted(natural_order, key=anchor_key))
+    else:
+        remaining = set(natural_order)
+        seed_heap = [
+            (
+                -benefit_by_current[current_id],
+                -len(
+                    evaluation_groups_by_current.get(
+                        current_id,
+                        frozenset(),
+                    )
+                ),
+                current_id,
+            )
+            for current_id in natural_order
+        ]
+        heapq.heapify(seed_heap)
+        fitting_heaps: dict[int, list[tuple[int, int]]] = {}
+        for current_id in natural_order:
+            size = int(output_size_by_current[current_id])
+            fitting_heaps.setdefault(size, []).append(
+                (-benefit_by_current[current_id], current_id)
+            )
+        for heap in fitting_heaps.values():
+            heapq.heapify(heap)
+        output_sizes = tuple(sorted(fitting_heaps))
+
+        def pop_seed() -> int:
+            while seed_heap:
+                _benefit, _group_count, current_id = heapq.heappop(seed_heap)
+                if current_id in remaining:
+                    return current_id
+            raise ValueError("fan-out ordering lost an unplaced current")
+
+        def pop_fitting(capacity: int) -> int | None:
+            selected_size: int | None = None
+            selected_key: tuple[int, int, int] | None = None
+            for size in output_sizes:
+                if size > capacity:
+                    break
+                heap = fitting_heaps[size]
+                while heap and heap[0][1] not in remaining:
+                    heapq.heappop(heap)
+                if not heap:
+                    continue
+                benefit, current_id = heap[0]
+                key = (benefit, -size, current_id)
+                if selected_key is None or key < selected_key:
+                    selected_size = size
+                    selected_key = key
+            if selected_size is None:
+                return None
+            _benefit, current_id = heapq.heappop(
+                fitting_heaps[selected_size]
+            )
+            return current_id
+
+        bins: list[list[int]] = []
+        while remaining:
+            seed = pop_seed()
+            current_bin: list[int] = []
+            groups_in_bin: set[int] = set()
+            overlap_by_current: dict[int, int] = {}
+            candidate_heap: list[tuple[int, int, int, int]] = []
+            used = 0
+
+            def add_current(current_id: int) -> None:
+                nonlocal used
+                remaining.remove(current_id)
+                current_bin.append(current_id)
+                used += int(output_size_by_current[current_id])
+                for group_id in shared_by_current[current_id]:
+                    if group_id in groups_in_bin:
+                        continue
+                    groups_in_bin.add(group_id)
+                    for candidate_id in members_by_group[group_id]:
+                        if candidate_id not in remaining:
+                            continue
+                        overlap = overlap_by_current.get(candidate_id, 0) + 1
+                        overlap_by_current[candidate_id] = overlap
+                        heapq.heappush(
+                            candidate_heap,
+                            (
+                                -overlap,
+                                -benefit_by_current[candidate_id],
+                                -int(output_size_by_current[candidate_id]),
+                                candidate_id,
+                            ),
+                        )
+
+            def pop_overlapping(capacity: int) -> int | None:
+                postponed: list[tuple[int, int, int, int]] = []
+                selected: int | None = None
+                while candidate_heap:
+                    item = heapq.heappop(candidate_heap)
+                    overlap, _benefit, _size, current_id = item
+                    if current_id not in remaining:
+                        continue
+                    if -overlap != overlap_by_current.get(current_id, 0):
+                        continue
+                    if int(output_size_by_current[current_id]) > capacity:
+                        postponed.append(item)
+                        continue
+                    selected = current_id
+                    break
+                for item in postponed:
+                    heapq.heappush(candidate_heap, item)
+                return selected
+
+            add_current(seed)
+            while remaining:
+                capacity = chunk_size - used
+                if capacity < 0:
+                    break
+                selected = pop_overlapping(capacity)
+                if selected is None:
+                    selected = pop_fitting(capacity)
+                if selected is None:
+                    break
+                add_current(selected)
+            bins.append(current_bin)
+
+        candidate_order = tuple(
+            current_id for current_bin in bins for current_id in current_bin
+        )
+    after = _chunk_evaluation_occurrence_count(
+        candidate_order,
+        output_size_by_current=output_size_by_current,
+        evaluation_groups_by_current=evaluation_groups_by_current,
+        chunk_size=chunk_size,
+    )
+    if after >= before:
+        return natural_order, before, before
+    return candidate_order, before, after
+
+
+def _stage_with_fanout_aware_output_order(
+    stage: GenericCompiledStageBlueprint,
+    *,
+    chunk_size: int | None,
+) -> GenericCompiledStageBlueprint:
+    if (
+        chunk_size is None
+        or int(chunk_size) < 1
+        or not stage.evaluation_groups_by_current
+        or not stage.output_slots
+        or str(stage.stage_kind).startswith("amplitude")
+    ):
+        return stage
+
+    slots_by_current: dict[int, list[GenericStageOutputSlot]] = {}
+    for slot in stage.output_slots:
+        slots_by_current.setdefault(slot.current_id, []).append(slot)
+    natural_order = tuple(slots_by_current)
+    output_size_by_current = {
+        current_id: sum(slot.output_stop - slot.output_start for slot in slots)
+        for current_id, slots in slots_by_current.items()
+    }
+    groups_by_current = {
+        int(current_id): frozenset(int(group_id) for group_id in group_ids)
+        for current_id, group_ids in stage.evaluation_groups_by_current
+        if current_id in slots_by_current
+    }
+    current_order, before, after = _fanout_aware_current_order(
+        natural_order,
+        output_size_by_current=output_size_by_current,
+        evaluation_groups_by_current=groups_by_current,
+        chunk_size=int(chunk_size),
+    )
+    if current_order == natural_order:
+        return replace(
+            stage,
+            fanout_chunk_size=int(chunk_size),
+            fanout_evaluation_occurrences_before=before,
+            fanout_evaluation_occurrences_after=after,
+        )
+
+    outputs: list[Any] = []
+    output_slots: list[GenericStageOutputSlot] = []
+    for current_id in current_order:
+        for slot in slots_by_current[current_id]:
+            components = stage.output_expressions[slot.output_start : slot.output_stop]
+            start = len(outputs)
+            outputs.extend(components)
+            output_slots.append(
+                replace(
+                    slot,
+                    output_start=start,
+                    output_stop=len(outputs),
+                )
+            )
+    if len(outputs) != len(stage.output_expressions):
+        raise ValueError("fan-out output ordering lost stage expressions")
+    return replace(
+        stage,
+        output_slots=tuple(output_slots),
+        first_output_previews=_expression_previews(outputs),
+        output_expressions=tuple(outputs),
+        fanout_chunk_size=int(chunk_size),
+        fanout_evaluation_occurrences_before=before,
+        fanout_evaluation_occurrences_after=after,
+    )
+
+
+def _prepare_stage_for_output_chunking(
+    stage: GenericCompiledStageBlueprint,
+    *,
+    blueprint: GenericStageCompilerBlueprint | None,
+    symbolica_settings: Any | None,
+    current_stage_position: int | None = None,
+    current_stage_count: int | None = None,
+) -> GenericCompiledStageBlueprint:
+    if symbolica_settings is None:
+        return stage
+    settings = _stage_symbolica_settings(
+        stage,
+        blueprint,
+        symbolica_settings,
+        current_stage_position=current_stage_position,
+        current_stage_count=current_stage_count,
+    )
+    return _stage_with_fanout_aware_output_order(
+        stage,
+        chunk_size=getattr(settings, "compiled_output_chunk_size", None),
+    )
+
+
 def write_generic_stage_evaluator_artifacts(
     blueprint: GenericStageCompilerBlueprint,
     artifact_dir: str | Path,
@@ -471,10 +825,18 @@ def write_generic_stage_evaluator_artifacts(
     stage_payloads = []
     stage_timings: list[dict[str, object]] = []
     for stage in blueprint.stages:
-        payload = stage.to_json_dict()
-        payload["evaluator"] = compile_stage(stage)
+        prepared_stage = _prepare_stage_for_output_chunking(
+            stage,
+            blueprint=blueprint,
+            symbolica_settings=symbolica_settings,
+        )
+        payload = prepared_stage.to_json_dict()
+        payload["evaluator"] = compile_stage(prepared_stage)
         stage_timings.append(
-            _stage_build_timing_record(stage.evaluator_label, payload["evaluator"])
+            _stage_build_timing_record(
+                prepared_stage.evaluator_label,
+                payload["evaluator"],
+            )
         )
         stage_payloads.append(payload)
         if progress_callback is not None:
@@ -489,8 +851,13 @@ def write_generic_stage_evaluator_artifacts(
                 }
             )
 
-    amplitude_payload = blueprint.amplitude_stage.to_json_dict()
-    amplitude_payload["evaluator"] = compile_stage(blueprint.amplitude_stage)
+    prepared_amplitude_stage = _prepare_stage_for_output_chunking(
+        blueprint.amplitude_stage,
+        blueprint=blueprint,
+        symbolica_settings=symbolica_settings,
+    )
+    amplitude_payload = prepared_amplitude_stage.to_json_dict()
+    amplitude_payload["evaluator"] = compile_stage(prepared_amplitude_stage)
     stage_timings.append(
         _stage_build_timing_record(
             blueprint.amplitude_stage.evaluator_label,
@@ -867,9 +1234,16 @@ def build_and_write_generic_stage_evaluator_artifacts(
                 "cannot write generic evaluator artifact with lowering blockers: "
                 + "; ".join(stage.blockers)
             )
-        payload = stage.to_json_dict()
-        payload["evaluator"] = _compile_stage_evaluator_artifact(
+        prepared_stage = _prepare_stage_for_output_chunking(
             stage,
+            blueprint=None,
+            symbolica_settings=symbolica_settings,
+            current_stage_position=position,
+            current_stage_count=current_stage_count,
+        )
+        payload = prepared_stage.to_json_dict()
+        payload["evaluator"] = _compile_stage_evaluator_artifact(
+            prepared_stage,
             output_dir,
             compiler=compiler,
             blueprint=None,
@@ -882,11 +1256,11 @@ def build_and_write_generic_stage_evaluator_artifacts(
             current_stage_count=current_stage_count,
         )
         timing = _stage_build_timing_record(
-            stage.evaluator_label,
+            prepared_stage.evaluator_label,
             payload["evaluator"],
         )
         stage_timings.append(timing)
-        if str(stage.stage_kind).startswith("amplitude"):
+        if str(prepared_stage.stage_kind).startswith("amplitude"):
             amplitude_payload = payload
         else:
             stage_payloads.append(payload)
@@ -894,7 +1268,7 @@ def build_and_write_generic_stage_evaluator_artifacts(
             evaluator_progress_callback(
                 {
                     "stage": "stage complete",
-                    "item": stage.evaluator_label,
+                    "item": prepared_stage.evaluator_label,
                     "increment": 1,
                     "total": stage_count,
                     "duration_s": timing["stage_evaluator_build_s"],
@@ -1427,41 +1801,57 @@ def _compile_current_stage_blueprint(
         tuple[int, tuple[int, ...], tuple[float, ...]],
         tuple[Any, Any],
     ] = {}
+    compact_evaluation_cache: dict[int, tuple[Any, ...]] = {}
+    evaluation_groups_by_current = tuple(
+        (
+            current_id,
+            tuple(
+                sorted(
+                    {
+                        (
+                            int(interaction.evaluation_group_id)
+                            if interaction.evaluation_group_id is not None
+                            else -(interaction.id + 1)
+                        )
+                        for interaction_item in interactions_by_result[current_id]
+                        for interaction in (
+                            dag.interactions[
+                                int(interaction_item)
+                                if interactions_compacted
+                                else int(_dict(interaction_item)["interaction_id"])
+                            ],
+                        )
+                    }
+                )
+            ),
+        )
+        for current_id in sorted(interactions_by_result)
+    )
 
     for current_id in sorted(interactions_by_result):
         current_slot = current_slots[current_id]
         dimension = int(current_slot["dimension"])
         total = tuple(0j for _ in range(dimension))
         for interaction_item in interactions_by_result[current_id]:
+            interaction_id = (
+                int(interaction_item)
+                if interactions_compacted
+                else int(_dict(interaction_item)["interaction_id"])
+            )
             try:
-                contribution = (
-                    _compact_interaction_contribution(
-                        dag,
-                        stage_model,
-                        int(interaction_item),
-                        value_components_by_slot_id=value_components_by_slot_id,
-                        input_value_slot_by_current_id=input_value_slot_by_current_id,
-                        momentum_components_by_slot_id=momentum_components_by_slot_id,
-                        momentum_slot_by_mask=momentum_slot_by_mask,
-                        model_parameter_symbols=local_inputs.model_parameter_symbols,
-                        coupling_cache=compact_coupling_cache,
-                    )
-                    if interactions_compacted
-                    else _interaction_contribution(
-                        dag,
-                        stage_model,
-                        _dict(interaction_item),
-                        value_components_by_slot_id=value_components_by_slot_id,
-                        momentum_components_by_slot_id=momentum_components_by_slot_id,
-                        model_parameter_symbols=local_inputs.model_parameter_symbols,
-                    )
+                contribution = _compact_interaction_contribution(
+                    dag,
+                    stage_model,
+                    interaction_id,
+                    value_components_by_slot_id=value_components_by_slot_id,
+                    input_value_slot_by_current_id=input_value_slot_by_current_id,
+                    momentum_components_by_slot_id=momentum_components_by_slot_id,
+                    momentum_slot_by_mask=momentum_slot_by_mask,
+                    model_parameter_symbols=local_inputs.model_parameter_symbols,
+                    coupling_cache=compact_coupling_cache,
+                    evaluation_cache=compact_evaluation_cache,
                 )
             except ValueError as error:
-                interaction_id = (
-                    int(interaction_item)
-                    if interactions_compacted
-                    else int(_dict(interaction_item)["interaction_id"])
-                )
                 blockers.append(
                     f"interaction {interaction_id}: {error}"
                 )
@@ -1530,6 +1920,7 @@ def _compile_current_stage_blueprint(
         expression_ready=not blockers,
         blockers=tuple(blockers),
         first_output_previews=_expression_previews(specialized_outputs),
+        evaluation_groups_by_current=evaluation_groups_by_current,
         parameter_symbols=local_inputs.parameter_symbols,
         output_expressions=specialized_outputs,
         symbolica_functions=symbolica_functions,
@@ -1709,57 +2100,77 @@ def _compact_interaction_contribution(
         tuple[int, tuple[int, ...], tuple[float, ...]],
         tuple[Any, Any],
     ],
+    evaluation_cache: dict[int, tuple[Any, ...]],
 ) -> tuple[Any, ...]:
     interaction = dag.interactions[interaction_id]
-    left_current = dag.currents[interaction.left_id]
-    right_current = dag.currents[interaction.right_id]
-    result_current = dag.currents[interaction.result_id]
-    left = value_components_by_slot_id[
-        input_value_slot_by_current_id[interaction.left_id]
-    ]
-    right = value_components_by_slot_id[
-        input_value_slot_by_current_id[interaction.right_id]
-    ]
-    coupling_key = (
-        int(interaction.vertex_kind),
-        interaction.vertex_particles,
-        interaction.coupling,
+    evaluation_group_id = interaction.evaluation_group_id
+    canonical_components = (
+        None
+        if evaluation_group_id is None
+        else evaluation_cache.get(evaluation_group_id)
     )
-    coupling = coupling_cache.get(coupling_key)
-    if coupling is None:
-        resolved_coupling = list(interaction.coupling)
-        names = _runtime_coupling_parameter_names(
-            interaction.vertex_kind,
+    evaluation_factor = complex(*interaction.evaluation_factor)
+    if evaluation_factor == 0j:
+        raise ValueError("interaction evaluation factor must be nonzero")
+    if canonical_components is None:
+        left_current = dag.currents[interaction.left_id]
+        right_current = dag.currents[interaction.right_id]
+        result_current = dag.currents[interaction.result_id]
+        left = value_components_by_slot_id[
+            input_value_slot_by_current_id[interaction.left_id]
+        ]
+        right = value_components_by_slot_id[
+            input_value_slot_by_current_id[interaction.right_id]
+        ]
+        coupling_key = (
+            int(interaction.vertex_kind),
             interaction.vertex_particles,
             interaction.coupling,
-            model=model,
         )
-        for index, name in enumerate(names):
-            if isinstance(name, str) and name in model_parameter_symbols:
-                resolved_coupling[index] = model_parameter_symbols[name]
-        coupling = (resolved_coupling[0], resolved_coupling[1])
-        coupling_cache[coupling_key] = coupling
-    components = model.vertex_component_expression(
-        int(interaction.vertex_kind),
-        left,
-        right,
-        result_particle_id=int(result_current.index.particle_id),
-        result_chirality=int(result_current.index.chirality),
-        left_chirality=int(left_current.index.chirality),
-        right_chirality=int(right_current.index.chirality),
-        coupling=coupling,
-        left_momentum=momentum_components_by_slot_id[
-            momentum_slot_by_mask[left_current.index.momentum_mask]
-        ],
-        right_momentum=momentum_components_by_slot_id[
-            momentum_slot_by_mask[right_current.index.momentum_mask]
-        ],
+        coupling = coupling_cache.get(coupling_key)
+        if coupling is None:
+            resolved_coupling = list(interaction.coupling)
+            names = _runtime_coupling_parameter_names(
+                interaction.vertex_kind,
+                interaction.vertex_particles,
+                interaction.coupling,
+                model=model,
+            )
+            for index, name in enumerate(names):
+                if isinstance(name, str) and name in model_parameter_symbols:
+                    resolved_coupling[index] = model_parameter_symbols[name]
+            coupling = (resolved_coupling[0], resolved_coupling[1])
+            coupling_cache[coupling_key] = coupling
+        components = model.vertex_component_expression(
+            int(interaction.vertex_kind),
+            left,
+            right,
+            result_particle_id=int(result_current.index.particle_id),
+            result_chirality=int(result_current.index.chirality),
+            left_chirality=int(left_current.index.chirality),
+            right_chirality=int(right_current.index.chirality),
+            coupling=coupling,
+            left_momentum=momentum_components_by_slot_id[
+                momentum_slot_by_mask[left_current.index.momentum_mask]
+            ],
+            right_momentum=momentum_components_by_slot_id[
+                momentum_slot_by_mask[right_current.index.momentum_mask]
+            ],
+        )
+        canonical_components = (
+            components
+            if evaluation_factor == 1.0 + 0.0j
+            else tuple(component / evaluation_factor for component in components)
+        )
+        if evaluation_group_id is not None:
+            evaluation_cache[evaluation_group_id] = canonical_components
+    color_weight = complex(*interaction.color_weight)
+    attachment_weight = color_weight * evaluation_factor
+    if attachment_weight == 1.0 + 0.0j:
+        return canonical_components
+    return tuple(
+        attachment_weight * component for component in canonical_components
     )
-    color_weight = tuple(interaction.color_weight)
-    if color_weight == (1.0, 0.0):
-        return components
-    weight = color_weight[0] + 1j * color_weight[1]
-    return tuple(weight * component for component in components)
 
 
 def _amplitude_root_expression(
