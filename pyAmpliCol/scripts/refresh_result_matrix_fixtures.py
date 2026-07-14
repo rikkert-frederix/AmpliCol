@@ -105,12 +105,20 @@ def main(argv: list[str] | None = None) -> int:
                 skip_cpp_o3=bool(args.skip_cpp_o3),
             )
 
-    fixture = _build_fixture(colors, max_n=args.max_n)
+    existing_fixture: dict[str, Any] | None = None
+    min_n = 1
     if args.extend_existing and args.output.is_file():
-        fixture = _extend_fixture(
-            _read_json(args.output),
-            fixture,
-        )
+        existing_fixture = _read_json(args.output)
+        existing_max_n = int(existing_fixture.get("max_n", 0))
+        if existing_max_n < 1 or args.max_n <= existing_max_n:
+            parser.error(
+                "--extend-existing requires --max-n to exceed the existing fixture"
+            )
+        min_n = existing_max_n + 1
+
+    fixture = _build_fixture(colors, min_n=min_n, max_n=args.max_n)
+    if existing_fixture is not None:
+        fixture = _extend_fixture(existing_fixture, fixture)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
     print(
@@ -152,7 +160,12 @@ def _refresh_cache(
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
 
 
-def _build_fixture(colors: Iterable[str], *, max_n: int) -> dict[str, Any]:
+def _build_fixture(
+    colors: Iterable[str],
+    *,
+    min_n: int = 1,
+    max_n: int,
+) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
     unsupported: list[dict[str, Any]] = []
     unvalidated: list[dict[str, Any]] = []
@@ -175,7 +188,7 @@ def _build_fixture(colors: Iterable[str], *, max_n: int) -> dict[str, Any]:
         for base_key, by_n in sorted(data.get("entries", {}).items()):
             for n_text, entry in sorted(by_n.items(), key=lambda item: int(item[0])):
                 n_final = int(n_text)
-                if n_final > max_n:
+                if n_final < min_n or n_final > max_n:
                     continue
                 validation = entry.get("validation") or {}
                 amplicol = entry.get("amplicol") or {}
@@ -262,6 +275,18 @@ def _extend_fixture(
         ]
         refreshed[key] = [*retained, *appended]
 
+    sources = {
+        str(source.get("color_accuracy")): source
+        for source in existing.get("sources", [])
+    }
+    sources.update(
+        {
+            str(source.get("color_accuracy")): source
+            for source in refreshed.get("sources", [])
+        }
+    )
+    refreshed["sources"] = [sources[color] for color in sorted(sources)]
+
     refreshed["cases"].sort(
         key=lambda item: (
             item["color_accuracy"],
@@ -300,7 +325,8 @@ def _case_from_entry(
     value = float(validation["values"]["pyamplicol_jit"])
     reference = float(validation["reference"])
     rel_diff = float(validation["relative_differences"]["pyamplicol_jit"])
-    point = _read_validation_point(validation.get("point_source"))
+    point_source = _validation_point_source(entry, validation)
+    point = _read_validation_point(point_source)
     return {
         "id": f"{color}:{base_key}:n{n_final}",
         "base_key": base_key,
@@ -336,16 +362,40 @@ def _case_from_entry(
         },
         "metadata": {
             "source_cache": _repo_relative(source_cache),
-            "point_source": _repo_relative(Path(str(validation.get("point_source", "")))),
+            "point_source": _repo_relative(point_source),
+            "point_source_declared": validation.get("point_source"),
             "amplicol_command": validation.get("amplicol_command"),
         },
     }
 
 
-def _read_validation_point(path_value: object) -> list[dict[str, Any]]:
-    if not isinstance(path_value, str) or not path_value:
-        raise ValueError("validation record is missing point_source")
-    path = Path(path_value)
+def _validation_point_source(
+    entry: dict[str, Any],
+    validation: dict[str, Any],
+) -> Path:
+    declared = validation.get("point_source")
+    candidates: list[Path] = []
+    if isinstance(declared, str) and declared:
+        candidates.append(Path(declared))
+    for mode_name in ("pyamplicol_cpp_o3", "pyamplicol_jit"):
+        mode = entry.get(mode_name)
+        if not isinstance(mode, dict):
+            continue
+        for key in ("output_dir", "selected_output_dir", "all_flow_output_dir"):
+            output_dir = mode.get(key)
+            if isinstance(output_dir, str) and output_dir:
+                candidates.append(Path(output_dir) / "validation_momenta.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    attempted = ", ".join(str(path) for path in candidates) or "<none>"
+    raise FileNotFoundError(
+        "validation record has no retained phase-space point; "
+        f"attempted: {attempted}"
+    )
+
+
+def _read_validation_point(path: Path) -> list[dict[str, Any]]:
     payload = _read_json(path)
     points = payload.get("points")
     if not isinstance(points, list) or not points:

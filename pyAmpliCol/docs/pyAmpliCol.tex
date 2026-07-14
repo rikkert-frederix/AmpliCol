@@ -806,25 +806,28 @@ adjustment.  With the patch, all-flow O1 generation progressed to
 \input{result_matrix_full_table.tex}
 
 \paragraph{Archived validation fixture.}
-Every populated LC/NLC/full-colour validation cell through \(n\le6\) is mirrored in
-\path{tests/fixtures/result_matrix_references.json}.  The integration test
-checks those cached same-point \AC/\PAC\ values without a local Fortran run;
-\path{scripts/refresh_result_matrix_fixtures.py} refreshes the fixture from the
-matrix caches.
+All 180 populated LC/NLC/full-colour validation cells through \(n\le9\) are
+mirrored in \path{tests/fixtures/result_matrix_references.json}.  The fixture
+contains 94 LC cases and 43 cases for each of NLC and full colour.  The
+integration test checks those cached same-point \AC/\PAC\ values without a
+local Fortran run; \path{scripts/refresh_result_matrix_fixtures.py} extends the
+fixture incrementally from the matrix caches.
 
 \noindent\footnotesize The following tables repeat the same process families,
 colour conventions, and \AC\ references with \PAC\ generated from the bundled
 loader-JSON Standard Model.  Numerical validation now covers every populated
-reference through \(n=6\): all 144 applicable cells agree with the stored
-built-in/\AC\ values at identical phase-space points and parameters, with
-maximum relative difference \(9.88\times10^{-13}\).  All three colour modes are
-covered through \(n=5\); at \(n=6\), the fixture follows the currently populated
-LC references while the built-in NLC/full-colour caches remain empty.  The
-generation and runtime cells report measured compiled-model runs, while source
-conversion is reported separately and is not charged to each process build.
-The two additional three-quark-line NLC/full-colour timing cells are not among
-the 144 direct-reference comparisons because Fortran \AC\ does not expose that
-colour contraction; they are labelled accordingly in the generated tables.
+reference through \(n=9\): all 180 applicable cells agree with the stored
+built-in/\AC\ values at identical phase-space points and parameters.  The
+fixture's maximum relative difference is \(9.91\times10^{-13}\).  All three
+colour modes are covered through \(n=5\); the higher-multiplicity campaign
+follows every populated LC reference, with 13 cases each at \(n=6,7,8\) and 10
+at \(n=9\).  Generation and runtime cells report measured compiled-model runs;
+the final high-multiplicity campaign is a numerical-validation pass and does
+not replace those timing measurements.  Source conversion is reported
+separately and is not charged to each process build.  Four additional
+three-quark-line NLC/full-colour timing cells are not among the 180
+direct-reference comparisons because Fortran \AC\ does not expose that colour
+contraction; they are labelled accordingly in the generated tables.
 Blank cells are not copied built-in measurements.  Majorana/FNV interactions,
 spin $3/2$, sextet external states, loop/counterterm vertices, and opaque
 callbacks remain explicit preflight errors in this milestone; massive spin-2
@@ -844,16 +847,15 @@ For the reduced observable it requires
 \]
 It writes the cumulative report after every case and preserves superseded
 process directories in the same output tree.  The committed incremental reports
-are \path{docs/ufo_sm_n4_validation_report.json},
-\path{docs/ufo_sm_n5_validation_report.json}, and
-\path{docs/ufo_sm_n6_validation_report.json}.
+are \path{docs/ufo_sm_n4_validation_report.json} through
+\path{docs/ufo_sm_n9_validation_report.json}.
 \begin{lstlisting}[language=bash,basicstyle=\ttfamily\scriptsize,breaklines=true,breakatwhitespace=true]
 env PYTHONPATH=src dependencies/.venv/bin/python \
   scripts/run_with_memory_watch.py --limit-gb 30 -- \
   dependencies/.venv/bin/python scripts/validate_ufo_sm_fixture.py \
-  --min-n 1 --max-n 6 --color-accuracy all --n-cores 5 \
+  --min-n 1 --max-n 9 --color-accuracy all --n-cores 5 \
   --tolerance 1e-10 --regenerate --keep-going \
-  --output-root .ufo_support_outputs/ufo_sm_fixture_validation_n6
+  --output-root .ufo_support_outputs/ufo_sm_fixture_validation_n9
 \end{lstlisting}
 \input{result_matrix_ufo_sm_table.tex}
 \input{z_performance_ufo_sm_table.tex}

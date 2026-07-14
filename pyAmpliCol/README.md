@@ -23,16 +23,15 @@ processes.  Unsupported requests fail explicitly with diagnostics that name the
 missing layer, such as colour expansion, current closure, or a missing
 vertex/propagator lowering.
 
-The external-model validation fixture now contains 144 populated
-LC/NLC/full-colour Standard Model cases through final-state multiplicity six
-from the bundled loader JSON.  This covers all three colour modes through
-`n=5` and the currently populated LC references at `n=6`.  At identical stored
-phase-space points and matched parameters, all 144 agree with the
-built-in/AmpliCol references at `1e-10` tolerance; the largest observed relative
-difference is `9.88e-13`.  The incremental portable reports are
-`docs/ufo_sm_n4_validation_report.json`, `docs/ufo_sm_n5_validation_report.json`,
-and `docs/ufo_sm_n6_validation_report.json`; every generated process artifact
-is retained below `.ufo_support_outputs/`.
+The external-model validation fixture now contains 180 populated
+LC/NLC/full-colour Standard Model cases through final-state multiplicity nine
+from the bundled loader JSON.  It covers all three colour modes through `n=5`
+and every populated LC reference through `n=9`.  At identical stored
+phase-space points and matched parameters, all 180 agree with the
+built-in/AmpliCol references at `1e-10` tolerance; the fixture's largest
+relative difference is `9.91e-13`.  Incremental portable reports for `n=4`
+through `n=9` live under `docs/ufo_sm_n*_validation_report.json`; every
+generated process artifact is retained below `.ufo_support_outputs/`.
 
 ## Installation
 

@@ -46,6 +46,7 @@ def test_non_lc_fixture_generation_matches_uniform_matrix_chunking(tmp_path) -> 
     assert _option(command, "--symbolica-output-chunk-strategy") == "uniform"
     assert _option(command, "--max-coupling-order") == "QED=0"
     assert "--monitor" in command
+    assert "--json" not in command
 
 
 def test_lc_fixture_generation_retains_selected_flow_auto_chunking(tmp_path) -> None:
@@ -79,6 +80,7 @@ def test_lc_fixture_generation_retains_selected_flow_auto_chunking(tmp_path) -> 
     assert _option(command, "--lc-sector-ids") == "0"
     assert _option(command, "--reference-color-order") == "1,3,4,5,6,2"
     assert "--monitor" in command
+    assert "--json" not in command
 
 
 def test_generation_command_streams_and_retains_monitor_output(

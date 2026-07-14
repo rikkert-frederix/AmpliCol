@@ -322,7 +322,6 @@ def _generation_command(
         "--model-cache-dir",
         str(model_cache),
         "--monitor",
-        "--json",
     ]
     base_key = str(case["base_key"])
     command.extend(FAMILY_FLAGS.get(base_key, ()))

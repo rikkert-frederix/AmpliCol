@@ -23,7 +23,7 @@ This document separates three layers that are easy to conflate:
 |---|---|---|
 | Legacy particle vocabulary | Implemented in process/model metadata | QCD partons, `a`, `z`, `w+`, `w-`, charged leptons, neutrinos, and `h`. |
 | Model sources | Implemented for the built-in SM, trusted UFO directories, loader JSON, and exact-version compiled models | `--model` resolves each source into the same immutable `CompiledModel`; UFO imports run in an isolated worker, while data-only JSON starts after import. |
-| Generic UFO lowering | External SM validated point-wise through every populated reference at `n <= 6` | Loader tensors are normalized, simplified through Idenso/Spenso, projected to the Weyl and LC/NLC/full-colour bases, and oriented into current kernels. Component bodies up to 1 KiB are inlined before evaluator construction; larger spin-2/high-rank bodies remain in Symbolica's function map. The 144-case fixture covers all three colour modes through `n=5` and LC at `n=6`; unsupported model features fail during aggregate preflight. |
+| Generic UFO lowering | External SM validated point-wise through every populated reference at `n <= 9` | Loader tensors are normalized, simplified through Idenso/Spenso, projected to the Weyl and LC/NLC/full-colour bases, and oriented into current kernels. Component bodies up to 1 KiB are inlined before evaluator construction; larger spin-2/high-rank bodies remain in Symbolica's function map. The 180-case fixture covers all three colour modes through `n=5` and every populated LC reference through `n=9`; unsupported model features fail during aggregate preflight. |
 | Colorless and spin-2 models | Implemented and documented | UFO, loader JSON, and compiled-model inputs converge to identical canonical IR for `scalars` and `scalar_gravity`. Scalar contacts are validated through final-state `n=8`, including the direct ten-point vertex and an independent eager n-ary oracle. Scalar gravity is validated through three final gravitons in double and 50-digit evaluation; the four-graviton five-minute attempt completes DAG construction and filtering but times out during current merging. LC/NLC/full use the same unit singlet metric. |
 | Run cards and runtime parameters | Implemented | Every public subcommand accepts an `[arguments]` TOML run card with explicit CLI overrides. Cards accept argparse destinations and normalized public long-option spellings. Generated artifacts carry a complete complex-JSON parameter card; Rusticol accepts validated partial overrides at runtime. |
 | Compiled-model artifacts and cache | Implemented | `compile-model` writes portable `*.pyAmplicol-model.json` data and process generation embeds the exact model. Dependency fingerprints and source/restriction content keys prevent stale reuse. |
@@ -378,9 +378,10 @@ External UFO/JSON models use the parallel `CompiledModel` route. Its preflight
 reports unsupported particles, tensors, functions, propagators, and fermion
 flows together; accepted terms are oriented into model-owned kernels before
 the same DAG compiler is entered. The bundled external SM currently passes all
-144 populated LC/NLC/full-colour fixture cases through `n <= 6`; the `n=6`
-fixture currently contains LC references because the built-in NLC/full matrix
-caches stop at `n=5`.
+180 populated LC/NLC/full-colour fixture cases through `n <= 9`.  All three
+colour modes are represented through `n=5`; the higher-multiplicity fixture
+follows the available built-in LC references, with 13 cases each at `n=6`,
+`n=7`, and `n=8`, and 10 at `n=9`.
 
 The generic colour planner and current planner already use the canonical
 all-outgoing process IR.  The colour planner enumerates leading-colour open
