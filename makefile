@@ -14,33 +14,32 @@ else
   $(error FP must be 'd' (double, default) or 'f' (float), got '$(FP)')
 endif
 
-FFLAGS    = -O0 -frecursive -g
-CFLAGS    = -O0 -g $(FPFLAG)
-NVCCFLAGS = -O0 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177 --fmad=false $(FPFLAG)
-#FFLAGS = -O1 -frecursive
-#CFLAGS = -O1
+# FFLAGS    = -O0 -g
+# CFLAGS    = -O0 -g $(FPFLAG)
+# NVCCFLAGS = -O0 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177 --fmad=false $(FPFLAG)
+# FFLAGS = -O1
+# CFLAGS = -O1
 # NVCCFLAGS = -O1 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177
-# FFLAGS = -O2 -frecursive
+# FFLAGS = -O2
 # CFLAGS = -O2
 # NVCCFLAGS = -O2 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177
-# FFLAGS = -O3 -frecursive
+# FFLAGS = -O3
 # CFLAGS = -O3
 # NVCCFLAGS = -O3 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177
-# FFLAGS = -O3 -ffast-math -frecursive
-# CFLAGS = -O3 -ffast-math
-# NVCCFLAGS = -O3 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177 --use_fast_math
+FFLAGS = -O3 -ffast-math
+CFLAGS = -O3 -ffast-math
+NVCCFLAGS = -O3 -std=c++14 -rdc=true -Xcompiler -fPIC -I. -ILibrary -diag-suppress 177 --use_fast_math
 
 
 ifeq ($(shell $(CXX) --version | grep -c clang),1)
-  STDLIB_FLAG = -stdlib=libc++
-  STDLIB_LDLIBS   = -lc++
+  STDLIB_FLAG   = -stdlib=libc++
+  STDLIB_LDLIBS = -lc++
 else
-  STDLIB_FLAG =
-  STDLIB_LDLIBS   =
+  STDLIB_FLAG   =
+  STDLIB_LDLIBS =
 endif
 
-LHAPDF_CFLAGS  := $(shell lhapdf-config --cflags)
-
+#LHAPDF_CFLAGS := $(shell lhapdf-config --cflags)
 
 # ----------------------------------------------------------------------
 # 1. Detect amplitude sources and group them
@@ -58,7 +57,7 @@ AMPOBJCU  := $(notdir $(AMPSRCCU:.cu=.o))
 
 # Explicit rule so Make knows how to build amplitude objects
 $(AMPOBJ): %.o : Library/%.f03
-	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
+	$(FC) -frecursive $(FFLAGS) -fPIC -c -I. -ILibrary $<
 $(AMPOBJC): %.o : Library/%.c
 	$(CC) $(CFLAGS) -fPIC -c -I. -ILibrary $<
 $(AMPOBJCU): %.o : Library/%.cu
@@ -80,7 +79,7 @@ AMPSPACELIBC   := libamplicolmadspace_c.so
 AMPSPACELIBCU  := libamplicolmadspace_cu.so
 
 $(AMPSPACELIBF): amplib.o umami_impl.o umami.o $(AMPLIBS) feynmanrules.o
-	$(FC) $(FFLAGS) -fPIC -shared -o $@ $^
+	$(FC) -frecursive $(FFLAGS) -fPIC -shared -o $@ $^
 
 $(AMPSPACELIBC): amplibc.o umamic.o $(AMPLIBSC) FeynmanRulesC.o
 	$(CXX) $(CFLAGS) $(STDLIB_FLAG) -fPIC -shared -o $@ $^
@@ -147,7 +146,7 @@ $(AMPSPACELIBCU): amplibcu.o amplibcu_dlink.o $(AMPOBJCU) FeynmanRules_device.o 
 	$(FC) $(FFLAGS) -c -I. -IPhaseSpace $<
 
 %.o: Library/%.f03
-	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
+	$(FC) -frecursive $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
 %.o: Library/%.cpp
 	$(CXX) $(CFLAGS) $(STDLIB_FLAG) -fPIC -c -I. -ILibrary $< -std=c++17
@@ -206,14 +205,9 @@ amplitude_QCD.o amplicol_reweight.o ranmar.o
 amplicol_generate: cleanlib $(FILES_M_INT_QCD) dummy.o
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) $(STDLIB_LDLIBS) dummy.o `lhapdf-config --ldflags` -lstdc++ 
 
-amplicol_generate_library_f: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) $(AMPSPACELIB)
-	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
+amplicol_generate_library_f: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) $(AMPSPACELIBF)
+	$(FC) -frecursive $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
 	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
-
-#amplicol_generate_library: $(FILES_M_INT_QCD) $(AMPSPACELIB)
-#	$(FC) $(FFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) $(AMPSPACELIB) \
-#	`lhapdf-config --ldflags` -lstdc++ -Wl,-rpath,$(PWD)
-
 
 amplicol_generate_library_c: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) $(AMPSPACELIB) amplibc.o $(AMPLIBSC) $(AMPSPACELIBC)
 	$(CXX) $(CFLAGS) $(STDLIB_LDLIBS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) amplibc.o $(AMPLIBSC) \
