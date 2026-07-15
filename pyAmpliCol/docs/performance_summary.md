@@ -88,7 +88,7 @@ The CLI now supports reusable evaluator artifacts for the shared-current compile
 
 This is intended for the C++ and ASM performance rows above. It lets runtime-only choices such as `--batch-size` be retimed without regenerating the evaluator. The n=5,6,7,8,9 C++ O3 rows in this table were generated with that two-stage save/load workflow and retimed from saved evaluators at batch size 128.
 
-The rusticol rows use the same saved process directory format. The directory contains the shared-current DAG or scalar zero-gluon manifest, Symbolica stage/scalar evaluators, validation momenta, and a standalone `check_standalone.py` script. The n=9 rusticol row reuses the previously generated C++ O3 compiled evaluators and records the full C++ O3 generation cost in the table; writing the rusticol process wrapper around that artifact took 103 s. The rusticol runtime can load both saved JIT and compiled-complex stage evaluators, but the rows above use the compiled C++ evaluator libraries for `precision=16` because low-multiplicity probes found C++ O3 faster than saved JIT under rusticol. `evaluate_with_prec(..., 32)` and higher precisions load the serialized Symbolica evaluator states from the same process directory and return Python `Decimal` values. The wall timings above use cached NumPy input arrays in the benchmark wrapper and reusable Rust stage scratch buffers, matching the intended `rusticol.Runtime.evaluate/profile(momenta)` API where momenta are already supplied as arrays.
+The rusticol rows use the same saved process directory format. The directory contains the shared-current DAG or scalar zero-gluon manifest, Symbolica stage/scalar evaluators, validation momenta, and the generated `API/python/check_standalone.py` runner. The n=9 rusticol row reuses the previously generated C++ O3 compiled evaluators and records the full C++ O3 generation cost in the table; writing the rusticol process wrapper around that artifact took 103 s. The rusticol runtime can load both saved JIT and compiled-complex stage evaluators, but the rows above use the compiled C++ evaluator libraries for `precision=16` because low-multiplicity probes found C++ O3 faster than saved JIT under rusticol. `evaluate_with_prec(..., 32)` and higher precisions load the serialized Symbolica evaluator states from the same process directory and return Python `Decimal` values. The wall timings above use cached NumPy input arrays in the benchmark wrapper and reusable Rust stage scratch buffers, matching the intended `rusticol.Runtime.evaluate/profile(momenta)` API where momenta are already supplied as arrays.
 
 Process-generic Rusticol probes were also run for `u d~ > w+ g g`,
 `d d~ > z z g`, pure-QCD channels, and multi-quark-line channels. These
@@ -192,8 +192,8 @@ The generated process directory can also be checked without importing pyAmplicCo
 
 ```bash
 cd /Users/vjhirsch/HEP_programs/AmpliCol/pyAmpliCol/outputs/reproduce/n3-rusticol
-python check_standalone.py --precision 16 --profile
-python check_standalone.py --precision 32 --profile
+python API/python/check_standalone.py --precision 16 --profile
+python API/python/check_standalone.py --precision 32 --profile
 ```
 
 ## Dependency Versions
@@ -212,7 +212,7 @@ python check_standalone.py --precision 32 --profile
       "requested": true,
       "source_path": "../rusticol",
       "source_rev": "92ac9e60932a2a0cf15a72b8f7d1e08e7fd5dccf",
-      "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts"
+      "usage": "Python, C++, and Fortran runtime for pyAmpliCol schema-v2 process artifacts"
     },
     "symbolica": {
       "installed": true,

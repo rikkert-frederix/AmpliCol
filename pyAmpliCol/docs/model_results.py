@@ -472,17 +472,22 @@ def _high_precision_value(output_dir: Path, *, timeout_s: int) -> float:
     command = _watched_command(
         [
             sys.executable,
-            str(output_dir / "check_standalone.py"),
+            str(output_dir / "API" / "python" / "check_standalone.py"),
             "--precision",
             "50",
+            "--json",
         ],
         timeout_s=timeout_s,
     )
     completed = _run_command(command)
-    match = re.search(r"^values:\s*\[([^,\]]+)", completed.stdout, re.MULTILINE)
-    if match is None:
-        raise ValueError("could not parse 50-digit value from check_standalone.py")
-    return float(match.group(1))
+    try:
+        payload = json.loads(completed.stdout)
+        value = payload["compatibility_total"][0]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
+        raise ValueError(
+            "could not parse 50-digit value from API/python/check_standalone.py"
+        ) from error
+    return float(value)
 
 
 def _measure_sources(

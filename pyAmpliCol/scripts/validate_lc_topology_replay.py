@@ -19,7 +19,7 @@ if __package__ is None or __package__ == "":
 
 from pyamplicol.core_types import ExternalMomentum  # noqa: E402
 from pyamplicol.color_plan import lc_topology_replay_safe_groups  # noqa: E402
-from pyamplicol.dag_runtime import SymbolicaEvaluatorSettings  # noqa: E402
+from pyamplicol.symbolica_evaluator import SymbolicaEvaluatorSettings  # noqa: E402
 from pyamplicol.generic_artifact import (  # noqa: E402
     GenericProcessManifest,
     build_generic_process_manifest,

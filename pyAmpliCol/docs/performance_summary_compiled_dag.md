@@ -1,7 +1,7 @@
 # pyAmpliCol Compiled DAG Performance Summary
 
 > **Historical note:** this document records the exploratory alias-backed
-> monolithic compiled-DAG route. That route is deprecated for production after
+> monolithic compiled-DAG route. That route and its CLI commands were removed after
 > the schema-v2 generic staged DAG and Rusticol runtime became the supported
 > implementation. The data below is retained for design provenance and backend
 > comparison only; current results and reproduction commands live in
@@ -15,8 +15,8 @@ multi-output evaluator route.
 Compiled-DAG generated-code profiles should use no final-output chunking by
 default. Chunking was tested and is counterproductive for this mode because
 each final-output chunk duplicates the same internal alias dependency graph.
-The CLI still exposes `--compiled-dag-output-chunk-size` as a debug/memory
-experiment, but compiled-DAG presets intentionally do not auto-select chunking.
+The historical CLI exposed `--compiled-dag-output-chunk-size` as a debug/memory
+experiment, but compiled-DAG presets did not auto-select chunking.
 
 Current dependency status: the managed installer uses
 `valentinHirschi/symbolica_mod` branch `pyamplicol-dev-base`, which is

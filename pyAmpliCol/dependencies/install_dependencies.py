@@ -33,6 +33,8 @@ GAMMALOOP_DIR = DEPS_DIR / "gammaloop"
 XSIMD_DIR = DEPS_DIR / "xsimd"
 UFO_MODEL_LOADER_DIR = DEPS_DIR / "ufo-model-loader"
 RUSTICOL_DIR = AMPLICOL_ROOT / "rusticol"
+RUSTICOL_NATIVE_FLAGS = RUSTICOL_DIR / "target" / "release" / "rusticol-native-static-libs.txt"
+RUSTICOL_STATIC_LIBRARY = RUSTICOL_DIR / "target" / "release" / "librusticol_capi.a"
 
 SYMBOLICA_COMMUNITY_URL = "https://github.com/symbolica-dev/symbolica-community.git"
 SYMBOLICA_URL = "https://github.com/symbolica-dev/symbolica.git"
@@ -341,6 +343,13 @@ def ensure_maturin(*, require_complete_bootstrap: bool = True) -> None:
             env=env,
         )
     run([venv_python(), "-m", "maturin", "--version"], env=env)
+
+
+def ensure_just() -> None:
+    if shutil.which("just") is not None:
+        return
+    print("Installing `just` with Cargo for the Rusticol build.")
+    run(["cargo", "install", "just", "--locked"])
 
 
 def remove_path(path: Path) -> None:
@@ -723,7 +732,7 @@ def write_dependency_manifest(
             "installed": python_package_is_installed("rusticol"),
             "source_path": display_path(RUSTICOL_DIR),
             "source_rev": optional_git_head(RUSTICOL_DIR),
-            "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts",
+            "usage": "Python, C++, and Fortran runtime for pyAmpliCol schema-v2 process artifacts",
         },
         "dependency_patches": dependency_patch_manifest_entries(),
     }
@@ -870,7 +879,13 @@ if runtime is None:
 required_runtime_methods = {
     "load",
     "evaluate",
+    "evaluate_resolved",
     "evaluate_with_prec",
+    "evaluate_resolved_with_prec",
+    "set_model_parameters",
+    "set_model_parameter",
+    "mute_warnings",
+    "unmute_warnings",
     "profile",
     "stage_diagnostics",
     "metadata",
@@ -960,6 +975,8 @@ def installed_environment_is_ready(
     if not venv_python().exists():
         return False
     if not include_gammaloop and python_package_is_installed("gammaloop"):
+        return False
+    if not rusticol_native_assets_are_ready():
         return False
 
     completed = run(
@@ -1121,12 +1138,9 @@ def build_wheels_and_install(*, include_gammaloop: bool) -> None:
     )
     install_wheel(loader_wheel, force_reinstall=True, no_deps=True)
 
-    rusticol_wheel = build_maturin_wheel(
-        RUSTICOL_DIR,
-        RUSTICOL_WHEEL_DIR,
-        release=True,
-    )
+    rusticol_wheel = build_rusticol_wheel_and_native_library()
     install_wheel(rusticol_wheel, force_reinstall=True, no_deps=True)
+    install_rusticol_native_assets()
 
     if not include_gammaloop:
         print("Skipping GammaLoop API build because it was not requested.")
@@ -1151,6 +1165,56 @@ def build_symbolica_wheel_and_install() -> None:
         release=True,
     )
     install_wheel(symbolica_wheel, force_reinstall=True, no_deps=True)
+
+
+def build_rusticol_wheel_and_native_library() -> Path:
+    ensure_just()
+    RUSTICOL_WHEEL_DIR.mkdir(parents=True, exist_ok=True)
+    for wheel in RUSTICOL_WHEEL_DIR.glob("*.whl"):
+        wheel.unlink()
+    env = venv_environment()
+    env["PYTHON"] = str(venv_python())
+    env["RUSTICOL_WHEEL_DIR"] = str(RUSTICOL_WHEEL_DIR)
+    run(["just", "build"], cwd=RUSTICOL_DIR, env=env)
+    wheels = sorted(
+        RUSTICOL_WHEEL_DIR.glob("*.whl"),
+        key=lambda path: path.stat().st_mtime,
+    )
+    if not wheels:
+        raise DependencySetupError(f"No Rusticol wheel was produced in {RUSTICOL_WHEEL_DIR}")
+    if not RUSTICOL_STATIC_LIBRARY.exists() or not RUSTICOL_NATIVE_FLAGS.exists():
+        raise DependencySetupError("Rusticol native static-library build did not produce its assets")
+    return wheels[-1]
+
+
+def install_rusticol_native_assets() -> None:
+    include_dir = VENV_DIR / "include" / "rusticol"
+    library_dir = VENV_DIR / "lib"
+    share_dir = VENV_DIR / "share" / "rusticol"
+    fortran_dir = share_dir / "fortran"
+    bin_dir = venv_bin_dir()
+    for directory in (include_dir, library_dir, share_dir, fortran_dir, bin_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(RUSTICOL_DIR / "include" / "rusticol.h", include_dir / "rusticol.h")
+    shutil.copy2(RUSTICOL_DIR / "include" / "rusticol.hpp", include_dir / "rusticol.hpp")
+    shutil.copy2(RUSTICOL_STATIC_LIBRARY, library_dir / "librusticol_capi.a")
+    shutil.copy2(RUSTICOL_DIR / "fortran" / "rusticol.f90", fortran_dir / "rusticol.f90")
+    shutil.copy2(RUSTICOL_NATIVE_FLAGS, share_dir / "native-static-libs.txt")
+    config = bin_dir / "rusticol-config"
+    shutil.copy2(RUSTICOL_DIR / "scripts" / "rusticol-config", config)
+    config.chmod(config.stat().st_mode | 0o111)
+
+
+def rusticol_native_assets_are_ready() -> bool:
+    paths = (
+        VENV_DIR / "include" / "rusticol" / "rusticol.h",
+        VENV_DIR / "include" / "rusticol" / "rusticol.hpp",
+        VENV_DIR / "lib" / "librusticol_capi.a",
+        VENV_DIR / "share" / "rusticol" / "fortran" / "rusticol.f90",
+        VENV_DIR / "share" / "rusticol" / "native-static-libs.txt",
+        venv_bin_dir() / "rusticol-config",
+    )
+    return all(path.exists() for path in paths)
 
 
 def print_activation_hint() -> None:

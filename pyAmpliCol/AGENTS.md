@@ -239,23 +239,18 @@ special-casing Z, W, dilepton, or Higgs process families.
 
 The public CLI should expose the generic DAG workflow first: `processes`,
 `process-plan`, `generate-process`, `time-process`, and
-`compare-amplicol --runtime-backend rusticol`. Legacy native/tensor/Z-family
-commands may stay parseable only as compatibility stubs or reference helpers,
-but they must be hidden from help output and must not be used as production
-entry points. Process-set child generation must forward generic generation
-options, including `--color-accuracy`, rather than silently forcing LC or a
-family-specific mode.
+`compare-amplicol --runtime-backend rusticol`. The native/tensor/Z-family CLI
+commands and their schema-v1 runtime modules have been removed; do not restore
+them as compatibility stubs. Process-set child generation must forward generic
+generation options, including `--color-accuracy`, rather than silently forcing
+LC or a family-specific mode.
 
-`pyamplicol.evaluation.NativeRuntimeEvaluator` is retired reference-only code.
-It must reject accidental construction by default and may only be used with an
-explicit `allow_reference_legacy=True` opt-in inside hidden compatibility
-commands, migration diagnostics, or historical reference tests. New production
-evaluation must load schema-v2 generic DAG artifacts through Rusticol.
-Unit modules that exercise retired Z-family native kernels, tensor-network
-runtimes, schema-v1 symbolic artifacts, or the old staged `ZGluonDAGEvaluator`
-should remain skipped in the default suite unless they are being run manually
-for historical diagnostics. New regression coverage belongs on the generic
-DAG/schema-v2/Rusticol path.
+Production evaluation loads schema-v2 generic DAG artifacts through Rusticol.
+Schema-v1 artifact writers, loaders, Python evaluators, and historical tests
+have been removed. New regression coverage belongs on the generic
+DAG/schema-v2/Rusticol path. The independent Fortran AmpliCol reference adapter
+and `processes --legacy-output` remain valid because neither is a Rusticol
+schema-v1 interface.
 
 Phase-space helpers in the public API must be process-independent. Use
 `massive_rambo_final_state` for generic validation/warmup momenta. Any
@@ -335,13 +330,13 @@ Strict ownership rules:
   `native.py`, which is now reference-only.
 - `matrix.py` is the generic schema-v2 planning facade. Its public API should not
   export native/family compatibility aliases or old `supported_native_target`
-  fields. Old `CurrentKey`/`RecursionGraph` family graph construction belongs
-  only in clearly named legacy/reference modules such as `legacy_matrix.py`.
+  fields. Do not reintroduce the old `CurrentKey`/`RecursionGraph` family graph
+  construction as a parallel recursion implementation.
 - `rusticol.Runtime.load()` is the production runtime entry point and accepts
-  only schema-v2 generic DAG artifacts.  Schema-v1 family artifacts from the old
-  eager-DAG route are reference-only and require the explicit
-  `rusticol.Runtime.load_legacy()` API. Do not add new process support by
-  extending the schema-v1 loader.
+  only schema-v2 generic DAG artifacts. Older schema-v2 artifacts remain valid
+  for summed evaluation, but resolved evaluation requires the physics metadata
+  emitted by current generation. Schema-v1 artifacts are rejected and have no
+  alternate loader.
 - The AmpliCol adapter owns all legacy process steering through
   `subprocess.Popen`. Do not call `run.sh` from pyamplicol library code.
 
@@ -393,13 +388,10 @@ full-colour implementation work. NLC/full-colour planning and scaffolding may
 remain visible, but active implementation follows only after the generic LC
 milestone is validated and pushed.
 
-Once the generic LC implementation is under control, remove legacy code before
-the milestone commit. During the refactor, old family-specific native kernels,
-tensor-network-only modes, schema-v1 eager-DAG compatibility, and experimental
-compiled-DAG routes may remain only as temporary validation aids. They should
-not survive as production code after the generic DAG/Rusticol path covers the
-legacy Fortran AmpliCol LC process range and reproduces the documented
-performance. This cleanup happens before NLC/full-colour implementation work.
+The family-specific native kernels, tensor-network-only modes, schema-v1
+eager-DAG compatibility, and experimental compiled-DAG routes have been
+removed. Keep the production surface on the generic schema-v2 DAG and shared
+Rusticol core rather than rebuilding parallel runtime implementations.
 
 The first native implementation strategy is one whole symbolic/tensor network:
 external wavefunctions and cached polarizations stay at the evaluator boundary,
@@ -484,16 +476,24 @@ runtime ratio, after warming up JIT-compiled evaluators. Still report full
 runtime overhead separately so slow wavefunction or parameter packing remains
 visible.
 
-Rusticol is a PyO3 runtime that links the local Symbolica Rust crate while
-pyamplicol also uses Symbolica through the Python extension. Until the linking
-model is unified, keep rusticol extension-load/error-path tests isolated in
-subprocesses when the same pytest process also constructs Python-side
-Symbolica graph objects. Direct production runtime use through
-`rusticol.Runtime.load(...)` is still the target API for schema-v2 generic DAG
-artifacts, while `rusticol.Runtime.load_legacy(...)` is only for schema-v1
-reference artifacts and migration diagnostics. Tests that intentionally
-exercise failed loads or unsupported manifests should not poison the main
-pytest process before later Symbolica construction tests.
+Rusticol has a Python-independent core that links the local Symbolica Rust
+crate. PyO3/NumPy bindings are optional features over that core, and the
+`rusticol-capi` static library must remain free of Python symbols and linker
+flags. Keep extension-load/error-path tests isolated in subprocesses when the
+same pytest process also constructs Python-side Symbolica graph objects.
+Direct Python use goes through `rusticol.Runtime.load(...)`; generated C++17
+and Fortran 2008 examples use the same core through C ABI v1. Tests that
+intentionally exercise failed loads or unsupported manifests should not poison
+the main pytest process before later Symbolica construction tests.
+
+Every generated single-process or process-set root owns exactly one `API/`
+bundle with Python, C++, and Fortran standalone runners. Child subprocesses,
+LC sidecars, and replay representatives must not emit nested bundles. The
+resolved API exposes physical helicity and colour-flow IDs, while internal LC
+sector IDs remain a low-level compatibility detail. Omitted resolved selectors
+return every represented component; summing those axes must reproduce the
+optimized compatibility total. C++ and Fortran expose f64 only, while Python
+retains f64, double-double, and arbitrary precision.
 
 For compiled Symbolica backends, distinguish the valid scalar compiled modes
 from SIMD complex mode. On Apple Silicon/aarch64, `compiled-complex-4x` is not

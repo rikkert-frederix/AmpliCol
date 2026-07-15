@@ -1,13 +1,19 @@
 #![recursion_limit = "256"]
 
+#[cfg(feature = "python")]
 use numpy::IntoPyArray;
+#[cfg(feature = "python")]
 use pyo3::IntoPyObjectExt;
+#[cfg(feature = "python")]
 use pyo3::buffer::PyBuffer;
+#[cfg(feature = "python")]
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
-use serde::Deserialize;
+#[cfg(feature = "python")]
+use pyo3::types::{PyAny, PyDict, PyList, PyTuple};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -20,31 +26,64 @@ use symbolica::prelude::{
     ExpressionEvaluator, Float, JITCompilationSettings, Rational, Real, RealLike,
 };
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RusticolError {
+    message: String,
+}
+
+impl RusticolError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for RusticolError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RusticolError {}
+
+#[cfg(not(feature = "python"))]
+type PyResult<T> = Result<T, RusticolError>;
+#[cfg(not(feature = "python"))]
+type PyErr = RusticolError;
+
+#[cfg(not(feature = "python"))]
+struct PyValueError;
+#[cfg(not(feature = "python"))]
+impl PyValueError {
+    fn new_err(message: impl std::fmt::Display) -> RusticolError {
+        RusticolError::new(message.to_string())
+    }
+}
+
+#[cfg(not(feature = "python"))]
+struct PyRuntimeError;
+#[cfg(not(feature = "python"))]
+impl PyRuntimeError {
+    fn new_err(message: impl std::fmt::Display) -> RusticolError {
+        RusticolError::new(message.to_string())
+    }
+}
+
 const MAX_LC_TOPOLOGY_REPLAY_EXPANDED_POINTS: usize = 8192;
 const LC_SECTOR_SELECTOR_PARAMETER: &str = "runtime.lc_sector_id";
 const PROCESS_MANIFEST_READ_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
-struct ProcessManifestHeader {
+struct ArtifactManifestHeader {
     #[serde(default)]
     schema_version: u32,
     #[serde(default)]
     kind: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ProcessManifest {
-    schema_version: u32,
-    kind: String,
-    process: String,
-    family: String,
-    gluon_count: usize,
-    external_pdg_order: Vec<i32>,
-    model: ModelManifest,
-    normalization: NormalizationManifest,
-    layout: LayoutManifest,
-    table: TableManifest,
-    compiled: CompiledSweepManifest,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -64,6 +103,8 @@ struct ProcessSetEntryManifest {
     crossing_alias_of: Option<String>,
     #[serde(default)]
     input_crossing_map: Option<Vec<InputCrossingMapEntry>>,
+    #[serde(default)]
+    physics: Option<PhysicsManifestV2>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -247,6 +288,8 @@ struct GenericRuntimeSchemaManifestV2 {
     model_parameters: Vec<GenericRuntimeModelParameterManifestV2>,
     #[serde(default)]
     normalization: Option<GenericRuntimeNormalizationManifestV2>,
+    #[serde(default)]
+    physics: Option<PhysicsManifestV2>,
     parameter_layout: GenericParameterLayoutManifestV2,
     current_storage: GenericCurrentStorageManifestV2,
     value_storage: GenericValueStorageManifestV2,
@@ -254,6 +297,102 @@ struct GenericRuntimeSchemaManifestV2 {
     momentum_slots: Vec<GenericMomentumSlotManifestV2>,
     stages: Vec<GenericStageManifestV2>,
     amplitude_stage: GenericAmplitudeStageManifestV2,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsManifestV2 {
+    schema_version: u32,
+    kind: String,
+    process: String,
+    process_key: String,
+    color_accuracy: String,
+    external_particles: Vec<PhysicsExternalParticleManifestV2>,
+    helicities: Vec<PhysicsHelicityManifestV2>,
+    color_components: Vec<PhysicsColorComponentManifestV2>,
+    #[serde(default)]
+    model_parameters: Vec<PhysicsModelParameterManifestV2>,
+    coverage: PhysicsCoverageManifestV2,
+    selectors: PhysicsSelectorsManifestV2,
+    reduction: PhysicsReductionManifestV2,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsExternalParticleManifestV2 {
+    label: usize,
+    index: usize,
+    side: String,
+    role: String,
+    particle: String,
+    outgoing_particle: String,
+    pdg: i32,
+    outgoing_pdg: i32,
+    particle_class: String,
+    momentum_slot: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsHelicityManifestV2 {
+    id: String,
+    index: usize,
+    helicities: Vec<i32>,
+    representative_id: String,
+    computed: bool,
+    structural_zero: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsColorComponentManifestV2 {
+    id: String,
+    index: usize,
+    kind: String,
+    #[serde(default)]
+    word: Vec<usize>,
+    representative_id: String,
+    computed: bool,
+    #[serde(default)]
+    internal_sector_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsModelParameterManifestV2 {
+    name: String,
+    kind: String,
+    parameter_index: usize,
+    #[serde(default)]
+    default: f64,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsCoverageManifestV2 {
+    helicities: String,
+    color: String,
+    color_kind: String,
+    #[serde(default)]
+    structural_zero_helicity_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsSelectorsManifestV2 {
+    helicity: bool,
+    color_flow: bool,
+    contracted_color: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsReductionManifestV2 {
+    kind: String,
+    groups: Vec<PhysicsReductionGroupManifestV2>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PhysicsReductionGroupManifestV2 {
+    group_id: i64,
+    representative_helicity_id: String,
+    physical_helicity_ids: Vec<String>,
+    representative_color_id: String,
+    physical_color_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -574,115 +713,6 @@ struct GenericValueSlotRefManifestV2 {
     dimension: usize,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct ModelManifest {
-    alpha_s_me_check: f64,
-    alpha_ew: f64,
-    mass_z: f64,
-    mass_w: Option<f64>,
-    width_z: Option<f64>,
-    width_w: Option<f64>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct NormalizationManifest {
-    color_factor: f64,
-    average_factor: f64,
-    identical_factor: f64,
-    coupling_factor: f64,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct LayoutManifest {
-    parameter_count: usize,
-    current_offsets: Vec<usize>,
-    momentum_offsets_and_labels: Vec<MomentumOffsetManifest>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct MomentumOffsetManifest {
-    offset: usize,
-    labels: Vec<usize>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct TableManifest {
-    currents: Vec<CurrentManifest>,
-    sources: Vec<SourceManifest>,
-    amplitudes: Vec<AmplitudeManifest>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CurrentManifest {
-    id: usize,
-    pdg: i32,
-    dimension: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SourceManifest {
-    current_id: usize,
-    leg_label: usize,
-    helicity: i32,
-    physical_helicity: i32,
-    chirality: i32,
-    #[serde(default = "default_source_kind")]
-    source_kind: String,
-    #[serde(default)]
-    partner_leg_label: Option<usize>,
-    #[serde(default)]
-    partner_helicity: Option<i32>,
-    #[serde(default)]
-    partner_chirality: Option<i32>,
-    #[serde(default)]
-    vector_pdg: Option<i32>,
-    #[serde(default)]
-    coupling: Option<[f64; 2]>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct AmplitudeManifest {
-    multiplicity: f64,
-    #[serde(default)]
-    coherent_group_id: Option<i64>,
-}
-
-fn default_source_kind() -> String {
-    "external".to_string()
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CompiledSweepManifest {
-    kind: String,
-    stages: Vec<CurrentStageManifest>,
-    amplitude_stage: AmplitudeStageManifest,
-    zero_gluon: Option<ZeroGluonManifest>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ZeroGluonManifest {
-    parameter_names: Vec<String>,
-    evaluator_state_path: String,
-    z_left: f64,
-    z_right: f64,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CurrentStageManifest {
-    output_slots: Vec<OutputSlotManifest>,
-    evaluator: EvaluatorManifest,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct AmplitudeStageManifest {
-    output_length: usize,
-    raw_sum_weights: Vec<f64>,
-    #[serde(default)]
-    raw_sum_group_ids: Option<Vec<Option<i64>>>,
-    amplitude_evaluator: Option<EvaluatorManifest>,
-    raw_sum_evaluator: Option<EvaluatorManifest>,
-}
-
 fn resolve_process_root(root: &Path, process_key: Option<&str>) -> PyResult<ProcessSetSelection> {
     if root.join("process_manifest.json").exists() {
         if process_key.is_some() {
@@ -696,6 +726,7 @@ fn resolve_process_root(root: &Path, process_key: Option<&str>) -> PyResult<Proc
             selected_process: None,
             input_crossing_map: None,
             crossing_alias_of: None,
+            physics: None,
         });
     }
     let manifest_path = root.join("process_set_manifest.json");
@@ -717,9 +748,8 @@ fn resolve_process_root(root: &Path, process_key: Option<&str>) -> PyResult<Proc
             manifest_path.display()
         ))
     })?;
-    let supported_process_set = (manifest.schema_version == 1
-        && manifest.kind == "pyamplicol-rusticol-process-set")
-        || (manifest.schema_version == 2 && manifest.kind == "pyamplicol-generic-dag-process-set");
+    let supported_process_set =
+        manifest.schema_version == 2 && manifest.kind == "pyamplicol-generic-dag-process-set";
     if !supported_process_set {
         return Err(PyValueError::new_err(format!(
             "unsupported process-set artifact kind {} schema {}",
@@ -741,6 +771,7 @@ fn resolve_process_root(root: &Path, process_key: Option<&str>) -> PyResult<Proc
                 selected_process: Some(entry.process.clone()),
                 input_crossing_map: entry.input_crossing_map.clone(),
                 crossing_alias_of: entry.crossing_alias_of.clone(),
+                physics: entry.physics.clone(),
             });
         }
     }
@@ -754,32 +785,6 @@ fn resolve_process_root(root: &Path, process_key: Option<&str>) -> PyResult<Proc
         "process {selected:?} not found in {}; available: {available}",
         root.display()
     )))
-}
-
-fn validate_source_metadata(sources: &[SourceManifest]) -> PyResult<()> {
-    for source in sources {
-        match source.source_kind.as_str() {
-            "external" => {}
-            "lepton_pair_vector" => {
-                if source.partner_leg_label.is_none()
-                    || source.partner_helicity.is_none()
-                    || source.partner_chirality.is_none()
-                    || source.vector_pdg.is_none()
-                    || source.coupling.is_none()
-                {
-                    return Err(PyValueError::new_err(
-                        "lepton-pair vector source metadata is incomplete",
-                    ));
-                }
-            }
-            other => {
-                return Err(PyValueError::new_err(format!(
-                    "unsupported source kind {other:?}"
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -2109,35 +2114,6 @@ fn amplitude_value_variant(
     })
 }
 
-fn validate_amplitude_group_metadata(
-    amplitudes: &[AmplitudeManifest],
-    stage_group_ids: Option<&[Option<i64>]>,
-) -> PyResult<()> {
-    let Some(stage_group_ids) = stage_group_ids else {
-        return Ok(());
-    };
-    if amplitudes.len() != stage_group_ids.len() {
-        return Err(PyValueError::new_err(
-            "amplitude metadata and raw-sum group ids have different lengths",
-        ));
-    }
-    for (index, (amplitude, stage_group_id)) in amplitudes.iter().zip(stage_group_ids).enumerate() {
-        if amplitude.coherent_group_id != *stage_group_id {
-            return Err(PyValueError::new_err(format!(
-                "amplitude coherent group id mismatch at index {index}"
-            )));
-        }
-    }
-    Ok(())
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct OutputSlotManifest {
-    id: usize,
-    start: usize,
-    stop: usize,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind")]
 enum EvaluatorManifest {
@@ -2171,7 +2147,6 @@ enum F64Evaluator {
     Compiled(CompiledComplexEvaluator),
     Jit(JITCompiledEvaluator<Complex<f64>>),
     JitNative2(JITCompiledEvaluator<Complex<wide::f64x2>>),
-    Interpreted(ExpressionEvaluator<Complex<f64>>),
 }
 
 struct LoadedEvaluator {
@@ -2269,21 +2244,6 @@ impl RusticolHighPrecisionNumber for Float {
     }
 }
 
-struct CurrentStage {
-    outputs: Vec<(usize, usize, usize, usize)>,
-    chunk_outputs: Vec<Vec<(usize, usize)>>,
-    evaluator: EvaluatorGroup,
-}
-
-struct AmplitudeStage {
-    output_length: usize,
-    raw_sum_weights: Vec<f64>,
-    raw_sum_groups: Vec<RawSumGroup>,
-    has_coherent_groups: bool,
-    amplitude_evaluator: Option<EvaluatorGroup>,
-    raw_sum_evaluator: Option<EvaluatorGroup>,
-}
-
 struct RawSumGroup {
     id: i64,
     indices: Vec<usize>,
@@ -2304,13 +2264,6 @@ struct ColorContractionEntry {
     weight_re: f64,
     weight_im: f64,
     symmetry_factor: f64,
-}
-
-struct ZeroGluonStage {
-    parameter_names: Vec<String>,
-    evaluator: LoadedEvaluator,
-    z_left: f64,
-    z_right: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -2367,6 +2320,7 @@ fn add_profile_vector(target: &mut Vec<f64>, source: &[f64]) {
     }
 }
 
+#[cfg(feature = "python")]
 fn parse_optional_color_sector_ids(
     value: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Option<BTreeSet<i64>>> {
@@ -2379,6 +2333,7 @@ fn parse_optional_color_sector_ids(
     parse_required_color_sector_ids(value).map(Some)
 }
 
+#[cfg(feature = "python")]
 fn parse_required_color_sector_ids(value: &Bound<'_, PyAny>) -> PyResult<BTreeSet<i64>> {
     if let Ok(sector_id) = value.extract::<i64>() {
         return Ok(BTreeSet::from([sector_id]));
@@ -2400,15 +2355,6 @@ fn parse_required_color_sector_ids(value: &Bound<'_, PyAny>) -> PyResult<BTreeSe
 struct MemorySnapshot {
     current_rss_bytes: Option<u64>,
     peak_rss_bytes: Option<u64>,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct ComplexChecksum {
-    sum_re: f64,
-    sum_im: f64,
-    sum_abs2: f64,
-    max_abs: f64,
-    output_len: usize,
 }
 
 struct GenericRuntimeV2 {
@@ -2453,10 +2399,711 @@ struct GenericRuntimeV2 {
     model_parameter_runtime_slots: BTreeMap<String, GenericRuntimeParameterSlots>,
     model_parameter_values_f64: Vec<f64>,
     model_parameter_evaluator: Option<GenericModelParameterEvaluatorRuntimeV2>,
+    physics: Option<PhysicsRuntimeV2>,
     stages: Option<Vec<GenericStageRuntimeV2>>,
     amplitude_stage: Option<GenericAmplitudeRuntimeV2>,
     state_scratch_f64: Vec<Complex<f64>>,
     values_scratch_f64: Vec<f64>,
+}
+
+#[derive(Clone)]
+struct PhysicsRuntimeV2 {
+    manifest: PhysicsManifestV2,
+    helicity_index_by_id: BTreeMap<String, usize>,
+    color_index_by_id: BTreeMap<String, usize>,
+    reduction_by_group_id: BTreeMap<i64, PhysicsReductionGroupManifestV2>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedValues<T> {
+    values: Vec<T>,
+    point_count: usize,
+    helicity_indices: Vec<usize>,
+    color_indices: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeRuntimeMetadata {
+    pub abi_version: u32,
+    pub schema_version: u32,
+    pub process: String,
+    pub process_key: String,
+    pub representative_process: String,
+    pub representative_process_key: String,
+    pub crossing_alias_of: Option<String>,
+    pub color_accuracy: String,
+    pub external_pdg_order: Vec<i32>,
+    pub external_count: usize,
+    pub current_count: usize,
+    pub source_count: usize,
+    pub interaction_count: usize,
+    pub stage_count: usize,
+    pub amplitude_output_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeResolvedEvaluation {
+    /// Row-major storage with layout `[point][helicity][color]`.
+    pub values: Vec<f64>,
+    pub point_count: usize,
+    pub helicity_ids: Vec<String>,
+    pub color_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeExternalParticle {
+    pub label: usize,
+    pub index: usize,
+    pub side: String,
+    pub role: String,
+    pub particle: String,
+    pub outgoing_particle: String,
+    pub pdg: i32,
+    pub outgoing_pdg: i32,
+    pub particle_class: String,
+    pub momentum_slot: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeHelicityConfiguration {
+    pub id: String,
+    pub index: usize,
+    pub helicities: Vec<i32>,
+    pub representative_id: String,
+    pub computed: bool,
+    pub structural_zero: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeColorComponent {
+    pub id: String,
+    pub index: usize,
+    pub kind: String,
+    pub word: Vec<usize>,
+    pub representative_id: String,
+    pub computed: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeModelParameter {
+    pub name: String,
+    pub kind: String,
+    pub parameter_index: usize,
+    pub default: f64,
+}
+
+impl NativeResolvedEvaluation {
+    pub fn shape(&self) -> (usize, usize, usize) {
+        (
+            self.point_count,
+            self.helicity_ids.len(),
+            self.color_ids.len(),
+        )
+    }
+
+    pub fn totals(&self) -> Vec<f64> {
+        let component_count = self.helicity_ids.len() * self.color_ids.len();
+        self.values
+            .chunks(component_count)
+            .map(|point| point.iter().sum())
+            .collect()
+    }
+}
+
+/// Python-independent schema-v2 process runtime.
+///
+/// The input momentum layout is `[point][external particle][E, px, py, pz]`.
+/// Instances are mutable and must not be called concurrently; independent
+/// instances can be used from separate threads.
+pub struct NativeRuntime {
+    root: PathBuf,
+    runtime: GenericRuntimeV2,
+    process: String,
+    process_key: String,
+    input_crossing_map: Option<Vec<InputCrossingMapEntry>>,
+    crossing_alias_of: Option<String>,
+    physics: Option<PhysicsManifestV2>,
+    warnings_muted: bool,
+    warned_kinds: BTreeSet<String>,
+    pending_warnings: Vec<String>,
+}
+
+impl NativeRuntime {
+    pub const ABI_VERSION: u32 = 1;
+
+    pub fn load(
+        process_dir: impl AsRef<Path>,
+        process_key: Option<&str>,
+        model_parameters_path: Option<&Path>,
+    ) -> Result<Self, RusticolError> {
+        let requested = process_dir.as_ref();
+        let requested_root = requested.canonicalize().map_err(|error| {
+            RusticolError::new(format!(
+                "could not resolve process directory {}: {error}",
+                requested.display()
+            ))
+        })?;
+        let selection = resolve_process_root(&requested_root, process_key)
+            .map_err(|error| RusticolError::new(error.to_string()))?;
+        let manifest_path = selection.root.join("process_manifest.json");
+        let manifest = read_json_manifest::<GenericProcessManifestV2>(&manifest_path)
+            .map_err(RusticolError::new)?;
+        if manifest.schema_version != 2 || manifest.kind != "pyamplicol-generic-dag-process" {
+            return Err(RusticolError::new(format!(
+                "Rusticol native APIs support only schema-v2 generic DAG artifacts; got kind {:?} schema {}",
+                manifest.kind, manifest.schema_version
+            )));
+        }
+        let representative_process = manifest.process.clone();
+        let representative_key = manifest.key.clone();
+        let mut runtime = load_generic_schema_v2_manifest(manifest, &selection.root)
+            .map_err(|error| RusticolError::new(error.to_string()))?;
+        if let Some(metadata) = selection.physics.clone() {
+            runtime.physics = Some(
+                PhysicsRuntimeV2::new(metadata)
+                    .map_err(|error| RusticolError::new(error.to_string()))?,
+            );
+        }
+        if let Some(path) = model_parameters_path {
+            runtime
+                .apply_model_parameter_json_path(path)
+                .map_err(|error| RusticolError::new(error.to_string()))?;
+        }
+        let process = selection
+            .selected_process
+            .clone()
+            .unwrap_or_else(|| representative_process.clone());
+        let process_key = selection
+            .selected_key
+            .clone()
+            .unwrap_or_else(|| representative_key.clone());
+        let mut physics = runtime.physics.as_ref().map(|value| value.manifest.clone());
+        if let Some(metadata) = physics.as_mut() {
+            metadata.process = process.clone();
+            metadata.process_key = process_key.clone();
+        }
+        Ok(Self {
+            root: selection.root,
+            runtime,
+            process,
+            process_key,
+            input_crossing_map: selection.input_crossing_map,
+            crossing_alias_of: selection.crossing_alias_of,
+            physics,
+            warnings_muted: false,
+            warned_kinds: BTreeSet::new(),
+            pending_warnings: Vec::new(),
+        })
+    }
+
+    pub fn metadata(&self) -> NativeRuntimeMetadata {
+        NativeRuntimeMetadata {
+            abi_version: Self::ABI_VERSION,
+            schema_version: 2,
+            process: self.process.clone(),
+            process_key: self.process_key.clone(),
+            representative_process: self.runtime.process.clone(),
+            representative_process_key: self.runtime.key.clone(),
+            crossing_alias_of: self.crossing_alias_of.clone(),
+            color_accuracy: self.runtime.color_accuracy.clone(),
+            external_pdg_order: self.runtime.external_pdg_order.clone(),
+            external_count: self.runtime.external_count,
+            current_count: self.runtime.current_count,
+            source_count: self.runtime.source_count,
+            interaction_count: self.runtime.interaction_count,
+            stage_count: self.runtime.stage_count,
+            amplitude_output_count: self.runtime.amplitude_output_count,
+        }
+    }
+
+    pub fn metadata_json(&self) -> Result<String, RusticolError> {
+        serde_json::to_string(&self.metadata()).map_err(|error| {
+            RusticolError::new(format!("could not serialize runtime metadata: {error}"))
+        })
+    }
+
+    pub fn physics_json(&self) -> Result<String, RusticolError> {
+        let physics = self.physics.as_ref().ok_or_else(|| {
+            RusticolError::new(
+                "this older schema-v2 artifact has no resolved physics metadata; regenerate it with pyAmpliCol",
+            )
+        })?;
+        serde_json::to_string(physics).map_err(|error| {
+            RusticolError::new(format!("could not serialize physics metadata: {error}"))
+        })
+    }
+
+    pub fn external_count(&self) -> usize {
+        self.runtime.external_count
+    }
+
+    pub fn external_particles(&self) -> Result<Vec<NativeExternalParticle>, RusticolError> {
+        Ok(self
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                RusticolError::new("external-particle metadata requires artifact regeneration")
+            })?
+            .external_particles
+            .iter()
+            .map(|item| NativeExternalParticle {
+                label: item.label,
+                index: item.index,
+                side: item.side.clone(),
+                role: item.role.clone(),
+                particle: item.particle.clone(),
+                outgoing_particle: item.outgoing_particle.clone(),
+                pdg: item.pdg,
+                outgoing_pdg: item.outgoing_pdg,
+                particle_class: item.particle_class.clone(),
+                momentum_slot: item.momentum_slot,
+            })
+            .collect())
+    }
+
+    pub fn helicities(&self) -> Result<Vec<NativeHelicityConfiguration>, RusticolError> {
+        Ok(self
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                RusticolError::new("resolved helicities require regenerated physics metadata")
+            })?
+            .helicities
+            .iter()
+            .map(|item| NativeHelicityConfiguration {
+                id: item.id.clone(),
+                index: item.index,
+                helicities: item.helicities.clone(),
+                representative_id: item.representative_id.clone(),
+                computed: item.computed,
+                structural_zero: item.structural_zero,
+            })
+            .collect())
+    }
+
+    pub fn color_components(&self) -> Result<Vec<NativeColorComponent>, RusticolError> {
+        Ok(self
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                RusticolError::new("resolved color components require regenerated physics metadata")
+            })?
+            .color_components
+            .iter()
+            .map(|item| NativeColorComponent {
+                id: item.id.clone(),
+                index: item.index,
+                kind: item.kind.clone(),
+                word: item.word.clone(),
+                representative_id: item.representative_id.clone(),
+                computed: item.computed,
+            })
+            .collect())
+    }
+
+    pub fn model_parameters(&self) -> Result<Vec<NativeModelParameter>, RusticolError> {
+        Ok(self
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                RusticolError::new("model-parameter metadata requires artifact regeneration")
+            })?
+            .model_parameters
+            .iter()
+            .map(|item| NativeModelParameter {
+                name: item.name.clone(),
+                kind: item.kind.clone(),
+                parameter_index: item.parameter_index,
+                default: item.default,
+            })
+            .collect())
+    }
+
+    pub fn helicity_ids(&self) -> Result<Vec<String>, RusticolError> {
+        Ok(self
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                RusticolError::new("resolved helicities require regenerated physics metadata")
+            })?
+            .helicities
+            .iter()
+            .map(|item| item.id.clone())
+            .collect())
+    }
+
+    pub fn color_ids(&self) -> Result<Vec<String>, RusticolError> {
+        Ok(self
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                RusticolError::new("resolved color components require regenerated physics metadata")
+            })?
+            .color_components
+            .iter()
+            .map(|item| item.id.clone())
+            .collect())
+    }
+
+    pub fn resolved_shape(
+        &self,
+        helicity_ids: Option<&[String]>,
+        color_ids: Option<&[String]>,
+    ) -> Result<(usize, usize), RusticolError> {
+        if color_ids.is_some() && self.runtime.color_accuracy != "lc" {
+            return Err(RusticolError::new(
+                "LC color-flow selection is unavailable for NLC/full artifacts; their resolved color axis is contracted",
+            ));
+        }
+        let selected_helicities = selector_set(helicity_ids, "helicity")?;
+        let selected_colors = selector_set(color_ids, "color component")?;
+        let physics = self.runtime.physics.as_ref().ok_or_else(|| {
+            RusticolError::new(
+                "resolved evaluation is unavailable for this older schema-v2 artifact; regenerate it with pyAmpliCol",
+            )
+        })?;
+        let helicity_count = physics
+            .selected_helicity_indices(selected_helicities.as_ref())
+            .map_err(|error| RusticolError::new(error.to_string()))?
+            .len();
+        let color_count = physics
+            .selected_color_indices(selected_colors.as_ref())
+            .map_err(|error| RusticolError::new(error.to_string()))?
+            .len();
+        Ok((helicity_count, color_count))
+    }
+
+    pub fn evaluate_f64(
+        &mut self,
+        momenta: &[f64],
+        point_count: usize,
+    ) -> Result<Vec<f64>, RusticolError> {
+        let batch = self.prepare_f64_batch(momenta, point_count)?;
+        self.runtime
+            .run_f64(&batch)
+            .map(|(values, _profile)| values)
+            .map_err(|error| RusticolError::new(error.to_string()))
+    }
+
+    pub fn evaluate_resolved_f64(
+        &mut self,
+        momenta: &[f64],
+        point_count: usize,
+        helicity_ids: Option<&[String]>,
+        color_ids: Option<&[String]>,
+    ) -> Result<NativeResolvedEvaluation, RusticolError> {
+        if color_ids.is_some() && self.runtime.color_accuracy != "lc" {
+            return Err(RusticolError::new(
+                "LC color-flow selection is unavailable for NLC/full artifacts; their resolved color axis is contracted",
+            ));
+        }
+        self.record_resolved_warnings(helicity_ids, color_ids)?;
+        let selected_helicities = selector_set(helicity_ids, "helicity")?;
+        let selected_colors = selector_set(color_ids, "color component")?;
+        let batch = self.prepare_f64_batch(momenta, point_count)?;
+        let physics = self.physics.clone().ok_or_else(|| {
+            RusticolError::new(
+                "resolved evaluation is unavailable for this older schema-v2 artifact; regenerate it with pyAmpliCol",
+            )
+        })?;
+        let (resolved, _profile) = self
+            .runtime
+            .run_resolved_f64(
+                &batch,
+                selected_helicities.as_ref(),
+                selected_colors.as_ref(),
+            )
+            .map_err(|error| RusticolError::new(error.to_string()))?;
+        let helicity_ids = resolved
+            .helicity_indices
+            .iter()
+            .map(|index| physics.helicities[*index].id.clone())
+            .collect();
+        let color_ids = resolved
+            .color_indices
+            .iter()
+            .map(|index| physics.color_components[*index].id.clone())
+            .collect();
+        Ok(NativeResolvedEvaluation {
+            values: resolved.values,
+            point_count: resolved.point_count,
+            helicity_ids,
+            color_ids,
+        })
+    }
+
+    pub fn set_model_parameters(
+        &mut self,
+        values: &BTreeMap<String, (f64, f64)>,
+    ) -> Result<(), RusticolError> {
+        self.runtime
+            .apply_model_parameter_overrides(values)
+            .map_err(|error| RusticolError::new(error.to_string()))
+    }
+
+    pub fn set_model_parameter(
+        &mut self,
+        name: &str,
+        real: f64,
+        imaginary: f64,
+    ) -> Result<(), RusticolError> {
+        self.set_model_parameters(&BTreeMap::from([(name.to_string(), (real, imaginary))]))
+    }
+
+    pub fn set_model_parameters_json(&mut self, path: &Path) -> Result<(), RusticolError> {
+        self.runtime
+            .apply_model_parameter_json_path(path)
+            .map_err(|error| RusticolError::new(error.to_string()))
+    }
+
+    pub fn mute_warnings(&mut self) {
+        self.warnings_muted = true;
+    }
+
+    pub fn unmute_warnings(&mut self) {
+        self.warnings_muted = false;
+    }
+
+    pub fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_warnings)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn prepare_f64_batch(
+        &self,
+        momenta: &[f64],
+        point_count: usize,
+    ) -> Result<Vec<Vec<[f64; 4]>>, RusticolError> {
+        if point_count == 0 {
+            return Err(RusticolError::new("point_count must be positive"));
+        }
+        let values_per_point = self
+            .runtime
+            .external_count
+            .checked_mul(4)
+            .ok_or_else(|| RusticolError::new("momentum shape overflow"))?;
+        let expected = point_count
+            .checked_mul(values_per_point)
+            .ok_or_else(|| RusticolError::new("momentum shape overflow"))?;
+        if momenta.len() != expected {
+            return Err(RusticolError::new(format!(
+                "momenta contain {} values, expected {expected} for shape ({point_count}, {}, 4)",
+                momenta.len(),
+                self.runtime.external_count
+            )));
+        }
+        let mut batch = Vec::with_capacity(point_count);
+        for point_values in momenta.chunks_exact(values_per_point) {
+            let point = point_values
+                .chunks_exact(4)
+                .map(|components| [components[0], components[1], components[2], components[3]])
+                .collect();
+            batch.push(point);
+        }
+        apply_input_crossing_map(
+            batch,
+            self.runtime.external_count,
+            self.input_crossing_map.as_deref(),
+        )
+        .map_err(|error| RusticolError::new(error.to_string()))
+    }
+
+    fn record_resolved_warnings(
+        &mut self,
+        helicity_ids: Option<&[String]>,
+        color_ids: Option<&[String]>,
+    ) -> Result<(), RusticolError> {
+        if self.warnings_muted {
+            return Ok(());
+        }
+        let physics = self.runtime.physics.as_ref().ok_or_else(|| {
+            RusticolError::new("resolved evaluation requires regenerated physics metadata")
+        })?;
+        let mut warnings = Vec::new();
+        if physics.manifest.coverage.helicities != "complete" {
+            warnings.push((
+                "incomplete-helicity-coverage",
+                "resolved evaluation contains only the helicities represented by this artifact",
+            ));
+        }
+        if physics.manifest.coverage.color != "complete" {
+            warnings.push((
+                "incomplete-color-coverage",
+                "resolved evaluation contains only the color components represented by this artifact",
+            ));
+        }
+        let reduction_only_helicity = helicity_ids.is_some_and(|ids| {
+            ids.iter().any(|id| {
+                physics
+                    .helicity_index_by_id
+                    .get(id)
+                    .and_then(|index| physics.manifest.helicities.get(*index))
+                    .is_some_and(|item| !item.computed)
+            })
+        });
+        let reduction_only_color = color_ids.is_some_and(|ids| {
+            ids.iter().any(|id| {
+                physics
+                    .color_index_by_id
+                    .get(id)
+                    .and_then(|index| physics.manifest.color_components.get(*index))
+                    .is_some_and(|item| !item.computed)
+            })
+        });
+        if reduction_only_helicity || reduction_only_color {
+            warnings.push((
+                "reduction-only-selection",
+                "the selected resolved component reuses an exact symmetry representative",
+            ));
+        }
+        for (kind, message) in warnings {
+            if self.warned_kinds.insert(kind.to_string()) {
+                self.pending_warnings.push(message.to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn selector_set(
+    ids: Option<&[String]>,
+    kind: &str,
+) -> Result<Option<BTreeSet<String>>, RusticolError> {
+    let Some(ids) = ids else {
+        return Ok(None);
+    };
+    if ids.is_empty() {
+        return Err(RusticolError::new(format!(
+            "resolved {kind} selection must not be empty"
+        )));
+    }
+    let selected = ids.iter().cloned().collect::<BTreeSet<_>>();
+    if selected.len() != ids.len() {
+        return Err(RusticolError::new(format!(
+            "resolved {kind} selection contains duplicate ids"
+        )));
+    }
+    Ok(Some(selected))
+}
+
+impl PhysicsRuntimeV2 {
+    fn new(manifest: PhysicsManifestV2) -> PyResult<Self> {
+        if manifest.schema_version != 1 || manifest.kind != "pyamplicol-resolved-physics" {
+            return Err(PyValueError::new_err(format!(
+                "unsupported resolved physics metadata kind {:?} schema {}",
+                manifest.kind, manifest.schema_version
+            )));
+        }
+        let mut helicity_index_by_id = BTreeMap::new();
+        for (index, helicity) in manifest.helicities.iter().enumerate() {
+            if helicity.index != index
+                || helicity.helicities.len() != manifest.external_particles.len()
+            {
+                return Err(PyValueError::new_err(format!(
+                    "invalid resolved helicity metadata at index {index}"
+                )));
+            }
+            if helicity_index_by_id
+                .insert(helicity.id.clone(), index)
+                .is_some()
+            {
+                return Err(PyValueError::new_err(format!(
+                    "duplicate public helicity id {:?}",
+                    helicity.id
+                )));
+            }
+        }
+        let mut color_index_by_id = BTreeMap::new();
+        for (index, color) in manifest.color_components.iter().enumerate() {
+            if color.index != index {
+                return Err(PyValueError::new_err(format!(
+                    "invalid resolved color metadata at index {index}"
+                )));
+            }
+            if color_index_by_id.insert(color.id.clone(), index).is_some() {
+                return Err(PyValueError::new_err(format!(
+                    "duplicate public color id {:?}",
+                    color.id
+                )));
+            }
+        }
+        let mut reduction_by_group_id = BTreeMap::new();
+        for group in &manifest.reduction.groups {
+            if group.physical_helicity_ids.is_empty() || group.physical_color_ids.is_empty() {
+                return Err(PyValueError::new_err(format!(
+                    "resolved reduction group {} has an empty physical expansion",
+                    group.group_id
+                )));
+            }
+            for id in &group.physical_helicity_ids {
+                if !helicity_index_by_id.contains_key(id) {
+                    return Err(PyValueError::new_err(format!(
+                        "resolved reduction group {} references unknown helicity {id:?}",
+                        group.group_id
+                    )));
+                }
+            }
+            for id in &group.physical_color_ids {
+                if !color_index_by_id.contains_key(id) {
+                    return Err(PyValueError::new_err(format!(
+                        "resolved reduction group {} references unknown color component {id:?}",
+                        group.group_id
+                    )));
+                }
+            }
+            if reduction_by_group_id
+                .insert(group.group_id, group.clone())
+                .is_some()
+            {
+                return Err(PyValueError::new_err(format!(
+                    "duplicate resolved reduction group {}",
+                    group.group_id
+                )));
+            }
+        }
+        Ok(Self {
+            manifest,
+            helicity_index_by_id,
+            color_index_by_id,
+            reduction_by_group_id,
+        })
+    }
+
+    fn selected_helicity_indices(&self, ids: Option<&BTreeSet<String>>) -> PyResult<Vec<usize>> {
+        self.select_indices(ids, &self.helicity_index_by_id, "helicity")
+    }
+
+    fn selected_color_indices(&self, ids: Option<&BTreeSet<String>>) -> PyResult<Vec<usize>> {
+        self.select_indices(ids, &self.color_index_by_id, "color component")
+    }
+
+    fn select_indices(
+        &self,
+        ids: Option<&BTreeSet<String>>,
+        available: &BTreeMap<String, usize>,
+        kind: &str,
+    ) -> PyResult<Vec<usize>> {
+        let Some(ids) = ids else {
+            return Ok((0..available.len()).collect());
+        };
+        if ids.is_empty() {
+            return Err(PyValueError::new_err(format!(
+                "resolved {kind} selection must not be empty"
+            )));
+        }
+        let mut indices = Vec::with_capacity(ids.len());
+        for id in ids {
+            let index = available.get(id).ok_or_else(|| {
+                PyValueError::new_err(format!("unknown resolved {kind} id {id:?}"))
+            })?;
+            indices.push(*index);
+        }
+        indices.sort_unstable();
+        Ok(indices)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2710,6 +3357,12 @@ impl GenericRuntimeV2 {
         let topology_replay = manifest.compiled.lc_topology_replay.as_ref();
         let (topology_replay_mappings, topology_replay_weights) =
             build_lc_topology_replay_mappings(topology_replay)?;
+        let physics = manifest
+            .runtime_schema
+            .physics
+            .clone()
+            .map(PhysicsRuntimeV2::new)
+            .transpose()?;
         let external_is_initial = manifest
             .runtime_schema
             .external_particles
@@ -2874,6 +3527,7 @@ impl GenericRuntimeV2 {
             model_parameter_runtime_slots,
             model_parameter_values_f64,
             model_parameter_evaluator: None,
+            physics,
             stages: None,
             amplitude_stage: None,
             state_scratch_f64: Vec::new(),
@@ -2949,6 +3603,7 @@ impl GenericRuntimeV2 {
         &mut self,
         overrides: &BTreeMap<String, (f64, f64)>,
     ) -> PyResult<()> {
+        let mut proposed = self.model_parameter_values_f64.clone();
         for (name, (real, imaginary)) in overrides {
             let Some(slots) = self.model_parameter_runtime_slots.get(name).copied() else {
                 return Err(PyValueError::new_err(format!(
@@ -2964,21 +3619,29 @@ impl GenericRuntimeV2 {
                     "model-parameter override {name:?} has invalid value [{real}, {imaginary}]",
                 )));
             }
-            self.model_parameter_values_f64[slots.real] = *real;
+            proposed[slots.real] = *real;
             if let Some(index) = slots.imaginary {
                 if index >= self.model_parameter_values_f64.len() {
                     return Err(PyValueError::new_err(format!(
                         "model-parameter override {name:?} has an invalid imaginary slot"
                     )));
                 }
-                self.model_parameter_values_f64[index] = *imaginary;
+                proposed[index] = *imaginary;
             } else if *imaginary != 0.0 {
                 return Err(PyValueError::new_err(format!(
                     "real model parameter {name:?} cannot receive a nonzero imaginary component"
                 )));
             }
         }
-        self.refresh_derived_model_parameters()?;
+        let previous_values = std::mem::replace(&mut self.model_parameter_values_f64, proposed);
+        let previous_masses = self.particle_masses.clone();
+        let previous_normalization = self.normalization_factor;
+        if let Err(error) = self.refresh_derived_model_parameters() {
+            self.model_parameter_values_f64 = previous_values;
+            self.particle_masses = previous_masses;
+            self.normalization_factor = previous_normalization;
+            return Err(error);
+        }
         self.refresh_particle_mass_parameters();
         self.refresh_normalization_factor();
         Ok(())
@@ -3117,6 +3780,37 @@ impl GenericRuntimeV2 {
 
     fn run_f64(&mut self, batch: &[Vec<[f64; 4]>]) -> PyResult<(Vec<f64>, RuntimeProfile)> {
         self.run_f64_selected(batch, None)
+    }
+
+    fn run_resolved_f64(
+        &mut self,
+        batch: &[Vec<[f64; 4]>],
+        selected_helicity_ids: Option<&BTreeSet<String>>,
+        selected_color_ids: Option<&BTreeSet<String>>,
+    ) -> PyResult<(ResolvedValues<f64>, RuntimeProfile)> {
+        if self.lc_topology_replay_enabled {
+            return Err(PyValueError::new_err(
+                "resolved evaluation for LC topology-replay artifacts requires regeneration with resolved replay metadata",
+            ));
+        }
+        let physics = self.physics.clone().ok_or_else(|| {
+            PyValueError::new_err(
+                "resolved evaluation is unavailable for this older schema-v2 artifact; regenerate it with pyAmpliCol",
+            )
+        })?;
+        let (_summed, profile) = self.run_f64_materialized(batch)?;
+        let resolved = self
+            .amplitude_stage
+            .as_mut()
+            .expect("generic amplitude stage checked")
+            .reduce_scratch_f64_resolved(
+                batch.len(),
+                &physics,
+                self.normalization_factor,
+                selected_helicity_ids,
+                selected_color_ids,
+            )?;
+        Ok((resolved, profile))
     }
 
     fn run_f64_selected(
@@ -3498,6 +4192,143 @@ impl GenericRuntimeV2 {
         let reduction_s = reduction_start.elapsed().as_secs_f64();
         Ok((
             values,
+            RuntimeProfile {
+                source_fill_s,
+                momentum_setup_s: momentum_setup_s + model_parameter_setup_s,
+                stage_input_pack_s,
+                stage_evaluator_call_s,
+                stage_evaluator_s,
+                output_assign_s,
+                amplitude_input_pack_s,
+                amplitude_evaluator_call_s,
+                amplitude_evaluator_s,
+                reduction_s,
+                total_s: total_start.elapsed().as_secs_f64(),
+                stage_input_pack_by_stage_s,
+                stage_evaluator_call_by_stage_s,
+                stage_output_assign_by_stage_s,
+            },
+        ))
+    }
+
+    fn run_resolved_generic<T>(
+        &mut self,
+        batch: &[Vec<[T; 4]>],
+        binary_precision: Option<u32>,
+        selected_helicity_ids: Option<&BTreeSet<String>>,
+        selected_color_ids: Option<&BTreeSet<String>>,
+    ) -> PyResult<(ResolvedValues<T>, RuntimeProfile)>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        if self.lc_topology_replay_enabled {
+            return Err(PyValueError::new_err(
+                "resolved evaluation for LC topology-replay artifacts requires regeneration with resolved replay metadata",
+            ));
+        }
+        if self.stages.is_none() || self.amplitude_stage.is_none() {
+            return Err(self.execution_unavailable_error());
+        }
+        let physics = self.physics.clone().ok_or_else(|| {
+            PyValueError::new_err(
+                "resolved evaluation is unavailable for this older schema-v2 artifact; regenerate it with pyAmpliCol",
+            )
+        })?;
+        let total_start = Instant::now();
+        let n_points = batch.len();
+        let mut state = vec![complex_zero::<T>(); n_points * self.parameter_count];
+        let sources = &self.sources;
+        let momentum_slots = &self.momentum_slots;
+        let external_count = self.external_count;
+        let external_is_initial = &self.external_is_initial;
+        let particle_masses = &self.particle_masses;
+        let value_parameter_count = self.value_parameter_count;
+        let model_parameter_start = self.value_parameter_count + self.momentum_parameter_count;
+        let model_parameter_values = &self.model_parameter_values_f64;
+
+        let source_start = Instant::now();
+        for (row, point) in batch.iter().enumerate() {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_sources_row_generic(
+                sources,
+                external_count,
+                particle_masses,
+                row_state,
+                point,
+            )?;
+        }
+        let source_fill_s = source_start.elapsed().as_secs_f64();
+
+        let momentum_start = Instant::now();
+        for (row, point) in batch.iter().enumerate() {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_momenta_row_generic(
+                momentum_slots,
+                value_parameter_count,
+                external_count,
+                external_is_initial,
+                row_state,
+                point,
+            )?;
+        }
+        let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
+
+        let model_parameter_start_time = Instant::now();
+        for row in 0..n_points {
+            let row_state =
+                &mut state[row * self.parameter_count..(row + 1) * self.parameter_count];
+            Self::fill_model_parameters_row_generic(
+                model_parameter_start,
+                model_parameter_values,
+                row_state,
+            )?;
+        }
+        let model_parameter_setup_s = model_parameter_start_time.elapsed().as_secs_f64();
+
+        let mut stage_input_pack_s = 0.0;
+        let mut stage_evaluator_call_s = 0.0;
+        let mut stage_evaluator_s = 0.0;
+        let mut output_assign_s = 0.0;
+        let mut stage_input_pack_by_stage_s = Vec::new();
+        let mut stage_evaluator_call_by_stage_s = Vec::new();
+        let mut stage_output_assign_by_stage_s = Vec::new();
+        for stage in self.stages.as_mut().expect("generic stages checked") {
+            let (pack_s, eval_s, assign_s) = stage.evaluate_generic_into_state(
+                n_points,
+                self.parameter_count,
+                state.as_mut_slice(),
+                binary_precision,
+            )?;
+            stage_input_pack_s += pack_s;
+            stage_evaluator_call_s += eval_s;
+            stage_evaluator_s += pack_s + eval_s;
+            output_assign_s += assign_s;
+            stage_input_pack_by_stage_s.push(pack_s);
+            stage_evaluator_call_by_stage_s.push(eval_s);
+            stage_output_assign_by_stage_s.push(assign_s);
+        }
+
+        let reduction_start = Instant::now();
+        let (resolved, amplitude_input_pack_s, amplitude_evaluator_call_s) = self
+            .amplitude_stage
+            .as_mut()
+            .expect("generic amplitude stage checked")
+            .evaluate_resolved_generic(
+                n_points,
+                state.as_slice(),
+                binary_precision,
+                &physics,
+                self.normalization_factor,
+                selected_helicity_ids,
+                selected_color_ids,
+            )?;
+        let reduction_s = reduction_start.elapsed().as_secs_f64();
+        let amplitude_evaluator_s = amplitude_input_pack_s + amplitude_evaluator_call_s;
+        Ok((
+            resolved,
             RuntimeProfile {
                 source_fill_s,
                 momentum_setup_s: momentum_setup_s + model_parameter_setup_s,
@@ -4028,19 +4859,509 @@ fn is_fermion_pdg(particle_id: i32) -> bool {
     (1..=6).contains(&abs_id) || (11..=16).contains(&abs_id)
 }
 
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol", frozen, get_all, skip_from_py_object)]
+#[derive(Clone)]
+struct ExternalParticle {
+    label: usize,
+    index: usize,
+    side: String,
+    role: String,
+    particle: String,
+    outgoing_particle: String,
+    pdg: i32,
+    outgoing_pdg: i32,
+    particle_class: String,
+    momentum_slot: usize,
+}
+
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol", frozen, get_all, from_py_object)]
+#[derive(Clone)]
+struct HelicityConfiguration {
+    id: String,
+    index: usize,
+    helicities: Vec<i32>,
+    representative_id: String,
+    computed: bool,
+    structural_zero: bool,
+}
+
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol", frozen, get_all, from_py_object)]
+#[derive(Clone)]
+struct ColorFlow {
+    id: String,
+    index: usize,
+    word: Vec<usize>,
+    representative_id: String,
+    computed: bool,
+}
+
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol", frozen, get_all, skip_from_py_object)]
+#[derive(Clone)]
+struct ContractedColorComponent {
+    id: String,
+    index: usize,
+}
+
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol", frozen, get_all, skip_from_py_object)]
+#[derive(Clone)]
+struct ModelParameter {
+    name: String,
+    kind: String,
+    parameter_index: usize,
+    default: f64,
+}
+
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol", frozen, skip_from_py_object)]
+#[derive(Clone)]
+struct ProcessPhysics {
+    process: String,
+    process_key: String,
+    color_accuracy: String,
+    external_particles: Vec<ExternalParticle>,
+    helicities: Vec<HelicityConfiguration>,
+    color_flows: Vec<ColorFlow>,
+    contracted_color_components: Vec<ContractedColorComponent>,
+    model_parameters: Vec<ModelParameter>,
+    helicity_coverage: String,
+    color_coverage: String,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+#[cfg(feature = "python")]
+#[cfg(feature = "python")]
+impl ProcessPhysics {
+    #[getter]
+    fn process(&self) -> &str {
+        &self.process
+    }
+
+    #[getter]
+    fn process_key(&self) -> &str {
+        &self.process_key
+    }
+
+    #[getter]
+    fn color_accuracy(&self) -> &str {
+        &self.color_accuracy
+    }
+
+    #[getter]
+    fn external_particles(&self) -> Vec<ExternalParticle> {
+        self.external_particles.clone()
+    }
+
+    #[getter]
+    fn helicities(&self) -> Vec<HelicityConfiguration> {
+        self.helicities.clone()
+    }
+
+    #[getter]
+    fn color_flows(&self) -> Vec<ColorFlow> {
+        self.color_flows.clone()
+    }
+
+    #[getter]
+    fn contracted_color_components(&self) -> Vec<ContractedColorComponent> {
+        self.contracted_color_components.clone()
+    }
+
+    #[getter]
+    fn model_parameters(&self) -> Vec<ModelParameter> {
+        self.model_parameters.clone()
+    }
+
+    #[getter]
+    fn helicity_coverage(&self) -> &str {
+        &self.helicity_coverage
+    }
+
+    #[getter]
+    fn color_coverage(&self) -> &str {
+        &self.color_coverage
+    }
+}
+
+#[cfg(feature = "python")]
+impl ProcessPhysics {
+    fn from_manifest(manifest: &PhysicsManifestV2) -> Self {
+        Self {
+            process: manifest.process.clone(),
+            process_key: manifest.process_key.clone(),
+            color_accuracy: manifest.color_accuracy.clone(),
+            external_particles: manifest
+                .external_particles
+                .iter()
+                .map(|particle| ExternalParticle {
+                    label: particle.label,
+                    index: particle.index,
+                    side: particle.side.clone(),
+                    role: particle.role.clone(),
+                    particle: particle.particle.clone(),
+                    outgoing_particle: particle.outgoing_particle.clone(),
+                    pdg: particle.pdg,
+                    outgoing_pdg: particle.outgoing_pdg,
+                    particle_class: particle.particle_class.clone(),
+                    momentum_slot: particle.momentum_slot,
+                })
+                .collect(),
+            helicities: manifest
+                .helicities
+                .iter()
+                .map(|helicity| HelicityConfiguration {
+                    id: helicity.id.clone(),
+                    index: helicity.index,
+                    helicities: helicity.helicities.clone(),
+                    representative_id: helicity.representative_id.clone(),
+                    computed: helicity.computed,
+                    structural_zero: helicity.structural_zero,
+                })
+                .collect(),
+            color_flows: manifest
+                .color_components
+                .iter()
+                .filter(|color| color.kind == "lc-flow")
+                .map(|color| ColorFlow {
+                    id: color.id.clone(),
+                    index: color.index,
+                    word: color.word.clone(),
+                    representative_id: color.representative_id.clone(),
+                    computed: color.computed,
+                })
+                .collect(),
+            contracted_color_components: manifest
+                .color_components
+                .iter()
+                .filter(|color| color.kind == "contracted")
+                .map(|color| ContractedColorComponent {
+                    id: color.id.clone(),
+                    index: color.index,
+                })
+                .collect(),
+            model_parameters: manifest
+                .model_parameters
+                .iter()
+                .map(|parameter| ModelParameter {
+                    name: parameter.name.clone(),
+                    kind: parameter.kind.clone(),
+                    parameter_index: parameter.parameter_index,
+                    default: parameter.default,
+                })
+                .collect(),
+            helicity_coverage: manifest.coverage.helicities.clone(),
+            color_coverage: manifest.coverage.color.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyclass(module = "rusticol")]
+struct ResolvedEvaluation {
+    values: Py<PyAny>,
+    totals: Py<PyAny>,
+    shape: (usize, usize, usize),
+    helicities: Vec<HelicityConfiguration>,
+    color_flows: Vec<ColorFlow>,
+    contracted_color_components: Vec<ContractedColorComponent>,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl ResolvedEvaluation {
+    #[getter]
+    fn values(&self, py: Python<'_>) -> Py<PyAny> {
+        self.values.clone_ref(py)
+    }
+
+    #[getter]
+    fn shape(&self) -> (usize, usize, usize) {
+        self.shape
+    }
+
+    #[getter]
+    fn helicities(&self) -> Vec<HelicityConfiguration> {
+        self.helicities.clone()
+    }
+
+    #[getter]
+    fn color_flows(&self) -> Vec<ColorFlow> {
+        self.color_flows.clone()
+    }
+
+    #[getter]
+    fn contracted_color_components(&self) -> Vec<ContractedColorComponent> {
+        self.contracted_color_components.clone()
+    }
+
+    fn total(&self, py: Python<'_>) -> Py<PyAny> {
+        self.totals.clone_ref(py)
+    }
+}
+
+#[cfg(feature = "python")]
+#[derive(Clone, Copy)]
+enum PublicSelectorKind {
+    Helicity,
+    ColorFlow,
+}
+
+#[cfg(feature = "python")]
+fn parse_public_selector_ids(
+    value: Option<&Bound<'_, PyAny>>,
+    kind: PublicSelectorKind,
+) -> PyResult<Option<BTreeSet<String>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    if let Some(id) = public_selector_item_id(value, kind)? {
+        return Ok(Some(BTreeSet::from([id])));
+    }
+    let mut ids = BTreeSet::new();
+    for item in value.try_iter().map_err(|_| {
+        PyValueError::new_err(
+            "resolved selectors must be an id, a typed metadata object, or an iterable of them",
+        )
+    })? {
+        let item = item?;
+        let id = public_selector_item_id(&item, kind)?.ok_or_else(|| {
+            PyValueError::new_err("resolved selector iterable contains an unsupported item")
+        })?;
+        ids.insert(id);
+    }
+    if ids.is_empty() {
+        return Err(PyValueError::new_err(
+            "resolved selector iterable must not be empty",
+        ));
+    }
+    Ok(Some(ids))
+}
+
+#[cfg(feature = "python")]
+fn public_selector_item_id(
+    value: &Bound<'_, PyAny>,
+    kind: PublicSelectorKind,
+) -> PyResult<Option<String>> {
+    if let Ok(id) = value.extract::<String>() {
+        return Ok(Some(id));
+    }
+    match kind {
+        PublicSelectorKind::Helicity => {
+            if let Ok(item) = value.extract::<PyRef<'_, HelicityConfiguration>>() {
+                return Ok(Some(item.id.clone()));
+            }
+        }
+        PublicSelectorKind::ColorFlow => {
+            if let Ok(item) = value.extract::<PyRef<'_, ColorFlow>>() {
+                return Ok(Some(item.id.clone()));
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "python")]
+fn parse_python_model_parameter_mapping(
+    mapping: &Bound<'_, PyAny>,
+) -> PyResult<BTreeMap<String, (f64, f64)>> {
+    let items = mapping.call_method0("items").map_err(|_| {
+        PyValueError::new_err("model parameter updates must be supplied as a mapping")
+    })?;
+    let mut result = BTreeMap::new();
+    for item in items.try_iter()? {
+        let item = item?;
+        let pair = item.cast::<PyTuple>().map_err(|_| {
+            PyValueError::new_err("model parameter mapping items must be name/value pairs")
+        })?;
+        if pair.len() != 2 {
+            return Err(PyValueError::new_err(
+                "model parameter mapping items must contain exactly two values",
+            ));
+        }
+        let name = pair.get_item(0)?.extract::<String>()?;
+        let value = pair.get_item(1)?;
+        let components = if let Ok(real) = value.extract::<f64>() {
+            (real, 0.0)
+        } else if let Ok((real, imaginary)) = value.extract::<(f64, f64)>() {
+            (real, imaginary)
+        } else if value.hasattr("real")? && value.hasattr("imag")? {
+            (
+                value.getattr("real")?.extract::<f64>()?,
+                value.getattr("imag")?.extract::<f64>()?,
+            )
+        } else {
+            return Err(PyValueError::new_err(format!(
+                "model parameter {name:?} must be a real, complex, or (real, imag) pair",
+            )));
+        };
+        if result.insert(name.clone(), components).is_some() {
+            return Err(PyValueError::new_err(format!(
+                "duplicate model parameter update {name:?}",
+            )));
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(feature = "python")]
+fn resolved_f64_to_python(
+    py: Python<'_>,
+    resolved: ResolvedValues<f64>,
+    physics: &PhysicsManifestV2,
+) -> PyResult<ResolvedEvaluation> {
+    let helicity_count = resolved.helicity_indices.len();
+    let color_count = resolved.color_indices.len();
+    let mut rows = Vec::with_capacity(resolved.point_count);
+    let mut totals = Vec::with_capacity(resolved.point_count);
+    for point_index in 0..resolved.point_count {
+        let mut helicity_rows = Vec::with_capacity(helicity_count);
+        let mut total = 0.0;
+        for helicity_offset in 0..helicity_count {
+            let start = (point_index * helicity_count + helicity_offset) * color_count;
+            let color_values = resolved.values[start..start + color_count].to_vec();
+            total += color_values.iter().sum::<f64>();
+            helicity_rows.push(color_values);
+        }
+        rows.push(helicity_rows);
+        totals.push(total);
+    }
+    let typed = ProcessPhysics::from_manifest(physics);
+    Ok(ResolvedEvaluation {
+        values: rows.into_py_any(py)?,
+        totals: totals.into_pyarray(py).into_any().unbind(),
+        shape: (resolved.point_count, helicity_count, color_count),
+        helicities: resolved
+            .helicity_indices
+            .iter()
+            .map(|index| typed.helicities[*index].clone())
+            .collect(),
+        color_flows: resolved
+            .color_indices
+            .iter()
+            .filter_map(|index| {
+                let color = &physics.color_components[*index];
+                (color.kind == "lc-flow").then(|| ColorFlow {
+                    id: color.id.clone(),
+                    index: color.index,
+                    word: color.word.clone(),
+                    representative_id: color.representative_id.clone(),
+                    computed: color.computed,
+                })
+            })
+            .collect(),
+        contracted_color_components: resolved
+            .color_indices
+            .iter()
+            .filter_map(|index| {
+                let color = &physics.color_components[*index];
+                (color.kind == "contracted").then(|| ContractedColorComponent {
+                    id: color.id.clone(),
+                    index: color.index,
+                })
+            })
+            .collect(),
+    })
+}
+
+#[cfg(feature = "python")]
+fn resolved_decimals_to_python<T>(
+    py: Python<'_>,
+    resolved: ResolvedValues<T>,
+    physics: &PhysicsManifestV2,
+    decimal_digits: u32,
+) -> PyResult<ResolvedEvaluation>
+where
+    T: Real + std::fmt::Display + std::fmt::LowerExp,
+{
+    let decimal = py.import("decimal")?.getattr("Decimal")?;
+    let digits = decimal_digits as usize;
+    let helicity_count = resolved.helicity_indices.len();
+    let color_count = resolved.color_indices.len();
+    let mut point_rows: Vec<Py<PyAny>> = Vec::with_capacity(resolved.point_count);
+    let mut totals: Vec<Py<PyAny>> = Vec::with_capacity(resolved.point_count);
+    for point_index in 0..resolved.point_count {
+        let mut helicity_rows: Vec<Py<PyAny>> = Vec::with_capacity(helicity_count);
+        let mut total = T::new_zero();
+        for helicity_offset in 0..helicity_count {
+            let start = (point_index * helicity_count + helicity_offset) * color_count;
+            let mut color_values: Vec<Py<PyAny>> = Vec::with_capacity(color_count);
+            for value in &resolved.values[start..start + color_count] {
+                total += value.clone();
+                color_values.push(
+                    decimal
+                        .call1((format!("{value:.digits$e}"),))?
+                        .into_any()
+                        .unbind(),
+                );
+            }
+            helicity_rows.push(PyList::new(py, color_values)?.into_any().unbind());
+        }
+        point_rows.push(PyList::new(py, helicity_rows)?.into_any().unbind());
+        totals.push(
+            decimal
+                .call1((format!("{total:.digits$e}"),))?
+                .into_any()
+                .unbind(),
+        );
+    }
+    let typed = ProcessPhysics::from_manifest(physics);
+    Ok(ResolvedEvaluation {
+        values: PyList::new(py, point_rows)?.into_any().unbind(),
+        totals: PyList::new(py, totals)?.into_any().unbind(),
+        shape: (resolved.point_count, helicity_count, color_count),
+        helicities: resolved
+            .helicity_indices
+            .iter()
+            .map(|index| typed.helicities[*index].clone())
+            .collect(),
+        color_flows: resolved
+            .color_indices
+            .iter()
+            .filter_map(|index| {
+                let color = &physics.color_components[*index];
+                (color.kind == "lc-flow").then(|| ColorFlow {
+                    id: color.id.clone(),
+                    index: color.index,
+                    word: color.word.clone(),
+                    representative_id: color.representative_id.clone(),
+                    computed: color.computed,
+                })
+            })
+            .collect(),
+        contracted_color_components: resolved
+            .color_indices
+            .iter()
+            .filter_map(|index| {
+                let color = &physics.color_components[*index];
+                (color.kind == "contracted").then(|| ContractedColorComponent {
+                    id: color.id.clone(),
+                    index: color.index,
+                })
+            })
+            .collect(),
+    })
+}
+
+#[cfg(feature = "python")]
 #[pyclass(module = "rusticol")]
 struct Runtime {
     root: PathBuf,
-    manifest: Option<ProcessManifest>,
-    generic_runtime: Option<GenericRuntimeV2>,
+    generic_runtime: GenericRuntimeV2,
     selected_process_key: Option<String>,
     selected_process: Option<String>,
     input_crossing_map: Option<Vec<InputCrossingMapEntry>>,
     crossing_alias_of: Option<String>,
-    stages: Option<Vec<CurrentStage>>,
-    amplitude_stage: Option<AmplitudeStage>,
-    zero_gluon_stage: Option<ZeroGluonStage>,
     last_profile: RuntimeProfile,
+    warnings_muted: bool,
+    warned_kinds: BTreeSet<String>,
 }
 
 struct ProcessSetSelection {
@@ -4049,12 +5370,13 @@ struct ProcessSetSelection {
     selected_process: Option<String>,
     input_crossing_map: Option<Vec<InputCrossingMapEntry>>,
     crossing_alias_of: Option<String>,
+    physics: Option<PhysicsManifestV2>,
 }
 
+#[cfg(feature = "python")]
 fn load_rusticol_runtime(
     process_dir: &str,
     process_key: Option<&str>,
-    allow_legacy_schema_v1: bool,
     model_parameters_path: Option<&str>,
 ) -> PyResult<Runtime> {
     let process_dir = PathBuf::from(process_dir);
@@ -4067,219 +5389,43 @@ fn load_rusticol_runtime(
     let selection = resolve_process_root(&requested_root, process_key)?;
     let root = selection.root.clone();
     let manifest_path = root.join("process_manifest.json");
-    let generic_result = read_json_manifest::<GenericProcessManifestV2>(&manifest_path);
-    match generic_result {
-        Ok(generic)
-            if generic.schema_version == 2 && generic.kind == "pyamplicol-generic-dag-process" =>
-        {
-            let mut generic_runtime = load_generic_schema_v2_manifest(generic, &root)?;
-            if let Some(path) = model_parameters_path {
-                generic_runtime.apply_model_parameter_json_path(&PathBuf::from(path))?;
-            }
-            return Ok(Runtime {
-                root,
-                manifest: None,
-                generic_runtime: Some(generic_runtime),
-                selected_process_key: selection.selected_key,
-                selected_process: selection.selected_process,
-                input_crossing_map: selection.input_crossing_map,
-                crossing_alias_of: selection.crossing_alias_of,
-                stages: None,
-                amplitude_stage: None,
-                zero_gluon_stage: None,
-                last_profile: RuntimeProfile::default(),
-            });
-        }
-        Ok(generic) if !allow_legacy_schema_v1 => {
-            return Err(PyValueError::new_err(format!(
-                "Runtime.load only supports schema-v2 generic DAG artifacts; got kind {:?} \
-                 schema_version {}. Schema-v1 Rusticol artifacts are legacy; use \
-                 Runtime.load_legacy(...) for reference artifacts or regenerate with pyAmpliCol \
-                 generate-process.",
-                generic.kind, generic.schema_version
-            )));
-        }
-        Err(generic_error) if !allow_legacy_schema_v1 => {
-            let header = read_json_manifest::<ProcessManifestHeader>(&manifest_path);
-            if let Ok(header) = header {
-                if header.schema_version != 2 || header.kind != "pyamplicol-generic-dag-process" {
-                    return Err(PyValueError::new_err(format!(
-                        "Runtime.load only supports schema-v2 generic DAG artifacts; got kind {:?} \
-                         schema_version {}. Schema-v1 Rusticol artifacts are legacy; use \
-                         Runtime.load_legacy(...) for reference artifacts or regenerate with pyAmpliCol \
-                         generate-process.",
-                        header.kind, header.schema_version
-                    )));
-                }
-            }
-            return Err(PyValueError::new_err(format!(
-                "could not parse generic DAG process manifest schema v2: {generic_error}"
-            )));
-        }
-        Ok(_) | Err(_) => {}
-    }
-
-    let manifest: ProcessManifest =
+    let header: ArtifactManifestHeader =
         read_json_manifest(&manifest_path).map_err(PyValueError::new_err)?;
-    if manifest.schema_version != 1 {
+    if header.schema_version != 2 || header.kind != "pyamplicol-generic-dag-process" {
         return Err(PyValueError::new_err(format!(
-            "unsupported process manifest schema_version {}",
-            manifest.schema_version
+            "Rusticol supports only schema-v2 generic DAG artifacts; got kind {:?} \
+             schema_version {}. Schema-v1 execution has been removed; regenerate this process \
+             with pyAmpliCol generate-process.",
+            header.kind, header.schema_version
         )));
     }
-    if manifest.kind != "pyamplicol-rusticol-process" {
-        return Err(PyValueError::new_err(format!(
-            "unsupported process artifact kind {}",
-            manifest.kind
-        )));
-    }
-    if manifest.family != "q-qbar-z-gluons-leading-color"
-        && manifest.family != "q-qbar-vector-gluons-leading-color"
-        && manifest.family != "q-qbar-neutral-dilepton-gluons-leading-color"
-        && manifest.family != "q-qbar-neutral-dilepton-zero-gluon-leading-color"
-        && manifest.family != "q-qbar-charged-leptonic-w-gluons-leading-color"
-        && manifest.family != "q-qbar-charged-leptonic-w-zero-gluon-leading-color"
-    {
-        return Err(PyValueError::new_err(format!(
-            "rusticol currently supports q-qbar vector/leptonic-vector+gluon leading-colour artifacts, got {}",
-            manifest.family
-        )));
-    }
-    if manifest.compiled.kind == "zero-gluon-symbolic-scalar" {
-        if model_parameters_path.is_some() {
-            return Err(PyValueError::new_err(
-                "model-parameter JSON overrides are only supported for schema-v2 generic DAG artifacts",
-            ));
-        }
-        if manifest.gluon_count != 0 || manifest.external_pdg_order.len() != 3 {
-            return Err(PyValueError::new_err(
-                "zero-gluon process artifacts must have exactly three external legs",
-            ));
-        }
-        if manifest.external_pdg_order[0] + manifest.external_pdg_order[1] != 0
-            || manifest.external_pdg_order[2] != 23
-        {
-            return Err(PyValueError::new_err(
-                "zero-gluon process artifacts must be q qbar -> Z",
-            ));
-        }
-        if !manifest.normalization.coupling_factor.is_finite()
-            || !manifest.model.alpha_ew.is_finite()
-        {
-            return Err(PyValueError::new_err(
-                "model normalization constants are not finite",
-            ));
-        }
-        let zero_manifest = manifest.compiled.zero_gluon.as_ref().ok_or_else(|| {
-            PyValueError::new_err("zero-gluon process artifact is missing zero_gluon")
+    let generic: GenericProcessManifestV2 =
+        read_json_manifest(&manifest_path).map_err(|error| {
+            PyValueError::new_err(format!(
+                "could not parse generic DAG process manifest schema v2: {error}"
+            ))
         })?;
-        let zero_gluon_stage = ZeroGluonStage::load(zero_manifest, &root)?;
-        return Ok(Runtime {
-            root,
-            manifest: Some(manifest),
-            generic_runtime: None,
-            selected_process_key: selection.selected_key,
-            selected_process: selection.selected_process,
-            input_crossing_map: selection.input_crossing_map,
-            crossing_alias_of: selection.crossing_alias_of,
-            stages: Some(Vec::new()),
-            amplitude_stage: None,
-            zero_gluon_stage: Some(zero_gluon_stage),
-            last_profile: RuntimeProfile::default(),
-        });
+    let mut generic_runtime = load_generic_schema_v2_manifest(generic, &root)?;
+    if let Some(metadata) = selection.physics.clone() {
+        generic_runtime.physics = Some(PhysicsRuntimeV2::new(metadata)?);
     }
-    if manifest.compiled.kind != "shared-compiled-sweep" {
-        return Err(PyValueError::new_err(format!(
-            "unsupported compiled sweep kind {}",
-            manifest.compiled.kind
-        )));
+    if let Some(path) = model_parameters_path {
+        generic_runtime.apply_model_parameter_json_path(&PathBuf::from(path))?;
     }
-    let has_composite_sources = manifest
-        .table
-        .sources
-        .iter()
-        .any(|source| source.source_kind != "external");
-    let expected_external_count = if has_composite_sources {
-        manifest.gluon_count + 4
-    } else {
-        manifest.gluon_count + 3
-    };
-    if manifest.external_pdg_order.len() != expected_external_count {
-        return Err(PyValueError::new_err(
-            "external PDG order length does not match the shared-current artifact layout",
-        ));
-    }
-    if manifest
-        .table
-        .currents
-        .iter()
-        .enumerate()
-        .any(|(index, current)| current.id != index || current.dimension > 6 || current.pdg == 0)
-    {
-        return Err(PyValueError::new_err(
-            "current table ids/dimensions are not compatible with rusticol",
-        ));
-    }
-    validate_source_metadata(&manifest.table.sources)?;
-    if manifest.table.amplitudes.len() != manifest.compiled.amplitude_stage.raw_sum_weights.len() {
-        return Err(PyValueError::new_err(
-            "amplitude metadata and raw-sum weights have different lengths",
-        ));
-    }
-    if manifest
-        .table
-        .amplitudes
-        .iter()
-        .zip(&manifest.compiled.amplitude_stage.raw_sum_weights)
-        .any(|(amplitude, weight)| (amplitude.multiplicity - *weight).abs() > 0.0)
-    {
-        return Err(PyValueError::new_err(
-            "amplitude multiplicities and raw-sum weights differ",
-        ));
-    }
-    validate_amplitude_group_metadata(
-        &manifest.table.amplitudes,
-        manifest
-            .compiled
-            .amplitude_stage
-            .raw_sum_group_ids
-            .as_deref(),
-    )?;
-    if !manifest.normalization.coupling_factor.is_finite()
-        || !manifest.model.alpha_s_me_check.is_finite()
-        || !manifest.model.alpha_ew.is_finite()
-    {
-        return Err(PyValueError::new_err(
-            "model normalization constants are not finite",
-        ));
-    }
-    if model_parameters_path.is_some() {
-        return Err(PyValueError::new_err(
-            "model-parameter JSON overrides are only supported for schema-v2 generic DAG artifacts",
-        ));
-    }
-    let stages = manifest
-        .compiled
-        .stages
-        .iter()
-        .map(|stage| CurrentStage::load(stage, &root, &manifest.layout.current_offsets))
-        .collect::<PyResult<Vec<_>>>()?;
-    let amplitude_stage = AmplitudeStage::load(&manifest.compiled.amplitude_stage, &root)?;
     Ok(Runtime {
         root,
-        manifest: Some(manifest),
-        generic_runtime: None,
+        generic_runtime,
         selected_process_key: selection.selected_key,
         selected_process: selection.selected_process,
         input_crossing_map: selection.input_crossing_map,
         crossing_alias_of: selection.crossing_alias_of,
-        stages: Some(stages),
-        amplitude_stage: Some(amplitude_stage),
-        zero_gluon_stage: None,
         last_profile: RuntimeProfile::default(),
+        warnings_muted: false,
+        warned_kinds: BTreeSet::new(),
     })
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl Runtime {
     #[classmethod]
@@ -4290,128 +5436,125 @@ impl Runtime {
         process_key: Option<&str>,
         model_parameters: Option<&str>,
     ) -> PyResult<Self> {
-        load_rusticol_runtime(process_dir, process_key, false, model_parameters)
-    }
-
-    #[classmethod]
-    #[pyo3(signature = (process_dir, process_key=None, model_parameters=None))]
-    fn load_legacy(
-        _cls: &Bound<'_, pyo3::types::PyType>,
-        process_dir: &str,
-        process_key: Option<&str>,
-        model_parameters: Option<&str>,
-    ) -> PyResult<Self> {
-        load_rusticol_runtime(process_dir, process_key, true, model_parameters)
+        load_rusticol_runtime(process_dir, process_key, model_parameters)
     }
 
     #[getter]
     fn process(&self) -> PyResult<String> {
-        if let Some(generic) = &self.generic_runtime {
-            if let Some(selected) = &self.selected_process {
-                return Ok(selected.clone());
-            }
-            return Ok(generic.process.clone());
-        }
-        Ok(self.legacy_manifest().process.clone())
-    }
-
-    #[getter]
-    fn gluon_count(&self) -> PyResult<usize> {
-        if self.generic_runtime.is_some() {
-            return Err(PyValueError::new_err(
-                "generic schema-v2 artifacts do not expose a family-level gluon_count",
-            ));
-        }
-        Ok(self.legacy_manifest().gluon_count)
+        Ok(self
+            .selected_process
+            .clone()
+            .unwrap_or_else(|| self.generic_runtime.process.clone()))
     }
 
     fn metadata<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
-        if let Some(generic) = &self.generic_runtime {
-            dict.set_item(
-                "process",
-                self.selected_process.as_ref().unwrap_or(&generic.process),
-            )?;
-            dict.set_item(
-                "key",
-                self.selected_process_key.as_ref().unwrap_or(&generic.key),
-            )?;
-            dict.set_item("representative_process", &generic.process)?;
-            dict.set_item("representative_key", &generic.key)?;
-            dict.set_item("crossing_alias_of", self.crossing_alias_of.clone())?;
-            dict.set_item(
-                "input_crossing_map",
-                self.input_crossing_map
-                    .as_ref()
-                    .map(input_crossing_map_to_json)
-                    .unwrap_or_default(),
-            )?;
-            dict.set_item("artifact_class", "generic-dag-schema-v2")?;
-            dict.set_item("schema_version", 2)?;
-            dict.set_item("color_accuracy", &generic.color_accuracy)?;
-            dict.set_item("external_pdg_order", generic.external_pdg_order.clone())?;
-            dict.set_item("external_count", generic.external_count)?;
-            dict.set_item("parameter_count", generic.parameter_count)?;
-            dict.set_item("value_parameter_count", generic.value_parameter_count)?;
-            dict.set_item("momentum_parameter_count", generic.momentum_parameter_count)?;
-            dict.set_item("model_parameter_count", generic.model_parameter_count)?;
-            dict.set_item(
-                "model_parameter_names",
-                generic
-                    .model_parameter_runtime_slots
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            )?;
-            dict.set_item("current_count", generic.current_count)?;
-            dict.set_item("source_count", generic.source_count)?;
-            dict.set_item("interaction_count", generic.interaction_count)?;
-            dict.set_item("stage_count", generic.stage_count)?;
-            dict.set_item("amplitude_output_count", generic.amplitude_output_count)?;
-            dict.set_item("stage_evaluator_count", generic.stage_evaluator_count)?;
-            dict.set_item(
-                "stage_evaluator_labels",
-                generic.stage_evaluator_labels.clone(),
-            )?;
-            dict.set_item(
-                "amplitude_evaluator_label",
-                generic.amplitude_evaluator_label.clone(),
-            )?;
-            dict.set_item(
-                "lc_topology_reuse_available",
-                generic.lc_topology_reuse_available,
-            )?;
-            dict.set_item("lc_topology_group_count", generic.lc_topology_group_count)?;
-            dict.set_item(
-                "lc_topology_representative_sector_ids",
-                generic.lc_topology_representative_sector_ids.clone(),
-            )?;
-            dict.set_item(
-                "lc_topology_replay_enabled",
-                generic.lc_topology_replay_enabled,
-            )?;
-            dict.set_item(
-                "lc_topology_replay_sector_count",
-                generic.lc_topology_replay_sector_count,
-            )?;
-            dict.set_item(
-                "runtime_available",
-                generic.stages.is_some() && generic.amplitude_stage.is_some(),
-            )?;
-            dict.set_item("root", self.root.to_string_lossy().to_string())?;
-            return Ok(dict);
-        }
-        dict.set_item("process", &self.legacy_manifest().process)?;
-        dict.set_item("family", &self.legacy_manifest().family)?;
-        dict.set_item("schema_version", 1)?;
-        dict.set_item("gluon_count", self.legacy_manifest().gluon_count)?;
+        let generic = &self.generic_runtime;
         dict.set_item(
-            "parameter_count",
-            self.legacy_manifest().layout.parameter_count,
+            "process",
+            self.selected_process.as_ref().unwrap_or(&generic.process),
         )?;
-        dict.set_item("stage_count", self.stages_ref().len())?;
+        dict.set_item(
+            "key",
+            self.selected_process_key.as_ref().unwrap_or(&generic.key),
+        )?;
+        dict.set_item("representative_process", &generic.process)?;
+        dict.set_item("representative_key", &generic.key)?;
+        dict.set_item("crossing_alias_of", self.crossing_alias_of.clone())?;
+        dict.set_item(
+            "input_crossing_map",
+            self.input_crossing_map
+                .as_ref()
+                .map(input_crossing_map_to_json)
+                .unwrap_or_default(),
+        )?;
+        dict.set_item("artifact_class", "generic-dag-schema-v2")?;
+        dict.set_item("schema_version", 2)?;
+        dict.set_item("color_accuracy", &generic.color_accuracy)?;
+        dict.set_item("external_pdg_order", generic.external_pdg_order.clone())?;
+        dict.set_item("external_count", generic.external_count)?;
+        dict.set_item("parameter_count", generic.parameter_count)?;
+        dict.set_item("value_parameter_count", generic.value_parameter_count)?;
+        dict.set_item("momentum_parameter_count", generic.momentum_parameter_count)?;
+        dict.set_item("model_parameter_count", generic.model_parameter_count)?;
+        dict.set_item(
+            "model_parameter_names",
+            generic
+                .model_parameter_runtime_slots
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+        )?;
+        dict.set_item("current_count", generic.current_count)?;
+        dict.set_item("source_count", generic.source_count)?;
+        dict.set_item("interaction_count", generic.interaction_count)?;
+        dict.set_item("stage_count", generic.stage_count)?;
+        dict.set_item("amplitude_output_count", generic.amplitude_output_count)?;
+        dict.set_item("stage_evaluator_count", generic.stage_evaluator_count)?;
+        dict.set_item(
+            "stage_evaluator_labels",
+            generic.stage_evaluator_labels.clone(),
+        )?;
+        dict.set_item(
+            "amplitude_evaluator_label",
+            generic.amplitude_evaluator_label.clone(),
+        )?;
+        dict.set_item(
+            "lc_topology_reuse_available",
+            generic.lc_topology_reuse_available,
+        )?;
+        dict.set_item("lc_topology_group_count", generic.lc_topology_group_count)?;
+        dict.set_item(
+            "lc_topology_representative_sector_ids",
+            generic.lc_topology_representative_sector_ids.clone(),
+        )?;
+        dict.set_item(
+            "lc_topology_replay_enabled",
+            generic.lc_topology_replay_enabled,
+        )?;
+        dict.set_item(
+            "lc_topology_replay_sector_count",
+            generic.lc_topology_replay_sector_count,
+        )?;
+        dict.set_item(
+            "runtime_available",
+            generic.stages.is_some() && generic.amplitude_stage.is_some(),
+        )?;
         dict.set_item("root", self.root.to_string_lossy().to_string())?;
         Ok(dict)
+    }
+
+    #[getter]
+    fn physics(&self) -> PyResult<ProcessPhysics> {
+        let physics = self.generic_runtime.physics.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "this older schema-v2 artifact has no resolved physics metadata; regenerate it with pyAmpliCol",
+            )
+        })?;
+        Ok(ProcessPhysics::from_manifest(&physics.manifest))
+    }
+
+    fn set_model_parameters(&mut self, mapping: &Bound<'_, PyAny>) -> PyResult<()> {
+        let overrides = parse_python_model_parameter_mapping(mapping)?;
+        self.generic_runtime
+            .apply_model_parameter_overrides(&overrides)
+    }
+
+    #[pyo3(signature = (name, real, imaginary=0.0))]
+    fn set_model_parameter(&mut self, name: &str, real: f64, imaginary: f64) -> PyResult<()> {
+        self.generic_runtime
+            .apply_model_parameter_overrides(&BTreeMap::from([(
+                name.to_string(),
+                (real, imaginary),
+            )]))
+    }
+
+    fn mute_warnings(&mut self) {
+        self.warnings_muted = true;
+    }
+
+    fn unmute_warnings(&mut self) {
+        self.warnings_muted = false;
     }
 
     fn evaluate<'py>(
@@ -4421,6 +5564,50 @@ impl Runtime {
     ) -> PyResult<Py<PyAny>> {
         let values = self.evaluate_f64_values(py, momenta)?;
         f64_values_to_numpy_or_list(py, values)
+    }
+
+    #[pyo3(signature = (momenta, helicities=None, color_flows=None))]
+    fn evaluate_resolved(
+        &mut self,
+        py: Python<'_>,
+        momenta: &Bound<'_, PyAny>,
+        helicities: Option<&Bound<'_, PyAny>>,
+        color_flows: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<ResolvedEvaluation> {
+        let selected_helicity_ids =
+            parse_public_selector_ids(helicities, PublicSelectorKind::Helicity)?;
+        let selected_color_ids =
+            parse_public_selector_ids(color_flows, PublicSelectorKind::ColorFlow)?;
+        self.emit_resolved_warnings(
+            py,
+            selected_helicity_ids.as_ref(),
+            selected_color_ids.as_ref(),
+        )?;
+        let generic = &self.generic_runtime;
+        if selected_color_ids.is_some() && generic.color_accuracy != "lc" {
+            return Err(PyValueError::new_err(
+                "LC color-flow selection is unavailable for NLC/full artifacts; their resolved color axis is contracted",
+            ));
+        }
+        let external_count = generic.external_count;
+        let physics = generic
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                PyValueError::new_err(
+                    "resolved evaluation is unavailable for this older schema-v2 artifact; regenerate it with pyAmpliCol",
+                )
+            })?
+            .manifest
+            .clone();
+        let batch = self.generic_batch_from_python(py, momenta, external_count)?;
+        let (resolved, profile) = self.generic_runtime.run_resolved_f64(
+            &batch,
+            selected_helicity_ids.as_ref(),
+            selected_color_ids.as_ref(),
+        )?;
+        self.last_profile = profile;
+        resolved_f64_to_python(py, resolved, &physics)
     }
 
     fn evaluate_color_sectors<'py>(
@@ -4440,21 +5627,9 @@ impl Runtime {
         py: Python<'py>,
         momenta: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        let external_count = self
-            .generic_runtime
-            .as_ref()
-            .ok_or_else(|| {
-                PyValueError::new_err(
-                    "raw_amplitudes is only available for schema-v2 generic DAG artifacts",
-                )
-            })?
-            .external_count;
+        let external_count = self.generic_runtime.external_count;
         let batch = self.generic_batch_from_python(py, momenta, external_count)?;
-        let generic = self.generic_runtime.as_mut().ok_or_else(|| {
-            PyValueError::new_err(
-                "raw_amplitudes is only available for schema-v2 generic DAG artifacts",
-            )
-        })?;
+        let generic = &mut self.generic_runtime;
         if generic.lc_topology_replay_enabled {
             return Err(PyValueError::new_err(
                 "raw_amplitudes is not available for LC topology replay artifacts yet; \
@@ -4483,54 +5658,93 @@ impl Runtime {
         match PrecisionMode::from_decimal_digits(decimal_digit_precision)? {
             PrecisionMode::F64 => self.evaluate(py, momenta),
             PrecisionMode::DoubleDouble => {
-                let (values, profile) = if self.generic_runtime.is_some() {
-                    let external_count = self
-                        .generic_runtime
-                        .as_ref()
-                        .expect("checked")
-                        .external_count;
-                    let batch = self.generic_batch_double_from_python(momenta, external_count)?;
-                    self.generic_runtime
-                        .as_mut()
-                        .expect("checked")
-                        .run_double(&batch)?
-                } else {
-                    let batch = batch_momenta_double(
-                        momenta,
-                        self.legacy_manifest().external_pdg_order.len(),
-                    )?;
-                    self.run_double(&batch)?
-                };
+                let external_count = self.generic_runtime.external_count;
+                let batch = self.generic_batch_double_from_python(momenta, external_count)?;
+                let (values, profile) = self.generic_runtime.run_double(&batch)?;
                 self.last_profile = profile;
                 decimals_to_python(py, values, decimal_digit_precision)
             }
             PrecisionMode::Arbitrary(decimal_precision) => {
                 let binary_precision = decimal_digits_to_bits(decimal_precision);
-                let (values, profile) = if self.generic_runtime.is_some() {
-                    let external_count = self
-                        .generic_runtime
-                        .as_ref()
-                        .expect("checked")
-                        .external_count;
-                    let batch = self.generic_batch_float_from_python(
-                        momenta,
-                        binary_precision,
-                        external_count,
-                    )?;
-                    self.generic_runtime
-                        .as_mut()
-                        .expect("checked")
-                        .run_float(&batch, binary_precision)?
-                } else {
-                    let batch = batch_momenta_float(
-                        momenta,
-                        binary_precision,
-                        self.legacy_manifest().external_pdg_order.len(),
-                    )?;
-                    self.run_float(&batch, binary_precision)?
-                };
+                let external_count = self.generic_runtime.external_count;
+                let batch = self.generic_batch_float_from_python(
+                    momenta,
+                    binary_precision,
+                    external_count,
+                )?;
+                let (values, profile) = self.generic_runtime.run_float(&batch, binary_precision)?;
                 self.last_profile = profile;
                 decimals_to_python(py, values, decimal_precision)
+            }
+        }
+    }
+
+    #[pyo3(signature = (momenta, decimal_digit_precision, helicities=None, color_flows=None))]
+    fn evaluate_resolved_with_prec(
+        &mut self,
+        py: Python<'_>,
+        momenta: &Bound<'_, PyAny>,
+        decimal_digit_precision: u32,
+        helicities: Option<&Bound<'_, PyAny>>,
+        color_flows: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<ResolvedEvaluation> {
+        if decimal_digit_precision == 16 {
+            return self.evaluate_resolved(py, momenta, helicities, color_flows);
+        }
+        let selected_helicity_ids =
+            parse_public_selector_ids(helicities, PublicSelectorKind::Helicity)?;
+        let selected_color_ids =
+            parse_public_selector_ids(color_flows, PublicSelectorKind::ColorFlow)?;
+        self.emit_resolved_warnings(
+            py,
+            selected_helicity_ids.as_ref(),
+            selected_color_ids.as_ref(),
+        )?;
+        let generic = &self.generic_runtime;
+        if selected_color_ids.is_some() && generic.color_accuracy != "lc" {
+            return Err(PyValueError::new_err(
+                "LC color-flow selection is unavailable for NLC/full artifacts; their resolved color axis is contracted",
+            ));
+        }
+        let external_count = generic.external_count;
+        let physics = generic
+            .physics
+            .as_ref()
+            .ok_or_else(|| {
+                PyValueError::new_err(
+                    "resolved evaluation is unavailable for this older schema-v2 artifact; regenerate it with pyAmpliCol",
+                )
+            })?
+            .manifest
+            .clone();
+        match PrecisionMode::from_decimal_digits(decimal_digit_precision)? {
+            PrecisionMode::F64 => unreachable!("precision 16 returned above"),
+            PrecisionMode::DoubleDouble => {
+                let batch = self.generic_batch_double_from_python(momenta, external_count)?;
+                let (resolved, profile) = self.generic_runtime.run_resolved_generic(
+                    &batch,
+                    None,
+                    selected_helicity_ids.as_ref(),
+                    selected_color_ids.as_ref(),
+                )?;
+                self.last_profile = profile;
+                resolved_decimals_to_python(py, resolved, &physics, decimal_digit_precision)
+            }
+            PrecisionMode::Arbitrary(decimal_precision) => {
+                let binary_precision = decimal_digits_to_bits(decimal_precision);
+                let batch = self.generic_batch_float_from_python(
+                    momenta,
+                    binary_precision,
+                    external_count,
+                )?;
+                let (resolved, profile) = self.generic_runtime.run_resolved_generic(
+                    &batch,
+                    Some(binary_precision),
+                    selected_helicity_ids.as_ref(),
+                    selected_color_ids.as_ref(),
+                )?;
+                self.last_profile = profile;
+                resolved_decimals_to_python(py, resolved, &physics, decimal_precision)
             }
         }
     }
@@ -4552,35 +5766,12 @@ impl Runtime {
         }
         let (points, values, profile) = match PrecisionMode::from_decimal_digits(precision)? {
             PrecisionMode::F64 => {
-                let (points, values, profile) = if self.generic_runtime.is_some() {
-                    let external_count = self
-                        .generic_runtime
-                        .as_ref()
-                        .expect("checked")
-                        .external_count;
-                    let batch = self.generic_batch_from_python(py, momenta, external_count)?;
-                    let points = batch.len();
-                    let (values, profile) = self
-                        .generic_runtime
-                        .as_mut()
-                        .expect("checked")
-                        .run_f64_selected(&batch, selected_color_sector_ids.as_ref())?;
-                    (points, values, profile)
-                } else {
-                    if selected_color_sector_ids.is_some() {
-                        return Err(PyValueError::new_err(
-                            "LC color-sector runtime selection is only available for schema-v2 generic DAG artifacts",
-                        ));
-                    }
-                    let batch = batch_momenta(
-                        py,
-                        momenta,
-                        self.legacy_manifest().external_pdg_order.len(),
-                    )?;
-                    let points = batch.len();
-                    let (values, profile) = self.run_f64(&batch)?;
-                    (points, values, profile)
-                };
+                let external_count = self.generic_runtime.external_count;
+                let batch = self.generic_batch_from_python(py, momenta, external_count)?;
+                let points = batch.len();
+                let (values, profile) = self
+                    .generic_runtime
+                    .run_f64_selected(&batch, selected_color_sector_ids.as_ref())?;
                 let values = if include_values {
                     values.into_py_any(py)?
                 } else {
@@ -4589,29 +5780,10 @@ impl Runtime {
                 (points, values, profile)
             }
             PrecisionMode::DoubleDouble => {
-                let (points, values, profile) = if self.generic_runtime.is_some() {
-                    let external_count = self
-                        .generic_runtime
-                        .as_ref()
-                        .expect("checked")
-                        .external_count;
-                    let batch = self.generic_batch_double_from_python(momenta, external_count)?;
-                    let points = batch.len();
-                    let (values, profile) = self
-                        .generic_runtime
-                        .as_mut()
-                        .expect("checked")
-                        .run_double(&batch)?;
-                    (points, values, profile)
-                } else {
-                    let batch = batch_momenta_double(
-                        momenta,
-                        self.legacy_manifest().external_pdg_order.len(),
-                    )?;
-                    let points = batch.len();
-                    let (values, profile) = self.run_double(&batch)?;
-                    (points, values, profile)
-                };
+                let external_count = self.generic_runtime.external_count;
+                let batch = self.generic_batch_double_from_python(momenta, external_count)?;
+                let points = batch.len();
+                let (values, profile) = self.generic_runtime.run_double(&batch)?;
                 let values = if include_values {
                     decimals_to_python(py, values, precision)?
                 } else {
@@ -4621,34 +5793,14 @@ impl Runtime {
             }
             PrecisionMode::Arbitrary(decimal_precision) => {
                 let binary_precision = decimal_digits_to_bits(decimal_precision);
-                let (points, values, profile) = if self.generic_runtime.is_some() {
-                    let external_count = self
-                        .generic_runtime
-                        .as_ref()
-                        .expect("checked")
-                        .external_count;
-                    let batch = self.generic_batch_float_from_python(
-                        momenta,
-                        binary_precision,
-                        external_count,
-                    )?;
-                    let points = batch.len();
-                    let (values, profile) = self
-                        .generic_runtime
-                        .as_mut()
-                        .expect("checked")
-                        .run_float(&batch, binary_precision)?;
-                    (points, values, profile)
-                } else {
-                    let batch = batch_momenta_float(
-                        momenta,
-                        binary_precision,
-                        self.legacy_manifest().external_pdg_order.len(),
-                    )?;
-                    let points = batch.len();
-                    let (values, profile) = self.run_float(&batch, binary_precision)?;
-                    (points, values, profile)
-                };
+                let external_count = self.generic_runtime.external_count;
+                let batch = self.generic_batch_float_from_python(
+                    momenta,
+                    binary_precision,
+                    external_count,
+                )?;
+                let points = batch.len();
+                let (values, profile) = self.generic_runtime.run_float(&batch, binary_precision)?;
                 (
                     points,
                     if include_values {
@@ -4714,83 +5866,16 @@ impl Runtime {
         )?;
         Ok(dict)
     }
-
-    fn stage_diagnostics<'py>(
-        &mut self,
-        py: Python<'py>,
-        momenta: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyDict>> {
-        self.ensure_legacy_runtime()?;
-        let batch = batch_momenta(py, momenta, self.legacy_manifest().external_pdg_order.len())?;
-        let n_points = batch.len();
-        let parameter_count = self.legacy_manifest().layout.parameter_count;
-        let mut state = vec![c64(0.0, 0.0); n_points * parameter_count];
-
-        for (row, point) in batch.iter().enumerate() {
-            self.fill_sources(
-                &mut state[row * parameter_count..(row + 1) * parameter_count],
-                point,
-            )?;
-        }
-        for (row, point) in batch.iter().enumerate() {
-            self.fill_momenta(
-                &mut state[row * parameter_count..(row + 1) * parameter_count],
-                point,
-            );
-        }
-
-        let stages = PyList::empty(py);
-        stages.append(checksum_dict_str(
-            py,
-            "sources",
-            checksum_state_prefix(
-                &state,
-                n_points,
-                parameter_count,
-                self.legacy_manifest().table.currents.len() * 6,
-            ),
-        )?)?;
-
-        let current_offsets = self.legacy_manifest().layout.current_offsets.clone();
-        let mut evaluated = Vec::new();
-        let stage_count = self.stages_ref().len();
-        for stage_index in 0..stage_count {
-            let checksum = {
-                let stage = &mut self.stages_mut()[stage_index];
-                stage
-                    .evaluator
-                    .evaluate_batch_into(n_points, &state, &mut evaluated)?;
-                for row in 0..n_points {
-                    let row_state = &mut state[row * parameter_count..(row + 1) * parameter_count];
-                    for (column, _, _, state_offset) in &stage.outputs {
-                        row_state[*state_offset] =
-                            evaluated[row * stage.evaluator.output_len + *column];
-                    }
-                }
-                checksum_stage_outputs(
-                    &state,
-                    n_points,
-                    parameter_count,
-                    &current_offsets,
-                    &stage.outputs,
-                )
-            };
-            stages.append(checksum_dict_usize(py, stage_index + 1, checksum)?)?;
-        }
-
-        let dict = PyDict::new(py);
-        dict.set_item("points", n_points)?;
-        dict.set_item("stages", stages)?;
-        Ok(dict)
-    }
 }
 
+#[cfg(feature = "python")]
 enum PrecisionMode {
     F64,
     DoubleDouble,
     Arbitrary(u32),
 }
 
+#[cfg(feature = "python")]
 impl PrecisionMode {
     fn from_decimal_digits(precision: u32) -> PyResult<Self> {
         if precision == 16 {
@@ -4805,7 +5890,69 @@ impl PrecisionMode {
     }
 }
 
+#[cfg(feature = "python")]
 impl Runtime {
+    fn emit_resolved_warnings(
+        &mut self,
+        py: Python<'_>,
+        selected_helicity_ids: Option<&BTreeSet<String>>,
+        selected_color_ids: Option<&BTreeSet<String>>,
+    ) -> PyResult<()> {
+        if self.warnings_muted {
+            return Ok(());
+        }
+        let Some(physics) = self.generic_runtime.physics.as_ref() else {
+            return Ok(());
+        };
+        let mut warnings = Vec::new();
+        if physics.manifest.coverage.helicities != "complete" {
+            warnings.push((
+                "incomplete-helicity-coverage",
+                "resolved evaluation contains only the helicities represented by this artifact",
+            ));
+        }
+        if physics.manifest.coverage.color != "complete" {
+            warnings.push((
+                "incomplete-color-coverage",
+                "resolved evaluation contains only the color components represented by this artifact",
+            ));
+        }
+        let reduction_only_helicity = selected_helicity_ids.is_some_and(|ids| {
+            ids.iter().any(|id| {
+                physics
+                    .helicity_index_by_id
+                    .get(id)
+                    .and_then(|index| physics.manifest.helicities.get(*index))
+                    .is_some_and(|item| !item.computed)
+            })
+        });
+        let reduction_only_color = selected_color_ids.is_some_and(|ids| {
+            ids.iter().any(|id| {
+                physics
+                    .color_index_by_id
+                    .get(id)
+                    .and_then(|index| physics.manifest.color_components.get(*index))
+                    .is_some_and(|item| !item.computed)
+            })
+        });
+        if reduction_only_helicity || reduction_only_color {
+            warnings.push((
+                "reduction-only-selection",
+                "the selected resolved component reuses an exact symmetry representative",
+            ));
+        }
+        if warnings.is_empty() {
+            return Ok(());
+        }
+        let warnings_module = py.import("warnings")?;
+        for (kind, message) in warnings {
+            if self.warned_kinds.insert(kind.to_string()) {
+                warnings_module.call_method1("warn", (message,))?;
+            }
+        }
+        Ok(())
+    }
+
     fn generic_batch_from_python(
         &self,
         py: Python<'_>,
@@ -4835,49 +5982,6 @@ impl Runtime {
         apply_input_crossing_map_generic(&batch, expected_legs, self.input_crossing_map.as_deref())
     }
 
-    fn legacy_manifest(&self) -> &ProcessManifest {
-        self.manifest
-            .as_ref()
-            .expect("legacy schema-v1 manifest is unavailable for generic runtime")
-    }
-
-    fn ensure_legacy_runtime(&self) -> PyResult<()> {
-        if let Some(generic) = &self.generic_runtime {
-            return Err(generic.execution_unavailable_error());
-        }
-        Ok(())
-    }
-
-    fn stages_ref(&self) -> &Vec<CurrentStage> {
-        self.stages
-            .as_ref()
-            .expect("rusticol runtime stages are unavailable during drop")
-    }
-
-    fn stages_mut(&mut self) -> &mut Vec<CurrentStage> {
-        self.stages
-            .as_mut()
-            .expect("rusticol runtime stages are unavailable during drop")
-    }
-
-    fn amplitude_stage_mut(&mut self) -> &mut AmplitudeStage {
-        self.amplitude_stage
-            .as_mut()
-            .expect("rusticol amplitude stage is unavailable during drop")
-    }
-
-    fn zero_gluon_stage_ref(&self) -> &ZeroGluonStage {
-        self.zero_gluon_stage
-            .as_ref()
-            .expect("rusticol zero-gluon stage is unavailable during drop")
-    }
-
-    fn zero_gluon_stage_mut(&mut self) -> &mut ZeroGluonStage {
-        self.zero_gluon_stage
-            .as_mut()
-            .expect("rusticol zero-gluon stage is unavailable during drop")
-    }
-
     fn evaluate_f64_values(
         &mut self,
         py: Python<'_>,
@@ -4892,647 +5996,13 @@ impl Runtime {
         momenta: &Bound<'_, PyAny>,
         selected_color_sector_ids: Option<&BTreeSet<i64>>,
     ) -> PyResult<Vec<f64>> {
-        if self.generic_runtime.is_some() {
-            let external_count = self
-                .generic_runtime
-                .as_ref()
-                .expect("checked")
-                .external_count;
-            let batch = self.generic_batch_from_python(py, momenta, external_count)?;
-            let (values, profile) = self
-                .generic_runtime
-                .as_mut()
-                .expect("checked")
-                .run_f64_selected(&batch, selected_color_sector_ids)?;
-            self.last_profile = profile;
-            return Ok(values);
-        }
-        if selected_color_sector_ids.is_some() {
-            return Err(PyValueError::new_err(
-                "LC color-sector runtime selection is only available for schema-v2 generic DAG artifacts",
-            ));
-        }
-        let batch = batch_momenta(py, momenta, self.legacy_manifest().external_pdg_order.len())?;
-        let (values, profile) = self.run_f64(&batch)?;
+        let external_count = self.generic_runtime.external_count;
+        let batch = self.generic_batch_from_python(py, momenta, external_count)?;
+        let (values, profile) = self
+            .generic_runtime
+            .run_f64_selected(&batch, selected_color_sector_ids)?;
         self.last_profile = profile;
         Ok(values)
-    }
-
-    fn run_f64(&mut self, batch: &[[[f64; 4]; 16]]) -> PyResult<(Vec<f64>, RuntimeProfile)> {
-        if self.zero_gluon_stage.is_some() {
-            return self.run_zero_gluon_f64(batch);
-        }
-        let total_start = Instant::now();
-        let n_points = batch.len();
-        let parameter_count = self.legacy_manifest().layout.parameter_count;
-        let mut state = vec![c64(0.0, 0.0); n_points * parameter_count];
-
-        let source_start = Instant::now();
-        for (row, point) in batch.iter().enumerate() {
-            self.fill_sources(
-                &mut state[row * parameter_count..(row + 1) * parameter_count],
-                point,
-            )?;
-        }
-        let source_fill_s = source_start.elapsed().as_secs_f64();
-
-        let momentum_start = Instant::now();
-        for (row, point) in batch.iter().enumerate() {
-            self.fill_momenta(
-                &mut state[row * parameter_count..(row + 1) * parameter_count],
-                point,
-            );
-        }
-        let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
-
-        let mut stage_evaluator_s = 0.0;
-        let mut output_assign_s = 0.0;
-        let mut stage_input_pack_by_stage_s = Vec::new();
-        let mut stage_evaluator_call_by_stage_s = Vec::new();
-        let mut stage_output_assign_by_stage_s = Vec::new();
-        for stage in self.stages_mut() {
-            let (eval_s, assign_s) =
-                stage.evaluate_f64_into_state(n_points, parameter_count, &mut state)?;
-            stage_evaluator_s += eval_s;
-            output_assign_s += assign_s;
-            stage_input_pack_by_stage_s.push(0.0);
-            stage_evaluator_call_by_stage_s.push(eval_s);
-            stage_output_assign_by_stage_s.push(assign_s);
-        }
-
-        let amp_start = Instant::now();
-        let raw_sums = self
-            .amplitude_stage_mut()
-            .evaluate_raw_sums(n_points, &state)?;
-        let amplitude_evaluator_s = amp_start.elapsed().as_secs_f64();
-
-        let reduction_start = Instant::now();
-        let factor = self.legacy_manifest().normalization.color_factor
-            * self.legacy_manifest().normalization.coupling_factor
-            / (self.legacy_manifest().normalization.average_factor
-                * self.legacy_manifest().normalization.identical_factor);
-        let values = raw_sums
-            .into_iter()
-            .map(|raw| raw * factor)
-            .collect::<Vec<_>>();
-        let reduction_s = reduction_start.elapsed().as_secs_f64();
-        let total_s = total_start.elapsed().as_secs_f64();
-
-        Ok((
-            values,
-            RuntimeProfile {
-                source_fill_s,
-                momentum_setup_s,
-                stage_input_pack_s: 0.0,
-                stage_evaluator_call_s: stage_evaluator_s,
-                stage_evaluator_s,
-                output_assign_s,
-                amplitude_input_pack_s: 0.0,
-                amplitude_evaluator_call_s: amplitude_evaluator_s,
-                amplitude_evaluator_s,
-                reduction_s,
-                total_s,
-                stage_input_pack_by_stage_s,
-                stage_evaluator_call_by_stage_s,
-                stage_output_assign_by_stage_s,
-            },
-        ))
-    }
-
-    fn run_double(
-        &mut self,
-        batch: &[Vec<[DoubleFloat; 4]>],
-    ) -> PyResult<(Vec<DoubleFloat>, RuntimeProfile)> {
-        self.run_generic(batch, None)
-    }
-
-    fn run_float(
-        &mut self,
-        batch: &[Vec<[Float; 4]>],
-        binary_precision: u32,
-    ) -> PyResult<(Vec<Float>, RuntimeProfile)> {
-        self.run_generic(batch, Some(binary_precision))
-    }
-
-    fn run_generic<T>(
-        &mut self,
-        batch: &[Vec<[T; 4]>],
-        binary_precision: Option<u32>,
-    ) -> PyResult<(Vec<T>, RuntimeProfile)>
-    where
-        T: RusticolHighPrecisionNumber,
-        Complex<T>: Real + EvaluationDomain,
-    {
-        if self.zero_gluon_stage.is_some() {
-            return self.run_zero_gluon_generic(batch, binary_precision);
-        }
-        let total_start = Instant::now();
-        let n_points = batch.len();
-        let parameter_count = self.legacy_manifest().layout.parameter_count;
-        let mut state = vec![complex_zero::<T>(); n_points * parameter_count];
-
-        let source_start = Instant::now();
-        for (row, point) in batch.iter().enumerate() {
-            self.fill_sources_generic(
-                &mut state[row * parameter_count..(row + 1) * parameter_count],
-                point,
-            )?;
-        }
-        let source_fill_s = source_start.elapsed().as_secs_f64();
-
-        let momentum_start = Instant::now();
-        for (row, point) in batch.iter().enumerate() {
-            self.fill_momenta_generic(
-                &mut state[row * parameter_count..(row + 1) * parameter_count],
-                point,
-            );
-        }
-        let momentum_setup_s = momentum_start.elapsed().as_secs_f64();
-
-        let mut stage_evaluator_s = 0.0;
-        let mut output_assign_s = 0.0;
-        let mut stage_input_pack_by_stage_s = Vec::new();
-        let mut stage_evaluator_call_by_stage_s = Vec::new();
-        let mut stage_output_assign_by_stage_s = Vec::new();
-        for stage in self.stages_mut() {
-            let eval_start = Instant::now();
-            let evaluated =
-                stage
-                    .evaluator
-                    .evaluate_batch_generic(n_points, &state, binary_precision)?;
-            let eval_s = eval_start.elapsed().as_secs_f64();
-            stage_evaluator_s += eval_s;
-            let assign_start = Instant::now();
-            for row in 0..n_points {
-                let row_state = &mut state[row * parameter_count..(row + 1) * parameter_count];
-                for (column, _, _, state_offset) in &stage.outputs {
-                    row_state[*state_offset] =
-                        evaluated[row * stage.evaluator.output_len + *column].clone();
-                }
-            }
-            let assign_s = assign_start.elapsed().as_secs_f64();
-            output_assign_s += assign_s;
-            stage_input_pack_by_stage_s.push(0.0);
-            stage_evaluator_call_by_stage_s.push(eval_s);
-            stage_output_assign_by_stage_s.push(assign_s);
-        }
-
-        let amp_start = Instant::now();
-        let raw_sums = self.amplitude_stage_mut().evaluate_raw_sums_generic(
-            n_points,
-            &state,
-            binary_precision,
-        )?;
-        let amplitude_evaluator_s = amp_start.elapsed().as_secs_f64();
-
-        let reduction_start = Instant::now();
-        let factor = T::from(
-            self.legacy_manifest().normalization.color_factor
-                * self.legacy_manifest().normalization.coupling_factor
-                / (self.legacy_manifest().normalization.average_factor
-                    * self.legacy_manifest().normalization.identical_factor),
-        );
-        let values = raw_sums
-            .into_iter()
-            .map(|raw| raw * factor.clone())
-            .collect::<Vec<_>>();
-        let reduction_s = reduction_start.elapsed().as_secs_f64();
-        let total_s = total_start.elapsed().as_secs_f64();
-
-        Ok((
-            values,
-            RuntimeProfile {
-                source_fill_s,
-                momentum_setup_s,
-                stage_input_pack_s: 0.0,
-                stage_evaluator_call_s: stage_evaluator_s,
-                stage_evaluator_s,
-                output_assign_s,
-                amplitude_input_pack_s: 0.0,
-                amplitude_evaluator_call_s: amplitude_evaluator_s,
-                amplitude_evaluator_s,
-                reduction_s,
-                total_s,
-                stage_input_pack_by_stage_s,
-                stage_evaluator_call_by_stage_s,
-                stage_output_assign_by_stage_s,
-            },
-        ))
-    }
-
-    fn run_zero_gluon_f64(
-        &mut self,
-        batch: &[[[f64; 4]; 16]],
-    ) -> PyResult<(Vec<f64>, RuntimeProfile)> {
-        let total_start = Instant::now();
-        let source_start = Instant::now();
-        let params = self
-            .zero_gluon_stage_ref()
-            .parameter_rows_f64(self.legacy_manifest(), batch)?;
-        let source_fill_s = source_start.elapsed().as_secs_f64();
-
-        let eval_start = Instant::now();
-        let output_len = self.zero_gluon_stage_ref().evaluator.output_len;
-        let mut evaluated = vec![c64(0.0, 0.0); batch.len() * output_len];
-        {
-            let stage = self.zero_gluon_stage_mut();
-            stage
-                .evaluator
-                .evaluate_f64_batch(batch.len(), &params, &mut evaluated)?;
-        }
-        let amplitude_evaluator_s = eval_start.elapsed().as_secs_f64();
-
-        let reduction_start = Instant::now();
-        let factor = self.legacy_manifest().normalization.color_factor
-            * self.legacy_manifest().normalization.coupling_factor
-            / (self.legacy_manifest().normalization.average_factor
-                * self.legacy_manifest().normalization.identical_factor);
-        let values = (0..batch.len())
-            .map(|row| evaluated[row * output_len].re * factor)
-            .collect::<Vec<_>>();
-        let reduction_s = reduction_start.elapsed().as_secs_f64();
-        Ok((
-            values,
-            RuntimeProfile {
-                source_fill_s,
-                momentum_setup_s: 0.0,
-                stage_input_pack_s: 0.0,
-                stage_evaluator_call_s: 0.0,
-                stage_evaluator_s: 0.0,
-                output_assign_s: 0.0,
-                amplitude_input_pack_s: 0.0,
-                amplitude_evaluator_call_s: amplitude_evaluator_s,
-                amplitude_evaluator_s,
-                reduction_s,
-                total_s: total_start.elapsed().as_secs_f64(),
-                stage_input_pack_by_stage_s: Vec::new(),
-                stage_evaluator_call_by_stage_s: Vec::new(),
-                stage_output_assign_by_stage_s: Vec::new(),
-            },
-        ))
-    }
-
-    fn run_zero_gluon_generic<T>(
-        &mut self,
-        batch: &[Vec<[T; 4]>],
-        binary_precision: Option<u32>,
-    ) -> PyResult<(Vec<T>, RuntimeProfile)>
-    where
-        T: RusticolHighPrecisionNumber,
-        Complex<T>: Real + EvaluationDomain,
-    {
-        let total_start = Instant::now();
-        let source_start = Instant::now();
-        let params = self
-            .zero_gluon_stage_ref()
-            .parameter_rows_generic(self.legacy_manifest(), batch)?;
-        let source_fill_s = source_start.elapsed().as_secs_f64();
-
-        let eval_start = Instant::now();
-        let output_len = self.zero_gluon_stage_ref().evaluator.output_len;
-        let mut evaluated = vec![complex_zero::<T>(); batch.len() * output_len];
-        {
-            let stage = self.zero_gluon_stage_mut();
-            let input_len = stage.evaluator.input_len;
-            for row in 0..batch.len() {
-                let in_start = row * input_len;
-                let out_start = row * output_len;
-                T::evaluate_loaded(
-                    &mut stage.evaluator,
-                    &params[in_start..in_start + input_len],
-                    &mut evaluated[out_start..out_start + output_len],
-                    binary_precision,
-                )?;
-            }
-        }
-        let amplitude_evaluator_s = eval_start.elapsed().as_secs_f64();
-
-        let reduction_start = Instant::now();
-        let factor = T::from(
-            self.legacy_manifest().normalization.color_factor
-                * self.legacy_manifest().normalization.coupling_factor
-                / (self.legacy_manifest().normalization.average_factor
-                    * self.legacy_manifest().normalization.identical_factor),
-        );
-        let values = (0..batch.len())
-            .map(|row| evaluated[row * output_len].re.clone() * factor.clone())
-            .collect::<Vec<_>>();
-        let reduction_s = reduction_start.elapsed().as_secs_f64();
-        Ok((
-            values,
-            RuntimeProfile {
-                source_fill_s,
-                momentum_setup_s: 0.0,
-                stage_input_pack_s: 0.0,
-                stage_evaluator_call_s: 0.0,
-                stage_evaluator_s: 0.0,
-                output_assign_s: 0.0,
-                amplitude_input_pack_s: 0.0,
-                amplitude_evaluator_call_s: amplitude_evaluator_s,
-                amplitude_evaluator_s,
-                reduction_s,
-                total_s: total_start.elapsed().as_secs_f64(),
-                stage_input_pack_by_stage_s: Vec::new(),
-                stage_evaluator_call_by_stage_s: Vec::new(),
-                stage_output_assign_by_stage_s: Vec::new(),
-            },
-        ))
-    }
-
-    fn vector_mass(&self, pdg: i32) -> PyResult<f64> {
-        match pdg {
-            22 => Ok(0.0),
-            23 => Ok(self.legacy_manifest().model.mass_z),
-            24 | -24 => {
-                self.legacy_manifest().model.mass_w.ok_or_else(|| {
-                    PyValueError::new_err("process manifest model is missing mass_w")
-                })
-            }
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported electroweak vector PDG {pdg}"
-            ))),
-        }
-    }
-
-    fn vector_width(&self, pdg: i32) -> PyResult<f64> {
-        match pdg {
-            22 => Ok(0.0),
-            23 => {
-                self.legacy_manifest().model.width_z.ok_or_else(|| {
-                    PyValueError::new_err("process manifest model is missing width_z")
-                })
-            }
-            24 | -24 => {
-                self.legacy_manifest().model.width_w.ok_or_else(|| {
-                    PyValueError::new_err("process manifest model is missing width_w")
-                })
-            }
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported electroweak vector PDG {pdg}"
-            ))),
-        }
-    }
-
-    fn fill_sources(&self, row: &mut [Complex<f64>], point: &[[f64; 4]; 16]) -> PyResult<()> {
-        for source in &self.legacy_manifest().table.sources {
-            let offset = self.legacy_manifest().layout.current_offsets[source.current_id];
-            for component in 0..6 {
-                row[offset + component] = c64(0.0, 0.0);
-            }
-            let wave = if source.source_kind == "lepton_pair_vector" {
-                self.lepton_pair_vector_source(&source, point)?
-            } else if source.source_kind == "external" {
-                match source.leg_label {
-                    1 | 2 => {
-                        let current_pdg =
-                            self.legacy_manifest().table.currents[source.current_id].pdg;
-                        let p = negate(point[source.leg_label - 1]);
-                        if current_pdg < 0 {
-                            if source.physical_helicity == 1 {
-                                ext_antiquark_weyl(p, 1, -1)
-                            } else {
-                                ext_antiquark_weyl(p, -1, 1)
-                            }
-                        } else if current_pdg > 0 {
-                            if source.chirality == 1 {
-                                ext_quark_weyl(p, -1, 1)
-                            } else {
-                                ext_quark_weyl(p, 1, -1)
-                            }
-                        } else {
-                            return Err(PyValueError::new_err(format!(
-                                "unexpected fermion source current PDG {current_pdg}"
-                            )));
-                        }
-                    }
-                    label if label >= 3 && label < self.legacy_manifest().gluon_count + 3 => {
-                        ext_gluon(point[label - 1], source.helicity).to_vec()
-                    }
-                    label if label == self.legacy_manifest().gluon_count + 3 => {
-                        let vector_pdg = self.legacy_manifest().external_pdg_order[label - 1];
-                        if vector_pdg == 22 {
-                            ext_gluon(point[label - 1], source.helicity).to_vec()
-                        } else {
-                            ext_massive_vector(
-                                point[label - 1],
-                                source.helicity,
-                                self.vector_mass(vector_pdg)?,
-                            )
-                            .to_vec()
-                        }
-                    }
-                    _ => {
-                        return Err(PyValueError::new_err(format!(
-                            "unexpected source leg label {}",
-                            source.leg_label
-                        )));
-                    }
-                }
-            } else {
-                return Err(PyValueError::new_err(format!(
-                    "unsupported source kind {:?}",
-                    source.source_kind
-                )));
-            };
-            for (component, value) in wave.into_iter().enumerate() {
-                row[offset + component] = value;
-            }
-        }
-        Ok(())
-    }
-
-    fn lepton_pair_vector_source(
-        &self,
-        source: &SourceManifest,
-        point: &[[f64; 4]; 16],
-    ) -> PyResult<Vec<Complex<f64>>> {
-        let partner_label = source
-            .partner_leg_label
-            .ok_or_else(|| PyValueError::new_err("lepton-pair source is missing partner leg"))?;
-        let partner_helicity = source.partner_helicity.ok_or_else(|| {
-            PyValueError::new_err("lepton-pair source is missing partner helicity")
-        })?;
-        let partner_chirality = source.partner_chirality.ok_or_else(|| {
-            PyValueError::new_err("lepton-pair source is missing partner chirality")
-        })?;
-        let vector_pdg = source
-            .vector_pdg
-            .ok_or_else(|| PyValueError::new_err("lepton-pair source is missing vector PDG"))?;
-        let coupling = source
-            .coupling
-            .ok_or_else(|| PyValueError::new_err("lepton-pair source is missing coupling"))?;
-        let first_index = source
-            .leg_label
-            .checked_sub(1)
-            .ok_or_else(|| PyValueError::new_err("source leg labels are one-based"))?;
-        let second_index = partner_label
-            .checked_sub(1)
-            .ok_or_else(|| PyValueError::new_err("source leg labels are one-based"))?;
-        if first_index >= self.legacy_manifest().external_pdg_order.len()
-            || second_index >= self.legacy_manifest().external_pdg_order.len()
-        {
-            return Err(PyValueError::new_err(
-                "lepton-pair source refers to a leg outside the process",
-            ));
-        }
-        let first_pdg = self.legacy_manifest().external_pdg_order[first_index];
-        let second_pdg = self.legacy_manifest().external_pdg_order[second_index];
-        let current = if vector_pdg == 22 || vector_pdg == 23 {
-            neutral_lepton_pair_current(
-                first_pdg,
-                point[first_index],
-                source.helicity,
-                source.chirality,
-                second_pdg,
-                point[second_index],
-                partner_helicity,
-                partner_chirality,
-                coupling,
-            )?
-        } else if vector_pdg == 24 || vector_pdg == -24 {
-            charged_lepton_pair_current(
-                first_pdg,
-                point[first_index],
-                source.helicity,
-                source.chirality,
-                second_pdg,
-                point[second_index],
-                partner_helicity,
-                partner_chirality,
-                vector_pdg,
-                coupling,
-            )?
-        } else {
-            return Err(PyValueError::new_err(format!(
-                "unsupported lepton-pair vector source PDG {vector_pdg}"
-            )));
-        };
-        neutral_vector_propagator(
-            current,
-            add_momenta(point[first_index], point[second_index]),
-            vector_pdg,
-            self.vector_mass(vector_pdg)?,
-            self.vector_width(vector_pdg)?,
-        )
-    }
-
-    fn fill_sources_generic<T>(&self, row: &mut [Complex<T>], point: &[[T; 4]]) -> PyResult<()>
-    where
-        T: Real + RealLike + From<f64> + PartialOrd + Clone,
-    {
-        for source in &self.legacy_manifest().table.sources {
-            let offset = self.legacy_manifest().layout.current_offsets[source.current_id];
-            for component in 0..6 {
-                row[offset + component] = complex_zero::<T>();
-            }
-            if source.source_kind != "external" {
-                return Err(PyValueError::new_err(format!(
-                    "high-precision source filling for {:?} is not implemented in rusticol yet",
-                    source.source_kind
-                )));
-            }
-            let wave = match source.leg_label {
-                1 | 2 => {
-                    let current_pdg = self.legacy_manifest().table.currents[source.current_id].pdg;
-                    let p = negate_generic(&point[source.leg_label - 1]);
-                    if current_pdg < 0 {
-                        if source.physical_helicity == 1 {
-                            ext_antiquark_weyl_generic(&p, 1, -1)
-                        } else {
-                            ext_antiquark_weyl_generic(&p, -1, 1)
-                        }
-                    } else if current_pdg > 0 {
-                        if source.chirality == 1 {
-                            ext_quark_weyl_generic(&p, -1, 1)
-                        } else {
-                            ext_quark_weyl_generic(&p, 1, -1)
-                        }
-                    } else {
-                        return Err(PyValueError::new_err(format!(
-                            "unexpected fermion source current PDG {current_pdg}"
-                        )));
-                    }
-                }
-                label if label >= 3 && label < self.legacy_manifest().gluon_count + 3 => {
-                    ext_gluon_generic(&point[label - 1], source.helicity).to_vec()
-                }
-                label if label == self.legacy_manifest().gluon_count + 3 => {
-                    let vector_pdg = self.legacy_manifest().external_pdg_order[label - 1];
-                    if vector_pdg == 22 {
-                        ext_gluon_generic(&point[label - 1], source.helicity).to_vec()
-                    } else {
-                        ext_massive_vector_generic(
-                            &point[label - 1],
-                            source.helicity,
-                            T::from(self.vector_mass(vector_pdg)?),
-                        )
-                        .to_vec()
-                    }
-                }
-                _ => {
-                    return Err(PyValueError::new_err(format!(
-                        "unexpected source leg label {}",
-                        source.leg_label
-                    )));
-                }
-            };
-            for (component, value) in wave.into_iter().enumerate() {
-                row[offset + component] = value;
-            }
-        }
-        Ok(())
-    }
-
-    fn fill_momenta(&self, row: &mut [Complex<f64>], point: &[[f64; 4]; 16]) {
-        for entry in &self.legacy_manifest().layout.momentum_offsets_and_labels {
-            let mut momentum = [0.0; 4];
-            for label in &entry.labels {
-                let sign = if *label <= 2 { -1.0 } else { 1.0 };
-                for component in 0..4 {
-                    momentum[component] += sign * point[*label - 1][component];
-                }
-            }
-            for component in 0..4 {
-                row[entry.offset + component] = c64(momentum[component], 0.0);
-            }
-        }
-    }
-
-    fn fill_momenta_generic<T>(&self, row: &mut [Complex<T>], point: &[[T; 4]])
-    where
-        T: Real + RealLike + From<f64> + Clone,
-    {
-        for entry in &self.legacy_manifest().layout.momentum_offsets_and_labels {
-            let mut momentum = [T::new_zero(), T::new_zero(), T::new_zero(), T::new_zero()];
-            for label in &entry.labels {
-                let sign = if *label <= 2 {
-                    T::from(-1.0)
-                } else {
-                    T::from(1.0)
-                };
-                for component in 0..4 {
-                    momentum[component] += point[*label - 1][component].clone() * sign.clone();
-                }
-            }
-            for component in 0..4 {
-                row[entry.offset + component] =
-                    Complex::new(momentum[component].clone(), T::new_zero());
-            }
-        }
-    }
-}
-
-impl Drop for Runtime {
-    fn drop(&mut self) {
-        if let Some(stages) = self.stages.take() {
-            std::mem::forget(stages);
-        }
-        if let Some(amplitude_stage) = self.amplitude_stage.take() {
-            std::mem::forget(amplitude_stage);
-        }
-        if let Some(zero_gluon_stage) = self.zero_gluon_stage.take() {
-            std::mem::forget(zero_gluon_stage);
-        }
     }
 }
 
@@ -6076,14 +6546,6 @@ impl GenericAmplitudeRuntimeV2 {
         Ok((0.0, eval_start.elapsed().as_secs_f64()))
     }
 
-    fn reduce_scratch_f64_into(
-        &mut self,
-        batch_size: usize,
-        raw_sums: &mut Vec<f64>,
-    ) -> PyResult<()> {
-        self.reduce_scratch_f64_into_selected(batch_size, raw_sums, None)
-    }
-
     fn reduce_scratch_f64_into_selected(
         &mut self,
         batch_size: usize,
@@ -6173,12 +6635,160 @@ impl GenericAmplitudeRuntimeV2 {
         Ok(())
     }
 
-    fn evaluate_raw_sums_generic<T>(
+    fn reduce_scratch_f64_resolved(
+        &mut self,
+        batch_size: usize,
+        physics: &PhysicsRuntimeV2,
+        normalization_factor: f64,
+        selected_helicity_ids: Option<&BTreeSet<String>>,
+        selected_color_ids: Option<&BTreeSet<String>>,
+    ) -> PyResult<ResolvedValues<f64>> {
+        let amplitudes = &self.output_scratch_f64;
+        if amplitudes.len() != batch_size * self.output_length {
+            return Err(PyValueError::new_err(format!(
+                "generic amplitude output buffer has length {}, expected {}",
+                amplitudes.len(),
+                batch_size * self.output_length
+            )));
+        }
+        let helicity_count = physics.manifest.helicities.len();
+        let color_count = physics.manifest.color_components.len();
+        let mut full_values = vec![0.0; batch_size * helicity_count * color_count];
+
+        if let Some(contraction) = self.color_contraction.as_mut() {
+            if color_count != 1 || physics.manifest.color_components[0].kind != "contracted" {
+                return Err(PyValueError::new_err(
+                    "resolved NLC/full evaluation requires one contracted color component",
+                ));
+            }
+            if self.raw_sum_groups.len() != contraction.group_count {
+                return Err(PyValueError::new_err(
+                    "colour contraction group count does not match coherent groups",
+                ));
+            }
+            contraction
+                .group_scratch_f64
+                .resize(batch_size * contraction.group_count, c64(0.0, 0.0));
+            for row in 0..batch_size {
+                let row_offset = row * self.output_length;
+                let group_row = row * contraction.group_count;
+                for (group_index, group) in self.raw_sum_groups.iter().enumerate() {
+                    let mut sum = c64(0.0, 0.0);
+                    for index in &group.indices {
+                        sum += amplitudes[row_offset + *index];
+                    }
+                    contraction.group_scratch_f64[group_row + group_index] = sum;
+                }
+                for entry in &contraction.entries {
+                    let left_group = &self.raw_sum_groups[entry.left_group_index];
+                    let right_group = &self.raw_sum_groups[entry.right_group_index];
+                    let left_reduction = physics
+                        .reduction_by_group_id
+                        .get(&left_group.id)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "resolved metadata is missing coherent group {}",
+                                left_group.id
+                            ))
+                        })?;
+                    let right_reduction = physics
+                        .reduction_by_group_id
+                        .get(&right_group.id)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "resolved metadata is missing coherent group {}",
+                                right_group.id
+                            ))
+                        })?;
+                    if left_reduction.physical_helicity_ids != right_reduction.physical_helicity_ids
+                    {
+                        return Err(PyValueError::new_err(
+                            "colour contraction mixed distinct physical helicities",
+                        ));
+                    }
+                    let left = contraction.group_scratch_f64[group_row + entry.left_group_index];
+                    let right = contraction.group_scratch_f64[group_row + entry.right_group_index];
+                    let product = left * right.conj();
+                    let contribution = normalization_factor
+                        * entry.symmetry_factor
+                        * (entry.weight_re * product.re - entry.weight_im * product.im)
+                        / left_reduction.physical_helicity_ids.len() as f64;
+                    for helicity_id in &left_reduction.physical_helicity_ids {
+                        let helicity_index = physics.helicity_index_by_id[helicity_id];
+                        full_values[(row * helicity_count + helicity_index) * color_count] +=
+                            contribution;
+                    }
+                }
+            }
+        } else {
+            if !self.has_coherent_groups {
+                return Err(PyValueError::new_err(
+                    "resolved evaluation requires coherent amplitude-group metadata",
+                ));
+            }
+            for row in 0..batch_size {
+                let row_offset = row * self.output_length;
+                for group in &self.raw_sum_groups {
+                    let reduction =
+                        physics
+                            .reduction_by_group_id
+                            .get(&group.id)
+                            .ok_or_else(|| {
+                                PyValueError::new_err(format!(
+                                    "resolved metadata is missing coherent group {}",
+                                    group.id
+                                ))
+                            })?;
+                    let mut sum = c64(0.0, 0.0);
+                    for index in &group.indices {
+                        sum += amplitudes[row_offset + *index];
+                    }
+                    let member_count =
+                        reduction.physical_helicity_ids.len() * reduction.physical_color_ids.len();
+                    let contribution = normalization_factor
+                        * group.all_sector_weight
+                        * (sum.re * sum.re + sum.im * sum.im)
+                        / member_count as f64;
+                    for helicity_id in &reduction.physical_helicity_ids {
+                        let helicity_index = physics.helicity_index_by_id[helicity_id];
+                        for color_id in &reduction.physical_color_ids {
+                            let color_index = physics.color_index_by_id[color_id];
+                            full_values[(row * helicity_count + helicity_index) * color_count
+                                + color_index] += contribution;
+                        }
+                    }
+                }
+            }
+        }
+
+        let helicity_indices = physics.selected_helicity_indices(selected_helicity_ids)?;
+        let color_indices = physics.selected_color_indices(selected_color_ids)?;
+        let mut values =
+            Vec::with_capacity(batch_size * helicity_indices.len() * color_indices.len());
+        for row in 0..batch_size {
+            for helicity_index in &helicity_indices {
+                for color_index in &color_indices {
+                    values.push(
+                        full_values
+                            [(row * helicity_count + *helicity_index) * color_count + *color_index],
+                    );
+                }
+            }
+        }
+        Ok(ResolvedValues {
+            values,
+            point_count: batch_size,
+            helicity_indices,
+            color_indices,
+        })
+    }
+
+    fn evaluate_outputs_generic<T>(
         &mut self,
         batch_size: usize,
         state: &[Complex<T>],
         binary_precision: Option<u32>,
-    ) -> PyResult<(Vec<T>, f64, f64)>
+    ) -> PyResult<(Vec<Complex<T>>, f64, f64)>
     where
         T: RusticolHighPrecisionNumber,
         Complex<T>: Real + EvaluationDomain,
@@ -6233,7 +6843,54 @@ impl GenericAmplitudeRuntimeV2 {
                 batch_size * self.output_length
             )));
         }
+        Ok((evaluated, input_pack_s, evaluator_call_s))
+    }
+
+    fn evaluate_raw_sums_generic<T>(
+        &mut self,
+        batch_size: usize,
+        state: &[Complex<T>],
+        binary_precision: Option<u32>,
+    ) -> PyResult<(Vec<T>, f64, f64)>
+    where
+        T: RusticolHighPrecisionNumber,
+        Complex<T>: Real + EvaluationDomain,
+    {
+        let (evaluated, input_pack_s, evaluator_call_s) =
+            self.evaluate_outputs_generic(batch_size, state, binary_precision)?;
         let mut raw_sums = vec![T::new_zero(); batch_size];
+        if let Some(contraction) = self.color_contraction.as_ref() {
+            if self.raw_sum_groups.len() != contraction.group_count {
+                return Err(PyValueError::new_err(
+                    "colour contraction group count does not match coherent groups",
+                ));
+            }
+            let mut group_values = vec![complex_zero::<T>(); batch_size * contraction.group_count];
+            for row in 0..batch_size {
+                let row_offset = row * self.output_length;
+                let group_row = row * contraction.group_count;
+                for (group_index, group) in self.raw_sum_groups.iter().enumerate() {
+                    let mut sum = complex_zero::<T>();
+                    for index in &group.indices {
+                        sum.re += evaluated[row_offset + *index].re.clone();
+                        sum.im += evaluated[row_offset + *index].im.clone();
+                    }
+                    group_values[group_row + group_index] = sum;
+                }
+                for entry in &contraction.entries {
+                    let left = &group_values[group_row + entry.left_group_index];
+                    let right = &group_values[group_row + entry.right_group_index];
+                    let product_re =
+                        left.re.clone() * right.re.clone() + left.im.clone() * right.im.clone();
+                    let product_im =
+                        left.im.clone() * right.re.clone() - left.re.clone() * right.im.clone();
+                    raw_sums[row] += T::from(entry.symmetry_factor)
+                        * (T::from(entry.weight_re) * product_re
+                            - T::from(entry.weight_im) * product_im);
+                }
+            }
+            return Ok((raw_sums, input_pack_s, evaluator_call_s));
+        }
         for row in 0..batch_size {
             let row_offset = row * self.output_length;
             if self.has_coherent_groups {
@@ -6258,250 +6915,150 @@ impl GenericAmplitudeRuntimeV2 {
         }
         Ok((raw_sums, input_pack_s, evaluator_call_s))
     }
-}
 
-impl CurrentStage {
-    fn load(
-        manifest: &CurrentStageManifest,
-        root: &Path,
-        current_offsets: &[usize],
-    ) -> PyResult<Self> {
-        let mut outputs = Vec::new();
-        for slot in &manifest.output_slots {
-            for (component, column) in (slot.start..slot.stop).enumerate() {
-                let offset = *current_offsets.get(slot.id).ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "stage output references unknown current id {}",
-                        slot.id
-                    ))
-                })? + component;
-                outputs.push((column, slot.id, component, offset));
-            }
-        }
-        let evaluator = EvaluatorGroup::load(&manifest.evaluator, root)?;
-        let mut chunk_outputs = Vec::with_capacity(evaluator.evaluators.len());
-        let mut chunk_start = 0;
-        for chunk in &evaluator.evaluators {
-            let chunk_stop = chunk_start + chunk.output_len;
-            let outputs_for_chunk = outputs
-                .iter()
-                .filter_map(|(column, _, _, state_offset)| {
-                    if *column >= chunk_start && *column < chunk_stop {
-                        Some((*column - chunk_start, *state_offset))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            chunk_outputs.push(outputs_for_chunk);
-            chunk_start = chunk_stop;
-        }
-        Ok(Self {
-            outputs,
-            chunk_outputs,
-            evaluator,
-        })
-    }
-
-    fn evaluate_f64_into_state(
-        &mut self,
-        batch_size: usize,
-        parameter_count: usize,
-        state: &mut [Complex<f64>],
-    ) -> PyResult<(f64, f64)> {
-        let mut evaluator_time_s = 0.0;
-        let mut assign_time_s = 0.0;
-        for chunk_index in 0..self.evaluator.evaluators.len() {
-            let evaluator = &mut self.evaluator.evaluators[chunk_index];
-            if state.len() != batch_size * evaluator.input_len {
-                return Err(PyValueError::new_err(format!(
-                    "parameter buffer has length {}, expected {}",
-                    state.len(),
-                    batch_size * evaluator.input_len
-                )));
-            }
-            let chunk_output_len = evaluator.output_len;
-            self.evaluator
-                .chunk_scratch_f64
-                .resize(batch_size * chunk_output_len, c64(0.0, 0.0));
-
-            let eval_start = Instant::now();
-            evaluator.evaluate_f64_batch(
-                batch_size,
-                &*state,
-                &mut self.evaluator.chunk_scratch_f64,
-            )?;
-            evaluator_time_s += eval_start.elapsed().as_secs_f64();
-
-            let assign_start = Instant::now();
-            for row in 0..batch_size {
-                let state_row = row * parameter_count;
-                let chunk_row = row * chunk_output_len;
-                for (local_column, state_offset) in &self.chunk_outputs[chunk_index] {
-                    state[state_row + *state_offset] =
-                        self.evaluator.chunk_scratch_f64[chunk_row + *local_column];
-                }
-            }
-            assign_time_s += assign_start.elapsed().as_secs_f64();
-        }
-        Ok((evaluator_time_s, assign_time_s))
-    }
-}
-
-impl AmplitudeStage {
-    fn load(manifest: &AmplitudeStageManifest, root: &Path) -> PyResult<Self> {
-        let raw_sum_group_ids = manifest
-            .raw_sum_group_ids
-            .clone()
-            .unwrap_or_else(|| vec![None; manifest.output_length]);
-        let raw_sum_color_sector_ids = vec![None; manifest.output_length];
-        let has_coherent_groups = raw_sum_group_ids.iter().any(Option::is_some);
-        let raw_sum_groups = if has_coherent_groups {
-            build_raw_sum_groups(
-                manifest.output_length,
-                &manifest.raw_sum_weights,
-                &manifest.raw_sum_weights,
-                &raw_sum_group_ids,
-                &raw_sum_color_sector_ids,
-            )?
-        } else {
-            Vec::new()
-        };
-        Ok(Self {
-            output_length: manifest.output_length,
-            raw_sum_weights: manifest.raw_sum_weights.clone(),
-            raw_sum_groups,
-            has_coherent_groups,
-            amplitude_evaluator: manifest
-                .amplitude_evaluator
-                .as_ref()
-                .map(|m| EvaluatorGroup::load(m, root))
-                .transpose()?,
-            raw_sum_evaluator: manifest
-                .raw_sum_evaluator
-                .as_ref()
-                .map(|m| EvaluatorGroup::load(m, root))
-                .transpose()?,
-        })
-    }
-
-    fn evaluate_raw_sums(
-        &mut self,
-        batch_size: usize,
-        state: &[Complex<f64>],
-    ) -> PyResult<Vec<f64>> {
-        if let Some(raw_sum_evaluator) = &mut self.raw_sum_evaluator {
-            let evaluated = raw_sum_evaluator.evaluate_batch(batch_size, state)?;
-            return Ok((0..batch_size)
-                .map(|row| evaluated[row * raw_sum_evaluator.output_len].re)
-                .collect());
-        }
-        let amplitude_evaluator = self
-            .amplitude_evaluator
-            .as_mut()
-            .ok_or_else(|| PyRuntimeError::new_err("amplitude stage has no amplitude evaluator"))?;
-        if !self.has_coherent_groups {
-            let mut raw_sums = vec![0.0; batch_size];
-            let mut output_offset = 0;
-            for evaluator in &mut amplitude_evaluator.evaluators {
-                if state.len() != batch_size * evaluator.input_len {
-                    return Err(PyValueError::new_err(format!(
-                        "parameter buffer has length {}, expected {}",
-                        state.len(),
-                        batch_size * evaluator.input_len
-                    )));
-                }
-                amplitude_evaluator
-                    .chunk_scratch_f64
-                    .resize(batch_size * evaluator.output_len, c64(0.0, 0.0));
-                evaluator.evaluate_f64_batch(
-                    batch_size,
-                    state,
-                    &mut amplitude_evaluator.chunk_scratch_f64,
-                )?;
-                for row in 0..batch_size {
-                    let row_offset = row * evaluator.output_len;
-                    for local_index in 0..evaluator.output_len {
-                        let value = amplitude_evaluator.chunk_scratch_f64[row_offset + local_index];
-                        let weight = self.raw_sum_weights[output_offset + local_index];
-                        raw_sums[row] += weight * (value.re * value.re + value.im * value.im);
-                    }
-                }
-                output_offset += evaluator.output_len;
-            }
-            return Ok(raw_sums);
-        }
-        let evaluated = amplitude_evaluator.evaluate_batch(batch_size, state)?;
-        let mut raw_sums = vec![0.0; batch_size];
-        for row in 0..batch_size {
-            let row_offset = row * amplitude_evaluator.output_len;
-            if self.has_coherent_groups {
-                for group in &self.raw_sum_groups {
-                    let mut sum = c64(0.0, 0.0);
-                    for index in &group.indices {
-                        sum += evaluated[row_offset + *index];
-                    }
-                    raw_sums[row] += group.weight * (sum.re * sum.re + sum.im * sum.im);
-                }
-                continue;
-            }
-            for index in 0..self.output_length {
-                let value = evaluated[row_offset + index];
-                let weight = self.raw_sum_weights[index];
-                raw_sums[row] += weight * (value.re * value.re + value.im * value.im);
-            }
-        }
-        Ok(raw_sums)
-    }
-
-    fn evaluate_raw_sums_generic<T>(
+    fn evaluate_resolved_generic<T>(
         &mut self,
         batch_size: usize,
         state: &[Complex<T>],
         binary_precision: Option<u32>,
-    ) -> PyResult<Vec<T>>
+        physics: &PhysicsRuntimeV2,
+        normalization_factor: f64,
+        selected_helicity_ids: Option<&BTreeSet<String>>,
+        selected_color_ids: Option<&BTreeSet<String>>,
+    ) -> PyResult<(ResolvedValues<T>, f64, f64)>
     where
         T: RusticolHighPrecisionNumber,
         Complex<T>: Real + EvaluationDomain,
     {
-        if let Some(raw_sum_evaluator) = &mut self.raw_sum_evaluator {
-            let evaluated =
-                raw_sum_evaluator.evaluate_batch_generic(batch_size, state, binary_precision)?;
-            return Ok((0..batch_size)
-                .map(|row| evaluated[row * raw_sum_evaluator.output_len].re.clone())
-                .collect());
-        }
-        let amplitude_evaluator = self
-            .amplitude_evaluator
-            .as_mut()
-            .ok_or_else(|| PyRuntimeError::new_err("amplitude stage has no amplitude evaluator"))?;
-        let evaluated =
-            amplitude_evaluator.evaluate_batch_generic(batch_size, state, binary_precision)?;
-        let mut raw_sums = vec![T::new_zero(); batch_size];
-        for row in 0..batch_size {
-            let row_offset = row * amplitude_evaluator.output_len;
-            if self.has_coherent_groups {
+        let (evaluated, input_pack_s, evaluator_call_s) =
+            self.evaluate_outputs_generic(batch_size, state, binary_precision)?;
+        let helicity_count = physics.manifest.helicities.len();
+        let color_count = physics.manifest.color_components.len();
+        let mut full_values = vec![T::new_zero(); batch_size * helicity_count * color_count];
+        if let Some(contraction) = self.color_contraction.as_ref() {
+            if color_count != 1 || physics.manifest.color_components[0].kind != "contracted" {
+                return Err(PyValueError::new_err(
+                    "resolved NLC/full evaluation requires one contracted color component",
+                ));
+            }
+            let mut group_values = vec![complex_zero::<T>(); batch_size * contraction.group_count];
+            for row in 0..batch_size {
+                let row_offset = row * self.output_length;
+                let group_row = row * contraction.group_count;
+                for (group_index, group) in self.raw_sum_groups.iter().enumerate() {
+                    let mut sum = complex_zero::<T>();
+                    for index in &group.indices {
+                        sum.re += evaluated[row_offset + *index].re.clone();
+                        sum.im += evaluated[row_offset + *index].im.clone();
+                    }
+                    group_values[group_row + group_index] = sum;
+                }
+                for entry in &contraction.entries {
+                    let left_group = &self.raw_sum_groups[entry.left_group_index];
+                    let right_group = &self.raw_sum_groups[entry.right_group_index];
+                    let left_reduction = physics
+                        .reduction_by_group_id
+                        .get(&left_group.id)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "resolved metadata is missing coherent group {}",
+                                left_group.id
+                            ))
+                        })?;
+                    let right_reduction = physics
+                        .reduction_by_group_id
+                        .get(&right_group.id)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "resolved metadata is missing coherent group {}",
+                                right_group.id
+                            ))
+                        })?;
+                    if left_reduction.physical_helicity_ids != right_reduction.physical_helicity_ids
+                    {
+                        return Err(PyValueError::new_err(
+                            "colour contraction mixed distinct physical helicities",
+                        ));
+                    }
+                    let left = &group_values[group_row + entry.left_group_index];
+                    let right = &group_values[group_row + entry.right_group_index];
+                    let product_re =
+                        left.re.clone() * right.re.clone() + left.im.clone() * right.im.clone();
+                    let product_im =
+                        left.im.clone() * right.re.clone() - left.re.clone() * right.im.clone();
+                    let coefficient = normalization_factor * entry.symmetry_factor
+                        / left_reduction.physical_helicity_ids.len() as f64;
+                    let contribution = T::from(coefficient)
+                        * (T::from(entry.weight_re) * product_re
+                            - T::from(entry.weight_im) * product_im);
+                    for helicity_id in &left_reduction.physical_helicity_ids {
+                        let helicity_index = physics.helicity_index_by_id[helicity_id];
+                        full_values[(row * helicity_count + helicity_index) * color_count] +=
+                            contribution.clone();
+                    }
+                }
+            }
+        } else {
+            for row in 0..batch_size {
+                let row_offset = row * self.output_length;
                 for group in &self.raw_sum_groups {
+                    let reduction =
+                        physics
+                            .reduction_by_group_id
+                            .get(&group.id)
+                            .ok_or_else(|| {
+                                PyValueError::new_err(format!(
+                                    "resolved metadata is missing coherent group {}",
+                                    group.id
+                                ))
+                            })?;
                     let mut sum_re = T::new_zero();
                     let mut sum_im = T::new_zero();
                     for index in &group.indices {
-                        let value = &evaluated[row_offset + *index];
-                        sum_re += value.re.clone();
-                        sum_im += value.im.clone();
+                        sum_re += evaluated[row_offset + *index].re.clone();
+                        sum_im += evaluated[row_offset + *index].im.clone();
                     }
-                    raw_sums[row] +=
-                        T::from(group.weight) * (sum_re.clone() * sum_re + sum_im.clone() * sum_im);
+                    let member_count =
+                        reduction.physical_helicity_ids.len() * reduction.physical_color_ids.len();
+                    let contribution = T::from(
+                        normalization_factor * group.all_sector_weight / member_count as f64,
+                    ) * (sum_re.clone() * sum_re + sum_im.clone() * sum_im);
+                    for helicity_id in &reduction.physical_helicity_ids {
+                        let helicity_index = physics.helicity_index_by_id[helicity_id];
+                        for color_id in &reduction.physical_color_ids {
+                            let color_index = physics.color_index_by_id[color_id];
+                            full_values[(row * helicity_count + helicity_index) * color_count
+                                + color_index] += contribution.clone();
+                        }
+                    }
                 }
-                continue;
-            }
-            for index in 0..self.output_length {
-                let value = &evaluated[row_offset + index];
-                let weight = T::from(self.raw_sum_weights[index]);
-                raw_sums[row] += weight
-                    * (value.re.clone() * value.re.clone() + value.im.clone() * value.im.clone());
             }
         }
-        Ok(raw_sums)
+        let helicity_indices = physics.selected_helicity_indices(selected_helicity_ids)?;
+        let color_indices = physics.selected_color_indices(selected_color_ids)?;
+        let mut values =
+            Vec::with_capacity(batch_size * helicity_indices.len() * color_indices.len());
+        for row in 0..batch_size {
+            for helicity_index in &helicity_indices {
+                for color_index in &color_indices {
+                    values.push(
+                        full_values
+                            [(row * helicity_count + *helicity_index) * color_count + *color_index]
+                            .clone(),
+                    );
+                }
+            }
+        }
+        Ok((
+            ResolvedValues {
+                values,
+                point_count: batch_size,
+                helicity_indices,
+                color_indices,
+            },
+            input_pack_s,
+            evaluator_call_s,
+        ))
     }
 }
 
@@ -6895,31 +7452,6 @@ impl LoadedEvaluator {
                 eval.evaluate_batch(batch_size, params, out)
                     .map_err(PyRuntimeError::new_err)
             }
-            F64Evaluator::Interpreted(eval) => {
-                if params.len() != batch_size * self.input_len {
-                    return Err(PyValueError::new_err(format!(
-                        "parameter buffer has length {}, expected {}",
-                        params.len(),
-                        batch_size * self.input_len
-                    )));
-                }
-                if out.len() != batch_size * self.output_len {
-                    return Err(PyValueError::new_err(format!(
-                        "output buffer has length {}, expected {}",
-                        out.len(),
-                        batch_size * self.output_len
-                    )));
-                }
-                for row in 0..batch_size {
-                    let in_start = row * self.input_len;
-                    let out_start = row * self.output_len;
-                    eval.evaluate(
-                        &params[in_start..in_start + self.input_len],
-                        &mut out[out_start..out_start + self.output_len],
-                    );
-                }
-                Ok(())
-            }
         }
     }
 
@@ -6952,283 +7484,6 @@ impl LoadedEvaluator {
                 "native two-lane evaluation requested for a non-native evaluator",
             )),
         }
-    }
-}
-
-impl ZeroGluonStage {
-    fn load(manifest: &ZeroGluonManifest, root: &Path) -> PyResult<Self> {
-        let state_path = artifact_path(root, &manifest.evaluator_state_path);
-        let (_jit_settings, exact_eval, _jit_complex, _jit_native2) =
-            load_evaluator_state(&state_path)?;
-        let eval_complex = exact_eval
-            .clone()
-            .map_coeff(&|c| Complex::new(c.re.to_f64(), c.im.to_f64()));
-        let input_len = manifest.parameter_names.len();
-        Ok(Self {
-            parameter_names: manifest.parameter_names.clone(),
-            evaluator: LoadedEvaluator {
-                eval: F64Evaluator::Interpreted(eval_complex),
-                exact_eval: Some(exact_eval),
-                double_eval: None,
-                arb_eval: None,
-                input_len,
-                output_len: 1,
-            },
-            z_left: manifest.z_left,
-            z_right: manifest.z_right,
-        })
-    }
-
-    fn parameter_rows_f64(
-        &self,
-        manifest: &ProcessManifest,
-        batch: &[[[f64; 4]; 16]],
-    ) -> PyResult<Vec<Complex<f64>>> {
-        let mut rows = Vec::with_capacity(batch.len() * self.parameter_names.len());
-        for point in batch {
-            let context = ZeroGluonParameterContext::new_f64(manifest, point, self)?;
-            for name in &self.parameter_names {
-                rows.push(context.value_f64(name)?);
-            }
-        }
-        Ok(rows)
-    }
-
-    fn parameter_rows_generic<T>(
-        &self,
-        manifest: &ProcessManifest,
-        batch: &[Vec<[T; 4]>],
-    ) -> PyResult<Vec<Complex<T>>>
-    where
-        T: Real + RealLike + From<f64> + PartialOrd + Clone,
-    {
-        let mut rows = Vec::with_capacity(batch.len() * self.parameter_names.len());
-        for point in batch {
-            let context = ZeroGluonParameterContext::new_generic(manifest, point, self)?;
-            for name in &self.parameter_names {
-                rows.push(context.value_generic(name)?);
-            }
-        }
-        Ok(rows)
-    }
-}
-
-struct ZeroGluonParameterContext<T> {
-    quark_minus: Vec<Complex<T>>,
-    quark_plus: Vec<Complex<T>>,
-    antiquark_minus: Vec<Complex<T>>,
-    antiquark_plus: Vec<Complex<T>>,
-    z_minus: Vec<Complex<T>>,
-    z_zero: Vec<Complex<T>>,
-    z_plus: Vec<Complex<T>>,
-    z_left: T,
-    z_right: T,
-}
-
-impl ZeroGluonParameterContext<f64> {
-    fn new_f64(
-        manifest: &ProcessManifest,
-        point: &[[f64; 4]; 16],
-        stage: &ZeroGluonStage,
-    ) -> PyResult<Self> {
-        let (quark_momentum, antiquark_momentum) =
-            zero_gluon_quark_antiquark_momenta_f64(manifest, point)?;
-        let z_momentum = point[2];
-        Ok(Self {
-            quark_minus: ext_quark_dirac(quark_momentum, -1).to_vec(),
-            quark_plus: ext_quark_dirac(quark_momentum, 1).to_vec(),
-            antiquark_minus: ext_antiquark_dirac(antiquark_momentum, -1).to_vec(),
-            antiquark_plus: ext_antiquark_dirac(antiquark_momentum, 1).to_vec(),
-            z_minus: ext_massive_vector(z_momentum, -1, manifest.model.mass_z).to_vec(),
-            z_zero: ext_massive_vector(z_momentum, 0, manifest.model.mass_z).to_vec(),
-            z_plus: ext_massive_vector(z_momentum, 1, manifest.model.mass_z).to_vec(),
-            z_left: stage.z_left,
-            z_right: stage.z_right,
-        })
-    }
-
-    fn value_f64(&self, name: &str) -> PyResult<Complex<f64>> {
-        if name == "z_left" {
-            return Ok(c64(self.z_left, 0.0));
-        }
-        if name == "z_right" {
-            return Ok(c64(self.z_right, 0.0));
-        }
-        let (prefix, helicity, component, part) = parse_zero_gluon_parameter_name(name)?;
-        let wave = self.wave_f64(prefix, helicity)?;
-        let value = wave.get(component).ok_or_else(|| {
-            PyValueError::new_err(format!("zero-gluon component index out of range in {name}"))
-        })?;
-        match part {
-            "re" => Ok(c64(value.re, 0.0)),
-            "im" => Ok(c64(value.im, 0.0)),
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported zero-gluon parameter component {part:?} in {name}"
-            ))),
-        }
-    }
-
-    fn wave_f64(&self, prefix: &str, helicity: i32) -> PyResult<&Vec<Complex<f64>>> {
-        match (prefix, helicity) {
-            ("q", -1) => Ok(&self.quark_minus),
-            ("q", 1) => Ok(&self.quark_plus),
-            ("aq", -1) => Ok(&self.antiquark_minus),
-            ("aq", 1) => Ok(&self.antiquark_plus),
-            ("z", -1) => Ok(&self.z_minus),
-            ("z", 0) => Ok(&self.z_zero),
-            ("z", 1) => Ok(&self.z_plus),
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported zero-gluon wavefunction label {prefix}_{helicity}"
-            ))),
-        }
-    }
-}
-
-impl<T> ZeroGluonParameterContext<T>
-where
-    T: Real + RealLike + From<f64> + PartialOrd + Clone,
-{
-    fn new_generic(
-        manifest: &ProcessManifest,
-        point: &[[T; 4]],
-        stage: &ZeroGluonStage,
-    ) -> PyResult<Self> {
-        let (quark_momentum, antiquark_momentum) =
-            zero_gluon_quark_antiquark_momenta_generic(manifest, point)?;
-        let z_momentum = point
-            .get(2)
-            .ok_or_else(|| PyValueError::new_err("zero-gluon point is missing Z momentum"))?;
-        Ok(Self {
-            quark_minus: ext_quark_dirac_generic(&quark_momentum, -1).to_vec(),
-            quark_plus: ext_quark_dirac_generic(&quark_momentum, 1).to_vec(),
-            antiquark_minus: ext_antiquark_dirac_generic(&antiquark_momentum, -1).to_vec(),
-            antiquark_plus: ext_antiquark_dirac_generic(&antiquark_momentum, 1).to_vec(),
-            z_minus: ext_massive_vector_generic(z_momentum, -1, T::from(manifest.model.mass_z))
-                .to_vec(),
-            z_zero: ext_massive_vector_generic(z_momentum, 0, T::from(manifest.model.mass_z))
-                .to_vec(),
-            z_plus: ext_massive_vector_generic(z_momentum, 1, T::from(manifest.model.mass_z))
-                .to_vec(),
-            z_left: T::from(stage.z_left),
-            z_right: T::from(stage.z_right),
-        })
-    }
-
-    fn value_generic(&self, name: &str) -> PyResult<Complex<T>> {
-        if name == "z_left" {
-            return Ok(Complex::new(self.z_left.clone(), T::new_zero()));
-        }
-        if name == "z_right" {
-            return Ok(Complex::new(self.z_right.clone(), T::new_zero()));
-        }
-        let (prefix, helicity, component, part) = parse_zero_gluon_parameter_name(name)?;
-        let wave = self.wave_generic(prefix, helicity)?;
-        let value = wave.get(component).ok_or_else(|| {
-            PyValueError::new_err(format!("zero-gluon component index out of range in {name}"))
-        })?;
-        match part {
-            "re" => Ok(Complex::new(value.re.clone(), T::new_zero())),
-            "im" => Ok(Complex::new(value.im.clone(), T::new_zero())),
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported zero-gluon parameter component {part:?} in {name}"
-            ))),
-        }
-    }
-
-    fn wave_generic(&self, prefix: &str, helicity: i32) -> PyResult<&Vec<Complex<T>>> {
-        match (prefix, helicity) {
-            ("q", -1) => Ok(&self.quark_minus),
-            ("q", 1) => Ok(&self.quark_plus),
-            ("aq", -1) => Ok(&self.antiquark_minus),
-            ("aq", 1) => Ok(&self.antiquark_plus),
-            ("z", -1) => Ok(&self.z_minus),
-            ("z", 0) => Ok(&self.z_zero),
-            ("z", 1) => Ok(&self.z_plus),
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported zero-gluon wavefunction label {prefix}_{helicity}"
-            ))),
-        }
-    }
-}
-
-fn parse_zero_gluon_parameter_name(name: &str) -> PyResult<(&str, i32, usize, &str)> {
-    let parts = name.split('_').collect::<Vec<_>>();
-    if parts.len() != 4 {
-        return Err(PyValueError::new_err(format!(
-            "invalid zero-gluon parameter name {name:?}"
-        )));
-    }
-    let helicity = parse_helicity_token(parts[1])?;
-    let component = parts[2].parse::<usize>().map_err(|err| {
-        PyValueError::new_err(format!(
-            "invalid zero-gluon component index in {name:?}: {err}"
-        ))
-    })?;
-    Ok((parts[0], helicity, component, parts[3]))
-}
-
-fn parse_helicity_token(token: &str) -> PyResult<i32> {
-    let (sign, value) = token.split_at(1);
-    let magnitude = value
-        .parse::<i32>()
-        .map_err(|err| PyValueError::new_err(format!("invalid helicity token {token:?}: {err}")))?;
-    match sign {
-        "m" => Ok(-magnitude),
-        "p" => Ok(magnitude),
-        _ => Err(PyValueError::new_err(format!(
-            "invalid helicity token sign in {token:?}"
-        ))),
-    }
-}
-
-fn zero_gluon_quark_antiquark_momenta_f64(
-    manifest: &ProcessManifest,
-    point: &[[f64; 4]; 16],
-) -> PyResult<([f64; 4], [f64; 4])> {
-    if manifest.external_pdg_order.len() != 3 {
-        return Err(PyValueError::new_err(
-            "zero-gluon process requires three external momenta",
-        ));
-    }
-    let current0 = -manifest.external_pdg_order[0];
-    let current1 = -manifest.external_pdg_order[1];
-    let p0 = negate(point[0]);
-    let p1 = negate(point[1]);
-    if current0 > 0 && current1 < 0 {
-        Ok((p0, p1))
-    } else if current1 > 0 && current0 < 0 {
-        Ok((p1, p0))
-    } else {
-        Err(PyValueError::new_err(
-            "zero-gluon process requires one incoming quark and one antiquark",
-        ))
-    }
-}
-
-fn zero_gluon_quark_antiquark_momenta_generic<T>(
-    manifest: &ProcessManifest,
-    point: &[[T; 4]],
-) -> PyResult<([T; 4], [T; 4])>
-where
-    T: Real + Clone,
-{
-    if manifest.external_pdg_order.len() != 3 || point.len() < 3 {
-        return Err(PyValueError::new_err(
-            "zero-gluon process requires three external momenta",
-        ));
-    }
-    let current0 = -manifest.external_pdg_order[0];
-    let current1 = -manifest.external_pdg_order[1];
-    let p0 = negate_generic(&point[0]);
-    let p1 = negate_generic(&point[1]);
-    if current0 > 0 && current1 < 0 {
-        Ok((p0, p1))
-    } else if current1 > 0 && current0 < 0 {
-        Ok((p1, p0))
-    } else {
-        Err(PyValueError::new_err(
-            "zero-gluon process requires one incoming quark and one antiquark",
-        ))
     }
 }
 
@@ -7443,24 +7698,6 @@ fn artifact_path(root: &Path, value: &str) -> PathBuf {
         path
     } else {
         root.join(path)
-    }
-}
-
-fn batch_momenta(
-    py: Python<'_>,
-    momenta: &Bound<'_, PyAny>,
-    expected_legs: usize,
-) -> PyResult<Vec<[[f64; 4]; 16]>> {
-    match PyBuffer::<f64>::get(momenta) {
-        Ok(buffer) => batch_momenta_from_buffer(py, &buffer, expected_legs),
-        Err(buffer_error) => match momenta.extract::<Vec<Vec<Vec<f64>>>>() {
-            Ok(points) => batch_momenta_from_nested(points, expected_legs),
-            Err(sequence_error) => Err(PyValueError::new_err(format!(
-                "momenta must be a C-contiguous f64 buffer or nested sequence with shape \
-                 (batch, {expected_legs}, 4); buffer error: {buffer_error}; sequence error: \
-                 {sequence_error}",
-            ))),
-        },
     }
 }
 
@@ -7701,6 +7938,7 @@ fn replay_mappings_per_expanded_batch(n_points: usize) -> usize {
     (MAX_LC_TOPOLOGY_REPLAY_EXPANDED_POINTS / n_points).max(1)
 }
 
+#[cfg(feature = "python")]
 fn batch_momenta_dynamic(
     py: Python<'_>,
     momenta: &Bound<'_, PyAny>,
@@ -7719,6 +7957,7 @@ fn batch_momenta_dynamic(
     }
 }
 
+#[cfg(feature = "python")]
 fn batch_momenta_dynamic_from_buffer(
     py: Python<'_>,
     buffer: &PyBuffer<f64>,
@@ -7760,6 +7999,7 @@ fn batch_momenta_dynamic_from_buffer(
     Ok(out)
 }
 
+#[cfg(feature = "python")]
 fn batch_momenta_dynamic_from_nested(
     points: Vec<Vec<Vec<f64>>>,
     expected_legs: usize,
@@ -7787,82 +8027,7 @@ fn batch_momenta_dynamic_from_nested(
     Ok(out)
 }
 
-fn batch_momenta_from_buffer(
-    py: Python<'_>,
-    buffer: &PyBuffer<f64>,
-    expected_legs: usize,
-) -> PyResult<Vec<[[f64; 4]; 16]>> {
-    let shape = buffer.shape();
-    if shape.len() != 3 {
-        return Err(PyValueError::new_err(format!(
-            "momenta must have shape (batch, n_external, 4), got {shape:?}"
-        )));
-    }
-    if shape[2] != 4 {
-        return Err(PyValueError::new_err(format!(
-            "last momenta axis must have length 4, got {}",
-            shape[2]
-        )));
-    }
-    if shape[1] != expected_legs {
-        return Err(PyValueError::new_err(format!(
-            "momenta must have shape (batch, {expected_legs}, 4), got {shape:?}",
-        )));
-    }
-    if shape[1] > 16 {
-        return Err(PyValueError::new_err(
-            "rusticol currently supports at most 16 external legs in the fixed f64 path",
-        ));
-    }
-    let values = buffer
-        .as_slice(py)
-        .ok_or_else(|| PyValueError::new_err("momenta buffer must be C-contiguous f64 data"))?;
-    let mut out = Vec::with_capacity(shape[0]);
-    for row in 0..shape[0] {
-        let mut point = [[0.0; 4]; 16];
-        for leg in 0..shape[1] {
-            for component in 0..4 {
-                let index = (row * shape[1] + leg) * 4 + component;
-                point[leg][component] = values[index].get();
-            }
-        }
-        out.push(point);
-    }
-    Ok(out)
-}
-
-fn batch_momenta_from_nested(
-    points: Vec<Vec<Vec<f64>>>,
-    expected_legs: usize,
-) -> PyResult<Vec<[[f64; 4]; 16]>> {
-    let mut out = Vec::with_capacity(points.len());
-    for (row_index, row) in points.into_iter().enumerate() {
-        if row.len() != expected_legs {
-            return Err(PyValueError::new_err(format!(
-                "momenta row {row_index} has {} external legs, expected {expected_legs}",
-                row.len(),
-            )));
-        }
-        if row.len() > 16 {
-            return Err(PyValueError::new_err(
-                "rusticol currently supports at most 16 external legs in the fixed f64 path",
-            ));
-        }
-        let mut point = [[0.0; 4]; 16];
-        for (leg_index, leg) in row.into_iter().enumerate() {
-            if leg.len() != 4 {
-                return Err(PyValueError::new_err(format!(
-                    "momenta row {row_index} leg {leg_index} has length {}, expected 4",
-                    leg.len()
-                )));
-            }
-            point[leg_index] = [leg[0], leg[1], leg[2], leg[3]];
-        }
-        out.push(point);
-    }
-    Ok(out)
-}
-
+#[cfg(feature = "python")]
 fn batch_momenta_double(
     momenta: &Bound<'_, PyAny>,
     expected_legs: usize,
@@ -7886,6 +8051,7 @@ fn batch_momenta_double(
         .collect())
 }
 
+#[cfg(feature = "python")]
 fn batch_momenta_float(
     momenta: &Bound<'_, PyAny>,
     binary_precision: u32,
@@ -7949,6 +8115,7 @@ fn batch_momenta_float(
     Ok(out)
 }
 
+#[cfg(feature = "python")]
 fn parse_float_component(value: &Bound<'_, PyAny>, binary_precision: u32) -> PyResult<Float> {
     let text = value.str()?.to_string_lossy().into_owned();
     Float::parse(&text, Some(binary_precision)).map_err(|err| {
@@ -7962,6 +8129,7 @@ fn decimal_digits_to_bits(decimal_digits: u32) -> u32 {
     (decimal_digits as f64 * std::f64::consts::LOG2_10).ceil() as u32
 }
 
+#[cfg(feature = "python")]
 fn decimals_to_python<T: std::fmt::Display + std::fmt::LowerExp>(
     py: Python<'_>,
     values: Vec<T>,
@@ -7976,88 +8144,9 @@ fn decimals_to_python<T: std::fmt::Display + std::fmt::LowerExp>(
     Ok(PyList::new(py, items)?.into_any().unbind())
 }
 
+#[cfg(feature = "python")]
 fn f64_values_to_numpy_or_list(py: Python<'_>, values: Vec<f64>) -> PyResult<Py<PyAny>> {
     Ok(values.into_pyarray(py).into_any().unbind())
-}
-
-fn checksum_dict_str<'py>(
-    py: Python<'py>,
-    stage: &str,
-    checksum: ComplexChecksum,
-) -> PyResult<Bound<'py, PyDict>> {
-    let dict = checksum_dict_base(py, checksum)?;
-    dict.set_item("stage", stage)?;
-    Ok(dict)
-}
-
-fn checksum_dict_usize<'py>(
-    py: Python<'py>,
-    stage: usize,
-    checksum: ComplexChecksum,
-) -> PyResult<Bound<'py, PyDict>> {
-    let dict = checksum_dict_base(py, checksum)?;
-    dict.set_item("stage", stage)?;
-    Ok(dict)
-}
-
-fn checksum_dict_base(py: Python<'_>, checksum: ComplexChecksum) -> PyResult<Bound<'_, PyDict>> {
-    let dict = PyDict::new(py);
-    dict.set_item("output_len", checksum.output_len)?;
-    dict.set_item("sum_re", checksum.sum_re)?;
-    dict.set_item("sum_im", checksum.sum_im)?;
-    dict.set_item("sum_abs2", checksum.sum_abs2)?;
-    dict.set_item("max_abs", checksum.max_abs)?;
-    Ok(dict)
-}
-
-fn checksum_state_prefix(
-    state: &[Complex<f64>],
-    batch_size: usize,
-    parameter_count: usize,
-    prefix_len: usize,
-) -> ComplexChecksum {
-    let mut checksum = ComplexChecksum {
-        output_len: batch_size * prefix_len,
-        ..ComplexChecksum::default()
-    };
-    for row in 0..batch_size {
-        let row_start = row * parameter_count;
-        for value in &state[row_start..row_start + prefix_len] {
-            checksum.add(*value);
-        }
-    }
-    checksum
-}
-
-fn checksum_stage_outputs(
-    state: &[Complex<f64>],
-    batch_size: usize,
-    parameter_count: usize,
-    current_offsets: &[usize],
-    outputs: &[(usize, usize, usize, usize)],
-) -> ComplexChecksum {
-    let mut checksum = ComplexChecksum {
-        output_len: batch_size * outputs.len(),
-        ..ComplexChecksum::default()
-    };
-    for row in 0..batch_size {
-        let row_start = row * parameter_count;
-        for (_, current_id, component, _) in outputs {
-            let value = state[row_start + current_offsets[*current_id] + *component];
-            checksum.add(value);
-        }
-    }
-    checksum
-}
-
-impl ComplexChecksum {
-    fn add(&mut self, value: Complex<f64>) {
-        self.sum_re += value.re;
-        self.sum_im += value.im;
-        let abs2 = value.re * value.re + value.im * value.im;
-        self.sum_abs2 += abs2;
-        self.max_abs = self.max_abs.max(abs2.sqrt());
-    }
 }
 
 fn memory_snapshot() -> MemorySnapshot {
@@ -8116,225 +8205,6 @@ fn c64(re: f64, im: f64) -> Complex<f64> {
 
 fn negate(momentum: [f64; 4]) -> [f64; 4] {
     [-momentum[0], -momentum[1], -momentum[2], -momentum[3]]
-}
-
-fn add_momenta(left: [f64; 4], right: [f64; 4]) -> [f64; 4] {
-    [
-        left[0] + right[0],
-        left[1] + right[1],
-        left[2] + right[2],
-        left[3] + right[3],
-    ]
-}
-
-fn minkowski_square(momentum: [f64; 4]) -> f64 {
-    momentum[0] * momentum[0]
-        - momentum[1] * momentum[1]
-        - momentum[2] * momentum[2]
-        - momentum[3] * momentum[3]
-}
-
-fn minkowski_dot_momentum(vector: &[Complex<f64>; 4], momentum: [f64; 4]) -> Complex<f64> {
-    vector[0] * c64(momentum[0], 0.0)
-        - vector[1] * c64(momentum[1], 0.0)
-        - vector[2] * c64(momentum[2], 0.0)
-        - vector[3] * c64(momentum[3], 0.0)
-}
-
-fn neutral_vector_propagator(
-    vector: [Complex<f64>; 4],
-    momentum: [f64; 4],
-    vector_pdg: i32,
-    mass: f64,
-    width: f64,
-) -> PyResult<Vec<Complex<f64>>> {
-    if vector_pdg == 22 {
-        let denominator = minkowski_square(momentum);
-        if denominator == 0.0 {
-            return Err(PyValueError::new_err("singular massless vector propagator"));
-        }
-        let prefactor = c64(0.0, -1.0) / c64(denominator, 0.0);
-        return Ok(vector.into_iter().map(|value| value * prefactor).collect());
-    }
-    let denominator = c64(minkowski_square(momentum) - mass * mass, mass * width);
-    if denominator.re == 0.0 && denominator.im == 0.0 {
-        return Err(PyValueError::new_err("singular massive vector propagator"));
-    }
-    let prefactor = c64(0.0, -1.0) / denominator;
-    let longitudinal = minkowski_dot_momentum(&vector, momentum) / c64(mass * mass, 0.0);
-    Ok((0..4)
-        .map(|component| {
-            (vector[component] - c64(momentum[component], 0.0) * longitudinal) * prefactor
-        })
-        .collect())
-}
-
-fn lepton_antilepton_to_vector_weyl(
-    lepton: Vec<Complex<f64>>,
-    antilepton: Vec<Complex<f64>>,
-    coupling: [f64; 2],
-    lepton_chirality: i32,
-    antilepton_chirality: i32,
-) -> [Complex<f64>; 4] {
-    let prefactor = c64(0.0, 1.0 / 2.0_f64.sqrt());
-    let left = c64(coupling[0], 0.0);
-    let right = c64(coupling[1], 0.0);
-    let l1 = lepton[0];
-    let l2 = lepton[1];
-    let a1 = antilepton[0];
-    let a2 = antilepton[1];
-    if lepton_chirality == -1 && antilepton_chirality == 1 {
-        let factor = prefactor * left;
-        return [
-            factor * (l1 * a1 + l2 * a2),
-            -factor * (l2 * a1 + l1 * a2),
-            c64(0.0, 1.0) * factor * (-l2 * a1 + l1 * a2),
-            factor * (-l1 * a1 + l2 * a2),
-        ];
-    }
-    if lepton_chirality == 1 && antilepton_chirality == -1 {
-        let factor = prefactor * right;
-        return [
-            factor * (l1 * a1 + l2 * a2),
-            factor * (l1 * a2 + l2 * a1),
-            c64(0.0, 1.0) * factor * (-l1 * a2 + l2 * a1),
-            factor * (l1 * a1 - l2 * a2),
-        ];
-    }
-    [c64(0.0, 0.0); 4]
-}
-
-fn antilepton_lepton_to_vector_weyl(
-    antilepton: Vec<Complex<f64>>,
-    lepton: Vec<Complex<f64>>,
-    coupling: [f64; 2],
-    antilepton_chirality: i32,
-    lepton_chirality: i32,
-) -> [Complex<f64>; 4] {
-    let prefactor = c64(0.0, 1.0 / 2.0_f64.sqrt());
-    let left = c64(coupling[0], 0.0);
-    let right = c64(coupling[1], 0.0);
-    let a1 = antilepton[0];
-    let a2 = antilepton[1];
-    let l1 = lepton[0];
-    let l2 = lepton[1];
-    if antilepton_chirality == 1 && lepton_chirality == -1 {
-        let factor = prefactor * left;
-        return [
-            factor * (l1 * a1 + l2 * a2),
-            -factor * (l2 * a1 + l1 * a2),
-            c64(0.0, 1.0) * factor * (-l2 * a1 + l1 * a2),
-            factor * (-l1 * a1 + l2 * a2),
-        ];
-    }
-    if antilepton_chirality == -1 && lepton_chirality == 1 {
-        let factor = prefactor * right;
-        return [
-            factor * (l1 * a1 + l2 * a2),
-            factor * (l1 * a2 + l2 * a1),
-            c64(0.0, 1.0) * factor * (-l1 * a2 + l2 * a1),
-            factor * (l1 * a1 - l2 * a2),
-        ];
-    }
-    [c64(0.0, 0.0); 4]
-}
-
-fn neutral_lepton_pair_current(
-    first_pdg: i32,
-    first_momentum: [f64; 4],
-    first_helicity: i32,
-    first_chirality: i32,
-    second_pdg: i32,
-    second_momentum: [f64; 4],
-    second_helicity: i32,
-    second_chirality: i32,
-    coupling: [f64; 2],
-) -> PyResult<[Complex<f64>; 4]> {
-    if first_pdg > 0 && second_pdg < 0 && first_pdg == -second_pdg {
-        return Ok(lepton_antilepton_to_vector_weyl(
-            ext_quark_weyl(first_momentum, first_helicity, first_chirality),
-            ext_antiquark_weyl(second_momentum, second_helicity, second_chirality),
-            coupling,
-            first_chirality,
-            second_chirality,
-        ));
-    }
-    if first_pdg < 0 && second_pdg > 0 && second_pdg == -first_pdg {
-        return Ok(antilepton_lepton_to_vector_weyl(
-            ext_antiquark_weyl(first_momentum, first_helicity, first_chirality),
-            ext_quark_weyl(second_momentum, second_helicity, second_chirality),
-            coupling,
-            first_chirality,
-            second_chirality,
-        ));
-    }
-    Err(PyValueError::new_err(format!(
-        "neutral lepton-pair vector source expects l- l+, got {first_pdg} {second_pdg}"
-    )))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn charged_lepton_pair_current(
-    first_pdg: i32,
-    first_momentum: [f64; 4],
-    first_helicity: i32,
-    first_chirality: i32,
-    second_pdg: i32,
-    second_momentum: [f64; 4],
-    second_helicity: i32,
-    second_chirality: i32,
-    vector_pdg: i32,
-    coupling: [f64; 2],
-) -> PyResult<[Complex<f64>; 4]> {
-    if vector_pdg == 24 {
-        if matches!(first_pdg, -11 | -13 | -15) && matches!(second_pdg, 12 | 14 | 16) {
-            return Ok(antilepton_lepton_to_vector_weyl(
-                ext_antiquark_weyl(first_momentum, first_helicity, first_chirality),
-                ext_quark_weyl(second_momentum, second_helicity, second_chirality),
-                coupling,
-                first_chirality,
-                second_chirality,
-            ));
-        }
-        if matches!(first_pdg, 12 | 14 | 16) && matches!(second_pdg, -11 | -13 | -15) {
-            return Ok(lepton_antilepton_to_vector_weyl(
-                ext_quark_weyl(first_momentum, first_helicity, first_chirality),
-                ext_antiquark_weyl(second_momentum, second_helicity, second_chirality),
-                coupling,
-                first_chirality,
-                second_chirality,
-            ));
-        }
-        return Err(PyValueError::new_err(format!(
-            "W+ lepton-pair vector source expects l+ nu, got {first_pdg} {second_pdg}"
-        )));
-    }
-    if vector_pdg == -24 {
-        if matches!(first_pdg, 11 | 13 | 15) && matches!(second_pdg, -12 | -14 | -16) {
-            return Ok(lepton_antilepton_to_vector_weyl(
-                ext_quark_weyl(first_momentum, first_helicity, first_chirality),
-                ext_antiquark_weyl(second_momentum, second_helicity, second_chirality),
-                coupling,
-                first_chirality,
-                second_chirality,
-            ));
-        }
-        if matches!(first_pdg, -12 | -14 | -16) && matches!(second_pdg, 11 | 13 | 15) {
-            return Ok(antilepton_lepton_to_vector_weyl(
-                ext_antiquark_weyl(first_momentum, first_helicity, first_chirality),
-                ext_quark_weyl(second_momentum, second_helicity, second_chirality),
-                coupling,
-                first_chirality,
-                second_chirality,
-            ));
-        }
-        return Err(PyValueError::new_err(format!(
-            "W- lepton-pair vector source expects l- nu~, got {first_pdg} {second_pdg}"
-        )));
-    }
-    Err(PyValueError::new_err(format!(
-        "charged lepton-pair vector source expects W+/W-, got {vector_pdg}"
-    )))
 }
 
 fn fortran_sign(value: f64, sign_source: f64) -> f64 {
@@ -9014,10 +8884,6 @@ fn ext_quark_weyl_array(momentum: [f64; 4], helicity: i32, chirality: i32) -> [C
     }
 }
 
-fn ext_quark_weyl(momentum: [f64; 4], helicity: i32, chirality: i32) -> Vec<Complex<f64>> {
-    ext_quark_weyl_array(momentum, helicity, chirality).to_vec()
-}
-
 fn ext_quark_weyl_generic<T>(momentum: &[T; 4], helicity: i32, chirality: i32) -> Vec<Complex<T>>
 where
     T: Real + RealLike + From<f64> + PartialOrd + Clone,
@@ -9124,10 +8990,6 @@ fn ext_antiquark_weyl_array(
     }
 }
 
-fn ext_antiquark_weyl(momentum: [f64; 4], helicity: i32, chirality: i32) -> Vec<Complex<f64>> {
-    ext_antiquark_weyl_array(momentum, helicity, chirality).to_vec()
-}
-
 fn ext_antiquark_weyl_generic<T>(
     momentum: &[T; 4],
     helicity: i32,
@@ -9196,6 +9058,314 @@ where
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn test_physics_runtime(color_accuracy: &str) -> PhysicsRuntimeV2 {
+        let contracted = color_accuracy != "lc";
+        let color_components = if contracted {
+            vec![PhysicsColorComponentManifestV2 {
+                id: "contracted".to_string(),
+                index: 0,
+                kind: "contracted".to_string(),
+                word: Vec::new(),
+                representative_id: "contracted".to_string(),
+                computed: true,
+                internal_sector_id: None,
+            }]
+        } else {
+            vec![
+                PhysicsColorComponentManifestV2 {
+                    id: "flow:0".to_string(),
+                    index: 0,
+                    kind: "lc-flow".to_string(),
+                    word: vec![1, 2],
+                    representative_id: "flow:0".to_string(),
+                    computed: true,
+                    internal_sector_id: Some(0),
+                },
+                PhysicsColorComponentManifestV2 {
+                    id: "flow:1".to_string(),
+                    index: 1,
+                    kind: "lc-flow".to_string(),
+                    word: vec![2, 1],
+                    representative_id: "flow:0".to_string(),
+                    computed: false,
+                    internal_sector_id: Some(1),
+                },
+            ]
+        };
+        let physical_color_ids = color_components
+            .iter()
+            .map(|item| item.id.clone())
+            .collect();
+        let mut helicities = vec![
+            PhysicsHelicityManifestV2 {
+                id: "hel:+-".to_string(),
+                index: 0,
+                helicities: vec![1, -1],
+                representative_id: "hel:+-".to_string(),
+                computed: true,
+                structural_zero: false,
+            },
+            PhysicsHelicityManifestV2 {
+                id: "hel:-+".to_string(),
+                index: 1,
+                helicities: vec![-1, 1],
+                representative_id: "hel:+-".to_string(),
+                computed: false,
+                structural_zero: false,
+            },
+        ];
+        if !contracted {
+            helicities.push(PhysicsHelicityManifestV2 {
+                id: "hel:zero".to_string(),
+                index: 2,
+                helicities: vec![1, 1],
+                representative_id: "hel:zero".to_string(),
+                computed: false,
+                structural_zero: true,
+            });
+        }
+        PhysicsRuntimeV2::new(PhysicsManifestV2 {
+            schema_version: 1,
+            kind: "pyamplicol-resolved-physics".to_string(),
+            process: "x x > y y".to_string(),
+            process_key: "x_x_to_y_y".to_string(),
+            color_accuracy: color_accuracy.to_string(),
+            external_particles: vec![
+                PhysicsExternalParticleManifestV2 {
+                    label: 1,
+                    index: 0,
+                    side: "incoming".to_string(),
+                    role: "initial".to_string(),
+                    particle: "x".to_string(),
+                    outgoing_particle: "x~".to_string(),
+                    pdg: 1,
+                    outgoing_pdg: -1,
+                    particle_class: "fermion".to_string(),
+                    momentum_slot: 0,
+                },
+                PhysicsExternalParticleManifestV2 {
+                    label: 2,
+                    index: 1,
+                    side: "incoming".to_string(),
+                    role: "initial".to_string(),
+                    particle: "x~".to_string(),
+                    outgoing_particle: "x".to_string(),
+                    pdg: -1,
+                    outgoing_pdg: 1,
+                    particle_class: "fermion".to_string(),
+                    momentum_slot: 1,
+                },
+            ],
+            helicities,
+            color_components,
+            model_parameters: Vec::new(),
+            coverage: PhysicsCoverageManifestV2 {
+                helicities: "complete".to_string(),
+                color: "complete".to_string(),
+                color_kind: if contracted {
+                    "contracted".to_string()
+                } else {
+                    "physical-lc-flows".to_string()
+                },
+                structural_zero_helicity_count: usize::from(!contracted),
+            },
+            selectors: PhysicsSelectorsManifestV2 {
+                helicity: true,
+                color_flow: !contracted,
+                contracted_color: contracted,
+            },
+            reduction: PhysicsReductionManifestV2 {
+                kind: "coherent-group-physical-expansion".to_string(),
+                groups: vec![PhysicsReductionGroupManifestV2 {
+                    group_id: 7,
+                    representative_helicity_id: "hel:+-".to_string(),
+                    physical_helicity_ids: vec!["hel:+-".to_string(), "hel:-+".to_string()],
+                    representative_color_id: if contracted {
+                        "contracted".to_string()
+                    } else {
+                        "flow:0".to_string()
+                    },
+                    physical_color_ids,
+                }],
+            },
+        })
+        .unwrap()
+    }
+
+    fn empty_evaluator_group() -> EvaluatorGroup {
+        EvaluatorGroup {
+            evaluators: Vec::new(),
+            output_len: 0,
+            chunk_scratch_f64: Vec::new(),
+            chunk_scratch_native2: Vec::new(),
+        }
+    }
+
+    fn test_amplitude_runtime(
+        outputs: Vec<Complex<f64>>,
+        color_contraction: Option<ColorContractionRuntime>,
+    ) -> GenericAmplitudeRuntimeV2 {
+        let output_length = outputs.len();
+        GenericAmplitudeRuntimeV2 {
+            output_length,
+            raw_sum_weights: vec![1.0; output_length],
+            raw_sum_all_sector_weights: vec![1.0; output_length],
+            raw_sum_color_sector_ids: vec![None; output_length],
+            raw_sum_groups: vec![RawSumGroup {
+                id: 7,
+                indices: (0..output_length).collect(),
+                weight: 1.0,
+                all_sector_weight: 1.0,
+                sector_ids: vec![0],
+            }],
+            has_coherent_groups: true,
+            color_contraction,
+            input_components: None,
+            input_spans: Vec::new(),
+            parameter_scratch_f64: Vec::new(),
+            output_scratch_f64: outputs,
+            parameter_scratch_native2: Vec::new(),
+            output_scratch_native2: Vec::new(),
+            evaluator: empty_evaluator_group(),
+        }
+    }
+
+    #[test]
+    fn resolved_lc_reduction_expands_symmetries_and_structural_zeros() {
+        let physics = test_physics_runtime("lc");
+        let mut amplitude = test_amplitude_runtime(vec![c64(2.0, 0.0)], None);
+
+        let resolved = amplitude
+            .reduce_scratch_f64_resolved(1, &physics, 4.0, None, None)
+            .unwrap();
+
+        assert_eq!(resolved.point_count, 1);
+        assert_eq!(resolved.helicity_indices, vec![0, 1, 2]);
+        assert_eq!(resolved.color_indices, vec![0, 1]);
+        assert_eq!(resolved.values, vec![4.0, 4.0, 4.0, 4.0, 0.0, 0.0]);
+        assert_eq!(resolved.values.iter().sum::<f64>(), 16.0);
+
+        let helicities = BTreeSet::from(["hel:-+".to_string()]);
+        let colors = BTreeSet::from(["flow:1".to_string()]);
+        let selected = amplitude
+            .reduce_scratch_f64_resolved(1, &physics, 4.0, Some(&helicities), Some(&colors))
+            .unwrap();
+        assert_eq!(selected.values, vec![4.0]);
+    }
+
+    #[test]
+    fn resolved_nlc_and_full_reductions_have_one_contracted_color_component() {
+        for color_accuracy in ["nlc", "full"] {
+            let physics = test_physics_runtime(color_accuracy);
+            let contraction = ColorContractionRuntime {
+                group_count: 1,
+                entries: vec![ColorContractionEntry {
+                    left_group_index: 0,
+                    right_group_index: 0,
+                    weight_re: 2.0,
+                    weight_im: 0.0,
+                    symmetry_factor: 1.0,
+                }],
+                group_scratch_f64: Vec::new(),
+            };
+            let mut amplitude = test_amplitude_runtime(vec![c64(3.0, 0.0)], Some(contraction));
+
+            let resolved = amplitude
+                .reduce_scratch_f64_resolved(1, &physics, 2.0, None, None)
+                .unwrap();
+
+            assert_eq!(resolved.helicity_indices, vec![0, 1]);
+            assert_eq!(resolved.color_indices, vec![0]);
+            assert_eq!(resolved.values, vec![18.0, 18.0]);
+            assert_eq!(resolved.values.iter().sum::<f64>(), 36.0);
+        }
+    }
+
+    #[test]
+    fn model_parameter_override_batch_is_atomic() {
+        let manifest: GenericProcessManifestV2 =
+            serde_json::from_value(minimal_generic_manifest()).unwrap();
+        let mut runtime = GenericRuntimeV2::from_manifest(manifest).unwrap();
+        runtime.model_parameter_values_f64 = vec![0.118];
+        runtime.model_parameter_runtime_slots.insert(
+            "normalization.alpha_s_me_check".to_string(),
+            GenericRuntimeParameterSlots {
+                real: 0,
+                imaginary: None,
+            },
+        );
+        let invalid_batch = BTreeMap::from([
+            ("normalization.alpha_s_me_check".to_string(), (0.101, 0.0)),
+            ("unknown.parameter".to_string(), (1.0, 0.0)),
+        ]);
+
+        let error = runtime
+            .apply_model_parameter_overrides(&invalid_batch)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unknown.parameter"));
+        assert_eq!(runtime.model_parameter_values_f64, vec![0.118]);
+        runtime
+            .apply_model_parameter_overrides(&BTreeMap::from([(
+                "normalization.alpha_s_me_check".to_string(),
+                (0.101, 0.0),
+            )]))
+            .unwrap();
+        assert_eq!(runtime.model_parameter_values_f64, vec![0.101]);
+    }
+
+    #[test]
+    fn resolved_warning_state_is_mutable_and_once_per_native_handle() {
+        let mut physics = test_physics_runtime("lc");
+        physics.manifest.coverage.helicities = "fixed".to_string();
+        physics.manifest.coverage.color = "fixed".to_string();
+        let manifest: GenericProcessManifestV2 =
+            serde_json::from_value(minimal_generic_manifest()).unwrap();
+        let mut generic_runtime = GenericRuntimeV2::from_manifest(manifest).unwrap();
+        generic_runtime.physics = Some(physics.clone());
+        let mut runtime = NativeRuntime {
+            root: PathBuf::new(),
+            runtime: generic_runtime,
+            process: "x x > y y".to_string(),
+            process_key: "x_x_to_y_y".to_string(),
+            input_crossing_map: None,
+            crossing_alias_of: None,
+            physics: Some(physics.manifest.clone()),
+            warnings_muted: false,
+            warned_kinds: BTreeSet::new(),
+            pending_warnings: Vec::new(),
+        };
+        let helicities = ["hel:-+".to_string()];
+        let colors = ["flow:1".to_string()];
+
+        runtime.mute_warnings();
+        runtime
+            .record_resolved_warnings(Some(&helicities), Some(&colors))
+            .unwrap();
+        assert!(runtime.take_warnings().is_empty());
+
+        runtime.unmute_warnings();
+        runtime
+            .record_resolved_warnings(Some(&helicities), Some(&colors))
+            .unwrap();
+        runtime
+            .record_resolved_warnings(Some(&helicities), Some(&colors))
+            .unwrap();
+        let warnings = runtime.take_warnings();
+        assert_eq!(warnings.len(), 3);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("helicities"))
+        );
+        assert!(warnings.iter().any(|warning| warning.contains("color")));
+        assert!(warnings.iter().any(|warning| warning.contains("symmetry")));
+        runtime
+            .record_resolved_warnings(Some(&helicities), Some(&colors))
+            .unwrap();
+        assert!(runtime.take_warnings().is_empty());
+    }
 
     #[test]
     fn native_two_lane_parameter_pack_preserves_component_order_and_odd_tail() {
@@ -9271,6 +9441,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "python")]
     fn generic_dynamic_momenta_parser_accepts_more_than_sixteen_legs() {
         let point = vec![vec![0.0, 1.0, 2.0, 3.0]; 17];
         let parsed = batch_momenta_dynamic_from_nested(vec![point], 17).unwrap();
@@ -9278,19 +9449,6 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].len(), 17);
         assert_eq!(parsed[0][16], [0.0, 1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn legacy_fixed_momenta_parser_keeps_sixteen_leg_cap() {
-        pyo3::Python::initialize();
-        let point = vec![vec![0.0, 1.0, 2.0, 3.0]; 17];
-        let error = batch_momenta_from_nested(vec![point], 17).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("at most 16 external legs in the fixed f64 path")
-        );
     }
 
     #[test]
@@ -10271,19 +10429,29 @@ mod tests {
     }
 }
 
+#[cfg(feature = "python")]
 #[pymodule]
 fn rusticol(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Runtime>()?;
+    m.add_class::<ProcessPhysics>()?;
+    m.add_class::<ExternalParticle>()?;
+    m.add_class::<HelicityConfiguration>()?;
+    m.add_class::<ColorFlow>()?;
+    m.add_class::<ContractedColorComponent>()?;
+    m.add_class::<ModelParameter>()?;
+    m.add_class::<ResolvedEvaluation>()?;
     m.add_function(wrap_pyfunction!(build_profile, m)?)?;
     m.add_function(wrap_pyfunction!(build_target, m)?)?;
     Ok(())
 }
 
+#[cfg(feature = "python")]
 #[pyfunction]
 fn build_profile() -> &'static str {
     env!("RUSTICOL_BUILD_PROFILE")
 }
 
+#[cfg(feature = "python")]
 #[pyfunction]
 fn build_target() -> &'static str {
     env!("RUSTICOL_BUILD_TARGET")

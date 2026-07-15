@@ -160,8 +160,25 @@ def test_dependency_build_wheels_installs_rusticol_by_default(monkeypatch) -> No
     def fake_install(wheel, **_kwargs):
         calls.append(("install", wheel.parent.name, wheel.name, None))
 
+    def fake_build_rusticol():
+        calls.append(("build", "rusticol", "rusticol", True))
+        return installer.RUSTICOL_WHEEL_DIR / "rusticol.whl"
+
+    def fake_install_rusticol_native_assets():
+        calls.append(("install-native", "rusticol", "assets", None))
+
     monkeypatch.setattr(installer, "build_maturin_wheel", fake_build)
     monkeypatch.setattr(installer, "build_python_wheel", fake_build)
+    monkeypatch.setattr(
+        installer,
+        "build_rusticol_wheel_and_native_library",
+        fake_build_rusticol,
+    )
+    monkeypatch.setattr(
+        installer,
+        "install_rusticol_native_assets",
+        fake_install_rusticol_native_assets,
+    )
     monkeypatch.setattr(installer, "install_wheel", fake_install)
     monkeypatch.setattr(installer, "ensure_gammaloop_api_absent", lambda: None)
 
@@ -172,6 +189,7 @@ def test_dependency_build_wheels_installs_rusticol_by_default(monkeypatch) -> No
     assert ("build", "rusticol", "rusticol", True) in calls
     assert ("install", "ufo-model-loader", "ufo-model-loader.whl", None) in calls
     assert ("install", "rusticol", "rusticol.whl", None) in calls
+    assert ("install-native", "rusticol", "assets", None) in calls
 
 
 def test_bootstrap_tools_ready_requires_maturin_cli(monkeypatch, tmp_path: Path) -> None:

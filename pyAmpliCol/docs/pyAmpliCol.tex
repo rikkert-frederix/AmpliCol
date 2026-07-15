@@ -71,14 +71,16 @@ that numerically sweeps this current table.  \PAC\ builds the same logical DAG
 in Python, lowers bounded pieces to tensor-network expressions handled by
 Spenso, compiles the resulting parametric scalar/vector expressions with
 Symbolica evaluators, and can now execute the staged sweep from Rust through
-the PyO3 runtime \texttt{rusticol}.
+the Python-independent runtime \texttt{rusticol}, with Python, C++17, and
+Fortran 2008 bindings.
 
 \paragraph{Current status.}
 The generic LC/NLC/full-colour staged-DAG implementation is the production
 \PAC\ workflow.  Process generation writes schema-v2 artifacts loaded by
-\texttt{rusticol}.  Run-card arguments may come from TOML, while surviving
-model parameters are runtime inputs supplied through loader-compatible complex
-JSON.  The default benchmark route is Rusticol with SymJIT stage
+the Python-independent \texttt{rusticol} core through Python, C++17, or
+Fortran 2008.  Run-card arguments may come from TOML, while surviving model
+parameters are runtime inputs supplied through loader-compatible complex JSON.
+The default benchmark route is Rusticol with SymJIT stage
 evaluators and stage-local inputs.  Selected-flow JIT artifacts measure stage
 chunks around base 128 and run at batch 128; all-flow artifacts use uniform
 chunk 8192 and batch 64.  Both use ten Horner iterations, Symbolica's default
@@ -107,7 +109,8 @@ compiles, and writes one stage at a time, then releases its Symbolica
 expressions before lowering the next stage.  Small detailed and plan-only
 artifacts retain the full records; large diagnostic sidecars explicitly record
 that they contain the compact runtime schema.  Rusticol accepts both layouts
-and remains backward-compatible with earlier artifacts.
+and remains backward-compatible with earlier schema-v2 artifacts for summed
+evaluation.
 
 \section{The AmpliCol Current Recursion}
 
@@ -636,47 +639,55 @@ $E_{\mathrm{amp}}$ and the final coherent square-sum.
 The previous staged \PAC\ runtime proved that the shared-current DAG could
 match Fortran \AC\ numerically, but its Python loop still moved current tables
 between many evaluator calls.  The current implementation keeps Python as the
-process generator and validation driver, but moves the hot eager-DAG sweep into
-a PyO3 extension named \texttt{rusticol}.  The generated artifact is now a
-self-contained process directory used by both runtimes:
-\Needspace{12\baselineskip}
+process generator and validation driver, while a Python-independent Rust core
+performs the hot eager-DAG sweep.  Optional PyO3/NumPy bindings expose that core
+as \texttt{rusticol}; C ABI v1 exposes the same implementation to C++17 and
+Fortran 2008 without a Python dependency.  A generated artifact is therefore a
+self-contained process directory shared by all three language APIs:
+\Needspace{14\baselineskip}
 \begin{lstlisting}[language=Python]
-rt_py = pyamplicol.load_process(process_dir, runtime="python")
-values_py = rt_py.evaluate(momenta)
-
 import rusticol
 rt = rusticol.Runtime.load(process_dir)
-values = rt.evaluate(momenta)
-profile = rt.profile(momenta)
+summed = rt.evaluate(momenta)
+resolved = rt.evaluate_resolved(momenta)
+assert allclose(resolved.total(), summed)
+
+one = rt.evaluate_resolved(
+    momenta,
+    helicities=[rt.physics.helicities[0]],
+    color_flows=[rt.physics.color_flows[0]],
+)
 \end{lstlisting}
-The Python and Rust runtimes read the same \texttt{process\_manifest.json}, the
-same Symbolica evaluator manifests, and the same validation momenta.  The
-Python path is kept as a transparent reference implementation.  The Rust path is
-the performance path.
+The Python process facade and every Rusticol binding read the same
+\texttt{process\_manifest.json}, Symbolica evaluator manifests, and validation
+momenta.  There is no parallel C++ or Fortran evaluator implementation.
 
-A process directory contains four classes of data.  First, it records process
-and model metadata: external PDG order, momentum conventions, particle and
-vertex tables, couplings, masses, symmetry factors, and leading-color
-normalization.  Second, it stores the shared-current DAG: source currents,
-current ids, dimensions, interaction stages, output slots, retained amplitude
-records, helicity weights, and color factors.  Third, it stores the compiled
-Symbolica evaluator artifacts for each stage and for the final amplitude/raw-sum
-stage.  Fourth, it contains standalone validation assets:
-\texttt{validation\_momenta.json} with decimal-string momenta and a
-\texttt{check\_standalone.py} script that imports only \texttt{rusticol}, plus
-\texttt{numpy} when available for the optimized f64 input path.
+\Needspace{18\baselineskip}
+A process directory records process/model metadata, the shared-current DAG,
+compiled Symbolica stage evaluators, a complete runtime parameter card, and
+validation momenta.  A single-process root or process-set root additionally
+contains exactly one generated API bundle; subprocesses, LC sidecars, and
+replay representatives do not duplicate it:
 
-\Needspace{13\baselineskip}
 \begin{lstlisting}[language=Python]
-# Generated by pyAmpliCol.
 process_dir/
-  process_manifest.json
-  manifest.json
-  validation_momenta.json
-  check_standalone.py
-  compiled/              # C++/ASM shared libraries when present
-  ... evaluator states ...
+  process_manifest.json       # or process_set_manifest.json
+  ... evaluator states and model inputs ...
+  API/
+    validation_points.dat
+    python/check_standalone.py
+    cpp/check_standalone.cpp
+    cpp/Makefile
+    fortran/check_standalone.f90
+    fortran/Makefile
 \end{lstlisting}
+
+Each runner loads typed physics metadata, applies an optional JSON model card
+and direct parameter overrides, evaluates every requested resolved component,
+explicitly sums it, and compares against the compatibility total.  Process-set
+runners accept a process key or process string, including crossing aliases.  A
+bundle without validation momenta still builds, loads metadata, and exits with
+a diagnostic.
 
 \texttt{rusticol.Runtime.load} streams the typed schema directly from disk,
 validates current/value relationships through precomputed indices, loads every
@@ -688,6 +699,46 @@ wavefunctions and momentum sums, executes stage evaluators in topological order,
 writes the returned current components into the contiguous state table, executes
 the amplitude/raw-sum evaluator, applies the Fortran-matched normalization, and
 returns a NumPy array of matrix elements.
+
+\paragraph{Summed and resolved semantics.}
+\texttt{evaluate} and \texttt{evaluate\_with\_prec} keep the optimized
+compatibility path and return one fully summed matrix element per point.
+\texttt{evaluate\_resolved} returns an LC tensor with axes
+\texttt{(point, physical helicity, physical color flow)}.  NLC and full-colour
+artifacts instead return
+\texttt{(point, physical helicity, 1)}, because their last axis is the already
+contracted colour component.  Values include the normal couplings, colour and
+initial-state averages, normalization, and identical-particle factors, so a
+plain sum over the non-point axes reproduces \texttt{evaluate}.
+
+Selectors use stable public helicity and physical-flow IDs; Python also accepts
+their typed metadata objects.  These flow IDs are deliberately distinct from
+internal LC sector IDs, whose \texttt{evaluate\_color\_sectors} interface is
+retained only as a low-level compatibility API.  Omitted selectors return each
+represented physical component separately.  Exact global-helicity flips,
+pure-gluon reflections, and proven zero helicities are expanded only in the
+resolved output by reusing recorded representatives.  The normal summed path
+does not materialize those extra values, and resolved evaluation runs the DAG
+once per input batch rather than once per component.  Process-set aliases map
+the metadata and selectors back to the requested physical process.
+
+Current schema-v2 artifacts record this contract in
+\texttt{runtime\_schema.physics}, including external particles, coverage,
+helicity and colour descriptors, symmetry representatives, reduction maps,
+model parameters, and selector capabilities.  Older schema-v2 artifacts remain
+usable through the summed API but request regeneration for resolved output.
+Schema-v1 artifact writers, runtimes, and loaders have been removed; this does
+not affect the independent Fortran \AC\ reference adapter or
+\texttt{processes --legacy-output}.
+
+\paragraph{Runtime model inputs.}
+All used masses, widths, couplings, and normalization inputs remain runtime
+parameters.  A JSON card can be supplied while loading, and
+\texttt{set\_model\_parameters} applies a mapping atomically: Rusticol validates
+the complete batch before committing it, then refreshes derived values and
+normalization.  A single-parameter convenience setter delegates to the same
+transaction.  Coverage/reduction warnings are emitted once per kind and handle
+and can be muted or unmuted; unavailable selectors remain errors.
 
 On AArch64, the f64 route loads native two-lane complex SymJIT payloads.  A
 stage-local input slice is packed once and reused by every output chunk in that
@@ -727,6 +778,19 @@ to Symbolica's \texttt{DoubleFloat} coefficients.  Other positive precisions map
 to arbitrary-precision \texttt{Float} evaluators.  The high-precision routes
 share the same stage orchestration code through generic Rust traits, while the
 f64 route remains specialized and avoids high-precision allocation overhead.
+
+\paragraph{Native language bindings.}
+The C ABI uses opaque mutable handles, thread-local errors, explicit buffer
+sizes, and panic containment at every boundary.  One handle is not called
+concurrently, while independent handles may run in parallel.  Resolved C
+storage is \texttt{[point][helicity][color]}.  The header-only C++17 wrapper
+adds RAII, typed metadata and indexed resolved results; the Fortran 2008
+\texttt{ISO\_C\_BINDING} module returns allocatable arrays shaped
+\texttt{(color, helicity, point)}.  Both native interfaces are double precision
+only.  The dependency installer places headers, static library, Fortran module
+source, and a relocatable \texttt{rusticol-config} under the managed venv.
+\texttt{just build} creates both the release Maturin wheel and static C ABI
+library, whose link interface contains no Python symbols or \texttt{-lpython}.
 
 The artifact schema is process-generic.  The staged execution format no longer
 needs a Rust-side process-family branch: each process directory supplies the

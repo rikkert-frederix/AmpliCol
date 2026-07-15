@@ -3,7 +3,8 @@
 pyAmpliCol is the Python generation and validation layer for the modern
 AmpliCol matrix-element prototype.  The current production path generates a
 shared-current eager-DAG process artifact in Python and evaluates it through the
-Rusticol PyO3 runtime using serialized Symbolica evaluators.
+Python-independent Rusticol core using serialized Symbolica evaluators. Python,
+C++17, and Fortran 2008 bindings all call that same runtime implementation.
 
 The production path is now the leading-colour generic DAG artifact route.  The
 process parser/enumerator expands concrete subprocesses, process sets,
@@ -187,14 +188,66 @@ detailed and plan-only artifacts keep the full records; large diagnostic
 sidecars explicitly identify their compact layout. Rusticol accepts both forms,
 so existing artifacts remain usable.
 
-The generated process directory is self-contained.  It includes a
-`process_manifest.json`, serialized evaluator artifacts under `evaluators/`,
-validation momenta, and a standalone checker:
+The generated process directory is self-contained. It includes a
+`process_manifest.json`, serialized evaluator artifacts, and one generated
+multi-language API bundle at its root:
+
+```text
+API/
+  validation_points.dat
+  python/check_standalone.py
+  cpp/check_standalone.cpp
+  cpp/Makefile
+  fortran/check_standalone.f90
+  fortran/Makefile
+```
+
+The Python runner supports f64, double-double, and arbitrary precision. The
+C++17 and Fortran 2008 runners use the same Python-independent Rusticol core
+through its C ABI and intentionally expose f64 only. Activate the managed venv
+so `rusticol-config` is on `PATH`, then build and run any example directly:
 
 ```sh
 cd outputs/dd_z_4g
-python3 check_standalone.py --precision 16 --profile
+python3 API/python/check_standalone.py --precision 16 --profile
+make -C API/cpp
+API/cpp/check_standalone
+make -C API/fortran
+API/fortran/check_standalone
 ```
+
+All runners accept `--model-parameters`, repeatable
+`--set-parameter NAME REAL IMAG`, and `--json`. Process-set runners also
+accept `--process`. They print every physical helicity/color component,
+explicitly sum the resolved tensor, and compare that sum with the optimized
+compatibility total.
+
+The corresponding Python API keeps the summed path unchanged and exposes a
+separate resolved path:
+
+```python
+import numpy as np
+import rusticol
+
+runtime = rusticol.Runtime.load("outputs/dd_z_4g")
+physics = runtime.physics
+resolved = runtime.evaluate_resolved(momenta)
+one_component = runtime.evaluate_resolved(
+    momenta,
+    helicities=[physics.helicities[0]],
+    color_flows=[physics.color_flows[0]],
+)
+assert np.allclose(resolved.total(), runtime.evaluate(momenta))
+```
+
+With omitted selectors, LC results have shape
+`(point, physical_helicity, physical_color_flow)`. NLC/full-colour results have
+shape `(point, physical_helicity, 1)` because colour is already contracted.
+Stable public flow IDs are distinct from internal LC sector IDs. Exact folded
+helicity/flow symmetries are expanded only by the resolved API, while
+`evaluate()` retains the optimized summed reduction. Older schema-v2 artifacts
+remain valid for summed evaluation but must be regenerated before resolved
+metadata can be requested; schema-v1 Rusticol artifacts are no longer loaded.
 
 Masses, widths, normalization inputs, and model couplings remain runtime
 parameters.  Their exact names and defaults are listed under
@@ -216,7 +269,12 @@ subset with a loader-compatible complex JSON file:
 ```
 
 Rusticol rejects unknown parameter names instead of silently baking or
-ignoring them.
+ignoring them. `set_model_parameters(mapping)` validates a complete update
+before committing any value and then refreshes derived parameters, masses,
+widths, and normalization; `set_model_parameter(...)` is the convenience form
+for one value. Resolved-coverage and symmetry-reuse warnings are emitted once
+per runtime handle and can be controlled with `mute_warnings()` and
+`unmute_warnings()`.
 
 ## Useful Commands
 
@@ -235,15 +293,16 @@ ignoring them.
 ./pyamplicol.sh compare-amplicol 'd d~ > Z g g g g' --runtime-backend rusticol --points 10
 ```
 
-`generate-process` also accepts process sets.  A process-set output contains a
-root `process_set_manifest.json` and one nested subprocess artifact per
-canonical process key.  The root also has a `check_standalone.py` wrapper that
-forwards to the selected subprocess checker:
+`generate-process` also accepts process sets. A process-set output contains a
+root `process_set_manifest.json`, one nested subprocess artifact per canonical
+process key, and exactly one root `API/` bundle. Subprocesses and crossing
+representatives do not duplicate the bundle:
 
 ```sh
 ./pyamplicol.sh generate-process 'd d~ > Z g | u u~ > Z g' outputs/z_1g_set
 ./pyamplicol.sh time-process outputs/z_1g_set --process u_ubar_to_z_g
-python outputs/z_1g_set/check_standalone.py --process 'u u~ > z g' --precision 16
+python outputs/z_1g_set/API/python/check_standalone.py \
+  --process 'u u~ > z g' --precision 16
 ```
 
 Inclusive labels are expanded at the process-set boundary.  For example,

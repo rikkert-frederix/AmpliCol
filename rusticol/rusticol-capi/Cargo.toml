@@ -1,0 +1,13 @@
+[package]
+name = "rusticol-capi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "rusticol_capi"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+libc = "0.2"
+rusticol = { path = "..", default-features = false }
+serde_json = "1.0"

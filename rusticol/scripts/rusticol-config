@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+prefix=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+include_dir="$prefix/include/rusticol"
+library="$prefix/lib/librusticol_capi.a"
+fortran_module="$prefix/share/rusticol/fortran/rusticol.f90"
+native_flags=$(cat "$prefix/share/rusticol/native-static-libs.txt")
+
+case "${1:-}" in
+  --abi-version)
+    printf '%s\n' '1'
+    ;;
+  --version)
+    printf '%s\n' '0.1.0'
+    ;;
+  --prefix)
+    printf '%s\n' "$prefix"
+    ;;
+  --include-dir)
+    printf '%s\n' "$include_dir"
+    ;;
+  --library)
+    printf '%s\n' "$library"
+    ;;
+  --fortran-module)
+    printf '%s\n' "$fortran_module"
+    ;;
+  --cflags)
+    printf '%s\n' "-I$include_dir"
+    ;;
+  --libs)
+    printf '%s\n' "-L$prefix/lib -lrusticol_capi $native_flags"
+    ;;
+  --all)
+    printf 'abi_version=1\nversion=0.1.0\nprefix=%s\ninclude=%s\nlibrary=%s\nfortran=%s\nlibs=%s\n' \
+      "$prefix" "$include_dir" "$library" "$fortran_module" "$native_flags"
+    ;;
+  *)
+    printf '%s\n' \
+      'usage: rusticol-config --abi-version|--version|--prefix|--include-dir|--library|--fortran-module|--cflags|--libs|--all' >&2
+    exit 2
+    ;;
+esac

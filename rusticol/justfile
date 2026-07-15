@@ -1,0 +1,19 @@
+set shell := ["sh", "-eu", "-c"]
+
+python := env_var_or_default("PYTHON", "python3")
+wheel_dir := env_var_or_default("RUSTICOL_WHEEL_DIR", "target/wheels")
+
+build: wheel native
+
+wheel:
+    {{python}} -m maturin build --release --out {{wheel_dir}}
+
+native:
+    cargo build --release --package rusticol-capi
+    {{python}} scripts/capture_native_static_libs.py
+
+check:
+    cargo check --workspace
+    cargo check --package rusticol --features python
+    gfortran -std=f2008 -fsyntax-only fortran/rusticol.f90
+    c++ -std=c++17 -fsyntax-only -x c++ include/rusticol.hpp

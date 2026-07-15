@@ -49,7 +49,7 @@
     "requested": true,
     "source_path": "../rusticol",
     "source_rev": "ba16d8beaf42e3ddd25da75d48aee39d4be395fa",
-    "usage": "PyO3 runtime for pyAmpliCol eager-DAG process artifacts"
+    "usage": "Python, C++, and Fortran runtime for pyAmpliCol schema-v2 process artifacts"
   },
   "schema_version": 1,
   "symbolica": {

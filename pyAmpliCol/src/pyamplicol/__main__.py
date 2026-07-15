@@ -46,120 +46,13 @@ from .reference import (
     reference_color_order_for_run,
 )
 
-_RUNTIME_BACKENDS = (
-    "auto",
-    "python",
-    "dag",
-    "numeric-tensor-network",
-    "rusticol",
-)
-_PRODUCTION_RUNTIME_BACKENDS = ("rusticol",)
-RuntimeBackend = Literal[
-    "auto",
-    "python",
-    "dag",
-    "numeric-tensor-network",
-    "rusticol",
-]
+_RUNTIME_BACKENDS = ("rusticol",)
+RuntimeBackend = Literal["rusticol"]
 
 _CHILD_PROGRESS_ENV = "PYAMPLICOL_CHILD_PROGRESS"
 _CHILD_PROGRESS_PREFIX = "::pyamplicol-progress::"
 _DEFAULT_SYMBOLICA_OUTPUT_CHUNK_SIZE = 128
 _DEFAULT_SYMBOLICA_STAGE_LOCAL_PARAMETER_LAYOUT = True
-
-
-_PROCESS_SET_STANDALONE_CHECK_SCRIPT = r'''#!/usr/bin/env python3
-from __future__ import annotations
-
-import argparse
-import json
-import runpy
-import sys
-from pathlib import Path
-
-
-def resolve_process(root: Path, selected: str | None):
-    manifest = json.loads((root / "process_set_manifest.json").read_text())
-    entries = manifest.get("processes", [])
-    if not isinstance(entries, list) or not entries:
-        raise SystemExit(f"process-set artifact contains no subprocesses: {root}")
-    selected_key = selected or str(manifest.get("default_process_key"))
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        key = str(entry.get("key"))
-        process = str(entry.get("process"))
-        if selected_key in {key, process}:
-            path = Path(str(entry.get("path", "")))
-            process_dir = path if path.is_absolute() else root / path
-            return entry, process_dir
-    available = ", ".join(
-        str(entry.get("key"))
-        for entry in entries
-        if isinstance(entry, dict) and "key" in entry
-    )
-    raise SystemExit(
-        f"process {selected_key!r} not found in {root}; available: {available}"
-    )
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Standalone rusticol process-set check")
-    parser.add_argument(
-        "--process",
-        help=(
-            "Canonical process key or process string to select from this "
-            "process-set artifact. Defaults to the manifest default."
-        ),
-    )
-    parser.add_argument("--precision", type=int, default=16)
-    parser.add_argument("--profile", action="store_true")
-    parser.add_argument("--target-runtime", type=float, default=10.0)
-    parser.add_argument(
-        "--rusticol-folder",
-        type=Path,
-        help=(
-            "Optional rusticol location forwarded to the selected subprocess "
-            "checker."
-        ),
-    )
-    args, passthrough = parser.parse_known_args()
-
-    root = Path(__file__).resolve().parent
-    _, process_dir = resolve_process(root, args.process)
-    checker = process_dir / "check_standalone.py"
-    if not checker.exists():
-        raise SystemExit(f"selected subprocess has no standalone checker: {checker}")
-
-    forwarded = [
-        str(checker),
-        "--precision",
-        str(args.precision),
-        "--target-runtime",
-        str(args.target_runtime),
-    ]
-    if args.profile:
-        forwarded.append("--profile")
-    if args.rusticol_folder is not None:
-        forwarded.extend(["--rusticol-folder", str(args.rusticol_folder)])
-    forwarded.extend(passthrough)
-    sys.argv = forwarded
-    try:
-        runpy.run_path(str(checker), run_name="__main__")
-    except SystemExit as exc:
-        code = exc.code
-        if code is None:
-            return 0
-        if isinstance(code, int):
-            return code
-        print(code, file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-'''
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -256,29 +149,6 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_generic_dag_pruning_options(process_plan)
     process_plan.add_argument("--json", action="store_true")
 
-    generate = subparsers.add_parser(
-        "generate",
-        help=argparse.SUPPRESS,
-    )
-    _add_process_options(generate)
-    generate.add_argument("process", metavar="PROCESS")
-    generate.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    generate.add_argument("--no-cache", action="store_true")
-    _add_evaluator_build_options(generate)
-    generate.add_argument("--json", action="store_true")
-
-    evaluate = subparsers.add_parser(
-        "evaluate",
-        help=argparse.SUPPRESS,
-    )
-    _add_process_options(evaluate)
-    evaluate.add_argument("process", metavar="PROCESS")
-    evaluate.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    evaluate.add_argument("--sqrt-s", type=float)
-    _add_runtime_backend_option(evaluate)
-    _add_evaluator_build_options(evaluate)
-    evaluate.add_argument("--json", action="store_true")
-
     compare = subparsers.add_parser(
         "compare-amplicol",
         help="Drive legacy AmpliCol reference generation/evaluation.",
@@ -293,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--timeout", type=float)
     compare.add_argument("--process-file", type=Path)
     compare.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    _add_runtime_backend_option(compare, production=True)
+    _add_runtime_backend_option(compare)
     _add_evaluator_build_options(compare)
     _add_generic_dag_pruning_options(compare)
     compare.add_argument("--skip-build", action="store_true")
@@ -322,91 +192,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     compare.add_argument("--dry-run", action="store_true")
     compare.add_argument("--json", action="store_true")
-
-    family = subparsers.add_parser(
-        "validate-z-gluon-family",
-        help=argparse.SUPPRESS,
-    )
-    _add_process_options(family)
-    family.add_argument("--min-gluons", type=int, default=0)
-    family.add_argument("--max-gluons", type=int, default=6)
-    family.add_argument("--points", type=int, default=10)
-    family.add_argument("--rel-tol", type=float, default=1.0e-8)
-    family.add_argument("--timing", type=int)
-    family.add_argument("--amplicol-root", type=Path, default=_default_amplicol_root())
-    family.add_argument("--jobs", type=int, default=8)
-    family.add_argument("--timeout", type=float)
-    family.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    _add_runtime_backend_option(family)
-    _add_evaluator_build_options(family)
-    family.add_argument("--dry-run", action="store_true")
-    family.add_argument("--json", action="store_true")
-
-    benchmark = subparsers.add_parser(
-        "benchmark-z-gluon-modes",
-        help=argparse.SUPPRESS,
-    )
-    _add_process_options(benchmark)
-    benchmark.add_argument("--min-gluons", type=int, default=0)
-    benchmark.add_argument("--max-gluons", type=int, default=6)
-    benchmark.add_argument("--points", type=int, default=3)
-    benchmark.add_argument("--timing", type=int)
-    benchmark.add_argument("--amplicol-root", type=Path, default=_default_amplicol_root())
-    benchmark.add_argument("--jobs", type=int, default=8)
-    benchmark.add_argument("--timeout", type=float)
-    benchmark.add_argument("--numeric-timeout", type=float, default=120.0)
-    benchmark.add_argument("--parametric-timeout", type=float, default=180.0)
-    benchmark.add_argument("--parametric-max-gluons", type=int, default=4)
-    benchmark.add_argument(
-        "--only-legacy-shared",
-        action="store_true",
-        help="Benchmark only legacy AmpliCol and the shared-current D-mode.",
-    )
-    _add_evaluator_build_options(benchmark)
-    benchmark.add_argument(
-        "--tensor-strategy",
-        choices=("interleaved", "monolithic"),
-        default="interleaved",
-    )
-    benchmark.add_argument("--output", type=Path)
-    benchmark.add_argument("--json", action="store_true")
-
-    tensor_profile = subparsers.add_parser(
-        "profile-tensor-evaluator",
-        help=argparse.SUPPRESS,
-    )
-    tensor_profile.add_argument("process", metavar="PROCESS")
-    tensor_profile.add_argument("--sqrt-s", type=float, default=1000.0)
-    tensor_profile.add_argument("--repetitions", type=int, default=100)
-    tensor_profile.add_argument("--evaluator-repetitions", type=int)
-    tensor_profile.add_argument(
-        "--tensor-strategy",
-        choices=("interleaved", "monolithic"),
-        default="interleaved",
-    )
-    tensor_profile.add_argument("--json", action="store_true")
-
-    dag_profile = subparsers.add_parser(
-        "profile-dag-evaluator",
-        help=argparse.SUPPRESS,
-    )
-    dag_profile.add_argument("process", metavar="PROCESS")
-    dag_profile.add_argument("--sqrt-s", type=float, default=1000.0)
-    dag_profile.add_argument("--points", type=int, default=16)
-    dag_profile.add_argument("--repetitions", type=int, default=100)
-    dag_profile.add_argument(
-        "--generate-only",
-        action="store_true",
-        help=(
-            "Generate and save a reusable DAG process artifact, then exit "
-            "without timing runtime evaluation. This is primarily for the "
-            "rusticol two-stage workflow."
-        ),
-    )
-    _add_runtime_backend_option(dag_profile)
-    _add_evaluator_build_options(dag_profile)
-    _set_fast_rusticol_dag_defaults(dag_profile)
-    dag_profile.add_argument("--json", action="store_true")
 
     generate_process = subparsers.add_parser(
         "generate-process",
@@ -519,6 +304,11 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     generate_process.add_argument(
+        "--no-api-bundle",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    generate_process.add_argument(
         "--runtime-lc-sector-selector",
         dest="runtime_lc_sector_selector",
         action="store_true",
@@ -590,28 +380,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     time_process.add_argument("--json", action="store_true")
-
-    profile = subparsers.add_parser(
-        "profile",
-        help=argparse.SUPPRESS,
-    )
-    _add_process_options(profile)
-    profile.add_argument("process", metavar="PROCESS")
-    profile.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    _add_runtime_backend_option(profile)
-    _add_evaluator_build_options(profile)
-    profile.add_argument("--json", action="store_true")
-
-    for legacy_command in (
-        "generate",
-        "evaluate",
-        "validate-z-gluon-family",
-        "benchmark-z-gluon-modes",
-        "profile-tensor-evaluator",
-        "profile-dag-evaluator",
-        "profile",
-    ):
-        _hide_subcommand_from_help(subparsers, legacy_command)
 
     for command_parser in subparsers.choices.values():
         command_parser.add_argument(
@@ -918,20 +686,6 @@ def _validate_required_run_card_arguments(
         )
 
 
-def _hide_subcommand_from_help(
-    subparsers: Any,
-    name: str,
-) -> None:
-    """Keep a compatibility subcommand parseable while removing it from help."""
-
-    choices_actions = getattr(subparsers, "_choices_actions", None)
-    if not isinstance(choices_actions, list):
-        return
-    choices_actions[:] = [
-        action for action in choices_actions if getattr(action, "dest", None) != name
-    ]
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.version:
@@ -949,26 +703,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_processes(args)
     if args.command == "process-plan":
         return _cmd_process_plan(args)
-    if args.command == "generate":
-        return _cmd_generate(args)
-    if args.command == "evaluate":
-        return _cmd_evaluate(args)
     if args.command == "compare-amplicol":
         return _cmd_compare_amplicol(args)
-    if args.command == "validate-z-gluon-family":
-        return _cmd_validate_z_gluon_family(args)
-    if args.command == "benchmark-z-gluon-modes":
-        return _cmd_benchmark_z_gluon_modes(args)
-    if args.command == "profile-tensor-evaluator":
-        return _cmd_profile_tensor_evaluator(args)
-    if args.command == "profile-dag-evaluator":
-        return _cmd_profile_dag_evaluator(args)
     if args.command == "generate-process":
         return _cmd_generate_process(args)
     if args.command == "time-process":
         return _cmd_time_process(args)
-    if args.command == "profile":
-        return _cmd_profile(args)
     raise ValueError(f"unknown command: {args.command}")
 
 
@@ -1283,34 +1023,19 @@ def _add_generic_dag_pruning_options(parser: argparse.ArgumentParser) -> None:
 
 def _add_runtime_backend_option(
     parser: argparse.ArgumentParser,
-    *,
-    production: bool = False,
 ) -> None:
-    choices = _PRODUCTION_RUNTIME_BACKENDS if production else _RUNTIME_BACKENDS
-    default = "rusticol" if production else "auto"
-    help_text = (
-        "Production runtime backend. The generic DAG workflow currently uses "
-        "Rusticol process artifacts."
-        if production
-        else (
-            "Legacy native runtime backend for compatibility commands. "
-            "Production generation uses `generate-process` and Rusticol "
-            "process artifacts."
-        )
-    )
     parser.add_argument(
         "--runtime-backend",
-        choices=choices,
-        default=default,
-        help=help_text,
+        choices=_RUNTIME_BACKENDS,
+        default="rusticol",
+        help=(
+            "Production runtime backend. The generic DAG workflow uses "
+            "Rusticol process artifacts."
+        ),
     )
 
 
-def _add_evaluator_build_options(
-    parser: argparse.ArgumentParser,
-    *,
-    include_legacy_compiled_dag_options: bool = False,
-) -> None:
+def _add_evaluator_build_options(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(
         merge_evaluators_strategy=False,
         symbolica_direct_translation=True,
@@ -1357,94 +1082,6 @@ def _add_evaluator_build_options(
             "stage evaluators."
         ),
     )
-    parser.set_defaults(compiled_dag_inline_external_wavefunctions=True)
-    parser.set_defaults(compiled_dag_helicity_filter=True)
-    parser.set_defaults(
-        compiled_dag_lowering="spenso",
-        compiled_dag_cross_check_lowering=False,
-        compiled_dag_output_chunk_size=None,
-        compiled_dag_helicity_filter_samples=10,
-        compiled_dag_helicity_filter_seed=12345,
-        compiled_dag_helicity_filter_relative_tolerance=1.0e-12,
-        compiled_dag_helicity_filter_zero_tolerance=1.0e-300,
-        compiled_dag_helicity_filter_phase_space="rambo",
-    )
-    if include_legacy_compiled_dag_options:
-        parser.add_argument(
-            "--compiled-dag-evaluator",
-            action="store_true",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-lowering",
-            choices=("spenso", "symbolic"),
-            default="spenso",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-cross-check-lowering",
-            action="store_true",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-output-chunk-size",
-            type=int,
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-inline-external-wavefunctions",
-            dest="compiled_dag_inline_external_wavefunctions",
-            action="store_true",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--no-compiled-dag-inline-external-wavefunctions",
-            dest="compiled_dag_inline_external_wavefunctions",
-            action="store_false",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-helicity-filter",
-            dest="compiled_dag_helicity_filter",
-            action="store_true",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--no-compiled-dag-helicity-filter",
-            dest="compiled_dag_helicity_filter",
-            action="store_false",
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-helicity-filter-samples",
-            type=int,
-            default=10,
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-helicity-filter-seed",
-            type=int,
-            default=12345,
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-helicity-filter-relative-tolerance",
-            type=float,
-            default=1.0e-12,
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-helicity-filter-zero-tolerance",
-            type=float,
-            default=1.0e-300,
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument(
-            "--compiled-dag-helicity-filter-phase-space",
-            choices=("rambo", "canonical"),
-            default="rambo",
-            help=argparse.SUPPRESS,
-        )
     parser.add_argument(
         "--verbose-evaluator-build",
         action="store_true",
@@ -1816,12 +1453,7 @@ def _external_gluon_count(process: Any) -> int:
 
 
 def _runtime_backend(args: argparse.Namespace) -> RuntimeBackend:
-    if bool(getattr(args, "compiled_dag_evaluator", False)):
-        raise ValueError(
-            "--compiled-dag-evaluator is deprecated; use generic DAG process "
-            "artifacts with Rusticol instead."
-        )
-    value = getattr(args, "runtime_backend", "auto")
+    value = getattr(args, "runtime_backend", "rusticol")
     if value not in _RUNTIME_BACKENDS:
         raise ValueError(f"unknown runtime backend: {value}")
     return cast(RuntimeBackend, value)
@@ -1919,38 +1551,10 @@ def _runtime_evaluator_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "symbolica_raw_sum_final_stage": bool(
             getattr(args, "symbolica_raw_sum_final_stage", False)
         ),
-        "compiled_dag_lowering": str(getattr(args, "compiled_dag_lowering", "spenso")),
-        "compiled_dag_cross_check_lowering": bool(
-            getattr(args, "compiled_dag_cross_check_lowering", False)
-        ),
-        "compiled_dag_inline_external_wavefunctions": bool(
-            getattr(args, "compiled_dag_inline_external_wavefunctions", True)
-        ),
-        "compiled_dag_helicity_filter": bool(
-            getattr(args, "compiled_dag_helicity_filter", True)
-        ),
-        "compiled_dag_helicity_filter_samples": int(
-            getattr(args, "compiled_dag_helicity_filter_samples", 10)
-        ),
-        "compiled_dag_helicity_filter_seed": int(
-            getattr(args, "compiled_dag_helicity_filter_seed", 12345)
-        ),
-        "compiled_dag_helicity_filter_relative_tolerance": float(
-            getattr(args, "compiled_dag_helicity_filter_relative_tolerance", 1.0e-12)
-        ),
-        "compiled_dag_helicity_filter_zero_tolerance": float(
-            getattr(args, "compiled_dag_helicity_filter_zero_tolerance", 1.0e-300)
-        ),
-        "compiled_dag_helicity_filter_phase_space": str(
-            getattr(args, "compiled_dag_helicity_filter_phase_space", "rambo")
-        ),
     }
 
 
 def _compiled_output_chunk_size(args: argparse.Namespace) -> int | None:
-    compiled_dag_chunk_size = getattr(args, "compiled_dag_output_chunk_size", None)
-    if compiled_dag_chunk_size is not None:
-        return int(compiled_dag_chunk_size)
     value = getattr(
         args,
         "symbolica_compiled_output_chunk_size",
@@ -2825,137 +2429,6 @@ def _cmd_model_process_plan(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_generate(args: argparse.Namespace) -> int:
-    return _legacy_native_command_unavailable(args, "generate")
-
-
-def _cmd_generate_reference(args: argparse.Namespace) -> int:
-    from .evaluation import NativeRuntimeEvaluator
-    from .legacy_matrix import NativeMatrixElementGenerator
-
-    generator = NativeMatrixElementGenerator(
-        cache_dir=None if args.no_cache else args.cache_dir
-    )
-    result = generator.generate(
-        args.process,
-        options=_process_options(args),
-        write_cache_metadata=not args.no_cache,
-    )
-    payload = result.to_json_dict()
-    if bool(getattr(args, "compiled_dag_evaluator", False)) or getattr(
-        args,
-        "save_evaluator_dir",
-        None,
-    ) is not None:
-        runtime = NativeRuntimeEvaluator(
-            args.process,
-            runtime_backend=_runtime_backend(args),
-            allow_python_fallback=False,
-            allow_reference_legacy=True,
-            **_runtime_evaluator_kwargs(args),
-        )
-        payload["native_runtime_backend"] = runtime.metadata.to_json_dict()
-        save_dir = getattr(args, "save_evaluator_dir", None)
-        if save_dir is not None:
-            manifest_path = runtime.save_evaluator_artifact(save_dir)
-            payload["saved_evaluator_manifest"] = str(manifest_path)
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        status = "supported" if result.supported_native_target else "unsupported"
-        print(f"{args.process}: native target {status}; backend={result.backend}")
-        runtime_payload = payload.get("native_runtime_backend")
-        if isinstance(runtime_payload, dict):
-            print(
-                "runtime evaluator: "
-                f"{runtime_payload.get('backend')} ({runtime_payload.get('kernel')})"
-            )
-        if "saved_evaluator_manifest" in payload:
-            print(f"saved evaluator: {payload['saved_evaluator_manifest']}")
-        if result.cache_file is not None:
-            print(f"metadata cache: {result.cache_file}")
-        for note in result.notes:
-            print(note)
-    return 0
-
-
-def _cmd_evaluate(args: argparse.Namespace) -> int:
-    return _legacy_native_command_unavailable(args, "evaluate")
-
-
-def _cmd_evaluate_reference(args: argparse.Namespace) -> int:
-    from .evaluation import NativeRuntimeEvaluator
-    from .legacy_matrix import NativeMatrixElementGenerator
-
-    artifact = _load_optional_evaluator_artifact(args.cache_dir, args.process)
-    try:
-        evaluator = NativeRuntimeEvaluator(
-            args.process,
-            runtime_backend=_runtime_backend(args),
-            allow_reference_legacy=True,
-            **_runtime_evaluator_kwargs(args),
-        )
-        evaluation_start = time.perf_counter()
-        result = evaluator.evaluate(sqrt_s=args.sqrt_s)
-        evaluation_time_s = time.perf_counter() - evaluation_start
-    except NativeEvaluationError as exc:
-        generator = NativeMatrixElementGenerator(cache_dir=args.cache_dir)
-        generation = generator.generate(args.process, options=_process_options(args))
-        payload = generation.to_json_dict()
-        payload["evaluation_available"] = False
-        payload["reason"] = str(exc)
-        payload["evaluator_artifact"] = _artifact_status(
-            args.cache_dir,
-            args.process,
-            artifact,
-        )
-        if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
-        else:
-            print(payload["reason"])
-        return 2
-
-    runtime_metadata = evaluator.refresh_metadata().to_json_dict()
-    payload = _evaluation_to_dict(result, runtime_metadata=runtime_metadata)
-    payload["native_runtime_backend"] = runtime_metadata
-    payload["native_evaluation_time_s"] = evaluation_time_s
-    payload["batch_size"] = args.batch_size
-    payload["merge_evaluators_strategy"] = args.merge_evaluators_strategy
-    payload["verbose_evaluator_build"] = args.verbose_evaluator_build
-    if args.no_inlined_helicity_sum:
-        payload["raw_amplitude_vector"] = payload["helicity_contributions"]
-    payload["evaluator_artifact"] = _artifact_status(
-        args.cache_dir,
-        args.process,
-        artifact,
-    )
-    payload["symbolic_evaluation"] = _symbolic_artifact_evaluation(
-        args.process,
-        result,
-        artifact,
-    )
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(f"backend: {payload['backend']} ({payload['kernel']})")
-        print(f"matrix element: {result.matrix_element:.16e}")
-        print(f"raw helicity sum: {result.raw_helicity_sum:.16e}")
-        artifact_payload = payload["evaluator_artifact"]
-        if isinstance(artifact_payload, dict) and artifact_payload.get("available"):
-            print(f"evaluator artifact: {artifact_payload['file']}")
-        symbolic_payload = payload["symbolic_evaluation"]
-        if isinstance(symbolic_payload, dict) and symbolic_payload.get("available"):
-            print(
-                "symbolica artifact matrix element: "
-                f"{symbolic_payload['matrix_element']:.16e}"
-            )
-            print(
-                "symbolica/native relative difference: "
-                f"{symbolic_payload['relative_difference']:.6g}"
-            )
-    return 0
-
-
 def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
     options = _process_options(args)
     runtime_backend = _runtime_backend(args)
@@ -3054,24 +2527,21 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
     else:  # pragma: no cover - parser logic keeps one compare mode selected.
         raise RuntimeError("no AmpliCol comparison mode selected")
     commands.extend(run.commands)
-    if runtime_backend == "rusticol":
-        native_generation, rusticol_process_dir = _rusticol_generation_profile(
-            args.process,
-            args.cache_dir,
-            options,
-            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
-            reference_color_order=_amplicol_reference_color_order_for_run(run),
-            generic_dag_pruning_kwargs=_compare_generic_dag_pruning_kwargs(
-                args,
-                process=args.process,
-            ),
+    if runtime_backend != "rusticol":
+        raise NativeEvaluationError(
+            "compare-amplicol supports only the production Rusticol runtime"
         )
-    else:
-        native_generation = _native_generation_profile(
-            args.process,
-            args.cache_dir,
-            options,
-        )
+    native_generation, rusticol_process_dir = _rusticol_generation_profile(
+        args.process,
+        args.cache_dir,
+        options,
+        runtime_evaluator_kwargs=runtime_evaluator_kwargs,
+        reference_color_order=_amplicol_reference_color_order_for_run(run),
+        generic_dag_pruning_kwargs=_compare_generic_dag_pruning_kwargs(
+            args,
+            process=args.process,
+        ),
+    )
     payload = {
         "mode": mode,
         "process": args.process,
@@ -3087,23 +2557,16 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
         "total_command_time_s": sum(command.elapsed_s for command in commands),
         "pyamplicol_generation": native_generation,
     }
-    if runtime_backend == "rusticol" and rusticol_process_dir is not None:
-        _attach_rusticol_probe_comparison(
-            run,
-            payload,
-            rusticol_process_dir,
-            options=options,
-            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
-            compare_args=args,
-        )
-    else:
-        _attach_native_probe_comparison(
-            args.process,
-            run,
-            payload,
-            runtime_backend=runtime_backend,
-            runtime_evaluator_kwargs=runtime_evaluator_kwargs,
-        )
+    if rusticol_process_dir is None:
+        raise NativeEvaluationError("Rusticol generation did not return an artifact path")
+    _attach_rusticol_probe_comparison(
+        run,
+        payload,
+        rusticol_process_dir,
+        options=options,
+        runtime_evaluator_kwargs=runtime_evaluator_kwargs,
+        compare_args=args,
+    )
     payload["pyamplicol_performance"] = {
         "generation": native_generation,
         "runtime": payload.get("native_runtime"),
@@ -3158,321 +2621,6 @@ def _cmd_compare_amplicol(args: argparse.Namespace) -> int:
         for row in run.timing_rows:
             print(f"{row.label}: {row.seconds:.6g} s {row.note}".rstrip())
     return 0
-
-
-def _cmd_validate_z_gluon_family(args: argparse.Namespace) -> int:
-    return _legacy_z_gluon_command_unavailable(args, "validate-z-gluon-family")
-
-
-def _legacy_z_gluon_command_unavailable(
-    args: argparse.Namespace,
-    command: str,
-) -> int:
-    message = (
-        f"{command} is a legacy Z+gluon-only command. Production generation, "
-        "validation, and profiling now go through generic DAG process "
-        "artifacts: use `process-plan`, `generate-process`, "
-        "`time-process`, and `compare-amplicol --runtime-backend rusticol`."
-    )
-    if getattr(args, "json", False):
-        print(
-            json.dumps(
-                {
-                    "available": False,
-                    "command": command,
-                    "error": message,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-    else:
-        print(message, file=sys.stderr)
-    return 1
-
-
-def _legacy_native_command_unavailable(
-    args: argparse.Namespace,
-    command: str,
-) -> int:
-    message = (
-        f"{command} is a legacy native-kernel command. Production pyAmpliCol "
-        "now uses generic DAG process artifacts: run `process-plan` to inspect "
-        "support, `generate-process PROCESS OUTPUT_DIR` to build an artifact, "
-        "`time-process OUTPUT_DIR` to evaluate/profile it through Rusticol, "
-        "or `compare-amplicol --runtime-backend rusticol` for Fortran "
-        "validation."
-    )
-    payload = {
-        "available": False,
-        "command": command,
-        "error": message,
-        "process": getattr(args, "process", None),
-        "runtime_backend": _runtime_backend(args) if hasattr(args, "runtime_backend") else None,
-    }
-    if getattr(args, "json", False):
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(message, file=sys.stderr)
-    return 1
-
-
-def _cmd_validate_z_gluon_family_reference(args: argparse.Namespace) -> int:
-    if args.min_gluons < 0:
-        raise ValueError("--min-gluons must be non-negative")
-    if args.max_gluons < args.min_gluons:
-        raise ValueError("--max-gluons must be greater than or equal to --min-gluons")
-    options = _process_options(args)
-    if args.dry_run:
-        payload = _z_gluon_family_dry_run_payload(args, options)
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
-
-    adapter = AmplicolAdapter(
-        args.amplicol_root,
-        jobs=args.jobs,
-        timeout=args.timeout,
-    )
-    rows: list[dict[str, object]] = []
-    for gluon_count in range(args.min_gluons, args.max_gluons + 1):
-        process = _z_gluon_family_process(gluon_count)
-        native_generation = _native_generation_profile(
-            process,
-            args.cache_dir,
-            options,
-        )
-        commands: list[CommandResult] = []
-        build = adapter.prepare_library(process, options=options)
-        if gluon_count == 0:
-            run = adapter.run_amplicol_fixed_probe(
-                process,
-                points=args.points,
-                process_file=build.process_file,
-                options=options,
-                timing_sample=args.timing,
-                use_library=True,
-            )
-            mode = "amplicol_fixed_probe_library"
-        else:
-            run = adapter.run_amplicol_probe(
-                process,
-                points=args.points,
-                process_file=build.process_file,
-                options=options,
-                timing_sample=args.timing,
-                use_library=True,
-            )
-            mode = "amplicol_probe_library"
-        timing_run = adapter.run_library_use(
-            process,
-            nevents=args.points if args.timing is None else args.timing,
-            seed=101,
-            options=options,
-            timing_sample=1,
-        )
-        commands.extend(build.commands)
-        commands.extend(run.commands)
-        commands.extend(timing_run.commands)
-        row: dict[str, object] = {
-            "gluon_count": gluon_count,
-            "process": process,
-            "mode": mode,
-            "fortran_timing_workflow": "generated_library_use",
-            "runtime_backend": _z_gluon_family_runtime_backend(
-                gluon_count,
-                _runtime_backend(args),
-            ),
-            "process_file": str(run.process_file),
-            "probe_points": [_probe_point_to_dict(point) for point in run.probe_points],
-            "timing_rows": [
-                {"label": timing.label, "seconds": timing.seconds, "note": timing.note}
-                for timing in timing_run.timing_rows
-            ],
-            "commands": [_command_summary(command) for command in commands],
-            "total_command_time_s": sum(command.elapsed_s for command in commands),
-            "pyamplicol_generation": native_generation,
-        }
-        _attach_native_probe_comparison(
-            process,
-            run,
-            row,
-            runtime_backend=_z_gluon_family_runtime_backend(
-                gluon_count,
-                _runtime_backend(args),
-            ),
-            runtime_evaluator_kwargs=_runtime_evaluator_kwargs(args),
-        )
-        rows.append(row)
-
-    summary = _z_gluon_family_summary(rows)
-    passed = _z_gluon_family_passed(summary, rel_tol=args.rel_tol)
-    payload = {
-        "family": "d d~ -> Z + n g",
-        "min_gluons": args.min_gluons,
-        "max_gluons": args.max_gluons,
-        "points": args.points,
-        "rel_tol": args.rel_tol,
-        "passed": passed,
-        "runtime_backend": args.runtime_backend,
-        "summary": summary,
-        "rows": rows,
-    }
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(
-            "d d~ -> Z + n g validation: "
-            f"n={args.min_gluons}..{args.max_gluons}, points={args.points}"
-        )
-        print(
-            "validated rows: "
-            f"{summary['validated_rows']}/{summary['requested_rows']}; "
-            f"max rel diff={summary['max_relative_difference']}; "
-            f"rel_tol={args.rel_tol}; passed={passed}"
-        )
-        for row in rows:
-            probe_summary = row.get("native_probe_summary")
-            max_rel = (
-                probe_summary.get("max_relative_difference")
-                if isinstance(probe_summary, dict)
-                else None
-            )
-            runtime = row.get("native_runtime")
-            mean_runtime = (
-                runtime.get("mean_per_point_s")
-                if isinstance(runtime, dict)
-                else None
-            )
-            probe_points = row.get("probe_points")
-            probe_point_count = len(probe_points) if isinstance(probe_points, list) else 0
-            print(
-                f"n={row['gluon_count']}: "
-                f"points={probe_point_count}, "
-                f"max_rel={max_rel}, "
-                f"pyamplicol_mean_s={mean_runtime}"
-            )
-    return 0 if passed else 1
-
-
-def _cmd_benchmark_z_gluon_modes(args: argparse.Namespace) -> int:
-    return _legacy_z_gluon_command_unavailable(args, "benchmark-z-gluon-modes")
-
-
-def _cmd_benchmark_z_gluon_modes_reference(args: argparse.Namespace) -> int:
-    from .benchmarks import benchmark_z_gluon_modes, format_mode_benchmark_table
-
-    evaluator_build_kwargs = _runtime_evaluator_kwargs(args)
-    evaluator_build_kwargs["runtime_backend"] = "dag"
-    payload = benchmark_z_gluon_modes(
-        min_gluons=args.min_gluons,
-        max_gluons=args.max_gluons,
-        points=args.points,
-        timing=args.timing,
-        amplicol_root=args.amplicol_root,
-        jobs=args.jobs,
-        timeout=args.timeout,
-        options=_process_options(args),
-        numeric_timeout=args.numeric_timeout,
-        parametric_timeout=args.parametric_timeout,
-        parametric_max_gluons=args.parametric_max_gluons,
-        tensor_strategy=args.tensor_strategy,
-        output=args.output,
-        batch_size=args.batch_size,
-        merge_evaluators_strategy=args.merge_evaluators_strategy,
-        verbose_evaluator_build=args.verbose_evaluator_build,
-        evaluator_build_kwargs=evaluator_build_kwargs,
-        include_python=not args.only_legacy_shared,
-        include_numeric_tn=not args.only_legacy_shared,
-        include_parametric_tn=not args.only_legacy_shared,
-        include_shared_dag=True,
-    )
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(
-            "d d~ -> Z + n g mode benchmark: "
-            f"n={args.min_gluons}..{args.max_gluons}, points={args.points}, "
-            f"tensor_strategy={args.tensor_strategy}, batch_size={args.batch_size}"
-        )
-        print(format_mode_benchmark_table(payload))
-        summary = payload["summary"]
-        print(
-            "successful rows: "
-            f"A={summary['mode_success_counts']['legacy']}, "
-            f"B={summary['mode_success_counts']['python']}, "
-            f"C={summary['mode_success_counts']['numeric_tn']}, "
-            f"D-scalar={summary['mode_success_counts']['parametric_tn']}, "
-            f"D-shared={summary['mode_success_counts']['shared_dag']}"
-        )
-        print(
-            "max rel diff to legacy among available pyamplicol modes: "
-            f"{summary['max_relative_difference_to_legacy']}"
-        )
-        print(
-            "all four modes match for all rows: "
-            f"{summary['all_four_modes_match_for_all_rows']}"
-        )
-    return 0
-
-
-def _cmd_profile_tensor_evaluator(args: argparse.Namespace) -> int:
-    return _legacy_z_gluon_command_unavailable(args, "profile-tensor-evaluator")
-
-
-def _cmd_profile_tensor_evaluator_reference(args: argparse.Namespace) -> int:
-    from .benchmarks import profile_z_gluon_tensor_evaluator
-
-    payload = profile_z_gluon_tensor_evaluator(
-        args.process,
-        sqrt_s=args.sqrt_s,
-        repetitions=args.repetitions,
-        evaluator_repetitions=args.evaluator_repetitions,
-        tensor_strategy=args.tensor_strategy,
-    )
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(f"process: {payload['process']}")
-        print(f"tensor strategy: {payload['tensor_strategy']}")
-        print(f"gluon count: {payload['gluon_count']}")
-        print(f"generation: {payload['generation_s']:.6g} s")
-        print(
-            "pure evaluator call: "
-            f"{payload['pure_evaluator_call_us']:.6g} us"
-        )
-        print(f"full evaluate: {payload['full_evaluate_ms']:.6g} ms")
-        print(
-            "full evaluate per helicity: "
-            f"{payload['full_evaluate_per_helicity_us']:.6g} us"
-        )
-    return 0
-
-
-def _cmd_profile_dag_evaluator(args: argparse.Namespace) -> int:
-    runtime_backend = _runtime_backend(args)
-    if bool(getattr(args, "generate_only", False)):
-        return _cmd_generate_dag_evaluator_artifact(args, runtime_backend)
-    message = (
-        "profile-dag-evaluator is a legacy Z+gluon profiler. Production "
-        "profiling now uses generic DAG process artifacts: run "
-        "`generate-process PROCESS OUTPUT_DIR` and then `time-process OUTPUT_DIR`."
-    )
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "available": False,
-                    "error": message,
-                    "process": args.process,
-                    "runtime_backend": runtime_backend,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-    else:
-        print(message, file=sys.stderr)
-    return 1
 
 
 def _cmd_generate_process(args: argparse.Namespace) -> int:
@@ -3534,8 +2682,11 @@ def _cmd_generate_process(args: argparse.Namespace) -> int:
         entries=report.entries,
         selection_report=report,
     )
-    if len(process_set.entries) == 1 and not any(
-        marker in args.process for marker in ("|", "[")
+    updates_existing_set = _updates_existing_process_set(args)
+    if (
+        len(process_set.entries) == 1
+        and not any(marker in args.process for marker in ("|", "["))
+        and not updates_existing_set
     ):
         args.process = process_set.entries[0].process
         return _cmd_generate_generic_dag_artifact(args, process_set.entries[0])
@@ -3591,12 +2742,19 @@ def _cmd_generate_model_process(args: argparse.Namespace) -> int:
             args,
             ValueError(f"no valid processes found for {args.process!r}"),
         )
-    if len(process_set.entries) == 1:
+    if len(process_set.entries) == 1 and not _updates_existing_process_set(args):
         args._compiled_model = compiled
         args.process = process_set.entries[0].process
         return _cmd_generate_generic_dag_artifact(args, process_set.entries[0])
     args._compiled_model = compiled
     return _cmd_generate_process_set(args, process_set)
+
+
+def _updates_existing_process_set(args: argparse.Namespace) -> bool:
+    output_dir = getattr(args, "output_dir", None)
+    if output_dir is None or not (args.append or args.replace):
+        return False
+    return (Path(output_dir).expanduser() / "process_set_manifest.json").exists()
 
 
 def _cmd_generate_process_dry_run(
@@ -3851,6 +3009,7 @@ def _cmd_generate_generic_dag_artifact(
             verbose_evaluator_build=bool(build_kwargs["verbose_evaluator_build"]),
             progress_callback=progress_callback,
             write_generic_plan=not bool(getattr(args, "skip_generic_plan", False)),
+            emit_api_bundle=not bool(getattr(args, "no_api_bundle", False)),
             **writer_kwargs,
             **pruning_kwargs,
         )
@@ -4390,6 +3549,13 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
             if key not in ordered_keys:
                 ordered_keys.append(key)
     process_entries = [merged[key] for key in ordered_keys if key in merged]
+    _attach_process_set_physics_metadata(
+        root,
+        process_entries,
+        entries,
+        color_accuracy=str(getattr(args, "color_accuracy", "lc")),
+        options=_process_options(args),
+    )
     existing_default_key = (
         str(existing.get("default_process_key"))
         if isinstance(existing, dict)
@@ -4424,10 +3590,13 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
         json.dumps(process_set_manifest, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    (root / "check_standalone.py").write_text(
-        _PROCESS_SET_STANDALONE_CHECK_SCRIPT,
-        encoding="utf-8",
-    )
+    from .api_bundle import remove_api_bundle, write_api_bundle
+
+    for entry in process_entries:
+        relative_path = Path(str(entry.get("path", "")))
+        subprocess_dir = relative_path if relative_path.is_absolute() else root / relative_path
+        remove_api_bundle(subprocess_dir)
+    write_api_bundle(root)
     if args.json:
         print(
             json.dumps(
@@ -4454,6 +3623,59 @@ def _cmd_generate_process_set(args: argparse.Namespace, process_set: object) -> 
             ],
         )
     return 0
+
+
+def _attach_process_set_physics_metadata(
+    root: Path,
+    process_entries: Sequence[dict[str, object]],
+    requested_entries: Sequence[Any],
+    *,
+    color_accuracy: str,
+    options: ProcessOptions,
+) -> None:
+    from .generic_artifact import remap_process_set_physics
+    from .process_ir import build_process_ir
+
+    requested_by_key = {
+        str(entry.key): entry
+        for entry in requested_entries
+        if getattr(entry, "key", None) is not None
+    }
+    for process_entry in process_entries:
+        relative_path = Path(str(process_entry.get("path", "")))
+        process_root = relative_path if relative_path.is_absolute() else root / relative_path
+        manifest_path = process_root / "process_manifest.json"
+        try:
+            process_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        runtime_schema = process_manifest.get("runtime_schema")
+        if not isinstance(runtime_schema, Mapping):
+            continue
+        representative_physics = runtime_schema.get("physics")
+        if not isinstance(representative_physics, Mapping):
+            continue
+        key = str(process_entry.get("key", ""))
+        requested = requested_by_key.get(key)
+        selected_ir = getattr(requested, "ir", None)
+        if selected_ir is None:
+            try:
+                selected_ir = build_process_ir(
+                    str(process_entry["process"]),
+                    color_accuracy=color_accuracy,
+                    options=options,
+                )
+            except (TypeError, ValueError):
+                continue
+        crossing_map = process_entry.get("input_crossing_map")
+        process_entry["physics"] = remap_process_set_physics(
+            representative_physics,
+            selected_ir,
+            cast(
+                Sequence[Mapping[str, object]] | None,
+                crossing_map if isinstance(crossing_map, list) else None,
+            ),
+        )
 
 
 def _generic_process_set_generation_metadata(
@@ -4511,6 +3733,7 @@ def _generate_process_child_command(
         process,
         str(output_dir),
         "--json",
+        "--no-api-bundle",
         "--color-accuracy",
         str(getattr(args, "color_accuracy", "lc")),
         "--flavour-scheme",
@@ -5243,10 +4466,7 @@ def _load_process_set_manifest(root: Path) -> dict[str, object] | None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"process-set manifest is not a JSON object: {path}")
-    if payload.get("kind") not in {
-        "pyamplicol-rusticol-process-set",
-        "pyamplicol-generic-dag-process-set",
-    }:
+    if payload.get("kind") != "pyamplicol-generic-dag-process-set":
         raise ValueError(f"unsupported process-set artifact kind: {payload.get('kind')!r}")
     return payload
 
@@ -6137,70 +5357,6 @@ def _compact_rusticol_profile(profile: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
-def _cmd_generate_dag_evaluator_artifact(
-    args: argparse.Namespace,
-    runtime_backend: str,
-) -> int:
-    save_dir = getattr(args, "save_evaluator_dir", None)
-    if save_dir is None:
-        message = "--generate-only requires --save-evaluator-dir"
-        if args.json:
-            print(
-                json.dumps(
-                    {
-                        "available": False,
-                        "error": message,
-                        "process": args.process,
-                        "runtime_backend": runtime_backend,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-        else:
-            print(message, file=sys.stderr)
-        return 1
-    if runtime_backend != "rusticol":
-        message = (
-            "--generate-only only writes production generic DAG process "
-            "artifacts through the Rusticol runtime. Use `generate-process` "
-            "for new workflows."
-        )
-        if args.json:
-            print(
-                json.dumps(
-                    {
-                        "available": False,
-                        "error": message,
-                        "process": args.process,
-                        "runtime_backend": runtime_backend,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-        else:
-            print(message, file=sys.stderr)
-        return 1
-
-    delegate = argparse.Namespace(**vars(args))
-    delegate.output_dir = Path(save_dir)
-    delegate.color_accuracy = getattr(delegate, "color_accuracy", "lc")
-    delegate.append = getattr(delegate, "append", False)
-    delegate.replace = getattr(delegate, "replace", False)
-    delegate.n_cores = getattr(delegate, "n_cores", 1)
-    delegate.flavour_scheme = getattr(delegate, "flavour_scheme", 5)
-    delegate.include_3qqbar = getattr(delegate, "include_3qqbar", False)
-    delegate.include_cc = getattr(delegate, "include_cc", False)
-    delegate.include_resonance = getattr(delegate, "include_resonance", False)
-    delegate.parallel_process_enumeration = getattr(
-        delegate,
-        "parallel_process_enumeration",
-        False,
-    )
-    return _cmd_generate_process(delegate)
-
-
 def _format_error(value: object) -> str:
     if not isinstance(value, (float, int)):
         return "n/a"
@@ -6269,101 +5425,6 @@ def _process_gluon_count_hint(process: str) -> int:
         return 0
     final_state = process.split(">", 1)[1]
     return sum(1 for token in final_state.lower().split() if token == "g")
-
-
-def _charged_leptonic_w_effective_process(
-    process: str,
-    *,
-    vector_pdg: int,
-    gluon_count: int,
-) -> str:
-    initial, separator, _final = process.partition(">")
-    if not separator:
-        raise NativeEvaluationError(
-            "invalid charged-current process string; expected 'initial > final'"
-        )
-    if vector_pdg == 24:
-        vector_name = "w+"
-    elif vector_pdg == -24:
-        vector_name = "w-"
-    else:
-        raise NativeEvaluationError(
-            f"charged-current effective process needs W+/W-, got {vector_pdg}"
-        )
-    final_tokens = [vector_name, *(["g"] * gluon_count)]
-    return f"{initial.strip()} > {' '.join(final_tokens)}"
-
-
-def _neutral_dilepton_effective_process(
-    process: str,
-    *,
-    gluon_count: int,
-) -> str:
-    initial, separator, _final = process.partition(">")
-    if not separator:
-        raise NativeEvaluationError(
-            "invalid neutral-dilepton process string; expected 'initial > final'"
-        )
-    final_tokens = ["z", *(["g"] * gluon_count)]
-    return f"{initial.strip()} > {' '.join(final_tokens)}"
-
-
-def _cmd_profile(args: argparse.Namespace) -> int:
-    return _legacy_native_command_unavailable(args, "profile")
-
-
-def _cmd_profile_reference(args: argparse.Namespace) -> int:
-    from .evaluation import NativeRuntimeEvaluator
-    from .legacy_matrix import NativeMatrixElementGenerator
-
-    generator = NativeMatrixElementGenerator(cache_dir=args.cache_dir)
-    result = generator.generate(args.process, options=_process_options(args))
-    artifact = _load_optional_evaluator_artifact(args.cache_dir, args.process)
-    per_point_runtime_s = None
-    runtime_metadata = None
-    try:
-        evaluator = NativeRuntimeEvaluator(
-            args.process,
-            runtime_backend=_runtime_backend(args),
-            allow_reference_legacy=True,
-            **_runtime_evaluator_kwargs(args),
-        )
-        start = time.perf_counter()
-        evaluator.evaluate()
-        per_point_runtime_s = time.perf_counter() - start
-        runtime_metadata = evaluator.metadata.to_json_dict()
-    except NativeEvaluationError:
-        per_point_runtime_s = None
-    payload = result.to_json_dict()
-    payload["profile"] = {
-        "generation_time_s": result.generation_time_s,
-        "tensor_network_reduction_s": _tensor_network_reduction_time(artifact),
-        "symbolica_optimization_jit_s": _symbolic_evaluator_build_time(artifact),
-        "artifact_cache_hit": result.artifact_cache_hit,
-        "artifact_load_s": None if artifact is None else artifact.load_time_s,
-        "per_point_runtime_s": per_point_runtime_s,
-        "native_runtime_backend": runtime_metadata,
-    }
-    payload["profile_notes"] = (
-        "Generation/cache/load/runtime timing is available for the staged native "
-        "kernel; Symbolica evaluator build and tensor-network reduction timing are "
-        "reported when an evaluator artifact is present."
-    )
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(f"generation metadata time: {result.generation_time_s:.6g} s")
-        if artifact is not None:
-            print(f"artifact load time: {artifact.load_time_s:.6g} s")
-        if runtime_metadata is not None:
-            print(
-                "native backend: "
-                f"{runtime_metadata['backend']} ({runtime_metadata['kernel']})"
-            )
-        if per_point_runtime_s is not None:
-            print(f"native per-point runtime: {per_point_runtime_s:.6g} s")
-        print(payload["profile_notes"])
-    return 0
 
 
 def _process_enumeration_to_dict(enumeration: ProcessEnumeration) -> dict[str, object]:
@@ -6497,276 +5558,6 @@ def _evaluation_to_dict(
     }
 
 
-def _native_generation_profile(
-    process: str,
-    cache_dir: Path,
-    options: ProcessOptions,
-) -> dict[str, object]:
-    from .legacy_matrix import NativeMatrixElementGenerator
-
-    result = NativeMatrixElementGenerator(cache_dir=cache_dir).generate(
-        process,
-        options=options,
-    )
-    artifact = _load_optional_evaluator_artifact(cache_dir, process)
-    artifact_payload = {} if artifact is None else artifact.payload
-    full_me_ready = artifact_payload.get("full_me_tensor_network_ready")
-    graph_counts = artifact_payload.get("graph_counts")
-    blueprint = _tensor_network_blueprint_summary(artifact_payload)
-    return {
-        "cache_dir": str(cache_dir),
-        "metadata_file": None if result.cache_file is None else str(result.cache_file),
-        "artifact_file": (
-            None if result.artifact_file is None else str(result.artifact_file)
-        ),
-        "backend": result.backend,
-        "kernel": artifact_payload.get("kernel"),
-        "artifact_fingerprint": result.artifact_fingerprint,
-        "artifact_cache_hit": result.artifact_cache_hit,
-        "artifact_load_s": None if artifact is None else artifact.load_time_s,
-        "generation_time_s": result.generation_time_s,
-        "supported_native_target": result.supported_native_target,
-        "full_me_tensor_network_ready": full_me_ready,
-        "graph_counts": graph_counts,
-        "tensor_network_blueprint": blueprint,
-    }
-
-
-def _tensor_network_blueprint_summary(
-    artifact_payload: dict[str, object],
-) -> dict[str, object] | None:
-    lowering = artifact_payload.get("symbolic_lowering")
-    if not isinstance(lowering, dict):
-        return None
-    blueprint = lowering.get("tensor_network_blueprint")
-    if not isinstance(blueprint, dict):
-        return None
-    keys = (
-        "engine",
-        "status",
-        "expression_built",
-        "expression_executed",
-        "ready_interactions",
-        "pending_interactions",
-        "placeholder_vertex_kinds",
-        "registered_tensor_names",
-        "expression_length",
-        "executed_expression_length",
-        "execution_time_s",
-        "full_me_tensor_network_ready",
-        "propagator_lowering_ready",
-    )
-    return {key: blueprint.get(key) for key in keys}
-
-
-def _load_optional_evaluator_artifact(
-    cache_dir: Path,
-    process: str,
-) -> Any | None:
-    from .legacy_matrix import load_evaluator_artifact
-
-    try:
-        return load_evaluator_artifact(cache_dir, process)
-    except (OSError, ValueError):
-        return None
-
-
-def _artifact_status(
-    cache_dir: Path,
-    process: str,
-    artifact: Any | None,
-) -> dict[str, object]:
-    from .legacy_matrix import evaluator_artifact_path
-
-    if artifact is None:
-        return {
-            "available": False,
-            "file": str(evaluator_artifact_path(cache_dir, process)),
-        }
-    payload = artifact.payload
-    return {
-        "available": True,
-        "file": str(artifact.file),
-        "load_time_s": artifact.load_time_s,
-        "schema_version": payload.get("schema_version"),
-        "artifact_fingerprint": payload.get("artifact_fingerprint"),
-        "backend": payload.get("backend"),
-        "kernel": payload.get("kernel"),
-        "full_me_tensor_network_ready": payload.get("full_me_tensor_network_ready"),
-        "symbolic_scalar_evaluator_ready": payload.get(
-            "symbolic_scalar_evaluator_ready"
-        ),
-        "tensor_network_scalar_evaluator_ready": payload.get(
-            "tensor_network_scalar_evaluator_ready"
-        ),
-    }
-
-
-def _symbolic_artifact_evaluation(
-    process: str,
-    native_result: object,
-    artifact: Any | None,
-) -> dict[str, object]:
-    if artifact is None:
-        return {
-            "available": False,
-            "reason": "no evaluator artifact loaded",
-        }
-    kernel = artifact.payload.get("kernel")
-    if kernel == "symbolica-zero-gluon":
-        return _zero_gluon_artifact_evaluation(process, native_result, artifact)
-    if kernel == "symbolica-one-gluon-tensor-network":
-        return _z_gluon_tensor_network_artifact_evaluation(
-            process,
-            native_result,
-            artifact,
-            kernel=kernel,
-        )
-    if kernel == "symbolica-z-gluon-tensor-network":
-        return _z_gluon_tensor_network_artifact_evaluation(
-            process,
-            native_result,
-            artifact,
-            kernel=kernel,
-        )
-    return {
-        "available": False,
-        "reason": f"artifact kernel is {kernel!r}",
-    }
-
-
-def _zero_gluon_artifact_evaluation(
-    process: str,
-    native_result: object,
-    artifact: Any,
-) -> dict[str, object]:
-    from .symbolic import ZeroGluonSymbolicEvaluator
-
-    evaluator_payload = artifact.payload.get("symbolic_scalar_evaluator")
-    if not isinstance(evaluator_payload, dict):
-        return {
-            "available": False,
-            "reason": "artifact has no symbolic scalar evaluator payload",
-        }
-    kernel = "symbolica-zero-gluon"
-    try:
-        start = time.perf_counter()
-        symbolic = ZeroGluonSymbolicEvaluator.from_artifact_payload(evaluator_payload)
-        symbolic_result = symbolic.evaluate(
-            process,
-            getattr(native_result, "particles"),
-        )
-        elapsed_s = time.perf_counter() - start
-    except (KeyError, TypeError, ValueError, RuntimeError, NativeEvaluationError) as exc:
-        return {
-            "available": False,
-            "kernel": kernel,
-            "reason": str(exc),
-        }
-
-    return _symbolic_evaluation_success_payload(
-        kernel=kernel,
-        native_result=native_result,
-        matrix_element=symbolic_result.matrix_element,
-        raw_helicity_sum=symbolic_result.raw_helicity_sum,
-        elapsed_s=elapsed_s,
-    )
-
-
-def _z_gluon_tensor_network_artifact_evaluation(
-    process: str,
-    native_result: object,
-    artifact: Any,
-    *,
-    kernel: str,
-) -> dict[str, object]:
-    evaluator_payload = artifact.payload.get("tensor_network_scalar_evaluator")
-    if not isinstance(evaluator_payload, dict):
-        return {
-            "available": False,
-            "reason": "artifact has no tensor-network scalar evaluator payload",
-        }
-    try:
-        from .tensor_runtime import ZGluonTensorNetworkEvaluator
-
-        start = time.perf_counter()
-        evaluator = ZGluonTensorNetworkEvaluator.from_artifact_payload(
-            process,
-            evaluator_payload,
-        )
-        tensor_result = evaluator.evaluate(
-            getattr(native_result, "particles"),
-        )
-        elapsed_s = time.perf_counter() - start
-    except (KeyError, TypeError, ValueError, RuntimeError, NativeEvaluationError) as exc:
-        return {
-            "available": False,
-            "kernel": kernel,
-            "reason": str(exc),
-        }
-
-    return _symbolic_evaluation_success_payload(
-        kernel=kernel,
-        native_result=native_result,
-        matrix_element=tensor_result.matrix_element,
-        raw_helicity_sum=tensor_result.raw_helicity_sum,
-        elapsed_s=elapsed_s,
-    )
-
-
-def _symbolic_evaluation_success_payload(
-    *,
-    kernel: str,
-    native_result: object,
-    matrix_element: float,
-    raw_helicity_sum: float,
-    elapsed_s: float,
-) -> dict[str, object]:
-    native_me = float(getattr(native_result, "matrix_element"))
-    denom = max(abs(native_me), abs(matrix_element), 1.0e-300)
-    return {
-        "available": True,
-        "kernel": kernel,
-        "matrix_element": matrix_element,
-        "raw_helicity_sum": raw_helicity_sum,
-        "relative_difference": abs(matrix_element - native_me) / denom,
-        "evaluation_time_s": elapsed_s,
-    }
-
-
-def _symbolic_evaluator_build_time(
-    artifact: Any | None,
-) -> float | None:
-    if artifact is None:
-        return None
-    evaluator_payload = artifact.payload.get("symbolic_scalar_evaluator")
-    if not isinstance(evaluator_payload, dict):
-        evaluator_payload = artifact.payload.get("tensor_network_scalar_evaluator")
-    if not isinstance(evaluator_payload, dict):
-        return None
-    build_time = evaluator_payload.get("build_time_s")
-    if not isinstance(build_time, (float, int)):
-        metadata = evaluator_payload.get("metadata")
-        if isinstance(metadata, dict):
-            build_time = metadata.get("symbolica_evaluator_build_s")
-    return float(build_time) if isinstance(build_time, (float, int)) else None
-
-
-def _tensor_network_reduction_time(
-    artifact: Any | None,
-) -> float | None:
-    if artifact is None:
-        return None
-    evaluator_payload = artifact.payload.get("tensor_network_scalar_evaluator")
-    if not isinstance(evaluator_payload, dict):
-        return None
-    metadata = evaluator_payload.get("metadata")
-    if not isinstance(metadata, dict):
-        return None
-    reduction_time = metadata.get("tensor_network_reduction_s")
-    return float(reduction_time) if isinstance(reduction_time, (float, int)) else None
-
-
 def _amplicol_dry_run_payload(
     args: argparse.Namespace,
     options: ProcessOptions,
@@ -6844,150 +5635,6 @@ def _amplicol_dry_run_payload(
         "pyamplicol_runtime_backend": args.runtime_backend,
         "commands": commands,
     }
-
-
-def _z_gluon_family_process(gluon_count: int) -> str:
-    if gluon_count == 0:
-        return "d d~ > z"
-    return "d d~ > z " + " ".join("g" for _ in range(gluon_count))
-
-
-def _z_gluon_family_dry_run_payload(
-    args: argparse.Namespace,
-    options: ProcessOptions,
-) -> dict[str, object]:
-    rows: list[dict[str, object]] = []
-    for gluon_count in range(args.min_gluons, args.max_gluons + 1):
-        process = _z_gluon_family_process(gluon_count)
-        timing = args.points if args.timing is None else args.timing
-        probe_flag = "--amplicol_fixed_probe" if gluon_count == 0 else "--amplicol_probe"
-        mode = "amplicol_fixed_probe_library" if gluon_count == 0 else "amplicol_probe_library"
-        commands = [
-            ["make", "cleanlib"],
-            ["make", f"-j{args.jobs}", "amplicol_generate"],
-            [
-                "./amplicol_generate",
-                "--library=create",
-                "--process=processes.txt",
-            ],
-            ["make", f"-j{args.jobs}", "amplicol_generate_library"],
-            [
-                "./amplicol_generate",
-                f"{probe_flag}={args.points}",
-                f"--timing={timing}",
-                "--process=processes.txt",
-                "--library=use",
-            ],
-            [
-                "./amplicol_generate",
-                "--library=use",
-                f"--nevents={timing}",
-                "--seed=101",
-                "--timing=1",
-            ],
-        ]
-        rows.append(
-            {
-                "gluon_count": gluon_count,
-                "process": process,
-                "mode": mode,
-                "fortran_timing_workflow": "generated_library_use",
-                "runtime_backend": _z_gluon_family_runtime_backend(
-                    gluon_count,
-                    _runtime_backend(args),
-                ),
-                "commands": commands,
-            }
-        )
-    return {
-        "family": "d d~ -> Z + n g",
-        "min_gluons": args.min_gluons,
-        "max_gluons": args.max_gluons,
-        "points": args.points,
-        "rel_tol": args.rel_tol,
-        "timing": args.points if args.timing is None else args.timing,
-        "options": {
-            "flavour_scheme": options.flavour_scheme,
-            "include_3qqbar": options.include_3qqbar,
-            "include_cc": options.include_cc,
-            "include_resonance": options.include_resonance,
-            "serial": options.serial,
-        },
-        "amplicol_root": str(args.amplicol_root),
-        "pyamplicol_cache_dir": str(args.cache_dir),
-        "pyamplicol_runtime_backend": args.runtime_backend,
-        "rows": rows,
-    }
-
-
-def _z_gluon_family_summary(rows: Sequence[dict[str, object]]) -> dict[str, object]:
-    max_relative_difference = None
-    validated_rows = 0
-    total_reference_points = 0
-    total_native_points = 0
-    total_command_time_s = 0.0
-    pyamplicol_runtime_total_s = 0.0
-    for row in rows:
-        command_time = row.get("total_command_time_s")
-        if isinstance(command_time, (float, int)):
-            total_command_time_s += float(command_time)
-        summary = row.get("native_probe_summary")
-        if not isinstance(summary, dict):
-            continue
-        reference_points = int(summary.get("reference_points", 0))
-        available_points = int(summary.get("available_points", 0))
-        total_reference_points += reference_points
-        total_native_points += available_points
-        failures = summary.get("failures")
-        if available_points == reference_points and not failures:
-            validated_rows += 1
-        row_max = summary.get("max_relative_difference")
-        if isinstance(row_max, (float, int)):
-            max_relative_difference = (
-                float(row_max)
-                if max_relative_difference is None
-                else max(max_relative_difference, float(row_max))
-            )
-        runtime = row.get("native_runtime")
-        if isinstance(runtime, dict):
-            runtime_total = runtime.get("total_s")
-            if isinstance(runtime_total, (float, int)):
-                pyamplicol_runtime_total_s += float(runtime_total)
-    return {
-        "requested_rows": len(rows),
-        "validated_rows": validated_rows,
-        "reference_points": total_reference_points,
-        "native_points": total_native_points,
-        "max_relative_difference": max_relative_difference,
-        "total_command_time_s": total_command_time_s,
-        "pyamplicol_runtime_total_s": pyamplicol_runtime_total_s,
-    }
-
-
-def _z_gluon_family_passed(
-    summary: dict[str, object],
-    *,
-    rel_tol: float,
-) -> bool:
-    requested_rows = summary.get("requested_rows")
-    validated_rows = summary.get("validated_rows")
-    max_relative_difference = summary.get("max_relative_difference")
-    if not isinstance(requested_rows, int) or not isinstance(validated_rows, int):
-        return False
-    if requested_rows == 0 or validated_rows != requested_rows:
-        return False
-    if not isinstance(max_relative_difference, (float, int)):
-        return False
-    return float(max_relative_difference) <= rel_tol
-
-
-def _z_gluon_family_runtime_backend(
-    gluon_count: int,
-    requested: str,
-) -> str:
-    if gluon_count == 0 and requested in ("dag", "numeric-tensor-network"):
-        return "python"
-    return requested
 
 
 def _rusticol_generation_profile(
@@ -7151,137 +5798,6 @@ def _probe_point_to_dict(point: object) -> dict[str, object]:
             for particle in getattr(point, "particles")
         ],
     }
-
-
-def _attach_native_probe_comparison(
-    process: str,
-    run: object,
-    payload: dict[str, object],
-    *,
-    runtime_backend: str = "auto",
-    runtime_evaluator_kwargs: dict[str, Any] | None = None,
-) -> None:
-    reference_points = list(getattr(run, "probe_points"))
-    first_phase_space_point = getattr(run, "first_phase_space_point")
-    if not reference_points and first_phase_space_point is not None:
-        matrix_element = getattr(first_phase_space_point, "matrix_element")
-        if matrix_element is not None:
-            reference_points = [first_phase_space_point]
-    if not reference_points:
-        return
-
-    from .evaluation import NativeRuntimeEvaluator
-
-    evaluator = NativeRuntimeEvaluator(
-        process,
-        runtime_backend=cast(RuntimeBackend, runtime_backend),
-        allow_reference_legacy=True,
-        **(runtime_evaluator_kwargs or {}),
-    )
-    native_points: list[dict[str, int | float]] = []
-    failures: list[str] = []
-    timing_component_fields = (
-        "source_fill_time_s",
-        "momentum_setup_time_s",
-        "parameter_pack_time_s",
-        "evaluator_time_s",
-        "output_transfer_time_s",
-        "result_reduction_time_s",
-    )
-    timing_components = {field: 0.0 for field in timing_component_fields}
-    timing_seen = False
-    for point in reference_points:
-        try:
-            start = time.perf_counter()
-            native = evaluator.evaluate(particles=getattr(point, "particles"))
-            elapsed_s = time.perf_counter() - start
-        except NativeEvaluationError as exc:
-            failures.append(str(exc))
-            continue
-        reference_me = float(getattr(point, "matrix_element"))
-        denom = max(abs(reference_me), abs(native.matrix_element), 1.0e-300)
-        native_points.append(
-            {
-                "point": getattr(point, "point", 1),
-                "reference_matrix_element": reference_me,
-                "native_matrix_element": native.matrix_element,
-                "relative_difference": abs(native.matrix_element - reference_me) / denom,
-                "native_runtime_s": elapsed_s,
-            }
-        )
-        runtime_impl = getattr(evaluator, "_runtime", None)
-        timing = getattr(runtime_impl, "last_runtime_timing", None)
-        timing_to_json = getattr(timing, "to_json_dict", None)
-        if callable(timing_to_json):
-            timing_payload = timing_to_json()
-            timing_seen = True
-            for field in timing_component_fields:
-                timing_components[field] += float(timing_payload.get(field, 0.0))
-
-    runtime_metadata = evaluator.refresh_metadata().to_json_dict()
-    payload["native_runtime_backend"] = runtime_metadata
-
-    if native_points:
-        first = native_points[0]
-        payload["native_first_point_available"] = True
-        payload["native_first_point_matrix_element"] = first["native_matrix_element"]
-        payload["native_first_point_relative_difference"] = first["relative_difference"]
-    elif failures:
-        payload["native_first_point_available"] = False
-        payload["native_first_point_reason"] = failures[0]
-
-    payload["native_probe_points"] = native_points
-    payload["native_probe_summary"] = {
-        "reference_points": len(reference_points),
-        "available_points": len(native_points),
-        "max_relative_difference": (
-            max(float(point["relative_difference"]) for point in native_points)
-            if native_points
-            else None
-        ),
-        "failures": failures,
-    }
-    if native_points:
-        runtimes = [float(point["native_runtime_s"]) for point in native_points]
-        total_s = sum(runtimes)
-        timing_breakdown: dict[str, object] | None = None
-        if timing_seen:
-            python_overhead = (
-                timing_components["source_fill_time_s"]
-                + timing_components["momentum_setup_time_s"]
-                + timing_components["parameter_pack_time_s"]
-                + timing_components["output_transfer_time_s"]
-                + timing_components["result_reduction_time_s"]
-            )
-            timing_breakdown = {
-                **timing_components,
-                "python_overhead_time_s": python_overhead,
-                "measured_time_s": python_overhead
-                + timing_components["evaluator_time_s"],
-            }
-        evaluator_only_total_s = (
-            _float_or_none(timing_breakdown.get("evaluator_time_s"))
-            if isinstance(timing_breakdown, dict)
-            else None
-        )
-        payload["native_runtime"] = {
-            "evaluated_points": len(runtimes),
-            "total_s": total_s,
-            "mean_per_point_s": total_s / len(runtimes),
-            "min_per_point_s": min(runtimes),
-            "max_per_point_s": max(runtimes),
-            "setup_time_s": evaluator.metadata.setup_time_s,
-            "timing_breakdown_total_s": timing_breakdown,
-            "evaluator_only_total_s": evaluator_only_total_s,
-            "evaluator_only_mean_per_point_s": (
-                evaluator_only_total_s / len(runtimes)
-                if evaluator_only_total_s is not None
-                else None
-            ),
-            "evaluations_per_second": (
-                len(runtimes) / total_s if total_s > 0.0 else None
-            ),
-        }
 
 
 def _attach_rusticol_probe_comparison(

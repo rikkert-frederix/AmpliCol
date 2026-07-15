@@ -13,37 +13,16 @@ import pyamplicol
 import pyamplicol.__main__ as cli
 from pyamplicol.__main__ import (
     _apply_model_generation_symbolica_defaults,
-    _attach_native_probe_comparison,
     _attach_rusticol_probe_comparison_from_runtime,
     _generation_build_kwargs,
     _runtime_backend,
     _runtime_evaluator_kwargs,
-    _z_gluon_family_passed,
     main,
     parse_args,
 )
-from pyamplicol.native import ExternalMomentum
+from pyamplicol.core_types import ExternalMomentum
 from pyamplicol.processes import ProcessOptions
 from pyamplicol.reference import AmplicolProbePoint, AmplicolWorkflowResult
-
-
-def _assert_legacy_native_command_payload(
-    capsys,
-    *,
-    command: str,
-    process: str,
-    runtime_backend: str | None = None,
-) -> dict[str, object]:
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["available"] is False
-    assert payload["command"] == command
-    assert payload["process"] == process
-    assert "legacy native-kernel command" in payload["error"]
-    assert "generate-process PROCESS OUTPUT_DIR" in payload["error"]
-    assert "time-process OUTPUT_DIR" in payload["error"]
-    if runtime_backend is not None:
-        assert payload["runtime_backend"] == runtime_backend
-    return payload
 
 
 def test_cli_processes_json_and_legacy_export(
@@ -483,186 +462,6 @@ def test_cli_process_plan_writes_process_set_with_unsupported_diagnostics(
     ).exists()
 
 
-def test_cli_rejects_compiled_dag_shortcut_on_legacy_native_command() -> None:
-    with pytest.raises(SystemExit) as exc:
-        parse_args(
-            [
-                "evaluate",
-                "--compiled-dag-evaluator",
-                "d d~ > z g",
-            ]
-        )
-
-    assert exc.value.code == 2
-
-
-def test_cli_evaluate_photon_gluon_is_legacy_native_command(capsys) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "d d~ > a g",
-                "--runtime-backend",
-                "python",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > a g",
-        runtime_backend="python",
-    )
-
-
-def test_cli_evaluate_w_gluon_is_legacy_native_command(capsys) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "u d~ > w+ g",
-                "--runtime-backend",
-                "python",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="u d~ > w+ g",
-        runtime_backend="python",
-    )
-
-
-def test_cli_evaluate_w_gluon_dag_backend_is_legacy_native_command(capsys) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "u d~ > w+ g",
-                "--runtime-backend",
-                "dag",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="u d~ > w+ g",
-        runtime_backend="dag",
-    )
-
-
-def test_cli_evaluate_neutral_dilepton_gluon_is_legacy_native_command(capsys) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "d d~ > e+ e- g",
-                "--runtime-backend",
-                "python",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > e+ e- g",
-        runtime_backend="python",
-    )
-
-
-def test_cli_evaluate_zero_gluon_neutral_dilepton_is_legacy_native_command(
-    capsys,
-) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "d d~ > e+ e-",
-                "--runtime-backend",
-                "python",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > e+ e-",
-        runtime_backend="python",
-    )
-
-
-def test_cli_evaluate_charged_leptonic_w_gluon_is_legacy_native_command(
-    capsys,
-) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "u d~ > e+ ve g",
-                "--runtime-backend",
-                "python",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="u d~ > e+ ve g",
-        runtime_backend="python",
-    )
-
-
-def test_cli_evaluate_zero_gluon_charged_leptonic_w_is_legacy_native_command(
-    capsys,
-) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "u d~ > e+ ve",
-                "--runtime-backend",
-                "python",
-                "--sqrt-s",
-                "1000",
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="u d~ > e+ ve",
-        runtime_backend="python",
-    )
-
-
 def test_cli_rusticol_availability_allows_charged_leptonic_w_with_gluon() -> None:
     assert cli._rusticol_artifact_unavailable_message("u d~ > e+ ve g") is None
     assert cli._rusticol_artifact_unavailable_message("u d~ > e+ ve") is None
@@ -671,19 +470,6 @@ def test_cli_rusticol_availability_allows_charged_leptonic_w_with_gluon() -> Non
 def test_cli_rusticol_availability_allows_neutral_dilepton_with_gluon() -> None:
     assert cli._rusticol_artifact_unavailable_message("d d~ > e+ e- g") is None
     assert cli._rusticol_artifact_unavailable_message("d d~ > e+ e-") is None
-
-
-def test_cli_rusticol_runtime_backend_is_available() -> None:
-    args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "--runtime-backend",
-            "rusticol",
-            "d d~ > z g",
-        ]
-    )
-
-    assert _runtime_backend(args) == "rusticol"
 
 
 def test_cli_compare_amplicol_defaults_to_production_rusticol_backend() -> None:
@@ -735,36 +521,6 @@ def test_cli_compare_amplicol_rejects_legacy_native_backends() -> None:
         )
 
     assert exc.value.code == 2
-
-
-def test_cli_profile_dag_defaults_to_fast_rusticol_jit_o3() -> None:
-    args = parse_args(["profile-dag-evaluator", "d d~ > z g"])
-    kwargs = _runtime_evaluator_kwargs(args)
-
-    assert _runtime_backend(args) == "rusticol"
-    assert kwargs["symbolica_evaluator_backend"] == "jit"
-    assert kwargs["symbolica_jit_optimization_level"] == 3
-    assert kwargs["symbolica_n_cores"] == 10
-    assert kwargs["batch_size"] == 128
-    assert kwargs["symbolica_output_chunk_strategy"] == "auto"
-
-
-def test_cli_profile_dag_generate_only_flag_is_available(tmp_path: Path) -> None:
-    args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "--runtime-backend",
-            "rusticol",
-            "--generate-only",
-            "--save-evaluator-dir",
-            str(tmp_path / "process"),
-            "d d~ > z g",
-        ]
-    )
-
-    assert _runtime_backend(args) == "rusticol"
-    assert args.generate_only is True
-    assert args.save_evaluator_dir == tmp_path / "process"
 
 
 def test_cli_generate_process_minimal_command_uses_fast_rusticol_jit_defaults(
@@ -1119,7 +875,10 @@ def test_cli_generate_process_set_writes_root_manifest(
         generation,
         generation,
     ]
-    assert (output_dir / "check_standalone.py").exists()
+    assert (output_dir / "API" / "python" / "check_standalone.py").exists()
+    assert (output_dir / "API" / "cpp" / "Makefile").exists()
+    assert (output_dir / "API" / "fortran" / "Makefile").exists()
+    assert not (output_dir / "check_standalone.py").exists()
 
 
 def test_cli_generate_process_set_does_not_reuse_initial_final_crossings(
@@ -1332,6 +1091,53 @@ def test_cli_generate_process_set_append_uses_real_crossing_representative(
     assert payload["crossing_aliases"][0]["crossing_alias_of"] == (
         "d_dbar_to_u_ubar_g"
     )
+
+
+def test_cli_single_process_append_updates_existing_process_set(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "set"
+    output_dir.mkdir()
+    output_dir.joinpath("process_set_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "kind": "pyamplicol-generic-dag-process-set",
+                "default_process_key": "d_dbar_to_u_ubar_g",
+                "processes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    routed: list[tuple[object, object]] = []
+
+    def fake_process_set(command_args, process_set):
+        routed.append((command_args, process_set))
+        return 73
+
+    monkeypatch.setattr(cli, "_cmd_generate_process_set", fake_process_set)
+    monkeypatch.setattr(
+        cli,
+        "_cmd_generate_generic_dag_artifact",
+        lambda *_args, **_kwargs: pytest.fail(
+            "single-process append must not replace the process-set root"
+        ),
+    )
+
+    assert (
+        main(
+            [
+                "generate-process",
+                "d d~ > u~ u g",
+                str(output_dir),
+                "--append",
+                "--json",
+            ]
+        )
+        == 73
+    )
+    assert len(routed) == 1
 
 
 def test_cli_generate_process_set_respects_parallel_worker_limit_and_reports_ram(
@@ -1993,78 +1799,6 @@ def test_cli_generate_process_set_append_and_replace(
     assert replaced_manifest["default_process_key"] == "d_dbar_to_z_g"
 
 
-def test_process_set_standalone_checker_selects_subprocess(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "set"
-    first = root / "subprocesses" / "d_dbar_to_z_g"
-    second = root / "subprocesses" / "u_ubar_to_z_g"
-    first.mkdir(parents=True)
-    second.mkdir(parents=True)
-    root.joinpath("process_set_manifest.json").write_text(
-        json.dumps(
-            {
-                "kind": "pyamplicol-rusticol-process-set",
-                "default_process_key": "d_dbar_to_z_g",
-                "processes": [
-                    {
-                        "key": "d_dbar_to_z_g",
-                        "process": "d d~ > z g",
-                        "path": "subprocesses/d_dbar_to_z_g",
-                    },
-                    {
-                        "key": "u_ubar_to_z_g",
-                        "process": "u u~ > z g",
-                        "path": "subprocesses/u_ubar_to_z_g",
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    root.joinpath("check_standalone.py").write_text(
-        cli._PROCESS_SET_STANDALONE_CHECK_SCRIPT,
-        encoding="utf-8",
-    )
-    nested_script = (
-        "import json, sys\n"
-        "from pathlib import Path\n"
-        "Path('selected.json').write_text(json.dumps(sys.argv))\n"
-    )
-    (first / "check_standalone.py").write_text(nested_script, encoding="utf-8")
-    (second / "check_standalone.py").write_text(nested_script, encoding="utf-8")
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(root / "check_standalone.py"),
-            "--process",
-            "u u~ > z g",
-            "--precision",
-            "32",
-            "--profile",
-            "--target-runtime",
-            "0.5",
-            "--rusticol-folder",
-            str(tmp_path / "site-packages"),
-        ],
-        cwd=second,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    forwarded = json.loads((second / "selected.json").read_text(encoding="utf-8"))
-    assert forwarded[0] == str(second / "check_standalone.py")
-    assert "--precision" in forwarded
-    assert forwarded[forwarded.index("--precision") + 1] == "32"
-    assert "--profile" in forwarded
-    assert "--target-runtime" in forwarded
-    assert forwarded[forwarded.index("--target-runtime") + 1] == "0.5"
-    assert "--rusticol-folder" in forwarded
-
-
 def test_cli_generate_process_set_surfaces_child_json_error(
     capsys,
     monkeypatch,
@@ -2472,199 +2206,6 @@ def test_time_process_wall_uses_evaluate_separately_from_profile() -> None:
     assert profile["input_pack_us_per_point"] == pytest.approx(0.21875)
 
 
-def test_cli_rejects_compiled_dag_flags_on_hidden_profile_command() -> None:
-    with pytest.raises(SystemExit) as exc:
-        parse_args(
-            [
-                "profile-dag-evaluator",
-                "--compiled-dag-evaluator",
-                "d d~ > z g",
-            ]
-        )
-
-    assert exc.value.code == 2
-
-
-def test_cli_generic_stage_jit_direct_translation_default() -> None:
-    staged_args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "d d~ > z g",
-        ]
-    )
-    disabled_args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "--symbolica-no-jit-direct-translation",
-            "d d~ > z g",
-        ]
-    )
-
-    assert _runtime_evaluator_kwargs(staged_args)[
-        "symbolica_jit_direct_translation"
-    ] is False
-    assert _runtime_evaluator_kwargs(disabled_args)[
-        "symbolica_jit_direct_translation"
-    ] is False
-
-
-def test_cli_generic_stage_uses_tuned_common_pair_defaults() -> None:
-    staged_args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "d d~ > z g",
-        ]
-    )
-    explicit_args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "--symbolica-cpe-iterations",
-            "5",
-            "--symbolica-max-common-pair-distance",
-            "75",
-            "d d~ > z g",
-        ]
-    )
-
-    staged_kwargs = _runtime_evaluator_kwargs(staged_args)
-    explicit_kwargs = _runtime_evaluator_kwargs(explicit_args)
-
-    assert staged_kwargs["symbolica_cpe_iterations"] is None
-    assert staged_kwargs["symbolica_max_common_pair_distance"] == 1000
-    assert explicit_kwargs["symbolica_cpe_iterations"] == 5
-    assert explicit_kwargs["symbolica_max_common_pair_distance"] == 75
-
-
-def test_cli_accepts_tapered_stage_output_chunking() -> None:
-    args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "--symbolica-output-chunk-strategy",
-            "tapered-stage",
-            "d d~ > z g",
-        ]
-    )
-
-    kwargs = _runtime_evaluator_kwargs(args)
-    settings = cli._symbolica_settings_from_runtime_kwargs(
-        kwargs,
-        process="d d~ > z g",
-    )
-
-    assert kwargs["symbolica_output_chunk_strategy"] == "tapered-stage"
-    assert settings.output_chunk_strategy == "tapered-stage"
-
-
-def test_cli_accepts_measured_stage_output_chunking() -> None:
-    args = parse_args(
-        [
-            "profile-dag-evaluator",
-            "--symbolica-output-chunk-strategy",
-            "measured-stage",
-            "d d~ > z g",
-        ]
-    )
-
-    settings = cli._symbolica_settings_from_runtime_kwargs(
-        _runtime_evaluator_kwargs(args),
-        process="d d~ > z g",
-    )
-
-    assert settings.output_chunk_strategy == "measured-stage"
-
-
-def test_cli_generate_writes_metadata_cache(capsys, tmp_path: Path) -> None:
-    assert (
-        main(
-            [
-                "generate",
-                "d d~ > z g g",
-                "--cache-dir",
-                str(tmp_path),
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="generate",
-        process="d d~ > z g g",
-    )
-
-
-def test_cli_generate_zero_gluon_writes_symbolica_scalar_artifact(
-    capsys,
-    tmp_path: Path,
-) -> None:
-    assert (
-        main(
-            [
-                "generate",
-                "d d~ > z",
-                "--cache-dir",
-                str(tmp_path),
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="generate",
-        process="d d~ > z",
-    )
-
-
-def test_cli_generate_three_gluon_graph_records_auxiliary_tensor_route(
-    capsys,
-    tmp_path: Path,
-) -> None:
-    assert (
-        main(
-            [
-                "generate",
-                "d d~ > z g g g",
-                "--cache-dir",
-                str(tmp_path),
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="generate",
-        process="d d~ > z g g g",
-    )
-
-
-def test_cli_profile_tensor_evaluator_is_legacy_command(capsys) -> None:
-    assert (
-        main(
-            [
-                "profile-tensor-evaluator",
-                "d d~ > z g",
-                "--repetitions",
-                "2",
-                "--evaluator-repetitions",
-                "2",
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["available"] is False
-    assert payload["command"] == "profile-tensor-evaluator"
-    assert "legacy Z+gluon-only command" in payload["error"]
-    assert "generate-process" in payload["error"]
-
-
 def test_cli_compare_amplicol_dry_run_defaults_to_library_momenta_probe(
     capsys,
 ) -> None:
@@ -2788,94 +2329,6 @@ def test_cli_compare_amplicol_dry_run_uses_library_backed_probe_for_generic_proc
     assert "--library=use" in payload["commands"][-1]
 
 
-def test_cli_validate_z_gluon_family_is_legacy_command(
-    capsys,
-) -> None:
-    assert (
-        main(
-            [
-                "validate-z-gluon-family",
-                "--max-gluons",
-                "2",
-                "--points",
-                "7",
-                "--runtime-backend",
-                "dag",
-                "--dry-run",
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["available"] is False
-    assert payload["command"] == "validate-z-gluon-family"
-    assert "legacy Z+gluon-only command" in payload["error"]
-    assert "compare-amplicol --runtime-backend rusticol" in payload["error"]
-
-
-def test_z_gluon_family_passed_enforces_complete_rows_and_tolerance() -> None:
-    assert _z_gluon_family_passed(
-        {
-            "requested_rows": 7,
-            "validated_rows": 7,
-            "max_relative_difference": 2.0e-12,
-        },
-        rel_tol=1.0e-8,
-    )
-    assert not _z_gluon_family_passed(
-        {
-            "requested_rows": 7,
-            "validated_rows": 6,
-            "max_relative_difference": 2.0e-12,
-        },
-        rel_tol=1.0e-8,
-    )
-    assert not _z_gluon_family_passed(
-        {
-            "requested_rows": 7,
-            "validated_rows": 7,
-            "max_relative_difference": 2.0e-7,
-        },
-        rel_tol=1.0e-8,
-    )
-
-
-def test_native_probe_comparison_reports_runtime_metrics() -> None:
-    mass = 91.188
-    run = AmplicolWorkflowResult(
-        commands=(),
-        process_file=Path("processes.txt"),
-        probe_points=(
-            AmplicolProbePoint(
-                point=1,
-                group=1,
-                integral=1,
-                particles=(
-                    ExternalMomentum(1, (mass / 2.0, 0.0, 0.0, mass / 2.0)),
-                    ExternalMomentum(-1, (mass / 2.0, 0.0, 0.0, -mass / 2.0)),
-                    ExternalMomentum(23, (mass, 0.0, 0.0, 0.0)),
-                ),
-                matrix_element=142.10653372872991,
-            ),
-        ),
-    )
-    payload: dict[str, object] = {}
-
-    _attach_native_probe_comparison("d d~ > z", run, payload)
-
-    points = payload["native_probe_points"]
-    assert isinstance(points, list)
-    assert points[0]["relative_difference"] == 0.0
-    assert points[0]["native_runtime_s"] >= 0.0
-    runtime = payload["native_runtime"]
-    assert isinstance(runtime, dict)
-    assert runtime["evaluated_points"] == 1
-    assert runtime["total_s"] >= 0.0
-    assert runtime["mean_per_point_s"] >= 0.0
-
-
 def test_rusticol_probe_comparison_uses_probe_momenta() -> None:
     class FakeRusticolRuntime:
         def __init__(self) -> None:
@@ -2980,222 +2433,6 @@ def test_rusticol_probe_comparison_reorders_to_artifact_pdg_order() -> None:
     points = payload["native_probe_points"]
     assert isinstance(points, list)
     assert points[0]["relative_difference"] == pytest.approx(0.0)
-
-
-def test_cli_evaluate_zero_gluon_process_uses_native_kernel(capsys) -> None:
-    assert main(["evaluate", "d d~ > z", "--json"]) == 1
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > z",
-        runtime_backend="auto",
-    )
-
-
-def test_cli_evaluate_one_gluon_process_uses_native_kernel(capsys) -> None:
-    assert main(["evaluate", "d d~ > z g", "--sqrt-s", "1000", "--json"]) == 1
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > z g",
-        runtime_backend="auto",
-    )
-
-
-def test_cli_evaluate_two_gluon_process_uses_native_dag(capsys) -> None:
-    assert main(["evaluate", "d d~ > z g g", "--sqrt-s", "1000", "--json"]) == 1
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > z g g",
-        runtime_backend="auto",
-    )
-
-
-def test_cli_evaluate_one_gluon_process_uses_numeric_tensor_network(capsys) -> None:
-    assert (
-        main(
-            [
-                "evaluate",
-                "d d~ > z g",
-                "--sqrt-s",
-                "1000",
-                "--runtime-backend",
-                "numeric-tensor-network",
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="evaluate",
-        process="d d~ > z g",
-        runtime_backend="numeric-tensor-network",
-    )
-
-
-def test_cli_evaluate_reports_cached_evaluator_artifact(
-    capsys,
-    tmp_path: Path,
-) -> None:
-    assert (
-        main(
-            [
-                "generate",
-                "d d~ > z g",
-                "--cache-dir",
-                str(tmp_path),
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="generate",
-        process="d d~ > z g",
-    )
-
-
-def test_cli_evaluate_reports_symbolica_artifact_cross_check(
-    capsys,
-    tmp_path: Path,
-) -> None:
-    assert (
-        main(
-            [
-                "generate",
-                "d d~ > z",
-                "--cache-dir",
-                str(tmp_path),
-                "--json",
-            ]
-        )
-        == 1
-    )
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="generate",
-        process="d d~ > z",
-    )
-
-
-def test_cli_profile_reports_artifact_and_native_runtime(
-    capsys,
-    tmp_path: Path,
-) -> None:
-    assert (
-        main(
-            [
-                "profile",
-                "d d~ > z g",
-                "--cache-dir",
-                str(tmp_path),
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    _assert_legacy_native_command_payload(
-        capsys,
-        command="profile",
-        process="d d~ > z g",
-        runtime_backend="auto",
-    )
-
-
-def test_cli_profile_dag_evaluator_deprecates_compiled_dag_backend(capsys) -> None:
-    assert (
-        main(
-            [
-                "profile-dag-evaluator",
-                "d d~ > z g",
-                "--points",
-                "16",
-                "--repetitions",
-                "1",
-                "--batch-size",
-                "16",
-                "--symbolica-evaluator-backend",
-                "jit",
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["available"] is False
-    assert payload["runtime_backend"] == "rusticol"
-    assert "legacy Z+gluon profiler" in payload["error"]
-    assert "generate-process PROCESS OUTPUT_DIR" in payload["error"]
-
-
-def test_cli_profile_dag_evaluator_reports_unsupported_process_json(capsys) -> None:
-    for process, expected_error in (
-        (
-            "d d~ > z z g",
-            "generate-process PROCESS OUTPUT_DIR",
-        ),
-    ):
-        assert (
-            main(
-                [
-                    "profile-dag-evaluator",
-                    process,
-                    "--runtime-backend",
-                    "rusticol",
-                    "--json",
-                ]
-            )
-            == 1
-        )
-
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["available"] is False
-        assert payload["process"] == process
-        assert payload["runtime_backend"] == "rusticol"
-        assert expected_error in payload["error"]
-
-
-def test_cli_rusticol_generate_only_delegates_to_generic_artifact_json(
-    capsys,
-    tmp_path: Path,
-) -> None:
-    for index, process in enumerate(
-        (
-            "d d~ > z z g",
-        )
-    ):
-        assert (
-            main(
-                [
-                    "profile-dag-evaluator",
-                    process,
-                    "--runtime-backend",
-                    "rusticol",
-                    "--generate-only",
-                    "--save-evaluator-dir",
-                    str(tmp_path / f"process-{index}"),
-                    "--symbolica-evaluator-backend",
-                    "jit",
-                    "--json",
-                ]
-            )
-            == 0
-        )
-
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["available"] is True
-        assert payload["process"] == process
-        assert payload["runtime_backend"] == "rusticol"
-        assert payload["kind"] == "pyamplicol-generic-dag-process"
-        assert payload["artifact_class"] == "generic-dag-schema-v2"
-        assert payload["lowering_status"]["full_tensor_network_ready"] is True
-        assert (tmp_path / f"process-{index}" / "process_manifest.json").exists()
 
 
 def test_cli_generate_process_writes_multi_singlet_schema_v2_artifact_json(
@@ -3372,67 +2609,6 @@ def test_cli_generate_process_accepts_multi_quark_nlc_colour_class_locally(
     manifest = json.loads((tmp_path / "process" / "process_manifest.json").read_text())
     contraction = manifest["runtime_schema"]["amplitude_stage"]["color_contraction"]
     assert contraction["supported"] is True
-
-
-def test_cli_rusticol_generate_only_supports_zero_gluon_process(
-    tmp_path: Path,
-) -> None:
-    env = dict(
-        os.environ,
-        PYTHONPATH=str(Path(pyamplicol.__file__).resolve().parents[1]),
-    )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pyamplicol",
-            "profile-dag-evaluator",
-            "d d~ > z",
-            "--runtime-backend",
-            "rusticol",
-            "--generate-only",
-            "--save-evaluator-dir",
-            str(tmp_path / "zero"),
-            "--json",
-        ],
-        check=False,
-        env=env,
-        text=True,
-        capture_output=True,
-    )
-
-    assert result.returncode == 0, result.stderr + result.stdout
-    payload = json.loads(result.stdout)
-    assert payload["available"] is True
-    assert payload["runtime_backend"] == "rusticol"
-    assert payload["kind"] == "pyamplicol-generic-dag-process"
-    assert payload["artifact_class"] == "generic-dag-schema-v2"
-    assert payload["lowering_status"]["full_tensor_network_ready"] is True
-    assert (tmp_path / "zero" / "process_manifest.json").exists()
-    assert (tmp_path / "zero" / "check_standalone.py").exists()
-
-
-def test_cli_benchmark_z_gluon_modes_is_legacy_command(capsys) -> None:
-    assert (
-        main(
-            [
-                "benchmark-z-gluon-modes",
-                "--only-legacy-shared",
-                "--min-gluons",
-                "1",
-                "--max-gluons",
-                "1",
-                "--json",
-            ]
-        )
-        == 1
-    )
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["available"] is False
-    assert payload["command"] == "benchmark-z-gluon-modes"
-    assert "legacy Z+gluon-only command" in payload["error"]
-    assert "time-process" in payload["error"]
 
 
 def test_memory_watchdog_allows_small_command() -> None:

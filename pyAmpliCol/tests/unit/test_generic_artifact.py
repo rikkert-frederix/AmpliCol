@@ -108,6 +108,62 @@ def test_generic_process_manifest_keeps_physical_and_outgoing_pdg_orders() -> No
     assert runtime_schema["normalization"]["average_factor"] == 36
     assert runtime_schema["normalization"]["couplings_in_stage_evaluators"] is True
     assert runtime_schema["current_storage"]["component_count"] > 0
+    physics = runtime_schema["physics"]
+    assert physics["kind"] == "pyamplicol-resolved-physics"
+    assert physics["process"] == "d d~ > z g"
+    assert physics["coverage"] == {
+        "helicities": "complete",
+        "color": "complete",
+        "color_kind": "physical-lc-flows",
+        "structural_zero_helicity_count": 12,
+    }
+    assert physics["color_components"] == [
+        {
+            "id": "flow:2,4,1",
+            "index": 0,
+            "kind": "lc-flow",
+            "word": [2, 4, 1],
+            "representative_id": "flow:2,4,1",
+            "computed": True,
+            "internal_sector_id": 0,
+        }
+    ]
+
+
+def test_runtime_physics_expands_exact_helicity_and_flow_symmetries() -> None:
+    physics = build_generic_process_manifest("g g > g g").to_json_dict()[
+        "runtime_schema"
+    ]["physics"]
+
+    assert physics["coverage"]["helicities"] == "complete"
+    assert physics["coverage"]["color"] == "complete"
+    assert len(physics["helicities"]) == 16
+    assert sum(item["structural_zero"] for item in physics["helicities"]) == 10
+    assert len(physics["color_components"]) == 6
+    assert sum(item["computed"] for item in physics["color_components"]) == 3
+    first_group = physics["reduction"]["groups"][0]
+    assert len(first_group["physical_helicity_ids"]) == 2
+    assert len(first_group["physical_color_ids"]) == 2
+
+
+def test_runtime_physics_contracts_nlc_color_to_one_public_component() -> None:
+    physics = build_generic_process_manifest(
+        "d d~ > g g",
+        color_accuracy="nlc",
+    ).to_json_dict()["runtime_schema"]["physics"]
+
+    assert physics["selectors"]["color_flow"] is False
+    assert physics["selectors"]["contracted_color"] is True
+    assert physics["color_components"] == [
+        {
+            "id": "contracted",
+            "index": 0,
+            "kind": "contracted",
+            "word": [],
+            "representative_id": "contracted",
+            "computed": True,
+        }
+    ]
 
 
 def test_numerical_current_merge_reuses_unchanged_zero_filter_warmup() -> None:
@@ -1132,7 +1188,10 @@ def test_generic_dag_process_artifact_writes_schema_v2_stage_blueprint_runtime(
     assert raw["runtime_schema"]["parameter_layout"]["momentum_components_real"] is True
     assert raw["runtime_schema"]["amplitude_stage"]["roots"]
     assert (tmp_path / "generic_process_manifest.json").exists()
-    assert (tmp_path / "check_standalone.py").exists()
+    assert (tmp_path / "API" / "python" / "check_standalone.py").exists()
+    assert (tmp_path / "API" / "cpp" / "check_standalone.cpp").exists()
+    assert (tmp_path / "API" / "fortran" / "check_standalone.f90").exists()
+    assert not (tmp_path / "check_standalone.py").exists()
     assert (tmp_path / "validation_momenta.json").exists()
 
 
@@ -1860,6 +1919,13 @@ def test_generic_dag_process_set_artifact_writes_subprocess_manifests(
         / "subprocesses"
         / "d_dbar_to_z_g"
         / "process_manifest.json"
+    ).exists()
+    assert (tmp_path / "API" / "validation_points.dat").exists()
+    assert not (
+        tmp_path
+        / "subprocesses"
+        / "d_dbar_to_z_g"
+        / "API"
     ).exists()
 
 

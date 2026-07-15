@@ -11,7 +11,7 @@ from symbolica.community.spenso import (
 )
 
 from pyamplicol.model import AmplicolSMLeadingColorModel
-from pyamplicol.native import (
+from pyamplicol.reference_kernels import (
     _antilepton_lepton_to_vector_weyl,
     _gluon_tensor_to_gluon,
     _gluon_propagator,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import copy
 import json
 import math
 import pickle
@@ -10,6 +11,7 @@ from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
+from itertools import product
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
 
@@ -139,6 +141,7 @@ class GenericProcessManifest:
     dag: GenericDAG
     model: Model
     color_plan: GenericColorPlan
+    helicity_reduction_plan: Mapping[str, object] | None = None
     structural_current_aggregation: Mapping[str, object] | None = None
     zero_current_filter: Mapping[str, object] | None = None
     current_merging: Mapping[str, object] | None = None
@@ -232,6 +235,7 @@ class GenericProcessManifest:
                 self.model,
                 selected_color_sector_ids=selected_color_sector_ids,
                 enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+                helicity_reduction_plan=self.helicity_reduction_plan,
             ),
             "planning_status": {
                 "color_ready": color_ready,
@@ -402,6 +406,11 @@ def build_generic_process_manifest(
     )
     phase_started = time.perf_counter()
     dag = prune_global_helicity_flip_equivalent_roots(dag, model)
+    helicity_reduction_plan = _build_helicity_reduction_plan(
+        dag,
+        model,
+        selected_source_helicities=selected_source_helicities,
+    )
     _emit_generation_progress(
         progress_callback,
         "helicity ready",
@@ -565,6 +574,7 @@ def build_generic_process_manifest(
         dag=dag,
         model=model,
         color_plan=color_plan,
+        helicity_reduction_plan=helicity_reduction_plan,
         structural_current_aggregation=structural_current_aggregation,
         zero_current_filter=zero_current_filter,
         current_merging=current_merging,
@@ -986,6 +996,7 @@ def write_generic_dag_process_artifact(
     jit_compile: bool = True,
     progress_callback: Any | None = None,
     write_generic_plan: bool = True,
+    emit_api_bundle: bool = True,
     enable_lc_sector_runtime_selector: bool | None = None,
     reference_color_order: Sequence[int] | None = None,
     selected_color_sector_ids: set[int] | None = None,
@@ -1260,10 +1271,6 @@ def write_generic_dag_process_artifact(
             increment=1,
             duration_s=time.perf_counter() - phase_started,
         )
-        (sidecar_dir / "check_standalone.py").write_text(
-            _GENERIC_DAG_CHECK_STANDALONE,
-            encoding="utf-8",
-        )
         _write_generic_validation_momenta(generic_manifest, sidecar_dir)
         sidecar_compiled = cast(dict[str, Any], sidecar_payload["compiled"])
         sidecar_metadata.append(
@@ -1297,11 +1304,11 @@ def write_generic_dag_process_artifact(
         increment=1,
         duration_s=time.perf_counter() - phase_started,
     )
-    (output_path / "check_standalone.py").write_text(
-        _GENERIC_DAG_CHECK_STANDALONE,
-        encoding="utf-8",
-    )
     _write_generic_validation_momenta(generic_manifest, output_path)
+    if emit_api_bundle:
+        from .api_bundle import write_api_bundle
+
+        write_api_bundle(output_path)
     return manifest_path, payload
 
 
@@ -1355,6 +1362,7 @@ def write_lc_topology_replay_partition_artifact(
     jit_compile: bool = True,
     progress_callback: Any | None = None,
     write_generic_plan: bool = True,
+    emit_api_bundle: bool = True,
     reference_color_order: Sequence[int] | None = None,
     max_coupling_orders: Mapping[str, int] | None = None,
     max_lc_current_line_groups: int | None = None,
@@ -1475,6 +1483,7 @@ def write_lc_topology_replay_partition_artifact(
             jit_compile=jit_compile,
             progress_callback=progress_callback,
             write_generic_plan=write_generic_plan,
+            emit_api_bundle=False,
             enable_lc_sector_runtime_selector=False,
             reference_color_order=reference_color_order,
             selected_color_sector_ids={representative_id},
@@ -1645,10 +1654,10 @@ def write_lc_topology_replay_partition_artifact(
         json.dumps(payload, separators=(",", ":"), sort_keys=True),
         encoding="utf-8",
     )
-    (output_path / "check_standalone.py").write_text(
-        _GENERIC_DAG_CHECK_STANDALONE,
-        encoding="utf-8",
-    )
+    if emit_api_bundle:
+        from .api_bundle import write_api_bundle
+
+        write_api_bundle(output_path)
     return manifest_path, payload
 
 
@@ -1952,6 +1961,7 @@ def write_generic_dag_process_set_artifact(
             verbose_evaluator_build=verbose_evaluator_build,
             jit_compile=jit_compile,
             progress_callback=progress_callback,
+            emit_api_bundle=False,
             enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
             selected_color_sector_ids=selected_color_sector_ids,
             runtime_lc_sector_ids=runtime_lc_sector_ids,
@@ -1973,6 +1983,7 @@ def write_generic_dag_process_set_artifact(
             numerical_current_zero_tolerance=numerical_current_zero_tolerance,
         )
         compiled_payload = cast(dict[str, Any], payload["compiled"])
+        runtime_schema = cast(dict[str, Any], payload["runtime_schema"])
         processes.append(
             {
                 "key": entry.key,
@@ -1985,6 +1996,7 @@ def write_generic_dag_process_set_artifact(
                 "lowering_status": payload["lowering_status"],
                 "runtime_available": bool(compiled_payload.get("runtime_available")),
                 "generation_request": generation_metadata,
+                "physics": runtime_schema.get("physics"),
             }
         )
     runtime_available = all(
@@ -2012,10 +2024,9 @@ def write_generic_dag_process_set_artifact(
         json.dumps(payload, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    (output_path / "check_standalone.py").write_text(
-        _GENERIC_DAG_CHECK_STANDALONE,
-        encoding="utf-8",
-    )
+    from .api_bundle import write_api_bundle
+
+    write_api_bundle(output_path)
     return manifest_path, payload
 
 
@@ -4594,6 +4605,7 @@ def _generic_dag_process_artifact_payload(
         runtime_manifest.dag,
         runtime_manifest.model,
         enable_lc_sector_runtime_selector=enable_lc_sector_runtime_selector,
+        helicity_reduction_plan=runtime_manifest.helicity_reduction_plan,
         progress_callback=lambda phase, completed, total: _emit_generation_progress(
             progress_callback,
             "runtime schema",
@@ -5048,6 +5060,7 @@ def _runtime_manifest_for_color_sectors(
         dag=filtered,
         model=manifest.model,
         color_plan=manifest.color_plan,
+        helicity_reduction_plan=manifest.helicity_reduction_plan,
         structural_current_aggregation=manifest.structural_current_aggregation,
         zero_current_filter=manifest.zero_current_filter,
         current_merging=manifest.current_merging,
@@ -5060,6 +5073,7 @@ def _generic_runtime_schema_payload(
     *,
     selected_color_sector_ids: set[int] | None = None,
     enable_lc_sector_runtime_selector: bool = True,
+    helicity_reduction_plan: Mapping[str, object] | None = None,
     progress_callback: Any | None = None,
 ) -> dict[str, object]:
     compact_storage_metadata = (
@@ -5118,13 +5132,23 @@ def _generic_runtime_schema_payload(
         for source_id in dag.sources
     )
     model_parameter_count = len(model_parameters)
+    external_particles = _runtime_external_particles(dag)
+    physics = _runtime_physics_payload(
+        dag,
+        model,
+        external_particles=external_particles,
+        amplitude_stage=amplitude_stage_payload,
+        model_parameters=model_parameters,
+        selected_color_sector_ids=selected_color_sector_ids,
+        helicity_reduction_plan=helicity_reduction_plan,
+    )
     return {
         "schema_version": GENERIC_PROCESS_SCHEMA_VERSION,
         "kind": "pyamplicol-generic-dag-runtime-schema",
         "process_key": dag.process.key,
         "process": dag.process.process,
         "color_accuracy": dag.process.color_accuracy,
-        "external_particles": _runtime_external_particles(dag),
+        "external_particles": external_particles,
         "momentum_conventions": _runtime_momentum_conventions(dag),
         "model": _runtime_model_payload(model, dag=dag),
         "normalization": _runtime_normalization_payload(dag, model),
@@ -5152,6 +5176,7 @@ def _generic_runtime_schema_payload(
             ),
         },
         "model_parameters": model_parameters,
+        "physics": physics,
         "current_storage": {
             "component_count": (
                 current_slots[-1]["component_stop"] if current_slots else 0
@@ -5194,6 +5219,12 @@ def _generic_runtime_schema_payload(
 
 
 def _runtime_external_particles(dag: GenericDAG) -> list[dict[str, object]]:
+    return _runtime_external_particles_for_process(dag.process)
+
+
+def _runtime_external_particles_for_process(
+    process: CanonicalProcessIR,
+) -> list[dict[str, object]]:
     return [
         {
             "label": leg.label,
@@ -5208,8 +5239,459 @@ def _runtime_external_particles(dag: GenericDAG) -> list[dict[str, object]]:
             "momentum_slot": leg.label - 1,
             "momentum_components": ["E", "px", "py", "pz"],
         }
-        for leg in dag.process.legs
+        for leg in process.legs
     ]
+
+
+def remap_process_set_physics(
+    representative_physics: Mapping[str, object],
+    selected_process: CanonicalProcessIR,
+    input_crossing_map: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    """Express shared representative axes in a crossing alias's public labels."""
+
+    payload = copy.deepcopy(dict(representative_physics))
+    payload["process"] = selected_process.process
+    payload["process_key"] = selected_process.key
+    payload["color_accuracy"] = selected_process.color_accuracy
+    payload["external_particles"] = _runtime_external_particles_for_process(
+        selected_process
+    )
+    if not input_crossing_map:
+        return payload
+
+    external_count = len(selected_process.legs)
+    target_to_source = {
+        int(entry["target_index"]): (
+            int(entry["source_index"]),
+            float(entry["sign"]),
+        )
+        for entry in input_crossing_map
+    }
+    if set(target_to_source) != set(range(external_count)):
+        raise ValueError("input_crossing_map does not cover every representative leg")
+
+    def remap_helicity(values: Sequence[object]) -> tuple[int, ...]:
+        if len(values) != external_count:
+            raise ValueError("resolved helicity vector has the wrong external-leg count")
+        selected = [0] * external_count
+        for target_index, raw_value in enumerate(values):
+            source_index, sign = target_to_source[target_index]
+            value = int(raw_value)
+            if (
+                sign < 0.0
+                and selected_process.legs[source_index].particle_class == "gluon"
+            ):
+                value = -value
+            selected[source_index] = value
+        return tuple(selected)
+
+    raw_helicities = cast(
+        Sequence[Mapping[str, object]], payload.get("helicities", ())
+    )
+    vectors_by_id = {
+        str(record["id"]): cast(Sequence[object], record["helicities"])
+        for record in raw_helicities
+    }
+    helicity_id_map: dict[str, str] = {}
+    helicity_records: list[dict[str, object]] = []
+    for raw_record in raw_helicities:
+        record = dict(raw_record)
+        old_id = str(record["id"])
+        vector = remap_helicity(cast(Sequence[object], record["helicities"]))
+        representative = remap_helicity(
+            vectors_by_id[str(record["representative_id"])]
+        )
+        new_id = _public_helicity_id(vector)
+        record["helicities"] = list(vector)
+        record["id"] = new_id
+        record["representative_id"] = _public_helicity_id(representative)
+        helicity_id_map[old_id] = new_id
+        helicity_records.append(record)
+    helicity_records.sort(
+        key=lambda record: tuple(cast(Sequence[int], record["helicities"]))
+    )
+    for index, record in enumerate(helicity_records):
+        record["index"] = index
+    payload["helicities"] = helicity_records
+
+    label_map = {
+        target_index + 1: source_index + 1
+        for target_index, (source_index, _sign) in target_to_source.items()
+    }
+    color_id_map: dict[str, str] = {}
+    color_records: list[dict[str, object]] = []
+    for raw_record in cast(
+        Sequence[Mapping[str, object]], payload.get("color_components", ())
+    ):
+        record = dict(raw_record)
+        old_id = str(record["id"])
+        record["_old_representative_id"] = str(
+            record.get("representative_id", old_id)
+        )
+        if str(record.get("kind")) == "lc-flow":
+            word = tuple(
+                label_map[int(label)]
+                for label in cast(Sequence[object], record.get("word", ()))
+            )
+            new_id = _public_color_flow_id(
+                word,
+                int(record.get("internal_sector_id") or 0),
+            )
+            record["word"] = list(word)
+            record["id"] = new_id
+        else:
+            new_id = old_id
+        color_id_map[old_id] = new_id
+        color_records.append(record)
+    for record in color_records:
+        old_representative = str(record.pop("_old_representative_id"))
+        record["representative_id"] = color_id_map[old_representative]
+    color_records.sort(key=lambda record: str(record["id"]))
+    for index, record in enumerate(color_records):
+        record["index"] = index
+    payload["color_components"] = color_records
+
+    reduction = cast(dict[str, object], payload.get("reduction", {}))
+    for group in cast(Sequence[dict[str, object]], reduction.get("groups", ())):
+        group["representative_helicity_id"] = helicity_id_map[
+            str(group["representative_helicity_id"])
+        ]
+        group["physical_helicity_ids"] = [
+            helicity_id_map[str(value)]
+            for value in cast(Sequence[object], group["physical_helicity_ids"])
+        ]
+        group["representative_color_id"] = color_id_map[
+            str(group["representative_color_id"])
+        ]
+        group["physical_color_ids"] = [
+            color_id_map[str(value)]
+            for value in cast(Sequence[object], group["physical_color_ids"])
+        ]
+    return payload
+
+
+def _build_helicity_reduction_plan(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    selected_source_helicities: Mapping[int, int] | None,
+) -> dict[str, object]:
+    """Capture exact helicity coverage before numerical DAG rewrites."""
+
+    _group_ids, groups = _amplitude_group_metadata(dag, dag.amplitude_roots)
+    represented: set[tuple[int, ...]] = set()
+    for group in groups:
+        vector = tuple(_helicity_vector_from_group_key(dag, group.helicity_key))
+        represented.add(vector)
+        if group.helicity_weight > 1.0 + 1.0e-12:
+            represented.add(tuple(-value for value in vector))
+
+    possible = _runtime_possible_helicity_vectors(dag, model)
+    selected = {
+        int(label): int(helicity)
+        for label, helicity in (selected_source_helicities or {}).items()
+    }
+    covered_domain = tuple(
+        vector
+        for vector in possible
+        if all(vector[label - 1] == helicity for label, helicity in selected.items())
+    )
+    structural_zeros = tuple(
+        sorted(set(covered_domain) - represented)
+    )
+    return {
+        "kind": "pyamplicol-helicity-reduction-plan",
+        "complete": not selected,
+        "selected_source_helicities": {
+            str(label): helicity for label, helicity in sorted(selected.items())
+        },
+        "possible_helicities": [list(vector) for vector in possible],
+        "represented_helicities": [list(vector) for vector in sorted(represented)],
+        "structural_zero_helicities": [
+            list(vector) for vector in structural_zeros
+        ],
+    }
+
+
+def _runtime_physics_payload(
+    dag: GenericDAG,
+    model: Model,
+    *,
+    external_particles: Sequence[Mapping[str, object]],
+    amplitude_stage: Mapping[str, object],
+    model_parameters: Sequence[Mapping[str, object]],
+    selected_color_sector_ids: set[int] | None,
+    helicity_reduction_plan: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Build stable public axes and reduction metadata for resolved evaluation."""
+
+    coherent_groups = cast(
+        Sequence[Mapping[str, object]],
+        amplitude_stage.get("coherent_groups", ()),
+    )
+    represented_helicities: dict[tuple[int, ...], dict[str, object]] = {}
+    group_helicity_members: dict[int, tuple[tuple[int, ...], ...]] = {}
+    for group in coherent_groups:
+        group_id = _schema_int(group["group_id"])
+        vector = tuple(_schema_int(value) for value in cast(Sequence[object], group["helicities"]))
+        members = [vector]
+        helicity_weight = float(group.get("helicity_weight", 1.0))
+        if helicity_weight > 1.0 + 1.0e-12:
+            flipped = tuple(-value for value in vector)
+            if flipped != vector:
+                members.append(flipped)
+        group_helicity_members[group_id] = tuple(members)
+        for member_index, member in enumerate(members):
+            represented_helicities.setdefault(
+                member,
+                {
+                    "helicities": list(member),
+                    "representative_helicities": list(vector),
+                    "computed": member_index == 0,
+                    "structural_zero": False,
+                },
+            )
+
+    possible_helicities = _runtime_possible_helicity_vectors(dag, model)
+    structural_zeros = {
+        tuple(_schema_int(value) for value in cast(Sequence[object], vector))
+        for vector in cast(
+            Sequence[Sequence[object]],
+            (helicity_reduction_plan or {}).get("structural_zero_helicities", ()),
+        )
+    }
+    for vector in structural_zeros:
+        represented_helicities.setdefault(
+            vector,
+            {
+                "helicities": list(vector),
+                "representative_helicities": list(vector),
+                "computed": False,
+                "structural_zero": True,
+            },
+        )
+
+    helicity_vectors = sorted(represented_helicities)
+    helicity_ids = {
+        vector: _public_helicity_id(vector) for vector in helicity_vectors
+    }
+    helicities = []
+    for index, vector in enumerate(helicity_vectors):
+        record = represented_helicities[vector]
+        representative = tuple(
+            _schema_int(value)
+            for value in cast(Sequence[object], record["representative_helicities"])
+        )
+        helicities.append(
+            {
+                "id": helicity_ids[vector],
+                "index": index,
+                "helicities": list(vector),
+                "representative_id": helicity_ids.get(
+                    representative,
+                    _public_helicity_id(representative),
+                ),
+                "computed": bool(record["computed"]),
+                "structural_zero": bool(record["structural_zero"]),
+            }
+        )
+
+    color_components, group_color_members = _runtime_physical_color_components(
+        dag,
+        coherent_groups,
+    )
+    color_ids = {str(record["id"]) for record in color_components}
+    reduction_groups = []
+    for group in coherent_groups:
+        group_id = _schema_int(group["group_id"])
+        helicity_members = group_helicity_members[group_id]
+        color_members = group_color_members[group_id]
+        reduction_groups.append(
+            {
+                "group_id": group_id,
+                "representative_helicity_id": helicity_ids[helicity_members[0]],
+                "physical_helicity_ids": [
+                    helicity_ids[member] for member in helicity_members
+                ],
+                "representative_color_id": color_members[0],
+                "physical_color_ids": list(color_members),
+            }
+        )
+        if any(color_id not in color_ids for color_id in color_members):
+            raise RuntimeError(
+                f"internal resolved color metadata is missing group {group_id} components"
+            )
+
+    complete_helicity_coverage = bool(
+        (helicity_reduction_plan or {}).get(
+            "complete",
+            set(helicity_vectors) == set(possible_helicities),
+        )
+    )
+    if dag.process.color_accuracy == "lc":
+        physical_color_count = len(color_components)
+        expected_color_count = _runtime_expected_lc_physical_color_count(dag)
+        complete_color_coverage = (
+            selected_color_sector_ids is None
+            and not dag.color_plan.truncated
+            and physical_color_count == expected_color_count
+        )
+        color_kind = "physical-lc-flows"
+    else:
+        complete_color_coverage = not dag.color_plan.truncated
+        color_kind = "contracted"
+
+    return {
+        "schema_version": 1,
+        "kind": "pyamplicol-resolved-physics",
+        "process": dag.process.process,
+        "process_key": dag.process.key,
+        "color_accuracy": dag.process.color_accuracy,
+        "external_particles": [dict(particle) for particle in external_particles],
+        "helicities": helicities,
+        "color_components": color_components,
+        "model_parameters": [dict(parameter) for parameter in model_parameters],
+        "coverage": {
+            "helicities": "complete" if complete_helicity_coverage else "subset",
+            "color": "complete" if complete_color_coverage else "subset",
+            "color_kind": color_kind,
+            "structural_zero_helicity_count": len(structural_zeros),
+        },
+        "selectors": {
+            "helicity": True,
+            "color_flow": dag.process.color_accuracy == "lc",
+            "contracted_color": dag.process.color_accuracy in {"nlc", "full"},
+        },
+        "reduction": {
+            "kind": (
+                "lc-diagonal"
+                if dag.process.color_accuracy == "lc"
+                else "sparse-contracted-color"
+            ),
+            "groups": reduction_groups,
+        },
+    }
+
+
+def _runtime_possible_helicity_vectors(
+    dag: GenericDAG,
+    model: Model,
+) -> tuple[tuple[int, ...], ...]:
+    per_leg: list[tuple[int, ...]] = []
+    for leg in dag.process.legs:
+        if leg.outgoing_pdg is None:
+            per_leg.append((0,))
+            continue
+        particle_id = int(leg.outgoing_pdg)
+        values = []
+        for source_state in model.source_spin_states(particle_id):
+            helicity = int(source_state.helicity)
+            if leg.is_initial and model.is_gluon(particle_id):
+                helicity = -helicity
+            values.append(helicity)
+        per_leg.append(tuple(sorted(set(values))))
+    return tuple(tuple(values) for values in product(*per_leg))
+
+
+def _runtime_pure_gluon_tree_helicity_zeros_are_proven(
+    dag: GenericDAG,
+    model: Model,
+) -> bool:
+    if not dag.process.legs:
+        return False
+    return all(
+        leg.outgoing_pdg is not None
+        and model.is_gluon(int(leg.outgoing_pdg))
+        for leg in dag.process.legs
+    )
+
+
+def _public_helicity_id(helicities: Sequence[int]) -> str:
+    return "h:" + ",".join(f"{int(value):+d}" for value in helicities)
+
+
+def _runtime_physical_color_components(
+    dag: GenericDAG,
+    coherent_groups: Sequence[Mapping[str, object]],
+) -> tuple[list[dict[str, object]], dict[int, tuple[str, ...]]]:
+    if dag.process.color_accuracy != "lc":
+        component = {
+            "id": "contracted",
+            "index": 0,
+            "kind": "contracted",
+            "word": [],
+            "representative_id": "contracted",
+            "computed": True,
+        }
+        return [component], {
+            _schema_int(group["group_id"]): ("contracted",)
+            for group in coherent_groups
+        }
+
+    records: dict[str, dict[str, object]] = {}
+    group_members: dict[int, tuple[str, ...]] = {}
+    for group in coherent_groups:
+        group_id = _schema_int(group["group_id"])
+        sector_id = _schema_int(group["color_sector_id"])
+        word = tuple(_schema_int(value) for value in cast(Sequence[object], group["color_word"]))
+        representative_id = _public_color_flow_id(word, sector_id)
+        members = [representative_id]
+        records.setdefault(
+            representative_id,
+            {
+                "id": representative_id,
+                "kind": "lc-flow",
+                "word": list(word),
+                "representative_id": representative_id,
+                "computed": True,
+                "internal_sector_id": sector_id,
+            },
+        )
+        helicity_weight = float(group.get("helicity_weight", 1.0))
+        all_sector_weight = float(group.get("all_sector_weight", helicity_weight))
+        if (
+            word
+            and all_sector_weight > helicity_weight + 1.0e-12
+            and len(word) > 2
+        ):
+            reflected_word = (word[0], *reversed(word[1:]))
+            reflected_id = _public_color_flow_id(reflected_word, sector_id)
+            if reflected_id != representative_id:
+                members.append(reflected_id)
+                records.setdefault(
+                    reflected_id,
+                    {
+                        "id": reflected_id,
+                        "kind": "lc-flow",
+                        "word": list(reflected_word),
+                        "representative_id": representative_id,
+                        "computed": False,
+                        "internal_sector_id": None,
+                    },
+                )
+        group_members[group_id] = tuple(members)
+    components = [records[key] for key in sorted(records)]
+    for index, component in enumerate(components):
+        component["index"] = index
+    return components, group_members
+
+
+def _public_color_flow_id(word: Sequence[int], sector_id: int) -> str:
+    if word:
+        return "flow:" + ",".join(str(int(label)) for label in word)
+    return f"flow:singlet:{sector_id}"
+
+
+def _runtime_expected_lc_physical_color_count(dag: GenericDAG) -> int:
+    count = 0
+    for sector in dag.color_plan.sectors:
+        count += 1
+        if sector.kind == "single-trace" and len(sector.trace_labels) > 2:
+            reflected = (sector.trace_labels[0], *reversed(sector.trace_labels[1:]))
+            if reflected != sector.trace_labels:
+                count += 1
+    return count
 
 
 def _runtime_momentum_conventions(dag: GenericDAG) -> dict[str, object]:
@@ -6232,7 +6714,19 @@ def _runtime_amplitude_stage_payload(
     )
     coherent_group_ids, color_groups = _amplitude_group_metadata(dag, selected_roots)
     color_contraction = build_color_contraction_plan(dag.color_plan, color_groups)
+    group_weights: dict[int, tuple[float, float]] = {}
     for output_index, root in enumerate(selected_roots):
+        group_id = coherent_group_ids[root.id]
+        all_sector_weight = _root_all_sector_weight(
+            dag,
+            root,
+            selected_color_sector_ids=selected_color_sector_ids,
+            has_multiple_lc_root_sectors=has_multiple_lc_root_sectors,
+        )
+        group_weights.setdefault(
+            group_id,
+            (float(root.helicity_weight), float(all_sector_weight)),
+        )
         roots.append(
             {
                 "output_index": output_index,
@@ -6275,14 +6769,25 @@ def _runtime_amplitude_stage_payload(
                 "color_weight": list(root.color_weight),
                 "color_sector_id": _root_color_sector_id(dag, root),
                 "contraction": root.contraction,
-                "coherent_group_id": coherent_group_ids[root.id],
+                "coherent_group_id": group_id,
                 "helicity_weight": root.helicity_weight,
-                "all_sector_weight": _root_all_sector_weight(
+                "all_sector_weight": all_sector_weight,
+            }
+        )
+    coherent_groups = []
+    for descriptor in color_groups:
+        helicity_weight, all_sector_weight = group_weights[descriptor.group_id]
+        coherent_groups.append(
+            {
+                "group_id": descriptor.group_id,
+                "helicities": _helicity_vector_from_group_key(
                     dag,
-                    root,
-                    selected_color_sector_ids=selected_color_sector_ids,
-                    has_multiple_lc_root_sectors=has_multiple_lc_root_sectors,
+                    descriptor.helicity_key,
                 ),
+                "color_sector_id": descriptor.sector_id,
+                "color_word": list(descriptor.word),
+                "helicity_weight": helicity_weight,
+                "all_sector_weight": all_sector_weight,
             }
         )
     return {
@@ -6293,6 +6798,7 @@ def _runtime_amplitude_stage_payload(
             if selected_color_sector_ids is None
             else sorted(selected_color_sector_ids)
         ),
+        "coherent_groups": coherent_groups,
         "roots": roots,
         "final_reduction": {
             "status": (
@@ -6309,6 +6815,18 @@ def _runtime_amplitude_stage_payload(
             None if color_contraction is None else color_contraction.to_json_dict()
         ),
     }
+
+
+def _helicity_vector_from_group_key(
+    dag: GenericDAG,
+    helicity_key: tuple[object, ...],
+) -> list[int]:
+    by_label: dict[int, int] = {}
+    for item in helicity_key:
+        if not isinstance(item, tuple) or len(item) < 5:
+            continue
+        by_label[int(item[0])] = int(item[4])
+    return [by_label.get(int(leg.label), 0) for leg in dag.process.legs]
 
 
 def _amplitude_group_metadata(

@@ -3,17 +3,22 @@ name = "rusticol"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["rusticol-capi"]
+resolver = "2"
+
 [lib]
 name = "rusticol"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["extension-module"]
-extension-module = ["pyo3/extension-module"]
+default = []
+python = ["dep:pyo3", "dep:numpy"]
+extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.28" }
-numpy = "0.28"
+pyo3 = { version = "0.28", optional = true }
+numpy = { version = "0.28", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = "2.0"
