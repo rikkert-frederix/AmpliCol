@@ -204,19 +204,20 @@ contains
     type(amplitude_QCD) :: amp
     integer,dimension(:,:),allocatable :: part,orders
     integer,dimension(:,:),allocatable :: spin
-    integer,dimension(:),allocatable :: hel
+    integer,dimension(:),allocatable :: hel,lepton_list
     real(kind=dp),dimension(:,:),allocatable :: p
     integer :: i
 
-    allocate(part(n,1),orders(n,1),hel(n))
+    allocate(part(n,1),orders(n,1),hel(n),lepton_list(1))
     part(1:n,1)=process(1:n)
     orders(1:n,1)=order(1:n)
     hel=0
+    lepton_list(1)=0
 
     call setup_spin(n,process,spin)
     call fill_reference_momenta(n,process,point,p)
 
-    call amp%init(1,n,1,part,spin,orders,model)
+    call amp%init(1,n,1,part,spin,orders,model,lepton_list(1),lepton_list)
     call amp%evaluate(n,p,hel,.false.,model)
 
     n_amps=amp%n_amps

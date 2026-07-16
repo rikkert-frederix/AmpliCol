@@ -11,12 +11,12 @@ module read_process_file
 contains
   subroutine read_processes_from_file(filename)
     implicit none
-    character(len=80) :: filename
+    character(len=*),intent(in) :: filename
     integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
-    integer :: i,j
+    integer :: i,j,nl,nal
     open(unit=10,file=filename,status='old')
     read (10,*) next,nproc_unique
     ndim=3*(next-2)-4
@@ -95,6 +95,30 @@ contains
        allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
        pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
+       ! fill the lepton_list
+       nl=0
+       do j=1,pgl(igroup)%nproc
+          do i=1,next
+             if (phys_model%is_lepton(pgl(igroup)%processes(i,j))) then
+                    nl=nl+1 
+             endif
+          enddo
+       enddo
+       allocate(pgl(igroup)%lepton_list(1+2*nl))
+       pgl(igroup)%lepton_list(1)=2*nl
+       nl=0
+       nal=1
+       do j=1,pgl(igroup)%nproc
+          do i=1,next
+             if (phys_model%is_lepton(pgl(igroup)%processes(i,j))) then
+                    pgl(igroup)%lepton_list(nl+2)=i
+                    nl=nl+2
+            elseif (phys_model%is_antilepton(pgl(igroup)%processes(i,j))) then
+                    pgl(igroup)%lepton_list(nal+2)=-i
+                    nal=nal+2
+             endif
+          enddo
+       enddo
        pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
        pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
        pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
@@ -140,6 +164,7 @@ contains
     real(kind=8),dimension(:),allocatable :: mass,width
     real(kind=8),dimension(pgl_unique%ndim) :: x
     real(kind=8),external :: ran2
+    integer :: nl,nal
     type(psv) :: ps
     allocate(phase_space_gen23 :: pgl_unique%phase_space)
     allocate(pgl_unique%processes(next,nproc_unique))
@@ -175,8 +200,34 @@ contains
     allocate(ps%x(1:pgl_unique%ndim+pgl_unique%phase_space%ndim_extra))
     allocate(ps%p(0:3,1:pgl_unique%next))
     
+    ! Fill lepton list
+    nl=0
+    do j=1,pgl_unique%nproc
+       do i=1,next
+          if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
+             nl=nl+1
+          endif
+       enddo
+    enddo
+    allocate(pgl_unique%lepton_list(1+2*nl))
+    pgl_unique%lepton_list(1)=2*nl
+    nl=0
+    nal=1
+    do j=1,pgl_unique%nproc
+       do i=1,next
+          if (phys_model%is_lepton(pgl_unique%processes(i,j))) then
+              pgl_unique%lepton_list(nl+2)=i
+              nl=nl+2
+          elseif (phys_model%is_antilepton(pgl_unique%processes(i,j))) then
+              pgl_unique%lepton_list(nal+2)=-i
+              nal=nal+2
+          endif
+       enddo
+    enddo
+
     call pgl_unique%amps(1)%init(1,next,pgl_unique%nproc,pgl_unique%processes,&
-         pgl_unique%spin,pgl_unique%color_orders,phys_model)
+         pgl_unique%spin,pgl_unique%color_orders,phys_model,&
+         pgl_unique%lepton_list(1),pgl_unique%lepton_list(:))
         
     allocate(amp2(nevent,pgl_unique%nproc))
     allocate(amp(nevent,pgl_unique%amps(1)%n_amps))

@@ -59,6 +59,8 @@ program amplicol_reweight
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
+  integer,dimension(:),allocatable :: lepton_list
+  integer :: hopp
   
   call get_run_arguments()
 
@@ -95,7 +97,8 @@ program amplicol_reweight
         call cpu_time(tBefore)
         nprocs=nprocs+1
         processes(1:next,iproc)=part(1:next,1)
-        call amps(iproc)%init(2,next,1,part,spin,o,phys_model)
+        call get_lepton_info()
+        call amps(iproc)%init(2,next,1,part,spin,o,phys_model,lepton_list(1),lepton_list)
         call amps(iproc)%init_col(next,col_acc)
         call cpu_time(tAfter)
         t_amp_init=t_amp_init+tAfter-tBefore
@@ -447,6 +450,33 @@ contains
 505 format(a,3(1x,e14.8))
 506 format(a,100i3)
   end subroutine write_event
+
+  subroutine get_lepton_info()
+    implicit none
+    integer :: i,j
+    integer :: nl,nal
+
+    hopp=4
+    nl=0
+    do i=1,next
+       if (phys_model%is_lepton(processes(i,iproc))) then
+           nl=nl+1
+       endif
+    enddo    
+    if (.not.allocated(lepton_list)) allocate(lepton_list(1+2*nl))
+    lepton_list(1)=2*nl
+    nl=2
+    nal=3
+    do i=1,next
+      if (phys_model%is_lepton(processes(i,iproc))) then
+             lepton_list(nl)=i
+             nl=nl+2
+      elseif (phys_model%is_antilepton(processes(i,iproc))) then
+             lepton_list(nal)=-i
+             nal=nal+2
+      endif
+    enddo
+  end subroutine get_lepton_info
 
   subroutine write_init(ounit)
     use overall
