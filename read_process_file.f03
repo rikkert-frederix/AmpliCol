@@ -7,7 +7,7 @@ module read_process_file
   real(kind=8),dimension(:),allocatable :: unique_map_value
   integer,dimension(:),allocatable :: unique_map,iden_iproc
   integer,dimension(:,:,:),allocatable :: iden_processes
-  real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor,recycling_history_multiplicity
+  real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
   subroutine read_processes_from_file(filename)
     implicit none
@@ -52,7 +52,6 @@ contains
        allocate(color_orders(1:next,nproc_in_group))
        allocate(iden_processes(1:next,nproc_in_group,nproc_in_group))
        allocate(idenCOandMAPfactor(nproc_in_group,nproc_in_group))
-       allocate(recycling_history_multiplicity(nproc_in_group,nproc_in_group))
        allocate(multi_chans(0:max_channels,nproc_in_group))
        allocate(ichans(0:max_channels))
        do iflav=1,2
@@ -91,8 +90,6 @@ contains
        allocate(pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%phase_space_orders(1:next))
        allocate(pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%recycling_history_multiplicity( &
-            1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
        allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
@@ -103,10 +100,6 @@ contains
        pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
        pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
             idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
-       pgl(igroup)%recycling_history_multiplicity( &
-            1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)= &
-            recycling_history_multiplicity( &
-            1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
        pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc)=iden_iproc(1:pgl(igroup)%nproc)
        pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
             iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
@@ -119,7 +112,6 @@ contains
        deallocate(phase_space_orders)
        deallocate(iden_processes)
        deallocate(idenCOandMAPfactor)
-       deallocate(recycling_history_multiplicity)
        deallocate(multi_chans)
        deallocate(ichans)
        write (99,*) '****************************************************'
@@ -289,7 +281,7 @@ contains
        idenCOMAPfactor=idenCOfactor
     endif
     if (idenCOMAPfactor.eq.0d0) return
-    call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,idenCOfactor,max_channels,ichans)
+    call add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
   end subroutine add_to_process_list
 
 
@@ -360,12 +352,12 @@ contains
     endif
   end subroutine get_unique_process_from_quarks
 
-  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,idenCOfactor,max_channels,ichans)
+  subroutine add_to_unique_process_list(process,process_unique,order,idenCOMAPfactor,max_channels,ichans)
     implicit none
     integer,intent(in) :: max_channels
     integer,dimension(0:max_channels),intent(in) :: ichans
     integer,dimension(next) :: process,process_unique,order
-    real(kind=8) :: idenCOMAPfactor,idenCOfactor
+    real(kind=8) :: idenCOMAPfactor
     integer :: iproc
     call move_colour_singlet_in_order(process,order)
     if (.not.reduce_to_unique_matrix_elements) then
@@ -376,7 +368,6 @@ contains
        iden_iproc(nprocs)=1
        iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
        idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
-       recycling_history_multiplicity(iden_iproc(nprocs),nprocs)=idenCOfactor
        multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
        return
     endif
@@ -393,14 +384,12 @@ contains
        iden_iproc(nprocs)=1
        iden_processes(1:next,iden_iproc(nprocs),nprocs)=process(1:next)
        idenCOandMAPfactor(iden_iproc(nprocs),nprocs)=idenCOMAPfactor
-       recycling_history_multiplicity(iden_iproc(nprocs),nprocs)=idenCOfactor
        multi_chans(0:ichans(0),nprocs)=ichans(0:ichans(0))
     else
        ! identical to another matrix element
        iden_iproc(iproc)=iden_iproc(iproc)+1
        iden_processes(1:next,iden_iproc(iproc),iproc)=process(1:next)
        idenCOandMAPfactor(iden_iproc(iproc),iproc)=idenCOMAPfactor
-       recycling_history_multiplicity(iden_iproc(iproc),iproc)=idenCOfactor
        if (ichans(0).ne.multi_chans(0,iproc)) then
           write (*,*) 'Number of multi-channels not the same among identical processes',&
                ichans(0),multi_chans(0,iproc)

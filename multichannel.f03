@@ -38,11 +38,7 @@ contains
        call pgl(i)%phase_space%compute_x_from_momenta(ps_local)
        if (ps_local%jac.lt.0d0) then
           ! The x's could not be correctly computed from the momenta
-          ! -34 (Eir) and -2 (double-t) are expected zero-width gen23
-          ! boundaries; this alternative parametrisation has no inverse.
-          if (ps_local%jac.ne.-34d0 .and. ps_local%jac.ne.-2d0) then
-             write (99,*) 'WARNING: multi-channel weight not included'
-          endif
+          write (99,*) 'WARNING: multi-channel weight not included'
           weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
           return
        endif
