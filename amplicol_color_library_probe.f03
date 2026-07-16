@@ -21,7 +21,7 @@ program amplicol_color_library_probe
   complex(kind=8),dimension(:),allocatable :: colour_amps
   complex(kind=8),dimension(:,:),allocatable :: order_amps
   complex(kind=8) :: amp_col_c, amp2_c
-  character(len=80) :: momenta_file
+  character(len=1024) :: momenta_file
   character(len=32) :: color_arg, color_name
   character(len=256) :: arg, env_value
   logical :: print_matrix
@@ -207,7 +207,8 @@ contains
   subroutine read_probe_momenta()
     implicit none
     integer :: j
-    character(len=80) :: tmp, default_file
+    character(len=80) :: tmp
+    character(len=1024) :: default_file
     if (len_trim(momenta_file) == 0) then
        write(tmp,*) igroup
        default_file = 'Library/amp'//trim(adjustl(tmp))//'_'
@@ -233,7 +234,8 @@ contains
   subroutine read_legacy_probe_momenta()
     implicit none
     integer :: j
-    character(len=80) :: tmp, default_file
+    character(len=80) :: tmp
+    character(len=1024) :: default_file
     if (len_trim(momenta_file) == 0) then
        write(tmp,*) igroup
        default_file = 'Utilities/ME_checks/momenta_'//trim(adjustl(tmp))//'_'
