@@ -216,6 +216,9 @@ program amplicol_color_probe
        matrix2(1)/dble(points),matrix2(2)/dble(points),matrix2(3)/dble(points)
   write (*,'(a,1x,a,1x,i0,1x,i0,1x,es24.16)') 'AMPICOL_COLOR_PROBE_VALUE',&
        trim(color_name),igroup,iint,norm_factor*matrix2(iacc_request)/dble(points)
+  if (fixed_helicity .and. iacc_request.eq.1) then
+     call print_lc_flow_contributions()
+  endif
   write (*,'(a)') repeat('-',78)
   write (*,'(a)') 'Timing summary                           seconds    percent  note'
   write (*,'(a)') repeat('-',78)
@@ -233,9 +236,9 @@ contains
 
   subroutine print_recursion_counts()
     implicit none
-    integer :: isize, current_id, vertex_id
+    integer :: isize, current_id, vertex_id, vertex_type
     integer :: gluon_count, auxiliary_count, other_current_count
-    integer,dimension(0:3) :: vertex_kind_counts
+    integer,dimension(0:24) :: vertex_kind_counts
     integer :: other_vertex_count
 
     do isize=1,n-1
@@ -262,9 +265,12 @@ contains
        other_vertex_count = 0
        do vertex_id=amp%n_vert_start(isize),amp%n_vert_end(isize)
           if (amp%interaction_list(vertex_id)%type >= 0 .and.&
-               amp%interaction_list(vertex_id)%type <= 3) then
+               amp%interaction_list(vertex_id)%type <= 24) then
              vertex_kind_counts(amp%interaction_list(vertex_id)%type) = &
                   vertex_kind_counts(amp%interaction_list(vertex_id)%type) + 1
+             if (amp%interaction_list(vertex_id)%type > 3) then
+                other_vertex_count = other_vertex_count + 1
+             endif
           else
              other_vertex_count = other_vertex_count + 1
           endif
@@ -273,6 +279,12 @@ contains
             isize,amp%n_vert_end(isize)-amp%n_vert_start(isize)+1,&
             vertex_kind_counts(0),vertex_kind_counts(1),&
             vertex_kind_counts(2),vertex_kind_counts(3),other_vertex_count
+       do vertex_type=0,24
+          if (vertex_kind_counts(vertex_type) > 0) then
+             write (*,'(a,3(1x,i0))') 'AMPICOL_COLOR_PROBE_VERTEX_KIND',&
+                  isize,vertex_type,vertex_kind_counts(vertex_type)
+          endif
+       enddo
     enddo
   end subroutine print_recursion_counts
 
@@ -408,6 +420,39 @@ contains
        enddo
     enddo
   end subroutine accumulate_colour
+
+  subroutine print_lc_flow_contributions()
+    implicit none
+    integer :: row, val, pos, col, first_pos, last_pos, word_index
+    real(kind=8) :: contribution, contribution_sum
+    complex(kind=8) :: contracted_amplitude, column_amplitude
+
+    contribution_sum = 0d0
+    do row=1,amp%nColOrd
+       contracted_amplitude = (0d0,0d0)
+       do val=1,amp%n_col_vals(1)
+          column_amplitude = (0d0,0d0)
+          first_pos = amp%row_index(row-1,val,1)+1
+          last_pos = amp%row_index(row,val,1)
+          do pos=first_pos,last_pos
+             col = amp%col_index(amp%i_col_i(val,1)+pos)
+             column_amplitude = column_amplitude + amp%amps(col)
+          enddo
+          contracted_amplitude = contracted_amplitude + &
+               column_amplitude*amp%diff_col_vals(val,1)
+       enddo
+       contribution = norm_factor*dble(&
+            contracted_amplitude*conjg(amp%amps(row)))
+       contribution_sum = contribution_sum + contribution
+       write (*,'(a,1x,i0,1x,es24.16)') &
+            'AMPICOL_COLOR_PROBE_FLOW_VALUE',row,contribution
+       write (*,'(a,1x,i0,1x,*(i0,1x))') &
+            'AMPICOL_COLOR_PROBE_FLOW_PERM',row,&
+            (amp%perm(word_index,row),word_index=1,n-amp%n_sing(1))
+    enddo
+    write (*,'(a,1x,es24.16)') &
+         'AMPICOL_COLOR_PROBE_FLOW_SUM',contribution_sum
+  end subroutine print_lc_flow_contributions
 
   subroutine print_color_matrix()
     implicit none
