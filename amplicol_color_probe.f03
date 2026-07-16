@@ -325,8 +325,9 @@ contains
 
   subroutine read_probe_momenta()
     implicit none
-    integer :: j
+    integer :: j, momenta_unit, open_status
     character(len=80) :: tmp, default_file
+    character(len=256) :: open_message
     if (len_trim(momenta_file) == 0) then
        write(tmp,*) igroup
        default_file = 'Utilities/ME_checks/momenta_'//trim(adjustl(tmp))//'_'
@@ -335,17 +336,23 @@ contains
     else
        default_file = momenta_file
     endif
-    open(unit=14,file=trim(adjustl(default_file)),status='old')
+    open(newunit=momenta_unit,file=trim(adjustl(default_file)),status='old',&
+         action='read',iostat=open_status,iomsg=open_message)
+    if (open_status /= 0) then
+       write (*,*) 'could not open momenta file ',trim(adjustl(default_file)),&
+            ': ',trim(open_message)
+       stop 1
+    endif
     do j=1,n
-       read(14,*) p(0,j),p(1,j),p(2,j),p(3,j)
+       read(momenta_unit,*) p(0,j),p(1,j),p(2,j),p(3,j)
     enddo
-    close(14)
+    close(momenta_unit)
   end subroutine read_probe_momenta
 
   subroutine read_optional_helicities()
     implicit none
     integer :: j
-    if (argc == 6) return
+    if (argc <= 6) return
     if (argc /= 6 + n) then
        write (*,*) 'fixed-helicity mode expects one helicity per external leg'
        write (*,*) 'received extra arguments',argc-6,'expected',n
