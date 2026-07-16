@@ -20,7 +20,7 @@ module phase_space_gen23_mod
   real(kind=8),dimension(-1:1) :: ip,ip_shat,ip_dt,ip_mass
   real(kind=8),dimension(-1:1),parameter :: ip_flat=[0d0,0d0,0d0]
   ! tiny parameter cutoff to prevent/reduce numerical instabilities:
-  real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8
+  real(kind=8),parameter :: vtiny=1d-12,tiny=1d-8,tiny_kin=1d-30
   real(kind=8),parameter :: pi=3.1415926535897932d0
   logical,parameter :: use_t_channel_at_start=.true.
   ! If true, the cut-aware bounds are used as the actual integration limits.
@@ -2477,7 +2477,7 @@ contains
     implicit none
     real(kind=8),intent(in) :: shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2
     real(kind=8),intent(out) :: smin,smax,V,sqrtGG
-    real(kind=8) :: GG,s1,s2
+    real(kind=8) :: GG,s1,s2,lam
     V=computeV(shat_i,shat_im1,shat_ip1,t_i,t_im1,t_ip1,m_i_2,m_ip1_2)
     GG = G(t_i  , shat_ip1, shat_i  , t_ip1, m_ip1_2, 0d0) &
         *G(t_im1, shat_i  , shat_im1, t_i  , m_i_2  , 0d0)
@@ -2487,9 +2487,16 @@ contains
        GG=0d0
        V=0d0
     endif
+    lam=lambda(shat_i,t_i,0d0)
+    if (abs(lam).le.tiny_kin*max(1d0,abs(shat_i),abs(t_i))) then
+       smin=shat_im1+shat_ip1
+       smax=smin
+       sqrtGG=0d0
+       return
+    endif
     sqrtGG=sqrt(GG)
-    s1=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V + sqrtGG)
-    s2=shat_im1+shat_ip1+2d0/lambda(shat_i,t_i,0d0) * (4d0*V - sqrtGG)
+    s1=shat_im1+shat_ip1+2d0/lam * (4d0*V + sqrtGG)
+    s2=shat_im1+shat_ip1+2d0/lam * (4d0*V - sqrtGG)
     smin=min(s1,s2)
     smax=max(s1,s2)
   end subroutine sminmax
@@ -2645,8 +2652,13 @@ contains
     ! Phys. Rev. 187 (1969), 2008-2016, doi:10.1103/PhysRev.187.2008
     implicit none
     real(kind=8),intent(in) :: si,shat_i,shat_im1,shat_ip1,t_i,V,sqrtGG,ran
-    real(kind=8) :: cosphi,x
-    cosphi=((si-shat_im1-shat_ip1)*0.5d0*lambda(shat_i,t_i,0d0)-4d0*V)/sqrtGG
+    real(kind=8) :: cosphi,x,lam
+    lam=lambda(shat_i,t_i,0d0)
+    if (abs(lam).le.tiny_kin*max(1d0,abs(shat_i),abs(t_i)) .or. abs(sqrtGG).le.tiny_kin) then
+       getphifroms=0d0
+       return
+    endif
+    cosphi=((si-shat_im1-shat_ip1)*0.5d0*lam-4d0*V)/sqrtGG
     if (cosphi.lt.-1d0 .or. cosphi.gt.1d0) then
        write (99,*) 'WARNING cosphi does not have a reasonable value',cosphi
        getphifroms=0d0
