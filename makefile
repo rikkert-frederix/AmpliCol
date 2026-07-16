@@ -110,6 +110,12 @@ amplitude_QCD.o amplicol_reweight.o ranmar.o
 FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o matrix_element_regression.o
 
+FILES_M_COLOR_PROBE = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
+LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
+feynmanrules.o particles.o amplitude_QCD.o common.o phase_space_genpt.o \
+phase_space_haag.o cuts.o read_process_file.o multichannel.o \
+handling_processes.o simple_integrator.o helper_modules.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -123,6 +129,9 @@ amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
+
+amplicol_color_probe: $(FILES_M_COLOR_PROBE) amplicol_color_probe.o
+	$(FC) $(FFLAGS) -o $@ amplicol_color_probe.o $(FILES_M_COLOR_PROBE)
 
 matrix_element_regression: $(FILES_M_TEST_ME)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_ME)
@@ -150,6 +159,7 @@ update_matrix_goldens: matrix_element_regression update_matrix_cases
 # ----------------------------------------------------------------------
 
 amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o
+amplicol_color_probe.o : amplitude_QCD.o math_functions.o particles.o read_process_file.o handling_processes.o
 phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
@@ -177,7 +187,7 @@ amplib.o: $(notdir $(AMPSRC:.f03=.o))
 # ----------------------------------------------------------------------
 
 clean:
-	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so
+	rm -f *.o *.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin lib*.so amplicol_color_probe
 
 cleanlib:
 	rm -f libamp*.so amp*lib.o amp*lib.mod Library/amp*.f03 Library/amp*.data Library/amplitudes*.bin
