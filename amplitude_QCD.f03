@@ -167,6 +167,9 @@ contains
 
     if (this%imode.eq.1) call allocate_and_fill_spins()
     call allocate_and_fill_colour_permutations()
+    if (this%imode.eq.2 .and. this%n_qqbar(1).eq.3) then
+       call deduplicate_three_line_colour_flows()
+    endif
     call allocate_and_fill_momentum_array()
 
     ! All done. But there could be currents that are not needed. Filter them out
@@ -371,6 +374,103 @@ contains
       enddo
     end subroutine allocate_and_fill_colour_permutations
 
+    subroutine deduplicate_three_line_colour_flows()
+      ! The alternative three-line canonical order is needed while building
+      ! currents, but it can close the same physical open-string flow more
+      ! than once.  Keep one amplitude for each set of q[g...]qbar strings;
+      ! the ordering of the independent strings is not physical.
+      implicit none
+      integer :: old_amp,new_amp,previous
+
+      new_amp=0
+      do old_amp=1,this%n_amps
+         do previous=1,new_amp
+            if (same_three_line_flow(this%perm(:,old_amp),&
+                 this%perm(:,previous))) exit
+         enddo
+         if (previous.le.new_amp) cycle
+         new_amp=new_amp+1
+         if (new_amp.ne.old_amp) then
+            this%curr2amp(:,new_amp)=this%curr2amp(:,old_amp)
+            this%perm(:,new_amp)=this%perm(:,old_amp)
+            this%include_amp(new_amp)=this%include_amp(old_amp)
+            this%same_flavour_sum(new_amp,:)=this%same_flavour_sum(old_amp,:)
+            this%same_flavour_sum_operation(new_amp,:)=&
+                 this%same_flavour_sum_operation(old_amp,:)
+         endif
+      enddo
+      this%n_amps=new_amp
+      this%iproc_start(this%nprocs+1)=this%n_amps+1
+      if (this%n_amps.ne.this%nColOrd) then
+         write (*,*) 'Unexpected number of unique three-line colour flows',&
+              this%n_amps,this%nColOrd
+         stop 1
+      endif
+    end subroutine deduplicate_three_line_colour_flows
+
+    logical function same_three_line_flow(left,right)
+      implicit none
+      integer,dimension(:),intent(in) :: left,right
+      integer :: line,other,candidate
+      integer,dimension(3) :: left_len,right_len
+      integer,dimension(n,3) :: left_lines,right_lines
+
+      call split_three_line_flow(left,left_len,left_lines)
+      call split_three_line_flow(right,right_len,right_lines)
+      same_three_line_flow=.true.
+      do line=1,3
+         other=0
+         do candidate=1,3
+            if (right_lines(1,candidate).eq.left_lines(1,line)) then
+               other=candidate
+               exit
+            endif
+         enddo
+         if (other.eq.0 .or. left_len(line).ne.right_len(other)) then
+            same_three_line_flow=.false.
+            return
+         endif
+         if (any(left_lines(1:left_len(line),line).ne.&
+              right_lines(1:right_len(other),other))) then
+            same_three_line_flow=.false.
+            return
+         endif
+      enddo
+    end function same_three_line_flow
+
+    subroutine split_three_line_flow(word,line_len,lines)
+      implicit none
+      integer,dimension(:),intent(in) :: word
+      integer,dimension(3),intent(out) :: line_len
+      integer,dimension(n,3),intent(out) :: lines
+      integer :: pos,label,line,nord
+
+      line_len=0
+      lines=0
+      line=0
+      nord=size(word)
+      do pos=1,nord
+         label=word(pos)
+         if (is_quark_from_order(label,1)) then
+            line=line+1
+            if (line.gt.3) then
+               write (*,*) 'Too many strings in three-line colour flow',word
+               stop 1
+            endif
+         endif
+         if (line.eq.0) then
+            write (*,*) 'Three-line colour flow does not begin with a quark',word
+            stop 1
+         endif
+         line_len(line)=line_len(line)+1
+         lines(line_len(line),line)=label
+      enddo
+      if (line.ne.3) then
+         write (*,*) 'Incomplete three-line colour flow',word
+         stop 1
+      endif
+    end subroutine split_three_line_flow
+
     subroutine allocate_and_fill_momentum_array()
       implicit none
       integer :: ic
@@ -427,13 +527,20 @@ contains
             write (*,*) 'not the same number of quarks and anti-quarks',nq,naq
             stop 1
          endif
-         if (nq.gt.2) then
-            write (*,*) 'more than two quarks',nq
+         if (nq.gt.3) then
+            write (*,*) 'more than three quarks',nq
             stop 1
          endif
          if (nq+naq+nsing+nglu.ne.n) then
             write (*,*) 'particle types do not add up',nq,naq,nsing,nglu,':',n
             stop 1
+         endif
+         if (nq.eq.3) then
+            ! check_input_consistency() has already retained the supplied
+            ! q...qbar block order (and its alternative block ordering).  It
+            ! is a valid canonical seed for the generic three-line recursion;
+            ! rebuilding it with the older two-line layout would drop a line.
+            cycle
          endif
          iq=0; iaq=0 ; iglu=0 ; ising=0
          order(1:n,1,iproc)= 0
@@ -475,6 +582,8 @@ contains
          this%nColOrd=factorial(nglu)
       elseif (nq.eq.2) then
          this%nColOrd=factorial(nglu)*(nglu+1)*2
+      elseif (nq.eq.3) then
+         this%nColOrd=factorial(nglu)*(nglu+1)*(nglu+2)*3
       else
          write (*,*) 'Number of colour orders unknown',nq
          stop 1
@@ -2524,6 +2633,12 @@ contains
     ioff=this%iproc_start(iproc)-1
     nOrd=n-this%n_sing(iproc)
 
+    if (this%n_qqbar(iproc).eq.3) then
+       call init_three_quark_line_colour_matrix()
+       write (99,*) '... colour matrix initialised'
+       return
+    endif
+
     allocate(n_vals(1:3))
     allocate(diff_vals(max_vals,1:3))
     allocate(this%i_col_i(max_vals,1:3))
@@ -2670,6 +2785,332 @@ contains
 
     write (99,*) '... colour matrix initialised'
   contains
+    subroutine init_three_quark_line_colour_matrix()
+      ! Construct the colour Gram matrix directly from the open fundamental
+      ! strings represented by each dual amplitude.  This is the generic
+      ! three-quark-line continuation of the specialised 0/1/2-line code
+      ! below: sewing a row to a conjugate row closes the strings into traces,
+      ! and color_algebra performs the exact SU(Nc) reduction.
+      implicit none
+      integer :: row,col,iacc,ival,nrows,max_pairs,max_nvals,total_entries
+      integer :: offset
+      integer,dimension(:),allocatable :: flow_sign,nvalues
+      integer,dimension(:,:),allocatable :: endpoints,ngluons,counts,cursor
+      integer,dimension(:,:,:),allocatable :: gluons
+      real(kind=8),dimension(:,:,:),allocatable :: factors
+      real(kind=8),dimension(:,:),allocatable :: values
+      real(kind=8),dimension(3) :: col_fac
+
+      nrows=this%nColOrd
+      if (this%n_amps.ne.nrows) then
+         write (*,*) 'Three-line colour basis does not match generated amplitudes',&
+              this%n_amps,nrows
+         stop 1
+      endif
+
+      allocate(endpoints(3,nrows))
+      allocate(ngluons(3,nrows))
+      allocate(gluons(nOrd,3,nrows))
+      allocate(flow_sign(nrows))
+      call build_three_line_flow_metadata(endpoints,ngluons,gluons,flow_sign)
+
+      allocate(factors(nrows,nrows,3))
+      factors=0d0
+      do row=1,nrows
+         if (use_symm_cm) then
+            col=row
+         else
+            col=1
+         endif
+         do while (col.le.nrows)
+            call compute_three_line_color_factor(row,col,endpoints,ngluons,&
+                 gluons,flow_sign,col_fac)
+            if (use_symm_cm .and. row.ne.col) col_fac=2d0*col_fac
+            factors(row,col,1:3)=col_fac(1:3)
+            col=col+1
+         enddo
+      enddo
+
+      max_pairs=nrows*(nrows+1)/2
+      allocate(nvalues(3))
+      allocate(values(max_pairs,3))
+      allocate(counts(max_pairs,3))
+      nvalues=0
+      values=0d0
+      counts=0
+      do row=1,nrows
+         if (use_symm_cm) then
+            col=row
+         else
+            col=1
+         endif
+         do while (col.le.nrows)
+            do iacc=1,3
+               if (factors(row,col,iacc).eq.0d0) cycle
+               do ival=1,nvalues(iacc)
+                  if (factors(row,col,iacc).eq.values(ival,iacc)) exit
+               enddo
+               if (ival.eq.nvalues(iacc)+1) then
+                  nvalues(iacc)=ival
+                  values(ival,iacc)=factors(row,col,iacc)
+               endif
+               counts(ival,iacc)=counts(ival,iacc)+1
+            enddo
+            col=col+1
+         enddo
+      enddo
+
+      max_nvals=maxval(nvalues)
+      allocate(this%n_col_vals(3))
+      this%n_col_vals=nvalues
+      allocate(this%diff_col_vals(max_nvals,3))
+      allocate(this%i_col_i(max_nvals,3))
+      allocate(this%row_index(0:nrows,max_nvals,3))
+      this%diff_col_vals=0d0
+      this%i_col_i=0
+      this%row_index=0
+      do iacc=1,3
+         this%diff_col_vals(1:nvalues(iacc),iacc)=values(1:nvalues(iacc),iacc)
+      enddo
+
+      total_entries=1+sum(counts)
+      allocate(this%col_index(total_entries))
+      this%col_index=0
+      offset=1
+      do iacc=1,3
+         do ival=1,nvalues(iacc)
+            this%i_col_i(ival,iacc)=offset
+            offset=offset+counts(ival,iacc)
+         enddo
+      enddo
+
+      allocate(cursor(max_nvals,3))
+      cursor=0
+      do row=1,nrows
+         if (use_symm_cm) then
+            col=row
+         else
+            col=1
+         endif
+         do while (col.le.nrows)
+            do iacc=1,3
+               if (factors(row,col,iacc).eq.0d0) cycle
+               do ival=1,nvalues(iacc)
+                  if (factors(row,col,iacc).eq.values(ival,iacc)) exit
+               enddo
+               cursor(ival,iacc)=cursor(ival,iacc)+1
+               this%col_index(this%i_col_i(ival,iacc)+cursor(ival,iacc))=col
+            enddo
+            col=col+1
+         enddo
+         do iacc=1,3
+            this%row_index(row,1:nvalues(iacc),iacc)=cursor(1:nvalues(iacc),iacc)
+         enddo
+      enddo
+    end subroutine init_three_quark_line_colour_matrix
+
+    subroutine build_three_line_flow_metadata(endpoints,ngluons,gluons,flow_sign)
+      implicit none
+      integer,dimension(3,this%nColOrd),intent(out) :: endpoints,ngluons
+      integer,dimension(nOrd,3,this%nColOrd),intent(out) :: gluons
+      integer,dimension(this%nColOrd),intent(out) :: flow_sign
+      integer :: row,line,qrank,arank,i,j,inversions
+      integer,dimension(3) :: ref_q,ref_aq,row_q,row_aq,row_ngluons
+      integer,dimension(nOrd,3) :: row_gluons
+
+      endpoints=0
+      ngluons=0
+      gluons=0
+      call parse_three_line_word(this%perm(1:nOrd,ioff+1),ref_q,ref_aq,&
+           row_ngluons,row_gluons)
+      do row=1,this%nColOrd
+         call parse_three_line_word(this%perm(1:nOrd,ioff+row),row_q,row_aq,&
+              row_ngluons,row_gluons)
+         do line=1,3
+            qrank=0
+            arank=0
+            do i=1,3
+               if (row_q(line).eq.ref_q(i)) qrank=i
+               if (row_aq(line).eq.ref_aq(i)) arank=i
+            enddo
+            if (qrank.eq.0 .or. arank.eq.0) then
+               write (*,*) 'Inconsistent external labels in three-line colour flow',row
+               stop 1
+            endif
+            endpoints(qrank,row)=arank
+            ngluons(qrank,row)=row_ngluons(line)
+            if (row_ngluons(line).gt.0) then
+               gluons(1:row_ngluons(line),qrank,row)=&
+                    row_gluons(1:row_ngluons(line),line)
+            endif
+         enddo
+         inversions=0
+         do i=1,2
+            do j=i+1,3
+               if (endpoints(i,row).gt.endpoints(j,row)) inversions=inversions+1
+            enddo
+         enddo
+         if (mod(inversions,2).eq.0) then
+            flow_sign(row)=1
+         else
+            flow_sign(row)=-1
+         endif
+      enddo
+    end subroutine build_three_line_flow_metadata
+
+    subroutine parse_three_line_word(word,q_labels,aq_labels,line_ngluons,line_gluons)
+      implicit none
+      integer,dimension(nOrd),intent(in) :: word
+      integer,dimension(3),intent(out) :: q_labels,aq_labels,line_ngluons
+      integer,dimension(nOrd,3),intent(out) :: line_gluons
+      integer :: pos,label,line
+
+      q_labels=0
+      aq_labels=0
+      line_ngluons=0
+      line_gluons=0
+      line=0
+      do pos=1,nOrd
+         label=word(pos)
+         if (label_is_quark(label)) then
+            if (line.ne.0 .and. aq_labels(line).eq.0) then
+               write (*,*) 'Adjacent quarks in three-line colour word',word
+               stop 1
+            endif
+            line=line+1
+            if (line.gt.3) then
+               write (*,*) 'Too many quark strings in three-line colour word',word
+               stop 1
+            endif
+            q_labels(line)=label
+         elseif (label_is_antiquark(label)) then
+            if (line.eq.0 .or. q_labels(line).eq.0 .or. aq_labels(line).ne.0) then
+               write (*,*) 'Unmatched antiquark in three-line colour word',word
+               stop 1
+            endif
+            aq_labels(line)=label
+         elseif (abs(part(label)).eq.21) then
+            if (line.eq.0 .or. aq_labels(line).ne.0) then
+               write (*,*) 'Gluon outside an open quark string',word
+               stop 1
+            endif
+            line_ngluons(line)=line_ngluons(line)+1
+            line_gluons(line_ngluons(line),line)=label
+         else
+            write (*,*) 'Unknown coloured label in three-line colour word',label,word
+            stop 1
+         endif
+      enddo
+      if (line.ne.3 .or. any(q_labels.eq.0) .or. any(aq_labels.eq.0)) then
+         write (*,*) 'Incomplete three-line colour word',word
+         stop 1
+      endif
+    end subroutine parse_three_line_word
+
+    logical function label_is_quark(label)
+      implicit none
+      integer,intent(in) :: label
+      label_is_quark=(label.le.2 .and. part(label).le.-1 .and. part(label).ge.-6) .or. &
+           (label.gt.2 .and. part(label).ge.1 .and. part(label).le.6)
+    end function label_is_quark
+
+    logical function label_is_antiquark(label)
+      implicit none
+      integer,intent(in) :: label
+      label_is_antiquark=(label.le.2 .and. part(label).ge.1 .and. part(label).le.6) .or. &
+           (label.gt.2 .and. part(label).le.-1 .and. part(label).ge.-6)
+    end function label_is_antiquark
+
+    subroutine compute_three_line_color_factor(row,col,endpoints,ngluons,&
+         gluons,flow_sign,col_fac)
+      implicit none
+      integer,intent(in) :: row,col
+      integer,dimension(3,this%nColOrd),intent(in) :: endpoints,ngluons
+      integer,dimension(nOrd,3,this%nColOrd),intent(in) :: gluons
+      integer,dimension(this%nColOrd),intent(in) :: flow_sign
+      real(kind=8),dimension(3),intent(out) :: col_fac
+      integer :: q,qnext,anti,start,line,nloops,pos,power,leading_power,max_power,sgn
+      integer,dimension(3) :: trace_len
+      integer,dimension(2*nOrd,3) :: trace_word
+      logical,dimension(3) :: visited
+      real(kind=16) :: exact
+
+      trace_len=0
+      trace_word=0
+      visited=.false.
+      nloops=0
+      do start=1,3
+         if (visited(start)) cycle
+         nloops=nloops+1
+         q=start
+         do
+            if (visited(q)) then
+               if (q.eq.start) exit
+               write (*,*) 'Malformed three-line colour-flow cycle',row,col
+               stop 1
+            endif
+            visited(q)=.true.
+            do pos=1,ngluons(q,row)
+               trace_len(nloops)=trace_len(nloops)+1
+               trace_word(trace_len(nloops),nloops)=gluons(pos,q,row)
+            enddo
+            anti=endpoints(q,row)
+            qnext=0
+            do line=1,3
+               if (endpoints(line,col).eq.anti) then
+                  qnext=line
+                  exit
+               endif
+            enddo
+            if (qnext.eq.0) then
+               write (*,*) 'Cannot sew three-line colour-flow endpoints',row,col,anti
+               stop 1
+            endif
+            do pos=ngluons(qnext,col),1,-1
+               trace_len(nloops)=trace_len(nloops)+1
+               trace_word(trace_len(nloops),nloops)=gluons(pos,qnext,col)
+            enddo
+            q=qnext
+         enddo
+      enddo
+
+      call Tr_allocate(nOrd)
+      Tr=0
+      coef=0d0
+      coef_Nc=0
+      Tr(0,0,0)=1
+      Tr(0,0,1)=nloops
+      do line=1,nloops
+         Tr(0,line,1)=trace_len(line)
+         if (trace_len(line).gt.0) then
+            Tr(1:trace_len(line),line,1)=trace_word(1:trace_len(line),line)
+         endif
+      enddo
+      sgn=flow_sign(row)*flow_sign(col)
+      coef(1)=dble(sgn)
+      coef_Nc(0,1)=sgn
+      call Tr_full_simplify(exact)
+
+      leading_power=nOrd-3
+      col_fac=0d0
+      if (leading_power.ge.-nOrd .and. leading_power.le.nOrd) then
+         col_fac(1)=dble(coef_Nc(leading_power,0))*3d0**leading_power
+      endif
+      max_power=-nOrd-1
+      do power=nOrd,-nOrd,-1
+         if (coef_Nc(power,0).ne.0) then
+            max_power=power
+            exit
+         endif
+      enddo
+      ! Match the established NLC convention: retain the exact coefficient
+      ! for every matrix entry whose leading power lies within two powers of
+      ! the global leading colour term.  Do not truncate qualifying entries.
+      if (max_power.ge.leading_power-2) col_fac(2)=dble(exact)
+      col_fac(3)=dble(exact)
+      call Tr_deallocate
+    end subroutine compute_three_line_color_factor
+
     subroutine get_unique_row(iunique,irow,gi,ui)
       ! get a new row in the colour matrix corresponding to 'iunique'
       implicit none
