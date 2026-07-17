@@ -5,6 +5,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
+  integer(kind=8),parameter :: max_three_line_color_orders=5000_8
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert,chirality
@@ -47,7 +48,7 @@ module amplitude_QCD_mod
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
-          same_flavour_sum,same_flavour_sum_operation
+          same_flavour_sum,same_flavour_sum_operation,three_line_partner_curr2amp
      integer,dimension(:,:,:),allocatable :: spins,row_index
      logical,dimension(:),allocatable :: include_amp,same_flav
      logical :: lib_created=.false.
@@ -168,7 +169,7 @@ contains
     if (this%imode.eq.1) call allocate_and_fill_spins()
     call allocate_and_fill_colour_permutations()
     if (this%imode.eq.2 .and. this%n_qqbar(1).eq.3) then
-       call deduplicate_three_line_colour_flows()
+       call group_three_line_colour_flows()
     endif
     call allocate_and_fill_momentum_array()
 
@@ -374,39 +375,71 @@ contains
       enddo
     end subroutine allocate_and_fill_colour_permutations
 
-    subroutine deduplicate_three_line_colour_flows()
+    subroutine group_three_line_colour_flows()
       ! The alternative three-line canonical order is needed while building
       ! currents, but it can close the same physical open-string flow more
       ! than once.  Keep one amplitude for each set of q[g...]qbar strings;
       ! the ordering of the independent strings is not physical.
       implicit none
-      integer :: old_amp,new_amp,previous
+      integer :: old_amp,flow,flow_count
+      integer,dimension(:),allocatable :: representative,partner
+      integer,dimension(:,:),allocatable :: old_curr2amp,old_perm,&
+           old_same_flavour_sum,old_same_flavour_sum_operation
+      logical,dimension(:),allocatable :: old_include_amp
 
-      new_amp=0
+      allocate(representative(this%nColOrd))
+      allocate(partner(this%nColOrd))
+      representative=0
+      partner=0
+      flow_count=0
       do old_amp=1,this%n_amps
-         do previous=1,new_amp
+         do flow=1,flow_count
             if (same_three_line_flow(this%perm(:,old_amp),&
-                 this%perm(:,previous))) exit
+                 this%perm(:,representative(flow)))) exit
          enddo
-         if (previous.le.new_amp) cycle
-         new_amp=new_amp+1
-         if (new_amp.ne.old_amp) then
-            this%curr2amp(:,new_amp)=this%curr2amp(:,old_amp)
-            this%perm(:,new_amp)=this%perm(:,old_amp)
-            this%include_amp(new_amp)=this%include_amp(old_amp)
-            this%same_flavour_sum(new_amp,:)=this%same_flavour_sum(old_amp,:)
-            this%same_flavour_sum_operation(new_amp,:)=&
-                 this%same_flavour_sum_operation(old_amp,:)
+         if (flow.gt.flow_count) then
+            flow_count=flow_count+1
+            representative(flow_count)=old_amp
+         elseif (partner(flow).eq.0) then
+            partner(flow)=old_amp
+         else
+            write (*,*) 'More than two closures for a three-line colour flow',flow
+            stop 1
          endif
       enddo
-      this%n_amps=new_amp
-      this%iproc_start(this%nprocs+1)=this%n_amps+1
-      if (this%n_amps.ne.this%nColOrd) then
-         write (*,*) 'Unexpected number of unique three-line colour flows',&
-              this%n_amps,this%nColOrd
+      if (flow_count.ne.this%nColOrd) then
+         write (*,*) 'Unexpected three-line colour-flow closure multiplicity',&
+              flow_count,this%nColOrd,this%n_amps
          stop 1
       endif
-    end subroutine deduplicate_three_line_colour_flows
+
+      allocate(old_curr2amp(2,this%n_amps))
+      allocate(old_perm(size(this%perm,1),this%n_amps))
+      allocate(old_include_amp(this%n_amps))
+      allocate(old_same_flavour_sum(this%n_amps,2))
+      allocate(old_same_flavour_sum_operation(this%n_amps,2))
+      old_curr2amp=this%curr2amp
+      old_perm=this%perm
+      old_include_amp=this%include_amp
+      old_same_flavour_sum=this%same_flavour_sum
+      old_same_flavour_sum_operation=this%same_flavour_sum_operation
+      allocate(this%three_line_partner_curr2amp(2,this%nColOrd))
+      this%three_line_partner_curr2amp=0
+      do flow=1,this%nColOrd
+         this%curr2amp(:,flow)=old_curr2amp(:,representative(flow))
+         this%perm(:,flow)=old_perm(:,representative(flow))
+         this%include_amp(flow)=old_include_amp(representative(flow))
+         this%same_flavour_sum(flow,:)=&
+              old_same_flavour_sum(representative(flow),:)
+         this%same_flavour_sum_operation(flow,:)=&
+              old_same_flavour_sum_operation(representative(flow),:)
+         if (partner(flow).ne.0) then
+            this%three_line_partner_curr2amp(:,flow)=old_curr2amp(:,partner(flow))
+         endif
+      enddo
+      this%n_amps=this%nColOrd
+      this%iproc_start(this%nprocs+1)=this%n_amps+1
+    end subroutine group_three_line_colour_flows
 
     logical function same_three_line_flow(left,right)
       implicit none
@@ -515,6 +548,7 @@ contains
       use math_functions
       implicit none
       integer :: i,nq,naq,nglu,nsing,iq,iaq,iglu,ising
+      integer(kind=8) :: color_orders_64
       do iproc=1,this%nprocs
          nq=0; naq=0 ; nglu=0 ; nsing=0
          do i=1,n
@@ -583,7 +617,20 @@ contains
       elseif (nq.eq.2) then
          this%nColOrd=factorial(nglu)*(nglu+1)*2
       elseif (nq.eq.3) then
-         this%nColOrd=factorial(nglu)*(nglu+1)*(nglu+2)*3
+         color_orders_64=3_8*int(nglu+1,kind=8)*int(nglu+2,kind=8)
+         do i=2,nglu
+            if (color_orders_64.gt.max_three_line_color_orders/int(i,kind=8)) then
+               color_orders_64=max_three_line_color_orders+1_8
+               exit
+            endif
+            color_orders_64=color_orders_64*int(i,kind=8)
+         enddo
+         if (color_orders_64.gt.max_three_line_color_orders) then
+            write (*,*) 'Three-line colour basis exceeds supported size',&
+                 color_orders_64,max_three_line_color_orders
+            stop 1
+         endif
+         this%nColOrd=int(color_orders_64)
       else
          write (*,*) 'Number of colour orders unknown',nq
          stop 1
@@ -633,6 +680,7 @@ contains
       allocate(this%same_flav(1:this%nprocs))
       do iproc=1,this%nprocs
          if (this%n_qqbar(iproc).eq.3) then
+            call canonicalize_three_line_order(iproc)
             call fill_alternative_quark_order(iproc)
          endif
          this%same_flav(iproc)=.false. ! This will be updated once the numerical check using 'find_same_flavour' is done
@@ -711,46 +759,131 @@ contains
       enddo
     end subroutine check_input_consistency
 
+    subroutine canonicalize_three_line_order(iproc)
+      implicit none
+      integer,intent(in) :: iproc
+      integer :: i,pos,nq,naq,nglu,nsing
+      integer,dimension(3) :: q,aq
+      integer,dimension(n) :: gluons,singlets
+
+      q=0
+      aq=0
+      gluons=0
+      singlets=0
+      nq=0
+      naq=0
+      nglu=0
+      nsing=0
+      do i=1,n
+         if (is_quark_from_order(i,iproc)) then
+            nq=nq+1
+            if (nq.le.3) q(nq)=i
+         elseif (is_antiquark_from_order(i,iproc)) then
+            naq=naq+1
+            if (naq.le.3) aq(naq)=i
+         elseif (pm%is_gluon(this%processes(i,iproc))) then
+            nglu=nglu+1
+            gluons(nglu)=i
+         elseif (pm%is_singlet(this%processes(i,iproc))) then
+            nsing=nsing+1
+            singlets(nsing)=i
+         else
+            write (*,*) 'Unknown particle in three-line colour order',&
+                 this%processes(i,iproc)
+            stop 1
+         endif
+      enddo
+      if (nq.ne.3 .or. naq.ne.3) then
+         write (*,*) 'Three-line colour order has inconsistent endpoints',nq,naq
+         stop 1
+      endif
+      if (nsing.ne.0) then
+         write (*,*) 'Three-line colour probe does not support colour singlets',nsing
+         stop 1
+      endif
+
+      pos=1
+      order(pos,1,iproc)=q(1)
+      do i=1,nglu
+         pos=pos+1
+         order(pos,1,iproc)=gluons(i)
+      enddo
+      pos=pos+1
+      order(pos,1,iproc)=aq(1)
+      pos=pos+1
+      order(pos,1,iproc)=q(2)
+      pos=pos+1
+      order(pos,1,iproc)=aq(2)
+      pos=pos+1
+      order(pos,1,iproc)=q(3)
+      do i=1,nsing
+         pos=pos+1
+         order(pos,1,iproc)=singlets(i)
+      enddo
+      pos=pos+1
+      order(pos,1,iproc)=aq(3)
+      if (pos.ne.n) then
+         write (*,*) 'Three-line canonical colour order has wrong size',pos,n
+         stop 1
+      endif
+    end subroutine canonicalize_three_line_order
+
     subroutine fill_alternative_quark_order(iproc)
       implicit none
       integer,intent(in) :: iproc
-      integer :: i
+      integer :: i,ncolored
       integer,dimension(3) :: q,aq
+      integer,dimension(n) :: colored_positions,colored_order,alternative
       q=0
       aq=0
+      ncolored=0
+      colored_positions=0
+      colored_order=0
+      alternative=0
       do i=1,n
+         if (pm%is_singlet(this%processes(order(i,1,iproc),iproc))) cycle
+         ncolored=ncolored+1
+         colored_positions(ncolored)=i
+         colored_order(ncolored)=order(i,1,iproc)
          if (is_quark_from_order(order(i,1,iproc),iproc)) then
             if (q(1).eq.0) then
-               q(1)=i
+               q(1)=ncolored
             elseif (q(2).eq.0) then
-               q(2)=i
+               q(2)=ncolored
             elseif (q(3).eq.0) then
-               q(3)=i
+               q(3)=ncolored
             endif
          endif
          if (is_antiquark_from_order(order(i,1,iproc),iproc)) then
             if (aq(1).eq.0) then
-               aq(1)=i
+               aq(1)=ncolored
             elseif (aq(2).eq.0) then
-               aq(2)=i
+               aq(2)=ncolored
             elseif (aq(3).eq.0) then
-               aq(3)=i
+               aq(3)=ncolored
             endif
          endif
       enddo
       if (aq(1).ne.q(2)-1) then
          write (*,*) 'Second quark should come right after first anti-quark in colour order'
+         write (*,*) q,aq,ncolored,colored_order(1:ncolored)
          stop 1
       endif
       if (aq(2).ne.q(3)-1) then
          write (*,*) 'Third quark should come right after second anti-quark in colour order'
+         write (*,*) q,aq,ncolored,colored_order(1:ncolored)
          stop 1
       endif
-      if (aq(3).ne.n) then
-         write (*,*) 'there are more particles after final anti-quark'
+      if (aq(3).ne.ncolored) then
+         write (*,*) 'there are more coloured particles after final anti-quark'
          stop 1
       endif
-      order(:,2,iproc)=[order(q(2):aq(2),1,iproc),order(q(1):aq(1),1,iproc),order(q(3):aq(3),1,iproc)]
+      alternative(1:ncolored)=[colored_order(q(2):aq(2)),&
+           colored_order(q(1):aq(1)),colored_order(q(3):aq(3))]
+      order(:,2,iproc)=order(:,1,iproc)
+      do i=1,ncolored
+         order(colored_positions(i),2,iproc)=alternative(i)
+      enddo
     end subroutine fill_alternative_quark_order
     
     subroutine set_max_cur()
@@ -2473,6 +2606,12 @@ contains
                   else
                      if (.not.this%same_flav(iproc)) then
                         this%amps(iamp)=contract_currents(iamp)
+                        if (allocated(this%three_line_partner_curr2amp) .and.&
+                             this%three_line_partner_curr2amp(1,iamp).ne.0) then
+                           this%amps(iamp)=this%amps(iamp)+contract_current_pair(&
+                                this%three_line_partner_curr2amp(1,iamp),&
+                                this%three_line_partner_curr2amp(2,iamp))
+                        endif
                      endif
                   endif
                enddo
@@ -2504,12 +2643,18 @@ contains
       integer :: ic1,ic2
       ic1=this%curr2amp(1,iamp)
       ic2=this%curr2amp(2,iamp)
-      if (this%current_list(ic1)%chirality.ne.0 .and. this%current_list(ic2)%chirality.ne.0) then
-         contract_currents=sum(this%current_list(ic1)%val_c(1:2)*this%current_list(ic2)%val_c(1:2))
-      else
-         contract_currents=sum(this%current_list(ic1)%val_c(1:4)*this%current_list(ic2)%val_c(1:4))
-      endif
+      contract_currents=contract_current_pair(ic1,ic2)
     end function contract_currents
+
+    complex(kind=8) function contract_current_pair(ic1,ic2)
+      implicit none
+      integer,intent(in) :: ic1,ic2
+      if (this%current_list(ic1)%chirality.ne.0 .and. this%current_list(ic2)%chirality.ne.0) then
+         contract_current_pair=sum(this%current_list(ic1)%val_c(1:2)*this%current_list(ic2)%val_c(1:2))
+      else
+         contract_current_pair=sum(this%current_list(ic1)%val_c(1:4)*this%current_list(ic2)%val_c(1:4))
+      endif
+    end function contract_current_pair
 
     complex (kind=8) function apply_operation(iamp,idau)
       implicit none
@@ -2802,6 +2947,11 @@ contains
       real(kind=8),dimension(3) :: col_fac
 
       nrows=this%nColOrd
+      if (int(nrows,kind=8).gt.max_three_line_color_orders) then
+         write (*,*) 'Three-line colour matrix exceeds supported size',&
+              nrows,max_three_line_color_orders
+         stop 1
+      endif
       if (this%n_amps.ne.nrows) then
          write (*,*) 'Three-line colour basis does not match generated amplitudes',&
               this%n_amps,nrows
@@ -4752,6 +4902,16 @@ contains
           endif
        enddo
     enddo
+    if (allocated(this%three_line_partner_curr2amp)) then
+       do iamp=1,this%n_amps
+          do i=1,2
+             if (this%three_line_partner_curr2amp(i,iamp).ne.0) then
+                this%three_line_partner_curr2amp(i,iamp)=&
+                     where_to_cur(this%three_line_partner_curr2amp(i,iamp))
+             endif
+          enddo
+       enddo
+    endif
     do iamp=1,this%n_amps
        if (.not.this%include_amp(iamp)) cycle
        do i=1,2
@@ -4964,6 +5124,8 @@ contains
     if (allocated(amp%n_qqbar)) deallocate(amp%n_qqbar)
     if (allocated(amp%perm)) deallocate(amp%perm)
     if (allocated(amp%curr2amp)) deallocate(amp%curr2amp)
+    if (allocated(amp%three_line_partner_curr2amp)) &
+         deallocate(amp%three_line_partner_curr2amp)
     if (allocated(amp%i_col_i)) deallocate(amp%i_col_i)
     if (allocated(amp%processes)) deallocate(amp%processes)
     if (allocated(amp%same_flavour_sum)) deallocate(amp%same_flavour_sum)

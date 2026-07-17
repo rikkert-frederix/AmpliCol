@@ -185,6 +185,72 @@ def parse_matrix(output: str) -> dict[str, Counter[float]]:
     return result
 
 
+def parse_indexed_matrix(
+    output: str,
+) -> tuple[dict[int, tuple[int, ...]], dict[tuple[str, int, int], float]]:
+    permutations: dict[int, tuple[int, ...]] = {}
+    entries: dict[tuple[str, int, int], float] = {}
+    for line in output.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "AMPICOL_COLOR_MATRIX_PERM":
+            permutations[int(fields[1])] = tuple(int(value) for value in fields[2:])
+        elif fields and fields[0] == "AMPICOL_COLOR_MATRIX_ENTRY":
+            entries[(fields[1], int(fields[2]), int(fields[3]))] = float(fields[4])
+    return permutations, entries
+
+
+def _is_quark_label(label: int, pdgs: tuple[int, ...]) -> bool:
+    pdg = pdgs[label - 1]
+    return (label <= 2 and -6 <= pdg <= -1) or (label > 2 and 1 <= pdg <= 6)
+
+
+def _is_antiquark_label(label: int, pdgs: tuple[int, ...]) -> bool:
+    pdg = pdgs[label - 1]
+    return (label <= 2 and 1 <= pdg <= 6) or (label > 2 and -6 <= pdg <= -1)
+
+
+def endpoint_permutation(
+    word: tuple[int, ...], pdgs: tuple[int, ...]
+) -> tuple[int, ...]:
+    endpoints: dict[int, int] = {}
+    quark = 0
+    for label in word:
+        if _is_quark_label(label, pdgs):
+            quark = label
+        elif _is_antiquark_label(label, pdgs):
+            if quark == 0:
+                raise AssertionError(f"antiquark {label} has no open string in {word}")
+            endpoints[quark] = label
+            quark = 0
+    if quark or len(endpoints) != 3:
+        raise AssertionError(f"incomplete three-line flow word {word}")
+    return tuple(endpoints[label] for label in sorted(endpoints))
+
+
+def check_no_gluon_indexed_matrix(output: str, case: Case) -> None:
+    permutations, entries = parse_indexed_matrix(output)
+    endpoint_orders = {
+        row: endpoint_permutation(word, case.pdgs)
+        for row, word in permutations.items()
+    }
+    expected: dict[tuple[str, int, int], float] = {}
+    for row, row_order in endpoint_orders.items():
+        for col, col_order in endpoint_orders.items():
+            if col < row:
+                continue
+            if row == col:
+                expected[("lc", row, col)] = 27.0
+                coefficient = 27.0
+            else:
+                relative = tuple(col_order.index(endpoint) for endpoint in row_order)
+                fixed_points = sum(index == value for index, value in enumerate(relative))
+                coefficient = -18.0 if fixed_points == 1 else 6.0
+            expected[("nlc", row, col)] = coefficient
+            expected[("full", row, col)] = coefficient
+    if entries != expected:
+        raise AssertionError(f"{case.process}: indexed color matrix is incorrect")
+
+
 def parse_components(output: str) -> tuple[float, float, float]:
     matches = COMPONENTS_RE.findall(output)
     if len(matches) != 1:
@@ -235,6 +301,8 @@ def check_case(
         raise AssertionError(f"{case.process}: missing {expected_amplitudes!r}")
     if parse_matrix(output) != case.matrix_entries:
         raise AssertionError(f"{case.process}: unexpected LC/NLC/full color matrices")
+    if case.color_orders == 6:
+        check_no_gluon_indexed_matrix(output, case)
     for expected, actual in zip(case.components, parse_components(output), strict=True):
         if not math.isclose(actual, expected, rel_tol=1.0e-12, abs_tol=1.0e-24):
             raise AssertionError(
@@ -242,6 +310,57 @@ def check_case(
                 f"expected={expected}, actual={actual}"
             )
     print(f"PASS {case.process}: {case.color_orders} all-flow color orders")
+
+
+def check_singlet_rejected(
+    repository: Path, temporary: Path, env: dict[str, str]
+) -> None:
+    process = "d d~ > u u~ s s~ a"
+    pdgs = (1, -1, 2, -2, 3, -3, 22)
+    run(
+        [
+            sys.executable,
+            "process_list.py",
+            "--serial",
+            "--include_3qqbar",
+            process,
+        ],
+        cwd=repository,
+        env=env,
+    )
+    group, integral = selected_entry(repository / "processes.txt", pdgs)
+    momenta_file = temporary / "momenta-singlet.txt"
+    momenta_file.write_text(
+        "\n".join(
+            " ".join(f"{value:.17g}" for value in row)
+            for row in CASES[1].momenta
+        )
+        + "\n",
+        encoding="ascii",
+    )
+    completed = subprocess.run(
+        [
+            "./amplicol_color_probe",
+            "1",
+            str(group),
+            str(integral),
+            "full",
+            "processes.txt",
+            str(momenta_file),
+            *(str(value) for value in CASES[1].helicities),
+        ],
+        cwd=repository,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode == 0:
+        raise AssertionError(f"{process}: unsupported direct probe unexpectedly ran")
+    if "does not support colour singlets" not in completed.stdout:
+        raise AssertionError(
+            f"{process}: direct probe did not fail with its supported-scope message"
+        )
+    print(f"PASS {process}: unsupported singlet scope rejected before allocation")
 
 
 def main() -> int:
@@ -261,6 +380,7 @@ def main() -> int:
             temporary = Path(raw)
             for case in CASES:
                 check_case(repository, temporary, case, env)
+            check_singlet_rejected(repository, temporary, env)
     finally:
         if saved_processes is None:
             process_file.unlink(missing_ok=True)
