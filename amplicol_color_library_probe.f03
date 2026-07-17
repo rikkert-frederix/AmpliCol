@@ -12,7 +12,8 @@ program amplicol_color_library_probe
   integer :: igroup, iint, argc, n, nmax, iacc_request, col_acc
   integer :: n_helicity_combinations
   integer :: irow, i, ic, icol, ioff, max_amp_size
-  integer,dimension(:),allocatable :: hel, row_to_integral, lepton_list
+  integer,dimension(:),allocatable :: hel, row_to_group, row_to_integral
+  integer,dimension(:),allocatable :: row_sign, lepton_list
   integer,dimension(:,:),allocatable :: local_part, local_order, spin_init, spin_loop
   integer,dimension(:,:),allocatable :: helicity_table, helicity_amp_index
   real(kind=8),dimension(:,:),allocatable :: p
@@ -107,8 +108,9 @@ program amplicol_color_library_probe
   call build_helicity_lookup()
 
   max_amp_size = 0
-  do i=1,size(pgl(igroup)%amps)
-     max_amp_size = max(max_amp_size,size(pgl(igroup)%amps(i)%amps))
+  do irow=1,colour_amp%nColOrd
+     max_amp_size = max(max_amp_size,&
+          size(pgl(row_to_group(irow))%amps(row_to_integral(irow))%amps))
   enddo
   allocate(order_amps(max_amp_size,colour_amp%nColOrd))
   allocate(colour_amps(colour_amp%nColOrd))
@@ -301,7 +303,7 @@ contains
 
   subroutine build_helicity_lookup()
     implicit none
-    integer :: combination, position, state, remaining, row, jint, active
+    integer :: combination, position, state, remaining, row, jgroup, jint, active
     n_helicity_combinations = 1
     do position=1,n
        n_helicity_combinations = n_helicity_combinations*spin_loop(0,position)
@@ -318,8 +320,9 @@ contains
        enddo
        hel(1:n) = helicity_table(1:n,combination)
        do row=1,colour_amp%nColOrd
+          jgroup = row_to_group(row)
           jint = row_to_integral(row)
-          helicity_amp_index(row,combination) = find_helicity_index(jint)
+          helicity_amp_index(row,combination) = find_helicity_index(jgroup,jint)
        enddo
     enddo
     active = 0
@@ -336,16 +339,32 @@ contains
 
   subroutine build_row_to_integral()
     implicit none
-    integer :: row, jint
+    integer :: row, jgroup, jint, match_sign, pass
+    allocate(row_to_group(colour_amp%nColOrd))
     allocate(row_to_integral(colour_amp%nColOrd))
+    allocate(row_sign(colour_amp%nColOrd))
+    row_to_group = 0
     row_to_integral = 0
+    row_sign = 0
     do row=1,colour_amp%nColOrd
-       do jint=1,size(pgl(igroup)%amps)
-          if (.not.all(pgl(igroup)%processes(1:n,jint).eq.local_part(1:n,1))) cycle
-          if (colour_order_matches(jint,row)) then
-             row_to_integral(row) = jint
-             exit
-          endif
+       ! Prefer a direct/cyclic representation in any generated group.  Only
+       ! if none exists may a pure-gluon reflected representative be reused.
+       do pass=1,2
+          do jgroup=1,ngroups
+             if (pgl(jgroup)%next.ne.n) cycle
+             do jint=1,size(pgl(jgroup)%amps)
+                if (.not.all(pgl(jgroup)%processes(1:n,jint).eq.&
+                     local_part(1:n,1))) cycle
+                match_sign = colour_order_match_sign(jgroup,jint,row,pass.eq.2)
+                if (match_sign.eq.0) cycle
+                row_to_group(row) = jgroup
+                row_to_integral(row) = jint
+                row_sign(row) = match_sign
+                exit
+             enddo
+             if (row_to_integral(row).ne.0) exit
+          enddo
+          if (row_to_integral(row).ne.0) exit
        enddo
        if (row_to_integral(row).eq.0) then
           write (*,*) 'Could not map colour row to generated-library integral',row
@@ -355,32 +374,46 @@ contains
     enddo
   end subroutine build_row_to_integral
 
-  logical function colour_order_matches(jint,row)
+  integer function colour_order_match_sign(jgroup,jint,row,allow_reflection)
     implicit none
-    integer,intent(in) :: jint,row
+    integer,intent(in) :: jgroup,jint,row
+    logical,intent(in) :: allow_reflection
     integer :: pos, label, m, nord
-    integer,dimension(n) :: candidate
+    integer,dimension(n) :: candidate, reversed
     nord = n - colour_amp%n_sing(1)
     candidate = 0
     m = 0
     do pos=1,n
-       label = pgl(igroup)%color_orders(pos,jint)
+       label = pgl(jgroup)%color_orders(pos,jint)
        if (label.lt.1 .or. label.gt.n) cycle
-       if (.not.phys_model%is_singlet(pgl(igroup)%processes(label,jint))) then
+       if (.not.phys_model%is_singlet(pgl(jgroup)%processes(label,jint))) then
           m = m + 1
           candidate(m) = label
        endif
     enddo
-    colour_order_matches = .false.
+    colour_order_match_sign = 0
     if (m.ne.nord) return
     if (all(candidate(1:nord).eq.colour_amp%perm(1:nord,row))) then
-       colour_order_matches = .true.
+       colour_order_match_sign = 1
        return
     endif
-    if (is_pure_gluon_word(candidate,nord)) then
-       colour_order_matches = cyclic_order_matches(candidate,colour_amp%perm(1:nord,row),nord)
+    if (cyclic_order_matches(candidate,colour_amp%perm(1:nord,row),nord)) then
+       colour_order_match_sign = 1
+       return
     endif
-  end function colour_order_matches
+    if (.not.allow_reflection .or. .not.is_pure_gluon_word(candidate,nord)) return
+    reversed = 0
+    do pos=1,nord
+       reversed(pos) = candidate(nord-pos+1)
+    enddo
+    if (cyclic_order_matches(reversed,colour_amp%perm(1:nord,row),nord)) then
+       if (mod(nord,2).eq.0) then
+          colour_order_match_sign = 1
+       else
+          colour_order_match_sign = -1
+       endif
+    endif
+  end function colour_order_match_sign
 
   logical function is_pure_gluon_word(word,nord)
     implicit none
@@ -430,22 +463,25 @@ contains
 
   subroutine evaluate_colour_order_amplitudes()
     implicit none
-    integer :: row, jint
+    integer :: row, jgroup, jint
     order_amps = (0d0,0d0)
     do row=1,colour_amp%nColOrd
+       jgroup = row_to_group(row)
        jint = row_to_integral(row)
-       call evaluate_amp(igroup,jint,p,order_amps(:,row))
+       call evaluate_amp(jgroup,jint,p,order_amps(:,row))
+       if (row_sign(row).ne.1) order_amps(:,row) = &
+            dble(row_sign(row))*order_amps(:,row)
     enddo
   end subroutine evaluate_colour_order_amplitudes
 
-  integer function find_helicity_index(jint)
+  integer function find_helicity_index(jgroup,jint)
     implicit none
-    integer,intent(in) :: jint
+    integer,intent(in) :: jgroup,jint
     integer :: ih, ispin
     find_helicity_index = 0
-    do ih=1,pgl(igroup)%amps(jint)%n_amps
-       do ispin=1,size(pgl(igroup)%amps(jint)%spins,2)
-          if (all(pgl(igroup)%amps(jint)%spins(1:n,ispin,ih).eq.hel(1:n))) then
+    do ih=1,pgl(jgroup)%amps(jint)%n_amps
+       do ispin=1,size(pgl(jgroup)%amps(jint)%spins,2)
+          if (all(pgl(jgroup)%amps(jint)%spins(1:n,ispin,ih).eq.hel(1:n))) then
              find_helicity_index = ih
              return
           endif
