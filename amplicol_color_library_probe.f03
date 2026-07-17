@@ -15,8 +15,10 @@ program amplicol_color_library_probe
   integer,dimension(:),allocatable :: hel, row_to_group, row_to_integral
   integer,dimension(:),allocatable :: row_sign, lepton_list
   integer,dimension(:,:),allocatable :: local_part, local_order, spin_init, spin_loop
+  integer,dimension(:,:),allocatable :: row_to_local
   integer,dimension(:,:),allocatable :: helicity_table, helicity_amp_index
   real(kind=8),dimension(:,:),allocatable :: p
+  real(kind=8),dimension(:,:,:),allocatable :: row_momenta
   real(kind=8),dimension(3) :: matrix2, matrix2_result
   real(kind=8) :: t0, t1, t_eval, t_colour, t_total, norm_factor
   complex(kind=8),dimension(:),allocatable :: colour_amps
@@ -72,6 +74,7 @@ program amplicol_color_library_probe
        80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
   call phys_model%init_vert()
   call read_amplitude_lib()
+  call validate_coherent_library()
   if (igroup < 1 .or. igroup > ngroups) then
      write (*,*) 'invalid group',igroup,'ngroups=',ngroups
      stop 1
@@ -105,6 +108,7 @@ program amplicol_color_library_probe
   call colour_amp%init_col(n,col_acc)
   if (print_matrix) call print_color_matrix()
   call build_row_to_integral()
+  call build_row_momenta()
   call build_helicity_lookup()
 
   max_amp_size = 0
@@ -205,6 +209,21 @@ contains
        endif
     enddo
   end subroutine lowercase
+
+  subroutine validate_coherent_library()
+    implicit none
+    integer :: jgroup, jint
+    if (iacc_request.le.1) return
+    do jgroup=1,ngroups
+       do jint=1,size(pgl(jgroup)%amps)
+          if (size(pgl(jgroup)%amps(jint)%spins,2).ne.1) then
+             write (*,*) 'Color library probe requires an unfiltered library.'
+             write (*,*) 'Regenerate with --library=create-raw.'
+             stop 1
+          endif
+       enddo
+    enddo
+  end subroutine validate_coherent_library
 
   subroutine read_probe_momenta()
     implicit none
@@ -322,7 +341,7 @@ contains
        do row=1,colour_amp%nColOrd
           jgroup = row_to_group(row)
           jint = row_to_integral(row)
-          helicity_amp_index(row,combination) = find_helicity_index(jgroup,jint)
+          helicity_amp_index(row,combination) = find_helicity_index(jgroup,jint,row)
        enddo
     enddo
     active = 0
@@ -340,26 +359,30 @@ contains
   subroutine build_row_to_integral()
     implicit none
     integer :: row, jgroup, jint, match_sign, pass
+    integer,dimension(n) :: leg_map
     allocate(row_to_group(colour_amp%nColOrd))
     allocate(row_to_integral(colour_amp%nColOrd))
     allocate(row_sign(colour_amp%nColOrd))
+    allocate(row_to_local(n,colour_amp%nColOrd))
     row_to_group = 0
     row_to_integral = 0
     row_sign = 0
+    row_to_local = 0
     do row=1,colour_amp%nColOrd
        ! Prefer a direct/cyclic representation in any generated group.  Only
        ! if none exists may a pure-gluon reflected representative be reused.
-       do pass=1,2
+       ! Finally, relabel identical external particles and carry that mapping
+       ! into the generated amplitude's momenta and helicities.
+       do pass=1,3
           do jgroup=1,ngroups
              if (pgl(jgroup)%next.ne.n) cycle
              do jint=1,size(pgl(jgroup)%amps)
-                if (.not.all(pgl(jgroup)%processes(1:n,jint).eq.&
-                     local_part(1:n,1))) cycle
-                match_sign = colour_order_match_sign(jgroup,jint,row,pass.eq.2)
+                match_sign = colour_order_match_sign(jgroup,jint,row,pass,leg_map)
                 if (match_sign.eq.0) cycle
                 row_to_group(row) = jgroup
                 row_to_integral(row) = jint
                 row_sign(row) = match_sign
+                row_to_local(1:n,row) = leg_map(1:n)
                 exit
              enddo
              if (row_to_integral(row).ne.0) exit
@@ -374,14 +397,17 @@ contains
     enddo
   end subroutine build_row_to_integral
 
-  integer function colour_order_match_sign(jgroup,jint,row,allow_reflection)
+  integer function colour_order_match_sign(jgroup,jint,row,pass,leg_map)
     implicit none
-    integer,intent(in) :: jgroup,jint,row
-    logical,intent(in) :: allow_reflection
-    integer :: pos, label, m, nord
+    integer,intent(in) :: jgroup,jint,row,pass
+    integer,dimension(n),intent(out) :: leg_map
+    integer :: pos, label, local_label, m, nord, shift
     integer,dimension(n) :: candidate, reversed
+    logical :: valid
+    logical,dimension(n) :: local_used
     nord = n - colour_amp%n_sing(1)
     candidate = 0
+    leg_map = 0
     m = 0
     do pos=1,n
        label = pgl(jgroup)%color_orders(pos,jint)
@@ -393,36 +419,102 @@ contains
     enddo
     colour_order_match_sign = 0
     if (m.ne.nord) return
-    if (all(candidate(1:nord).eq.colour_amp%perm(1:nord,row))) then
-       colour_order_match_sign = 1
-       return
-    endif
-    if (cyclic_order_matches(candidate,colour_amp%perm(1:nord,row),nord)) then
-       colour_order_match_sign = 1
-       return
-    endif
-    if (.not.allow_reflection .or. .not.is_pure_gluon_word(candidate,nord)) return
-    reversed = 0
-    do pos=1,nord
-       reversed(pos) = candidate(nord-pos+1)
-    enddo
-    if (cyclic_order_matches(reversed,colour_amp%perm(1:nord,row),nord)) then
-       if (mod(nord,2).eq.0) then
-          colour_order_match_sign = 1
-       else
-          colour_order_match_sign = -1
+    if (pass.le.2) then
+       if (.not.all(pgl(jgroup)%processes(1:n,jint).eq.local_part(1:n,1))) return
+       do pos=1,n
+          leg_map(pos) = pos
+       enddo
+       if (pass.eq.1) then
+          if (cyclic_order_matches(candidate,colour_amp%perm(1:nord,row),nord)) &
+               colour_order_match_sign = 1
+          return
        endif
+       if (.not.is_pure_gluon_word(jgroup,jint,candidate,nord)) return
+       reversed = 0
+       do pos=1,nord
+          reversed(pos) = candidate(nord-pos+1)
+       enddo
+       if (cyclic_order_matches(reversed,colour_amp%perm(1:nord,row),nord)) then
+          if (mod(nord,2).eq.0) then
+             colour_order_match_sign = 1
+          else
+             colour_order_match_sign = -1
+          endif
+       endif
+       return
     endif
+
+    do shift=0,nord-1
+       leg_map = 0
+       local_used = .false.
+       valid = .true.
+       do pos=1,nord
+          label = candidate(mod(pos-1+shift,nord)+1)
+          local_label = colour_amp%perm(pos,row)
+          if (label.lt.1 .or. label.gt.n .or. &
+               local_label.lt.1 .or. local_label.gt.n) then
+             valid = .false.
+             exit
+          endif
+          if (leg_map(label).ne.0 .or. local_used(local_label) .or. &
+               ((label.le.2).neqv.(local_label.le.2)) .or. &
+               pgl(jgroup)%processes(label,jint).ne.local_part(local_label,1)) then
+             valid = .false.
+             exit
+          endif
+          ! No fermion permutation sign is represented here.  Keep fermions
+          ! fixed and use this fallback only for identical bosonic legs.
+          if (label.ne.local_label .and. &
+               phys_model%is_fermion(pgl(jgroup)%processes(label,jint))) then
+             valid = .false.
+             exit
+          endif
+          leg_map(label) = local_label
+          local_used(local_label) = .true.
+       enddo
+       if (.not.valid) cycle
+
+       ! Keep unconstrained colour-singlet legs fixed whenever possible.
+       do pos=1,n
+          if (leg_map(pos).eq.0 .and. .not.local_used(pos) .and. &
+               pgl(jgroup)%processes(pos,jint).eq.local_part(pos,1)) then
+             leg_map(pos) = pos
+             local_used(pos) = .true.
+          endif
+       enddo
+       do pos=1,n
+          if (leg_map(pos).ne.0) cycle
+          do local_label=1,n
+             if (local_used(local_label)) cycle
+             if ((pos.le.2).neqv.(local_label.le.2)) cycle
+             if (pgl(jgroup)%processes(pos,jint).ne.&
+                  local_part(local_label,1)) cycle
+             if (pos.ne.local_label .and. &
+                  phys_model%is_fermion(pgl(jgroup)%processes(pos,jint))) cycle
+             leg_map(pos) = local_label
+             local_used(local_label) = .true.
+             exit
+          enddo
+          if (leg_map(pos).eq.0) then
+             valid = .false.
+             exit
+          endif
+       enddo
+       if (valid) then
+          colour_order_match_sign = 1
+          return
+       endif
+    enddo
   end function colour_order_match_sign
 
-  logical function is_pure_gluon_word(word,nord)
+  logical function is_pure_gluon_word(jgroup,jint,word,nord)
     implicit none
-    integer,intent(in) :: nord
+    integer,intent(in) :: jgroup,jint,nord
     integer,dimension(n),intent(in) :: word
     integer :: j
     is_pure_gluon_word = .true.
     do j=1,nord
-       if (.not.phys_model%is_gluon(local_part(word(j),1))) then
+       if (.not.phys_model%is_gluon(pgl(jgroup)%processes(word(j),jint))) then
           is_pure_gluon_word = .false.
           return
        endif
@@ -448,6 +540,19 @@ contains
     enddo
   end function cyclic_order_matches
 
+  subroutine build_row_momenta()
+    implicit none
+    integer :: row, position
+    allocate(row_momenta(0:3,nmax,colour_amp%nColOrd))
+    row_momenta = 0d0
+    do row=1,colour_amp%nColOrd
+       do position=1,n
+          row_momenta(0:3,position,row) = &
+               p(0:3,row_to_local(position,row))
+       enddo
+    enddo
+  end subroutine build_row_momenta
+
   subroutine contract_all_helicities()
     implicit none
     integer :: combination, row, ih
@@ -468,20 +573,21 @@ contains
     do row=1,colour_amp%nColOrd
        jgroup = row_to_group(row)
        jint = row_to_integral(row)
-       call evaluate_amp(jgroup,jint,p,order_amps(:,row))
+       call evaluate_amp(jgroup,jint,row_momenta(:,:,row),order_amps(:,row))
        if (row_sign(row).ne.1) order_amps(:,row) = &
             dble(row_sign(row))*order_amps(:,row)
     enddo
   end subroutine evaluate_colour_order_amplitudes
 
-  integer function find_helicity_index(jgroup,jint)
+  integer function find_helicity_index(jgroup,jint,row)
     implicit none
-    integer,intent(in) :: jgroup,jint
+    integer,intent(in) :: jgroup,jint,row
     integer :: ih, ispin
     find_helicity_index = 0
     do ih=1,pgl(jgroup)%amps(jint)%n_amps
        do ispin=1,size(pgl(jgroup)%amps(jint)%spins,2)
-          if (all(pgl(jgroup)%amps(jint)%spins(1:n,ispin,ih).eq.hel(1:n))) then
+          if (all(pgl(jgroup)%amps(jint)%spins(1:n,ispin,ih).eq.&
+               hel(row_to_local(1:n,row)))) then
              find_helicity_index = ih
              return
           endif
