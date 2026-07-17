@@ -8,22 +8,6 @@ FC = gfortran
 FFLAGS = -ffast-math -O3
 PYTHON ?= python
 
-ifeq ($(origin CXX),default)
-  CXX = g++
-endif
-
-ifeq ($(shell $(CXX) --version | grep -c clang),1)
-  STDLIB_FLAG = -stdlib=libc++
-  STDLIB_LDLIBS   = -lc++
-else
-  STDLIB_FLAG =
-  STDLIB_LDLIBS   =
-endif
-
-LHAPDF_CONFIG ?= lhapdf-config
-LHAPDF_CFLAGS  := $(shell $(LHAPDF_CONFIG) --cflags)
-LHAPDF_LDFLAGS := $(shell $(LHAPDF_CONFIG) --ldflags)
-
 # ----------------------------------------------------------------------
 # 1. Detect amplitude sources and group them
 # ----------------------------------------------------------------------
@@ -59,9 +43,6 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 
 %.o: PDF/%.f
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
-
-%.o: PDF/%.cc
-	$(CXX) $(CXXFLAGS) $(STDLIB_FLAG) $(LHAPDF_CFLAGS)  -c -I. -IPDF $< -std=c++11
 
 %.o: PDF/%.f90
 	$(FC) $(FFLAGS) -c -I. -IPDF $<
@@ -107,8 +88,7 @@ LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
 feynmanrules.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
-helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
-pdf_lhapdf62.o
+helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o
@@ -120,32 +100,31 @@ FILES_M_COLOR_PROBE = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
 feynmanrules.o particles.o amplitude_QCD.o common.o phase_space_genpt.o \
 phase_space_haag.o cuts.o pdf_wrap.o read_process_file.o multichannel.o \
-handling_processes.o simple_integrator.o helper_modules.o pdf_lhapdf62.o
+handling_processes.o simple_integrator.o helper_modules.o
 
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
 
 amplicol_generate: $(FILES_M_INT_QCD) dummy.o
-	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o $(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_INT_QCD) dummy.o
 
 amplicol_generate_library: $(FILES_M_INT_QCD) amplib.o $(AMPLIBS)
 	$(FC) $(FFLAGS) -o amplicol_generate $(FILES_M_INT_QCD) amplib.o $(AMPLIBS) \
-	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
+	-Wl,-rpath,$(PWD)
 
 amplicol_library_benchmark: $(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) amplicol_library_benchmark.o
 	$(FC) $(FFLAGS) -o $@ amplicol_library_benchmark.o \
 	$(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) \
-	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
+	-Wl,-rpath,$(PWD)
 
 amplicol_color_library_probe: $(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) amplicol_color_library_probe.o
 	$(FC) $(FFLAGS) -o $@ amplicol_color_library_probe.o \
 	$(filter-out amplicol_generate.o,$(FILES_M_INT_QCD)) amplib.o $(AMPLIBS) \
-	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS) -Wl,-rpath,$(PWD)
+	-Wl,-rpath,$(PWD)
 
 amplicol_color_probe: $(FILES_M_COLOR_PROBE) amplicol_color_probe.o
-	$(FC) $(FFLAGS) -o $@ amplicol_color_probe.o $(FILES_M_COLOR_PROBE) \
-	$(LHAPDF_LDFLAGS) -lstdc++ $(STDLIB_LDLIBS)
+	$(FC) $(FFLAGS) -o $@ amplicol_color_probe.o $(FILES_M_COLOR_PROBE)
 
 amplicol_reweight: $(FILES_M_RWGT_QCD)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_RWGT_QCD)
@@ -198,7 +177,6 @@ simple_integrator.o : helper_modules.o
 amplitude_library.o : handling_processes.o read_process_file.o dummy.o
 mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.o
 scales.o : common.o particles.o cuts.o
-pdf_lhapdf62.o : makefile
 amplib.o: $(notdir $(AMPSRC:.f03=.o))
 
 # ----------------------------------------------------------------------
