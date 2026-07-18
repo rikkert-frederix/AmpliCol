@@ -1708,7 +1708,7 @@ contains
       left=1
       right=max_key
       do while (left.le.right)
-         middle=(right+left)/2
+         middle=left+(right-left)/2
          if (current_dict(middle).eq.val) then
             key=middle
             return
@@ -3363,7 +3363,7 @@ contains
      left=1
      right=max_keys
      do while (left.le.right)
-        middle=(right+left)/2
+        middle=left+(right-left)/2
         if (perm_dict(middle).eq.val) then
            solve_dict=middle
            return
