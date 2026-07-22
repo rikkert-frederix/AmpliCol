@@ -23,13 +23,13 @@ program amplicol_generate
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
-  character(len=80) :: filename,logfile,limit_logfile,tag
+  character(len=80) :: filename,real_filename,logfile,limit_logfile,tag
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
-  integer :: ichan,iint,itmax,ncalls0,iamp
+  integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups
   integer :: limit_point
   integer,parameter :: n_limit_points=100,n_limit_failures=20
   integer,dimension(:,:,:),allocatable :: soft_fail,soft_tested
@@ -42,7 +42,7 @@ program amplicol_generate
   character(len=10) :: time
   character(len=5) :: zone
   character(len=19) :: formatted
-  logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,subtracted_real
+  logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,has_real_process
   logical :: limits_ok
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
@@ -73,7 +73,18 @@ program amplicol_generate
   if (use_amplitude_library) then
      call read_amplitude_lib()
   else
-     call read_processes_from_file(filename)
+     if (has_real_process) then
+        call count_process_groups(filename,nborn_groups)
+        call count_process_groups(real_filename,nreal_groups)
+        call allocate_process_groups(nborn_groups+nreal_groups)
+        call read_processes_from_file(filename,0)
+        call clear_process_file_metadata()
+        call read_processes_from_file(real_filename,nborn_groups)
+        pgl(nborn_groups+1:ngroups)%is_subtracted_real=.true.
+        call clear_process_file_metadata()
+     else
+        call read_processes_from_file(filename)
+     endif
      do i=1,ngroups
        call setup_optimised_multichannel_weight_computation(pgl(i))
     enddo
@@ -98,6 +109,14 @@ program amplicol_generate
         allocate(phase_space_genpt :: pgl(igroup)%phase_space)
      elseif (PS_choice.eq.4) then
         allocate(phase_space_gen23 :: pgl(igroup)%phase_space)
+     endif
+
+     ! Use the cut-aware bounds for Born phase spaces.  The phase-space
+     ! generator copies this module setting into each instance during init,
+     ! allowing Born and real channels to retain different sampling domains
+     ! in a single B+R-D integration.
+     if (PS_choice.eq.1 .or. PS_choice.eq.4) then
+        call set_use_soft_bounds_as_actual_limits(.not.pgl(igroup)%is_subtracted_real)
      endif
 
      allocate(mass(pgl(igroup)%next))
@@ -156,7 +175,7 @@ program amplicol_generate
            if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
                 pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
-           call initialise_subtraction(igroup,iamp)
+           if (pgl(igroup)%is_subtracted_real .or. limit_test) call initialise_subtraction(igroup,iamp)
            if (read_momenta) then
               if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
               call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
@@ -214,10 +233,12 @@ program amplicol_generate
      endif
   endif
   
-  filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
-  open(unit=11,file=filename,action='readwrite',status='unknown')
-  if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
-  call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
+  if (.not.has_real_process) then
+     filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
+     open(unit=11,file=filename,action='readwrite',status='unknown')
+     if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
+     call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
+  endif
   
   allocate(nintegrals(ngroups))
   if (keep_processes_separate) then
@@ -329,7 +350,7 @@ program amplicol_generate
            endif
         endif
      endif
-     if (to_write(1)) then
+     if (to_write(1) .and. .not.has_real_process) then
         if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
         call unwgt_process(pgl(ichan),iint) ! pick a random process
         call unwgt_helicity(pgl(ichan))     ! pick a random helicity for the process picked
@@ -346,28 +367,32 @@ program amplicol_generate
      t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
      call cpu_time(tFinalBefore)
   endif
-  if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
-  call flush(11)
-  call simple_integrator%assign_evnt_wgts(wgts)
-  if (timing_mode.eq.timing_detailed) then
-     call cpu_time(tSampleAfter)
-     t_Evt_wgt_assign=t_Evt_wgt_assign+tSampleAfter-tSampleBefore
-  endif
-  if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
-  rewind(11)
-  filename='Outputs/'//trim(adjustl(tag))//'events.lhe'
-  open(unit=12,file=filename,action='write',status='unknown')
-  write (*,*) 'Updating event weights...'
-  write (99,*) 'Updating event weights...'
-  do i=1,size(wgts,dim=2)
-     call event_update_wgt(11,12,wgts(1,i))
-  enddo
-  close(11,status='DELETE')
-  write(12,'(a)') '</LesHouchesEvents>'
-  close(12)
-  if (timing_mode.eq.timing_detailed) then
-     call cpu_time(tSampleAfter)
-     t_Evt_wgt_update=t_Evt_wgt_update+tSampleAfter-tSampleBefore
+  if (.not.has_real_process) then
+     if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
+     call flush(11)
+     call simple_integrator%assign_evnt_wgts(wgts)
+     if (timing_mode.eq.timing_detailed) then
+        call cpu_time(tSampleAfter)
+        t_Evt_wgt_assign=t_Evt_wgt_assign+tSampleAfter-tSampleBefore
+     endif
+     if (timing_mode.eq.timing_detailed) call cpu_time(tSampleBefore)
+     rewind(11)
+     filename='Outputs/'//trim(adjustl(tag))//'events.lhe'
+     open(unit=12,file=filename,action='write',status='unknown')
+     write (*,*) 'Updating event weights...'
+     write (99,*) 'Updating event weights...'
+     do i=1,size(wgts,dim=2)
+        call event_update_wgt(11,12,wgts(1,i))
+     enddo
+     close(11,status='DELETE')
+     write(12,'(a)') '</LesHouchesEvents>'
+     close(12)
+     if (timing_mode.eq.timing_detailed) then
+        call cpu_time(tSampleAfter)
+        t_Evt_wgt_update=t_Evt_wgt_update+tSampleAfter-tSampleBefore
+     endif
+  else
+     call print_contribution_results()
   endif
   if (timing_enabled) then
      call cpu_time(tFinalAfter)
@@ -387,6 +412,38 @@ program amplicol_generate
   close(99)
   
 contains
+
+  subroutine print_contribution_results()
+    implicit none
+    real(kind=8),allocatable :: channel_res(:,:),channel_unc(:,:)
+    real(kind=8) :: born_res,born_unc,real_res,real_unc,total_res,total_unc
+    integer :: i
+    call simple_integrator%get_channel_results(channel_res,channel_unc)
+    born_res=0d0
+    born_unc=0d0
+    real_res=0d0
+    real_unc=0d0
+    do i=1,ngroups
+       if (pgl(i)%is_subtracted_real) then
+          real_res=real_res+channel_res(2,i)
+          real_unc=real_unc+channel_unc(2,i)**2
+       else
+          born_res=born_res+channel_res(2,i)
+          born_unc=born_unc+channel_unc(2,i)**2
+       endif
+    enddo
+    born_unc=sqrt(born_unc)
+    real_unc=sqrt(real_unc)
+    total_res=born_res+real_res
+    total_unc=sqrt(born_unc**2+real_unc**2)
+    write (*,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born contribution:',born_res,'+/-',born_unc
+    write (*,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Real-subtracted contribution:',real_res,'+/-',real_unc
+    write (*,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born + real-subtracted:',total_res,'+/-',total_unc
+    write (99,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born contribution:',born_res,'+/-',born_unc
+    write (99,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Real-subtracted contribution:',real_res,'+/-',real_unc
+    write (99,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born + real-subtracted:',total_res,'+/-',total_unc
+    deallocate(channel_res,channel_unc)
+  end subroutine print_contribution_results
 
   subroutine print_timing(iunit)
     implicit none
@@ -513,7 +570,7 @@ contains
        endif
        return
     endif
-    if (.not.read_momenta .and. .not.subtracted_real) then
+    if (.not.read_momenta .and. .not.pgl(ichan)%is_subtracted_real) then
        if (.not.pass_cuts(pgl(ichan))) then
           val=0d0
           if (time_physics) then
@@ -559,9 +616,9 @@ contains
     endif
 
     real_pass=.true.
-    if (subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
+    if (pgl(ichan)%is_subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
     amp2_integrand=pgl(ichan)%amp2(1)
-    if (subtracted_real) then
+    if (pgl(ichan)%is_subtracted_real) then
        call evaluate_real_dipoles(iint,ichan,amp2_dip)
        if (real_pass) then
           amp2_integrand=amp2_integrand-amp2_dip
@@ -752,8 +809,8 @@ contains
     integer :: timing_sample_arg
     integer(kind=8) iseed
     common /to_seed/iseed
-    call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,subtracted_real)
+    call parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
+         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,has_real_process)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -784,17 +841,25 @@ contains
     endif
     timing_sample=timing_sample_arg
 
-    if (subtracted_real) then
-       if (.not.keep_processes_separate) then
-          write (*,*) '--subtracted-real requires keep_processes_separate=true'
+    if (has_real_process) then
+       if (len_trim(real_filename).eq.0) then
+          write (*,*) '--real-process requires a non-empty file name'
           stop 1
        endif
-       if (.not.limit_test .and. accuracy.le.0d0) then
-          write (*,*) '--subtracted-real is integration-only; provide --accuracy=X'
+       if (.not.keep_processes_separate) then
+          write (*,*) '--real-process requires keep_processes_separate=true'
+          stop 1
+       endif
+       if (accuracy.le.0d0) then
+          write (*,*) '--real-process is integration-only; provide --accuracy=X'
           stop 1
        endif
        if (library.ne.'none') then
-          write (*,*) '--subtracted-real is not available with --library=create or --library=use'
+          write (*,*) '--real-process is not available with --library=create or --library=use'
+          stop 1
+       endif
+       if (limit_test .or. read_momenta) then
+          write (*,*) '--real-process is not available with --limit_test or --me_test'
           stop 1
        endif
     endif

@@ -1,22 +1,23 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       limit_test,timing,timing_sample,accuracy,alpha_dipole,subtracted_real)
+  subroutine parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
+       limit_test,timing,timing_sample,accuracy,alpha_dipole,has_real_process)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
     logical :: verbose, show_help
-    character(len=80) :: filename,library,tag,timing
+    character(len=80) :: filename,real_filename,library,tag,timing
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta,limit_test,subtracted_real
+    logical :: read_momenta,limit_test,has_real_process
     integer :: me_points,timing_sample
     real(kind=8) :: accuracy,alpha_dipole(4)
 
     ! Default values:
     show_help=.false.
     filename='processes.txt'
+    real_filename=''
     ncalls0=10000
     PS_choice=1
     seed=0
@@ -25,7 +26,7 @@ contains
     tag=''
     read_momenta=.false.
     limit_test=.false.
-    subtracted_real=.false.
+    has_real_process=.false.
     timing='basic'
     timing_sample=100
     accuracy=0d0
@@ -38,6 +39,9 @@ contains
           show_help = .true.
        elseif (index(arg, "--process=").eq.1 .or. index(arg, "-p=").eq.1) then
           filename = arg(index(arg, "=")+1:)
+       elseif (index(arg, "--real-process=").eq.1) then
+          real_filename = arg(index(arg, "=")+1:)
+          has_real_process=.true.
        elseif (index(arg, "--nevents=").eq.1 .or. index(arg, "-n=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) ncalls0
@@ -61,7 +65,8 @@ contains
        elseif (arg.eq."--limit_test" .or. arg.eq."-lt") then
           limit_test=.true.
        elseif (arg.eq."--subtracted-real") then
-          subtracted_real=.true.
+          write (*,*) '--subtracted-real has been replaced by --real-process=FILE'
+          stop 1
        elseif (index(arg, "--timing=").eq.1) then
           timing = arg(index(arg, "=")+1:)
        elseif (index(arg, "--timing-sample=").eq.1) then
@@ -88,7 +93,8 @@ contains
        write (*,'(a)') "Usage: 'amplicol_generate <arguments>'. Possible arguments are"
        write (*,'(a)') ""
        write (*,'(a)') "  --help,           -h      : Show this message."
-       write (*,'(a)') "  --process=[X],    -p=[X]  : Process specified in file [X] (default is './processes.txt')."
+       write (*,'(a)') "  --process=[X],    -p=[X]  : Born process specified in file [X] (default is './processes.txt')."
+       write (*,'(a)') "  --real-process=[X]         : Real-emission process file; integrates B + R-sum(D) in one run."
        write (*,'(a)') "  --nevents=[X],    -n=[X]  : Number of unweighted events to generate (default is 10000)."
        write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use "// &
             "-- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel."
@@ -101,7 +107,6 @@ contains
        write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
             "with [X] points tested (single PS kinematics)"
        write (*,'(a)') "  --limit_test,     -lt      : Test soft and collinear CS limits and exit."
-       write (*,'(a)') "  --subtracted-real         : Integrate the local real contribution R-sum(D); requires --accuracy."
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&

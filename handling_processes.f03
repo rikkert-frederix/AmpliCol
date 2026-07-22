@@ -47,6 +47,7 @@ module handling_processes
      integer(kind=8),dimension(:),allocatable :: iden
      logical,dimension(-6:7,2) :: ipdgs
      integer(kind=4) :: next,ndim,ndim_extra
+     logical :: is_subtracted_real=.false.
      integer,dimension(:),allocatable :: col_fac
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
      integer(kind=4),dimension(:),allocatable :: hel,passed
@@ -185,8 +186,8 @@ contains
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,iproc
-    if (.not. allocated(pgl%spin)) allocate(pgl%spin(0:3,1:next))
-    do i=1,next
+    if (.not. allocated(pgl%spin)) allocate(pgl%spin(0:3,1:pgl%next))
+    do i=1,pgl%next
        pgl%spin(0,i)=phys_model%get_spin(pgl%processes(i,1))
        if (pgl%spin(0,i).eq.2) then
           pgl%spin(1,i)=-1
@@ -203,7 +204,7 @@ contains
        endif
     enddo
     do iproc=2,pgl%nproc
-       do i=1,next
+       do i=1,pgl%next
           if (pgl%spin(0,i).ne.phys_model%get_spin(pgl%processes(i,iproc))) then
              write (*,*) 'Spin states of particles in different processes not compatible',iproc
              stop 1
@@ -220,7 +221,7 @@ contains
        nq=0
        ng=0
        nsing=0
-       do i=1,next
+       do i=1,pgl_unique%next
           if (phys_model%is_quark(abs(pgl_unique%processes(i,iproc)))) then
              nq=nq+1
           elseif(phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
@@ -236,7 +237,7 @@ contains
        if (nq.eq.0 .and. nsing.ne.0) then
           ig=nsing+1
           is=1
-          do i=1,next
+          do i=1,pgl_unique%next
              if (phys_model%is_singlet(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(is,iproc)=i
                 is=is+1
@@ -248,17 +249,17 @@ contains
 !!$          write (*,*) 'when there are colour singlets, there should be quarks'
 !!$          stop 1
        elseif (nq.eq.0) then
-          do i=1,next
+          do i=1,pgl_unique%next
              pgl_unique%color_orders(i,iproc)=i
           enddo
        elseif (nq.eq.2) then
           ig=2
           is=ng+2
-          do i=1,next
+          do i=1,pgl_unique%next
              if (phys_model%is_quark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(1,iproc)=i
              elseif (phys_model%is_antiquark(pgl_unique%processes(i,iproc))) then
-                pgl_unique%color_orders(next,iproc)=i
+                pgl_unique%color_orders(pgl_unique%next,iproc)=i
              elseif (phys_model%is_gluon(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(ig,iproc)=i
                 ig=ig+1
@@ -272,14 +273,14 @@ contains
           iaq=2
           ig=nq
           is=ng+4
-          do i=1,next
+          do i=1,pgl_unique%next
              if (phys_model%is_quark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iq,iproc)=i
                 iq=iq+2
              elseif (phys_model%is_antiquark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iaq,iproc)=i
                 if (iaq.eq.nq-2) then
-                   iaq=next
+                   iaq=pgl_unique%next
                 else
                    iaq=iaq+2
                 endif
@@ -325,10 +326,10 @@ contains
     type(phase_space_order_group),intent(inout) :: pgl
     integer :: i,j,ni,iproc
     integer,dimension(:,:),allocatable :: iden_part
-    allocate(iden_part(1:next,2))
+    allocate(iden_part(1:pgl%next,2))
     do iproc=1,pgl%nproc
        ni=0
-       do i=3,next
+       do i=3,pgl%next
           do j=1,ni
              if (iden_part(j,1).eq.pgl%processes(i,iproc)) then
                 iden_part(j,2)=iden_part(j,2)+1
@@ -355,7 +356,7 @@ contains
     real(kind=8) :: fac
     do iproc=1,pgl%nproc
        fac=0d0
-       do i=1,next
+       do i=1,pgl%next
           if (pgl%processes(i,iproc).eq.21) then
              fac=fac+1d0
           elseif (abs(pgl%processes(i,iproc)).ge.1 .and. abs(pgl%processes(i,iproc)).le.6) then

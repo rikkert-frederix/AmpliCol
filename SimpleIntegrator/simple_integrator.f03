@@ -188,7 +188,7 @@ module simple_integrator_mod
      type(channel),allocatable,dimension(:) :: channels
      ! x and wgt are allocated by get_points and released by fill_points.
    contains
-     procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts
+     procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts,get_channel_results
      procedure,private :: read_all_grids,write_all_grids&
           &,get_channel_and_integral,update_points_requested&
           &,print_results,compute_total_rate,update_nevts_unw_req&
@@ -1478,6 +1478,19 @@ contains
     real(kind=8),intent(out) :: wgt
     call this%channels(ichan)%recompute_wgt_from_x(this%channels(ichan)%current_iter,x,wgt)
   end subroutine compute_wgt_from_x
+
+  ! Return the signed and absolute combined estimates for every channel.
+  subroutine get_channel_results(this,res,unc)
+    implicit none
+    class(integrator),intent(in) :: this
+    real(kind=8),allocatable,dimension(:,:),intent(out) :: res,unc
+    integer :: i
+    allocate(res(2,this%nchannel),unc(2,this%nchannel))
+    do i=1,this%nchannel
+       res(:,i)=this%channels(i)%res
+       unc(:,i)=this%channels(i)%unc
+    enddo
+  end subroutine get_channel_results
   
   ! Placeholder for future grid restart support.
   subroutine read_all_grids(this)

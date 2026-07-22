@@ -9,14 +9,52 @@ module read_process_file
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
-  subroutine read_processes_from_file(filename)
+  subroutine count_process_groups(filename,nfile_groups)
+    implicit none
+    character(len=*),intent(in) :: filename
+    integer,intent(out) :: nfile_groups
+    integer :: file_next,file_nunique,i
+    open(unit=10,file=filename,status='old',action='read')
+    read(10,*) file_next,file_nunique
+    do i=1,file_nunique
+       read(10,*)
+    enddo
+    read(10,*)
+    read(10,*)
+    read(10,*) nfile_groups
+    close(10)
+  end subroutine count_process_groups
+
+  subroutine allocate_process_groups(ntotal_groups)
+    implicit none
+    integer,intent(in) :: ntotal_groups
+    if (allocated(pgl)) deallocate(pgl)
+    allocate(pgl(ntotal_groups))
+    ngroups=ntotal_groups
+  end subroutine allocate_process_groups
+
+  subroutine clear_process_file_metadata()
+    implicit none
+    if (allocated(unique_procs)) deallocate(unique_procs)
+    if (allocated(pgl_unique)) deallocate(pgl_unique)
+    if (allocated(unique_map_value)) deallocate(unique_map_value)
+    if (allocated(unique_map)) deallocate(unique_map)
+  end subroutine clear_process_file_metadata
+
+  subroutine read_processes_from_file(filename,igroup_offset)
     implicit none
     character(len=80) :: filename
-    integer :: iproc,igroup,icheck,nproc_in_group,max_channels,iflav,ndim
+    integer,intent(in),optional :: igroup_offset
+    integer :: iproc,igroup,igroup_global,icheck,nproc_in_group,max_channels,iflav,ndim,nfile_groups,offset
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
     integer :: i,j
+    offset=0
+    if (present(igroup_offset)) offset=igroup_offset
+    if (allocated(pgl_unique) .or. allocated(unique_procs) .or. allocated(unique_map) .or. allocated(unique_map_value)) then
+       call clear_process_file_metadata()
+    endif
     open(unit=10,file=filename,status='old')
     read (10,*) next,nproc_unique
     ndim=3*(next-2)-4
@@ -31,14 +69,22 @@ contains
     call check_unique_processes()
     read(10,*)
     read(10,*)
-    read (10,*) ngroups
-    allocate(pgl(ngroups))
+    read (10,*) nfile_groups
+    if (.not.allocated(pgl)) then
+       call allocate_process_groups(nfile_groups)
+       offset=0
+    endif
+    if (offset.lt.0 .or. offset+nfile_groups.gt.size(pgl)) then
+       write (*,*) 'ERROR: process-file group range is invalid',offset,nfile_groups,size(pgl)
+       stop 1
+    endif
 
     allocate(process(1:next))
     allocate(order(1:next))
 
     read (10,*) 
-    do igroup=1,ngroups
+    do igroup=1,nfile_groups
+       igroup_global=offset+igroup
        nprocs=0
        sf_nprocs=0
        allocate(phase_space_orders(1:next))
@@ -72,40 +118,44 @@ contains
              enddo
           endif
        enddo
-       pgl(igroup)%next=next
-       pgl(igroup)%nproc=nprocs
-       pgl(igroup)%ndim=ndim
-       pgl(igroup)%ndim_extra=0
-       pgl(igroup)%multichan%max_channels=max_channels
+       pgl(igroup_global)%next=next
+       pgl(igroup_global)%nproc=nprocs
+       pgl(igroup_global)%ndim=ndim
+       pgl(igroup_global)%ndim_extra=0
+       pgl(igroup_global)%multichan%max_channels=max_channels
        if (keep_processes_separate) then
-          allocate(pgl(igroup)%amps(1:pgl(igroup)%nproc))
-          allocate(pgl(igroup)%nhel(1:pgl(igroup)%nproc))
-          allocate(pgl(igroup)%passed(1:pgl(igroup)%nproc))
+          allocate(pgl(igroup_global)%amps(1:pgl(igroup_global)%nproc))
+          allocate(pgl(igroup_global)%nhel(1:pgl(igroup_global)%nproc))
+          allocate(pgl(igroup_global)%passed(1:pgl(igroup_global)%nproc))
        else
-          allocate(pgl(igroup)%amps(1))
-          allocate(pgl(igroup)%nhel(1))
-          allocate(pgl(igroup)%passed(1))
+          allocate(pgl(igroup_global)%amps(1))
+          allocate(pgl(igroup_global)%nhel(1))
+          allocate(pgl(igroup_global)%passed(1))
        endif
-       allocate(pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%phase_space_orders(1:next))
-       allocate(pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%val_procs(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc))
-       allocate(pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc))
-       pgl(igroup)%processes(1:next,1:pgl(igroup)%nproc)=processes(1:next,1:pgl(igroup)%nproc)
-       pgl(igroup)%color_orders(1:next,1:pgl(igroup)%nproc)=color_orders(1:next,1:pgl(igroup)%nproc)
-       pgl(igroup)%phase_space_orders(1:next)=phase_space_orders(1:next)
-       pgl(igroup)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
-            idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
-       pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc)=iden_iproc(1:pgl(igroup)%nproc)
-       pgl(igroup)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)=&
-            iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup)%nproc)),1:pgl(igroup)%nproc)
-       pgl(igroup)%multichan%channels(1:max_channels,1:pgl(igroup)%nproc)=multi_chans(1:max_channels,1:pgl(igroup)%nproc)
-       pgl(igroup)%multichan%number_of_channels(1:pgl(igroup)%nproc)=multi_chans(0,1:pgl(igroup)%nproc)
-       pgl(igroup)%passed=0
+       allocate(pgl(igroup_global)%processes(1:next,1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%color_orders(1:next,1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%phase_space_orders(1:next))
+       allocate(pgl(igroup_global)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%iden_iproc(1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%val_procs(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%multichan%channels(1:max_channels,1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%multichan%number_of_channels(1:pgl(igroup_global)%nproc))
+       pgl(igroup_global)%processes(1:next,1:pgl(igroup_global)%nproc)=processes(1:next,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%color_orders(1:next,1:pgl(igroup_global)%nproc)=color_orders(1:next,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%phase_space_orders(1:next)=phase_space_orders(1:next)
+       pgl(igroup_global)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)=&
+            idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%iden_iproc(1:pgl(igroup_global)%nproc)=iden_iproc(1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)=&
+            iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%multichan%channels=0
+       do iproc=1,pgl(igroup_global)%nproc
+          pgl(igroup_global)%multichan%channels(1:multi_chans(0,iproc),iproc)=&
+               multi_chans(1:multi_chans(0,iproc),iproc)+offset
+       enddo
+       pgl(igroup_global)%multichan%number_of_channels(1:pgl(igroup_global)%nproc)=multi_chans(0,1:pgl(igroup_global)%nproc)
+       pgl(igroup_global)%passed=0
        deallocate(iden_iproc)
        deallocate(processes)
        deallocate(color_orders)
@@ -115,10 +165,10 @@ contains
        deallocate(multi_chans)
        deallocate(ichans)
        write (99,*) '****************************************************'
-       do iproc=1,pgl(igroup)%nproc
-          write(99,*) iproc,':',pgl(igroup)%processes(1:next,iproc),' ; ',&
-               pgl(igroup)%color_orders(1:next,iproc),' ; ',pgl(igroup)%iden_iproc(iproc),' ; ',&
-               pgl(igroup)%multichan%channels(1:pgl(igroup)%multichan%number_of_channels(iproc),iproc)
+       do iproc=1,pgl(igroup_global)%nproc
+          write(99,*) iproc,':',pgl(igroup_global)%processes(1:next,iproc),' ; ',&
+               pgl(igroup_global)%color_orders(1:next,iproc),' ; ',pgl(igroup_global)%iden_iproc(iproc),' ; ',&
+               pgl(igroup_global)%multichan%channels(1:pgl(igroup_global)%multichan%number_of_channels(iproc),iproc)
        enddo
        write (99,*) '****************************************************'
        read(10,*)

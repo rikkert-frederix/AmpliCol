@@ -3,6 +3,11 @@ module phase_space_gen23_mod
   use phase_space_base
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
+     ! Whether this phase-space instance uses the cut-aware (soft) bounds
+     ! as its actual integration limits.  The module-level setter below is
+     ! copied into this component during init so different channels can use
+     ! different bound modes in one multichannel integration.
+     logical :: use_soft_bounds_as_actual_limits=.false.
    contains
      procedure :: init => gen23_init
      procedure :: generate_momenta => gen23_generate_momenta
@@ -72,6 +77,7 @@ contains
     logical,intent(in),optional :: flat
     integer(kind=4) :: i,j,ndim_extra,cnt1,cnt2
     integer(kind=4),dimension(2) :: iset
+    this%use_soft_bounds_as_actual_limits=use_soft_bounds_as_actual_limits
     this%sqrtshat=sqrts
     this%sqrts=sqrts
     this%t_channel=t_chan
@@ -310,19 +316,20 @@ contains
   subroutine apply_bound_mode(this)
     implicit none
     class(phase_space_gen23),intent(inout) :: this
-    if (.not.use_soft_bounds_as_actual_limits) return
+    if (.not.this%use_soft_bounds_as_actual_limits) return
     this%invm_min(:,1)=this%invm_min(:,2)
     this%invm_max(:,1)=this%invm_max(:,2)
     this%ETmin(:,1)=this%ETmin(:,2)
   end subroutine apply_bound_mode
 
-  subroutine select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff)
+  subroutine select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff,use_soft_bounds)
     implicit none
     real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
     real(kind=8),dimension(1:2),intent(out) :: var_min_eff,var_max_eff
+    logical,intent(in) :: use_soft_bounds
     var_min_eff=var_min
     var_max_eff=var_max
-    if (.not.use_soft_bounds_as_actual_limits) return
+    if (.not.use_soft_bounds) return
     var_min_eff(1)=var_min(2)
     var_max_eff(1)=var_max(2)
     if (var_min_eff(1).gt.var_max_eff(1)) var_min_eff(1)=var_max_eff(1)
@@ -330,14 +337,16 @@ contains
     var_max_eff(2)=var_max_eff(1)
   end subroutine select_integration_bounds
 
-  subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+  subroutine random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax,use_soft_bounds)
     implicit none
     real(kind=8),dimension(-1:1),intent(in) :: power_in
     real(kind=8),dimension(1:2),intent(in) :: var_min,var_max
     real(kind=8),dimension(3),intent(out) :: power,vmin,vmax
+    logical,intent(in) :: use_soft_bounds
     real(kind=8),dimension(1:2) :: varmin,varmax,var_min_loc,var_max_loc
     real(kind=8),parameter :: epsilon=1d-8
-    call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc)
+    call select_integration_bounds(var_min,var_max,var_min_loc,var_max_loc, &
+         use_soft_bounds)
     if (var_min_loc(1).gt.var_max_loc(1)) then
        write (*,*) 'Incorrect hard range in random_to_var_inputs'
        write (*,*) var_min, var_max
@@ -1414,7 +1423,8 @@ contains
       integer(kind=4) :: k
       real(kind=8),dimension(3) :: vmin,vmax,power,q
       real(kind=8) :: xloc
-      call random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax)
+      call random_to_var_inputs(power_in,var_min,var_max,power,vmin,vmax, &
+           this%use_soft_bounds_as_actual_limits)
       call random_to_var_weights(power,vmin,vmax,q)
       if (sum(q(1:3)).le.0d0) then
          var=vmin(2)
@@ -2213,7 +2223,8 @@ contains
       real(kind=8),dimension(1:2) :: var_min_eff,var_max_eff
       real(kind=8) :: var,xloc
       logical :: found
-      call select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff)
+      call select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff, &
+           this%use_soft_bounds_as_actual_limits)
       if (var_min_eff(1).gt.var_max_eff(1)) then
          jac=-1d0
          return
@@ -2223,7 +2234,8 @@ contains
          jac=-1d0
          return
       endif
-      call random_to_var_inputs(power_in,var_min_eff,var_max_eff,power,vmin,vmax)
+      call random_to_var_inputs(power_in,var_min_eff,var_max_eff,power,vmin,vmax, &
+           this%use_soft_bounds_as_actual_limits)
       call random_to_var_weights(power,vmin,vmax,q)
       if (var_min_eff(1).lt.0d0 .and. var_max_eff(1).le.0d0) then
          var=-variable
