@@ -1,7 +1,8 @@
 .DEFAULT_GOAL := amplicol_generate
 
 .PHONY: test_matrix_elements test_integrated_kernels test_massive_dipole_kernel \
-	test_simple_integrator_mixed_dims update_matrix_cases update_matrix_goldens
+	test_simple_integrator_mixed_dims test_simple_integrator_uncertainty_sampling \
+	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -140,6 +141,11 @@ test_simple_integrator_mixed_dims: simple_integrator.o helper_modules.o ranmar.o
 	$(FC) $(FFLAGS) -I. -o tests/simple_integrator_mixed_dims.exe \
 		tests/simple_integrator_mixed_dims.f90 simple_integrator.o helper_modules.o ranmar.o
 	./tests/simple_integrator_mixed_dims.exe
+
+test_simple_integrator_uncertainty_sampling: simple_integrator.o helper_modules.o ranmar.o
+	$(FC) $(FFLAGS) -I. -o tests/simple_integrator_uncertainty_sampling.exe \
+		tests/simple_integrator_uncertainty_sampling.f90 simple_integrator.o helper_modules.o ranmar.o
+	./tests/simple_integrator_uncertainty_sampling.exe
 
 # ----------------------------------------------------------------------
 # 5. Build executables

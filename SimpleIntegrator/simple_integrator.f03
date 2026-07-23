@@ -206,6 +206,9 @@ module simple_integrator_mod
   real(kind=8),parameter :: write_evnt_fraction=0.05d0
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
+  ! Keep a small exploration probability so that a temporarily small or zero
+  ! error estimate cannot permanently starve a channel or integral.
+  real(kind=8),parameter :: uncertainty_sampling_fraction=0.95d0
   logical :: turn_off_evnt_generation=.false.
   real(kind=8) :: requested_accuracy=0d0
   real(kind=8),parameter :: required_accuracy_factor=10d0
@@ -338,7 +341,7 @@ contains
     this%aux_unc_iter=0d0
     this%npoints_iter=0_8
     this%done=.false.
-    if (all(this%integrals%evgen_done)) then
+    if (.not.turn_off_evnt_generation .and. all(this%integrals%evgen_done)) then
        this%evgen_done=.true.
        this%done=.true.
     else
@@ -369,7 +372,12 @@ contains
     this%npoints_iter=0_8
     this%npoints_nonzero=0_8
     this%evnt=0
-    if (.not. this%evgen_done) this%done=.false.
+    if (turn_off_evnt_generation) then
+       this%evgen_done=.false.
+       this%done=.false.
+    elseif (.not. this%evgen_done) then
+       this%done=.false.
+    endif
     if (this%current_iter.eq.1) then
        this%f_max(this%current_iter)=-1d0
     elseif (this%current_iter.le.iters_without_evnts+1) then
@@ -586,11 +594,11 @@ contains
          'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
          'points) '//trim(formatted)//' :'
     call this%compute_total_rate()
-    call this%count_unweighted_evnts()
+    if (.not.turn_off_evnt_generation) call this%count_unweighted_evnts()
     call this%print_results()
     call this%update_grids()
     call this%init_next_iter()
-    if (all(this%channels%evgen_done)) done=.true.
+    if (.not.turn_off_evnt_generation .and. all(this%channels%evgen_done)) done=.true.
     if (turn_off_evnt_generation .and. this%res(1).gt.0d0 .and. &
          this%unc(1)/this%res(1).lt.requested_accuracy) done=.true.
     if (all(this%channels%done)) done=.true.
@@ -760,9 +768,15 @@ contains
     real(kind=8) :: rel_unc
     integer :: i,j
     integer(kind=8) :: npoints,npoints_channel
-    if (turn_off_evnt_generation .and. this%res(1).gt.0d0) then
-       rel_unc=this%unc(1)/this%res(1)
-       if (rel_unc.gt.2d0*requested_accuracy) this%npoints_requested=this%npoints_requested*2
+    if (turn_off_evnt_generation) then
+       if (this%res(1).gt.0d0) then
+          rel_unc=this%unc(1)/this%res(1)
+          if (rel_unc.gt.2d0*requested_accuracy) this%npoints_requested=this%npoints_requested*2
+       else
+          this%npoints_requested=this%npoints_requested*2
+       endif
+       call update_integration_points_requested(this)
+       return
     else
        this%npoints_requested=this%npoints_requested*2
     endif
@@ -799,6 +813,67 @@ contains
     enddo
     this%npoints_requested=npoints
   end subroutine update_points_requested
+
+  ! In integration-only mode, spend the next iteration primarily on the
+  ! strata that currently dominate the total absolute uncertainty.  The
+  ! channel allocation is based on channel errors, and each channel's share
+  ! is split between its integrals using their errors.  A uniform component
+  ! and hard minimums retain exploration and keep grid adaptation alive.
+  subroutine update_integration_points_requested(this)
+    implicit none
+    class(integrator),intent(inout) :: this
+    real(kind=8) :: total_unc,total_integral_unc,share
+    integer :: i,j,nactive_channels,nactive_integrals
+    integer(kind=8) :: npoints,npoints_channel
+
+    npoints=0_8
+    nactive_channels=count(.not.(this%channels%done.or.this%channels%evgen_done))
+    if (nactive_channels.eq.0) return
+    total_unc=sum(abs(this%channels%unc(1)),&
+         mask=.not.(this%channels%done.or.this%channels%evgen_done))
+
+    do i=1,this%nchannel
+       if (this%channels(i)%done.or.this%channels(i)%evgen_done) cycle
+       share=uncertainty_sampling_share(abs(this%channels(i)%unc(1)),&
+            total_unc,nactive_channels)
+       npoints_channel=max(int(share*dble(this%npoints_requested),kind=8),&
+            int(min_points_per_channel,kind=8))
+
+       nactive_integrals=count(.not.(this%channels(i)%integrals%done.or.&
+            this%channels(i)%integrals%evgen_done))
+       if (nactive_integrals.eq.0) cycle
+       total_integral_unc=sum(abs(this%channels(i)%integrals%unc(1)),&
+            mask=.not.(this%channels(i)%integrals%done.or.&
+            this%channels(i)%integrals%evgen_done))
+       do j=1,this%channels(i)%nintegral
+          if (this%channels(i)%integrals(j)%done.or.&
+               this%channels(i)%integrals(j)%evgen_done) cycle
+          share=uncertainty_sampling_share(&
+               abs(this%channels(i)%integrals(j)%unc(1)),&
+               total_integral_unc,nactive_integrals)
+          this%channels(i)%integrals(j)%npoints_requested=max(&
+               int(share*dble(npoints_channel),kind=8),&
+               int(min_points_per_integral,kind=8))
+          npoints=npoints+this%channels(i)%integrals(j)%npoints_requested
+       enddo
+    enddo
+    this%npoints_requested=npoints
+  end subroutine update_integration_points_requested
+
+  pure real(kind=8) function uncertainty_sampling_share(uncertainty,total_uncertainty,nactive) result(share)
+    implicit none
+    real(kind=8),intent(in) :: uncertainty,total_uncertainty
+    integer,intent(in) :: nactive
+
+    share=0d0
+    if (nactive.le.0) return
+    if (total_uncertainty.gt.tiny(1d0)) then
+       share=uncertainty_sampling_fraction*uncertainty/total_uncertainty+&
+            (1d0-uncertainty_sampling_fraction)/dble(nactive)
+    else
+       share=1d0/dble(nactive)
+    endif
+  end function uncertainty_sampling_share
   
   ! Build the next iteration's adaptive grids for one channel.
   subroutine channel_update_grids(this)
@@ -1104,7 +1179,8 @@ contains
          this%number,'channel     (accum):',this%res(2),'+/-',this%unc(2),'(',rel_unc,'%)'
     do i=1,this%nintegral
        this%integrals(i)%npoints_nonzero_total=this%integrals(i)%npoints_nonzero_total+this%integrals(i)%npoints_nonzero
-       if (this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
+       if (.not.turn_off_evnt_generation .and. &
+            this%integrals(i)%nevts_unw_gen.ge.this%integrals(i)%nevts_unw_req) then
           write(99,'(23x,i4,1x,a,1x,e10.4,1x,a,1x,e10.4,1x,a,1x,i10,1x,a,1x,i10,1x,a,1x,f8.6,1x,a,1x,i10,1x,a)') &
                i,':',this%integrals(i)%res(2),'+/-',this%integrals(i)%unc(2),&
                '--',this%integrals(i)%npoints_nonzero_total,'--',this%integrals(i)%nevnt_in_list,&
@@ -1542,20 +1618,73 @@ contains
     class(integrator),intent(inout) :: this
     integer,intent(out) :: ichan,iint
     real(kind=8),intent(out) :: wgt_chan
-    logical :: done
-    do
-       ichan=int(ran2()*this%nchannel)+1
-       if (.not.(this%channels(ichan)%done.or.this%channels(ichan)%evgen_done)) exit
-    enddo
+    if (turn_off_evnt_generation) then
+       call select_integration_channel(this,ichan)
+    else
+       do
+          ichan=int(ran2()*this%nchannel)+1
+          if (.not.(this%channels(ichan)%done.or.this%channels(ichan)%evgen_done)) exit
+       enddo
+    endif
     wgt_chan=1d0!dble(this%nchannel)
-    done=.false.
-    do
-       iint=int(ran2()*this%channels(ichan)%nintegral)+1
-       if (.not.(this%channels(ichan)%integrals(iint)%done.or.this%channels(ichan)%integrals(iint)%evgen_done)) exit
-    enddo
+    if (turn_off_evnt_generation) then
+       call select_integration_integral(this%channels(ichan),iint)
+    else
+       do
+          iint=int(ran2()*this%channels(ichan)%nintegral)+1
+          if (.not.(this%channels(ichan)%integrals(iint)%done.or.&
+               this%channels(ichan)%integrals(iint)%evgen_done)) exit
+       enddo
+    endif
     wgt_chan=wgt_chan*1d0!dble(this%channels(ichan)%nintegral)
     this%channels(ichan)%current_integral=iint
   end subroutine get_channel_and_integral
+
+  ! Uncertainty-weighted channel lottery used only without event generation.
+  subroutine select_integration_channel(this,ichan)
+    implicit none
+    class(integrator),intent(in) :: this
+    integer,intent(out) :: ichan
+    integer :: i,nactive
+    real(kind=8) :: total_unc,target,cumulative
+
+    nactive=count(.not.(this%channels%done.or.this%channels%evgen_done))
+    total_unc=sum(abs(this%channels%unc(1)),&
+         mask=.not.(this%channels%done.or.this%channels%evgen_done))
+    target=ran2()
+    cumulative=0d0
+    ichan=0
+    do i=1,this%nchannel
+       if (this%channels(i)%done.or.this%channels(i)%evgen_done) cycle
+       ichan=i
+       cumulative=cumulative+uncertainty_sampling_share(&
+            abs(this%channels(i)%unc(1)),total_unc,nactive)
+       if (target.lt.cumulative) return
+    enddo
+  end subroutine select_integration_channel
+
+  ! Uncertainty-weighted integral lottery within one selected channel.
+  subroutine select_integration_integral(this,iint)
+    implicit none
+    class(channel),intent(in) :: this
+    integer,intent(out) :: iint
+    integer :: i,nactive
+    real(kind=8) :: total_unc,target,cumulative
+
+    nactive=count(.not.(this%integrals%done.or.this%integrals%evgen_done))
+    total_unc=sum(abs(this%integrals%unc(1)),&
+         mask=.not.(this%integrals%done.or.this%integrals%evgen_done))
+    target=ran2()
+    cumulative=0d0
+    iint=0
+    do i=1,this%nintegral
+       if (this%integrals(i)%done.or.this%integrals(i)%evgen_done) cycle
+       iint=i
+       cumulative=cumulative+uncertainty_sampling_share(&
+            abs(this%integrals(i)%unc(1)),total_unc,nactive)
+       if (target.lt.cumulative) return
+    enddo
+  end subroutine select_integration_integral
   
   ! Public helper: compute the current adaptive-grid weight for an existing
   ! point in channel ichan.
