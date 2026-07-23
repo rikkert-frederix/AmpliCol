@@ -3,6 +3,8 @@ module subtraction
   use particles
   use amplitude_QCD_mod, only: use_real_gluons
   use common, only: alpha_dipole
+  use cs_dipole_mappings, only: dot4,cs_dot4_scale,cs_roundoff_tolerance,&
+       cs_value_is_resolved
   implicit none
   integer :: n
   integer,parameter :: alpha_status_excluded=-100
@@ -10,7 +12,7 @@ module subtraction
   private
   public :: initialise_subtraction, test_limits_integrand, generate_limit_phase_space_point
   public :: print_limit_failure_fractions, compute_the_amps, square_the_amps
-  public :: evaluate_real_dipoles
+  public :: evaluate_real_dipoles,check_real_subtraction_resolution
 contains
   subroutine initialise_subtraction(igroup,iamp)
     implicit none
@@ -393,6 +395,7 @@ contains
     integer,parameter :: nsteps=11
     real(kind=8),parameter :: limit_tolerance=1d-2,nonsingular_growth_tolerance=5d-2
     integer :: i,j,k,status,nselected,nmatched,nalpha_selected
+    integer :: kernel_status,failed_dipole
     real(kind=8) :: lambda,mass(pgl(ichan)%next-2),amp2_dip,ratio
     real(kind=8) :: ratios(nsteps),residuals(nsteps)
     real(kind=8) :: lambdas(nsteps),amp_values(nsteps),dip_values(nsteps)
@@ -438,7 +441,11 @@ contains
           if (is_gluon) then
              call compute_the_dipole_amps(iint,ichan)
              call square_the_dipole_amps(iint,ichan,amp2_dip,i,nselected=nselected,nmatched=nmatched,&
-                  nalpha_selected=nalpha_selected)
+                  nalpha_selected=nalpha_selected,kernel_status=kernel_status,failed_dipole=failed_dipole)
+             if (kernel_status.ne.0) then
+                mapping_status(k+1)=kernel_status
+                cycle
+             endif
              if (nmatched.eq.0) then
                 soft_no_dipoles=.true.
                 valid_values(k+1)=finite_nonsingular_value(amp_values(k+1))
@@ -524,7 +531,12 @@ contains
              if (.not.no_dipoles) then
                 call compute_the_dipole_amps(iint,ichan)
                 call square_the_dipole_amps(iint,ichan,amp2_dip,icol1=i,icol2=j,&
-                     nselected=nselected,nmatched=nmatched,nalpha_selected=nalpha_selected)
+                     nselected=nselected,nmatched=nmatched,nalpha_selected=nalpha_selected,&
+                     kernel_status=kernel_status,failed_dipole=failed_dipole)
+                if (kernel_status.ne.0) then
+                   mapping_status(k+1)=kernel_status
+                   cycle
+                endif
                 if (nmatched.eq.0) no_dipoles=.true.
                 if (nmatched.gt.0 .and. nselected.eq.0) then
                    if (.not.real_pass) then
@@ -864,17 +876,66 @@ contains
     enddo
   end subroutine compute_the_dipole_amps
 
-  subroutine evaluate_real_dipoles(iint,ichan,amp2_dip)
+  subroutine check_real_subtraction_resolution(iint,ichan,info,failed_dipole,invariant,tolerance)
+    ! Reject a point before evaluating its real matrix element when one of
+    ! its subtraction invariants is smaller than the cancellation error of
+    ! the four-vector arithmetic used to construct it.
+    implicit none
+    integer, intent(in) :: iint,ichan
+    integer, intent(out) :: info,failed_dipole
+    real(kind=8), intent(out) :: invariant,tolerance
+    integer :: idip,i,j
+    real(kind=8) :: dotij,dot_scale,parent_virtuality,parent_scale
+    real(kind=8) :: mi,mj,mparent
+
+    info=0
+    failed_dipole=0
+    invariant=0d0
+    tolerance=0d0
+    do idip=1,pgl(ichan)%dpl(iint)%ndip
+       if (abs(pgl(ichan)%dpl(iint)%dl(idip)%lc_weight).le.tiny(1d0)) cycle
+       i=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(1)
+       j=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk(2)
+       mi=phys_model%get_mass(pgl(ichan)%processes(i,iint))
+       mj=phys_model%get_mass(pgl(ichan)%processes(j,iint))
+       mparent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1))
+
+       dotij=dot4(pgl(ichan)%ps(1)%p(:,i),pgl(ichan)%ps(1)%p(:,j))
+       dot_scale=cs_dot4_scale(pgl(ichan)%ps(1)%p(:,i),pgl(ichan)%ps(1)%p(:,j))
+       if (.not.cs_value_is_resolved(dotij,dot_scale)) then
+          info=-401
+          failed_dipole=idip
+          invariant=dotij
+          tolerance=cs_roundoff_tolerance(dot_scale)
+          return
+       endif
+
+       parent_virtuality=mi*mi+mj*mj+2d0*dotij-mparent*mparent
+       parent_scale=mi*mi+mj*mj+mparent*mparent+2d0*dot_scale
+       if (.not.cs_value_is_resolved(parent_virtuality,parent_scale)) then
+          info=-402
+          failed_dipole=idip
+          invariant=parent_virtuality
+          tolerance=cs_roundoff_tolerance(parent_scale)
+          return
+       endif
+    enddo
+  end subroutine check_real_subtraction_resolution
+
+  subroutine evaluate_real_dipoles(iint,ichan,amp2_dip,info,failed_dipole)
     ! Sum all alpha-active local dipoles for one real-emission subprocess.
     implicit none
     integer,intent(in) :: iint,ichan
     real(kind=8),intent(out) :: amp2_dip
+    integer,intent(out) :: info,failed_dipole
 
     call compute_the_dipole_amps(iint,ichan)
-    call square_the_dipole_amps(iint,ichan,amp2_dip)
+    call square_the_dipole_amps(iint,ichan,amp2_dip,kernel_status=info,&
+         failed_dipole=failed_dipole)
   end subroutine evaluate_real_dipoles
 
-  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched,nalpha_selected)
+  subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched,nalpha_selected,&
+       kernel_status,failed_dipole)
     use cs_lc_spin_dipoles
     use FeynmanRules
     implicit none
@@ -883,7 +944,8 @@ contains
     integer,intent(out),optional :: nselected
     integer,intent(out),optional :: nmatched
     integer,intent(out),optional :: nalpha_selected
-    integer :: idip
+    integer,intent(out),optional :: kernel_status,failed_dipole
+    integer :: idip,dipole_info
     real(kind=8) :: amp2_dip,dip
     real(kind=8),parameter :: pi=3.14159265358979323846d0
     real(kind=8),dimension(pgl(ichan)%next) :: mass_real
@@ -904,6 +966,8 @@ contains
     if (present(nselected)) nselected=0
     if (present(nmatched)) nmatched=0
     if (present(nalpha_selected)) nalpha_selected=0
+    if (present(kernel_status)) kernel_status=0
+    if (present(failed_dipole)) failed_dipole=0
     do idip=1,pgl(ichan)%dpl(iint)%ndip
        if (use_collinear) then
           if (.not.collinear_dipole_matches(iint,ichan,idip,icol1,icol2)) cycle
@@ -932,9 +996,19 @@ contains
        eps_parent=conjg(eps_parent)
        call cs_lc_dipole_spinrho(pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,iint), &
             pgl(ichan)%dpl(iint)%dl(idip)%process_r,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,1d0/(4d0*pi), &
-            rho,eps_parent,dip,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight, &
+            rho,eps_parent,dip,info=dipole_info,lc_weight=pgl(ichan)%dpl(iint)%dl(idip)%lc_weight, &
             mass_real=mass_real, &
             mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
+       if (dipole_info.ne.0) then
+          amp2_dip=0d0
+          if (present(kernel_status)) kernel_status=dipole_info
+          if (present(failed_dipole)) failed_dipole=idip
+          if (.not.present(kernel_status)) then
+             write(*,*) 'ERROR: active local dipole kernel failed:',ichan,iint,idip,dipole_info
+             stop 1
+          endif
+          return
+       endif
        amp2_dip=amp2_dip+dip
     enddo
   end subroutine square_the_dipole_amps

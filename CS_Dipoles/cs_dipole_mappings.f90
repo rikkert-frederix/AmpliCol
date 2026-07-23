@@ -3,6 +3,7 @@ module cs_dipole_mappings
 
   integer, parameter :: dp = selected_real_kind(15, 307)
   real(dp), parameter :: tiny_kin = 1.0d-30
+  real(dp), parameter :: cs_roundoff_safety = 128.0_dp
 
 contains
 
@@ -12,6 +13,29 @@ contains
 
     d = p(0)*q(0) - p(1)*q(1) - p(2)*q(2) - p(3)*q(3)
   end function dot4
+
+
+  pure real(dp) function cs_dot4_scale(p,q) result(scale)
+    ! Absolute scale of the terms entering a Minkowski product.  This
+    ! measures how much cancellation is required to obtain dot4(p,q).
+    real(dp), intent(in) :: p(0:),q(0:)
+    scale=abs(p(0)*q(0))+abs(p(1)*q(1))+abs(p(2)*q(2))+abs(p(3)*q(3))
+  end function cs_dot4_scale
+
+
+  pure real(dp) function cs_roundoff_tolerance(scale) result(tolerance)
+    ! A scale-aware lower bound below which an invariant cannot be trusted
+    ! in double precision.  The safety factor covers the several arithmetic
+    ! operations and subsequent ratios used by the mappings and kernels.
+    real(dp), intent(in) :: scale
+    tolerance=max(tiny_kin,cs_roundoff_safety*epsilon(1.0_dp)*abs(scale))
+  end function cs_roundoff_tolerance
+
+
+  pure logical function cs_value_is_resolved(value,scale) result(resolved)
+    real(dp), intent(in) :: value,scale
+    resolved=abs(value).gt.cs_roundoff_tolerance(scale)
+  end function cs_value_is_resolved
 
 
   logical function is_initial(idx)
@@ -89,7 +113,14 @@ contains
           info=-13
           return
        endif
-       cut_variable=dot4(p(:,i),p(:,j))/(den+dot4(p(:,i),p(:,j)))
+       ! Initial--initial restriction variable
+       !
+       !   v_j = p_i.p_j / p_i.p_k .
+       !
+       ! Do not use v_j/(1+v_j) here.  That is a different variable and
+       ! makes the local restriction inconsistent with the analytically
+       ! integrated initial--initial dipole.
+       cut_variable=dot4(p(:,i),p(:,j))/den
     endif
     if (abs(cut_variable) < 100.0_dp*epsilon(1.0_dp)) cut_variable=0.0_dp
     if (abs(cut_variable-1.0_dp) < 100.0_dp*epsilon(1.0_dp)) cut_variable=1.0_dp

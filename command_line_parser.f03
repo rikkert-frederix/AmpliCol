@@ -2,12 +2,12 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       limit_test,timing,timing_sample,accuracy,alpha_dipole,has_real_process)
+       limit_test,timing,timing_sample,accuracy,alpha_dipole,dim_reg_scheme,has_real_process)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
     logical :: verbose, show_help
-    character(len=80) :: filename,real_filename,library,tag,timing
+    character(len=80) :: filename,real_filename,library,tag,timing,dim_reg_scheme
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
     logical :: read_momenta,limit_test,has_real_process
@@ -31,6 +31,7 @@ contains
     timing_sample=100
     accuracy=0d0
     alpha_dipole=(/1d0,1d0,1d0,1d0/)
+    dim_reg_scheme='hv'
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -82,6 +83,8 @@ contains
        elseif (index(arg, "--alpha=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           call parse_alpha(tmp,alpha_dipole)
+       elseif (index(arg, "--dim-reg=").eq.1) then
+          dim_reg_scheme=trim(adjustl(arg(index(arg, "=")+1:)))
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -112,6 +115,7 @@ contains
        write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&
             "the relative error is below [X] (0 < X < 1)."
        write (*,'(a)') "  --alpha=[X]               : Real-dipole restriction; one value or four comma-separated values FF,FI,IF,II."
+       write (*,'(a)') "  --dim-reg=[hv|fdh]        : Dimensional scheme for integrated dipoles (default: hv)."
        write (*,'(a)') ""
        stop
     end if

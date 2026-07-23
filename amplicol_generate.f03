@@ -18,6 +18,8 @@ program amplicol_generate
   use amplitude_library
   use mg_checks
   use subtraction
+  use cs_lc_spin_dipoles, only: dipole_status_is_numerical
+  use integrated_dipoles
   implicit none
   integer :: iproc
   real(kind=8) :: weight
@@ -29,6 +31,7 @@ program amplicol_generate
   integer :: igroup
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
+  integer,dimension(:),allocatable :: integration_ndim_extra
   integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups
   integer :: limit_point
   integer,parameter :: n_limit_points=100,n_limit_failures=20
@@ -36,6 +39,7 @@ program amplicol_generate
   integer,dimension(:,:,:,:),allocatable :: collinear_fail,collinear_tested
   real(kind=8),dimension(:,:),allocatable :: limit_base
   real(kind=8),dimension(1) :: f,f_abs
+  real(kind=8),dimension(7,1) :: f_aux
   logical :: done
   real(kind=8),dimension(:,:),allocatable :: wgts
   character(len=8) :: date
@@ -48,6 +52,7 @@ program amplicol_generate
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
   real(kind=8) :: accuracy
+  character(len=80) :: dim_reg_scheme
 
   call get_run_arguments()
   timing_enabled=timing_mode.ne.timing_none
@@ -224,6 +229,8 @@ program amplicol_generate
 
   enddo ! loop over phase-space-order groups
 
+  if (has_real_process) call initialise_integrated_dipoles(nborn_groups,dim_reg_scheme)
+
   if (use_amplitude_library) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
      call test_lib
@@ -240,18 +247,25 @@ program amplicol_generate
      call write_unique_in_file(pgl_unique,unique_map,unique_map_value,abs(ncalls0))
   endif
   
-  allocate(nintegrals(ngroups))
+  allocate(nintegrals(ngroups),integration_ndim_extra(ngroups))
+  integration_ndim_extra=pgl(1:ngroups)%ndim_extra
   if (keep_processes_separate) then
      nintegrals(1:ngroups)=pgl(1:ngroups)%nproc
   else
      nintegrals(1:ngroups)=1
   endif
+  if (has_real_process) then
+     do igroup=1,nborn_groups
+        nintegrals(igroup)=3*nintegrals(igroup)
+        integration_ndim_extra(igroup)=integration_ndim_extra(igroup)+1
+     enddo
+  endif
   if (accuracy.gt.0d0) then
      call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
-          pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax),accuracy)
+          integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),accuracy,naux=7)
   else
      call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
-          pgl(1:ngroups)%ndim_extra,nintegrals,abs(ncalls0),abs(itmax))
+          integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),naux=7)
   endif
   if (timing_mode.eq.timing_detailed) then
      call cpu_time(tAfter)
@@ -329,9 +343,10 @@ program amplicol_generate
         endif
      endif
      
-     call integrand(ichan,iint,simple_integrator%x(1,1),simple_integrator%wgt(1),f(1),f_abs(1))
+     call integrand(ichan,iint,simple_integrator%x(:,1),simple_integrator%wgt(1),&
+          f(1),f_abs(1),f_aux(:,1))
      if (time_detail_point) call cpu_time(tSampleBefore)
-     call simple_integrator%fill_points(1,f_abs,f,to_write,done)
+     call simple_integrator%fill_points(1,f_abs,f,to_write,done,f_aux=f_aux)
      if (time_detail_point) then
         call cpu_time(tSampleAfter)
         t_Int_fill=t_Int_fill+(tSampleAfter-tSampleBefore)*dble(timing_sample)
@@ -415,34 +430,31 @@ contains
 
   subroutine print_contribution_results()
     implicit none
-    real(kind=8),allocatable :: channel_res(:,:),channel_unc(:,:)
-    real(kind=8) :: born_res,born_unc,real_res,real_unc,total_res,total_unc
-    integer :: i
+    real(kind=8),allocatable :: channel_res(:,:),channel_unc(:,:),aux_res(:,:),aux_unc(:,:)
+    real(kind=8) :: component(7),component_unc(7),finite,finite_unc
+    character(len=32),parameter :: labels(7)=[character(len=32) ::&
+         'Born','Real - local dipoles','Integrated I coefficient -2',&
+         'Integrated I coefficient -1','Integrated I finite',&
+         'Integrated P','Integrated K']
+    integer :: i,j
     call simple_integrator%get_channel_results(channel_res,channel_unc)
-    born_res=0d0
-    born_unc=0d0
-    real_res=0d0
-    real_unc=0d0
+    call simple_integrator%get_channel_aux_results(aux_res,aux_unc)
+    component=0d0
+    component_unc=0d0
     do i=1,ngroups
-       if (pgl(i)%is_subtracted_real) then
-          real_res=real_res+channel_res(2,i)
-          real_unc=real_unc+channel_unc(2,i)**2
-       else
-          born_res=born_res+channel_res(2,i)
-          born_unc=born_unc+channel_unc(2,i)**2
-       endif
+       component=component+aux_res(:,i)
+       component_unc=component_unc+aux_unc(:,i)**2
     enddo
-    born_unc=sqrt(born_unc)
-    real_unc=sqrt(real_unc)
-    total_res=born_res+real_res
-    total_unc=sqrt(born_unc**2+real_unc**2)
-    write (*,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born contribution:',born_res,'+/-',born_unc
-    write (*,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Real-subtracted contribution:',real_res,'+/-',real_unc
-    write (*,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born + real-subtracted:',total_res,'+/-',total_unc
-    write (99,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born contribution:',born_res,'+/-',born_unc
-    write (99,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Real-subtracted contribution:',real_res,'+/-',real_unc
-    write (99,'(a,1x,e14.7,1x,a,1x,e12.5)') 'Born + real-subtracted:',total_res,'+/-',total_unc
-    deallocate(channel_res,channel_unc)
+    component_unc=sqrt(component_unc)
+    do j=1,7
+       write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') trim(labels(j))//':',component(j),'+/-',component_unc(j)
+       write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') trim(labels(j))//':',component(j),'+/-',component_unc(j)
+    enddo
+    finite=sum(component((/1,2,5,6,7/)))
+    finite_unc=sqrt(sum(component_unc((/1,2,5,6,7/))**2))
+    write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Finite B+(R-D)+I0+P+K:',finite,'+/-',finite_unc
+    write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Finite B+(R-D)+I0+P+K:',finite,'+/-',finite_unc
+    deallocate(channel_res,channel_unc,aux_res,aux_unc)
   end subroutine print_contribution_results
 
   subroutine print_timing(iunit)
@@ -518,19 +530,23 @@ contains
     if (sampled) residual_note='residual'
   end function residual_note
 
-  subroutine integrand(ichan,iint,x,vol,f,f_abs)
+  subroutine integrand(ichan,iint,x,vol,f,f_abs,f_components)
     use scales
     use amp_lib
     implicit none
     integer,intent(in) :: ichan,iint
-    real(kind=8), dimension(pgl(ichan)%ndim+pgl(ichan)%ndim_extra),intent(in) :: x
+    real(kind=8), dimension(:),intent(in) :: x
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
+    real(kind=8),intent(out) :: f_components(7)
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc
+    integer :: ih,iproc,eval_iint,integration_role,icopy
+    integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real(kind=8) :: amp2_integrand,amp2_dip
+    real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z
+    real(kind=8) :: unresolved_invariant,resolution_tolerance
+    real(kind=8),allocatable :: hard_copy(:)
     logical :: done,time_physics,real_pass
     real(kind=8),external :: alphaspdf
     time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
@@ -550,12 +566,23 @@ contains
     ! some point-by-point initialisation
     f=0d0
     f_abs=0d0
+    f_components=0d0
     val_abs=0d0
+    integration_role=1
+    eval_iint=iint
+    if (has_real_process .and. .not.pgl(ichan)%is_subtracted_real) then
+       integration_role=mod(iint-1,3)+1
+       if (keep_processes_separate) then
+          eval_iint=(iint-1)/3+1
+       else
+          eval_iint=1
+       endif
+    endif
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
     if (time_physics) call cpu_time(tBefore)
     if (.not.read_momenta) then
-       pgl(ichan)%ps(1)%x=x
+       pgl(ichan)%ps(1)%x=x(1:size(pgl(ichan)%ps(1)%x))
        call pgl(ichan)%phase_space%generate_momenta(pgl(ichan)%ps(1))
     endif
     if (debug ) then
@@ -570,6 +597,15 @@ contains
        endif
        return
     endif
+    if (pgl(ichan)%is_subtracted_real) then
+       call check_real_subtraction_resolution(eval_iint,ichan,resolution_info,&
+            resolution_dipole,unresolved_invariant,resolution_tolerance)
+       if (resolution_info.ne.0) then
+          call report_subtraction_rejection('invariant',ichan,eval_iint,&
+               resolution_dipole,resolution_info,unresolved_invariant,resolution_tolerance)
+          return
+       endif
+    endif
     if (.not.read_momenta .and. .not.pgl(ichan)%is_subtracted_real) then
        if (.not.pass_cuts(pgl(ichan))) then
           val=0d0
@@ -580,29 +616,29 @@ contains
           return
        endif
     endif
-    pgl(ichan)%passed(iint) = pgl(ichan)%passed(iint) + 1
+    pgl(ichan)%passed(eval_iint) = pgl(ichan)%passed(eval_iint) + 1
     call compute_multichannel_weight(ichan,pgl(ichan)%ps(1),colour_singlet_multichannel_weight)
     if (time_physics) then
        call cpu_time(tAfter)
        t_PS= t_PS + (tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
-    call compute_the_amps(iint,ichan,use_amplitude_library)
+    call compute_the_amps(eval_iint,ichan,use_amplitude_library)
     if (time_physics) then
        call cpu_time(tAfter)
        t_amp=t_amp+(tAfter-tBefore)*dble(timing_sample)
        tBefore=tAfter
     endif
-    call square_the_amps(iint,ichan)
+    call square_the_amps(eval_iint,ichan)
     if (time_physics) then
        call cpu_time(tAfter)
        t_mat=t_mat+(tAfter-tBefore)*dble(timing_sample)
     endif
     if ((.not. use_amplitude_library) &
-         .and. pgl(ichan)%passed(iint).le.nevent_hel_filter &
+         .and. pgl(ichan)%passed(eval_iint).le.nevent_hel_filter &
          .and. optimise_amplitudes) then
        if (time_physics) tBefore=tAfter
-       call optimise_the_amplitudes(iint,ichan,done)
+       call optimise_the_amplitudes(eval_iint,ichan,done)
        if (time_physics) then
           call cpu_time(tAfter)
           t_Amp_opt=t_Amp_opt+(tAfter-tBefore)*dble(timing_sample)
@@ -611,15 +647,27 @@ contains
     endif
 
     if (read_momenta) then
-        call perform_check(iint,ichan)
-        if (pgl(ichan)%passed(iint).gt.me_points) read_momenta=.false.
+        call perform_check(eval_iint,ichan)
+        if (pgl(ichan)%passed(eval_iint).gt.me_points) read_momenta=.false.
     endif
 
     real_pass=.true.
-    if (pgl(ichan)%is_subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),iint)
+    if (pgl(ichan)%is_subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),eval_iint)
     amp2_integrand=pgl(ichan)%amp2(1)
     if (pgl(ichan)%is_subtracted_real) then
-       call evaluate_real_dipoles(iint,ichan,amp2_dip)
+       call evaluate_real_dipoles(eval_iint,ichan,amp2_dip,kernel_info,kernel_dipole)
+       if (kernel_info.ne.0) then
+          if (dipole_status_is_numerical(kernel_info)) then
+             call report_subtraction_rejection('kernel',ichan,eval_iint,&
+                  kernel_dipole,kernel_info,0d0,0d0)
+             return
+          endif
+          write(*,*) 'ERROR: active local dipole kernel failed:',ichan,eval_iint,&
+               kernel_dipole,kernel_info
+          write(99,*) 'ERROR: active local dipole kernel failed:',ichan,eval_iint,&
+               kernel_dipole,kernel_info
+          stop 1
+       endif
        if (real_pass) then
           amp2_integrand=amp2_integrand-amp2_dip
        else
@@ -642,19 +690,22 @@ contains
     weight=vol*pgl(ichan)%ps(1)%jac*conv
 
     ! multiply by the strong coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).lt.pgl(ichan)%next-2) then
-       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(iint)%n_sing(1))
+    if (pgl(ichan)%amps(eval_iint)%n_sing(1).lt.pgl(ichan)%next-2) then
+       weight=weight*(4*pi*alphas)**(pgl(ichan)%next-2-pgl(ichan)%amps(eval_iint)%n_sing(1))
     endif
     
     ! multiply by the EW coupling
-    if (pgl(ichan)%amps(iint)%n_sing(1).ge.1) then
-       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(iint)%n_sing(1)
+    if (pgl(ichan)%amps(eval_iint)%n_sing(1).ge.1) then
+       weight=weight*(2d0*4d0*pi*alphaEW)**pgl(ichan)%amps(eval_iint)%n_sing(1)
     endif
 
     if (keep_processes_separate) then
-       val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(iint))
-       val(1)=val(1)*colour_singlet_multichannel_weight(iint)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),iint)
+       val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(eval_iint))
+       val(1)=val(1)*colour_singlet_multichannel_weight(eval_iint)
+       allocate(hard_copy(pgl(ichan)%iden_iproc(eval_iint)))
+       hard_copy=val(1)*pgl(ichan)%idenCOandMAPfactor(&
+            1:pgl(ichan)%iden_iproc(eval_iint),eval_iint)
+       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),eval_iint)
        f_abs=sum(val_abs(1:1))
        f=sum(val(1:1))
     else
@@ -664,11 +715,88 @@ contains
        f_abs=sum(val_abs(1:pgl(ichan)%nproc))
        f=sum(val(1:pgl(ichan)%nproc))
     endif
+    if (pgl(ichan)%is_subtracted_real) then
+       f_components(2)=f
+    elseif (has_real_process) then
+       if (integration_role.eq.1) then
+          f_components(1)=f
+          if (keep_processes_separate) then
+             call integrated_endpoint(ichan,eval_iint,&
+                  pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(eval_iint),eval_iint),&
+                  pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff)
+          else
+             icoeff=0d0
+             do iproc=1,pgl(ichan)%nproc
+                call add_endpoint_for_process(ichan,iproc,scale_ren,alphas,icoeff)
+             enddo
+          endif
+          f_components(3:5)=icoeff(-2:0)
+          f=f+icoeff(0)
+          f_abs=abs(f_components(1))+abs(icoeff(0))
+       else
+          z=x(size(x))
+          pterm=0d0
+          kterm=0d0
+          if (keep_processes_separate) then
+             call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
+                  pgl(ichan)%ps(1)%xbjrk,scale_fac,alphas,pterm,kterm)
+          endif
+          f_components(6)=pterm
+          f_components(7)=kterm
+          f=pterm+kterm
+          f_abs=abs(pterm)+abs(kterm)
+       endif
+    endif
+    if (allocated(hard_copy)) deallocate(hard_copy)
     if (time_physics) then
        call cpu_time(tAfter)
        t_weight=t_weight+(tAfter-tBefore)*dble(timing_sample)
     endif
   end subroutine integrand
+
+  subroutine report_subtraction_rejection(stage,ichan,iint,idip,status,invariant,tolerance)
+    character(len=*), intent(in) :: stage
+    integer, intent(in) :: ichan,iint,idip,status
+    real(kind=8), intent(in) :: invariant,tolerance
+    integer(kind=8), save :: invariant_rejections=0_8,kernel_rejections=0_8
+    integer(kind=8) :: count
+    logical :: report
+
+    if (trim(stage).eq.'invariant') then
+       invariant_rejections=invariant_rejections+1_8
+       count=invariant_rejections
+    else
+       kernel_rejections=kernel_rejections+1_8
+       count=kernel_rejections
+    endif
+    report=(count.le.10_8 .or. mod(count,1000_8).eq.0_8)
+    if (report) then
+       write(*,'(a,a,a,i0,a,4(i0,1x),a,2(es12.4,1x))')&
+            'INFO: rejected numerically unresolved real point (',trim(stage),&
+            '), count=',count,' channel/process/dipole/status=',&
+            ichan,iint,idip,status,' invariant/tolerance=',invariant,tolerance
+       write(99,'(a,a,a,i0,a,4(i0,1x),a,2(es12.4,1x))')&
+            'INFO: rejected numerically unresolved real point (',trim(stage),&
+            '), count=',count,' channel/process/dipole/status=',&
+            ichan,iint,idip,status,' invariant/tolerance=',invariant,tolerance
+    elseif (count.eq.11_8) then
+       write(*,'(a,a,a)') 'INFO: further ',trim(stage),&
+            ' numerical-rejection messages suppressed (counts reported every 1000)'
+       write(99,'(a,a,a)') 'INFO: further ',trim(stage),&
+            ' numerical-rejection messages suppressed (counts reported every 1000)'
+    endif
+  end subroutine report_subtraction_rejection
+
+  subroutine add_endpoint_for_process(igroup,iproc,mu,alpha_s,total)
+    integer,intent(in) :: igroup,iproc
+    real(kind=8),intent(in) :: mu,alpha_s
+    real(kind=8),intent(inout) :: total(-2:0)
+    real(kind=8) :: one(-2:0)
+    call integrated_endpoint(igroup,iproc,&
+         pgl(igroup)%val_procs(1:pgl(igroup)%iden_iproc(iproc),iproc),&
+         pgl(igroup)%ps(1)%p,mu,alpha_s,one)
+    total=total+one
+  end subroutine add_endpoint_for_process
 
   subroutine optimise_the_amplitudes(iint,ichan,done)
     implicit none
@@ -810,7 +938,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,has_real_process)
+         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,dim_reg_scheme,has_real_process)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -840,6 +968,12 @@ contains
        stop 1
     endif
     timing_sample=timing_sample_arg
+
+    dim_reg_scheme=trim(adjustl(dim_reg_scheme))
+    if (dim_reg_scheme.ne.'hv' .and. dim_reg_scheme.ne.'fdh') then
+       write (*,*) 'Dimensional regularization scheme must be hv or fdh: ',trim(dim_reg_scheme)
+       stop 1
+    endif
 
     if (has_real_process) then
        if (len_trim(real_filename).eq.0) then

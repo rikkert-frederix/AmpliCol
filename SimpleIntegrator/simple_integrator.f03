@@ -111,10 +111,11 @@ module simple_integrator_mod
   ! One adaptive sampling channel.  A channel owns one grid per adapted
   ! dimension and one or more integral estimates sharing those grids.
   type :: channel
-     integer :: ndim,nintegral,current_integral,current_iter&
+     integer :: ndim,nintegral,naux,current_integral,current_iter&
           &,number,max_iters,nevts_unw_req,ndim_extra
      integer(kind=8) :: npoints,npoints_iter
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
+     real(kind=8),allocatable,dimension(:) :: aux_res,aux_unc,aux_res_iter,aux_unc_iter
      real(kind=8) :: overweight
      logical :: done,evgen_done
      type(grid),allocatable,dimension(:,:) :: grids
@@ -140,6 +141,8 @@ module simple_integrator_mod
      real(kind=8),dimension(:),allocatable :: f_max
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,accum&
           &,accum2,unc_iter
+     real(kind=8),allocatable,dimension(:) :: aux_res,aux_unc,aux_res_iter,aux_res2_iter&
+          &,aux_accum,aux_accum2,aux_unc_iter
      integer :: ichan,nevts_unw_gen,evnt,nevnt_in_list,ndim &
           &,current_iter,max_iters,nevts_unw_req
      integer(kind=8) :: npoints_iter,npoints,npoints_requested&
@@ -188,7 +191,8 @@ module simple_integrator_mod
      type(channel),allocatable,dimension(:) :: channels
      ! x and wgt are allocated by get_points and released by fill_points.
    contains
-     procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts,get_channel_results
+     procedure,public :: init,get_points,fill_points,compute_wgt_from_x,assign_evnt_wgts,get_channel_results&
+          &,get_channel_aux_results
      procedure,private :: read_all_grids,write_all_grids&
           &,get_channel_and_integral,update_points_requested&
           &,print_results,compute_total_rate,update_nevts_unw_req&
@@ -212,13 +216,14 @@ module simple_integrator_mod
 contains
 
   ! Initialise the public integrator object and all channel/integral state.
-  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters,accuracy)
+  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters,accuracy,naux)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: nchannel,nevts_unw_req,niters
     integer,dimension(nchannel),intent(in) :: ndim,nintegral,ndim_extra
     real(kind=8),intent(in),optional :: accuracy
-    integer :: i
+    integer,intent(in),optional :: naux
+    integer :: i,naux_local
     if (nchannel.lt.1) then
        write (*,*) 'ERROR: nchannel must be at least 1'
        stop 1
@@ -253,6 +258,12 @@ contains
        write (*,*) 'ERROR: all channels must have at least one integral'
        stop 1
     endif
+    naux_local=0
+    if (present(naux)) naux_local=naux
+    if (naux_local.lt.0) then
+       write (*,*) 'ERROR: naux cannot be negative'
+       stop 1
+    endif
     if (allocated(this%channels)) deallocate(this%channels)
     if (allocated(this%x)) deallocate(this%x)
     if (allocated(this%wgt)) deallocate(this%wgt)
@@ -272,7 +283,7 @@ contains
          min_points_per_integral*maxval(nintegral)*this%nchannel)
     allocate(this%channels(this%nchannel))
     do i=1,this%nchannel
-       call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i)
+       call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i,naux_local)
     enddo
     this%current_channel=0
     this%npoints_gen=0
@@ -281,16 +292,17 @@ contains
   end subroutine init
 
   ! Initialise one channel, including its first set of grids and integrals.
-  subroutine channel_init(this,ndim,ndim_extra,nintegral,npoints,niters,ichan)
+  subroutine channel_init(this,ndim,ndim_extra,nintegral,npoints,niters,ichan,naux)
     implicit none
     class(channel),intent(inout) :: this
-    integer,intent(in) :: ndim,nintegral,niters,ichan,ndim_extra
+    integer,intent(in) :: ndim,nintegral,niters,ichan,ndim_extra,naux
     integer(kind=8) :: npoints
     integer :: i
     this%ndim=ndim
     this%ndim_extra=ndim_extra
     this%max_iters=niters
     this%nintegral=nintegral
+    this%naux=naux
     this%number=ichan
     this%nevts_unw_req=0
     allocate(this%grids(1:this%ndim,1:this%max_iters+1))
@@ -299,13 +311,16 @@ contains
        call this%grids(i,1)%init(npoints)
     enddo
     do i=1,this%nintegral
-       call this%integrals(i)%init(ndim,npoints/this%nintegral,this%number,this%max_iters)
+       call this%integrals(i)%init(ndim,npoints/this%nintegral,this%number,this%max_iters,naux)
     enddo
     this%current_integral=0
     this%current_iter=0
     this%npoints=0_8
     this%res=0d0
     this%unc=0d0
+    allocate(this%aux_res(naux),this%aux_unc(naux),this%aux_res_iter(naux),this%aux_unc_iter(naux))
+    this%aux_res=0d0
+    this%aux_unc=0d0
     this%overweight=0d0
     call this%init_next_iter()
     this%evgen_done=.false.
@@ -319,6 +334,8 @@ contains
     this%res_iter=0d0
     this%res2_iter=0d0
     this%unc_iter=0d0
+    this%aux_res_iter=0d0
+    this%aux_unc_iter=0d0
     this%npoints_iter=0_8
     this%done=.false.
     if (all(this%integrals%evgen_done)) then
@@ -344,6 +361,11 @@ contains
     this%accum=0d0
     this%accum2=0d0
     this%unc_iter=0d0
+    this%aux_res_iter=0d0
+    this%aux_res2_iter=0d0
+    this%aux_accum=0d0
+    this%aux_accum2=0d0
+    this%aux_unc_iter=0d0
     this%npoints_iter=0_8
     this%npoints_nonzero=0_8
     this%evnt=0
@@ -402,10 +424,10 @@ contains
   end subroutine determine_sizefill
   
   ! Initialise one integral estimate and its candidate-event buffer.
-  subroutine integral_init(this,ndim,npoints,ichan,niters)
+  subroutine integral_init(this,ndim,npoints,ichan,niters,naux)
     implicit none
     class(integral),intent(inout) :: this
-    integer,intent(in) :: ndim,ichan,niters
+    integer,intent(in) :: ndim,ichan,niters,naux
     integer(kind=8) :: npoints
     this%ndim=ndim
     this%ichan=ichan
@@ -434,6 +456,15 @@ contains
     this%unc_iter=0d0
     this%accum=0d0
     this%accum2=0d0
+    allocate(this%aux_res(naux),this%aux_unc(naux),this%aux_res_iter(naux),this%aux_res2_iter(naux),&
+         this%aux_accum(naux),this%aux_accum2(naux),this%aux_unc_iter(naux))
+    this%aux_res=0d0
+    this%aux_unc=0d0
+    this%aux_res_iter=0d0
+    this%aux_res2_iter=0d0
+    this%aux_accum=0d0
+    this%aux_accum2=0d0
+    this%aux_unc_iter=0d0
   end subroutine integral_init
   
   ! Select an active channel/integral and generate a batch of random points.
@@ -474,7 +505,7 @@ contains
   
   ! Return evaluated values for the most recent batch and trigger iteration
   ! finalisation when all active channels/integrals have enough statistics.
-  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted)
+  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted,f_aux)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: npoints
@@ -482,6 +513,7 @@ contains
     logical,dimension(npoints),intent(out) :: to_write
     logical,intent(out) :: done
     logical,dimension(npoints),intent(in),optional :: accepted
+    real(kind=8),dimension(:,:),intent(in),optional :: f_aux
     integer :: i
     done=.false.
     if (this%npoints_gen.eq.0) then
@@ -496,11 +528,30 @@ contains
        write (*,*) 'ERROR: too many points returned'
        stop 1
     endif
+    if (present(f_aux)) then
+       if (size(f_aux,1).ne.this%channels(this%current_channel)%naux .or. size(f_aux,2).ne.npoints) then
+          write (*,*) 'ERROR: f_aux has incompatible shape'
+          stop 1
+       endif
+    elseif (this%channels(this%current_channel)%naux.ne.0) then
+       write (*,*) 'ERROR: fill_points requires f_aux after init with naux > 0'
+       stop 1
+    endif
     do i=1,npoints
        if (present(accepted)) then
-          call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),accepted(i))
+          if (present(f_aux)) then
+             call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),&
+                  accepted(i),f_aux(:,i))
+          else
+             call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),accepted(i))
+          endif
        else
-          call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),f_abs(i).gt.0d0)
+          if (present(f_aux)) then
+             call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),&
+                  f_abs(i).gt.0d0,f_aux(:,i))
+          else
+             call this%channels(this%current_channel)%add_point(this%x(1,i),this%wgt(i),f_abs(i),f(i),to_write(i),f_abs(i).gt.0d0)
+          endif
        endif
     enddo
     this%npoints_gen=0
@@ -1104,6 +1155,13 @@ contains
        this%res(i)=sum(this%integrals(1:this%nintegral)%res(i))
        this%unc(i)=sqrt(sum(this%integrals(1:this%nintegral)%unc(i)**2))
     enddo
+    this%aux_res=0d0
+    this%aux_unc=0d0
+    do i=1,this%nintegral
+       this%aux_res=this%aux_res+this%integrals(i)%aux_res
+       this%aux_unc=this%aux_unc+this%integrals(i)%aux_unc**2
+    enddo
+    this%aux_unc=sqrt(this%aux_unc)
     if (this%current_iter.eq.1) then
        this%npoints=this%npoints_iter
     else
@@ -1125,8 +1183,17 @@ contains
        do i=1,2
           call update_res_and_unc(this%res(i),this%unc(i),this%npoints,this%res_iter(i),this%unc_iter(i),this%npoints_iter)
        enddo
-       this%npoints=this%npoints+this%npoints_iter
     endif
+    if (iter.eq.1) then
+       this%aux_res=this%aux_res_iter
+       this%aux_unc=this%aux_unc_iter
+    else
+       do i=1,size(this%aux_res)
+          call update_res_and_unc(this%aux_res(i),this%aux_unc(i),this%npoints,&
+               this%aux_res_iter(i),this%aux_unc_iter(i),this%npoints_iter)
+       enddo
+    endif
+    if (iter.ne.1) this%npoints=this%npoints+this%npoints_iter
   end subroutine integral_combine_iters
   
   ! Combine two independent sample means and their standard errors.
@@ -1134,7 +1201,7 @@ contains
     implicit none
     real(kind=8),intent(inout) :: res,unc
     real(kind=8),intent(in) :: res_iter,unc_iter
-    integer(kind=8),intent(inout) :: npoints,npoints_iter
+    integer(kind=8),intent(in) :: npoints,npoints_iter
     integer(kind=8) :: np
     np=npoints+npoints_iter
     unc=sqrt((unc**2*dble(npoints)**2+unc_iter**2*dble(npoints_iter)**2)&
@@ -1155,6 +1222,13 @@ contains
        this%res_iter(i)=sum(this%integrals(1:this%nintegral)%res_iter(i))
        this%unc_iter(i)=sqrt(sum(this%integrals(1:this%nintegral)%unc_iter(i)**2))
     enddo
+    this%aux_res_iter=0d0
+    this%aux_unc_iter=0d0
+    do i=1,this%nintegral
+       this%aux_res_iter=this%aux_res_iter+this%integrals(i)%aux_res_iter
+       this%aux_unc_iter=this%aux_unc_iter+this%integrals(i)%aux_unc_iter**2
+    enddo
+    this%aux_unc_iter=sqrt(this%aux_unc_iter)
   end subroutine channel_update_result_iter
 
   ! Compute the standard error of the mean from first and second moments.
@@ -1177,35 +1251,46 @@ contains
        do i=1,2
           call compute_uncertainty(this%res_iter(i),this%res2_iter(i),this%npoints_iter,this%unc_iter(i))
        enddo
+       this%aux_res_iter=this%aux_accum/dble(this%npoints_iter)
+       this%aux_res2_iter=this%aux_accum2/dble(this%npoints_iter)
+       do i=1,size(this%aux_res_iter)
+          call compute_uncertainty(this%aux_res_iter(i),this%aux_res2_iter(i),this%npoints_iter,this%aux_unc_iter(i))
+       enddo
     endif
   end subroutine integral_update_result_iter
   
   ! Add one evaluated point to a channel grid and to its active integral.
-  subroutine channel_add_point(this,x,wgt,f_abs,f,to_write,accepted)
+  subroutine channel_add_point(this,x,wgt,f_abs,f,to_write,accepted,f_aux)
     implicit none
     class(channel),intent(inout) :: this
     real(kind=8),dimension(this%ndim),intent(in) :: x
     real(kind=8),intent(in) :: f_abs,f,wgt
     logical,intent(out) :: to_write
     logical,intent(in) :: accepted
+    real(kind=8),dimension(:),intent(in),optional :: f_aux
     integer :: i
     this%npoints_iter=this%npoints_iter+1
     do i=1,this%ndim
        call this%grids(i,this%current_iter)%add_point(x(i),f_abs)
     enddo
-    call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write,accepted)
+    if (present(f_aux)) then
+       call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write,accepted,f_aux)
+    else
+       call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write,accepted)
+    endif
     if (all(this%integrals%done)) this%done=.true.
   end subroutine channel_add_point
 
   ! Accumulate one point in an integral and optionally save it as a candidate
   ! event for later final unweighting.
-  subroutine integral_add_point(this,x,wgt,f_abs,f,to_write,accepted)
+  subroutine integral_add_point(this,x,wgt,f_abs,f,to_write,accepted,f_aux)
     implicit none
     class(integral),intent(inout) :: this
     real(kind=8),intent(in) :: f_abs,f,wgt
     real(kind=8),dimension(this%ndim),intent(in) :: x
     logical,intent(out) :: to_write
     logical,intent(in) :: accepted
+    real(kind=8),dimension(:),intent(in),optional :: f_aux
     logical :: enough
     this%npoints_iter=this%npoints_iter+1
     if (accepted) this%npoints_nonzero=this%npoints_nonzero+1
@@ -1213,6 +1298,10 @@ contains
     this%accum(2)=this%accum(2)+f
     this%accum2(1)=this%accum2(1)+f_abs**2
     this%accum2(2)=this%accum2(2)+f**2
+    if (present(f_aux)) then
+       this%aux_accum=this%aux_accum+f_aux
+       this%aux_accum2=this%aux_accum2+f_aux**2
+    endif
     if (this%current_iter.le.iters_without_evnts) call this%update_max_value(f_abs)
     call this%check_write_evnt(x,wgt,f_abs,to_write,enough)
     if (this%npoints_nonzero.ge.this%npoints_requested .or. enough) this%done=.true.
@@ -1491,6 +1580,22 @@ contains
        unc(:,i)=this%channels(i)%unc
     enddo
   end subroutine get_channel_results
+
+  ! Return optional signed auxiliary estimates accumulated alongside the
+  ! primary scalar result.  These observables share the sampled points but do
+  ! not affect adaptation or event generation.
+  subroutine get_channel_aux_results(this,res,unc)
+    implicit none
+    class(integrator),intent(in) :: this
+    real(kind=8),allocatable,dimension(:,:),intent(out) :: res,unc
+    integer :: i,naux
+    naux=this%channels(1)%naux
+    allocate(res(naux,this%nchannel),unc(naux,this%nchannel))
+    do i=1,this%nchannel
+       res(:,i)=this%channels(i)%aux_res
+       unc(:,i)=this%channels(i)%aux_unc
+    enddo
+  end subroutine get_channel_aux_results
   
   ! Placeholder for future grid restart support.
   subroutine read_all_grids(this)

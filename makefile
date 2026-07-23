@@ -1,11 +1,12 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements update_matrix_cases update_matrix_goldens
+.PHONY: test_matrix_elements test_integrated_kernels test_massive_dipole_kernel \
+	test_simple_integrator_mixed_dims update_matrix_cases update_matrix_goldens
 
 FC = gfortran
-FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
+#FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
 #FFLAGS = -ffast-math -O3 -mcmodel=large
-#FFLAGS = -ffast-math -O3
+FFLAGS = -ffast-math -O3
 PYTHON ?= python
 
 CXX_ORIGIN := $(origin CXX)
@@ -117,13 +118,28 @@ phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o 	\
 simple_integrator.o helper_modules.o amplitude_library.o command_line_parser.o \
 mg_checks.o scales.o pdf_lhapdf62.o phase_space_module.o cs_dipole_mappings.o \
-cs_lc_dipoles.o subtraction.o
+cs_lc_dipoles.o cs_integrated_kernels.o subtraction.o integrated_dipoles.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o
 
 FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o matrix_element_regression.o
+
+test_integrated_kernels: cs_dipole_mappings.o cs_integrated_kernels.o
+	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/integrated_kernels.exe \
+		tests/integrated_kernels.f90 cs_integrated_kernels.o cs_dipole_mappings.o
+	./tests/integrated_kernels.exe
+
+test_massive_dipole_kernel: cs_dipole_mappings.o cs_lc_dipoles.o
+	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/massive_dipole_kernel.exe \
+		tests/massive_dipole_kernel.f90 cs_lc_dipoles.o cs_dipole_mappings.o
+	./tests/massive_dipole_kernel.exe
+
+test_simple_integrator_mixed_dims: simple_integrator.o helper_modules.o ranmar.o
+	$(FC) $(FFLAGS) -I. -o tests/simple_integrator_mixed_dims.exe \
+		tests/simple_integrator_mixed_dims.f90 simple_integrator.o helper_modules.o ranmar.o
+	./tests/simple_integrator_mixed_dims.exe
 
 # ----------------------------------------------------------------------
 # 5. Build executables
@@ -173,8 +189,8 @@ amplitude_QCD.o : bitset.o math_functions.o feynmanrules.o color_algebra.o parti
 amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_functions.o \
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
-	command_line_parser.o mg_checks.o scales.o subtraction.o phase_space_module.o \
-	cs_dipole_mappings.o cs_lc_dipoles.o feynmanrules.o
+	command_line_parser.o mg_checks.o scales.o subtraction.o integrated_dipoles.o phase_space_module.o \
+	cs_dipole_mappings.o cs_lc_dipoles.o cs_integrated_kernels.o feynmanrules.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
@@ -190,6 +206,8 @@ amplib.o : $(notdir $(AMPSRC:.f03=.o))
 subtraction.o : particles.o handling_processes.o amplitude_QCD.o cuts.o phase_space_module.o \
 	cs_dipole_mappings.o cs_lc_dipoles.o feynmanrules.o
 cs_lc_dipoles.o : cs_dipole_mappings.o
+cs_integrated_kernels.o : cs_dipole_mappings.o
+integrated_dipoles.o : handling_processes.o cs_dipole_mappings.o cs_integrated_kernels.o pdf_wrap.o
 
 # ----------------------------------------------------------------------
 # 7. Cleanup

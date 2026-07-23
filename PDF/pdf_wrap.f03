@@ -1,6 +1,39 @@
 module pdf_wrap
   use handling_processes
 contains
+  subroutine evaluate_pdf_flavour(flavour,x,scale,value)
+    ! Return f_flavour(x,scale), using PDG 21 for a gluon and 22 for a
+    ! photon.  LHAPDF's evolvePDF returns x*f and is converted here to f.
+    implicit none
+    integer,intent(in) :: flavour
+    real(kind=8),intent(in) :: x,scale
+    real(kind=8),intent(out) :: value
+    real(kind=8) :: all_pdf(-6:7)
+    logical :: requested(-6:7)
+    integer :: index
+
+    value=0d0
+    if (.not.include_pdf) return
+    if (x.le.0d0 .or. x.ge.1d0) return
+    if (flavour.eq.21 .or. flavour.eq.99) then
+       index=0
+    elseif (flavour.eq.22) then
+       index=7
+    else
+       index=flavour
+    endif
+    if (index.lt.-6 .or. index.gt.7) return
+    if (use_lhapdf) then
+       call evolvePDF(x,scale,all_pdf(-6))
+       value=all_pdf(index)/x
+    else
+       requested=.false.
+       requested(index)=.true.
+       call PDF_eval(1,requested,x,scale,all_pdf(-6))
+       value=all_pdf(index)
+    endif
+  end subroutine evaluate_pdf_flavour
+
     subroutine set_ipdgs_for_PDF(pgl)
     ! determines for which flavours the PDFs should be evolved
     implicit none

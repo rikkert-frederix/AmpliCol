@@ -80,6 +80,7 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --help,           -h      : Show this message.
   --process=[X],    -p=[X]  : Born process specified in file [X] (default is './processes.txt').
   --real-process=[X]         : Real-emission process file; integrates B + R-sum(D) in one run.
+  --dim-reg=[hv|fdh]         : Dimensional scheme for integrated dipoles (default: hv).
   --nevents=[X],    -n=[X]  : Number of unweighted events to generate (default is 10000).
   --phasespace=[X], -ps=[X] : Phase-space parametrisation to use -- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel.
   --seed=[X],       -s=[X]  : The random number seed to use (default is read from randinit file).
@@ -117,21 +118,22 @@ For failed limits, the complete deformation table is written to
 For real Catani-Seymour dipoles, the optional '--alpha=X' argument restricts the
 dipole phase space. A single value applies to all topologies; alternatively use
 four comma-separated values in the order FF, FI, IF, II. Values must satisfy
-0 < X <= 1. The default is one, and integrated I/K/P contributions are not
-affected.
+0 < X <= 1. The default is one. In a combined Born-plus-real run, the matching topology-specific
+endpoint corrections are applied to the integrated terms as well.
 
 The optional '--real-process=FILE' mode loads the Born processes from
 '--process=FILE' and real-emission processes from the additional file into one
 integration. The Born channels and the local real contribution `R - sum(D)`
 are sampled by the same multichannel integrator, even when their phase spaces
-have different dimensions. It requires '--accuracy=X' and does not produce
-unweighted events. The final report lists the Born contribution, the
-real-subtracted contribution, and their sum. The real matrix element and the
-dipole sum use the same phase-space, PDF, symmetry, coupling, and
-multichannel factors. This is only a partial NLO result: virtual and
-integrated I/K/P terms are not included, and the finite integral depends on
-the alpha restriction. The two input files are not cross-validated; callers
-must supply corresponding Born and real processes.
+have different dimensions. Each Born subprocess supplies an endpoint
+integral and one P+K convolution integral for each incoming beam, all in that
+same run. It requires '--accuracy=X' and does not produce unweighted events.
+The final report lists Born, R-sum(D), the three Laurent coefficients of I,
+P, K, and the finite subtotal B+(R-D)+I0+P+K. The virtual term is not
+included. Integrated histories are constructed exclusively from the local
+dipoles and are checked against the supplied Born processes and leading-colour
+orders. The supported dimensional schemes are HV (default) and FDH, selected
+with '--dim-reg=hv' or '--dim-reg=fdh'.
 Its real-emission measurement clusters massless QCD partons with inclusive
 kT and radius `DRjj_min`, requiring at least one fewer accepted jets than the
 number of real final-state jet legs. Each mapped dipole is cut independently

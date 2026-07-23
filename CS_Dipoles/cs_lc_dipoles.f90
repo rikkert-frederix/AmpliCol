@@ -1,5 +1,6 @@
 module cs_lc_spin_dipoles
-  use cs_dipole_mappings, only: dp, dot4, new_index
+  use cs_dipole_mappings, only: dp, dot4, new_index,cs_dot4_scale,&
+       cs_value_is_resolved
   implicit none
 
   real(dp), parameter :: pi_dp = 3.1415926535897932384626433832795_dp
@@ -21,6 +22,21 @@ contains
     integer, intent(in) :: idx
     is_initial = idx <= 2
   end function is_initial
+
+
+  pure logical function dipole_status_is_numerical(status) result(is_numerical)
+    ! Status values caused by a phase-space boundary or a denominator that
+    ! cannot be resolved reliably.  Invalid flavours, arguments, and
+    ! unsupported kernels are deliberately excluded: those are programming
+    ! errors and must remain fatal to the caller.
+    integer, intent(in) :: status
+    select case (status)
+    case (-17:-10,-101,-103,-104,-106,-108,-201,-202,-203,-301,-302,-303)
+       is_numerical=.true.
+    case default
+       is_numerical=.false.
+    end select
+  end function dipole_status_is_numerical
 
 
   logical function is_gluon(f)
@@ -208,7 +224,7 @@ contains
     complex(dp), intent(in) :: rho(2,2)
     complex(dp), intent(in) :: eps_parent(0:3,2)
     real(dp), intent(out) :: dip
-    integer, intent(out), optional :: info
+    integer, intent(out) :: info
     real(dp), intent(in), optional :: lc_weight
     real(dp), intent(in), optional :: mass_real(:), mass_parent
 
@@ -216,6 +232,7 @@ contains
     logical :: iini, kini
     real(dp) :: wt, pref, vcontract_alt
     real(dp) :: sij, sik, sjk, dotij, sij_parent
+    real(dp) :: dotij_scale,parent_scale
     real(dp) :: mi, mj, mk, mparent
     real(dp) :: x, y, z, u
     complex(dp) :: vhel(2,2)
@@ -228,6 +245,7 @@ contains
     
     dip = 0.0_dp
     istat = 0
+    info = 0
 
     if (present(lc_weight)) then
        wt = lc_weight
@@ -306,11 +324,17 @@ contains
     iini = is_initial(i)
     kini = is_initial(k)
 
-    sij = 2.0_dp * dot4(p(:,i), p(:,j))
     dotij = dot4(p(:,i), p(:,j))
-    sij_parent = dot4(p(:,i)+p(:,j),p(:,i)+p(:,j))-mparent*mparent
+    dotij_scale=cs_dot4_scale(p(:,i),p(:,j))
+    sij = 2.0_dp*dotij
+    ! Evaluate the parent virtuality from masses and p_i.p_j.  Forming
+    ! (p_i+p_j)^2 directly loses the same small invariant through a second
+    ! large cancellation in a collinear configuration.
+    sij_parent=mi*mi+mj*mj+2.0_dp*dotij-mparent*mparent
+    parent_scale=mi*mi+mj*mj+mparent*mparent+2.0_dp*dotij_scale
 
-    if (abs(sij_parent) <= tiny_dip .or. abs(dotij) <= tiny_dip) then
+    if (.not.cs_value_is_resolved(dotij,dotij_scale) .or. &
+         .not.cs_value_is_resolved(sij_parent,parent_scale)) then
        istat = -10
        goto 900
     end if
@@ -431,7 +455,7 @@ contains
     end if
 
 900 continue
-    if (present(info)) info = istat
+    info = istat
   end subroutine cs_lc_dipole_spinrho
 
 
