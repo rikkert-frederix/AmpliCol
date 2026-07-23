@@ -255,7 +255,8 @@ contains
                integrated_history_list(ih)%real_process)%dl(&
                integrated_history_list(ih)%local_dipole)%dip_ijk(2))
           fp=integrated_history_list(ih)%born_flavours(integrated_history_list(ih)%born_emitter)
-          call history_i_primitive(fi,fj,fp,primitive,parton)
+          call history_i_primitive(fi,fj,fp,integrated_history_list(ih)%topology,&
+               primitive,parton)
           if (parton.eq.0) cycle
           sij=abs(2d0*minkowski_dot(p(:,integrated_history_list(ih)%born_emitter),&
                p(:,integrated_history_list(ih)%born_spectator)))
@@ -357,7 +358,8 @@ contains
                   integrated_history_list(ih)%local_dipole)%dip_ijk(2))
              fp=integrated_history_list(ih)%born_flavours(&
                   integrated_history_list(ih)%born_emitter)
-             call history_i_primitive(fi,fj,fp,primitive,parton)
+             call history_i_primitive(fi,fj,fp,integrated_history_list(ih)%topology,&
+                  primitive,parton)
              if (parton.eq.0) cycle
              call cs_fi_alpha_terms(primitive,z,alpha_dipole(2),&
                   fi_regular,fi_subtracted,info)
@@ -402,8 +404,8 @@ contains
     kterm=kterm*alpha_s/(2d0*cs_pi)
   end subroutine integrated_beam
 
-  subroutine history_i_primitive(fi,fj,fp,coeff,parton)
-    integer, intent(in) :: fi,fj,fp
+  subroutine history_i_primitive(fi,fj,fp,topology,coeff,parton)
+    integer, intent(in) :: fi,fj,fp,topology
     real(kind=8), intent(out) :: coeff(-2:0)
     integer, intent(out) :: parton
     coeff=0d0
@@ -413,7 +415,14 @@ contains
        parton=cs_parton_q
     elseif ((fp.eq.21 .or. fp.eq.99) .and. &
          (fi.eq.21 .or. fi.eq.99) .and. (fj.eq.21 .or. fj.eq.99)) then
-       call cs_i_gg(coeff)
+       if (topology.eq.1 .or. topology.eq.2) then
+          ! FF/FI local g -> gg histories contain one ordered side of the
+          ! symmetric kernel.  Attaching the full primitive to both the
+          ! (i,j) and (j,i) histories doubles their integrated alpha change.
+          call cs_i_gg_ordered(coeff)
+       else
+          call cs_i_gg(coeff)
+       endif
        parton=cs_parton_g
     elseif ((fp.eq.21 .or. fp.eq.99) .and. abs(fi).le.6 .and. fi.eq.-fj) then
        call cs_i_qqbar(coeff)

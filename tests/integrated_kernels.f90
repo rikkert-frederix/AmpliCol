@@ -15,6 +15,12 @@ program integrated_kernels_test
   call assert_close(c(-2),2d0*cs_ca,'gg double pole')
   call assert_close(c(-1),(11d0/3d0)*cs_ca,'gg single pole')
 
+  call cs_i_gg_ordered(c)
+  call assert_close(c(-2),cs_ca,'ordered final-state gg double pole')
+  call assert_close(c(-1),(11d0/6d0)*cs_ca,'ordered final-state gg single pole')
+  call assert_close(c(0),cs_ca*(50d0/9d0-cs_pi**2/2d0),&
+       'ordered final-state gg finite')
+
   call cs_i_qqbar(c)
   call assert_close(c(-2),0d0,'qqbar double pole')
   call assert_close(c(-1),-(2d0/3d0)*cs_tr,'qqbar single pole')

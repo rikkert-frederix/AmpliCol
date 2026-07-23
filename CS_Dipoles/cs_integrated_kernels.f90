@@ -42,7 +42,8 @@ module cs_integrated_kernels
      real(dp) :: delta = 0.0_dp
   end type cs_distribution
 
-  public :: cs_gamma, cs_k_constant, cs_i_qg, cs_i_gg, cs_i_qqbar
+  public :: cs_gamma, cs_k_constant, cs_i_qg, cs_i_gg, cs_i_gg_ordered
+  public :: cs_i_qqbar
   public :: cs_ap_distribution, cs_kbar_distribution
   public :: cs_ff_alpha_endpoint, cs_fi_alpha_endpoint
   public :: cs_fi_alpha_terms, cs_if_alpha_distribution
@@ -85,12 +86,25 @@ contains
 
   pure subroutine cs_i_gg(coeff)
     ! Integral of the symmetric g -> g g kernel.  An ordered local history
-    ! carries the history's lc_weight in addition to these coefficients.
+    ! must use cs_i_gg_ordered instead; the history's lc_weight is an
+    ! independent colour-correlation factor.
     real(dp), intent(out) :: coeff(-2:0)
     coeff(-2)=2.0_dp*cs_ca
     coeff(-1)=(11.0_dp/3.0_dp)*cs_ca
     coeff(0)=2.0_dp*cs_ca*(50.0_dp/9.0_dp-cs_pi**2/2.0_dp)
   end subroutine cs_i_gg
+
+  pure subroutine cs_i_gg_ordered(coeff)
+    ! Integral of one ordered side of the final-state g -> g g kernel used
+    ! by final_splitting_matrix.  The complementary soft pole and the other
+    ! half of the collinear kernel belong to the history with i and j
+    ! interchanged.  The FI/FF alpha restriction is independent of that
+    ! interchange, so its endpoint and non-endpoint primitives are halved
+    ! by the same factor.
+    real(dp), intent(out) :: coeff(-2:0)
+    call cs_i_gg(coeff)
+    coeff=0.5_dp*coeff
+  end subroutine cs_i_gg_ordered
 
   pure subroutine cs_i_qqbar(coeff)
     ! Integral of one g -> q qbar flavour.
