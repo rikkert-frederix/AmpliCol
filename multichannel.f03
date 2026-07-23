@@ -19,6 +19,7 @@ contains
     type(psv),intent(in) :: ps
     type(psv) :: ps_local
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channels) :: factors
+    logical,dimension(pgl(ichan)%multichan%n_unique_channels) :: target_active
     real(kind=8),dimension(pgl(ichan)%multichan%n_unique_channelgroups) :: weight_factors
     real(kind=8),dimension(pgl(ichan)%nproc),intent(out) :: weight
     integer :: i,j,ii
@@ -28,6 +29,7 @@ contains
        return
     endif
     ps_local=ps
+    target_active=.true.
     call simple_integrator%compute_wgt_from_x(ichan,ps_local%x,vol_ichan)
     do j=1,pgl(ichan)%multichan%n_unique_channels
        i=pgl(ichan)%multichan%unique_channel_list(j)
@@ -35,12 +37,22 @@ contains
           ii=j
           cycle
        endif
+       ! Each inverse must start from the generated physical point.  Besides
+       ! avoiding state carried over from a previous inverse, this makes an
+       ! unavailable target chart a local zero-density contribution below.
+       ps_local=ps
        call pgl(i)%phase_space%compute_x_from_momenta(ps_local)
        if (ps_local%jac.lt.0d0) then
-          ! The x's could not be correctly computed from the momenta
-          write (99,*) 'WARNING: multi-channel weight not included'
-          weight(1:pgl(ichan)%nproc)=1d0/dble(pgl(ichan)%multichan%number_of_channels(1:pgl(ichan)%nproc))
-          return
+          ! A target chart can be singular at a phase-space boundary (or be
+          ! unavailable for this point).  Its density 1/J_i is then zero in
+          ! the multichannel denominator.  Do not discard the complete
+          ! multichannel correction merely because this one alternate chart
+          ! has no regular inverse.
+          write (99,'(a,i0,a,i0,a,i0)') &
+               'INFO: multi-channel inverse unavailable; source channel=',ichan,&
+               ', target channel=',i,', status=',nint(ps_local%jac)
+          target_active(j)=.false.
+          cycle
        endif
        call simple_integrator%compute_wgt_from_x(i,ps_local%x,vol)
        factors(j)=ps_local%jac*vol
@@ -49,6 +61,7 @@ contains
        weight_factors(i)=1d0
        do j=1,pgl(ichan)%multichan%unique_channelgroup_list(0,i)
           if (pgl(ichan)%multichan%unique_channelgroup_list(j,i).eq.ii) cycle
+          if (.not.target_active(pgl(ichan)%multichan%unique_channelgroup_list(j,i))) cycle
           weight_factors(i)=weight_factors(i)+ps%jac*vol_ichan/factors(pgl(ichan)%multichan%unique_channelgroup_list(j,i))
        enddo
     enddo

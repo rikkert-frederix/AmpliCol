@@ -826,7 +826,7 @@ contains
       den_scale=max(1d0,abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
       massless_collinear_limit=abs(den_t).le.vtiny*den_scale .and. &
            abs(invm(i)).le.vtiny*den_scale .and. &
-           maxval(this%ETmin(i,1:2)).le.vtiny*sqrt(den_scale)
+           this%ETmin(i,1).le.vtiny*sqrt(den_scale)
       if (abs(den_ir).le.vtiny*den_scale .or. &
            (abs(den_t).le.vtiny*den_scale .and. .not.massless_collinear_limit)) then
          ps%jac=-2d0
@@ -969,7 +969,7 @@ contains
          return
       endif
       if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
-         ps%jac=-33d0
+         ps%jac=-38d0
          if (debug) write (*,*) 'zero-energy system in gen23_one_step',piir(0)
          return
       endif
@@ -1027,7 +1027,7 @@ contains
          if (abs(delta_ir).le.vtiny*delta_scale) then
             ! For delta->0- the max has the finite limit ETmin(ir).  The
             ! same holds for a zero transverse bound from either side.
-            if (delta_ir.le.0d0 .or. maxval(this%ETmin(ir,1:2)).le.vtiny*sqrt(delta_scale)) then
+            if (delta_ir.le.0d0 .or. this%ETmin(ir,1).le.vtiny*sqrt(delta_scale)) then
                etminir(1:2)=this%ETmin(ir,1:2)
             else
                ps%jac=-34d0
@@ -1039,18 +1039,27 @@ contains
                  this%ETmin(ir,1:2))
          endif
          rad=(piir(0)-etminir(1:2))**2-invm(i)
-         if (any(rad.lt.0d0)) then
+         if (rad(1).lt.0d0) then
             ps%jac=-34d0
             if (debug) write (*,*) 'rad.lt.0d0 inverse',rad,piir(0),etminir,invm(i)
             return
          endif
-         smax(1:2)=min(smax(1:2),&
-              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt(rad)*pim1(1))
+         ! The second bound is an optional soft/pT importance-sampling
+         ! sector.  It can be empty for this sequential construction even
+         ! though the physical (hard) sector, stored in entry one, is valid.
+         ! Do not reject the physical point in that case.
+         smax(1)=min(smax(1),invm(i)+invm(im1)+2d0*(piir(0)-etminir(1))*pim1(0)+&
+              2d0*sqrt(rad(1))*pim1(1))
+         if (rad(2).ge.0d0) then
+            smax(2)=min(smax(2),invm(i)+invm(im1)+2d0*(piir(0)-etminir(2))*pim1(0)+&
+                 2d0*sqrt(rad(2))*pim1(1))
+         endif
 
          if(invm(i).eq.0d0) then
             smin(1)=max(smin(1),2d0*this%ETmin(i,1)*(pim1(0)-pim1(1)))
             smin(2)=max(smin(2),2d0*this%ETmin(i,2)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
+         if (rad(2).lt.0d0) smax(2)=smin(2)
 
       endif
       if (smin(1).ge.smax(1)) then
@@ -1217,7 +1226,7 @@ contains
          return
       endif
       if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
-         ps%jac=-33d0
+         ps%jac=-38d0
          if (debug) write (*,*) 'zero-energy system in gent_one_step',piir(0)
          return
       endif
@@ -1546,8 +1555,19 @@ contains
   contains
     logical function bad_inverse_jac()
       implicit none
+      ! Inverse-status codes used below: -2/-3/-4 are singular or empty
+      ! kinematic intervals, -5 is a non-negative Gram determinant,
+      ! -33 is a negative reconstruction root, -35 is a light-like boost
+      ! reference, -36/-37 are double-t bound failures, -38 is a zero
+      ! reconstructed energy, -39 is a zero Eir denominator, -40 is an
+      ! otherwise unclassified zero Jacobian, -41:-43 are inverse-variable
+      ! bounds/range failures, and -45/-46 are singular Eir/radial bounds.
       bad_inverse_jac=ps%jac.le.0d0
-      if (bad_inverse_jac) ps%jac=-1d0
+      ! Preserve the diagnostic status set by the inverse step.  In
+      ! particular, the multichannel caller needs to distinguish a point
+      ! outside an alternative channel's bounds from a Gram-determinant or
+      ! other kinematic reconstruction failure.
+      if (bad_inverse_jac .and. ps%jac.eq.0d0) ps%jac=-40d0
     end function bad_inverse_jac
 
     subroutine generate_bw_mass_inverse(ires)
@@ -1794,7 +1814,7 @@ contains
          stop 1
       endif
       if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
-         ps%jac=-33d0
+         ps%jac=-38d0
          return
       endif
       tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt(root(1))))
@@ -1896,7 +1916,7 @@ contains
       soft_ok=.true.
       yr(1:2)=lambda(invm(ia+ib),invm(i),this%invm_min(ir,1:2))
       if (yr(1).lt.0d0) then
-         ps%jac=-1d0
+         ps%jac=-36d0
          return
       endif
       if (yr(2).lt.0d0) soft_ok=.false.
@@ -1919,7 +1939,7 @@ contains
       end where
       pzmax(1:2)=lambda(sqrtshat**2,this%ETmin(i,1:2)**2,this%ETmin(ir,1:2)**2)
       if (pzmax(1).lt.0d0) then
-         ps%jac=-1d0
+         ps%jac=-37d0
          return
       endif
       if (pzmax(2).lt.0d0) soft_ok=.false.
@@ -1952,7 +1972,7 @@ contains
       den_scale=max(1d0,abs(invm(i)),abs(invm(i+ia)),sqrtshat**2)
       massless_collinear_limit=abs(den_t).le.vtiny*den_scale .and. &
            abs(invm(i)).le.vtiny*den_scale .and. &
-           maxval(this%ETmin(i,1:2)).le.vtiny*sqrt(den_scale)
+           this%ETmin(i,1).le.vtiny*sqrt(den_scale)
       if (abs(den_ir).le.vtiny*den_scale .or. &
            (abs(den_t).le.vtiny*den_scale .and. .not.massless_collinear_limit)) then
          ps%jac=-2d0
@@ -2067,7 +2087,7 @@ contains
          return
       endif
       if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
-         ps%jac=-33d0
+         ps%jac=-38d0
          return
       endif
       tmin(1)=max(tmin(1),invm(ir)-pib(0)/piir(0)*(base(1)+sqrt0(root(1))))
@@ -2117,15 +2137,15 @@ contains
          delta_ir=invm(ir)-invm(ir+ib)
          delta_scale=max(1d0,abs(invm(ir)),abs(invm(ir+ib)),pib(0)**2)
          if (abs(pib(0)).le.vtiny*max(1d0,sqrtshat)) then
-            ps%jac=-34d0
+            ps%jac=-39d0
             if (debug) write (*,*) 'unphysical inverse Eir constraint',delta_ir,pib(0)
             return
          endif
          if (abs(delta_ir).le.vtiny*delta_scale) then
-            if (delta_ir.le.0d0 .or. maxval(this%ETmin(ir,1:2)).le.vtiny*sqrt(delta_scale)) then
+            if (delta_ir.le.0d0 .or. this%ETmin(ir,1).le.vtiny*sqrt(delta_scale)) then
                etminir(1:2)=this%ETmin(ir,1:2)
             else
-               ps%jac=-34d0
+               ps%jac=-45d0
                if (debug) write (*,*) 'positive singular inverse Eir constraint',delta_ir,pib(0)
                return
             endif
@@ -2134,17 +2154,22 @@ contains
                  this%ETmin(ir,1:2))
          endif
          rad=(piir(0)-etminir(1:2))**2-invm(i)
-         if (any(rad.lt.0d0)) then
-            ps%jac=-34d0
+         if (rad(1).lt.0d0) then
+            ps%jac=-46d0
             if (debug) write (*,*) 'rad.lt.0d0 inverse',rad,piir(0),etminir,invm(i)
             return
          endif
-         smax(1:2)=min(smax(1:2),&
-              invm(i)+invm(im1)+2d0*(piir(0)-etminir(1:2))*pim1(0)+2d0*sqrt(rad)*pim1(1))
+         smax(1)=min(smax(1),invm(i)+invm(im1)+2d0*(piir(0)-etminir(1))*pim1(0)+&
+              2d0*sqrt(rad(1))*pim1(1))
+         if (rad(2).ge.0d0) then
+            smax(2)=min(smax(2),invm(i)+invm(im1)+2d0*(piir(0)-etminir(2))*pim1(0)+&
+                 2d0*sqrt(rad(2))*pim1(1))
+         endif
          if(invm(i).eq.0d0) then
             smin(1)=max(smin(1),2d0*this%ETmin(i,1)*(pim1(0)-pim1(1)))
             smin(2)=max(smin(2),2d0*this%ETmin(i,2)*(pim1(0)-pim1(1)*cos(this%drcut(i+im1))))
          endif
+         if (rad(2).lt.0d0) smax(2)=smin(2)
       endif
       if (smin(1).ge.smax(1)) then
          ps%jac=-4d0
@@ -2185,6 +2210,10 @@ contains
            &,invm(im1))
       if (gram4.ge.0d0) then 
          write (99,*) 'Warning: gram4 greater than or equal to zero in gen23_one_step_inverse',gram4,i,ir
+         write (99,*) '  inverse Gram inputs i,ir,ib,im1=',i,ir,ib,im1
+         write (99,*) '  shat_ip1,t_im1,t_i,shat_i,s_i,t_ip1,shat_im1,m_i_2,m_ip1_2=',&
+              & invm(ir+i+im1),invm(ir+ib),invm(ir+i+ib),invm(ir+i),invm(i+im1),&
+              & invm(ir+ib+i+im1),invm(ir),invm(i),invm(im1)
          ps%jac=-5d0
          return
       endif
@@ -2206,6 +2235,12 @@ contains
                endif
             endif
          enddo
+         ! Keep the configured singleton masses (in particular, exact
+         ! masslessness).  Compute all composite invariants before the
+         ! auxiliary longitudinal boost: recomputing a nearly light-like
+         ! quantity from the boosted components loses several digits through
+         ! E^2-p_z^2 cancellation and can spuriously flip a Gram determinant.
+         if (popcnt(i).gt.1) invm(i)=dot(p(0:3),p(0:3))
          call boostz(p(0:3),ycm,pp(0:3,i))
       enddo
     end subroutine fill_momentum_array
@@ -2221,26 +2256,28 @@ contains
       integer(kind=4) :: i,k
       real(kind=8),dimension(3) :: vmin,vmax,power,q
       real(kind=8),dimension(1:2) :: var_min_eff,var_max_eff
-      real(kind=8) :: var,xloc
+      real(kind=8) :: var,xloc,variable_clamped,bound_tol
       logical :: found
       call select_integration_bounds(var_min,var_max,var_min_eff,var_max_eff, &
            this%use_soft_bounds_as_actual_limits)
       if (var_min_eff(1).gt.var_max_eff(1)) then
-         jac=-1d0
+         jac=-41d0
          return
       endif
-      if (variable.lt.var_min_eff(1) .or. variable.gt.var_max_eff(1)) then
+      bound_tol=5d-8*max(1d0,abs(variable),abs(var_min_eff(1)),abs(var_max_eff(1)))
+      if (variable.lt.var_min_eff(1)-bound_tol .or. variable.gt.var_max_eff(1)+bound_tol) then
          write (99,*) 'Warning: variable not between varmin and varmax',var_min_eff(1),variable,var_max_eff(1)
-         jac=-1d0
+         jac=-42d0
          return
       endif
+      variable_clamped=min(max(variable,var_min_eff(1)),var_max_eff(1))
       call random_to_var_inputs(power_in,var_min_eff,var_max_eff,power,vmin,vmax, &
            this%use_soft_bounds_as_actual_limits)
       call random_to_var_weights(power,vmin,vmax,q)
       if (var_min_eff(1).lt.0d0 .and. var_max_eff(1).le.0d0) then
-         var=-variable
+         var=-variable_clamped
       else
-         var=variable
+         var=variable_clamped
       endif
       found=.false.
       k=0
@@ -2254,7 +2291,7 @@ contains
       enddo
       if (.not.found) then
          write (99,*) 'Warning: variable not in any active random-to-var range',variable,var_min_eff,var_max_eff
-         jac=-1d0
+         jac=-43d0
          return
       endif
       call var_to_random_map(var,power(k),vmin(k),vmax(k),xloc,jac)
@@ -2270,8 +2307,10 @@ contains
       real(kind=8),intent(inout) :: jac
       integer(kind=4) :: ip
       if (varmax-varmin.le.tiny*max(1d0,max(abs(varmin),abs(varmax)))) then
+         ! A zero-width sector is a phase-space boundary.  It has no
+         ! sampling measure, so retain a finite inverse Jacobian and use its
+         ! endpoint coordinate instead of classifying the point as invalid.
          x=0d0
-         jac=-1d0
          return
       endif
       ip=nint(power)
