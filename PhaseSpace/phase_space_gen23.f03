@@ -1810,8 +1810,9 @@ contains
       root(1:2)=(piir(0)-ETmini(1:2)-ETminir(1:2))*(piir(0)+ETmini(1:2)-ETminir(1:2))*&
            (piir(0)-ETmini(1:2)+ETminir(1:2))*(piir(0)+ETmini(1:2)+ETminir(1:2))
       if (root(1).lt.0d0) then
-         write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
-         stop 1
+         ps%jac=-33d0
+         if (debug) write (*,*) 'root.lt.0d0 in gent_one_step_inverse',root
+         return
       endif
       if (abs(piir(0)).le.vtiny*max(1d0,sqrtshat)) then
          ps%jac=-38d0
@@ -1828,8 +1829,9 @@ contains
       endif
       invm(ir+ib)=dot(pp(0:3,ir+ib),pp(0:3,ir+ib))
       if (tmin(1).ge.tmax(1)) then
-         write (*,*) 'tmin.ge.tmax in gent_one_step_inverse',tmin,tmax,invm(ir+ib)
-         stop 1
+         ps%jac=-3d0
+         if (debug) write (*,*) 'tmin.ge.tmax in gent_one_step_inverse',tmin,tmax,invm(ir+ib)
+         return
       endif
       if (debug) then
          write (*,*) 'ti - ir+ib',ir+ib,tmin,tmax,invm(ir+ib)
@@ -1957,8 +1959,9 @@ contains
          tmax(2)=tmin(1)
       endif
       if (tmin(1).ge.tmax(1)) then
-         write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
-         stop 1
+         ps%jac=-2d0
+         if (debug) write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
+         return
       endif
       invm(i+ia)=dot(pp(0:3,i+ia),pp(0:3,i+ia))
       if (debug) then
@@ -1998,8 +2001,9 @@ contains
          tmax(1:2)=min(tmax(1:2),invm(i)-sqrtshat**2*(this%ETmin(i,1:2)**2/den_t))
       endif
       if (tmin(1).ge.tmax(1)) then
-         write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
-         stop 1
+         ps%jac=-2d0
+         if (debug) write (*,*) 'tmin.ge.tmax in double_t_inverse',tmin,tmax
+         return
       endif
       invm(i+ib)=dot(pp(0:3,i+ib),pp(0:3,i+ib))
       if (debug) then
