@@ -82,10 +82,11 @@
 !
 ! Integrand convention
 ! --------------------
-! f_abs is the non-negative target used for grid adaptation, maximum-weight
-! estimates, and unweighting.  f is the signed contribution to the physical
-! integral.  In many event generators f_abs=abs(f), but callers may choose a
-! different positive envelope if needed.  The optional accepted array records
+! f_abs is the non-negative envelope used for maximum-weight estimates,
+! unweighting, and the absolute-envelope accuracy target.  f is the signed
+! contribution to the physical integral.  Event-generation grids adapt to
+! f_abs; accuracy-only grids adapt to the mean of abs(f), after local
+! cancellations.  The optional accepted array records
 ! points that pass the caller's cuts; accepted zero-weight points count towards
 ! the per-iteration statistics, while rejected points do not.
 !
@@ -166,6 +167,7 @@ module simple_integrator_mod
      integer :: size,size_fill
      real(kind=8),allocatable,dimension(:) :: current,accum,current_for_fillcell
      integer,allocatable,dimension(:) :: nhits
+     logical :: use_mean_abs
    contains
      procedure,private :: init => grid_init
      procedure,private :: add_point => grid_add_point
@@ -431,6 +433,7 @@ contains
     allocate(this%nhits(this%size_fill))
     this%accum=0d0
     this%nhits=0
+    this%use_mean_abs=.false.
   end subroutine grid_init
 
   ! Choose the number of adaptation fill cells from the requested statistics.
@@ -1414,7 +1417,13 @@ contains
     integer :: i
     this%npoints_iter=this%npoints_iter+1
     do i=1,this%ndim
-       call this%grids(i,this%current_iter)%add_point(x(i),f_abs)
+       if (turn_off_evnt_generation) then
+          ! For a signed integration the variance-optimal density is
+          ! proportional to abs(f), after real--dipole cancellation.
+          call this%grids(i,this%current_iter)%add_point(x(i),abs(f),.true.)
+       else
+          call this%grids(i,this%current_iter)%add_point(x(i),f_abs)
+       endif
     enddo
     if (present(f_aux)) then
        call this%integrals(this%current_integral)%add_point(x,wgt,f_abs,f,to_write,accepted,f_aux)
@@ -1554,12 +1563,21 @@ contains
   end subroutine increase_size_evnt_list
   
   ! Accumulate one sampled point into the grid-adaptation histogram.
-  subroutine grid_add_point(this,x,f_abs)
+  subroutine grid_add_point(this,x,f_abs,use_mean_abs)
     class(grid),intent(inout) :: this
     real(kind=8),intent(in) :: x,f_abs
+    logical,intent(in),optional :: use_mean_abs
     integer :: cell
+    logical :: mean_abs_metric
+    mean_abs_metric=.false.
+    if (present(use_mean_abs)) mean_abs_metric=use_mean_abs
     call this%find_cell_to_fill(x,cell)
-    if (importance_sampling_strategy.eq.1) then
+    if (mean_abs_metric) then
+       ! The accuracy-only metric is a cell mean of abs(f), rather than the
+       ! peak-oriented event envelope used by the strategies below.
+       this%use_mean_abs=.true.
+       this%accum(cell)=this%accum(cell)+f_abs
+    elseif (importance_sampling_strategy.eq.1) then
        this%accum(cell)=this%accum(cell)+f_abs
     elseif (importance_sampling_strategy.eq.2) then
        this%accum(cell)=max(this%accum(cell),f_abs)
@@ -1624,7 +1642,7 @@ contains
     real(kind=8), parameter :: tiny=1d-8
     do i=1,this%size_fill
        if (this%nhits(i).eq.0) cycle
-       if (importance_sampling_strategy.eq.1) then
+       if (this%use_mean_abs .or. importance_sampling_strategy.eq.1) then
           this%accum(i)=this%accum(i)/this%nhits(i)
        else
           this%accum(i)=this%accum(i)
