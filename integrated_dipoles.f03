@@ -6,6 +6,7 @@ module integrated_dipoles
   use handling_processes
   use cs_dipole_mappings, only: cs_dipole_topology
   use cs_integrated_kernels
+  use cs_massive_integrated_kernels
   use pdf_wrap, only: evaluate_pdf_flavour
   use common, only: alpha_dipole
   implicit none
@@ -22,6 +23,10 @@ module integrated_dipoles
      integer :: incoming_leg=0
      integer :: real_incoming_flavour=0
      integer :: born_incoming_flavour=0
+     real(kind=8) :: emitter_mass=0d0
+     real(kind=8) :: unresolved_mass=0d0
+     real(kind=8) :: parent_mass=0d0
+     real(kind=8) :: spectator_mass=0d0
      integer, allocatable :: real_flavours(:)
      integer, allocatable :: real_colour_order(:)
      integer, allocatable :: born_flavours(:)
@@ -72,7 +77,7 @@ contains
        do iproc=1,pgl(igroup)%nproc
           do icopy=1,pgl(igroup)%iden_iproc(iproc)
              do idip=1,pgl(igroup)%dpl(iproc)%ndip
-                call ensure_massless_integrated_history(igroup,iproc,idip)
+                call ensure_supported_integrated_history(igroup,iproc,idip)
                 call fill_history(candidates(ncandidate+1),igroup,iproc,icopy,idip)
                 call canonicalize_history_born(candidates(ncandidate+1),nborn_groups,matched)
                 if (.not.matched) then
@@ -119,7 +124,7 @@ contains
     integer :: igroup,iproc,icopy,emitter,ih,fi,fj,fp,parton,nf_available
     integer :: mapped_emitter,mapped_spectator
     integer :: leg_map(maxval(pgl(1:nborn_groups)%next))
-    logical :: invalid
+    logical :: invalid,massive_emitter_histories
 
     do igroup=1,nborn_groups
        do iproc=1,pgl(igroup)%nproc
@@ -129,11 +134,16 @@ contains
                 call parton_kind(fp,parton)
                 if (parton.eq.0) cycle
                 pole_sum=0d0
+                massive_emitter_histories=.false.
                 do ih=1,n_integrated_histories
                    if (.not.history_matches_copy(integrated_history_list(ih),igroup,iproc,icopy,&
                         leg_map(1:pgl(igroup)%next))) cycle
                    mapped_emitter=leg_map(integrated_history_list(ih)%born_emitter)
                    if (mapped_emitter.ne.emitter) cycle
+                   if (history_has_mass(integrated_history_list(ih))) then
+                      massive_emitter_histories=.true.
+                      cycle
+                   endif
                    fi=integrated_history_list(ih)%real_flavours(&
                         pgl(integrated_history_list(ih)%real_group)%dpl(&
                         integrated_history_list(ih)%real_process)%dl(&
@@ -151,6 +161,7 @@ contains
                         integrated_history_list(ih)%local_dipole)%lc_weight
                    pole_sum=pole_sum+weight*primitive(-2:-1)
                 enddo
+                if (massive_emitter_histories) cycle
                 call parton_kind(pgl(igroup)%iden_processes(emitter,icopy,iproc),parton)
                 if (parton.eq.cs_parton_q) then
                    expected=[cs_cf_lc,1.5d0*cs_cf_lc]
@@ -221,6 +232,10 @@ contains
     history%born_spectator=dip%dip_r_ijk(2)
     history%real_flavours=pgl(igroup)%iden_processes(:,icopy,iproc)
     history%real_colour_order=pgl(igroup)%color_orders(:,iproc)
+    history%emitter_mass=abs(phys_model%get_mass(dip%dip_ijk_f(1)))
+    history%unresolved_mass=abs(phys_model%get_mass(dip%dip_ijk_f(2)))
+    history%parent_mass=abs(phys_model%get_mass(dip%dip_r_ijk_f(1)))
+    history%spectator_mass=abs(phys_model%get_mass(dip%dip_r_ijk_f(2)))
     allocate(history%born_flavours(size(dip%process_r)))
     call make_history_reduced_process(pgl(igroup)%processes(:,iproc),history%real_flavours,&
          dip%process_r,history%born_flavours)
@@ -265,17 +280,20 @@ contains
     enddo
   end subroutine make_history_reduced_process
 
-  subroutine ensure_massless_integrated_history(igroup,iproc,idip)
-    ! The kernels in cs_integrated_kernels are the massless Catani--Seymour
-    ! formulae.  Local mappings support massive parents/spectators as well,
-    ! but silently attaching the massless integrated formula to such a
-    ! history gives a finite, physically incorrect result.
+  subroutine ensure_supported_integrated_history(igroup,iproc,idip)
+    ! The unresolved leg and both incoming legs remain massless.  A massive
+    ! emitter is supported only for final-state Q->Qg, while a massive
+    ! spectator is supported in FF and IF histories.
     integer, intent(in) :: igroup,iproc,idip
     type(dipole) :: dip
     real(kind=8) :: emitter_mass,unresolved_mass,parent_mass,spectator_mass,mass_tolerance
-    integer :: topology
+    integer :: topology,fi,fj,fp
+    logical :: supported
 
     dip=pgl(igroup)%dpl(iproc)%dl(idip)
+    fi=dip%dip_ijk_f(1)
+    fj=dip%dip_ijk_f(2)
+    fp=dip%dip_r_ijk_f(1)
     emitter_mass=abs(phys_model%get_mass(dip%dip_ijk_f(1)))
     unresolved_mass=abs(phys_model%get_mass(dip%dip_ijk_f(2)))
     parent_mass=abs(phys_model%get_mass(dip%dip_r_ijk_f(1)))
@@ -285,18 +303,29 @@ contains
          parent_mass.le.mass_tolerance .and. spectator_mass.le.mass_tolerance) return
 
     topology=cs_dipole_topology(dip%dip_ijk)
-    write(*,*) 'ERROR: massive integrated dipole history is not supported'
+    supported=.true.
+    if (unresolved_mass.gt.mass_tolerance) supported=.false.
+    if (emitter_mass.gt.mass_tolerance .or. parent_mass.gt.mass_tolerance) then
+       if (topology.ne.1 .and. topology.ne.2) supported=.false.
+       if (abs(fi).gt.6 .or. abs(fp).gt.6 .or. abs(fi).ne.abs(fp)) supported=.false.
+       if (fj.ne.21 .and. fj.ne.99) supported=.false.
+       if (abs(emitter_mass-parent_mass).gt.mass_tolerance) supported=.false.
+    endif
+    if (spectator_mass.gt.mass_tolerance .and. topology.ne.1 .and. topology.ne.3) supported=.false.
+    if (supported) return
+
+    write(*,*) 'ERROR: unsupported massive integrated dipole history'
     write(*,*) ' real group/process/dipole/topology:',igroup,iproc,idip,topology
     write(*,*) ' real emitter/unresolved masses:',emitter_mass,unresolved_mass
     write(*,*) ' reduced parent/spectator flavours:',dip%dip_r_ijk_f
     write(*,*) ' reduced parent/spectator masses:',parent_mass,spectator_mass
-    write(99,*) 'ERROR: massive integrated dipole history is not supported'
+    write(99,*) 'ERROR: unsupported massive integrated dipole history'
     write(99,*) ' real group/process/dipole/topology:',igroup,iproc,idip,topology
     write(99,*) ' real emitter/unresolved masses:',emitter_mass,unresolved_mass
     write(99,*) ' reduced parent/spectator flavours:',dip%dip_r_ijk_f
     write(99,*) ' reduced parent/spectator masses:',parent_mass,spectator_mass
     stop 1
-  end subroutine ensure_massless_integrated_history
+  end subroutine ensure_supported_integrated_history
 
   subroutine canonicalize_history_born(history,nborn_groups,matched)
     ! Reduced histories can place a collapsed U(1)/gluon parent in a
@@ -422,6 +451,7 @@ contains
     integer :: ih,icopy,fi,fj,fp,parton,info
     integer :: emitter,spectator,leg_map(pgl(igroup)%next)
     logical :: shifted(size(born_copy),pgl(igroup)%next)
+    logical :: massive_history
 
     coeff=0d0
     if (present(coeff_copy)) then
@@ -445,48 +475,62 @@ contains
                integrated_history_list(ih)%real_process)%dl(&
                integrated_history_list(ih)%local_dipole)%dip_ijk(2))
           fp=integrated_history_list(ih)%born_flavours(integrated_history_list(ih)%born_emitter)
-          call history_i_primitive(fi,fj,fp,integrated_history_list(ih)%topology,&
-               primitive,parton)
-          if (parton.eq.0) cycle
           emitter=leg_map(integrated_history_list(ih)%born_emitter)
           spectator=leg_map(integrated_history_list(ih)%born_spectator)
+          massive_history=history_has_mass(integrated_history_list(ih))
+          if (massive_history) then
+             call massive_history_endpoint(integrated_history_list(ih),fi,fj,fp,p,&
+                  emitter,spectator,mu,expanded,parton,info)
+             if (info.ne.0) then
+                write(*,*) 'ERROR: massive integrated endpoint failed'
+                write(*,*) ' history/topology/fi/fj/fp/status:',ih,&
+                     integrated_history_list(ih)%topology,fi,fj,fp,info
+                stop 1
+             endif
+             if (parton.eq.0) cycle
+          else
+             call history_i_primitive(fi,fj,fp,integrated_history_list(ih)%topology,&
+                  primitive,parton)
+             if (parton.eq.0) cycle
+          endif
           sij=abs(2d0*minkowski_dot(p(:,emitter),p(:,spectator)))
           if (sij.le.tiny(1d0)) cycle
-          ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
-          expanded(-2)=primitive(-2)
-          expanded(-1)=primitive(-1)+ell*primitive(-2)
-          expanded(0)=primitive(0)+ell*primitive(-1)+&
-               (0.5d0*ell*ell-cs_pi**2/12d0)*primitive(-2)
+          if (.not.massive_history) then
+             ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
+             expanded(-2)=primitive(-2)
+             expanded(-1)=primitive(-1)+ell*primitive(-2)
+             expanded(0)=primitive(0)+ell*primitive(-1)+&
+                  (0.5d0*ell*ell-cs_pi**2/12d0)*primitive(-2)
+          endif
           weight=pgl(integrated_history_list(ih)%real_group)%dpl(&
                integrated_history_list(ih)%real_process)%dl(&
                integrated_history_list(ih)%local_dipole)%lc_weight
-          endpoint_alpha=0d0
-          select case (integrated_history_list(ih)%topology)
-          case (1)
-             call cs_ff_alpha_endpoint(alpha_dipole(1),primitive,endpoint_alpha,info)
-          case (2)
-             ! The FI delta baseline differs from the FF insertion by the
-             ! negative single-pole coefficient.
-             expanded(0)=expanded(0)-primitive(-1)
-             call cs_fi_alpha_endpoint(alpha_dipole(2),primitive,endpoint_alpha,info)
-          case (3,4)
-             ! Initial--final and initial--initial restrictions have no
-             ! alpha-dependent endpoint.  Their complete finite changes
-             ! are applied as beam convolutions below.
-             info=0
-          case default
-             info=-4
-          end select
-          if (info.ne.0) then
-             write(*,*) 'ERROR: invalid integrated endpoint topology/alpha:',&
-                  integrated_history_list(ih)%topology,info
-             stop 1
+          if (.not.massive_history) then
+             endpoint_alpha=0d0
+             select case (integrated_history_list(ih)%topology)
+             case (1)
+                call cs_ff_alpha_endpoint(alpha_dipole(1),primitive,endpoint_alpha,info)
+             case (2)
+                ! The FI delta baseline differs from the FF insertion by the
+                ! negative single-pole coefficient.
+                expanded(0)=expanded(0)-primitive(-1)
+                call cs_fi_alpha_endpoint(alpha_dipole(2),primitive,endpoint_alpha,info)
+             case (3,4)
+                info=0
+             case default
+                info=-4
+             end select
+             if (info.ne.0) then
+                write(*,*) 'ERROR: invalid integrated endpoint topology/alpha:',&
+                     integrated_history_list(ih)%topology,info
+                stop 1
+             endif
+             expanded(0)=expanded(0)+endpoint_alpha
           endif
-          expanded(0)=expanded(0)+endpoint_alpha
           copy_contribution=born_copy(icopy)*weight*expanded*alpha_s/(2d0*cs_pi)
           coeff=coeff+copy_contribution
           if (present(coeff_copy)) coeff_copy(:,icopy)=coeff_copy(:,icopy)+copy_contribution
-          if (integrated_dimensional_scheme.eq.cs_scheme_fdh .and. &
+          if (.not.massive_history .and. integrated_dimensional_scheme.eq.cs_scheme_fdh .and. &
                phys_model%get_mass(pgl(igroup)%iden_processes(emitter,icopy,iproc)).eq.0d0 .and. &
                .not.shifted(icopy,emitter)) then
              copy_contribution=0d0
@@ -499,19 +543,87 @@ contains
     enddo
   end subroutine integrated_endpoint
 
+  subroutine massive_history_endpoint(history,fi,fj,fp,p,emitter,spectator,mu,coeff,parton,info)
+    type(integrated_history), intent(in) :: history
+    integer, intent(in) :: fi,fj,fp,emitter,spectator
+    real(kind=8), intent(in) :: p(0:,:),mu
+    real(kind=8), intent(out) :: coeff(-2:0)
+    integer, intent(out) :: parton,info
+    real(kind=8) :: sij,q2,ell
+    integer :: split,pa,pb
+
+    coeff=0d0
+    parton=0
+    info=0
+    sij=abs(2d0*minkowski_dot(p(:,emitter),p(:,spectator)))
+    if (sij.le.tiny(1d0)) then
+       info=-10
+       return
+    endif
+    call parton_kind(fp,parton)
+
+    select case (history%topology)
+    case (1)
+       split=0
+       if (parton.eq.cs_parton_q .and. (fj.eq.21 .or. fj.eq.99)) then
+          split=cs_massive_split_qg
+       elseif (parton.eq.cs_parton_g .and. (fi.eq.21 .or. fi.eq.99) .and. &
+            (fj.eq.21 .or. fj.eq.99)) then
+          split=cs_massive_split_gg
+       elseif (parton.eq.cs_parton_g .and. abs(fi).le.6 .and. fi.eq.-fj) then
+          split=cs_massive_split_qqbar
+       endif
+       if (split.eq.0) then
+          info=-11
+          return
+       endif
+       q2=history%parent_mass**2+history%spectator_mass**2+sij
+       ! The explicit massive final--final formulae use Q_ik^2 as their
+       ! dimensional scale, rather than 2 p_i.p_k.
+       ell=log(4d0*cs_pi*mu*mu/q2)-0.5772156649015328606d0
+       call cs_massive_ff_endpoint(parton,split,history%parent_mass,&
+            history%spectator_mass,q2,ell,alpha_dipole(1),&
+            integrated_dimensional_scheme,coeff,info)
+       if (info.eq.0 .and. fp.eq.99 .and. split.eq.cs_massive_split_qqbar) &
+            coeff=coeff/(cs_ca*cs_ca)
+    case (2)
+       if (parton.ne.cs_parton_q .or. history%parent_mass.le.0d0) then
+          info=-12
+          return
+       endif
+       ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
+       call cs_massive_fi_endpoint(history%parent_mass,sij,ell,&
+            alpha_dipole(2),coeff,info)
+    case (3)
+       call parton_kind(fi,pa)
+       call parton_kind(fp,pb)
+       if (pa.eq.0 .or. pb.eq.0 .or. history%spectator_mass.le.0d0) then
+          info=-13
+          return
+       endif
+       ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
+       call cs_massive_if_endpoint(pa,pb,history%spectator_mass,sij,ell,&
+            integrated_dimensional_scheme,5,coeff,info)
+    case default
+       info=-14
+    end select
+  end subroutine massive_history_endpoint
+
   subroutine integrated_beam(igroup,iproc,beam,z,hard_copy,xbj,mu_fac,alpha_s,pterm,kterm,pterm_copy,kterm_copy)
     integer, intent(in) :: igroup,iproc,beam
     real(kind=8), intent(in) :: z,hard_copy(:),xbj(2),mu_fac,alpha_s
     real(kind=8), intent(out) :: pterm,kterm
     real(kind=8), intent(out),optional :: pterm_copy(:),kterm_copy(:)
     type(cs_distribution) :: pk,kk,tilde_kernel,alpha_kernel
+    type(cs_convolution_kernel) :: massive_kernel
     real(kind=8) :: fa,fb,gz,g1,other_pdf,regularised_p,regularised_k
     real(kind=8) :: p_delta,sij,colour_log,colour_log_endpoint
     real(kind=8) :: history_weight,kernel_factor,primitive(-2:0)
-    real(kind=8) :: fi_regular,fi_subtracted
-    integer :: ih,icopy,a,b,other,info,pa,pb,fi,fj,fp,parton,spectator
+    real(kind=8) :: fi_regular,fi_subtracted,szone,sx
+    integer :: ih,icopy,a,b,other,info,pa,pb,fi,fj,fp,parton,spectator,emitter
     integer :: leg_map(pgl(igroup)%next)
     logical :: seen(n_integrated_histories)
+    logical :: massive_history,massive_if_history
 
     pterm=0d0
     kterm=0d0
@@ -556,7 +668,66 @@ contains
           endif
           g1=fb
           p_delta=0d0
-          if (integrated_history_list(ih)%topology.eq.2) then
+          massive_history=history_has_mass(integrated_history_list(ih))
+          massive_if_history=.false.
+          if (massive_history) then
+             fi=integrated_history_list(ih)%real_flavours(&
+                  pgl(integrated_history_list(ih)%real_group)%dpl(&
+                  integrated_history_list(ih)%real_process)%dl(&
+                  integrated_history_list(ih)%local_dipole)%dip_ijk(1))
+             fj=integrated_history_list(ih)%real_flavours(&
+                  pgl(integrated_history_list(ih)%real_group)%dpl(&
+                  integrated_history_list(ih)%real_process)%dl(&
+                  integrated_history_list(ih)%local_dipole)%dip_ijk(2))
+             fp=integrated_history_list(ih)%born_flavours(&
+                  integrated_history_list(ih)%born_emitter)
+             emitter=leg_map(integrated_history_list(ih)%born_emitter)
+             spectator=leg_map(integrated_history_list(ih)%born_spectator)
+             select case (integrated_history_list(ih)%topology)
+             case (2)
+                szone=abs(2d0*minkowski_dot(pgl(igroup)%ps(1)%p(:,emitter),&
+                     pgl(igroup)%ps(1)%p(:,beam)))
+                ! The real incoming momentum is p_a/z while the reduced
+                ! Born momentum p_a is held fixed by the convolution.
+                sx=szone/z
+                call cs_massive_fi_convolution(integrated_history_list(ih)%parent_mass,&
+                     sx,szone,z,alpha_dipole(2),massive_kernel,info)
+             case (3)
+                szone=abs(2d0*minkowski_dot(pgl(igroup)%ps(1)%p(:,beam),&
+                     pgl(igroup)%ps(1)%p(:,spectator)))
+                sx=szone/z
+                call cs_massive_if_convolution(pa,pb,&
+                     integrated_history_list(ih)%spectator_mass,sx,szone,z,&
+                     mu_fac*mu_fac/sx,mu_fac*mu_fac/szone,alpha_dipole(3),&
+                     5,massive_kernel,info)
+                if (info.eq.0) then
+                   call cs_ap_distribution(pa,pb,z,5,pk,info)
+                   ! The auxiliary U(1) parent already carries one 1/Nc
+                   ! through the local g->q qbar splitting trace.  Relative
+                   ! to the matched physical-gluon Born contribution, the
+                   ! initial-state convolution therefore needs only the
+                   ! remaining 1/Nc factor.
+                   if (info.eq.0 .and. fp.eq.99) &
+                        call cs_scale_distribution(pk,cs_u1_initial_factor)
+                endif
+                if (info.eq.0) then
+                   regularised_p=pk%regular*gz+pk%plus_one*(gz-g1)/(1d0-z)
+                   p_delta=pk%delta*g1
+                   massive_if_history=.true.
+                endif
+             case default
+                info=-20
+             end select
+             if (info.ne.0) then
+                write(*,*) 'ERROR: massive integrated convolution failed'
+                write(*,*) ' history/topology/fi/fj/fp/z/status:',ih,&
+                     integrated_history_list(ih)%topology,fi,fj,fp,z,info
+                stop 1
+             endif
+             regularised_k=cs_apply_convolution(massive_kernel,gz,g1)
+             if (fp.eq.99) regularised_k=regularised_k*cs_u1_initial_factor
+             if (.not.massive_if_history) regularised_p=0d0
+          elseif (integrated_history_list(ih)%topology.eq.2) then
              ! Final--initial histories have no universal P/Kbar term.  Their
              ! complete finite distribution, including the alpha=1 baseline,
              ! is a convolution on the initial spectator beam.
@@ -609,7 +780,7 @@ contains
              fp=integrated_history_list(ih)%born_flavours(&
                   integrated_history_list(ih)%born_emitter)
              kernel_factor=1d0
-             if (fp.eq.99) kernel_factor=1d0/(cs_ca*cs_ca)
+             if (fp.eq.99) kernel_factor=cs_u1_initial_factor
              call cs_scale_distribution(pk,kernel_factor)
              call cs_scale_distribution(kk,kernel_factor)
              regularised_p=pk%regular*gz+pk%plus_one*(gz-g1)/(1d0-z)
@@ -626,6 +797,14 @@ contains
           if (sij.gt.tiny(1d0)) then
              colour_log=log(mu_fac*mu_fac/(z*sij))
              colour_log_endpoint=log(mu_fac*mu_fac/sij)
+          endif
+          if (massive_if_history) then
+             ! finiteif returns the complete mass-factorised convolution.
+             ! Expose the same universal P contribution as the massless
+             ! path and leave the compensating remainder in K, without
+             ! changing their sum.
+             regularised_k=regularised_k+colour_log*regularised_p+&
+                  colour_log_endpoint*p_delta
           endif
           history_weight=pgl(integrated_history_list(ih)%real_group)%dpl(&
                integrated_history_list(ih)%real_process)%dl(&
@@ -686,6 +865,17 @@ contains
        kind=0
     endif
   end subroutine parton_kind
+
+  pure logical function history_has_mass(history)
+    type(integrated_history), intent(in) :: history
+    real(kind=8) :: tolerance
+    tolerance=100d0*epsilon(1d0)*max(1d0,history%emitter_mass,&
+         history%unresolved_mass,history%parent_mass,history%spectator_mass)
+    history_has_mass=history%emitter_mass.gt.tolerance .or. &
+         history%unresolved_mass.gt.tolerance .or. &
+         history%parent_mass.gt.tolerance .or. &
+         history%spectator_mass.gt.tolerance
+  end function history_has_mass
 
   pure real(kind=8) function minkowski_dot(a,b)
     real(kind=8), intent(in) :: a(0:3),b(0:3)

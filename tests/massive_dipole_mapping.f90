@@ -4,7 +4,7 @@ program massive_dipole_mapping
 
   real(dp) :: p(0:3,5), pt(0:3,4), masses(5), mp
   integer :: info
-  real(dp) :: cut_variable,expected_cut
+  real(dp) :: cut_variable,expected_cut,raw_y,q2,mui2,muk,muk2,yplus
 
   p = 0.0_dp
   p(:,1) = [500.0_dp, 0.0_dp, 0.0_dp, 500.0_dp]
@@ -36,6 +36,15 @@ program massive_dipole_mapping
 
   call cs_dipole_cut_variable(p,[3,4,5],masses,mp,cut_variable,info)
   call check_cut(info,cut_variable,'FF')
+  raw_y=dot4(p(:,3),p(:,4))/(dot4(p(:,3),p(:,4))+&
+       dot4(p(:,3),p(:,5))+dot4(p(:,4),p(:,5)))
+  q2=mp*mp+masses(5)*masses(5)+2.0_dp*&
+       (dot4(p(:,3),p(:,4))+dot4(p(:,3),p(:,5))+dot4(p(:,4),p(:,5)))
+  mui2=mp*mp/q2
+  muk2=masses(5)*masses(5)/q2
+  muk=sqrt(muk2)
+  yplus=1.0_dp-2.0_dp*muk*(1.0_dp-muk)/(1.0_dp-mui2-muk2)
+  call check_close(cut_variable,raw_y/yplus,'FF uses y/yplus')
   call cs_dipole_cut_variable(p,[3,4,1],masses,mp,cut_variable,info)
   call check_cut(info,cut_variable,'FI')
   call cs_dipole_cut_variable(p,[1,4,5],masses,0.0_dp,cut_variable,info)

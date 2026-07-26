@@ -18,6 +18,17 @@ module cs_integrated_kernels
   real(dp), parameter, public :: cs_pi = 3.1415926535897932384626433832795_dp
   real(dp), parameter, public :: cs_ca = 3.0_dp
   real(dp), parameter, public :: cs_cf_lc = cs_ca/2.0_dp
+  ! For a real incoming quark reducing to a gluon Born leg, the local
+  ! g->q qbar kernel contains 2*T_R and an ordered-history weight of 1/2.
+  ! Changing the incoming average from the real quark to the reduced Born
+  ! gluon supplies (N_c^2-1)/N_c=8/3.  The history weight is applied by
+  ! integrated_beam, leaving the physical C_F=4/3 after both factors.
+  real(dp), parameter, public :: cs_cf_initial_qg = &
+       (cs_ca*cs_ca-1.0_dp)/cs_ca
+  ! A q(real)->U(1)(Born) history has the same initial-state average as the
+  ! physical-gluon parent, while its local splitting trace is smaller by
+  ! one power of N_c.
+  real(dp), parameter, public :: cs_u1_initial_factor = 1.0_dp/cs_ca
   real(dp), parameter, public :: cs_tr = 0.5_dp
   ! The local crossed q <- g kernel is normalized with C_F^LC, while the
   ! real and reduced-Born matrix elements carry, respectively, gluon and
@@ -134,7 +145,7 @@ contains
     endif
 
     if (a == cs_parton_q .and. b == cs_parton_g) then
-       kernel%regular=cs_cf_lc*(1.0_dp+(1.0_dp-x)**2)/x
+       kernel%regular=cs_cf_initial_qg*(1.0_dp+(1.0_dp-x)**2)/x
     else if (a == cs_parton_g .and. b == cs_parton_q) then
        kernel%regular=cs_tr_initial_lc*(x*x+(1.0_dp-x)**2)
     else if (a == cs_parton_q .and. b == cs_parton_q) then
@@ -172,7 +183,7 @@ contains
     if (a == cs_parton_q .and. b == cs_parton_g) then
        call cs_ap_distribution(a,b,x,nf,ap,info)
        if (info /= 0) return
-       kernel%regular=ap%regular*logarithm+cs_cf_lc*x
+       kernel%regular=ap%regular*logarithm+cs_cf_initial_qg*x
     else if (a == cs_parton_g .and. b == cs_parton_q) then
        call cs_ap_distribution(a,b,x,nf,ap,info)
        if (info /= 0) return

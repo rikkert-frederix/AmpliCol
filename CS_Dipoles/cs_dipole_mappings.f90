@@ -53,7 +53,8 @@ contains
     real(dp), intent(out) :: cut_variable
     integer, intent(out) :: info
     integer :: n, i, j, k
-    real(dp) :: den, x, mi2, mj2, parent2
+    real(dp) :: den, x, mi2, mj2, mk2, parent2
+    real(dp) :: q2, mui2, muk, muk2, yplus
 
     cut_variable=0.0_dp
     info=0
@@ -84,6 +85,7 @@ contains
 
     mi2=mass_real(i)*mass_real(i)
     mj2=mass_real(j)*mass_real(j)
+    mk2=mass_real(k)*mass_real(k)
     parent2=mass_parent*mass_parent
     if (i > 2 .and. k > 2) then
        den=dot4(p(:,i),p(:,j))+dot4(p(:,i),p(:,k))+dot4(p(:,j),p(:,k))
@@ -92,6 +94,31 @@ contains
           return
        endif
        cut_variable=dot4(p(:,i),p(:,j))/den
+       if (parent2 > 0.0_dp .or. mk2 > 0.0_dp) then
+          ! For a massive FF dipole alpha is defined relative to the
+          ! kinematic endpoint: y_ij,k < alpha*y_+.  This keeps alpha=1 as
+          ! the unrestricted case and matches the massive integrated
+          ! finite terms.
+          q2=parent2+mk2+2.0_dp*den
+          if (q2 <= tiny_kin) then
+             info=-14
+             return
+          endif
+          mui2=parent2/q2
+          muk2=mk2/q2
+          muk=sqrt(muk2)
+          if (1.0_dp-mui2-muk2 <= tiny_kin) then
+             info=-14
+             return
+          endif
+          yplus=1.0_dp-2.0_dp*muk*(1.0_dp-muk)/&
+               (1.0_dp-mui2-muk2)
+          if (yplus <= tiny_kin) then
+             info=-14
+             return
+          endif
+          cut_variable=cut_variable/yplus
+       endif
     elseif (i > 2) then
        den=dot4(p(:,k),p(:,i))+dot4(p(:,k),p(:,j))
        if (abs(den) <= tiny_kin) then

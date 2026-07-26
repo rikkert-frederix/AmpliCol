@@ -71,6 +71,15 @@ program integrated_kernels_test
   call assert_close(k%regular,p%regular*log((1d0-x)/x)+&
        2d0*cs_tr_initial_lc*x*(1d0-x),'K g<-q LC initial-average normalization')
 
+  call cs_ap_distribution(cs_parton_q,cs_parton_g,x,5,p,info)
+  call assert_true(info.eq.0,'P q<-g status')
+  call assert_close(p%regular,cs_cf_initial_qg*(1d0+(1d0-x)**2)/x,&
+       'P q(real)->g(Born) initial-average normalization')
+  call assert_close(0.5d0*cs_cf_initial_qg,4d0/3d0,&
+       'ordered q(real)->g(Born) history includes its one-half colour weight')
+  call assert_close(0.5d0*cs_cf_initial_qg*cs_u1_initial_factor,4d0/9d0,&
+       'ordered q(real)->U(1)(Born) history includes one U(1) trace factor')
+
   call cs_if_alpha_distribution(cs_parton_q,cs_parton_q,x,alpha,ka,info)
   call cs_ap_distribution(cs_parton_q,cs_parton_q,x,5,p,info)
   call assert_true(info.eq.0,'IF alpha qq status')

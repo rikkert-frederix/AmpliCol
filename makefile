@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements test_integrated_kernels test_massive_dipole_kernel \
+.PHONY: test_matrix_elements test_integrated_kernels test_massive_integrated_kernels \
+	test_massive_dipole_mapping test_massive_dipole_kernel \
 	test_simple_integrator_mixed_dims test_simple_integrator_uncertainty_sampling \
 	test_histograms_cli test_integration_histograms test_integration_histograms_physics \
 	update_matrix_cases update_matrix_goldens
@@ -124,6 +125,7 @@ read_process_file.o multichannel.o handling_processes.o 	\
 simple_integrator.o helper_modules.o amplitude_library.o command_line_parser.o \
 mg_checks.o scales.o pdf_lhapdf62.o phase_space_module.o cs_dipole_mappings.o \
 cs_lc_dipoles.o cs_integrated_kernels.o subtraction.o integrated_dipoles.o
+FILES_M_INT_QCD += cs_massive_integrated_kernels.o
 FILES_M_INT_QCD += integration_histograms.o integration_analysis.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
@@ -136,6 +138,18 @@ test_integrated_kernels: cs_dipole_mappings.o cs_integrated_kernels.o
 	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/integrated_kernels.exe \
 		tests/integrated_kernels.f90 cs_integrated_kernels.o cs_dipole_mappings.o
 	./tests/integrated_kernels.exe
+
+test_massive_integrated_kernels: cs_dipole_mappings.o cs_integrated_kernels.o \
+	cs_massive_integrated_kernels.o
+	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/massive_integrated_kernels.exe \
+		tests/massive_integrated_kernels.f90 cs_massive_integrated_kernels.o \
+		cs_integrated_kernels.o cs_dipole_mappings.o
+	./tests/massive_integrated_kernels.exe
+
+test_massive_dipole_mapping: cs_dipole_mappings.o
+	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/massive_dipole_mapping.exe \
+		tests/massive_dipole_mapping.f90 cs_dipole_mappings.o
+	./tests/massive_dipole_mapping.exe
 
 test_massive_dipole_kernel: cs_dipole_mappings.o cs_lc_dipoles.o
 	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/massive_dipole_kernel.exe \
@@ -233,7 +247,9 @@ subtraction.o : particles.o handling_processes.o amplitude_QCD.o cuts.o phase_sp
 	cs_dipole_mappings.o cs_lc_dipoles.o feynmanrules.o
 cs_lc_dipoles.o : cs_dipole_mappings.o
 cs_integrated_kernels.o : cs_dipole_mappings.o
-integrated_dipoles.o : handling_processes.o cs_dipole_mappings.o cs_integrated_kernels.o pdf_wrap.o
+cs_massive_integrated_kernels.o : cs_dipole_mappings.o cs_integrated_kernels.o
+integrated_dipoles.o : handling_processes.o cs_dipole_mappings.o cs_integrated_kernels.o \
+	cs_massive_integrated_kernels.o pdf_wrap.o
 
 # ----------------------------------------------------------------------
 # 7. Cleanup

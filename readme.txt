@@ -134,15 +134,27 @@ included. Integrated histories are constructed exclusively from the local
 dipoles and are checked against the supplied Born processes and leading-colour
 orders. The supported dimensional schemes are HV (default) and FDH, selected
 with '--dim-reg=hv' or '--dim-reg=fdh'.
-The integrated kernels currently support massless QCD emitters, unresolved
-partons, and spectators only; a combined run stops during initialisation if a
-massive integrated history is encountered. Identical-flavour copies are
-expanded explicitly, and reduced histories are canonicalised onto the supplied
-Born leg and colour-order conventions before duplicate insertions are removed.
-At initialisation, the physical-parent histories are checked to reconstruct
-the universal quark and gluon poles for every light-flavour sector present in
-the supplied real-process file.
-Its real-emission measurement clusters massless QCD partons with inclusive
+The integrated kernels require a massless unresolved parton. In addition to
+the fully massless dipoles, they support a massive final-state quark emitter
+for Q -> Qg in FF and FI topologies, a massive final-state spectator in FF and
+IF topologies, and an FF dipole in which both the quark emitter and spectator
+are massive. Massive unresolved partons and massive initial-state legs are not
+supported; a combined run stops during initialisation if such a history is
+encountered. The massive finite terms include the topology-specific alpha
+restriction and HV/FDH scheme terms. The current executable sets the
+renormalisation and factorisation scales equal.
+Identical-flavour copies are expanded explicitly, and reduced histories are
+canonicalised onto the supplied Born leg and colour-order conventions before
+duplicate insertions are removed. At initialisation, purely massless
+physical-parent histories are checked to reconstruct the universal quark and
+gluon poles for every light-flavour sector present in the supplied
+real-process file.
+Initial-state flavour-changing kernels are normalised to the spin- and
+colour-averaged reduced Born contribution. In particular, a real incoming
+quark that reduces to a gluon includes the quark/gluon averaging ratio before
+the ordered-history colour weight is applied; auxiliary U(1)-parent beam
+convolutions carry one additional factor 1/Nc.
+ Its real-emission measurement clusters massless QCD partons with inclusive
 kT and radius `DRjj_min`, requiring at least one fewer accepted jets than the
 number of real final-state jet legs. Each mapped dipole is cut independently
 at parton level: every reduced final-state jet must pass `pTj_min`, `etaj_max`,
