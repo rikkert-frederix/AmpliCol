@@ -13,48 +13,24 @@
 # For more information, visit madgraph.phys.ucl.ac.be and amcatnlo.web.cern.ch
 #
 ################################################################################
-"""Module for the handling of histograms, including Monte-Carlo error per bin
-and scale/PDF uncertainties."""
+"""Standalone command-line converter for MadGraph ``.HwU`` histograms."""
 
-from __future__ import division
-
-from __future__ import absolute_import
-from __future__ import print_function
-import array
 import copy
-import fractions
-import itertools
+import io
 import logging
 import math
 import os
 import re
-import sys
-
 import subprocess
+import sys
 import xml.dom.minidom as minidom
-from xml.parsers.expat import ExpatError as XMLParsingError
-import six
-StringIO = six
-from six.moves import range
-from six.moves import zip
-import io
-if six.PY3:
-    file = io.IOBase
 
-root_path = os.path.split(os.path.dirname(os.path.realpath( __file__ )))[0]
-sys.path.append(os.path.join(root_path)) 
-sys.path.append(os.path.join(root_path,os.pardir))
-try:
-    # import from madgraph directory
-    import madgraph.various.misc as misc
-    from madgraph import MadGraph5Error
-    logger = logging.getLogger("madgraph.various.histograms")
+file = io.IOBase
+logger = logging.getLogger("histograms")
 
-except ImportError as error:
-    # import from madevent directory
-    import internal.misc as misc    
-    from internal import MadGraph5Error
-    logger = logging.getLogger("internal.histograms")
+
+class MadGraph5Error(Exception):
+    """Fatal error while parsing or converting histogram data."""
 
 # I copy the Physics object list here so as not to add a whole dependency to
 # base_objects which is annoying when using this histograms module from the
@@ -633,34 +609,34 @@ class HwU(Histogram):
     # than necessary because the HwU standard allows for spaces from within
     # the name of a weight
     weight_header_re = re.compile(
-                       '&\s*(?P<wgt_name>(\S|(\s(?!\s*(&|$))))+)(\s(?!(&|$)))*')
+                       r'&\s*(?P<wgt_name>(\S|(\s(?!\s*(&|$))))+)(\s(?!(&|$)))*')
     
     # ================================
     #  Histo weight specification RE's
     # ================================
     # The start of a plot
-    histo_start_re = re.compile('^\s*<histogram>\s*(?P<n_bins>\d+)\s*"\s*'+
-                                   '(?P<histo_name>(\S|(\s(?!\s*")))+)\s*"\s*$')
+    histo_start_re = re.compile(r'^\s*<histogram>\s*(?P<n_bins>\d+)\s*"\s*'+
+                                   r'(?P<histo_name>(\S|(\s(?!\s*")))+)\s*"\s*$')
     # A given weight specifier
-    a_float_re = '[\+|-]?\d+(\.\d*)?([EeDd][\+|-]?\d+)?'
+    a_float_re = r'[\+|-]?\d+(\.\d*)?([EeDd][\+|-]?\d+)?'
     histo_bin_weight_re = re.compile('(?P<weight>%s|NaN)'%a_float_re,re.IGNORECASE)
-    a_int_re = '[\+|-]?\d+'
+    a_int_re = r'[\+|-]?\d+'
     
     # The end of a plot
     histo_end_re = re.compile(r'^\s*<\\histogram>\s*$')
     # A scale type of weight
-    weight_label_scale = re.compile('^\s*mur\s*=\s*(?P<mur_fact>%s)'%a_float_re+\
-                   '\s*muf\s*=\s*(?P<muf_fact>%s)\s*$'%a_float_re,re.IGNORECASE)
-    weight_label_PDF = re.compile('^\s*PDF\s*=\s*(?P<PDF_set>\d+)\s*$')
-    weight_label_PDF_XML = re.compile('^\s*pdfset\s*=\s*(?P<PDF_set>\d+)\s*$')
-    weight_label_TMS = re.compile('^\s*TMS\s*=\s*(?P<Merging_scale>%s)\s*$'%a_float_re)
-    weight_label_alpsfact = re.compile('^\s*alpsfact\s*=\s*(?P<alpsfact>%s)\s*$'%a_float_re,
+    weight_label_scale = re.compile(r'^\s*mur\s*=\s*(?P<mur_fact>%s)'%a_float_re+\
+                   r'\s*muf\s*=\s*(?P<muf_fact>%s)\s*$'%a_float_re,re.IGNORECASE)
+    weight_label_PDF = re.compile(r'^\s*PDF\s*=\s*(?P<PDF_set>\d+)\s*$')
+    weight_label_PDF_XML = re.compile(r'^\s*pdfset\s*=\s*(?P<PDF_set>\d+)\s*$')
+    weight_label_TMS = re.compile(r'^\s*TMS\s*=\s*(?P<Merging_scale>%s)\s*$'%a_float_re)
+    weight_label_alpsfact = re.compile(r'^\s*alpsfact\s*=\s*(?P<alpsfact>%s)\s*$'%a_float_re,
                                                                   re.IGNORECASE)
 
-    weight_label_scale_adv = re.compile('^\s*dyn\s*=\s*(?P<dyn_choice>%s)'%a_int_re+\
-                                        '\s*mur\s*=\s*(?P<mur_fact>%s)'%a_float_re+\
-                                        '\s*muf\s*=\s*(?P<muf_fact>%s)\s*$'%a_float_re,re.IGNORECASE)
-    weight_label_PDF_adv = re.compile('^\s*PDF\s*=\s*(?P<PDF_set>\d+)\s+(?P<PDF_set_cen>\S+)\s*$')
+    weight_label_scale_adv = re.compile(r'^\s*dyn\s*=\s*(?P<dyn_choice>%s)'%a_int_re+\
+                                        r'\s*mur\s*=\s*(?P<mur_fact>%s)'%a_float_re+\
+                                        r'\s*muf\s*=\s*(?P<muf_fact>%s)\s*$'%a_float_re,re.IGNORECASE)
+    weight_label_PDF_adv = re.compile(r'^\s*PDF\s*=\s*(?P<PDF_set>\d+)\s+(?P<PDF_set_cen>\S+)\s*$')
     
     
     class ParseError(MadGraph5Error):
@@ -927,7 +903,7 @@ class HwU(Histogram):
                 res.append(' '.join('%+16.7e'%wgt for wgt in list(bin.boundaries)))
             res[-1] += ' '.join('%+16.7e'%bin.wgts[key] for key in 
                 self.bins.weight_labels if key not in ['central','stat_error'])
-        res.append('<\histogram>')
+        res.append(r'<\histogram>')
         return res
     
     def output(self, path=None, format='HwU', print_header=True):
@@ -1656,8 +1632,8 @@ class HwUList(histograms_PhysicsObjectList):
 
         return isinstance(obj, HwU) or isinstance(obj, HwUList)
 
-    def __init__(self, file_path, weight_header=None, run_id=None,
-            merging_scale=None, accepted_types_order=[], consider_reweights='ALL',
+    def __init__(self, file_path, weight_header=None, merging_scale=None,
+            accepted_types_order=[], consider_reweights='ALL',
                                                          raw_labels=False, **opts):
         """ Read one plot from a file_path or a stream. 
         This constructor reads all plots specified in target file.
@@ -1669,9 +1645,8 @@ class HwUList(histograms_PhysicsObjectList):
         title. The option 'consider_reweights' selects whether one wants to 
         include all the extra scale/pdf/merging variation weights. Possible values
         are 'ALL' or a list of the return types of the function get_HwU_wgt_label_type().
-        The option 'raw_labels' specifies that one wants to import the
-        histogram data with no treatment of the weight labels at all
-        (this is used for the matplotlib output).
+        The option 'raw_labels' imports histogram data without transforming
+        the weight labels.
         """
         
         if isinstance(file_path, str):
@@ -1681,42 +1656,30 @@ class HwUList(histograms_PhysicsObjectList):
         else:
             return super(HwUList,self).__init__(file_path, **opts)
 
-        try:
-            # Try to read it in XML format
-            self.parse_histos_from_PY8_XML_stream(stream, run_id, 
-                    merging_scale, accepted_types_order,
-                    consider_reweights=consider_reweights,
-                    raw_labels=raw_labels)  
-        except XMLParsingError:
-            # Rewinding the stream
-            stream.seek(0)
-            # Attempt to find the weight headers if not specified        
-            if not weight_header:
-                weight_header = HwU.parse_weight_header(stream,raw_labels=raw_labels)
-        
-            # Select a specific merging scale if asked for:
-            selected_label = None
-            if not merging_scale is None: 
-                for label in weight_header:
-                    if HwU.get_HwU_wgt_label_type(label)=='merging_scale':
-                        if float(label[1])==merging_scale:
-                            selected_label = label
-                            break
-                if selected_label is None:
-                    raise MadGraph5Error("No weight could be found in the input HwU "+\
-                      "for the selected merging scale '%4.2f'."%merging_scale)
+        if not weight_header:
+            weight_header = HwU.parse_weight_header(stream,raw_labels=raw_labels)
 
-            new_histo = HwU(stream, weight_header,raw_labels=raw_labels,
+        # Select a specific merging-scale weight as the central result.
+        selected_label = None
+        if merging_scale is not None:
+            for label in weight_header:
+                if HwU.get_HwU_wgt_label_type(label)=='merging_scale' and \
+                        float(label[1])==merging_scale:
+                    selected_label = label
+                    break
+            if selected_label is None:
+                raise MadGraph5Error("No weight could be found in the input HwU "+
+                  "for the selected merging scale '%4.2f'."%merging_scale)
+
+        new_histo = HwU(stream, weight_header,raw_labels=raw_labels,
+                        consider_reweights=consider_reweights,
+                        selected_central_weight=selected_label)
+        while new_histo.bins is not None:
+            if accepted_types_order==[] or new_histo.type in accepted_types_order:
+                self.append(new_histo)
+            new_histo = HwU(stream, weight_header, raw_labels=raw_labels,
                             consider_reweights=consider_reweights,
                             selected_central_weight=selected_label)
-#            new_histo.select_central_weight(selected_label)           
-            while not new_histo.bins is None:
-                if accepted_types_order==[] or \
-                                         new_histo.type in accepted_types_order:
-                    self.append(new_histo)
-                new_histo = HwU(stream, weight_header, raw_labels=raw_labels,
-                                consider_reweights=consider_reweights,
-                                selected_central_weight=selected_label)
                 
         #    if not run_id is None:
         #        logger.debug("The run_id '%s' was specified, but "%run_id+
@@ -1808,7 +1771,7 @@ class HwUList(histograms_PhysicsObjectList):
             # Filter empty weights coming from the split
             weight_label_list = [wgt.strip() for wgt in 
                 str(selected_run_node.getAttribute('header')).split(';') if
-                                                      not re.match('^\s*$',wgt)]
+                                                      not re.match(r'^\s*$',wgt)]
             ordered_weight_label_list = [w for w in weight_label_list if w not\
                                                              in ['xmin','xmax']]
             # Remove potential repetition of identical weight labels
@@ -1832,7 +1795,7 @@ class HwUList(histograms_PhysicsObjectList):
         all_weights = []
         for wgt_position, wgt_label in \
             enumerate(str(selected_run_node.getAttribute('header')).split(';')):
-            if not re.match('^\s*$',wgt_label) is None:
+            if not re.match(r'^\s*$',wgt_label) is None:
                 continue
             all_weights.append({'POSITION':wgt_position})
             for wgt_item in wgt_label.strip().split('_'):
@@ -2867,9 +2830,9 @@ plot \\"""
                 major_title=histo.type
             
             if not mu[0] in ['none',None]:
-                major_title += ', dynamical\_scale\_choice=%s'%mu[0]
+                major_title += r', dynamical\_scale\_choice=%s'%mu[0]
             if not pdf[0] in ['none',None]:
-                major_title += ', PDF=%s'%pdf[0].replace('_','\_')
+                major_title += ', PDF=%s'%pdf[0].replace('_',r'\_')
 
             # Do not show uncertainties for individual jet samples (unless first
             # or specified explicitely and uniquely)
@@ -2942,7 +2905,7 @@ plot \\"""
                         plot_lines.append(
 "'%s' index %d using (($1+$2)/2):%d ls %d title '%s'"\
 %(HwU_name,block_position+i,mu_var+3,color_index,\
-'%s dynamical\_scale\_choice=%s' % (title,mu[j])))
+                            r'%s dynamical\_scale\_choice=%s' % (title,mu[j])))
             # And now PDF_variation if available
             if not PDF_var_pos is None:
                 for j,PDF_var in enumerate(PDF_var_pos):
@@ -2952,7 +2915,7 @@ plot \\"""
                         plot_lines.append(
 "'%s' index %d using (($1+$2)/2):%d ls %d title '%s'"\
 %(HwU_name,block_position+i,PDF_var+3,color_index,\
-'%s PDF=%s' % (title,pdf[j].replace('_','\_'))))
+                          '%s PDF=%s' % (title,pdf[j].replace('_',r'\_'))))
 
         # Now add the uncertainty lines, those not using a band so that they
         # are not covered by those using a band after we reverse plo_lines
@@ -3465,16 +3428,8 @@ if __name__ == "__main__":
         The types can be: pdf, scale, stat, merging or alpsfact
         For the last two options one can use ...=all to automatically select all types.
         
-        When parsing an XML-formatted plot source output by the Pythia8 driver, the file names can be appended 
-        options as suffixes separated by '|', as follows:
-           python histograms.py <XML_source_file_name>@<option1>@<option2>@etc..
-        These options can be
-           'run_id=<integer>'      Specifies the run_ID from which the plots should be loaded.
-                                   By default, the first run is considered and the ones that follow are ignored.
-           'merging_scale=<float>' This option allows to specify to import only the plots corresponding to a specific 
-                                   value for the merging scale.
-                                   A value of -1 means that only the weights with the same merging scale as the central weight are kept.
-                                   By default, all weights are considered.
+        An input file may be suffixed with '@merging_scale=<float>' to select
+        that merging-scale weight as the central result.
     """
 
     possible_options=['--help', '--gnuplot', '--HwU', '--types','--n_ratios',\
@@ -3616,18 +3571,16 @@ if __name__ == "__main__":
         log("Loading histograms from '%s'."%arg)
         if OutName=="":
             OutName = os.path.basename(arg).split('.')[0]+'_output'
-        # Make sure to process the potential XML options appended to the filename
+        # Process the optional merging-scale selector appended to the filename.
         file_specification = arg.split('@')
         filename = file_specification.pop(0)
         file_options = {}
         for option in file_specification:
             opt, value = option.split('=')
-            if opt=='run_id':
-                file_options[opt]=int(value)
             if opt=='merging_scale':
                 file_options[opt]=float(value)
             else:
-                log("Unreckognize file option '%s'."%option)
+                log("Unrecognized file option '%s'."%option)
                 sys.exit(1)
         new_histo_list = HwUList(filename, accepted_types_order=accepted_types,
                           consider_reweights=consider_reweights, **file_options)

@@ -2,6 +2,7 @@
 
 .PHONY: test_matrix_elements test_integrated_kernels test_massive_dipole_kernel \
 	test_simple_integrator_mixed_dims test_simple_integrator_uncertainty_sampling \
+	test_histograms_cli \
 	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
@@ -146,6 +147,9 @@ test_simple_integrator_uncertainty_sampling: simple_integrator.o helper_modules.
 	$(FC) $(FFLAGS) -I. -o tests/simple_integrator_uncertainty_sampling.exe \
 		tests/simple_integrator_uncertainty_sampling.f90 simple_integrator.o helper_modules.o ranmar.o
 	./tests/simple_integrator_uncertainty_sampling.exe
+
+test_histograms_cli:
+	python3 tests/histograms_cli.py
 
 # ----------------------------------------------------------------------
 # 5. Build executables
