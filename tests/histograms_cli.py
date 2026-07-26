@@ -2,6 +2,7 @@
 """Regression checks for the standalone HwU histogram converter."""
 
 import subprocess
+import shutil
 import sys
 import tempfile
 import unittest
@@ -66,7 +67,22 @@ class HistogramCliTest(unittest.TestCase):
         self.assertTrue(output.with_suffix(".HwU").is_file())
         self.assertTrue(output.with_suffix(".gnuplot").is_file())
         self.assertIn("Transverse momentum", output.with_suffix(".HwU").read_text())
-        self.assertIn('set output "converted.ps"', output.with_suffix(".gnuplot").read_text())
+        gnuplot = output.with_suffix(".gnuplot").read_text()
+        self.assertIn('set output "converted.ps"', gnuplot)
+        self.assertIn("unset pointintervalbox", gnuplot)
+        errorbar_lines = [line for line in gnuplot.splitlines() if "w yerrorbar" in line]
+        self.assertTrue(errorbar_lines)
+        self.assertTrue(all("pt ''" in line for line in errorbar_lines))
+        if shutil.which("gnuplot"):
+            subprocess.run(
+                ["gnuplot", output.with_suffix(".gnuplot").name],
+                cwd=self.workdir,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            self.assertGreater(output.with_suffix(".ps").stat().st_size, 0)
 
     def test_raw_hwu_round_trip(self):
         output = self.workdir / "roundtrip"
