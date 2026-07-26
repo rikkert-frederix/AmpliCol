@@ -20,6 +20,9 @@ program amplicol_generate
   use subtraction
   use cs_lc_spin_dipoles, only: dipole_status_is_numerical
   use integrated_dipoles
+  use integration_histograms, only: histogram_initialize,histogram_begin_point,&
+       histogram_commit_point,histogram_finalize_iteration,histogram_write
+  use integration_analysis, only: analysis_begin,analysis_fill,analysis_distinguishes_massless_qcd_flavours
   implicit none
   integer :: iproc
   real(kind=8) :: weight
@@ -40,7 +43,7 @@ program amplicol_generate
   real(kind=8),dimension(:,:),allocatable :: limit_base
   real(kind=8),dimension(1) :: f,f_abs
   real(kind=8),dimension(7,1) :: f_aux
-  logical :: done
+  logical :: done,iteration_finished,histogram_active
   real(kind=8),dimension(:,:),allocatable :: wgts
   character(len=8) :: date
   character(len=10) :: time
@@ -267,6 +270,12 @@ program amplicol_generate
      call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
           integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),naux=7)
   endif
+  histogram_active=accuracy.gt.0d0 .and. .not.limit_test .and. .not.read_momenta
+  if (histogram_active) then
+     filename='Outputs/'//trim(adjustl(tag))//'histograms.HwU'
+     call histogram_initialize(nintegrals,has_real_process,filename)
+     call analysis_begin()
+  endif
   if (timing_mode.eq.timing_detailed) then
      call cpu_time(tAfter)
      t_Int_init=t_Int_init+tAfter-tBefore
@@ -343,10 +352,14 @@ program amplicol_generate
         endif
      endif
      
+     if (histogram_active) call histogram_begin_point(ichan,iint)
      call integrand(ichan,iint,simple_integrator%x(:,1),simple_integrator%wgt(1),&
           f(1),f_abs(1),f_aux(:,1))
+     if (histogram_active) call histogram_commit_point()
      if (time_detail_point) call cpu_time(tSampleBefore)
-     call simple_integrator%fill_points(1,f_abs,f,to_write,done,f_aux=f_aux)
+     call simple_integrator%fill_points(1,f_abs,f,to_write,done,f_aux=f_aux,&
+          iteration_finished=iteration_finished)
+     if (histogram_active .and. iteration_finished) call histogram_finalize_iteration()
      if (time_detail_point) then
         call cpu_time(tSampleAfter)
         t_Int_fill=t_Int_fill+(tSampleAfter-tSampleBefore)*dble(timing_sample)
@@ -377,6 +390,7 @@ program amplicol_generate
      endif
      if (done) exit
   enddo
+  if (histogram_active) call histogram_write()
   if (timing_enabled) then
      call cpu_time(tLoopAfter)
      t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
@@ -541,10 +555,13 @@ contains
     real(kind=8),intent(out) :: f_components(7)
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc,eval_iint,integration_role,icopy
+    integer :: ih,iproc,eval_iint,integration_role,icopy,idip
     integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z
+    real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z,real_hist_factor
+    real(kind=8),allocatable :: dipole_values(:),real_hist_weights(:)
+    real(kind=8),allocatable :: icoeff_copy(:,:),pterm_copy(:),kterm_copy(:)
+    integer :: mapped_process(pgl(ichan)%next-1)
     real(kind=8) :: unresolved_invariant,resolution_tolerance
     real(kind=8),allocatable :: hard_copy(:)
     logical :: done,time_physics,real_pass
@@ -655,7 +672,8 @@ contains
     if (pgl(ichan)%is_subtracted_real) real_pass=pass_real_subtracted_cuts(pgl(ichan),eval_iint)
     amp2_integrand=pgl(ichan)%amp2(1)
     if (pgl(ichan)%is_subtracted_real) then
-       call evaluate_real_dipoles(eval_iint,ichan,amp2_dip,kernel_info,kernel_dipole)
+       allocate(dipole_values(pgl(ichan)%dpl(eval_iint)%ndip))
+       call evaluate_real_dipoles(eval_iint,ichan,amp2_dip,kernel_info,kernel_dipole,dipole_values)
        if (kernel_info.ne.0) then
           if (dipole_status_is_numerical(kernel_info)) then
              call report_subtraction_rejection('kernel',ichan,eval_iint,&
@@ -700,14 +718,26 @@ contains
     endif
 
     if (keep_processes_separate) then
-       val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(eval_iint))
-       val(1)=val(1)*colour_singlet_multichannel_weight(eval_iint)
-       allocate(hard_copy(pgl(ichan)%iden_iproc(eval_iint)))
-       hard_copy=val(1)*pgl(ichan)%idenCOandMAPfactor(&
-            1:pgl(ichan)%iden_iproc(eval_iint),eval_iint)
-       call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),eval_iint)
-       f_abs=sum(val_abs(1:1))
-       f=sum(val(1:1))
+       if (histogram_active .and. pgl(ichan)%is_subtracted_real) then
+          ! R and every local counterevent have the same phase-space,
+          ! coupling, PDF, identity, and multichannel prefactor.  Evaluate
+          ! that factor once instead of evolving the PDFs for every dipole.
+          allocate(real_hist_weights(pgl(ichan)%iden_iproc(eval_iint)))
+          call physical_matrix_weight(ichan,eval_iint,1d0,weight,&
+               colour_singlet_multichannel_weight(eval_iint),real_hist_weights)
+          real_hist_factor=sum(real_hist_weights)
+          f=amp2_integrand*real_hist_factor
+          f_abs=abs(amp2_integrand)*sum(abs(real_hist_weights))
+       else
+          val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(eval_iint))
+          val(1)=val(1)*colour_singlet_multichannel_weight(eval_iint)
+          allocate(hard_copy(pgl(ichan)%iden_iproc(eval_iint)))
+          hard_copy=val(1)*pgl(ichan)%idenCOandMAPfactor(&
+               1:pgl(ichan)%iden_iproc(eval_iint),eval_iint)
+          call include_PDF_and_identical_procs(val,val_abs,pgl(ichan),eval_iint)
+          f_abs=sum(val_abs(1:1))
+          f=sum(val(1:1))
+       endif
     else
        val(1:pgl(ichan)%nproc)=pgl(ichan)%amp2(1:pgl(ichan)%nproc)*weight/dble(pgl(ichan)%iden(1:pgl(ichan)%nproc))
        val(1:pgl(ichan)%nproc)=val(1:pgl(ichan)%nproc)*colour_singlet_multichannel_weight(1:pgl(ichan)%nproc)
@@ -717,13 +747,50 @@ contains
     endif
     if (pgl(ichan)%is_subtracted_real) then
        f_components(2)=f
+       if (histogram_active) then
+          if (real_pass) then
+             if (analysis_distinguishes_massless_qcd_flavours) then
+                do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
+                   call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                        pgl(ichan)%iden_processes(:,icopy,eval_iint),&
+                        pgl(ichan)%amp2(1)*real_hist_weights(icopy),0d0)
+                enddo
+             else
+                call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                     pgl(ichan)%processes(:,eval_iint),pgl(ichan)%amp2(1)*real_hist_factor,0d0)
+             endif
+          endif
+          do idip=1,size(dipole_values)
+             if (.not.pgl(ichan)%dpl(eval_iint)%dl(idip)%active) cycle
+             if (analysis_distinguishes_massless_qcd_flavours) then
+                do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
+                   call make_identical_reduced_process(pgl(ichan)%processes(:,eval_iint),&
+                        pgl(ichan)%iden_processes(:,icopy,eval_iint),&
+                        pgl(ichan)%dpl(eval_iint)%dl(idip)%process_r,mapped_process)
+                   call analysis_fill(pgl(ichan)%next-1,pgl(ichan)%dpl(eval_iint)%dl(idip)%p_mapped,&
+                        mapped_process,-dipole_values(idip)*real_hist_weights(icopy),0d0)
+                enddo
+             else
+                call analysis_fill(pgl(ichan)%next-1,pgl(ichan)%dpl(eval_iint)%dl(idip)%p_mapped,&
+                     pgl(ichan)%dpl(eval_iint)%dl(idip)%process_r,&
+                     -dipole_values(idip)*real_hist_factor,0d0)
+             endif
+          enddo
+       endif
     elseif (has_real_process) then
        if (integration_role.eq.1) then
           f_components(1)=f
           if (keep_processes_separate) then
-             call integrated_endpoint(ichan,eval_iint,&
-                  pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(eval_iint),eval_iint),&
-                  pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff)
+             if (histogram_active .and. analysis_distinguishes_massless_qcd_flavours) then
+                allocate(icoeff_copy(-2:0,pgl(ichan)%iden_iproc(eval_iint)))
+                call integrated_endpoint(ichan,eval_iint,&
+                     pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(eval_iint),eval_iint),&
+                     pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff,icoeff_copy)
+             else
+                call integrated_endpoint(ichan,eval_iint,&
+                     pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(eval_iint),eval_iint),&
+                     pgl(ichan)%ps(1)%p,scale_ren,alphas,icoeff)
+             endif
           else
              icoeff=0d0
              do iproc=1,pgl(ichan)%nproc
@@ -733,18 +800,65 @@ contains
           f_components(3:5)=icoeff(-2:0)
           f=f+icoeff(0)
           f_abs=abs(f_components(1))+abs(icoeff(0))
+          if (histogram_active) then
+             if (analysis_distinguishes_massless_qcd_flavours) then
+                do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
+                   call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                        pgl(ichan)%iden_processes(:,icopy,eval_iint),&
+                        pgl(ichan)%val_procs(icopy,eval_iint)+icoeff_copy(0,icopy),&
+                        pgl(ichan)%val_procs(icopy,eval_iint))
+                enddo
+             else
+                call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                     pgl(ichan)%processes(:,eval_iint),f,f_components(1))
+             endif
+          endif
        else
           z=x(size(x))
           pterm=0d0
           kterm=0d0
           if (keep_processes_separate) then
-             call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
-                  pgl(ichan)%ps(1)%xbjrk,scale_fac,alphas,pterm,kterm)
+             if (histogram_active .and. analysis_distinguishes_massless_qcd_flavours) then
+                allocate(pterm_copy(size(hard_copy)),kterm_copy(size(hard_copy)))
+                call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
+                     pgl(ichan)%ps(1)%xbjrk,scale_fac,alphas,pterm,kterm,pterm_copy,kterm_copy)
+             else
+                call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
+                     pgl(ichan)%ps(1)%xbjrk,scale_fac,alphas,pterm,kterm)
+             endif
           endif
           f_components(6)=pterm
           f_components(7)=kterm
           f=pterm+kterm
           f_abs=abs(pterm)+abs(kterm)
+          if (histogram_active) then
+             if (analysis_distinguishes_massless_qcd_flavours) then
+                do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
+                   call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                        pgl(ichan)%iden_processes(:,icopy,eval_iint),&
+                        pterm_copy(icopy)+kterm_copy(icopy),0d0)
+                enddo
+             else
+                call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                     pgl(ichan)%processes(:,eval_iint),f,0d0)
+             endif
+          endif
+       endif
+    elseif (histogram_active) then
+       if (keep_processes_separate) then
+          if (analysis_distinguishes_massless_qcd_flavours) then
+             do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
+                call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                     pgl(ichan)%iden_processes(:,icopy,eval_iint),&
+                     pgl(ichan)%val_procs(icopy,eval_iint),pgl(ichan)%val_procs(icopy,eval_iint))
+             enddo
+          else
+             call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+                  pgl(ichan)%processes(:,eval_iint),f,f)
+          endif
+       else
+          call analysis_fill(pgl(ichan)%next,pgl(ichan)%ps(1)%p,&
+               pgl(ichan)%processes(:,eval_iint),f,f)
        endif
     endif
     if (allocated(hard_copy)) deallocate(hard_copy)
@@ -753,6 +867,43 @@ contains
        t_weight=t_weight+(tAfter-tBefore)*dble(timing_sample)
     endif
   end subroutine integrand
+
+  subroutine physical_matrix_weight(ichan,iint,matrix_element,common_weight,channel_weight,result)
+    integer,intent(in) :: ichan,iint
+    real(kind=8),intent(in) :: matrix_element,common_weight,channel_weight
+    real(kind=8),intent(out) :: result(:)
+    real(kind=8) :: value(1),value_abs(1)
+    value(1)=matrix_element*common_weight/dble(pgl(ichan)%iden(iint))
+    value(1)=value(1)*channel_weight
+    call include_PDF_and_identical_procs(value,value_abs,pgl(ichan),iint)
+    if (size(result).ne.pgl(ichan)%iden_iproc(iint)) then
+       write(*,*) 'ERROR: physical matrix histogram weight array has incompatible size'
+       stop 1
+    endif
+    result=pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(iint),iint)
+  end subroutine physical_matrix_weight
+
+  subroutine make_identical_reduced_process(base_real,copy_real,base_reduced,copy_reduced)
+    integer,intent(in) :: base_real(:),copy_real(:),base_reduced(:)
+    integer,intent(out) :: copy_reduced(:)
+    integer :: generic,ileg,target_flavour
+    copy_reduced=base_reduced
+    do generic=1,2
+       target_flavour=0
+       do ileg=1,size(base_real)
+          if (abs(base_real(ileg)).eq.generic) then
+             target_flavour=abs(copy_real(ileg))
+             exit
+          endif
+       enddo
+       if (target_flavour.eq.0) cycle
+       do ileg=1,size(base_reduced)
+          if (abs(base_reduced(ileg)).eq.generic) then
+             copy_reduced(ileg)=sign(target_flavour,base_reduced(ileg))
+          endif
+       enddo
+    enddo
+  end subroutine make_identical_reduced_process
 
   subroutine report_subtraction_rejection(stage,ichan,iint,idip,status,invariant,tolerance)
     character(len=*), intent(in) :: stage

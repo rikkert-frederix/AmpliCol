@@ -226,7 +226,7 @@ contains
          pgl(igroup)%iden_processes(:,icopy,iproc),pgl(igroup)%color_orders(:,iproc))
   end function history_matches_copy
 
-  subroutine integrated_endpoint(igroup,iproc,born_copy,p,mu,alpha_s,coeff)
+  subroutine integrated_endpoint(igroup,iproc,born_copy,p,mu,alpha_s,coeff,coeff_copy)
     ! Laurent coefficients of I(eps), multiplied by the corresponding
     ! PDF-weighted Born contributions.  Every entry is inherited from an
     ! actual local-dipole history.
@@ -234,13 +234,22 @@ contains
     real(kind=8), intent(in) :: born_copy(:),p(0:,:)
     real(kind=8), intent(in) :: mu,alpha_s
     real(kind=8), intent(out) :: coeff(-2:0)
+    real(kind=8), intent(out),optional :: coeff_copy(-2:,:)
     real(kind=8) :: primitive(-2:0),expanded(-2:0),sij,ell,weight
     real(kind=8) :: endpoint_alpha
+    real(kind=8) :: copy_contribution(-2:0)
     integer :: ih,icopy,fi,fj,fp,parton,info
     integer :: emitter
     logical :: shifted(size(born_copy),pgl(igroup)%next)
 
     coeff=0d0
+    if (present(coeff_copy)) then
+       if (size(coeff_copy,2).ne.size(born_copy)) then
+          write(*,*) 'ERROR: integrated endpoint copy array has incompatible size'
+          stop 1
+       endif
+       coeff_copy=0d0
+    endif
     shifted=.false.
     do icopy=1,size(born_copy)
        if (born_copy(icopy).eq.0d0) cycle
@@ -289,23 +298,28 @@ contains
              stop 1
           endif
           expanded(0)=expanded(0)+endpoint_alpha
-          coeff=coeff+born_copy(icopy)*weight*expanded*alpha_s/(2d0*cs_pi)
+          copy_contribution=born_copy(icopy)*weight*expanded*alpha_s/(2d0*cs_pi)
+          coeff=coeff+copy_contribution
+          if (present(coeff_copy)) coeff_copy(:,icopy)=coeff_copy(:,icopy)+copy_contribution
           emitter=integrated_history_list(ih)%born_emitter
           if (integrated_dimensional_scheme.eq.cs_scheme_fdh .and. &
                phys_model%get_mass(integrated_history_list(ih)%born_flavours(emitter)).eq.0d0 .and. &
                .not.shifted(icopy,emitter)) then
-             coeff(0)=coeff(0)+born_copy(icopy)*cs_fdh_endpoint_shift(parton)*&
-                  alpha_s/(2d0*cs_pi)
+             copy_contribution=0d0
+             copy_contribution(0)=born_copy(icopy)*cs_fdh_endpoint_shift(parton)*alpha_s/(2d0*cs_pi)
+             coeff=coeff+copy_contribution
+             if (present(coeff_copy)) coeff_copy(:,icopy)=coeff_copy(:,icopy)+copy_contribution
              shifted(icopy,emitter)=.true.
           endif
        enddo
     enddo
   end subroutine integrated_endpoint
 
-  subroutine integrated_beam(igroup,iproc,beam,z,hard_copy,xbj,mu_fac,alpha_s,pterm,kterm)
+  subroutine integrated_beam(igroup,iproc,beam,z,hard_copy,xbj,mu_fac,alpha_s,pterm,kterm,pterm_copy,kterm_copy)
     integer, intent(in) :: igroup,iproc,beam
     real(kind=8), intent(in) :: z,hard_copy(:),xbj(2),mu_fac,alpha_s
     real(kind=8), intent(out) :: pterm,kterm
+    real(kind=8), intent(out),optional :: pterm_copy(:),kterm_copy(:)
     type(cs_distribution) :: pk,kk,alpha_kernel
     real(kind=8) :: fa,fb,gz,g1,other_pdf,regularised_p,regularised_k
     real(kind=8) :: sij,colour_log,history_weight,primitive(-2:0)
@@ -316,6 +330,20 @@ contains
 
     pterm=0d0
     kterm=0d0
+    if (present(pterm_copy)) then
+       if (size(pterm_copy).ne.size(hard_copy)) then
+          write(*,*) 'ERROR: integrated P copy array has incompatible size'
+          stop 1
+       endif
+       pterm_copy=0d0
+    endif
+    if (present(kterm_copy)) then
+       if (size(kterm_copy).ne.size(hard_copy)) then
+          write(*,*) 'ERROR: integrated K copy array has incompatible size'
+          stop 1
+       endif
+       kterm_copy=0d0
+    endif
     if (z.le.0d0 .or. z.ge.1d0) return
     other=3-beam
     do icopy=1,size(hard_copy)
@@ -397,11 +425,17 @@ contains
                integrated_history_list(ih)%local_dipole)%lc_weight
           pterm=pterm-hard_copy(icopy)*other_pdf*history_weight*colour_log*regularised_p
           kterm=kterm+hard_copy(icopy)*other_pdf*history_weight*regularised_k
+          if (present(pterm_copy)) pterm_copy(icopy)=pterm_copy(icopy)-&
+               hard_copy(icopy)*other_pdf*history_weight*colour_log*regularised_p
+          if (present(kterm_copy)) kterm_copy(icopy)=kterm_copy(icopy)+&
+               hard_copy(icopy)*other_pdf*history_weight*regularised_k
           seen(ih)=.true.
        enddo
     enddo
     pterm=pterm*alpha_s/(2d0*cs_pi)
     kterm=kterm*alpha_s/(2d0*cs_pi)
+    if (present(pterm_copy)) pterm_copy=pterm_copy*alpha_s/(2d0*cs_pi)
+    if (present(kterm_copy)) kterm_copy=kterm_copy*alpha_s/(2d0*cs_pi)
   end subroutine integrated_beam
 
   subroutine history_i_primitive(fi,fj,fp,topology,coeff,parton)

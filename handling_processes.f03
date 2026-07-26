@@ -19,6 +19,7 @@ module handling_processes
      real(kind=8) :: lc_weight=1d0
      type(amplitude_QCD) :: amp
      real(kind=8),dimension(0:3) :: p_mapped_ij
+     real(kind=8),dimension(:,:),allocatable :: p_mapped
      logical :: active=.true.,alpha_active=.true.,passes_cuts=.true.
      integer,dimension(:),allocatable :: rho_lookup_ih1,rho_lookup_ih2
      logical :: rho_lookup_upper=.false.,rho_hermitian_checked=.false.
@@ -695,6 +696,7 @@ contains
     if (allocated(di%reduced_color_order)) deallocate(di%reduced_color_order)
     if (allocated(di%rho_lookup_ih1)) deallocate(di%rho_lookup_ih1)
     if (allocated(di%rho_lookup_ih2)) deallocate(di%rho_lookup_ih2)
+    if (allocated(di%p_mapped)) deallocate(di%p_mapped)
     call finalize_amplitude_QCD(di%amp)
   end subroutine finalize_dipole
 

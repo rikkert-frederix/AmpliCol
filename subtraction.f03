@@ -860,6 +860,10 @@ contains
        call cs_map(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,ps_mapped,info, &
             mass_real=mass_real, &
             mass_parent=phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)))
+       if (.not.allocated(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped)) then
+          allocate(pgl(ichan)%dpl(iint)%dl(idip)%p_mapped(0:3,pgl(ichan)%next-1))
+       endif
+       pgl(ichan)%dpl(iint)%dl(idip)%p_mapped=ps_mapped
        pgl(ichan)%dpl(iint)%dl(idip)%p_mapped_ij(0:3)= &
             ps_mapped(0:3,pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk(1))
        if (info.ne.0) then
@@ -922,20 +926,21 @@ contains
     enddo
   end subroutine check_real_subtraction_resolution
 
-  subroutine evaluate_real_dipoles(iint,ichan,amp2_dip,info,failed_dipole)
+  subroutine evaluate_real_dipoles(iint,ichan,amp2_dip,info,failed_dipole,dipole_values)
     ! Sum all alpha-active local dipoles for one real-emission subprocess.
     implicit none
     integer,intent(in) :: iint,ichan
     real(kind=8),intent(out) :: amp2_dip
     integer,intent(out) :: info,failed_dipole
+    real(kind=8),intent(out),optional :: dipole_values(:)
 
     call compute_the_dipole_amps(iint,ichan)
     call square_the_dipole_amps(iint,ichan,amp2_dip,kernel_status=info,&
-         failed_dipole=failed_dipole)
+         failed_dipole=failed_dipole,dipole_values=dipole_values)
   end subroutine evaluate_real_dipoles
 
   subroutine square_the_dipole_amps(iint,ichan,amp2_dip,iunres,icol1,icol2,nselected,nmatched,nalpha_selected,&
-       kernel_status,failed_dipole)
+       kernel_status,failed_dipole,dipole_values)
     use cs_lc_spin_dipoles
     use FeynmanRules
     implicit none
@@ -945,6 +950,7 @@ contains
     integer,intent(out),optional :: nmatched
     integer,intent(out),optional :: nalpha_selected
     integer,intent(out),optional :: kernel_status,failed_dipole
+    real(kind=8),intent(out),optional :: dipole_values(:)
     integer :: idip,dipole_info
     real(kind=8) :: amp2_dip,dip
     real(kind=8),parameter :: pi=3.14159265358979323846d0
@@ -960,6 +966,13 @@ contains
        stop 1
     endif
     amp2_dip=0d0
+    if (present(dipole_values)) then
+       if (size(dipole_values).ne.pgl(ichan)%dpl(iint)%ndip) then
+          write(*,*) 'ERROR: dipole_values has incompatible size'
+          stop 1
+       endif
+       dipole_values=0d0
+    endif
     do ipart=1,pgl(ichan)%next
        mass_real(ipart)=phys_model%get_mass(pgl(ichan)%processes(ipart,iint))
     enddo
@@ -1009,6 +1022,7 @@ contains
           endif
           return
        endif
+       if (present(dipole_values)) dipole_values(idip)=dip
        amp2_dip=amp2_dip+dip
     enddo
   end subroutine square_the_dipole_amps

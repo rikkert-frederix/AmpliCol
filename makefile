@@ -2,7 +2,7 @@
 
 .PHONY: test_matrix_elements test_integrated_kernels test_massive_dipole_kernel \
 	test_simple_integrator_mixed_dims test_simple_integrator_uncertainty_sampling \
-	test_histograms_cli \
+	test_histograms_cli test_integration_histograms test_integration_histograms_physics \
 	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
@@ -98,6 +98,9 @@ AMPLIBS := $(foreach g,$(AMPGROUPS),lib$(g).so)
 %.o: Library/%.f03
 	$(FC) $(FFLAGS) -fPIC -c -I. -ILibrary $<
 
+%.o: Utilities/plot_events/%.f03
+	$(FC) $(FFLAGS) -c -I. -IUtilities/plot_events $<
+
 # ----------------------------------------------------------------------
 # 3. Build one shared library per amplitude group
 # ----------------------------------------------------------------------
@@ -121,6 +124,7 @@ read_process_file.o multichannel.o handling_processes.o 	\
 simple_integrator.o helper_modules.o amplitude_library.o command_line_parser.o \
 mg_checks.o scales.o pdf_lhapdf62.o phase_space_module.o cs_dipole_mappings.o \
 cs_lc_dipoles.o cs_integrated_kernels.o subtraction.o integrated_dipoles.o
+FILES_M_INT_QCD += integration_histograms.o integration_analysis.o
 
 FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o
@@ -150,6 +154,16 @@ test_simple_integrator_uncertainty_sampling: simple_integrator.o helper_modules.
 
 test_histograms_cli:
 	python3 tests/histograms_cli.py
+
+test_integration_histograms: integration_histograms.o
+	$(FC) $(FFLAGS) -I. -IUtilities/plot_events -o tests/integration_histograms.exe \
+		tests/integration_histograms.f90 integration_histograms.o
+	./tests/integration_histograms.exe
+	python3 Utilities/plot_events/internal/histograms.py tests/integration_histograms.HwU \
+		--gnuplot --out=tests/integration_histograms_plot --no_open
+
+test_integration_histograms_physics: amplicol_generate
+	python3 tests/integration_histograms_physics.py
 
 # ----------------------------------------------------------------------
 # 5. Build executables
@@ -200,7 +214,9 @@ amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_function
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o mg_checks.o scales.o subtraction.o integrated_dipoles.o phase_space_module.o \
-	cs_dipole_mappings.o cs_lc_dipoles.o cs_integrated_kernels.o feynmanrules.o
+	cs_dipole_mappings.o cs_lc_dipoles.o cs_integrated_kernels.o feynmanrules.o \
+	integration_histograms.o integration_analysis.o
+integration_analysis.o : integration_histograms.o common.o cuts.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o

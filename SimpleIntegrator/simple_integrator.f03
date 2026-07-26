@@ -535,7 +535,9 @@ contains
   
   ! Return evaluated values for the most recent batch and trigger iteration
   ! finalisation when all active channels/integrals have enough statistics.
-  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted,f_aux)
+  ! iteration_finished lets clients synchronize per-iteration diagnostics
+  ! without exposing the integrator's private channel state.
+  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted,f_aux,iteration_finished)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: npoints
@@ -544,8 +546,10 @@ contains
     logical,intent(out) :: done
     logical,dimension(npoints),intent(in),optional :: accepted
     real(kind=8),dimension(:,:),intent(in),optional :: f_aux
+    logical,intent(out),optional :: iteration_finished
     integer :: i
     done=.false.
+    if (present(iteration_finished)) iteration_finished=.false.
     if (this%npoints_gen.eq.0) then
        write (*,*) 'ERROR: fill_points called before get_points'
        stop 1
@@ -587,6 +591,7 @@ contains
     this%npoints_gen=0
     if (all(this%channels%done)) then
        call this%finalise_iter(done)
+       if (present(iteration_finished)) iteration_finished=.true.
     endif
     deallocate(this%x)
     deallocate(this%wgt)
