@@ -3,7 +3,8 @@ program integrated_kernels_test
   implicit none
   real(kind=8), parameter :: tol=1d-13
   real(kind=8) :: alpha,c(-2:0),x,correction,regular_gz,subtracted
-  type(cs_distribution) :: p,k,ka
+  real(kind=8) :: lf,current_regular,current_plus,expected
+  type(cs_distribution) :: p,k,kt,ka
   integer :: info
 
   call cs_i_qg(c)
@@ -98,7 +99,52 @@ program integrated_kernels_test
   call assert_close(regular_gz,0d0,'FI alpha regular at one')
   call assert_close(subtracted,0d0,'FI alpha subtracted at one')
 
+  call cs_fi_distribution(c,x,1d0,regular_gz,subtracted,info)
+  call assert_true(info.eq.0,'FI complete distribution status')
+  call assert_close(regular_gz,2d0*c(-2)*log(2d0-x)/(1d0-x),&
+       'FI alpha-one regular baseline')
+  call assert_close(subtracted,-(2d0*c(-2)*log(1d0-x)+c(-1))/(1d0-x),&
+       'FI alpha-one plus baseline')
+  call cs_fi_distribution(c,x,alpha,regular_gz,subtracted,info)
+  call assert_close(regular_gz,0d0,'FI restricted support regular')
+  call assert_close(subtracted,0d0,'FI restricted support plus')
+  call cs_fi_distribution(c,0.95d0,alpha,regular_gz,subtracted,info)
+  call assert_true(abs(regular_gz).gt.0d0,'FI retained support regular')
+  call assert_true(abs(subtracted).gt.0d0,'FI retained support plus')
+
+  call cs_if_tilde_distribution(cs_parton_q,cs_parton_q,x,5,kt,info)
+  call assert_true(info.eq.0,'IF tilde qq status')
+  call assert_close(kt%regular,-2d0*cs_cf_lc*log(2d0-x)/(1d0-x),&
+       'IF tilde qq log(2-x)')
+  call assert_close(kt%plus_log_one,2d0*cs_cf_lc,'IF tilde qq plus-log')
+  call assert_close(kt%delta,-cs_pi**2*cs_cf_lc/3d0,'IF tilde qq delta')
+  call cs_if_tilde_distribution(cs_parton_g,cs_parton_q,x,5,kt,info)
+  call assert_close(kt%regular,0d0,'IF tilde off-diagonal regular')
+  call assert_close(kt%delta,0d0,'IF tilde off-diagonal delta')
+
+  call cs_ii_tilde_distribution(cs_parton_q,cs_parton_q,x,5,kt,info)
+  call assert_true(info.eq.0,'II tilde qq status')
+  call assert_close(kt%regular,-cs_cf_lc*(1d0+x)*log(1d0-x),&
+       'II tilde qq regular')
+  call assert_close(kt%plus_log_one,2d0*cs_cf_lc,'II tilde qq plus-log')
+  call assert_close(kt%delta,-2d0*cs_pi**2*cs_cf_lc/3d0,'II tilde qq delta')
+
+  ! Distribution-level comparison with the massless finiteii q->q formula.
+  lf=0.41d0
+  call cs_ap_distribution(cs_parton_q,cs_parton_q,x,5,p,info)
+  call cs_kbar_distribution(cs_parton_q,cs_parton_q,x,5,k,info)
+  call cs_ii_tilde_distribution(cs_parton_q,cs_parton_q,x,5,kt,info)
+  current_regular=-(lf-log(x))*p%regular+k%regular+kt%regular
+  expected=cs_cf_lc*((1d0+x)*lf-2d0*(1d0+x)*log(1d0-x)+(1d0-x))
+  call assert_close(current_regular,expected,'assembled II qq regular')
+  current_plus=-(lf-log(x))*p%plus_one/(1d0-x)+&
+       k%plus_log*log((1d0-x)/x)/(1d0-x)+&
+       kt%plus_log_one*log(1d0-x)/(1d0-x)
+  expected=cs_cf_lc*(-2d0*lf+4d0*log(1d0-x))/(1d0-x)
+  call assert_close(current_plus,expected,'assembled II qq plus')
+
   call cs_ii_alpha_distribution(cs_parton_g,cs_parton_q,x,alpha,ka,info)
+  call cs_ap_distribution(cs_parton_g,cs_parton_q,x,5,p,info)
   call assert_true(info.eq.0,'II alpha g<-q status')
   call assert_close(ka%regular,p%regular*log(alpha/(1d0-x)),&
        'II alpha g<-q matches P normalization')

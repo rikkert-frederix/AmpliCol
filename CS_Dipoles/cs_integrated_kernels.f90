@@ -4,6 +4,7 @@ module cs_integrated_kernels
   !
   !   regular(x) + plus_one/(1-x)_+
   !              + plus_log*(log((1-x)/x)/(1-x))_+
+  !              + plus_log_one*(log(1-x)/(1-x))_+
   !              + delta*delta(1-x).
   !
   ! Process-dependent leading-colour correlations are deliberately not
@@ -39,6 +40,7 @@ module cs_integrated_kernels
      real(dp) :: regular = 0.0_dp
      real(dp) :: plus_one = 0.0_dp
      real(dp) :: plus_log = 0.0_dp
+     real(dp) :: plus_log_one = 0.0_dp
      real(dp) :: delta = 0.0_dp
   end type cs_distribution
 
@@ -46,8 +48,10 @@ module cs_integrated_kernels
   public :: cs_i_qqbar
   public :: cs_ap_distribution, cs_kbar_distribution
   public :: cs_ff_alpha_endpoint, cs_fi_alpha_endpoint
-  public :: cs_fi_alpha_terms, cs_if_alpha_distribution
-  public :: cs_ii_alpha_distribution, cs_fdh_endpoint_shift
+  public :: cs_fi_distribution, cs_fi_alpha_terms
+  public :: cs_if_tilde_distribution, cs_ii_tilde_distribution
+  public :: cs_if_alpha_distribution, cs_ii_alpha_distribution
+  public :: cs_scale_distribution, cs_fdh_endpoint_shift
 
 contains
 
@@ -95,12 +99,11 @@ contains
   end subroutine cs_i_gg
 
   pure subroutine cs_i_gg_ordered(coeff)
-    ! Integral of one ordered side of the final-state g -> g g kernel used
-    ! by final_splitting_matrix.  The complementary soft pole and the other
-    ! half of the collinear kernel belong to the history with i and j
-    ! interchanged.  The FI/FF alpha restriction is independent of that
-    ! interchange, so its endpoint and non-endpoint primitives are halved
-    ! by the same factor.
+    ! Integral of one ordered side of the g -> g g kernel.  Every local
+    ! leading-colour history designates one colour neighbour and carries
+    ! only that ordered side, for final- and initial-state emitters alike.
+    ! The complementary soft pole and the other half of the collinear
+    ! kernel belong to the history on the other side of the gluon.
     real(dp), intent(out) :: coeff(-2:0)
     call cs_i_gg(coeff)
     coeff=0.5_dp*coeff
@@ -232,6 +235,38 @@ contains
          -primitive(-2)*logarithm*logarithm
   end subroutine cs_fi_alpha_endpoint
 
+  pure subroutine cs_fi_distribution(primitive,x,alpha,regular_gz,subtracted,info)
+    ! Complete non-endpoint massless final--initial distribution.  Its action
+    ! on a test function g is
+    !
+    !   regular_gz*g(x) + subtracted*(g(x)-g(1)).
+    !
+    ! At alpha=1 this is the finite FI baseline.  Restricting the local
+    ! dipole to 1-x < alpha leaves only x > 1-alpha.
+    real(dp), intent(in) :: primitive(-2:0),x,alpha
+    real(dp), intent(out) :: regular_gz,subtracted
+    integer, intent(out) :: info
+    real(dp) :: one_minus_x
+
+    regular_gz=0.0_dp
+    subtracted=0.0_dp
+    info=0
+    if (x <= 0.0_dp .or. x >= 1.0_dp) then
+       info=-1
+       return
+    endif
+    if (alpha <= 0.0_dp .or. alpha > 1.0_dp) then
+       info=-3
+       return
+    endif
+    if (x <= 1.0_dp-alpha) return
+
+    one_minus_x=1.0_dp-x
+    regular_gz=2.0_dp*primitive(-2)*log(2.0_dp-x)/one_minus_x
+    subtracted=-(2.0_dp*primitive(-2)*log(one_minus_x)+primitive(-1)) &
+         /one_minus_x
+  end subroutine cs_fi_distribution
+
   pure subroutine cs_fi_alpha_terms(primitive,x,alpha,regular_gz,subtracted,info)
     ! Non-endpoint final--initial alpha change.  Its action on a test
     ! function g is
@@ -264,6 +299,53 @@ contains
     subtracted=(2.0_dp*primitive(-2)*log(one_minus_x)+primitive(-1)) &
          /one_minus_x
   end subroutine cs_fi_alpha_terms
+
+  pure subroutine cs_if_tilde_distribution(a,b,x,nf,kernel,info)
+    ! Spectator-dependent finite K contribution for a massless
+    ! initial--final dipole at alpha=1.  It is nonzero only for diagonal
+    ! splittings.  The alpha-dependent change is returned separately by
+    ! cs_if_alpha_distribution.
+    integer, intent(in) :: a,b,nf
+    real(dp), intent(in) :: x
+    type(cs_distribution), intent(out) :: kernel
+    integer, intent(out) :: info
+    type(cs_distribution) :: ap
+    real(dp) :: one_minus_x
+
+    kernel=cs_distribution()
+    info=0
+    call cs_ap_distribution(a,b,x,nf,ap,info)
+    if (info /= 0) return
+    if (a /= b) return
+
+    one_minus_x=1.0_dp-x
+    kernel%regular=-ap%plus_one*log(2.0_dp-x)/one_minus_x
+    kernel%plus_log_one=ap%plus_one
+    kernel%delta=-(cs_pi**2/6.0_dp)*ap%plus_one
+  end subroutine cs_if_tilde_distribution
+
+  pure subroutine cs_ii_tilde_distribution(a,b,x,nf,kernel,info)
+    ! Spectator-dependent finite K contribution for a massless
+    ! initial--initial dipole at alpha=1.  In distributional form this is
+    ! the four-dimensional AP kernel multiplied by log(1-x), together with
+    ! the diagonal endpoint constant.
+    integer, intent(in) :: a,b,nf
+    real(dp), intent(in) :: x
+    type(cs_distribution), intent(out) :: kernel
+    integer, intent(out) :: info
+    type(cs_distribution) :: ap
+
+    kernel=cs_distribution()
+    info=0
+    call cs_ap_distribution(a,b,x,nf,ap,info)
+    if (info /= 0) return
+
+    kernel%regular=ap%regular*log(1.0_dp-x)
+    kernel%plus_log_one=ap%plus_one
+    if (a == b) then
+       kernel%delta=-(cs_pi**2/3.0_dp)*ap%plus_one
+    endif
+  end subroutine cs_ii_tilde_distribution
 
   pure subroutine cs_if_alpha_distribution(a,b,x,alpha,kernel,info)
     ! Finite change in a massless initial--final integrated dipole relative
@@ -347,5 +429,15 @@ contains
        value=0.0_dp
     end select
   end function cs_fdh_endpoint_shift
+
+  pure subroutine cs_scale_distribution(kernel,factor)
+    type(cs_distribution), intent(inout) :: kernel
+    real(dp), intent(in) :: factor
+    kernel%regular=factor*kernel%regular
+    kernel%plus_one=factor*kernel%plus_one
+    kernel%plus_log=factor*kernel%plus_log
+    kernel%plus_log_one=factor*kernel%plus_log_one
+    kernel%delta=factor*kernel%delta
+  end subroutine cs_scale_distribution
 
 end module cs_integrated_kernels

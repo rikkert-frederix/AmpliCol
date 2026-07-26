@@ -134,6 +134,14 @@ included. Integrated histories are constructed exclusively from the local
 dipoles and are checked against the supplied Born processes and leading-colour
 orders. The supported dimensional schemes are HV (default) and FDH, selected
 with '--dim-reg=hv' or '--dim-reg=fdh'.
+The integrated kernels currently support massless QCD emitters, unresolved
+partons, and spectators only; a combined run stops during initialisation if a
+massive integrated history is encountered. Identical-flavour copies are
+expanded explicitly, and reduced histories are canonicalised onto the supplied
+Born leg and colour-order conventions before duplicate insertions are removed.
+At initialisation, the physical-parent histories are checked to reconstruct
+the universal quark and gluon poles for every light-flavour sector present in
+the supplied real-process file.
 Its real-emission measurement clusters massless QCD partons with inclusive
 kT and radius `DRjj_min`, requiring at least one fewer accepted jets than the
 number of real final-state jet legs. Each mapped dipole is cut independently
