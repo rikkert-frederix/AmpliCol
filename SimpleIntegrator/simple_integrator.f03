@@ -183,7 +183,7 @@ module simple_integrator_mod
   ! Public driver object.  Users call init, then alternate get_points and
   ! fill_points until done, then call assign_evnt_wgts if events were written.
   type,public :: integrator
-     integer :: nchannel,current_channel,nevts_unw_req,npoints_gen
+     integer :: nchannel,current_channel,nevts_unw_req,npoints_gen,allocation_cursor
      integer(kind=8) :: npoints_requested
      real(kind=8),dimension(2) :: res,unc
      real(kind=8),allocatable,dimension(:,:),public :: x
@@ -197,7 +197,7 @@ module simple_integrator_mod
           &,get_channel_and_integral,update_points_requested&
           &,print_results,compute_total_rate,update_nevts_unw_req&
           &,count_unweighted_evnts,init_next_iter&
-          &,get_npoints_nonzero_iter,finalise_iter,update_grids
+          &,get_npoints_nonzero_iter,get_npoints_iter,finalise_iter,update_grids
   end type integrator
   double precision, external :: ran2
   integer,save :: iters_without_evnts,evnt_label=0
@@ -206,9 +206,8 @@ module simple_integrator_mod
   real(kind=8),parameter :: write_evnt_fraction=0.05d0
   integer,parameter :: min_points_per_channel=1024
   integer,parameter :: min_points_per_integral=128
-  ! Keep a small exploration probability so that a temporarily small or zero
-  ! error estimate cannot permanently starve a channel or integral.
-  real(kind=8),parameter :: uncertainty_sampling_fraction=0.95d0
+  integer(kind=8),parameter :: accuracy_pilot_points_per_stratum=1024_8
+  integer(kind=8),parameter :: min_accuracy_points_per_stratum=128_8
   logical :: turn_off_evnt_generation=.false.
   real(kind=8) :: requested_accuracy=0d0
   real(kind=8),parameter :: required_accuracy_factor=10d0
@@ -227,6 +226,7 @@ contains
     real(kind=8),intent(in),optional :: accuracy
     integer,intent(in),optional :: naux
     integer :: i,naux_local
+    integer(kind=8) :: initial_channel_points
     if (nchannel.lt.1) then
        write (*,*) 'ERROR: nchannel must be at least 1'
        stop 1
@@ -273,22 +273,34 @@ contains
     evnt_label=0
     this%nchannel=nchannel
     this%nevts_unw_req=nevts_unw_req
-    ! if we assume 1% unweighting efficiency, we expect ~10% time
-    ! spend in iterations that do not produce events:
-    iters_without_evnts=5
-    this%npoints_requested=int(nevts_unw_req/(0.1d0*2**iters_without_evnts),kind=8)
-    do while (this%npoints_requested/this%nchannel.lt.max(min_points_per_channel,min_points_per_integral*maxval(nintegral)) &
-         .and. iters_without_evnts.gt.3)
-       iters_without_evnts=iters_without_evnts-1
-       this%npoints_requested=int(nevts_unw_req/(0.03*2**iters_without_evnts),kind=8)
-    enddo
-    this%npoints_requested=max(this%npoints_requested,min_points_per_channel*this%nchannel,&
-         min_points_per_integral*maxval(nintegral)*this%nchannel)
     allocate(this%channels(this%nchannel))
-    do i=1,this%nchannel
-       call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i,naux_local)
-    enddo
+    if (turn_off_evnt_generation) then
+       iters_without_evnts=0
+       ! Accuracy-only runs start with equal, event-independent pilot samples
+       ! for every channel/integral leaf stratum.
+       this%npoints_requested=accuracy_pilot_points_per_stratum*sum(int(nintegral,kind=8))
+       do i=1,this%nchannel
+          initial_channel_points=accuracy_pilot_points_per_stratum*int(nintegral(i),kind=8)
+          call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),initial_channel_points,niters,i,naux_local)
+       enddo
+    else
+       ! If we assume 1% unweighting efficiency, we expect ~10% time
+       ! spent in iterations that do not produce events.
+       iters_without_evnts=5
+       this%npoints_requested=int(nevts_unw_req/(0.1d0*2**iters_without_evnts),kind=8)
+       do while (this%npoints_requested/this%nchannel.lt.max(min_points_per_channel,min_points_per_integral*maxval(nintegral)) &
+            .and. iters_without_evnts.gt.3)
+          iters_without_evnts=iters_without_evnts-1
+          this%npoints_requested=int(nevts_unw_req/(0.03*2**iters_without_evnts),kind=8)
+       enddo
+       this%npoints_requested=max(this%npoints_requested,min_points_per_channel*this%nchannel,&
+            min_points_per_integral*maxval(nintegral)*this%nchannel)
+       do i=1,this%nchannel
+          call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i,naux_local)
+       enddo
+    endif
     this%current_channel=0
+    this%allocation_cursor=0
     this%npoints_gen=0
     this%res=0d0
     this%unc=0d0
@@ -498,6 +510,13 @@ contains
     
     call this%get_channel_and_integral(ichan,iint,wgt_chan)
     this%current_channel=ichan
+    if (turn_off_evnt_generation) then
+       if (int(npoints,kind=8).gt.this%channels(ichan)%integrals(iint)%npoints_requested-&
+            this%channels(ichan)%integrals(iint)%npoints_iter) then
+          write (*,*) 'ERROR: accuracy-only batch exceeds its leaf quota'
+          stop 1
+       endif
+    endif
 
     ntot=this%channels(this%current_channel)%ndim+this%channels(this%current_channel)%ndim_extra
     allocate(this%x(1:ntot,1:npoints))
@@ -580,18 +599,22 @@ contains
     character(len=10) :: time
     character(len=5) :: zone
     character(len=19) :: formatted
-    integer(kind=8) :: npoints_nonzero
+    integer(kind=8) :: npoints_report
     call date_and_time(date, time, zone)
     write(formatted, '(A4,"-",A2,"-",A2," ",A2,":",A2,":",A2)') &
          date(1:4),date(5:6),date(7:8),time(1:2),time(3:4),time(5:6)
-    call this%get_npoints_nonzero_iter(npoints_nonzero)
+    if (turn_off_evnt_generation) then
+       call this%get_npoints_iter(npoints_report)
+    else
+       call this%get_npoints_nonzero_iter(npoints_report)
+    endif
     write (*,*) ''
     write (*,'(a,x,i4,x,a,x,i10,x,a)') &
-         'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
+         'iteration',this%channels(1)%current_iter,'(',npoints_report, &
          'points) '//trim(formatted)//' :'
     write (99,*) ''
     write (99,'(a,x,i4,x,a,x,i10,x,a)') &
-         'iteration',this%channels(1)%current_iter,'(',npoints_nonzero, &
+         'iteration',this%channels(1)%current_iter,'(',npoints_report, &
          'points) '//trim(formatted)//' :'
     call this%compute_total_rate()
     if (.not.turn_off_evnt_generation) call this%count_unweighted_evnts()
@@ -610,8 +633,13 @@ contains
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i
+    logical :: accuracy_refining
+    accuracy_refining=.false.
+    if (turn_off_evnt_generation .and. this%res(1).gt.0d0) then
+       accuracy_refining=this%unc(1)/this%res(1).gt.2d0*requested_accuracy
+    endif
     do i=1,this%nchannel
-       call this%channels(i)%update_grids()
+       call this%channels(i)%update_grids(accuracy_refining)
     enddo
   end subroutine update_grids
   
@@ -626,6 +654,19 @@ contains
        npoints_nonzero=npoints_nonzero+sum(this%channels(i)%integrals(1:this%channels(i)%nintegral)%npoints_nonzero)
     enddo
   end subroutine get_npoints_nonzero_iter
+
+  ! Count every evaluated point from the current iteration.  Accuracy-only
+  ! quotas are defined in terms of evaluations, including zero-weight points.
+  subroutine get_npoints_iter(this,npoints)
+    implicit none
+    class(integrator),intent(in) :: this
+    integer(kind=8),intent(out) :: npoints
+    integer :: i
+    npoints=0
+    do i=1,this%nchannel
+       npoints=npoints+sum(this%channels(i)%integrals(1:this%channels(i)%nintegral)%npoints_iter)
+    enddo
+  end subroutine get_npoints_iter
   
   ! Start the next iteration for channels that have not reached max_iters.
   subroutine init_next_iter(this)
@@ -814,75 +855,101 @@ contains
     this%npoints_requested=npoints
   end subroutine update_points_requested
 
-  ! In integration-only mode, spend the next iteration primarily on the
-  ! strata that currently dominate the total absolute uncertainty.  The
-  ! channel allocation is based on channel errors, and each channel's share
-  ! is split between its integrals using their errors.  A uniform component
-  ! and hard minimums retain exploration and keep grid adaptation alive.
+  ! In integration-only mode, allocate directly to channel/integral leaves.
+  ! For a leaf with accumulated error sigma/sqrt(n), q=sigma is estimated as
+  ! unc(1)*sqrt(n).  Minimising the next total variance at fixed cost gives
+  ! n+m proportional to q; water filling enforces the per-iteration minimum.
   subroutine update_integration_points_requested(this)
     implicit none
     class(integrator),intent(inout) :: this
-    real(kind=8) :: total_unc,total_integral_unc,share
-    integer :: i,j,nactive_channels,nactive_integrals
-    integer(kind=8) :: npoints,npoints_channel
+    integer :: i,j,k,nleaf,ibest,iter
+    integer(kind=8) :: budget,nminimum,nleft
+    integer(kind=8),allocatable :: nold(:),quota(:)
+    real(kind=8),allocatable :: q(:),target(:),remainder(:)
+    real(kind=8) :: lo,hi,mid,total_target,best_remainder
 
-    npoints=0_8
-    nactive_channels=count(.not.(this%channels%done.or.this%channels%evgen_done))
-    if (nactive_channels.eq.0) return
-    total_unc=sum(abs(this%channels%unc(1)),&
-         mask=.not.(this%channels%done.or.this%channels%evgen_done))
-
+    nleaf=0
     do i=1,this%nchannel
-       if (this%channels(i)%done.or.this%channels(i)%evgen_done) cycle
-       share=uncertainty_sampling_share(abs(this%channels(i)%unc(1)),&
-            total_unc,nactive_channels)
-       npoints_channel=max(int(share*dble(this%npoints_requested),kind=8),&
-            int(min_points_per_channel,kind=8))
-
-       nactive_integrals=count(.not.(this%channels(i)%integrals%done.or.&
-            this%channels(i)%integrals%evgen_done))
-       if (nactive_integrals.eq.0) cycle
-       total_integral_unc=sum(abs(this%channels(i)%integrals%unc(1)),&
-            mask=.not.(this%channels(i)%integrals%done.or.&
-            this%channels(i)%integrals%evgen_done))
+       nleaf=nleaf+this%channels(i)%nintegral
+    enddo
+    if (nleaf.eq.0) return
+    nminimum=min_accuracy_points_per_stratum
+    budget=max(this%npoints_requested,nminimum*int(nleaf,kind=8))
+    allocate(nold(nleaf),quota(nleaf),q(nleaf),target(nleaf),remainder(nleaf))
+    k=0
+    do i=1,this%nchannel
        do j=1,this%channels(i)%nintegral
-          if (this%channels(i)%integrals(j)%done.or.&
-               this%channels(i)%integrals(j)%evgen_done) cycle
-          share=uncertainty_sampling_share(&
-               abs(this%channels(i)%integrals(j)%unc(1)),&
-               total_integral_unc,nactive_integrals)
-          this%channels(i)%integrals(j)%npoints_requested=max(&
-               int(share*dble(npoints_channel),kind=8),&
-               int(min_points_per_integral,kind=8))
-          npoints=npoints+this%channels(i)%integrals(j)%npoints_requested
+          k=k+1
+          nold(k)=this%channels(i)%integrals(j)%npoints
+          q(k)=this%channels(i)%integrals(j)%unc(1)*sqrt(dble(max(nold(k),1_8)))
        enddo
     enddo
-    this%npoints_requested=npoints
-  end subroutine update_integration_points_requested
 
-  pure real(kind=8) function uncertainty_sampling_share(uncertainty,total_uncertainty,nactive) result(share)
-    implicit none
-    real(kind=8),intent(in) :: uncertainty,total_uncertainty
-    integer,intent(in) :: nactive
-
-    share=0d0
-    if (nactive.le.0) return
-    if (total_uncertainty.gt.tiny(1d0)) then
-       share=uncertainty_sampling_fraction*uncertainty/total_uncertainty+&
-            (1d0-uncertainty_sampling_fraction)/dble(nactive)
+    if (maxval(q).le.tiny(1d0)) then
+       quota=budget/int(nleaf,kind=8)
+       nleft=budget-sum(quota)
+       do k=1,int(nleft)
+          quota(k)=quota(k)+1_8
+       enddo
     else
-       share=1d0/dble(nactive)
+       lo=0d0
+       hi=1d0
+       do
+          total_target=sum(max(dble(nminimum),hi*q-dble(nold)))
+          if (total_target.ge.dble(budget)) exit
+          hi=2d0*hi
+       enddo
+       do iter=1,80
+          mid=0.5d0*(lo+hi)
+          total_target=sum(max(dble(nminimum),mid*q-dble(nold)))
+          if (total_target.lt.dble(budget)) then
+             lo=mid
+          else
+             hi=mid
+          endif
+       enddo
+       target=max(dble(nminimum),lo*q-dble(nold))
+       quota=int(floor(target),kind=8)
+       remainder=target-dble(quota)
+       nleft=budget-sum(quota)
+       do while (nleft.gt.0_8)
+          ibest=1
+          best_remainder=remainder(1)
+          do k=2,nleaf
+             if (remainder(k).gt.best_remainder) then
+                ibest=k
+                best_remainder=remainder(k)
+             endif
+          enddo
+          quota(ibest)=quota(ibest)+1_8
+          remainder(ibest)=-1d0
+          nleft=nleft-1_8
+       enddo
     endif
-  end function uncertainty_sampling_share
+
+    k=0
+    do i=1,this%nchannel
+       do j=1,this%channels(i)%nintegral
+          k=k+1
+          this%channels(i)%integrals(j)%npoints_requested=quota(k)
+       enddo
+    enddo
+    this%npoints_requested=sum(quota)
+    deallocate(nold,quota,q,target,remainder)
+  end subroutine update_integration_points_requested
   
   ! Build the next iteration's adaptive grids for one channel.
-  subroutine channel_update_grids(this)
+  subroutine channel_update_grids(this,accuracy_refining)
     implicit none
     class(channel),intent(inout) :: this
+    logical,intent(in) :: accuracy_refining
     type(grid) :: new_grid
     integer :: i
     logical update_grids
-    if (this%res(1).gt.0d0) then
+    if (turn_off_evnt_generation) then
+       ! All grids follow the global absolute-envelope convergence gate.
+       update_grids=accuracy_refining
+    elseif (this%res(1).gt.0d0) then
        update_grids=(((.not.this%evgen_done) .and. &
             this%unc(1)/this%res(1).gt.1d0/(sqrt(dble(max(this%nevts_unw_req,1)))*required_accuracy_factor)) .or. &
             this%current_iter.le.iters_without_evnts) .and. &
@@ -1380,7 +1447,11 @@ contains
     endif
     if (this%current_iter.le.iters_without_evnts) call this%update_max_value(f_abs)
     call this%check_write_evnt(x,wgt,f_abs,to_write,enough)
-    if (this%npoints_nonzero.ge.this%npoints_requested .or. enough) this%done=.true.
+    if (turn_off_evnt_generation) then
+       if (this%npoints_iter.ge.this%npoints_requested) this%done=.true.
+    elseif (this%npoints_nonzero.ge.this%npoints_requested .or. enough) then
+       this%done=.true.
+    endif
   end subroutine integral_add_point
 
   ! Track the largest absolute integrand value seen before event generation.
@@ -1619,7 +1690,7 @@ contains
     integer,intent(out) :: ichan,iint
     real(kind=8),intent(out) :: wgt_chan
     if (turn_off_evnt_generation) then
-       call select_integration_channel(this,ichan)
+       call select_accuracy_leaf(this,ichan,iint)
     else
        do
           ichan=int(ran2()*this%nchannel)+1
@@ -1627,9 +1698,7 @@ contains
        enddo
     endif
     wgt_chan=1d0!dble(this%nchannel)
-    if (turn_off_evnt_generation) then
-       call select_integration_integral(this%channels(ichan),iint)
-    else
+    if (.not.turn_off_evnt_generation) then
        do
           iint=int(ran2()*this%channels(ichan)%nintegral)+1
           if (.not.(this%channels(ichan)%integrals(iint)%done.or.&
@@ -1640,51 +1709,49 @@ contains
     this%channels(ichan)%current_integral=iint
   end subroutine get_channel_and_integral
 
-  ! Uncertainty-weighted channel lottery used only without event generation.
-  subroutine select_integration_channel(this,ichan)
+  ! Deterministically choose the least-filled accuracy-only leaf.  This
+  ! makes every evaluated point count against its exact leaf quota; ties are
+  ! rotated in flattened channel/integral order for reproducibility.
+  subroutine select_accuracy_leaf(this,ichan,iint)
     implicit none
-    class(integrator),intent(in) :: this
-    integer,intent(out) :: ichan
-    integer :: i,nactive
-    real(kind=8) :: total_unc,target,cumulative
+    class(integrator),intent(inout) :: this
+    integer,intent(out) :: ichan,iint
+    integer :: i,j,k,nleaf,chosen,best_rank,rank
+    real(kind=8) :: fraction,best_fraction
 
-    nactive=count(.not.(this%channels%done.or.this%channels%evgen_done))
-    total_unc=sum(abs(this%channels%unc(1)),&
-         mask=.not.(this%channels%done.or.this%channels%evgen_done))
-    target=ran2()
-    cumulative=0d0
-    ichan=0
+    nleaf=0
     do i=1,this%nchannel
-       if (this%channels(i)%done.or.this%channels(i)%evgen_done) cycle
-       ichan=i
-       cumulative=cumulative+uncertainty_sampling_share(&
-            abs(this%channels(i)%unc(1)),total_unc,nactive)
-       if (target.lt.cumulative) return
+       nleaf=nleaf+this%channels(i)%nintegral
     enddo
-  end subroutine select_integration_channel
-
-  ! Uncertainty-weighted integral lottery within one selected channel.
-  subroutine select_integration_integral(this,iint)
-    implicit none
-    class(channel),intent(in) :: this
-    integer,intent(out) :: iint
-    integer :: i,nactive
-    real(kind=8) :: total_unc,target,cumulative
-
-    nactive=count(.not.(this%integrals%done.or.this%integrals%evgen_done))
-    total_unc=sum(abs(this%integrals%unc(1)),&
-         mask=.not.(this%integrals%done.or.this%integrals%evgen_done))
-    target=ran2()
-    cumulative=0d0
+    ichan=0
     iint=0
-    do i=1,this%nintegral
-       if (this%integrals(i)%done.or.this%integrals(i)%evgen_done) cycle
-       iint=i
-       cumulative=cumulative+uncertainty_sampling_share(&
-            abs(this%integrals(i)%unc(1)),total_unc,nactive)
-       if (target.lt.cumulative) return
+    chosen=0
+    best_fraction=huge(1d0)
+    best_rank=nleaf
+    k=0
+    do i=1,this%nchannel
+       do j=1,this%channels(i)%nintegral
+          k=k+1
+          if (this%channels(i)%integrals(j)%done.or.this%channels(i)%integrals(j)%evgen_done) cycle
+          fraction=dble(this%channels(i)%integrals(j)%npoints_iter)/&
+               dble(max(this%channels(i)%integrals(j)%npoints_requested,1_8))
+          rank=modulo(k-this%allocation_cursor-1,nleaf)
+          if (fraction.lt.best_fraction-1d-14 .or. &
+               (abs(fraction-best_fraction).le.1d-14 .and. rank.lt.best_rank)) then
+             ichan=i
+             iint=j
+             chosen=k
+             best_fraction=fraction
+             best_rank=rank
+          endif
+       enddo
     enddo
-  end subroutine select_integration_integral
+    if (chosen.eq.0) then
+       write (*,*) 'ERROR: no unfinished accuracy-only integration leaf'
+       stop 1
+    endif
+    this%allocation_cursor=chosen
+  end subroutine select_accuracy_leaf
   
   ! Public helper: compute the current adaptive-grid weight for an existing
   ! point in channel ichan.
