@@ -151,7 +151,7 @@ program massive_integrated_kernels_test
         call cs_massive_if_convolution(a,b,1d-3,sx,szone,x,&
              exp(ell)/x,exp(ell),1d0,5,kernel_base,info)
         call assert_status(info,'massive IF alpha-one massless limit')
-        call cs_if_alpha_distribution(a,b,x,alpha,alpha_kernel,info)
+        call cs_if_alpha_distribution(a,b,x,5,alpha,alpha_kernel,info)
         call assert_status(info,'massless IF alpha comparison')
         call assert_close(kernel%regular-kernel_base%regular,&
              alpha_kernel%regular,2d-8,'massive IF alpha massless limit')

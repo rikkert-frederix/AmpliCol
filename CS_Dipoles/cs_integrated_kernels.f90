@@ -358,11 +358,11 @@ contains
     endif
   end subroutine cs_ii_tilde_distribution
 
-  pure subroutine cs_if_alpha_distribution(a,b,x,alpha,kernel,info)
+  pure subroutine cs_if_alpha_distribution(a,b,x,nf,alpha,kernel,info)
     ! Finite change in a massless initial--final integrated dipole relative
     ! to alpha=1.  Unlike final--initial dipoles this topology has no
     ! alpha-dependent endpoint term.
-    integer, intent(in) :: a,b
+    integer, intent(in) :: a,b,nf
     real(dp), intent(in) :: x,alpha
     type(cs_distribution), intent(out) :: kernel
     integer, intent(out) :: info
@@ -380,7 +380,7 @@ contains
        return
     endif
 
-    call cs_ap_distribution(a,b,x,5,ap,info)
+    call cs_ap_distribution(a,b,x,nf,ap,info)
     if (info /= 0 .or. alpha >= 1.0_dp) return
 
     one_minus_x=1.0_dp-x
@@ -391,7 +391,7 @@ contains
     endif
   end subroutine cs_if_alpha_distribution
 
-  pure subroutine cs_ii_alpha_distribution(a,b,x,alpha,kernel,info)
+  pure subroutine cs_ii_alpha_distribution(a,b,x,nf,alpha,kernel,info)
     ! Finite change in an integrated initial--initial dipole when the local
     ! subtraction is restricted by
     !
@@ -402,7 +402,7 @@ contains
     ! splitting kernel times log(alpha/(1-x)) for x < 1-alpha.  Expressing
     ! it through cs_ap_distribution keeps every flavour and leading-colour
     ! normalization identical to P and to the local histories.
-    integer, intent(in) :: a,b
+    integer, intent(in) :: a,b,nf
     real(dp), intent(in) :: x,alpha
     type(cs_distribution), intent(out) :: kernel
     integer, intent(out) :: info
@@ -419,7 +419,7 @@ contains
        return
     endif
 
-    call cs_ap_distribution(a,b,x,5,ap,info)
+    call cs_ap_distribution(a,b,x,nf,ap,info)
     if (info /= 0) return
     if (alpha >= 1.0_dp .or. x >= 1.0_dp-alpha) return
 

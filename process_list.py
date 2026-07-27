@@ -776,6 +776,9 @@ if __name__ == "__main__":
     towriteallprocs=WriteAllProcsIntoList(lep) # puts the phase_space_orders dictionary in a writable list
     
     with open('processes.txt','w') as f:
+        # Keep the numerical payload backwards-compatible while recording
+        # the factorisation flavour scheme needed by integrated subtraction.
+        f.write(f'# AmpliCol process-list v2 nf={len(flavour_scheme)}\n')
         f.write('\n'.join(towriteunique))
         f.write('\n'.join(towriteallprocs))
         f.write('\n')

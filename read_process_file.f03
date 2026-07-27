@@ -9,13 +9,43 @@ module read_process_file
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
+  subroutine read_process_file_header(iunit,file_next,file_nunique,file_flavour_scheme)
+    implicit none
+    integer,intent(in) :: iunit
+    integer,intent(out) :: file_next,file_nunique,file_flavour_scheme
+    character(len=1024) :: line
+    integer :: ios,ipos
+
+    read(iunit,'(a)',iostat=ios) line
+    if (ios.ne.0) then
+       write(*,*) 'ERROR: cannot read process-file header'
+       stop 1
+    endif
+    file_flavour_scheme=0
+    if (index(adjustl(line),'# AmpliCol process-list v2 nf=').eq.1) then
+       ipos=index(line,'nf=')
+       read(line(ipos+3:),*,iostat=ios) file_flavour_scheme
+       if (ios.ne.0 .or. file_flavour_scheme.lt.1 .or. file_flavour_scheme.gt.5) then
+          write(*,*) 'ERROR: invalid process-file flavour scheme header: ',trim(line)
+          stop 1
+       endif
+       read(iunit,*,iostat=ios) file_next,file_nunique
+    else
+       read(line,*,iostat=ios) file_next,file_nunique
+    endif
+    if (ios.ne.0) then
+       write(*,*) 'ERROR: invalid process-file first record: ',trim(line)
+       stop 1
+    endif
+  end subroutine read_process_file_header
+
   subroutine count_process_groups(filename,nfile_groups)
     implicit none
     character(len=*),intent(in) :: filename
     integer,intent(out) :: nfile_groups
-    integer :: file_next,file_nunique,i
+    integer :: file_next,file_nunique,file_flavour_scheme,i
     open(unit=10,file=filename,status='old',action='read')
-    read(10,*) file_next,file_nunique
+    call read_process_file_header(10,file_next,file_nunique,file_flavour_scheme)
     do i=1,file_nunique
        read(10,*)
     enddo
@@ -41,11 +71,12 @@ contains
     if (allocated(unique_map)) deallocate(unique_map)
   end subroutine clear_process_file_metadata
 
-  subroutine read_processes_from_file(filename,igroup_offset)
+  subroutine read_processes_from_file(filename,igroup_offset,file_flavour_scheme)
     implicit none
     character(len=80) :: filename
     integer,intent(in),optional :: igroup_offset
-    integer :: iproc,igroup,igroup_global,icheck,nproc_in_group,max_channels,iflav,ndim,nfile_groups,offset
+    integer,intent(out),optional :: file_flavour_scheme
+    integer :: iproc,igroup,igroup_global,icheck,nproc_in_group,max_channels,iflav,ndim,nfile_groups,offset,nf
     real(kind=8) :: idenCOfactor
     integer,dimension(:),allocatable :: process,order,ichans,phase_space_orders
     character(len=1024) :: buff
@@ -56,7 +87,8 @@ contains
        call clear_process_file_metadata()
     endif
     open(unit=10,file=filename,status='old')
-    read (10,*) next,nproc_unique
+    call read_process_file_header(10,next,nproc_unique,nf)
+    if (present(file_flavour_scheme)) file_flavour_scheme=nf
     ndim=3*(next-2)-4
     if (include_pdf) ndim=ndim+2
     allocate(unique_procs(1:next,1:nproc_unique))

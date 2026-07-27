@@ -13,6 +13,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TAG = "integration_histogram_regression"
 HWU = ROOT / "Outputs" / f"{TAG}_histograms.HwU"
 LOG = ROOT / "Outputs" / f"{TAG}_log_file.txt"
+BORN_PROCESS = ROOT / "processes_zz.txt"
+REAL_PROCESS = ROOT / "processes_zzj.txt"
+TEST_BORN_PROCESS = ROOT / "tests_nf_born_processes.txt"
+TEST_REAL_PROCESS = ROOT / "tests_nf_real_processes.txt"
+PROCESS_HEADER = "# AmpliCol process-list v2 nf=5\n"
+
+
+def write_fs5_process_copy(source: pathlib.Path, destination: pathlib.Path) -> None:
+    payload = source.read_text(encoding="utf-8")
+    if not payload.startswith("# AmpliCol process-list v2 nf="):
+        payload = PROCESS_HEADER + payload
+    destination.write_text(payload, encoding="utf-8")
 
 
 def close(actual: float, expected: float, tolerance: float, label: str) -> None:
@@ -44,10 +56,12 @@ def hwu_curve(text: str, curve: str) -> tuple[float, float]:
 
 
 def main() -> None:
+    write_fs5_process_copy(BORN_PROCESS, TEST_BORN_PROCESS)
+    write_fs5_process_copy(REAL_PROCESS, TEST_REAL_PROCESS)
     command = [
         str(ROOT / "amplicol_generate"),
-        "--process=processes_zz.txt",
-        "--real-process=processes_zzj.txt",
+        f"--process={TEST_BORN_PROCESS.name}",
+        f"--real-process={TEST_REAL_PROCESS.name}",
         "--accuracy=0.9",
         "--itmax=1",
         "--seed=12345",
@@ -111,6 +125,8 @@ def main() -> None:
     finally:
         HWU.unlink(missing_ok=True)
         LOG.unlink(missing_ok=True)
+        TEST_BORN_PROCESS.unlink(missing_ok=True)
+        TEST_REAL_PROCESS.unlink(missing_ok=True)
 
     print("integration histogram physics closure: PASS")
 

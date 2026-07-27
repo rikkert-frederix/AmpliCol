@@ -35,7 +35,7 @@ program amplicol_generate
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
   integer,dimension(:),allocatable :: integration_ndim_extra
-  integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups
+  integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups,born_flavour_scheme,real_flavour_scheme
   integer :: limit_point
   integer,parameter :: n_limit_points=100,n_limit_failures=20
   integer,dimension(:,:,:),allocatable :: soft_fail,soft_tested
@@ -85,9 +85,24 @@ program amplicol_generate
         call count_process_groups(filename,nborn_groups)
         call count_process_groups(real_filename,nreal_groups)
         call allocate_process_groups(nborn_groups+nreal_groups)
-        call read_processes_from_file(filename,0)
+        call read_processes_from_file(filename,0,born_flavour_scheme)
         call clear_process_file_metadata()
-        call read_processes_from_file(real_filename,nborn_groups)
+        call read_processes_from_file(real_filename,nborn_groups,real_flavour_scheme)
+        if (born_flavour_scheme.eq.0 .or. real_flavour_scheme.eq.0) then
+           write(*,*) 'ERROR: --real-process requires v2 process files with an nf= flavour-scheme header'
+           write(*,*) ' Regenerate both files with process_list.py.'
+           stop 1
+        endif
+        if (born_flavour_scheme.ne.real_flavour_scheme) then
+           write(*,*) 'ERROR: Born and real process files use different flavour schemes:',&
+                born_flavour_scheme,real_flavour_scheme
+           stop 1
+        endif
+        if (.not.use_lhapdf .and. born_flavour_scheme.ne.5) then
+           write(*,*) 'ERROR: non-FS5 --real-process runs require LHAPDF.'
+           write(*,*) ' The internal alpha_s evolution is only supported for FS=5.'
+           stop 1
+        endif
         pgl(nborn_groups+1:ngroups)%is_subtracted_real=.true.
         call clear_process_file_metadata()
      else
@@ -232,7 +247,7 @@ program amplicol_generate
 
   enddo ! loop over phase-space-order groups
 
-  if (has_real_process) call initialise_integrated_dipoles(nborn_groups,dim_reg_scheme)
+  if (has_real_process) call initialise_integrated_dipoles(nborn_groups,dim_reg_scheme,born_flavour_scheme)
 
   if (use_amplitude_library) then
      if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)

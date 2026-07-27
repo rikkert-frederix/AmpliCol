@@ -36,14 +36,16 @@ module integrated_dipoles
   type(integrated_history), allocatable, save, public :: integrated_history_list(:)
   integer, save, public :: n_integrated_histories=0
   integer, save, public :: integrated_dimensional_scheme=cs_scheme_hv
+  integer, save, public :: integrated_n_active_flavours=5
 
   public :: initialise_integrated_dipoles, history_matches_born
   public :: integrated_endpoint, integrated_beam
 
 contains
 
-  subroutine initialise_integrated_dipoles(nborn_groups,scheme_name)
+  subroutine initialise_integrated_dipoles(nborn_groups,scheme_name,n_active_flavours)
     integer, intent(in) :: nborn_groups
+    integer, intent(in) :: n_active_flavours
     character(len=*), intent(in) :: scheme_name
     type(integrated_history), allocatable :: candidates(:),unique_histories(:)
     integer :: igroup,iproc,icopy,idip,max_histories,ncandidate,i
@@ -57,6 +59,11 @@ contains
        write(*,*) 'ERROR: unsupported integrated-dipole dimensional scheme: ',trim(scheme_name)
        stop 1
     endif
+    if (n_active_flavours.lt.1 .or. n_active_flavours.gt.5) then
+       write(*,*) 'ERROR: integrated subtraction requires 1 <= nf <= 5:',n_active_flavours
+       stop 1
+    endif
+    integrated_n_active_flavours=n_active_flavours
 
     max_histories=0
     do igroup=nborn_groups+1,ngroups
@@ -175,7 +182,8 @@ contains
                         ((2d0/3d0)*cs_tr))
                    expected=[cs_ca,(11d0/6d0)*cs_ca-&
                         (2d0/3d0)*cs_tr*dble(nf_available)]
-                   invalid=nf_available.lt.0 .or. nf_available.gt.5 .or. &
+                   invalid=nf_available.lt.0 .or. &
+                        nf_available.gt.integrated_n_active_flavours .or. &
                         any(abs(pole_sum-expected).gt.tolerance*max(1d0,abs(expected)))
                 endif
                 if (invalid) then
@@ -603,7 +611,7 @@ contains
        endif
        ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
        call cs_massive_if_endpoint(pa,pb,history%spectator_mass,sij,ell,&
-            integrated_dimensional_scheme,5,coeff,info)
+            integrated_dimensional_scheme,integrated_n_active_flavours,coeff,info)
     case default
        info=-14
     end select
@@ -699,9 +707,10 @@ contains
                 call cs_massive_if_convolution(pa,pb,&
                      integrated_history_list(ih)%spectator_mass,sx,szone,z,&
                      mu_fac*mu_fac/sx,mu_fac*mu_fac/szone,alpha_dipole(3),&
-                     5,massive_kernel,info)
+                     integrated_n_active_flavours,massive_kernel,info)
                 if (info.eq.0) then
-                   call cs_ap_distribution(pa,pb,z,5,pk,info)
+                   call cs_ap_distribution(pa,pb,z,integrated_n_active_flavours,&
+                        pk,info)
                    ! The auxiliary U(1) parent already carries one 1/Nc
                    ! through the local g->q qbar splitting trace.  Relative
                    ! to the matched physical-gluon Born contribution, the
@@ -750,20 +759,22 @@ contains
              regularised_p=0d0
              regularised_k=fi_regular*gz+fi_subtracted*(gz-g1)
           else
-             call cs_ap_distribution(pa,pb,z,5,pk,info)
+             call cs_ap_distribution(pa,pb,z,integrated_n_active_flavours,pk,info)
              if (info.ne.0) cycle
-             call cs_kbar_distribution(pa,pb,z,5,kk,info)
+             call cs_kbar_distribution(pa,pb,z,integrated_n_active_flavours,kk,info)
              if (info.ne.0) cycle
              select case (integrated_history_list(ih)%topology)
              case (3)
-                call cs_if_tilde_distribution(pa,pb,z,5,tilde_kernel,info)
+                call cs_if_tilde_distribution(pa,pb,z,integrated_n_active_flavours,&
+                     tilde_kernel,info)
                 if (info.ne.0) cycle
-                call cs_if_alpha_distribution(pa,pb,z,alpha_dipole(3),&
+                call cs_if_alpha_distribution(pa,pb,z,integrated_n_active_flavours,alpha_dipole(3),&
                      alpha_kernel,info)
              case (4)
-                call cs_ii_tilde_distribution(pa,pb,z,5,tilde_kernel,info)
+                call cs_ii_tilde_distribution(pa,pb,z,integrated_n_active_flavours,&
+                     tilde_kernel,info)
                 if (info.ne.0) cycle
-                call cs_ii_alpha_distribution(pa,pb,z,alpha_dipole(4),&
+                call cs_ii_alpha_distribution(pa,pb,z,integrated_n_active_flavours,alpha_dipole(4),&
                      alpha_kernel,info)
              case default
                 tilde_kernel=cs_distribution()

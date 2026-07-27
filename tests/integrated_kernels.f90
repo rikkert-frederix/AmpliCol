@@ -60,6 +60,12 @@ program integrated_kernels_test
   call assert_true(info.eq.0,'Kgg status')
   call assert_close(k%plus_log,2d0*cs_ca,'Kgg plus-log')
   call assert_close(k%delta,-(50d0/9d0-cs_pi**2)*cs_ca+(16d0/9d0)*cs_tr*5d0,'Kgg delta')
+  call cs_ap_distribution(cs_parton_g,cs_parton_g,x,3,p,info)
+  call assert_close(p%delta,(11d0/6d0)*cs_ca-(2d0/3d0)*cs_tr*3d0,&
+       'Pgg delta follows supplied nf')
+  call cs_kbar_distribution(cs_parton_g,cs_parton_g,x,3,k,info)
+  call assert_close(k%delta,-(50d0/9d0-cs_pi**2)*cs_ca+(16d0/9d0)*cs_tr*3d0,&
+       'Kgg delta follows supplied nf')
 
   call cs_ap_distribution(cs_parton_g,cs_parton_q,x,5,p,info)
   call assert_true(info.eq.0,'P g<-q status')
@@ -80,18 +86,18 @@ program integrated_kernels_test
   call assert_close(0.5d0*cs_cf_initial_qg*cs_u1_initial_factor,4d0/9d0,&
        'ordered q(real)->U(1)(Born) history includes one U(1) trace factor')
 
-  call cs_if_alpha_distribution(cs_parton_q,cs_parton_q,x,alpha,ka,info)
+  call cs_if_alpha_distribution(cs_parton_q,cs_parton_q,x,5,alpha,ka,info)
   call cs_ap_distribution(cs_parton_q,cs_parton_q,x,5,p,info)
   call assert_true(info.eq.0,'IF alpha qq status')
   call assert_close(ka%regular,(p%regular+p%plus_one/(1d0-x))*log(alpha)-&
        p%plus_one/(1d0-x)*log((1d0-x+alpha)/(2d0-x)),&
        'IF alpha qq kernel')
-  call cs_if_alpha_distribution(cs_parton_g,cs_parton_q,x,alpha,ka,info)
+  call cs_if_alpha_distribution(cs_parton_g,cs_parton_q,x,5,alpha,ka,info)
   call cs_ap_distribution(cs_parton_g,cs_parton_q,x,5,p,info)
   call assert_true(info.eq.0,'IF alpha gq status')
   call assert_close(ka%regular,p%regular*log(alpha),&
        'IF alpha off-diagonal kernel')
-  call cs_if_alpha_distribution(cs_parton_q,cs_parton_q,x,1d0,ka,info)
+  call cs_if_alpha_distribution(cs_parton_q,cs_parton_q,x,5,1d0,ka,info)
   call assert_close(ka%regular,0d0,'IF alpha at one')
 
   call cs_i_qg(c)
@@ -152,26 +158,26 @@ program integrated_kernels_test
   expected=cs_cf_lc*(-2d0*lf+4d0*log(1d0-x))/(1d0-x)
   call assert_close(current_plus,expected,'assembled II qq plus')
 
-  call cs_ii_alpha_distribution(cs_parton_g,cs_parton_q,x,alpha,ka,info)
+  call cs_ii_alpha_distribution(cs_parton_g,cs_parton_q,x,5,alpha,ka,info)
   call cs_ap_distribution(cs_parton_g,cs_parton_q,x,5,p,info)
   call assert_true(info.eq.0,'II alpha g<-q status')
   call assert_close(ka%regular,p%regular*log(alpha/(1d0-x)),&
        'II alpha g<-q matches P normalization')
-  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_q,x,alpha,ka,info)
+  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_q,x,5,alpha,ka,info)
   call cs_ap_distribution(cs_parton_q,cs_parton_q,x,5,p,info)
   call assert_close(ka%regular,(p%regular+p%plus_one/(1d0-x))*&
        log(alpha/(1d0-x)),'II alpha qq unregularised kernel')
-  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_g,x,alpha,ka,info)
+  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_g,x,5,alpha,ka,info)
   call cs_ap_distribution(cs_parton_q,cs_parton_g,x,5,p,info)
   call assert_close(ka%regular,p%regular*log(alpha/(1d0-x)),&
        'II alpha qg unregularised kernel')
-  call cs_ii_alpha_distribution(cs_parton_g,cs_parton_g,x,alpha,ka,info)
+  call cs_ii_alpha_distribution(cs_parton_g,cs_parton_g,x,5,alpha,ka,info)
   call cs_ap_distribution(cs_parton_g,cs_parton_g,x,5,p,info)
   call assert_close(ka%regular,(p%regular+p%plus_one/(1d0-x))*&
        log(alpha/(1d0-x)),'II alpha gg unregularised kernel')
-  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_q,0.95d0,alpha,ka,info)
+  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_q,0.95d0,5,alpha,ka,info)
   call assert_close(ka%regular,0d0,'II alpha support')
-  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_q,x,1d0,ka,info)
+  call cs_ii_alpha_distribution(cs_parton_q,cs_parton_q,x,5,1d0,ka,info)
   call assert_close(ka%regular,0d0,'II alpha one')
 
   call assert_close(cs_fdh_endpoint_shift(cs_parton_q),-0.5d0*cs_cf_lc,'FDH quark shift')
