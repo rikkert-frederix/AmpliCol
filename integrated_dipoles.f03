@@ -444,13 +444,13 @@ contains
     if (present(leg_map)) leg_map=[(i,i=1,size(leg_map))]
   end function history_matches_copy
 
-  subroutine integrated_endpoint(igroup,iproc,born_copy,p,mu,alpha_s,coeff,coeff_copy)
+  subroutine integrated_endpoint(igroup,iproc,born_copy,p,mu_ren,alpha_s,coeff,coeff_copy)
     ! Laurent coefficients of I(eps), multiplied by the corresponding
     ! PDF-weighted Born contributions.  Every entry is inherited from an
     ! actual local-dipole history.
     integer, intent(in) :: igroup,iproc
     real(kind=8), intent(in) :: born_copy(:),p(0:,:)
-    real(kind=8), intent(in) :: mu,alpha_s
+    real(kind=8), intent(in) :: mu_ren,alpha_s
     real(kind=8), intent(out) :: coeff(-2:0)
     real(kind=8), intent(out),optional :: coeff_copy(-2:,:)
     real(kind=8) :: primitive(-2:0),expanded(-2:0),sij,ell,weight
@@ -488,7 +488,7 @@ contains
           massive_history=history_has_mass(integrated_history_list(ih))
           if (massive_history) then
              call massive_history_endpoint(integrated_history_list(ih),fi,fj,fp,p,&
-                  emitter,spectator,mu,expanded,parton,info)
+                  emitter,spectator,mu_ren,expanded,parton,info)
              if (info.ne.0) then
                 write(*,*) 'ERROR: massive integrated endpoint failed'
                 write(*,*) ' history/topology/fi/fj/fp/status:',ih,&
@@ -504,7 +504,7 @@ contains
           sij=abs(2d0*minkowski_dot(p(:,emitter),p(:,spectator)))
           if (sij.le.tiny(1d0)) cycle
           if (.not.massive_history) then
-             ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
+             ell=log(4d0*cs_pi*mu_ren*mu_ren/sij)-0.5772156649015328606d0
              expanded(-2)=primitive(-2)
              expanded(-1)=primitive(-1)+ell*primitive(-2)
              expanded(0)=primitive(0)+ell*primitive(-1)+&
@@ -551,10 +551,10 @@ contains
     enddo
   end subroutine integrated_endpoint
 
-  subroutine massive_history_endpoint(history,fi,fj,fp,p,emitter,spectator,mu,coeff,parton,info)
+  subroutine massive_history_endpoint(history,fi,fj,fp,p,emitter,spectator,mu_ren,coeff,parton,info)
     type(integrated_history), intent(in) :: history
     integer, intent(in) :: fi,fj,fp,emitter,spectator
-    real(kind=8), intent(in) :: p(0:,:),mu
+    real(kind=8), intent(in) :: p(0:,:),mu_ren
     real(kind=8), intent(out) :: coeff(-2:0)
     integer, intent(out) :: parton,info
     real(kind=8) :: sij,q2,ell
@@ -588,7 +588,7 @@ contains
        q2=history%parent_mass**2+history%spectator_mass**2+sij
        ! The explicit massive final--final formulae use Q_ik^2 as their
        ! dimensional scale, rather than 2 p_i.p_k.
-       ell=log(4d0*cs_pi*mu*mu/q2)-0.5772156649015328606d0
+       ell=log(4d0*cs_pi*mu_ren*mu_ren/q2)-0.5772156649015328606d0
        call cs_massive_ff_endpoint(parton,split,history%parent_mass,&
             history%spectator_mass,q2,ell,alpha_dipole(1),&
             integrated_dimensional_scheme,coeff,info)
@@ -599,7 +599,7 @@ contains
           info=-12
           return
        endif
-       ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
+       ell=log(4d0*cs_pi*mu_ren*mu_ren/sij)-0.5772156649015328606d0
        call cs_massive_fi_endpoint(history%parent_mass,sij,ell,&
             alpha_dipole(2),coeff,info)
     case (3)
@@ -609,7 +609,7 @@ contains
           info=-13
           return
        endif
-       ell=log(4d0*cs_pi*mu*mu/sij)-0.5772156649015328606d0
+       ell=log(4d0*cs_pi*mu_ren*mu_ren/sij)-0.5772156649015328606d0
        call cs_massive_if_endpoint(pa,pb,history%spectator_mass,sij,ell,&
             integrated_dimensional_scheme,integrated_n_active_flavours,coeff,info)
     case default
@@ -617,9 +617,10 @@ contains
     end select
   end subroutine massive_history_endpoint
 
-  subroutine integrated_beam(igroup,iproc,beam,z,hard_copy,xbj,mu_fac,alpha_s,pterm,kterm,pterm_copy,kterm_copy)
+  subroutine integrated_beam(igroup,iproc,beam,z,hard_copy,xbj,mu_ren,mu_fac,alpha_s,&
+       pterm,kterm,pterm_copy,kterm_copy)
     integer, intent(in) :: igroup,iproc,beam
-    real(kind=8), intent(in) :: z,hard_copy(:),xbj(2),mu_fac,alpha_s
+    real(kind=8), intent(in) :: z,hard_copy(:),xbj(2),mu_ren,mu_fac,alpha_s
     real(kind=8), intent(out) :: pterm,kterm
     real(kind=8), intent(out),optional :: pterm_copy(:),kterm_copy(:)
     type(cs_distribution) :: pk,kk,tilde_kernel,alpha_kernel
@@ -706,7 +707,7 @@ contains
                 sx=szone/z
                 call cs_massive_if_convolution(pa,pb,&
                      integrated_history_list(ih)%spectator_mass,sx,szone,z,&
-                     mu_fac*mu_fac/sx,mu_fac*mu_fac/szone,alpha_dipole(3),&
+                     mu_ren,mu_fac,alpha_dipole(3),&
                      integrated_n_active_flavours,massive_kernel,info)
                 if (info.eq.0) then
                    call cs_ap_distribution(pa,pb,z,integrated_n_active_flavours,&

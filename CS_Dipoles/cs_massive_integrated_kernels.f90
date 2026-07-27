@@ -9,7 +9,7 @@ module cs_massive_integrated_kernels
   ! multiplying g(1).  This is required by the massive-spectator kernels.
   use cs_dipole_mappings, only: dp
   use cs_integrated_kernels, only: cs_pi,cs_ca,cs_cf_lc,cs_cf_initial_qg,&
-       cs_tr_initial_lc,&
+       cs_tr_initial_lc,cs_gamma,&
        cs_parton_q,cs_parton_g,cs_scheme_hv,cs_scheme_fdh
   implicit none
   private
@@ -488,17 +488,21 @@ contains
     endif
   end subroutine if_endpoint_base
 
-  pure subroutine cs_massive_if_convolution(a,b,mk,s,szone,x,mu2_over_s,&
-       mu2_over_szone,alpha,nf,kernel,info)
+  pure subroutine cs_massive_if_convolution(a,b,mk,s,szone,x,mu_ren,mu_fac,&
+       alpha,nf,kernel,info)
     integer, intent(in) :: a,b,nf
-    real(dp), intent(in) :: mk,s,szone,x,mu2_over_s,mu2_over_szone,alpha
+    real(dp), intent(in) :: mk,s,szone,x,mu_ren,mu_fac,alpha
     type(cs_convolution_kernel), intent(out) :: kernel
     integer, intent(out) :: info
-    real(dp) :: m2,m2one,zp,l,lone,omx,core
+    real(dp) :: m2,m2one,zp,l,lone,log_ren_over_fac,omx,core
 
     kernel=cs_convolution_kernel()
     info=0
     if (mk <= 0.0_dp .or. s <= 0.0_dp .or. szone <= 0.0_dp) then
+       info=-1
+       return
+    endif
+    if (mu_ren <= 0.0_dp .or. mu_fac <= 0.0_dp) then
        info=-1
        return
     endif
@@ -518,8 +522,12 @@ contains
     m2one=mk*mk/szone
     omx=1.0_dp-x
     zp=omx/(omx+m2)
-    l=log(mu2_over_s)
-    lone=log(mu2_over_szone)
+    ! The finite initial-state convolution is factorised at mu_F.  The
+    ! reference formulae write L_R-log(mu_R^2/mu_F^2), which is exactly
+    ! log(mu_F^2/s) for the regular and plus-distribution terms.
+    l=log(mu_fac*mu_fac/s)
+    lone=log(mu_fac*mu_fac/szone)
+    log_ren_over_fac=log(mu_ren*mu_ren/(mu_fac*mu_fac))
 
     if (a == cs_parton_q .and. b == cs_parton_q) then
        kernel%regular=-cs_cf_lc*(-((-1.0_dp+x*x)*l)+&
@@ -536,6 +544,7 @@ contains
                2.0_dp*log((1.0_dp+alpha-x)*zp/&
                (alpha*(1.0_dp-x+zp)))/omx)
        endif
+       kernel%delta=cs_gamma(cs_parton_q,nf)*log_ren_over_fac
     elseif (a == cs_parton_q .and. b == cs_parton_g) then
        core=x*x-l*(2.0_dp+(-2.0_dp+x)*x)+&
             (2.0_dp+(-2.0_dp+x)*x)*log(omx)+&
@@ -574,6 +583,7 @@ contains
                2.0_dp*log(alpha*(1.0_dp-x+zp)/&
                ((1.0_dp+alpha-x)*zp))/omx)
        endif
+       kernel%delta=cs_gamma(cs_parton_g,nf)*log_ren_over_fac
     else
        info=-2
     endif

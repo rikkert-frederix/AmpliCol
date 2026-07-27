@@ -6,7 +6,7 @@ program massive_integrated_kernels_test
 
   real(kind=8), parameter :: tol=2d-10
   real(kind=8) :: c(-2:0),cref(-2:0),ell,q2,mi,mk,szone,sx,x,alpha
-  real(kind=8) :: mu2,expected,gz,g1,value
+  real(kind=8) :: mu2,mu_ren,mu_fac,expected,gz,g1,value
   type(cs_convolution_kernel) :: kernel,kernel_base
   type(cs_distribution) :: alpha_kernel
   integer :: info,a,b,split
@@ -87,13 +87,15 @@ program massive_integrated_kernels_test
        'massive FI plus endpoint')
 
   mk=173d0
+  mu_ren=sqrt(2.5d5)
+  mu_fac=mu_ren
   do a=cs_parton_q,cs_parton_g
      do b=cs_parton_q,cs_parton_g
         call cs_massive_if_endpoint(a,b,mk,szone,ell,cs_scheme_hv,5,c,info)
         call assert_status(info,'massive IF endpoint')
         call assert_finite(c,'massive IF endpoint')
         call cs_massive_if_convolution(a,b,mk,sx,szone,x,&
-             2.5d5/sx,2.5d5/szone,alpha,5,kernel,info)
+             mu_ren,mu_fac,alpha,5,kernel,info)
         call assert_status(info,'massive IF convolution')
         call assert_kernel_finite(kernel,'massive IF convolution')
      enddo
@@ -103,20 +105,22 @@ program massive_integrated_kernels_test
        cs_scheme_hv,5,c,info)
   call assert_vector_close(c,[1.5d0,0.108233297501044490d0,&
        0.590895114799644627d0],tol,'massive IF endpoint reference value')
+  mu_ren=sqrt(exp(ell)*szone)
+  mu_fac=mu_ren
   call cs_massive_if_convolution(cs_parton_q,cs_parton_q,mk,sx,szone,x,&
-       exp(ell)/x,exp(ell),alpha,5,kernel,info)
+       mu_ren,mu_fac,alpha,5,kernel,info)
   call assert_kernel_close(kernel,[3.01373022844279159d0,&
        -178.430858117428699d0,-175.268224965703638d0,0d0],tol,&
        'massive IF convolution reference value')
   call cs_massive_if_convolution(cs_parton_q,cs_parton_g,mk,sx,szone,x,&
-       exp(ell)/x,exp(ell),alpha,5,kernel,info)
+       mu_ren,mu_fac,alpha,5,kernel,info)
   ! This AmpliCol value includes the quark/gluon initial-state averaging
   ! ratio; integrated_beam subsequently applies the ordered 1/2 history
   ! weight.
   call assert_kernel_close(kernel,[-10.5641230665211356d0,0d0,0d0,0d0],&
        tol,'massive IF qg reference value')
   call cs_massive_if_convolution(cs_parton_g,cs_parton_q,mk,sx,szone,x,&
-       exp(ell)/x,exp(ell),alpha,5,kernel,info)
+       mu_ren,mu_fac,alpha,5,kernel,info)
   call assert_kernel_close(kernel,[-2.01588338840959258d0,0d0,0d0,0d0],&
        tol,'massive IF gq reference value')
   call cs_massive_if_endpoint(cs_parton_g,cs_parton_g,mk,szone,ell,&
@@ -124,10 +128,30 @@ program massive_integrated_kernels_test
   call assert_vector_close(c,[3d0,0.216466595002089979d0,&
        1.18179022959928925d0],tol,'massive IF gg endpoint reference value')
   call cs_massive_if_convolution(cs_parton_g,cs_parton_g,mk,sx,szone,x,&
-       exp(ell)/x,exp(ell),alpha,5,kernel,info)
+       mu_ren,mu_fac,alpha,5,kernel,info)
   call assert_kernel_close(kernel,[1.98477442794771974d0,&
        -356.861716234857397d0,-350.536449931407276d0,0d0],tol,&
        'massive IF gg reference value')
+
+  ! The massive IF reference formula contains a non-cancelling diagonal
+  ! delta term gamma_i log(mu_R^2/mu_F^2).  All regular and plus terms are
+  ! factorised at mu_F.
+  call cs_massive_if_convolution(cs_parton_q,cs_parton_q,mk,sx,szone,x,&
+       mu_fac,mu_fac,alpha,5,kernel_base,info)
+  call cs_massive_if_convolution(cs_parton_q,cs_parton_q,mk,sx,szone,x,&
+       2d0*mu_fac,mu_fac,alpha,5,kernel,info)
+  call assert_close(kernel%regular,kernel_base%regular,tol,'massive IF qq muF regular')
+  call assert_close(kernel%plus_z,kernel_base%plus_z,tol,'massive IF qq muF plus-z')
+  call assert_close(kernel%plus_one,kernel_base%plus_one,tol,'massive IF qq muF plus-one')
+  call assert_close(kernel%delta,cs_gamma(cs_parton_q,5)*log(4d0),tol,&
+       'massive IF qq muR/muF delta')
+  call cs_massive_if_convolution(cs_parton_g,cs_parton_g,mk,sx,szone,x,&
+       2d0*mu_fac,mu_fac,alpha,3,kernel,info)
+  call assert_close(kernel%delta,cs_gamma(cs_parton_g,3)*log(4d0),tol,&
+       'massive IF gg muR/muF delta')
+  call cs_massive_if_convolution(cs_parton_q,cs_parton_g,mk,sx,szone,x,&
+       2d0*mu_fac,mu_fac,alpha,5,kernel,info)
+  call assert_close(kernel%delta,0d0,tol,'massive IF off-diagonal muR/muF delta')
 
   call cs_massive_if_endpoint(cs_parton_q,cs_parton_q,mk,szone,ell,&
        cs_scheme_hv,5,cref,info)
@@ -146,10 +170,10 @@ program massive_integrated_kernels_test
   do a=cs_parton_q,cs_parton_g
      do b=cs_parton_q,cs_parton_g
         call cs_massive_if_convolution(a,b,1d-3,sx,szone,x,&
-             exp(ell)/x,exp(ell),alpha,5,kernel,info)
+             mu_ren,mu_fac,alpha,5,kernel,info)
         call assert_status(info,'massive IF alpha massless limit')
         call cs_massive_if_convolution(a,b,1d-3,sx,szone,x,&
-             exp(ell)/x,exp(ell),1d0,5,kernel_base,info)
+             mu_ren,mu_fac,1d0,5,kernel_base,info)
         call assert_status(info,'massive IF alpha-one massless limit')
         call cs_if_alpha_distribution(a,b,x,5,alpha,alpha_kernel,info)
         call assert_status(info,'massless IF alpha comparison')
@@ -161,7 +185,7 @@ program massive_integrated_kernels_test
   ! The generalized plus distribution must retain distinct z and endpoint
   ! values for a massive spectator.
   call cs_massive_if_convolution(cs_parton_q,cs_parton_q,mk,sx,szone,x,&
-       2.5d5/sx,2.5d5/szone,alpha,5,kernel,info)
+       sqrt(2.5d5),sqrt(2.5d5),alpha,5,kernel,info)
   call assert_true(abs(kernel%plus_z-kernel%plus_one).gt.1d-10,&
        'massive IF has distinct plus endpoint')
   gz=1.7d0

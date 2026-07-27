@@ -836,10 +836,11 @@ contains
              if (histogram_active .and. analysis_distinguishes_massless_qcd_flavours) then
                 allocate(pterm_copy(size(hard_copy)),kterm_copy(size(hard_copy)))
                 call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
-                     pgl(ichan)%ps(1)%xbjrk,scale_fac,alphas,pterm,kterm,pterm_copy,kterm_copy)
+                     pgl(ichan)%ps(1)%xbjrk,scale_ren,scale_fac,alphas,&
+                     pterm,kterm,pterm_copy,kterm_copy)
              else
                 call integrated_beam(ichan,eval_iint,integration_role-1,z,hard_copy,&
-                     pgl(ichan)%ps(1)%xbjrk,scale_fac,alphas,pterm,kterm)
+                     pgl(ichan)%ps(1)%xbjrk,scale_ren,scale_fac,alphas,pterm,kterm)
              endif
           endif
           f_components(6)=pterm
@@ -953,14 +954,14 @@ contains
     endif
   end subroutine report_subtraction_rejection
 
-  subroutine add_endpoint_for_process(igroup,iproc,mu,alpha_s,total)
+  subroutine add_endpoint_for_process(igroup,iproc,mu_ren,alpha_s,total)
     integer,intent(in) :: igroup,iproc
-    real(kind=8),intent(in) :: mu,alpha_s
+    real(kind=8),intent(in) :: mu_ren,alpha_s
     real(kind=8),intent(inout) :: total(-2:0)
     real(kind=8) :: one(-2:0)
     call integrated_endpoint(igroup,iproc,&
          pgl(igroup)%val_procs(1:pgl(igroup)%iden_iproc(iproc),iproc),&
-         pgl(igroup)%ps(1)%p,mu,alpha_s,one)
+         pgl(igroup)%ps(1)%p,mu_ren,alpha_s,one)
     total=total+one
   end subroutine add_endpoint_for_process
 

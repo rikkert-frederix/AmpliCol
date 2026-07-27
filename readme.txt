@@ -150,8 +150,10 @@ IF topologies, and an FF dipole in which both the quark emitter and spectator
 are massive. Massive unresolved partons and massive initial-state legs are not
 supported; a combined run stops during initialisation if such a history is
 encountered. The massive finite terms include the topology-specific alpha
-restriction and HV/FDH scheme terms. The current executable sets the
-renormalisation and factorisation scales equal.
+restriction and HV/FDH scheme terms. The current executable chooses equal
+renormalisation and factorisation scales, but the integrated equations retain
+their distinct mu_R and mu_F dependence (including the massive-IF finite
+scale-ratio term), so a later interface can vary them independently.
 Identical-flavour copies are expanded explicitly, and reduced histories are
 canonicalised onto the supplied Born leg and colour-order conventions before
 duplicate insertions are removed. At initialisation, purely massless
