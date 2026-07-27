@@ -98,7 +98,8 @@ contains
        write (*,'(a)') "  --help,           -h      : Show this message."
        write (*,'(a)') "  --process=[X],    -p=[X]  : Born process specified in file [X] (default is './processes.txt')."
        write (*,'(a)') "  --real-process=[X]         : Real-emission process file; integrates B + R-sum(D) in one run."
-       write (*,'(a)') "  --nevents=[X],    -n=[X]  : Number of unweighted events to generate; ignored with --accuracy (default is 10000)."
+       write (*,'(a)') "  --nevents=[X],    -n=[X]  : Number of unweighted events to generate; ignored with"// &
+            " --accuracy (default is 10000)."
        write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use "// &
             "-- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel."
        write (*,'(a)') "  --seed=[X],       -s=[X]  : The random number seed to use (default is read from randinit file)."
@@ -114,7 +115,8 @@ contains
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&
             "the absolute-envelope relative error is below [X] (0 < X < 1)."
-       write (*,'(a)') "  --alpha=[X]               : Real-dipole restriction; one value or four comma-separated values FF,FI,IF,II."
+       write (*,'(a)') "  --alpha=[X]               : Real-dipole restriction; one value or four comma-separated"// &
+            " values FF,FI,IF,II."
        write (*,'(a)') "  --dim-reg=[hv|fdh]        : Dimensional scheme for integrated dipoles (default: hv)."
        write (*,'(a)') ""
        stop

@@ -137,7 +137,8 @@ contains
        allocate(pgl(igroup_global)%phase_space_orders(1:next))
        allocate(pgl(igroup_global)%idenCOandMAPfactor(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%iden_iproc(1:pgl(igroup_global)%nproc))
-       allocate(pgl(igroup_global)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
+       allocate(pgl(igroup_global)%iden_processes(1:next,1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)), &
+            1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%val_procs(1:maxval(iden_iproc(1:pgl(igroup_global)%nproc)),1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%multichan%channels(1:max_channels,1:pgl(igroup_global)%nproc))
        allocate(pgl(igroup_global)%multichan%number_of_channels(1:pgl(igroup_global)%nproc))
