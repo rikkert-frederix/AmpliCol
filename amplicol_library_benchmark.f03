@@ -6,12 +6,15 @@ program amplicol_library_benchmark
   implicit none
 
   integer(kind=8) :: points, i
-  integer :: igroup, iint, ih, iproc, argc, j
+  integer :: igroup, iint, ih, iproc, argc, j, alias, fixed_ih, fixed_iproc
+  integer :: fixed_matches
   real(kind=8) :: t0, t1, t_eval, t_square, t_total
   real(kind=8),dimension(:,:),allocatable :: p
   complex(kind=8),dimension(:),allocatable :: amps, amps_save
   real(kind=8),dimension(:),allocatable :: amp2, amp2_hel
-  real(kind=8) :: checksum, norm_factor, selected_value
+  real(kind=8) :: checksum, norm_factor, selected_value, fixed_helicity_value
+  integer,dimension(:),allocatable :: requested_helicities
+  logical :: fixed_helicity_requested
   character(len=170) :: line,tmp
   character(len=1024) :: arg, momenta_file
   real(kind=8),parameter :: alpha_check=0.118d0
@@ -21,6 +24,7 @@ program amplicol_library_benchmark
   igroup = 1
   iint = 1
   momenta_file = ''
+  fixed_helicity_requested = .false.
 
   argc = command_argument_count()
   if (argc >= 1) then
@@ -52,6 +56,20 @@ program amplicol_library_benchmark
   if (iint < 1 .or. iint > size(pgl(igroup)%amps)) then
      write (*,*) 'invalid integral',iint,'n_integrals=',size(pgl(igroup)%amps)
      stop 1
+  endif
+  allocate(requested_helicities(pgl(igroup)%next))
+  requested_helicities = 0
+  if (argc > 4) then
+     if (argc /= 4 + pgl(igroup)%next) then
+        write (*,*) 'fixed-helicity probe expects one helicity per external leg'
+        write (*,*) 'received extra arguments',argc-4,'expected',pgl(igroup)%next
+        stop 1
+     endif
+     do j=1,pgl(igroup)%next
+        call get_command_argument(4+j,arg)
+        read(arg,*) requested_helicities(j)
+     enddo
+     fixed_helicity_requested = .true.
   endif
 
   allocate(p(0:3,pgl(igroup)%next))
@@ -92,6 +110,35 @@ program amplicol_library_benchmark
        *(2d0*4d0*pi*alphaEW)**pgl(igroup)%amps(iint)%n_sing(1)&
        /dble(pgl(igroup)%iden(iint))
   selected_value = norm_factor*amp2(1)
+  fixed_helicity_value = 0d0
+  if (fixed_helicity_requested) then
+     fixed_matches = 0
+     fixed_ih = 0
+     do ih=1,pgl(igroup)%amps(iint)%n_amps
+        do alias=1,pgl(igroup)%hel_fac(ih,iint)
+           if (all(pgl(igroup)%amps(iint)%spins(:,alias,ih).eq.&
+                requested_helicities)) then
+              fixed_matches = fixed_matches + 1
+              fixed_ih = ih
+           endif
+        enddo
+     enddo
+     if (fixed_matches /= 1) then
+        write (*,*) 'requested fixed helicity matched generated aliases',fixed_matches
+        stop 1
+     endif
+     if (keep_processes_separate) then
+        fixed_iproc = iint
+     else
+        fixed_iproc = 1
+        do while (fixed_iproc < pgl(igroup)%nproc .and.&
+             pgl(igroup)%amps(iint)%iproc_start(fixed_iproc+1) <= fixed_ih)
+           fixed_iproc = fixed_iproc + 1
+        enddo
+     endif
+     fixed_helicity_value = norm_factor*dble(amps(fixed_ih)*&
+          pgl(igroup)%col_fac(fixed_iproc)*dconjg(amps(fixed_ih)))
+  endif
 
   checksum = 0d0
   call cpu_time(t0)
@@ -136,6 +183,14 @@ program amplicol_library_benchmark
        pgl(igroup)%amps(iint)%n_sing(1)
   write (*,'(a,1x,es24.16)') &
        'AMPICOL_SELECTED_FLOW_PROBE_NORMALIZATION',norm_factor
+  if (fixed_helicity_requested) then
+     write (*,'(a,1x,i0,1x,*(i0,1x))') &
+          'AMPICOL_SELECTED_FLOW_PROBE_HELICITIES',pgl(igroup)%next,&
+          requested_helicities
+     write (*,'(a,1x,es24.16)') &
+          'AMPICOL_SELECTED_FLOW_PROBE_FIXED_HELICITY_VALUE',&
+          fixed_helicity_value
+  endif
   write (*,'(a)') repeat('-',78)
   write (*,'(a)') 'Timing summary                           seconds    percent  note'
   write (*,'(a)') repeat('-',78)

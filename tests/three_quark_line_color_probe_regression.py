@@ -303,12 +303,47 @@ def check_case(
         raise AssertionError(f"{case.process}: unexpected LC/NLC/full color matrices")
     if case.color_orders == 6:
         check_no_gluon_indexed_matrix(output, case)
-    for expected, actual in zip(case.components, parse_components(output), strict=True):
+    full_components = parse_components(output)
+    for expected, actual in zip(case.components, full_components, strict=True):
         if not math.isclose(actual, expected, rel_tol=1.0e-12, abs_tol=1.0e-24):
             raise AssertionError(
                 f"{case.process}: component differs: "
                 f"expected={expected}, actual={actual}"
             )
+
+    lc_output = run(
+        [
+            "./amplicol_color_probe",
+            "1",
+            str(group),
+            str(integral),
+            "lc",
+            "processes.txt",
+            str(momenta_file),
+            *(str(value) for value in case.helicities),
+        ],
+        cwd=repository,
+        env={**env, "AMPICOL_COLOR_PROBE_MATRIX": "1"},
+    )
+    expected_lc_matrix = {
+        "lc": case.matrix_entries["lc"],
+        "nlc": Counter(),
+        "full": Counter(),
+    }
+    if parse_matrix(lc_output) != expected_lc_matrix:
+        raise AssertionError(
+            f"{case.process}: sparse LC matrix differs from the generic result"
+        )
+    lc_components = parse_components(lc_output)
+    if not math.isclose(
+        lc_components[0],
+        full_components[0],
+        rel_tol=1.0e-12,
+        abs_tol=1.0e-24,
+    ) or lc_components[1:] != (0.0, 0.0):
+        raise AssertionError(
+            f"{case.process}: sparse LC contraction differs: {lc_components}"
+        )
     print(f"PASS {case.process}: {case.color_orders} all-flow color orders")
 
 

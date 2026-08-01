@@ -6,6 +6,7 @@ module amplitude_QCD_mod
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
   integer(kind=8),parameter :: max_three_line_color_orders=5000_8
+  logical :: allow_large_three_line_lc=.false.
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
      integer :: type,bin,n_vert,chirality
@@ -619,13 +620,15 @@ contains
       elseif (nq.eq.3) then
          color_orders_64=3_8*int(nglu+1,kind=8)*int(nglu+2,kind=8)
          do i=2,nglu
-            if (color_orders_64.gt.max_three_line_color_orders/int(i,kind=8)) then
+            if (.not.allow_large_three_line_lc .and.&
+                 color_orders_64.gt.max_three_line_color_orders/int(i,kind=8)) then
                color_orders_64=max_three_line_color_orders+1_8
                exit
             endif
             color_orders_64=color_orders_64*int(i,kind=8)
          enddo
-         if (color_orders_64.gt.max_three_line_color_orders) then
+         if (color_orders_64.gt.max_three_line_color_orders .and.&
+              .not.allow_large_three_line_lc) then
             write (*,*) 'Three-line colour basis exceeds supported size',&
                  color_orders_64,max_three_line_color_orders
             stop 1
@@ -2779,7 +2782,11 @@ contains
     nOrd=n-this%n_sing(iproc)
 
     if (this%n_qqbar(iproc).eq.3) then
-       call init_three_quark_line_colour_matrix()
+       if (col_acc.eq.0) then
+          call init_three_quark_line_lc_diagonal()
+       else
+          call init_three_quark_line_colour_matrix()
+       endif
        write (99,*) '... colour matrix initialised'
        return
     endif
@@ -2930,6 +2937,53 @@ contains
 
     write (99,*) '... colour matrix initialised'
   contains
+    subroutine init_three_quark_line_lc_diagonal()
+      ! At leading colour the physical three-line basis is diagonal with one
+      ! common coefficient.  Store only those n rows rather than materialising
+      ! the quadratic NLC/full Gram matrix.
+      implicit none
+      integer :: row,nrows
+      integer,dimension(:),allocatable :: flow_sign
+      integer,dimension(:,:),allocatable :: endpoints,ngluons
+      integer,dimension(:,:,:),allocatable :: gluons
+      real(kind=8),dimension(3) :: col_fac
+
+      nrows=this%nColOrd
+      if (this%n_amps.ne.nrows) then
+         write (*,*) 'Three-line colour basis does not match generated amplitudes',&
+              this%n_amps,nrows
+         stop 1
+      endif
+      allocate(endpoints(3,nrows))
+      allocate(ngluons(3,nrows))
+      allocate(gluons(nOrd,3,nrows))
+      allocate(flow_sign(nrows))
+      call build_three_line_flow_metadata(endpoints,ngluons,gluons,flow_sign)
+      call compute_three_line_color_factor(1,1,endpoints,ngluons,gluons,&
+           flow_sign,col_fac)
+      if (col_fac(1).eq.0d0) then
+         write (*,*) 'Three-line leading-colour diagonal is zero'
+         stop 1
+      endif
+
+      allocate(this%n_col_vals(3))
+      this%n_col_vals=(/1,0,0/)
+      allocate(this%diff_col_vals(1,3))
+      this%diff_col_vals=0d0
+      this%diff_col_vals(1,1)=col_fac(1)
+      allocate(this%i_col_i(1,3))
+      this%i_col_i=0
+      this%i_col_i(1,1)=1
+      allocate(this%row_index(0:nrows,1,3))
+      this%row_index=0
+      allocate(this%col_index(nrows+1))
+      this%col_index=0
+      do row=1,nrows
+         this%col_index(row+1)=row
+         this%row_index(row,1,1)=row
+      enddo
+    end subroutine init_three_quark_line_lc_diagonal
+
     subroutine init_three_quark_line_colour_matrix()
       ! Construct the colour Gram matrix directly from the open fundamental
       ! strings represented by each dual amplitude.  This is the generic

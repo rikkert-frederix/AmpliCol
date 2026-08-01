@@ -115,9 +115,11 @@ program amplicol_color_probe
   spin_init(1,1:n) = -9
 
   call cpu_time(t0)
+  allow_large_three_line_lc = col_acc.eq.0
   call amp%init(2,n,1,local_part,spin_init,local_order,phys_model,&
        pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
   call amp%init_col(n,col_acc)
+  allow_large_three_line_lc = .false.
   call cpu_time(t1)
   t_setup = t1 - t0
   if (print_matrix) call print_color_matrix()
