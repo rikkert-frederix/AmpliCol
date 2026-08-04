@@ -235,10 +235,10 @@ contains
           read(14) amps_save
           close(14)
           call evaluate_amp(igroup,iint,p,amps)
-          if (any(abs(amps_save-amps)/(abs(amps_save)+abs(amps)).gt.1d-8)) then
+          if (any(abs(amps_save-amps).gt.1d-20+1d-8*(abs(amps_save)+abs(amps)))) then
              write (*,*) 'Process library not compatible with saved amplitudes',igroup,iint
              do i=1,size(pgl(igroup)%amps(iint)%amps)
-                if (abs(amps_save(i)-amps(i))/(abs(amps_save(i))+abs(amps(i))).gt.1d-8) then
+                if (abs(amps_save(i)-amps(i)).gt.1d-20+1d-8*(abs(amps_save(i))+abs(amps(i)))) then
                    write (*,*) i,amps_save(i)
                    write (*,*) i,amps(i)
                 endif

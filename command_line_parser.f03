@@ -2,7 +2,8 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       timing,timing_sample)
+       amplicol_probe_points,amplicol_fixed_probe_points,amplicol_momenta_probe_points,&
+       amplicol_probe_quiet,timing,timing_sample)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
@@ -10,8 +11,9 @@ contains
     character(len=80) :: filename,library,tag,timing
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta 
-    integer :: me_points,timing_sample
+    logical :: read_momenta,amplicol_probe_quiet
+    integer :: me_points,amplicol_probe_points,amplicol_fixed_probe_points
+    integer :: amplicol_momenta_probe_points,timing_sample
 
     ! Default values:
     show_help=.false.
@@ -23,8 +25,15 @@ contains
     library='none'
     tag=''
     read_momenta=.false.
+    amplicol_probe_points=0
+    amplicol_fixed_probe_points=0
+    amplicol_momenta_probe_points=0
+    amplicol_probe_quiet=.false.
     timing='basic'
     timing_sample=100
+
+    call get_environment_variable("AMPICOL_PROBE_QUIET", tmp, status=i)
+    if (i.eq.0) call parse_boolish(tmp,amplicol_probe_quiet)
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -53,6 +62,24 @@ contains
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) me_points
           read_momenta=.true.
+       elseif (index(arg, "--amplicol_probe=").eq.1 .or. index(arg, "--amplicol-probe=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) amplicol_probe_points
+       elseif (index(arg, "--amplicol_fixed_probe=").eq.1 .or. &
+            index(arg, "--amplicol-fixed-probe=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) amplicol_fixed_probe_points
+       elseif (index(arg, "--amplicol_momenta_probe=").eq.1 .or. &
+            index(arg, "--amplicol-momenta-probe=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          read(tmp,*) amplicol_momenta_probe_points
+       elseif (arg.eq."--amplicol_probe_quiet" .or. &
+            arg.eq."--amplicol-probe-quiet") then
+          amplicol_probe_quiet=.true.
+       elseif (index(arg, "--amplicol_probe_quiet=").eq.1 .or. &
+            index(arg, "--amplicol-probe-quiet=").eq.1) then
+          tmp = arg(index(arg, "=")+1:)
+          call parse_boolish(tmp,amplicol_probe_quiet)
        elseif (index(arg, "--timing=").eq.1) then
           timing = arg(index(arg, "=")+1:)
        elseif (index(arg, "--timing-sample=").eq.1) then
@@ -81,10 +108,33 @@ contains
        write (*,'(a)') "  --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with with a tag '[X]_'."
        write (*,'(a)') "  --me_test=[X],    -mt=[X] : Perform ME level test against MG "//& 
             "with [X] points tested (single PS kinematics)"
-       write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
+       write (*,'(a)') "  --amplicol_probe=[X]      : Print [X] direct AmpliCol ME values and kinematics "//&
+            "without running MadGraph."
+       write (*,'(a)') "  --amplicol_fixed_probe=[X]: Print [X] direct AmpliCol ME values at a fixed "//&
+            "2-to-1 on-shell kinematic point. Currently supports q q~ > Z."
+       write (*,'(a)') "  --amplicol_momenta_probe=[X]: Print direct AmpliCol ME values using momenta "//&
+            "from Utilities/ME_checks/momenta_<group>_<integral>.txt, bypassing integration."
+       write (*,'(a)') "  --amplicol_probe_quiet   : Suppress per-point direct-probe ME/momentum stdout. "//&
+            "Can also be enabled with AMPICOL_PROBE_QUIET=1."
+       write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), detailed, or numeric "//&
+            "detailed timing sample."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') ""
        stop
     end if
   end subroutine parse_argument
+
+  subroutine parse_boolish(value,result)
+    implicit none
+    character(len=*),intent(in) :: value
+    logical,intent(out) :: result
+    character(len=256) :: local
+    local=trim(adjustl(value))
+    result=.true.
+    if (local.eq."" .or. local.eq."0" .or. local.eq."false" .or. local.eq."FALSE" .or. &
+         local.eq."False" .or. local.eq."no" .or. local.eq."NO" .or. local.eq."No" .or. &
+         local.eq."off" .or. local.eq."OFF" .or. local.eq."Off") then
+       result=.false.
+    endif
+  end subroutine parse_boolish
 end module argument_parser
