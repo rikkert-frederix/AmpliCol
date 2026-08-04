@@ -13,7 +13,7 @@ program amplicol_color_library_probe
   integer :: n_helicity_combinations
   integer :: irow, i, ic, icol, ioff, max_amp_size
   integer,dimension(:),allocatable :: hel, row_to_group, row_to_integral
-  integer,dimension(:),allocatable :: row_sign, lepton_list
+  integer,dimension(:),allocatable :: row_sign
   integer,dimension(:,:),allocatable :: local_part, local_order, spin_init, spin_loop
   integer,dimension(:,:),allocatable :: row_to_local
   integer,dimension(:,:),allocatable :: helicity_table, helicity_amp_index
@@ -24,9 +24,9 @@ program amplicol_color_library_probe
   complex(kind=8),dimension(:),allocatable :: colour_amps
   complex(kind=8),dimension(:,:),allocatable :: order_amps
   complex(kind=8) :: amp_col_c, amp2_c
-  character(len=1024) :: momenta_file
+  character(len=1024) :: momenta_file, arg
   character(len=32) :: color_arg, color_name
-  character(len=256) :: arg, env_value
+  character(len=256) :: env_value
   logical :: print_matrix
   real(kind=8),parameter :: alpha_check=0.118d0
   real(kind=8),parameter :: pi=3.14159265358979323846d0
@@ -101,10 +101,7 @@ program amplicol_color_library_probe
   spin_init(0,1:n) = 1
   spin_init(1,1:n) = -9
   call setup_local_spin_loop()
-  call build_lepton_list(local_part(1:n,1))
-
-  call colour_amp%init(2,n,1,local_part,spin_init,local_order,phys_model,&
-       lepton_list(1),lepton_list)
+  call colour_amp%init(2,n,1,local_part,spin_init,local_order,phys_model)
   call colour_amp%init_col(n,col_acc)
   if (print_matrix) call print_color_matrix()
   call build_row_to_integral()
@@ -272,31 +269,6 @@ contains
     enddo
     close(14)
   end subroutine read_legacy_probe_momenta
-
-  subroutine build_lepton_list(process)
-    implicit none
-    integer,dimension(n),intent(in) :: process
-    integer :: j, nl, nal, nlep
-    nlep = 0
-    do j=1,n
-       if (phys_model%is_lepton(process(j)) .or. &
-           phys_model%is_antilepton(process(j))) nlep = nlep + 1
-    enddo
-    allocate(lepton_list(1+2*nlep))
-    lepton_list = 0
-    lepton_list(1) = 2*nlep
-    nl = 0
-    nal = 0
-    do j=1,n
-       if (phys_model%is_lepton(process(j))) then
-          nl = nl + 1
-          lepton_list(nl+2) = j
-       elseif (phys_model%is_antilepton(process(j))) then
-          nal = nal + 1
-          lepton_list(nal+2) = -j
-       endif
-    enddo
-  end subroutine build_lepton_list
 
   subroutine setup_local_spin_loop()
     implicit none

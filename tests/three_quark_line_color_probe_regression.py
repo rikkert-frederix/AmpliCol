@@ -31,6 +31,8 @@ class Case:
 
 
 CASES = (
+    # Component values are independently cross-checked against pyAmpliCol's
+    # compiled and recurrence evaluators, including 32-decimal-digit precision.
     Case(
         process="d d~ > u u~ s s~",
         pdgs=(1, -1, 2, -2, 3, -3),
@@ -70,9 +72,9 @@ CASES = (
             "full": Counter({-18.0: 9, 6.0: 6, 27.0: 6}),
         },
         components=(
-            1.1063946294179874e-14,
-            6.482595953811198e-15,
-            6.482595953811198e-15,
+            1.3039052156690463e-14,
+            5.849282219821445e-15,
+            5.849282219821445e-15,
         ),
     ),
     Case(
@@ -120,9 +122,53 @@ CASES = (
             "full": Counter({16.0: 54, -48.0: 45, 72.0: 18}),
         },
         components=(
-            1.933598375456697e-12,
-            1.5674722235444195e-12,
-            1.5674722235444195e-12,
+            1.7878308543514494e-12,
+            8.295533767448123e-13,
+            8.295533767448123e-13,
+        ),
+    ),
+    Case(
+        process="d d~ > u u~ u u~",
+        pdgs=(1, -1, 2, -2, 2, -2),
+        helicities=(-1, 1, -1, 1, -1, 1),
+        momenta=(
+            (4671.200996478833, 0.0, 0.0, 4671.200996478833),
+            (5452.62449645975, 0.0, 0.0, -5452.62449645975),
+            (
+                3848.769685279069,
+                -1105.1428951212934,
+                -1737.2006769281086,
+                -3251.7412381317486,
+            ),
+            (
+                3660.1488063565753,
+                2228.296688374595,
+                1630.5712325370819,
+                2402.6278548445193,
+            ),
+            (
+                1275.9167404758375,
+                -470.2433927087442,
+                -436.62760397349416,
+                1102.8105076070963,
+            ),
+            (
+                1338.9902608271016,
+                -652.9104005445573,
+                543.2570483645209,
+                -1035.1206243007837,
+            ),
+        ),
+        color_orders=6,
+        matrix_entries={
+            "lc": Counter({27.0: 6}),
+            "nlc": Counter({-18.0: 9, 6.0: 6, 27.0: 6}),
+            "full": Counter({-18.0: 9, 6.0: 6, 27.0: 6}),
+        },
+        components=(
+            2.6038594934460394e-14,
+            1.3395024066340542e-14,
+            1.3395024066340542e-14,
         ),
     ),
 )
@@ -412,7 +458,8 @@ def main() -> int:
         with tempfile.TemporaryDirectory(
             dir="/tmp", prefix="amplicol-three-line-color-"
         ) as raw:
-            temporary = Path(raw)
+            temporary = Path(raw) / ("long-momenta-path-" + "x" * 80)
+            temporary.mkdir()
             for case in CASES:
                 check_case(repository, temporary, case, env)
             check_singlet_rejected(repository, temporary, env)

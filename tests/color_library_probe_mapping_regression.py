@@ -86,7 +86,12 @@ def main() -> int:
             env=env,
         )
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="amplicol-color-map-") as temporary:
-            momenta_file = Path(temporary) / "momenta.txt"
+            momenta_directory = Path(temporary)
+            for index in range(4):
+                momenta_directory /= f"long-path-{index}-" + "x" * 60
+                momenta_directory.mkdir()
+            momenta_file = momenta_directory / "momenta.txt"
+            assert len(str(momenta_file)) > 256
             for process, accuracies in CASES:
                 run(["make", "cleanlib"], cwd=repository, env=env)
                 run(

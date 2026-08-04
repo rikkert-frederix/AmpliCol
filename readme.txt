@@ -59,8 +59,13 @@ Amplicol code is a fortran code that can be compiled with
 
 make amplicol_generate
 
-This developer-oracle branch uses the bundled NNPDF 2.3 NLO QED grid and
-does not require an external LHAPDF installation.
+By default it requires 'LHAPDF' as an external dependency, with compile and
+link flags supplied by `lhapdf-config`. Developer tools that need a
+self-contained build can instead use the bundled NNPDF 2.3 NLO QED grid:
+
+make PDF_BACKEND=internal amplicol_generate
+
+Use `make clean` before switching PDF backends in an existing build tree.
 
 There is currently no "run_card" or "process_card" to set input
 parameters. All parameteres are hard-coded in the fortran code

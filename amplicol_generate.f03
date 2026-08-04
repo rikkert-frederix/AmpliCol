@@ -48,7 +48,13 @@ program amplicol_generate
   
   if (include_pdf .and. amplicol_momenta_probe_points.le.0 .and. &
        amplicol_fixed_probe_points.le.0) then
-     call PDF_initialise
+     if (use_lhapdf) then
+        call InitPDFsetbyname(trim(adjustl(lhapdfset)))
+        call initPDF(0)
+        call setlhaparm('SILENT')
+     else
+        call PDF_initialise
+     endif
   endif
   
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
@@ -141,8 +147,7 @@ program amplicol_generate
         do iamp=1,pgl(igroup)%nproc
            if (read_momenta) call run_madgraph_check(pgl(igroup)%next,igroup,iamp,pgl(igroup)%processes(1,iamp))
            call pgl(igroup)%amps(iamp)%init(1,pgl(igroup)%next,1,pgl(igroup)%processes(1,iamp),&
-                pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model,&
-                pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
+                pgl(igroup)%spin,pgl(igroup)%color_orders(1,iamp),phys_model)
            if (read_momenta) then
                    if (.not.allocated(p_read)) allocate(p_read(pgl(igroup)%next,0:3))
                    call read_in_momenta(pgl(igroup)%next,igroup,iamp,p_read)
@@ -153,8 +158,7 @@ program amplicol_generate
         enddo
      else
         call pgl(igroup)%amps(1)%init(1,pgl(igroup)%next,pgl(igroup)%nproc,pgl(igroup)%processes,&
-             pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model,&
-             pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
+             pgl(igroup)%spin,pgl(igroup)%color_orders,phys_model)
      endif
 
      if (timing_mode.eq.timing_detailed) then
@@ -614,6 +618,7 @@ contains
     integer :: ih,iproc
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     logical :: done,time_physics
+    real(kind=8),external :: alphaspdf
     time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
     if (create_amplitude_library) then
        if (pgl(ichan)%amps(iint)%lib_created) return
@@ -706,7 +711,11 @@ contains
     call set_scale(scale_choice,pgl(ichan)%next,pgl(ichan)%ps(1)%p,pgl(ichan)%processes(:,1),scale_ren)
     scale_fac=scale_ren
     scale_shower=scale_ren
-    alphas=alphas_Q(scale_ren,2,alphas_MZ)
+    if (use_lhapdf) then
+       alphas=alphaspdf(scale_ren)
+    else
+       alphas=alphas_Q(scale_ren,2,alphas_MZ)
+    endif
     
     ! MINT weight, phase-space jacobian and GeV -> pb conversion factor
     weight=vol*pgl(ichan)%ps(1)%jac*conv

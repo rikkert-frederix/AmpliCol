@@ -19,7 +19,8 @@ program amplicol_color_probe
   complex(kind=8) :: amp_col_c, amp2_c
   character(len=1024) :: process_file, momenta_file
   character(len=32) :: color_arg, color_name
-  character(len=256) :: arg, env_value
+  character(len=1024) :: arg
+  character(len=256) :: env_value
   logical :: print_matrix, fixed_helicity
   real(kind=8),parameter :: alpha_check=0.118d0
   real(kind=8),parameter :: pi=3.14159265358979323846d0
@@ -116,8 +117,7 @@ program amplicol_color_probe
 
   call cpu_time(t0)
   allow_large_three_line_lc = col_acc.eq.0
-  call amp%init(2,n,1,local_part,spin_init,local_order,phys_model,&
-       pgl(igroup)%lepton_list(1),pgl(igroup)%lepton_list)
+  call amp%init(2,n,1,local_part,spin_init,local_order,phys_model)
   call amp%init_col(n,col_acc)
   allow_large_three_line_lc = .false.
   call cpu_time(t1)
@@ -329,7 +329,8 @@ contains
   subroutine read_probe_momenta()
     implicit none
     integer :: j, momenta_unit, open_status
-    character(len=80) :: tmp, default_file
+    character(len=80) :: tmp
+    character(len=1024) :: default_file
     character(len=256) :: open_message
     if (len_trim(momenta_file) == 0) then
        write(tmp,*) igroup
