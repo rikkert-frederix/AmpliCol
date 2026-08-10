@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements update_matrix_cases update_matrix_goldens
+.PHONY: test_matrix_elements test_fermi_statistics update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -108,7 +108,10 @@ FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o part
 amplitude_QCD.o amplicol_reweight.o ranmar.o
 
 FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
-amplitude_QCD.o matrix_element_regression.o
+	amplitude_QCD.o matrix_element_regression.o
+
+FILES_M_TEST_FERMI = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+	amplitude_QCD.o fermi_statistics_regression.o
 
 # ----------------------------------------------------------------------
 # 5. Build executables
@@ -127,7 +130,13 @@ amplicol_reweight: $(FILES_M_RWGT_QCD)
 matrix_element_regression: $(FILES_M_TEST_ME)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_ME)
 
+fermi_statistics_regression: $(FILES_M_TEST_FERMI)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_FERMI)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+fermi_statistics_regression.o: tests/matrix_elements/fermi_statistics_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
@@ -138,6 +147,14 @@ tests/matrix_elements/golden.dat: matrix_element_regression tests/matrix_element
 
 test_matrix_elements: matrix_element_regression
 	./matrix_element_regression --check tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
+
+test_fermi_statistics: fermi_statistics_regression \
+		tests/matrix_elements/run_fermi_library_regression.py \
+		tests/matrix_elements/fermi_statistics_library_regression.f03
+	./fermi_statistics_regression
+	$(PYTHON) tests/matrix_elements/run_fermi_library_regression.py \
+		--generator $(CURDIR)/fermi_statistics_regression \
+		--compiler "$(FC)" --fflags="$(FFLAGS)"
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

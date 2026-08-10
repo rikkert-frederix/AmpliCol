@@ -506,6 +506,15 @@ contains
       allocate(this%processes(n,this%nprocs))
       allocate(this%n_qqbar(1:this%nprocs))
       this%processes(1:n,1:this%nprocs)=part(1:n,1:this%nprocs)
+      do iproc=2,this%nprocs
+         do i=1,n
+            if (pm%is_lepton_any(this%processes(i,iproc)) .neqv. &
+                 pm%is_lepton_any(this%processes(i,1))) then
+               write (*,*) 'Lepton positions must agree within a process group',i,iproc
+               stop 1
+            endif
+         enddo
+      enddo
       do iproc=1,this%nprocs
          this%n_qqbar(iproc)=number_of_quark_lines(this%processes(1,iproc))
       enddo
@@ -661,8 +670,10 @@ contains
       new_max_cur=2*max_cur
       allocate(tmp(new_max_cur))
       do ic=1,max_cur
-         allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
-         allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
+         if (allocated(current_list_local(ic)%vertices)) &
+              allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
+         if (allocated(current_list_local(ic)%vertex_sign)) &
+              allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
          tmp(ic)=current_list_local(ic)
       enddo
       do ic=1,max_cur
@@ -671,8 +682,10 @@ contains
       deallocate(current_list_local)
       allocate(current_list_local(new_max_cur))
       do ic=1,max_cur
-         allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
-         allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
+         if (allocated(tmp(ic)%vertices)) &
+              allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
+         if (allocated(tmp(ic)%vertex_sign)) &
+              allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
          current_list_local(ic)=tmp(ic)
       enddo
       do ic=1,max_cur
@@ -1098,21 +1111,55 @@ contains
       ! are made up of only gluons).
       implicit none
       logical,dimension(8) :: vertex_sign
+      logical :: lepton_sign
       integer :: i,ctype,ichir,nperm
       integer,dimension(0:isize) :: singlet_mv
       type(current),dimension(8) :: new_currents
+      ! External spinors are Grassmann odd.  The numerical wavefunctions used
+      ! below commute, so restore the sign needed to put the leptons contained
+      ! in the two child currents into one fixed (external-leg) order.
+      if (interaction_list_local(this%n_vert)%type.eq.22) then
+         ! The antilepton-lepton rule evaluates its spinor chain in the
+         ! opposite order; use that same order for the Grassmann factors.
+         lepton_sign=lepton_reordering_is_odd(ic2,ic1)
+      else
+         lepton_sign=lepton_reordering_is_odd(ic1,ic2)
+      endif
       if (.not.use_symmetry .or. this%imode.eq.1 .or. this%imode.eq.3) then
          new_currents(1)=combine_currents(ic1,ic2,ctype,ichir,singlet_mv,0)
          interaction_list_local(this%n_vert)%singlet_mv(0:isize)=singlet_mv(0:isize)
-         call add_current(.false.,new_currents(1))
+         call add_current(lepton_sign,new_currents(1))
          return
       endif
       ! Need to consider all the possible permutations
       call check_all_permutations(ctype,ichir,nperm,new_currents,vertex_sign)
       do i=1,nperm
-         call add_current(vertex_sign(i),new_currents(i))
+         call add_current(vertex_sign(i) .neqv. lepton_sign,new_currents(i))
       enddo
     end subroutine add_all_currents
+
+    logical function lepton_reordering_is_odd(current1,current2)
+      ! Return the parity of the permutation which changes
+      !
+      !   (leptons in current1), (leptons in current2)
+      !
+      ! into ascending external-leg order.  Applying this at every recursive
+      ! merge gives all diagrams the same external-fermion convention, including
+      ! diagrams with different pairings of identical leptons.
+      implicit none
+      integer,intent(in) :: current1,current2
+      integer :: i,j,ncross
+      ncross=0
+      do i=1,n
+         if (.not.btest(current_list_local(current1)%bin,i-1)) cycle
+         if (.not.pm%is_lepton_any(this%processes(i,1))) cycle
+         do j=1,i-1
+            if (.not.btest(current_list_local(current2)%bin,j-1)) cycle
+            if (pm%is_lepton_any(this%processes(j,1))) ncross=ncross+1
+         enddo
+      enddo
+      lepton_reordering_is_odd=mod(ncross,2).eq.1
+    end function lepton_reordering_is_odd
 
     subroutine check_all_permutations(ctype,ichir,nperm,new_currents,vertex_sign)
       ! If a current only contains (external) gluons, we can use symmetry to
@@ -1229,9 +1276,7 @@ contains
             if (new_current%chirality.ne.current_list_local(ic)%chirality) cycle
             if (new_current%bin.ne.current_list_local(ic)%bin) cycle
             if (new_current%ext_cur.ne.current_list_local(ic)%ext_cur) cycle
-            current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
-            current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
-            current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+            call append_current_vertex(ic,this%n_vert,vertex_sign)
             return
          enddo
          ! Need a new current
@@ -1292,11 +1337,36 @@ contains
             current_list_local(ic)%n_vert=0
          endif
          ! add the vertex to the current
-         current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
-         current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=this%n_vert
-         current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+         call append_current_vertex(ic,this%n_vert,vertex_sign)
       endif
     end subroutine add_current
+
+    subroutine append_current_vertex(ic,iv,vertex_sign)
+      implicit none
+      integer,intent(in) :: ic,iv
+      logical,intent(in) :: vertex_sign
+      integer :: old_capacity,new_capacity
+      integer,dimension(:),allocatable :: vertices
+      logical,dimension(:),allocatable :: vertex_signs
+
+      if (.not.allocated(current_list_local(ic)%vertices)) then
+         allocate(current_list_local(ic)%vertices(1))
+         allocate(current_list_local(ic)%vertex_sign(1))
+      elseif (current_list_local(ic)%n_vert.eq.size(current_list_local(ic)%vertices)) then
+         old_capacity=size(current_list_local(ic)%vertices)
+         new_capacity=max(1,2*old_capacity)
+         allocate(vertices(new_capacity),vertex_signs(new_capacity))
+         vertices(1:current_list_local(ic)%n_vert)=&
+              current_list_local(ic)%vertices(1:current_list_local(ic)%n_vert)
+         vertex_signs(1:current_list_local(ic)%n_vert)=&
+              current_list_local(ic)%vertex_sign(1:current_list_local(ic)%n_vert)
+         call move_alloc(vertices,current_list_local(ic)%vertices)
+         call move_alloc(vertex_signs,current_list_local(ic)%vertex_sign)
+      endif
+      current_list_local(ic)%n_vert=current_list_local(ic)%n_vert+1
+      current_list_local(ic)%vertices(current_list_local(ic)%n_vert)=iv
+      current_list_local(ic)%vertex_sign(current_list_local(ic)%n_vert)=vertex_sign
+    end subroutine append_current_vertex
 
     subroutine create_current_dict()
       ! Create a dictionary that uniquely gives every current a label. This
@@ -3132,14 +3202,17 @@ contains
     integer,dimension(n),intent(in)::hel
     character(len=170) :: line,tmp
     integer :: ip,ibin,i,isize,ih_in,ifinal,ic,iv,iamp,iproc,itype,j,ii,jj,idau,vkey
+    integer :: max_current_vertices
     integer :: chir1,chir2,chiri
     integer,dimension(0:24,0:8) :: icount
-    integer,dimension(150,11) :: icount_type
+    integer,dimension(:,:),allocatable :: icount_type
     integer,dimension(:,:),allocatable :: curs
     integer,dimension(:),allocatable :: pp
     real(kind=8),dimension(:),allocatable :: m,w
     integer,dimension(this%n_vert,0:24,0:8) :: cur1,cur2,int1,pp1,pp2
     real(kind=8),dimension(2,this%n_vert,0:24,0:8) :: coupl
+    max_current_vertices=max(1,maxval(this%current_list(:)%n_vert))
+    allocate(icount_type(max_current_vertices,11))
     write(tmp,*) igroup
     write(line,*) iint
     line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
@@ -3732,14 +3805,10 @@ contains
              write (*,*) 'not found:',this%current_list(ic)%type
              stop 1
           endif
-          if (this%current_list(ic)%n_vert.gt.150) then ! just use some large number here and below
-             write (*,*) 'Too many n_vert in creating library',this%current_list(ic)%n_vert,ic
-             stop 1
-          endif
           icount_type(this%current_list(ic)%n_vert,itype)=icount_type(this%current_list(ic)%n_vert,itype)+1
        enddo
 
-       do i=1,150
+       do i=1,max_current_vertices
           do j=1,11
              if (icount_type(i,j).eq.0) cycle
              write(tmp,*) isize
@@ -3756,7 +3825,7 @@ contains
        write(iunit,'(a)') ''
 
        
-       do i=1,150
+       do i=1,max_current_vertices
           do j=1,11
              if (icount_type(i,j).eq.0) cycle
 
@@ -3807,7 +3876,11 @@ contains
                 if (itype.ne.j) cycle
                 if (this%current_list(ic)%n_vert.ne.i) cycle
                 ii=ii+1
-                curs(1:i,ii)=this%current_list(ic)%vertices(1:i)
+                ! A negative label tells the generated library to subtract
+                ! this interaction when assembling the current.
+                curs(1:i,ii)=merge(-this%current_list(ic)%vertices(1:i),&
+                     this%current_list(ic)%vertices(1:i),&
+                     this%current_list(ic)%vertex_sign(1:i))
                 curs(0,ii)=ic
                 pp(ii)=this%pp_bin_to_i(this%current_list(ic)%bin)
                 m(ii)=this%current_list(ic)%mass
@@ -3916,13 +3989,17 @@ contains
              write(iunit,'(4x,a)') 'do i=1,'//trim(adjustl(tmp))
              write(tmp,*) i
              if (j.eq.6) then
-                write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*spread(sign(1,int1(1:'//trim(adjustl(tmp))//',i)),1,6),dim=2)'
              elseif (j.eq.5 .or. j.eq.7) then
-                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*sign(1,int1(1:'//trim(adjustl(tmp))//',i)))'
              elseif (j.ge.8 .and. j.le.11) then
-                write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*spread(sign(1,int1(1:'//trim(adjustl(tmp))//',i)),1,2),dim=2)'
              else
-                write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,abs(int1(1:'//trim(adjustl(tmp))//&
+                     ',i)))*spread(sign(1,int1(1:'//trim(adjustl(tmp))//',i)),1,4),dim=2)'
              endif
              if (j.eq.1 .and. isize.ne.n-1) then
                 write(iunit,'(6x,a)') 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
@@ -4036,6 +4113,7 @@ contains
     write(line,*) iint
     write(iunit,'(a)') 'end module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
     close(iunit)
+    deallocate(icount_type)
   end subroutine create_library
 
 
