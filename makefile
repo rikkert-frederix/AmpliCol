@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := amplicol_generate
 
 .PHONY: test_matrix_elements test_fermi_statistics test_three_quark_line_reweight \
-	update_matrix_cases update_matrix_goldens
+	test_three_quark_line_multichannel update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -172,6 +172,10 @@ test_three_quark_line_reweight: three_quark_line_reweight_regression \
 	./three_quark_line_reweight_regression
 	$(PYTHON) tests/matrix_elements/run_three_quark_line_reweight_regression.py \
 		--reweighter $(CURDIR)/amplicol_reweight
+
+test_three_quark_line_multichannel: \
+		process_list.py tests/process_list_three_quark_multichannel_regression.py
+	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

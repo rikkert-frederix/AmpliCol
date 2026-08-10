@@ -248,8 +248,12 @@ contains
        elseif (nq.eq.4 .or. nq.eq.6) then
           iq=1
           iaq=2
+          ! The first nq-1 slots hold alternating q/qbar endpoints.  Put
+          ! gluons next, then singlets, while the last antiquark closes the
+          ! order in slot next.  Using a fixed offset of four here overwrote
+          ! the third quark for six-quark processes with a singlet.
           ig=nq
-          is=ng+4
+          is=ng+nq
           do i=1,next
              if (phys_model%is_quark(pgl_unique%processes(i,iproc))) then
                 pgl_unique%color_orders(iq,iproc)=i

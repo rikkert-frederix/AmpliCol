@@ -73,6 +73,7 @@ program three_quark_line_reweight_regression
   call check_one_gluon()
   call check_photon()
   call check_identical_quarks()
+  call check_safe_multichannel_partner()
   write (*,'(a)') 'Three-quark-line reweight regression passed'
 
 contains
@@ -252,6 +253,49 @@ contains
     call check_quark_flavour_case([2,2,2,2,1,-1],&
          9.5640936205091913d-14,72d0,'two initial quarks')
   end subroutine check_identical_quarks
+
+  subroutine check_safe_multichannel_partner()
+    implicit none
+    type(amplitude_QCD) :: first_amp,second_amp
+    integer,dimension(n,1) :: partner_part,first_order,second_order
+    integer,dimension(0:3,n) :: partner_spin
+    integer,dimension(n) :: partner_hel
+    real(kind=dp),dimension(0:3,n) :: partner_p
+    real(kind=dp) :: first_squared,second_squared,scale
+
+    ! These are the two phase-space representatives paired by
+    ! process_list.py for u u > u u d d~.  Their exact coloured-leg string
+    ! contents are equal, so the imode=1 coefficients must agree at the same
+    ! labelled momentum point without permuting any external legs.
+    partner_part(:,1)=[2,2,2,2,1,-1]
+    first_order(:,1)=[4,1,3,2,5,6]
+    second_order(:,1)=[4,1,5,6,3,2]
+    partner_hel=[-1,1,-1,1,-1,1]
+    partner_spin=0
+    partner_spin(0,:)=1
+    partner_spin(1,:)=partner_hel
+    call fill_momenta(partner_p)
+
+    call first_amp%init(1,n,1,partner_part,partner_spin,first_order,model)
+    call second_amp%init(1,n,1,partner_part,partner_spin,second_order,model)
+    call first_amp%evaluate(n,partner_p,partner_hel,.false.,model)
+    call second_amp%evaluate(n,partner_p,partner_hel,.false.,model)
+    if (first_amp%n_amps.ne.1 .or. second_amp%n_amps.ne.1) then
+       write (*,*) 'Unexpected multichannel-partner amplitude multiplicity:',&
+            first_amp%n_amps,second_amp%n_amps
+       stop 1
+    endif
+    first_squared=abs(first_amp%amps(1))**2
+    second_squared=abs(second_amp%amps(1))**2
+    write (*,'(a,2es24.16)') 'THREE_LINE_SAFE_MC_PARTNER=',&
+         first_squared,second_squared
+    scale=max(first_squared,second_squared)
+    if (scale.lt.1d-30 .or. abs(first_squared-second_squared).gt.1d-12*scale) then
+       write (*,*) 'Safe three-line multichannel partners disagree:',&
+            first_squared,second_squared
+       stop 1
+    endif
+  end subroutine check_safe_multichannel_partner
 
   subroutine check_quark_flavour_case(process,madgraph_value,normalization,label)
     implicit none

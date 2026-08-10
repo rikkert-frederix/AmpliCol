@@ -79,8 +79,10 @@ contains
        found=.false.
        do i=1,nchans_group
           if (all_unique_channelgroups(0,i).ne.pgl%multichan%number_of_channels(iproc))cycle
-          if (all(all_unique_chans_inv(all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),i)).eq. &
-               pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc))) then
+          ! Stored channel groups use compact positions in all_unique_chans,
+          ! whereas pgl%multichan%channels still contains global group IDs.
+          if (all(all_unique_channelgroups(1:pgl%multichan%number_of_channels(iproc),i).eq. &
+               all_unique_chans_inv(pgl%multichan%channels(1:pgl%multichan%number_of_channels(iproc),iproc)))) then
              map_proc_to_group(iproc)=i
              found=.true.
              exit

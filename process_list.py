@@ -159,10 +159,11 @@ def ValidColorOrd(proc,perm):
             # have been already a quark earlier in the colour order:
             if found_antiquark or found_singlet or not found_quark:
                 return False
-            # UPDATE: Only remove duplicates from cyclic ordering. For
-            # three quark lines this will give two times as many dual
-            # amplitudes as we need; these will be taken care of
-            # through multi-channeling
+            # UPDATE: Only remove duplicates from cyclic ordering. For three
+            # quark lines this retains both orders of the two unanchored open
+            # strings. Later they become multichannel partners when they have
+            # the same fixed external-leg labelling; otherwise their old
+            # half-weight normalization is retained.
             if not found_first: return False
             found_antiquark = True
             found_quark = found_singlet = found_gluon = False
@@ -211,15 +212,28 @@ def second_tuple_index(tup):
 def OrderProcPerm(proc,perm):
     """Canonicalize a subprocess and its colour order.
 
-    Only final-state massless QCD particles are reordered. They are placed so
-    their colour-order positions are increasing after cyclically moving the
-    first incoming particle to the start. This reduces the number of distinct
-    phase-space parametrizations and increases the chance that equivalent
-    matrix elements are detected downstream.
+    For up to two quark lines, final-state massless QCD particles are relabelled
+    so their colour-order positions increase.  Three-line partner maps must
+    instead keep a common external-momentum labelling: only genuinely identical
+    final particles may be relabelled there.  Otherwise an alternate map would
+    evaluate its Jacobian for a different permutation of the target function.
     """
     # Start by bringing the colour order into the canonical frame.
     zero=perm.index(0)
     perm_mapped=list(perm[zero:]+perm[:zero]) # cyclicly permute
+    if count_matching_elements(proc,quarks) == 3:
+        for particle in all_coloured:
+            particle_positions = [
+                i for i, part in enumerate(proc) if i > 1 and part == particle
+            ]
+            positions_in_order = [
+                i for i, idx in enumerate(perm_mapped) if idx in particle_positions
+            ]
+            for i, val in zip(positions_in_order, sorted(particle_positions)):
+                perm_mapped[i] = val
+        perm_ordered=perm_mapped[len(perm)-zero:]+perm_mapped[:len(perm)-zero]
+        return tuple(proc),tuple(perm_ordered)
+
     elements_to_order=[]
     for i in perm_mapped:
         if proc[i] in massless_QCD and i > 1:
@@ -464,18 +478,92 @@ def IdenticalParticleSymmetryFactor(proc):
 
 def build_process_index():
     """Index ``(process, colour_order)`` pairs by phase-space-order number."""
+    process_order_to_index.clear()
     for i, key in enumerate(all_keys_sorted):
         for (process, order, _) in phase_space_orders[key]:
             process_order_to_index[(process, order)] = i
 
-def MultiChannelPartners(proc, perm, k, l):
-    """Attach multichannel partner phase-space orders to one subprocess row.
 
-    Colour-singlet particles can be assigned to different quark lines without
-    changing the matrix element. Those alternatives should therefore be sampled
-    as phase-space channels of the same contribution rather than counted as
-    independent matrix elements.
+def ThreeQuarkLineBlocks(proc, perm):
+    """Split ``perm`` into three strings, anchored on the one containing zero."""
+    quark_positions = [i for i, idx in enumerate(perm) if proc[idx] in quarks]
+    if len(quark_positions) != 3:
+        raise ValueError("three open colour strings require exactly three quarks")
+
+    zero_position = perm.index(0)
+    starts_before_zero = [i for i in quark_positions if i <= zero_position]
+    if starts_before_zero:
+        anchor_start = starts_before_zero[-1]
+    else:
+        anchor_start = quark_positions[-1]
+    anchored_order = perm[anchor_start:] + perm[:anchor_start]
+
+    blocks = []
+    for idx in anchored_order:
+        if proc[idx] in quarks:
+            blocks.append([])
+        if not blocks:
+            raise ValueError("colour order does not start on an open string")
+        blocks[-1].append(idx)
+    if len(blocks) != 3 or 0 not in blocks[0]:
+        raise ValueError("could not identify the colour string containing leg zero")
+    return tuple(tuple(block) for block in blocks)
+
+
+def SwapThreeQuarkLineOrder(proc, perm):
+    """Swap the two unanchored open colour strings in a three-line order.
+
+    Cyclic invariance fixes the string containing external leg zero.  The two
+    remaining strings are the redundant representations retained by
+    :func:`ValidColorOrd`.  Return the canonical process/order pair used by the
+    phase-space-group lookup.
     """
+    blocks = ThreeQuarkLineBlocks(proc, perm)
+
+    swapped_order = tuple(blocks[0] + blocks[2] + blocks[1])
+    return OrderProcPerm(proc, swapped_order)
+
+
+def ThreeQuarkLineBlockSignature(proc, perm):
+    """Return the exact coloured-leg strings represented by ``perm``.
+
+    The ordering of the three independent strings is irrelevant, but the leg
+    coloured-leg labels *within* every string are not.  Colour singlets are
+    deliberately omitted because their placements are already canonicalized by
+    the amplitude reader.  In particular, canonicalizing two identical final
+    coloured particles can move their momenta between strings.  Such a
+    relabelled ordering is not the same colour coefficient point by point and
+    must not be used as a multichannel partner without an explicit momentum
+    permutation.
+    """
+    blocks = ThreeQuarkLineBlocks(proc, perm)
+    return tuple(
+        sorted(tuple(idx for idx in block if proc[idx] in all_coloured)
+               for block in blocks)
+    )
+
+
+def LookupMultiChannelIndices(process_orders):
+    """Return the unique phase-space groups containing ``process_orders``."""
+    indices = []
+    for order, process in process_orders:
+        idx = process_order_to_index.get((process, order))
+        if idx is None:
+            raise ValueError(
+                "expected multichannel partner not found among phase-space "
+                f"orderings: {process} {order}"
+            )
+        if idx in indices:
+            raise ValueError(
+                "singlet permutations unexpectedly share phase-space group "
+                f"{idx}: {process} {order}"
+            )
+        indices.append(idx)
+    return tuple(sorted(indices))
+
+
+def SingletMultiChannelOrders(proc, perm):
+    """Return colour orders equivalent through singlet placement alone."""
     all_possible_perms = []
     singlet_indices = [perm.index(i) for i, p in enumerate(proc) if p in singlets]
     anti_quark_indices = tuple([perm.index(i) for i, p in enumerate(proc) if p in antiquarks])
@@ -493,13 +581,7 @@ def MultiChannelPartners(proc, perm, k, l):
     # the same matrix elements. These will be the multi-channel
     # partner processes. Currently, this is only based on the order of
     # the colour-singlets and how they are distributed among the
-    # colour-strings. For processes with three quark lines, each
-    # contribution is counted for twice. Hence, 'iden' should be set to
-    # two, so that their contribution is halved.
-    if len(anti_quark_indices) == 3:
-        iden=2.
-    else:
-        iden=1.
+    # colour-strings.
     if not singlet_perms:
         all_possible_perms.append((perm,proc))
     else:
@@ -555,25 +637,93 @@ def MultiChannelPartners(proc, perm, k, l):
                                 order.append(perm[i])
                         all_possible_perms.append((tuple(order),tuple(proc)))
 
-    # The possible permutations should be processes that are already
-    # included into other phase-space orderings. Look-up to which
-    # phase-space orders these permutations belong. These are the
-    # multi-channel partners.
-    mt = []
-    for (o,p) in all_possible_perms:
-        idx = process_order_to_index.get((p, o))
-        if idx is not None:
-            if idx in mt:
-                print("ERROR: found double. Each permutation should be unique for the multi-channel partners",p,o)
-                quit()
-            else:
-                mt.append(idx)
-        else:
-            print("ERROR: expected multi-channel partner not found among phase-space orderings",p,o)
-            quit()
+    return tuple(all_possible_perms)
+
+
+def MultiChannelPartners(proc, perm, k, l):
+    """Attach the original singlet-only multichannel metadata to one row."""
+    singlet_orders = SingletMultiChannelOrders(proc, perm)
+    mt = LookupMultiChannelIndices(singlet_orders)
+    anti_quark_count = sum(p in antiquarks for p in proc)
+    factor = 0.5 if anti_quark_count == 3 else 1.0
     # Overwrite the current proc+perm element with the one that also
     # includes the multi-channel partners:
-    phase_space_orders[k][l] = (proc, perm, tuple(sorted(mt)),1/iden)
+    phase_space_orders[k][l] = (proc, perm, mt, factor)
+
+
+def CombineThreeQuarkLineMultiChannels():
+    """Combine the two three-string representations into exact partner maps.
+
+    Start from the old normalization, in which each open-string ordering carries
+    one half and singlet placements are already multichannel partners.  Connected
+    components under singlet placement and pointwise-equivalent swaps of the two
+    unanchored strings are one physical coefficient.  Every phase-space map in
+    a component must carry the same *total* coefficient; otherwise unequal row
+    multiplicities can bias the pointwise Jacobian partition.  Rows sharing a
+    map therefore split the component weight between them.
+    """
+    nodes = []
+    node_index = {}
+    for channel, key in enumerate(all_keys_sorted):
+        for row_index, row in enumerate(phase_space_orders[key]):
+            process, order = row[:2]
+            node = len(nodes)
+            nodes.append((key, row_index, channel))
+            if (process, order) in node_index:
+                raise ValueError(f"duplicate process/order row: {process} {order}")
+            node_index[(process, order)] = node
+
+    parent = list(range(len(nodes)))
+
+    def find(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(first, second):
+        first = find(first)
+        second = find(second)
+        if first != second:
+            parent[second] = first
+
+    three_line_nodes = []
+    for node, (key, row_index, _) in enumerate(nodes):
+        process, order = phase_space_orders[key][row_index][:2]
+        if sum(p in antiquarks for p in process) != 3:
+            continue
+        three_line_nodes.append(node)
+        for partner_order, partner_process in SingletMultiChannelOrders(process, order):
+            union(node, node_index[(partner_process, partner_order)])
+        swapped_process, swapped_order = SwapThreeQuarkLineOrder(process, order)
+        # A canonical relabelling of identical final particles can change which
+        # momentum-labelled leg belongs to which open string.  Those rows agree
+        # only after permuting momenta, while the Fortran multichannel runtime
+        # evaluates every inverse map at the same momentum labels.  Combine only
+        # swaps that retain the exact three string contents.
+        if ThreeQuarkLineBlockSignature(process, order) == \
+                ThreeQuarkLineBlockSignature(swapped_process, swapped_order):
+            union(node, node_index[(swapped_process, swapped_order)])
+
+    components = {}
+    for node in three_line_nodes:
+        components.setdefault(find(node), []).append(node)
+
+    for component in components.values():
+        channels = tuple(sorted({nodes[node][2] for node in component}))
+        rows_per_channel = Counter(nodes[node][2] for node in component)
+        old_weight = math.fsum(
+            phase_space_orders[nodes[node][0]][nodes[node][1]][3]
+            / len(phase_space_orders[nodes[node][0]][nodes[node][1]][2])
+            for node in component
+        )
+
+        for node in component:
+            key, row_index, channel = nodes[node]
+            process, order = phase_space_orders[key][row_index][:2]
+            factor = old_weight / rows_per_channel[channel]
+            phase_space_orders[key][row_index] = (process, order, channels, factor)
+
 
 def DetermineMultiChannelPartnersAndSymmetryFactor():
     """Finalize each subprocess record with channels and symmetry factors."""
@@ -584,6 +734,7 @@ def DetermineMultiChannelPartnersAndSymmetryFactor():
     for key in all_keys_sorted:
         for i,(process,order,multichannel) in enumerate(phase_space_orders[key]):
             MultiChannelPartners(process,order,key,i)
+    CombineThreeQuarkLineMultiChannels()
     # Add the identical particle symmetry factor:
     for key in all_keys_sorted:
         for i,(process,order,multichannel,iden) in enumerate(phase_space_orders[key]):
