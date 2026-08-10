@@ -6,12 +6,14 @@ program simple_integrator_uncertainty_sampling_test
   integer,parameter :: event_first_iteration_points=2048
   integer :: accuracy_counts(nchannel,2),event_counts(nchannel,2)
   integer :: zero_counts_a(nchannel,2),zero_counts_b(nchannel,2),signed_counts(nchannel,2)
+  integer :: growth_counts(nchannel,2)
 
   call sample_second_iteration(.true.,accuracy_counts)
   call sample_second_iteration(.false.,event_counts)
   call sample_accuracy_pilot(1,.true.,zero_counts_a)
   call sample_accuracy_pilot(10000,.true.,zero_counts_b)
   call sample_accuracy_pilot(1,.false.,signed_counts)
+  call sample_quota_growth(growth_counts)
 
   call assert_true(sum(accuracy_counts(1,:)).gt.3*sum(accuracy_counts(2,:)),&
        'accuracy mode favours the channel with the largest uncertainty')
@@ -19,6 +21,8 @@ program simple_integrator_uncertainty_sampling_test
        'accuracy mode favours the integral with the largest uncertainty')
   call assert_true(all(accuracy_counts.gt.0),&
        'accuracy mode keeps every channel and integral active')
+  call assert_true(minval(accuracy_counts).ge.512,&
+       'accuracy mode reserves one quarter of the second iteration for exploration')
   call assert_true(maxval(event_counts).lt.1.2d0*minval(event_counts),&
        'event mode keeps rate-based balanced allocation')
   call assert_true(all(zero_counts_a.eq.1024) .and. all(zero_counts_b.eq.1024),&
@@ -27,6 +31,12 @@ program simple_integrator_uncertainty_sampling_test
        'accuracy allocation is independent of --nevents')
   call assert_true(all(signed_counts.eq.1024),&
        'signed cancellation does not affect absolute-envelope pilot allocation')
+  call assert_true(minval(growth_counts).ge.1024,&
+       'accuracy exploration remains active after the pilot iteration')
+  call assert_true(growth_counts(2,2).le.8192,&
+       'a newly noisy leaf cannot grow by more than sixteen times in one iteration')
+  call assert_true(growth_counts(2,2).gt.max(growth_counts(1,1),growth_counts(2,1),growth_counts(1,2)),&
+       'the growth cap still lets the newly noisy leaf receive the largest quota')
 
   write(*,'(a)') 'simple integrator uncertainty sampling test: PASS'
 
@@ -139,6 +149,38 @@ contains
     endif
     close(99)
   end subroutine sample_accuracy_pilot
+
+  subroutine sample_quota_growth(counts)
+    integer,intent(out) :: counts(nchannel,2)
+    type(integrator) :: integ
+    integer :: ichan,iint,stage
+    integer :: ndim(nchannel),ndim_extra(nchannel),nintegral(nchannel)
+    real(kind=8) :: f(1),f_abs(1)
+    logical :: to_write(1),done,iteration_finished
+
+    ndim=1
+    ndim_extra=0
+    nintegral=2
+    open(unit=99,status='scratch',action='readwrite')
+    call integ%init(nchannel,ndim,ndim_extra,nintegral,1,3,accuracy=1d-12)
+    counts=0
+    stage=1
+    done=.false.
+    do while (.not.done)
+       call integ%get_points(1,ichan,iint)
+       if ((stage.eq.1 .and. ichan.eq.1 .and. iint.eq.1) .or. &
+            (stage.eq.2 .and. ichan.eq.2 .and. iint.eq.2)) then
+          f_abs(1)=0.5d0+integ%x(1,1)
+       else
+          f_abs(1)=1d0
+       endif
+       f=f_abs
+       if (stage.eq.3) counts(ichan,iint)=counts(ichan,iint)+1
+       call integ%fill_points(1,f_abs,f,to_write,done,iteration_finished=iteration_finished)
+       if (iteration_finished) stage=stage+1
+    enddo
+    close(99)
+  end subroutine sample_quota_growth
 
   subroutine test_integrand(x,ichan,iint,value)
     real(kind=8),intent(in) :: x

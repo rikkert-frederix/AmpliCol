@@ -2,15 +2,16 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       limit_test,timing,timing_sample,accuracy,alpha_dipole,dim_reg_scheme,has_real_process)
+       limit_test,timing,timing_sample,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
+       tail_replay_file,replay_tail)
     integer :: i
     character(len=256) :: arg
-    character(len=256) :: input_file,tmp
+    character(len=256) :: input_file,tmp,tail_replay_file
     logical :: verbose, show_help
     character(len=80) :: filename,real_filename,library,tag,timing,dim_reg_scheme
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
-    logical :: read_momenta,limit_test,has_real_process
+    logical :: read_momenta,limit_test,has_real_process,replay_tail
     integer :: me_points,timing_sample
     real(kind=8) :: accuracy,alpha_dipole(4)
 
@@ -27,6 +28,8 @@ contains
     read_momenta=.false.
     limit_test=.false.
     has_real_process=.false.
+    tail_replay_file=''
+    replay_tail=.false.
     timing='basic'
     timing_sample=100
     accuracy=0d0
@@ -85,6 +88,9 @@ contains
           call parse_alpha(tmp,alpha_dipole)
        elseif (index(arg, "--dim-reg=").eq.1) then
           dim_reg_scheme=trim(adjustl(arg(index(arg, "=")+1:)))
+       elseif (index(arg, "--tail-replay=").eq.1) then
+          tail_replay_file=trim(adjustl(arg(index(arg, "=")+1:)))
+          replay_tail=.true.
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -118,6 +124,7 @@ contains
        write (*,'(a)') "  --alpha=[X]               : Real-dipole restriction; one value or four comma-separated"// &
             " values FF,FI,IF,II."
        write (*,'(a)') "  --dim-reg=[hv|fdh]        : Dimensional scheme for integrated dipoles (default: hv)."
+       write (*,'(a)') "  --tail-replay=[FILE]      : Re-evaluate the saved maximum-weight point in FILE and exit."
        write (*,'(a)') ""
        stop
     end if

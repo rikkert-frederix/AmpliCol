@@ -89,6 +89,7 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
   --me_test=[X],    -mt=[X] : Perform ME-level test against MG with [X] points tested (single PS kinematics)
   --limit_test,     -lt     : Test soft and collinear Catani-Seymour limits and exit.
+  --tail-replay=[FILE]      : Re-evaluate the saved maximum-weight real-subtraction point and exit.
 *****************************
 
 Most important are the '--nevents=X' to set the number of events to
@@ -130,7 +131,25 @@ integral and one P+K convolution integral for each incoming beam, all in that
 same run. It requires '--accuracy=X' and does not produce unweighted events.
 The final report lists Born, R-sum(D), the three Laurent coefficients of I,
 P, K, and the finite subtotal B+(R-D)+I0+P+K. The virtual term is not
-included. Integrated histories are constructed exclusively from the local
+included. Accuracy-only allocation reserves 25% of every post-pilot iteration
+for uniform exploration across channel/integral leaves; the remaining points
+follow the measured variances. A leaf quota may grow by at most a factor of 16
+per iteration. These safeguards affect sampling only and never clip or modify
+an integration weight.
+
+Combined runs retain separate top-eight lists for the signed real-subtraction
+residual and the individual R/D counterevent envelope in
+`Outputs/<tag>_tail_diagnostics.log`. Each record contains the random
+coordinates, momenta, real matrix element, individual dipoles, alpha cut
+variables, mapped-cut decisions, PDF/phase-space factors, and its contribution
+to the second moment. Compact fixtures for the global component and residual
+maxima are written to `Outputs/<tag>_tail_replay.dat` and
+`Outputs/<tag>_tail_residual_replay.dat`. Re-run with the original process,
+phase-space and alpha arguments plus `--tail-replay=FILE` to reproduce either
+point; each fixture retains its historical multichannel sampling factors, and
+the executable verifies the signed weight before exiting.
+
+Integrated histories are constructed exclusively from the local
 dipoles and are checked against the supplied Born processes and leading-colour
 orders. The supported dimensional schemes are HV (default) and FDH, selected
 with '--dim-reg=hv' or '--dim-reg=fdh'.

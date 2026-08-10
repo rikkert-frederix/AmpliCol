@@ -18,17 +18,34 @@ program amplicol_generate
   use amplitude_library
   use mg_checks
   use subtraction
+  use cs_dipole_mappings, only: cs_dipole_topology
   use cs_lc_spin_dipoles, only: dipole_status_is_numerical
   use integrated_dipoles
   use integration_histograms, only: histogram_initialize,histogram_begin_point,&
        histogram_commit_point,histogram_finalize_iteration,histogram_write
   use integration_analysis, only: analysis_begin,analysis_fill,analysis_distinguishes_massless_qcd_flavours
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
+  integer,parameter :: n_tail_records=8
+  type :: tail_record
+     logical :: valid=.false.,real_pass=.false.
+     integer :: ichan=0,iint=0,iteration=0
+     integer(kind=8) :: point=0_8
+     real(kind=8) :: score=0d0,residual_score=0d0,component_score=0d0
+     real(kind=8) :: f=0d0,f_abs=0d0,grid_volume=0d0,phase_space_jacobian=0d0
+     real(kind=8) :: matrix_real=0d0,dipole_sum=0d0,matrix_residual=0d0
+     real(kind=8) :: common_weight=0d0,physical_factor=0d0,counterevent_scale=0d0
+     real(kind=8) :: renormalization_scale=0d0,alpha_s_value=0d0
+     real(kind=8),allocatable :: x(:),momenta(:,:),dipole_values(:),alpha_variables(:)
+     integer,allocatable :: process(:),dipole_ijk(:,:),dipole_topology(:)
+     logical,allocatable :: alpha_active(:),active(:),passes_cuts(:)
+  end type tail_record
   integer :: iproc
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
   character(len=80) :: filename,real_filename,logfile,limit_logfile,tag
+  character(len=256) :: tail_logfile,tail_replay_output,tail_residual_replay_output,tail_replay_file
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
@@ -50,12 +67,17 @@ program amplicol_generate
   character(len=5) :: zone
   character(len=19) :: formatted
   logical :: create_amplitude_library,use_amplitude_library,read_momenta,limit_test,has_real_process
-  logical :: limits_ok
+  logical :: limits_ok,replay_tail,tail_tracking_enabled
   logical :: timing_enabled,time_detail_point,time_point_sample
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
   real(kind=8) :: accuracy
   character(len=80) :: dim_reg_scheme
+  type(tail_record),allocatable :: tail_residual_records(:,:,:),tail_component_records(:,:,:)
+  integer(kind=8),allocatable :: tail_npoints(:,:)
+  real(kind=8),allocatable :: tail_residual_sum2(:,:),tail_component_sum2(:,:)
+  integer :: tail_iteration
+  real(kind=8) :: tail_global_score,tail_global_residual_score
 
   call get_run_arguments()
   timing_enabled=timing_mode.ne.timing_none
@@ -285,7 +307,15 @@ program amplicol_generate
      call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
           integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),naux=7)
   endif
+  tail_tracking_enabled=has_real_process .and. .not.replay_tail
+  if (tail_tracking_enabled) call initialize_tail_diagnostics()
   histogram_active=accuracy.gt.0d0 .and. .not.limit_test .and. .not.read_momenta
+  main_run: block
+  if (replay_tail) then
+     histogram_active=.false.
+     call replay_saved_tail_point()
+     exit main_run
+  endif
   if (histogram_active) then
      filename='Outputs/'//trim(adjustl(tag))//'histograms.HwU'
      call histogram_initialize(nintegrals,has_real_process,filename)
@@ -375,6 +405,10 @@ program amplicol_generate
      call simple_integrator%fill_points(1,f_abs,f,to_write,done,f_aux=f_aux,&
           iteration_finished=iteration_finished)
      if (histogram_active .and. iteration_finished) call histogram_finalize_iteration()
+     if (tail_tracking_enabled .and. iteration_finished) then
+        tail_iteration=tail_iteration+1
+        call write_tail_diagnostics()
+     endif
      if (time_detail_point) then
         call cpu_time(tSampleAfter)
         t_Int_fill=t_Int_fill+(tSampleAfter-tSampleBefore)*dble(timing_sample)
@@ -406,6 +440,7 @@ program amplicol_generate
      if (done) exit
   enddo
   if (histogram_active) call histogram_write()
+  if (tail_tracking_enabled) call write_tail_diagnostics()
   if (timing_enabled) then
      call cpu_time(tLoopAfter)
      t_Int_loop=t_Int_loop+tLoopAfter-tLoopBefore
@@ -453,6 +488,7 @@ program amplicol_generate
      call print_timing(6)
      call print_timing(99)
   endif
+  end block main_run
   close(99)
   
 contains
@@ -559,7 +595,7 @@ contains
     if (sampled) residual_note='residual'
   end function residual_note
 
-  subroutine integrand(ichan,iint,x,vol,f,f_abs,f_components)
+  subroutine integrand(ichan,iint,x,vol,f,f_abs,f_components,replay_physical_factor,replay_counter_scale)
     use scales
     use amp_lib
     implicit none
@@ -568,12 +604,13 @@ contains
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
     real(kind=8),intent(out) :: f_components(7)
+    real(kind=8),intent(in),optional :: replay_physical_factor,replay_counter_scale
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
     integer :: ih,iproc,eval_iint,integration_role,icopy,idip
     integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
-    real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z,real_hist_factor
+    real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z,real_hist_factor,real_counter_scale
     real(kind=8),allocatable :: dipole_values(:),real_hist_weights(:)
     real(kind=8),allocatable :: icoeff_copy(:,:),pterm_copy(:),kterm_copy(:)
     integer :: mapped_process(pgl(ichan)%next-1)
@@ -733,16 +770,26 @@ contains
     endif
 
     if (keep_processes_separate) then
-       if (histogram_active .and. pgl(ichan)%is_subtracted_real) then
+       if (pgl(ichan)%is_subtracted_real) then
           ! R and every local counterevent have the same phase-space,
           ! coupling, PDF, identity, and multichannel prefactor.  Evaluate
           ! that factor once instead of evolving the PDFs for every dipole.
+          ! This path is also used by deterministic tail replay.
           allocate(real_hist_weights(pgl(ichan)%iden_iproc(eval_iint)))
           call physical_matrix_weight(ichan,eval_iint,1d0,weight,&
                colour_singlet_multichannel_weight(eval_iint),real_hist_weights)
           real_hist_factor=sum(real_hist_weights)
+          real_counter_scale=sum(abs(real_hist_weights))
+          if (present(replay_physical_factor) .or. present(replay_counter_scale)) then
+             if (.not.(present(replay_physical_factor) .and. present(replay_counter_scale))) then
+                write(*,*) 'ERROR: tail replay requires both saved real-emission sampling factors'
+                stop 1
+             endif
+             real_hist_factor=replay_physical_factor
+             real_counter_scale=replay_counter_scale
+          endif
           f=amp2_integrand*real_hist_factor
-          f_abs=abs(amp2_integrand)*sum(abs(real_hist_weights))
+          f_abs=abs(amp2_integrand)*real_counter_scale
        else
           val(1)=amp2_integrand*weight/dble(pgl(ichan)%iden(eval_iint))
           val(1)=val(1)*colour_singlet_multichannel_weight(eval_iint)
@@ -791,6 +838,10 @@ contains
                      -dipole_values(idip)*real_hist_factor,0d0)
              endif
           enddo
+       endif
+       if (tail_tracking_enabled) then
+          call consider_tail_point(ichan,eval_iint,x,vol,f,f_abs,pgl(ichan)%amp2(1),&
+               amp2_dip,amp2_integrand,weight,real_hist_factor,real_counter_scale,real_pass,dipole_values)
        endif
     elseif (has_real_process) then
        if (integration_role.eq.1) then
@@ -898,6 +949,380 @@ contains
     endif
     result=pgl(ichan)%val_procs(1:pgl(ichan)%iden_iproc(iint),iint)
   end subroutine physical_matrix_weight
+
+  subroutine initialize_tail_diagnostics()
+    implicit none
+    integer :: max_integrals,unit
+    max_integrals=maxval(pgl(1:ngroups)%nproc)
+    allocate(tail_residual_records(n_tail_records,ngroups,max_integrals))
+    allocate(tail_component_records(n_tail_records,ngroups,max_integrals))
+    allocate(tail_npoints(ngroups,max_integrals))
+    allocate(tail_residual_sum2(ngroups,max_integrals),tail_component_sum2(ngroups,max_integrals))
+    tail_residual_records%valid=.false.
+    tail_component_records%valid=.false.
+    tail_npoints=0_8
+    tail_residual_sum2=0d0
+    tail_component_sum2=0d0
+    tail_iteration=0
+    tail_global_score=-1d0
+    tail_global_residual_score=-1d0
+    timing_point=0_8
+    tail_logfile='Outputs/'//trim(adjustl(tag))//'tail_diagnostics.log'
+    tail_replay_output='Outputs/'//trim(adjustl(tag))//'tail_replay.dat'
+    tail_residual_replay_output='Outputs/'//trim(adjustl(tag))//'tail_residual_replay.dat'
+    ! A run that terminates before accepting a real point must not leave a
+    ! replay fixture from an older run with the same tag.
+    if (.not.replay_tail) then
+       open(newunit=unit,file=trim(tail_replay_output),status='replace',action='write')
+       close(unit,status='delete')
+       open(newunit=unit,file=trim(tail_residual_replay_output),status='replace',action='write')
+       close(unit,status='delete')
+    endif
+    call write_tail_diagnostics()
+  end subroutine initialize_tail_diagnostics
+
+  subroutine consider_tail_point(ichan,iint,x,vol,f_point,f_abs_point,matrix_real,dipole_sum,&
+       matrix_residual,common_weight,physical_factor,counterevent_scale,real_pass,dipole_values)
+    implicit none
+    integer,intent(in) :: ichan,iint
+    real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,matrix_real,dipole_sum,matrix_residual
+    real(kind=8),intent(in) :: common_weight,physical_factor,counterevent_scale,dipole_values(:)
+    logical,intent(in) :: real_pass
+    integer :: residual_slot,component_slot
+    real(kind=8) :: score,residual_score,component_score
+
+    residual_score=abs(f_point)
+    component_score=0d0
+    if (real_pass) component_score=abs(matrix_real)*counterevent_scale
+    if (size(dipole_values).gt.0) then
+       component_score=max(component_score,maxval(abs(dipole_values))*counterevent_scale)
+    endif
+    score=max(residual_score,component_score)
+    if (.not.ieee_is_finite(score)) then
+       write(*,*) 'ERROR: non-finite subtracted-real tail score:',ichan,iint,score
+       write(99,*) 'ERROR: non-finite subtracted-real tail score:',ichan,iint,score
+       stop 1
+    endif
+
+    tail_npoints(ichan,iint)=tail_npoints(ichan,iint)+1_8
+    tail_residual_sum2(ichan,iint)=tail_residual_sum2(ichan,iint)+f_point*f_point
+    tail_component_sum2(ichan,iint)=tail_component_sum2(ichan,iint)+component_score*component_score
+    if (score.le.0d0) return
+
+    residual_slot=find_tail_record_slot(tail_residual_records(:,ichan,iint),residual_score,.true.)
+    component_slot=find_tail_record_slot(tail_component_records(:,ichan,iint),component_score,.false.)
+    if (residual_slot.ne.0) then
+       call save_tail_record(tail_residual_records(residual_slot,ichan,iint),ichan,iint,x,vol,f_point,f_abs_point,&
+            matrix_real,dipole_sum,matrix_residual,common_weight,physical_factor,counterevent_scale,&
+            real_pass,dipole_values,residual_score,component_score,score)
+    endif
+    if (component_slot.ne.0) then
+       call save_tail_record(tail_component_records(component_slot,ichan,iint),ichan,iint,x,vol,f_point,f_abs_point,&
+            matrix_real,dipole_sum,matrix_residual,common_weight,physical_factor,counterevent_scale,&
+            real_pass,dipole_values,residual_score,component_score,score)
+    endif
+    if (score.gt.tail_global_score) then
+       tail_global_score=score
+       if (.not.replay_tail) then
+          call write_tail_replay_point(tail_replay_output,ichan,iint,x,vol,f_point,f_abs_point,score,&
+               physical_factor,counterevent_scale)
+       endif
+    endif
+    if (residual_score.gt.tail_global_residual_score) then
+       tail_global_residual_score=residual_score
+       if (.not.replay_tail) then
+          call write_tail_replay_point(tail_residual_replay_output,ichan,iint,x,vol,f_point,f_abs_point,&
+               residual_score,physical_factor,counterevent_scale)
+       endif
+    endif
+  end subroutine consider_tail_point
+
+  integer function find_tail_record_slot(records,key,use_residual) result(slot)
+    implicit none
+    type(tail_record),intent(in) :: records(:)
+    real(kind=8),intent(in) :: key
+    logical,intent(in) :: use_residual
+    integer :: irecord
+    real(kind=8) :: record_key,min_key
+
+    slot=0
+    if (key.le.0d0) return
+    min_key=huge(1d0)
+    do irecord=1,size(records)
+       if (.not.records(irecord)%valid) then
+          slot=irecord
+          return
+       endif
+       if (use_residual) then
+          record_key=records(irecord)%residual_score
+       else
+          record_key=records(irecord)%component_score
+       endif
+       if (record_key.lt.min_key) then
+          min_key=record_key
+          slot=irecord
+       endif
+    enddo
+    if (key.le.min_key) slot=0
+  end function find_tail_record_slot
+
+  subroutine save_tail_record(record,ichan,iint,x,vol,f_point,f_abs_point,matrix_real,dipole_sum,&
+       matrix_residual,common_weight,physical_factor,counterevent_scale,real_pass,dipole_values,&
+       residual_score,component_score,score)
+    implicit none
+    type(tail_record),intent(inout) :: record
+    integer,intent(in) :: ichan,iint
+    real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,matrix_real,dipole_sum,matrix_residual
+    real(kind=8),intent(in) :: common_weight,physical_factor,counterevent_scale,dipole_values(:)
+    real(kind=8),intent(in) :: residual_score,component_score,score
+    logical,intent(in) :: real_pass
+    integer :: idip,ndip
+
+    record%valid=.true.
+    record%real_pass=real_pass
+    record%ichan=ichan
+    record%iint=iint
+    record%iteration=tail_iteration+1
+    record%point=timing_point
+    record%score=score
+    record%residual_score=residual_score
+    record%component_score=component_score
+    record%f=f_point
+    record%f_abs=f_abs_point
+    record%grid_volume=vol
+    record%phase_space_jacobian=pgl(ichan)%ps(1)%jac
+    record%matrix_real=matrix_real
+    record%dipole_sum=dipole_sum
+    record%matrix_residual=matrix_residual
+    record%common_weight=common_weight
+    record%physical_factor=physical_factor
+    record%counterevent_scale=counterevent_scale
+    record%renormalization_scale=scale_ren
+    record%alpha_s_value=alphas
+    record%x=x
+    record%momenta=pgl(ichan)%ps(1)%p
+    record%process=pgl(ichan)%processes(:,iint)
+
+    ndip=size(dipole_values)
+    if (allocated(record%dipole_values)) deallocate(record%dipole_values)
+    if (allocated(record%alpha_variables)) deallocate(record%alpha_variables)
+    if (allocated(record%dipole_ijk)) deallocate(record%dipole_ijk)
+    if (allocated(record%dipole_topology)) deallocate(record%dipole_topology)
+    if (allocated(record%alpha_active)) deallocate(record%alpha_active)
+    if (allocated(record%active)) deallocate(record%active)
+    if (allocated(record%passes_cuts)) deallocate(record%passes_cuts)
+    allocate(record%dipole_values(ndip),record%alpha_variables(ndip),record%dipole_ijk(3,ndip))
+    allocate(record%dipole_topology(ndip),record%alpha_active(ndip),record%active(ndip),record%passes_cuts(ndip))
+    record%dipole_values=dipole_values
+    do idip=1,ndip
+       record%alpha_variables(idip)=pgl(ichan)%dpl(iint)%dl(idip)%alpha_variable
+       record%dipole_ijk(:,idip)=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk
+       record%dipole_topology(idip)=cs_dipole_topology(pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk)
+       record%alpha_active(idip)=pgl(ichan)%dpl(iint)%dl(idip)%alpha_active
+       record%active(idip)=pgl(ichan)%dpl(iint)%dl(idip)%active
+       record%passes_cuts(idip)=pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts
+    enddo
+  end subroutine save_tail_record
+
+  subroutine write_tail_replay_point(output_file,ichan,iint,x,vol,f_point,f_abs_point,score,&
+       physical_factor,counterevent_scale)
+    implicit none
+    character(len=*),intent(in) :: output_file
+    integer,intent(in) :: ichan,iint
+    real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
+    integer :: unit
+    open(newunit=unit,file=trim(output_file),status='replace',action='write')
+    write(unit,'(a)') '# AmpliCol tail replay v2'
+    write(unit,*) ichan,iint,size(x),PS_choice,tail_iteration+1,timing_point
+    write(unit,'(*(es25.16,1x))') vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
+    write(unit,'(*(es25.16,1x))') alpha_dipole
+    write(unit,'(*(es25.16,1x))') x
+    close(unit)
+  end subroutine write_tail_replay_point
+
+  subroutine replay_saved_tail_point()
+    implicit none
+    character(len=256) :: header
+    integer :: unit,replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration
+    integer(kind=8) :: replay_point
+    real(kind=8) :: replay_vol,expected_f,expected_f_abs,expected_score,replay_alpha(4),tolerance
+    real(kind=8) :: replay_physical_factor,replay_counter_scale
+    real(kind=8),allocatable :: replay_x(:)
+
+    open(newunit=unit,file=trim(tail_replay_file),status='old',action='read')
+    read(unit,'(a)') header
+    if (trim(header).ne.'# AmpliCol tail replay v2') then
+       write(*,*) 'ERROR: unsupported tail replay file: ',trim(header)
+       stop 1
+    endif
+    read(unit,*) replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration,replay_point
+    read(unit,*) replay_vol,expected_f,expected_f_abs,expected_score,replay_physical_factor,replay_counter_scale
+    read(unit,*) replay_alpha
+    allocate(replay_x(nrandom))
+    read(unit,*) replay_x
+    close(unit)
+
+    if (replay_ps.ne.PS_choice) then
+       write(*,*) 'ERROR: tail replay phase-space choice differs:',replay_ps,PS_choice
+       stop 1
+    endif
+    if (maxval(abs(replay_alpha-alpha_dipole)).gt.1d-14) then
+       write(*,*) 'ERROR: tail replay alpha values differ:'
+       write(*,*) ' saved:',replay_alpha
+       write(*,*) ' active:',alpha_dipole
+       stop 1
+    endif
+    if (replay_ichan.lt.1 .or. replay_ichan.gt.ngroups) then
+       write(*,*) 'ERROR: tail replay channel is out of range:',replay_ichan
+       stop 1
+    endif
+    if (.not.pgl(replay_ichan)%is_subtracted_real) then
+       write(*,*) 'ERROR: tail replay channel is not subtracted real:',replay_ichan
+       stop 1
+    endif
+    if (replay_iint.lt.1 .or. replay_iint.gt.pgl(replay_ichan)%nproc) then
+       write(*,*) 'ERROR: tail replay integral is out of range:',replay_iint
+       stop 1
+    endif
+    if (nrandom.ne.size(pgl(replay_ichan)%ps(1)%x)) then
+       write(*,*) 'ERROR: tail replay random-coordinate count differs:',nrandom,size(pgl(replay_ichan)%ps(1)%x)
+       stop 1
+    endif
+
+    call integrand(replay_ichan,replay_iint,replay_x,replay_vol,f(1),f_abs(1),f_aux(:,1),&
+         replay_physical_factor,replay_counter_scale)
+    tolerance=5d-11*max(1d0,abs(expected_f),abs(f(1)))
+    write(*,'(a,2(i0,1x),a,i0,a,i0)') 'Tail replay channel/integral ',replay_ichan,replay_iint,&
+         ' original iteration ',replay_iteration,' point ',replay_point
+    write(*,'(a,es24.16)') 'Saved signed weight:   ',expected_f
+    write(*,'(a,es24.16)') 'Replayed signed weight:',f(1)
+    write(*,'(a,es24.16)') 'Saved absolute weight: ',expected_f_abs
+    write(*,'(a,es24.16)') 'Saved tail score:      ',expected_score
+    if (abs(f(1)-expected_f).gt.tolerance) then
+       write(*,'(a,es12.4)') 'Tail replay: FAIL, tolerance ',tolerance
+       stop 1
+    endif
+    write(*,'(a)') 'Tail replay: PASS'
+    deallocate(replay_x)
+  end subroutine replay_saved_tail_point
+
+  subroutine write_tail_diagnostics()
+    implicit none
+    integer :: unit,ichan_local,iint_local,irecord,nvalid_residual,nvalid_component
+    real(kind=8) :: residual_top2,component_top2
+
+    open(newunit=unit,file=trim(tail_logfile),status='replace',action='write')
+    write(unit,'(a)') '# AmpliCol subtracted-real tail diagnostics v1'
+    write(unit,'(a,i0)') '# retained records per channel/integral: ',n_tail_records
+    write(unit,'(a,4(1x,es16.8))') '# alpha FF FI IF II:',alpha_dipole
+    write(unit,'(a)') '# score=max(abs(signed residual weight), largest measured R/D counterevent weight)'
+    write(unit,'(a)') '# component_replay_file='//trim(tail_replay_output)
+    write(unit,'(a)') '# residual_replay_file='//trim(tail_residual_replay_output)
+    do ichan_local=1,ngroups
+       if (.not.pgl(ichan_local)%is_subtracted_real) cycle
+       do iint_local=1,pgl(ichan_local)%nproc
+          nvalid_residual=count(tail_residual_records(:,ichan_local,iint_local)%valid)
+          nvalid_component=count(tail_component_records(:,ichan_local,iint_local)%valid)
+          if (nvalid_residual.eq.0 .and. nvalid_component.eq.0) cycle
+          residual_top2=0d0
+          component_top2=0d0
+          do irecord=1,n_tail_records
+             if (tail_residual_records(irecord,ichan_local,iint_local)%valid) then
+                residual_top2=residual_top2+tail_residual_records(irecord,ichan_local,iint_local)%f**2
+             endif
+             if (tail_component_records(irecord,ichan_local,iint_local)%valid) then
+                component_top2=component_top2+&
+                     tail_component_records(irecord,ichan_local,iint_local)%component_score**2
+             endif
+          enddo
+          write(unit,'(a,2(1x,i0),a,i0)') 'leaf channel/integral',ichan_local,iint_local,&
+               ' points ',tail_npoints(ichan_local,iint_local)
+          write(unit,'(a,es24.16,a,es14.6)') ' residual_sum_w2 ',tail_residual_sum2(ichan_local,iint_local),&
+               ' retained_fraction ',safe_fraction(residual_top2,tail_residual_sum2(ichan_local,iint_local))
+          write(unit,'(a,es24.16,a,es14.6)') ' component_sum_w2 ',tail_component_sum2(ichan_local,iint_local),&
+               ' retained_fraction ',safe_fraction(component_top2,tail_component_sum2(ichan_local,iint_local))
+          write(unit,'(a)') ' residual_records'
+          call write_tail_record_set(unit,tail_residual_records(:,ichan_local,iint_local),.true.)
+          write(unit,'(a)') ' component_records'
+          call write_tail_record_set(unit,tail_component_records(:,ichan_local,iint_local),.false.)
+       enddo
+    enddo
+    close(unit)
+  end subroutine write_tail_diagnostics
+
+  subroutine write_tail_record_set(unit,records,use_residual)
+    implicit none
+    integer,intent(in) :: unit
+    type(tail_record),intent(in) :: records(:)
+    logical,intent(in) :: use_residual
+    integer :: irecord,rank,nvalid,ibest
+    logical :: used(size(records))
+    real(kind=8) :: key,best_key
+
+    nvalid=count(records%valid)
+    used=.false.
+    do rank=1,nvalid
+       ibest=0
+       best_key=-1d0
+       do irecord=1,size(records)
+          if (used(irecord) .or. .not.records(irecord)%valid) cycle
+          if (use_residual) then
+             key=records(irecord)%residual_score
+          else
+             key=records(irecord)%component_score
+          endif
+          if (key.gt.best_key) then
+             ibest=irecord
+             best_key=key
+          endif
+       enddo
+       used(ibest)=.true.
+       call write_tail_record(unit,rank,records(ibest))
+    enddo
+  end subroutine write_tail_record_set
+
+  subroutine write_tail_record(unit,rank,record)
+    implicit none
+    integer,intent(in) :: unit,rank
+    type(tail_record),intent(in) :: record
+    integer :: ileg,idip
+    character(len=2),parameter :: topology_name(4)=[character(len=2) :: 'FF','FI','IF','II']
+
+    write(unit,'(a,i0,a,i0,a,i0,a,i0,a,i0)') ' record rank ',rank,' iteration ',record%iteration,&
+         ' point ',record%point,' channel ',record%ichan,' integral ',record%iint
+    write(unit,'(a,3(1x,es24.16))') ' scores total residual component',record%score,&
+         record%residual_score,record%component_score
+    write(unit,'(a,2(1x,es24.16),a,l1)') ' weights signed absolute',record%f,record%f_abs,&
+         ' real_pass ',record%real_pass
+    write(unit,'(a,3(1x,es24.16))') ' matrix real dipole_sum residual',record%matrix_real,&
+         record%dipole_sum,record%matrix_residual
+    write(unit,'(a,3(1x,es24.16))') ' factors common physical counterevent_scale',record%common_weight,&
+         record%physical_factor,record%counterevent_scale
+    write(unit,'(a,4(1x,es24.16))') ' kinematics grid_volume ps_jac muR alphaS',record%grid_volume,&
+         record%phase_space_jacobian,record%renormalization_scale,record%alpha_s_value
+    write(unit,'(a,*(1x,es24.16))') ' x',record%x
+    write(unit,'(a,*(1x,i0))') ' process',record%process
+    do ileg=1,size(record%momenta,2)
+       write(unit,'(a,1x,i0,4(1x,es24.16))') ' momentum',ileg,record%momenta(:,ileg)
+    enddo
+    do idip=1,size(record%dipole_values)
+       write(unit,'(a,1x,i0,3(1x,i0),1x,a,2(1x,es24.16),3(1x,l1),1x,es24.16)')&
+            ' dipole',idip,record%dipole_ijk(:,idip),topology_name(record%dipole_topology(idip)),&
+            record%alpha_variables(idip),record%dipole_values(idip),record%alpha_active(idip),&
+            record%active(idip),record%passes_cuts(idip),-record%dipole_values(idip)*record%physical_factor
+    enddo
+    write(unit,'(a)') ' end_record'
+  end subroutine write_tail_record
+
+  real(kind=8) function safe_fraction(numerator,denominator)
+    implicit none
+    real(kind=8),intent(in) :: numerator,denominator
+    if (denominator.gt.0d0) then
+       safe_fraction=numerator/denominator
+    else
+       safe_fraction=0d0
+    endif
+  end function safe_fraction
 
   subroutine make_identical_reduced_process(base_real,copy_real,base_reduced,copy_reduced)
     integer,intent(in) :: base_real(:),copy_real(:),base_reduced(:)
@@ -1105,7 +1530,8 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,dim_reg_scheme,has_real_process)
+         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
+         tail_replay_file,replay_tail)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')
@@ -1163,6 +1589,13 @@ contains
           write (*,*) '--real-process is not available with --limit_test or --me_test'
           stop 1
        endif
+    elseif (replay_tail) then
+       write (*,*) '--tail-replay requires --real-process=FILE'
+       stop 1
+    endif
+    if (replay_tail .and. len_trim(tail_replay_file).eq.0) then
+       write (*,*) '--tail-replay requires a non-empty file name'
+       stop 1
     endif
 
     if (library.eq.'none') then

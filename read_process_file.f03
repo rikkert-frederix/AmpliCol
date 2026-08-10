@@ -242,6 +242,8 @@ contains
        if (width(i).ne.0d0) width(i)=0d0
     enddo
     call setup_spin(pgl_unique)
+    allocate(pgl_unique%hel(pgl_unique%next))
+    pgl_unique%hel=pgl_unique%spin(1,1:pgl_unique%next)
     call setup_color_order(pgl_unique)
 
     do iproc=1,pgl_unique%nproc
@@ -302,6 +304,7 @@ contains
             ':',pgl_unique%color_orders(1:pgl_unique%next,iproc)
     enddo
     deallocate(pgl_unique%spin)
+    deallocate(pgl_unique%hel)
     deallocate(pgl_unique%phase_space)
     deallocate(ps%p)
     deallocate(ps%x)

@@ -848,12 +848,14 @@ contains
        pgl(ichan)%dpl(iint)%dl(idip)%active=.false.
        pgl(ichan)%dpl(iint)%dl(idip)%alpha_active=.false.
        pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts=.false.
+       pgl(ichan)%dpl(iint)%dl(idip)%alpha_variable=huge(1d0)
        call cs_dipole_cut_variable(pgl(ichan)%ps(1)%p,pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk,&
             mass_real,phys_model%get_mass(pgl(ichan)%dpl(iint)%dl(idip)%dip_r_ijk_f(1)),cut_variable,cut_info)
        if (cut_info.ne.0) then
           write (*,*) 'error computing cs alpha variable',cut_info
           stop 1
        endif
+       pgl(ichan)%dpl(iint)%dl(idip)%alpha_variable=cut_variable
        topology=cs_dipole_topology(pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk)
        if (cut_variable.gt.alpha_dipole(topology)+alpha_cut_tolerance) cycle
        pgl(ichan)%dpl(iint)%dl(idip)%alpha_active=.true.

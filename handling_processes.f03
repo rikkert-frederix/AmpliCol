@@ -14,9 +14,10 @@ module handling_processes
      integer,dimension(:),allocatable :: process_r,dip_map,reduced_color_order
      integer,dimension(3) :: dip_ijk,dip_ijk_f
      integer,dimension(2) :: dip_r_ijk,dip_r_ijk_f
-     integer :: dipole_type=0 ! 0:II, 1:IF, 2:FI, 3:FF
+     integer :: dipole_type=0 ! bit convention: 0:II, 1:FI, 2:IF, 3:FF
      integer :: col_fac=1
      real(kind=8) :: lc_weight=1d0
+     real(kind=8) :: alpha_variable=huge(1d0)
      type(amplitude_QCD) :: amp
      real(kind=8),dimension(0:3) :: p_mapped_ij
      real(kind=8),dimension(:,:),allocatable :: p_mapped

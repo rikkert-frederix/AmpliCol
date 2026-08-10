@@ -210,6 +210,8 @@ module simple_integrator_mod
   integer,parameter :: min_points_per_integral=128
   integer(kind=8),parameter :: accuracy_pilot_points_per_stratum=1024_8
   integer(kind=8),parameter :: min_accuracy_points_per_stratum=128_8
+  real(kind=8),parameter :: accuracy_exploration_fraction=0.25d0
+  integer(kind=8),parameter :: accuracy_quota_growth_limit=16_8
   logical :: turn_off_evnt_generation=.false.
   real(kind=8) :: requested_accuracy=0d0
   real(kind=8),parameter :: required_accuracy_factor=10d0
@@ -868,16 +870,18 @@ contains
 
   ! In integration-only mode, allocate directly to channel/integral leaves.
   ! For a leaf with accumulated error sigma/sqrt(n), q=sigma is estimated as
-  ! unc(1)*sqrt(n).  Minimising the next total variance at fixed cost gives
-  ! n+m proportional to q; water filling enforces the per-iteration minimum.
+  ! unc(1)*sqrt(n).  Most of the next budget follows the corresponding
+  ! variance-optimal water filling.  A fixed exploration share remains uniform
+  ! across all leaves, and a per-iteration growth cap prevents one newly seen
+  ! tail point from starving the rest of the integration.
   subroutine update_integration_points_requested(this)
     implicit none
     class(integrator),intent(inout) :: this
     integer :: i,j,k,nleaf,ibest,iter
-    integer(kind=8) :: budget,nminimum,nleft
-    integer(kind=8),allocatable :: nold(:),quota(:)
+    integer(kind=8) :: budget,nminimum,nleft,exploration_each
+    integer(kind=8),allocatable :: nold(:),quota(:),base(:),cap(:),previous_quota(:)
     real(kind=8),allocatable :: q(:),target(:),remainder(:)
-    real(kind=8) :: lo,hi,mid,total_target,best_remainder
+    real(kind=8) :: lo,hi,mid,total_target,best_remainder,qscale
 
     nleaf=0
     do i=1,this%nchannel
@@ -886,56 +890,69 @@ contains
     if (nleaf.eq.0) return
     nminimum=min_accuracy_points_per_stratum
     budget=max(this%npoints_requested,nminimum*int(nleaf,kind=8))
-    allocate(nold(nleaf),quota(nleaf),q(nleaf),target(nleaf),remainder(nleaf))
+    allocate(nold(nleaf),quota(nleaf),base(nleaf),cap(nleaf),previous_quota(nleaf),&
+         q(nleaf),target(nleaf),remainder(nleaf))
     k=0
     do i=1,this%nchannel
        do j=1,this%channels(i)%nintegral
           k=k+1
           nold(k)=this%channels(i)%integrals(j)%npoints
+          previous_quota(k)=this%channels(i)%integrals(j)%npoints_requested
           q(k)=this%channels(i)%integrals(j)%unc(1)*sqrt(dble(max(nold(k),1_8)))
        enddo
     enddo
 
-    if (maxval(q).le.tiny(1d0)) then
-       quota=budget/int(nleaf,kind=8)
-       nleft=budget-sum(quota)
-       do k=1,int(nleft)
-          quota(k)=quota(k)+1_8
-       enddo
+    ! If a new tail estimate asks for an abrupt global budget increase, reach it
+    ! over several iterations.  This keeps the advertised per-leaf growth cap
+    ! feasible without silently relaxing it.
+    budget=min(budget,accuracy_quota_growth_limit*sum(max(previous_quota,nminimum)))
+    exploration_each=int(floor(accuracy_exploration_fraction*dble(budget)/dble(nleaf)),kind=8)
+    cap=accuracy_quota_growth_limit*max(previous_quota,nminimum)
+    base=min(cap,max(nminimum,exploration_each))
+
+    qscale=maxval(q)
+    if (qscale.le.tiny(1d0)) then
+       q=1d0
     else
-       lo=0d0
-       hi=1d0
-       do
-          total_target=sum(max(dble(nminimum),hi*q-dble(nold)))
-          if (total_target.ge.dble(budget)) exit
-          hi=2d0*hi
-       enddo
-       do iter=1,80
-          mid=0.5d0*(lo+hi)
-          total_target=sum(max(dble(nminimum),mid*q-dble(nold)))
-          if (total_target.lt.dble(budget)) then
-             lo=mid
-          else
-             hi=mid
+       q=max(q/qscale,1d-12)
+    endif
+
+    lo=0d0
+    hi=maxval((dble(nold)+dble(cap))/q)+1d0
+    do iter=1,100
+       mid=0.5d0*(lo+hi)
+       total_target=sum(max(dble(base),min(dble(cap),mid*q-dble(nold))))
+       if (total_target.lt.dble(budget)) then
+          lo=mid
+       else
+          hi=mid
+       endif
+    enddo
+    target=max(dble(base),min(dble(cap),lo*q-dble(nold)))
+    quota=int(floor(target),kind=8)
+    remainder=target-dble(quota)
+    nleft=budget-sum(quota)
+    do while (nleft.gt.0_8)
+       ibest=0
+       best_remainder=-huge(1d0)
+       do k=1,nleaf
+          if (quota(k).ge.cap(k)) cycle
+          if (remainder(k).gt.best_remainder) then
+             ibest=k
+             best_remainder=remainder(k)
           endif
        enddo
-       target=max(dble(nminimum),lo*q-dble(nold))
-       quota=int(floor(target),kind=8)
-       remainder=target-dble(quota)
-       nleft=budget-sum(quota)
-       do while (nleft.gt.0_8)
-          ibest=1
-          best_remainder=remainder(1)
-          do k=2,nleaf
-             if (remainder(k).gt.best_remainder) then
-                ibest=k
-                best_remainder=remainder(k)
-             endif
-          enddo
-          quota(ibest)=quota(ibest)+1_8
-          remainder(ibest)=-1d0
-          nleft=nleft-1_8
-       enddo
+       if (ibest.eq.0) then
+          write (*,*) 'ERROR: accuracy allocation cannot satisfy its point budget'
+          stop 1
+       endif
+       quota(ibest)=quota(ibest)+1_8
+       remainder(ibest)=-1d0
+       nleft=nleft-1_8
+    enddo
+    if (sum(quota).ne.budget) then
+       write (*,*) 'ERROR: accuracy allocation changed its point budget:',sum(quota),budget
+       stop 1
     endif
 
     k=0
@@ -946,7 +963,7 @@ contains
        enddo
     enddo
     this%npoints_requested=sum(quota)
-    deallocate(nold,quota,q,target,remainder)
+    deallocate(nold,quota,base,cap,previous_quota,q,target,remainder)
   end subroutine update_integration_points_requested
   
   ! Build the next iteration's adaptive grids for one channel.

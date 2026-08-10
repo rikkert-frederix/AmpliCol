@@ -11,20 +11,31 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TAG = "integration_histogram_regression"
+REPLAY_TAG = "integration_histogram_replay"
+RESIDUAL_REPLAY_TAG = "integration_histogram_residual_replay"
 HWU = ROOT / "Outputs" / f"{TAG}_histograms.HwU"
 LOG = ROOT / "Outputs" / f"{TAG}_log_file.txt"
-BORN_PROCESS = ROOT / "processes_zz.txt"
-REAL_PROCESS = ROOT / "processes_zzj.txt"
+TAIL_LOG = ROOT / "Outputs" / f"{TAG}_tail_diagnostics.log"
+TAIL_REPLAY = ROOT / "Outputs" / f"{TAG}_tail_replay.dat"
+TAIL_RESIDUAL_REPLAY = ROOT / "Outputs" / f"{TAG}_tail_residual_replay.dat"
+REPLAY_LOG = ROOT / "Outputs" / f"{REPLAY_TAG}_log_file.txt"
+RESIDUAL_REPLAY_LOG = ROOT / "Outputs" / f"{RESIDUAL_REPLAY_TAG}_log_file.txt"
+REPLAY_TAIL_LOG = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_diagnostics.log"
+REPLAY_TAIL_REPLAY = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_replay.dat"
 TEST_BORN_PROCESS = ROOT / "tests_nf_born_processes.txt"
 TEST_REAL_PROCESS = ROOT / "tests_nf_real_processes.txt"
-PROCESS_HEADER = "# AmpliCol process-list v2 nf=5\n"
 
 
-def write_fs5_process_copy(source: pathlib.Path, destination: pathlib.Path) -> None:
-    payload = source.read_text(encoding="utf-8")
-    if not payload.startswith("# AmpliCol process-list v2 nf="):
-        payload = PROCESS_HEADER + payload
-    destination.write_text(payload, encoding="utf-8")
+def generate_process(process: str, destination: pathlib.Path) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        subprocess.run(
+            ["python3", str(ROOT / "process_list.py"), "--serial", process],
+            cwd=tmpdir,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        destination.write_bytes((pathlib.Path(tmpdir) / "processes.txt").read_bytes())
 
 
 def close(actual: float, expected: float, tolerance: float, label: str) -> None:
@@ -56,8 +67,8 @@ def hwu_curve(text: str, curve: str) -> tuple[float, float]:
 
 
 def main() -> None:
-    write_fs5_process_copy(BORN_PROCESS, TEST_BORN_PROCESS)
-    write_fs5_process_copy(REAL_PROCESS, TEST_REAL_PROCESS)
+    generate_process("p p > z z", TEST_BORN_PROCESS)
+    generate_process("p p > z z 1j", TEST_REAL_PROCESS)
     command = [
         str(ROOT / "amplicol_generate"),
         f"--process={TEST_BORN_PROCESS.name}",
@@ -78,6 +89,7 @@ def main() -> None:
         )
         output = completed.stdout
         hwu = HWU.read_text(encoding="utf-8")
+        tail_log = TAIL_LOG.read_text(encoding="utf-8")
 
         signed = result_line(output, "    Integral     (accum)")
         born = result_line(output, "Born")
@@ -106,6 +118,43 @@ def main() -> None:
                 raise AssertionError(f"missing default histogram: {title}")
         if hwu.count("<histogram>") != 66:
             raise AssertionError("unexpected number of default LO/NLO histogram blocks")
+        if "# AmpliCol subtracted-real tail diagnostics v1" not in tail_log:
+            raise AssertionError("missing subtracted-real tail diagnostics")
+        if (
+            "scores total residual component" not in tail_log
+            or " residual_records" not in tail_log
+            or " component_records" not in tail_log
+            or " dipole" not in tail_log
+        ):
+            raise AssertionError("tail diagnostics omit component or dipole details")
+        if not TAIL_REPLAY.is_file():
+            raise AssertionError("missing deterministic tail replay file")
+        if not TAIL_RESIDUAL_REPLAY.is_file():
+            raise AssertionError("missing deterministic residual-tail replay file")
+
+        for replay_file, replay_tag in (
+            (TAIL_REPLAY, REPLAY_TAG),
+            (TAIL_RESIDUAL_REPLAY, RESIDUAL_REPLAY_TAG),
+        ):
+            replay = subprocess.run(
+                [
+                    str(ROOT / "amplicol_generate"),
+                    f"--process={TEST_BORN_PROCESS.name}",
+                    f"--real-process={TEST_REAL_PROCESS.name}",
+                    "--accuracy=0.9",
+                    "--itmax=1",
+                    "--seed=12345",
+                    f"--tag={replay_tag}",
+                    f"--tail-replay={replay_file}",
+                ],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            if "Tail replay: PASS" not in replay.stdout:
+                raise AssertionError(f"saved tail point did not replay: {replay_file}")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(
@@ -125,6 +174,13 @@ def main() -> None:
     finally:
         HWU.unlink(missing_ok=True)
         LOG.unlink(missing_ok=True)
+        TAIL_LOG.unlink(missing_ok=True)
+        TAIL_REPLAY.unlink(missing_ok=True)
+        TAIL_RESIDUAL_REPLAY.unlink(missing_ok=True)
+        REPLAY_LOG.unlink(missing_ok=True)
+        RESIDUAL_REPLAY_LOG.unlink(missing_ok=True)
+        REPLAY_TAIL_LOG.unlink(missing_ok=True)
+        REPLAY_TAIL_REPLAY.unlink(missing_ok=True)
         TEST_BORN_PROCESS.unlink(missing_ok=True)
         TEST_REAL_PROCESS.unlink(missing_ok=True)
 
