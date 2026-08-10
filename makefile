@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements test_fermi_statistics update_matrix_cases update_matrix_goldens
+.PHONY: test_matrix_elements test_fermi_statistics test_three_quark_line_reweight \
+	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -113,6 +114,9 @@ FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o parti
 FILES_M_TEST_FERMI = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 	amplitude_QCD.o fermi_statistics_regression.o
 
+FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+	amplitude_QCD.o three_quark_line_reweight_regression.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -133,10 +137,17 @@ matrix_element_regression: $(FILES_M_TEST_ME)
 fermi_statistics_regression: $(FILES_M_TEST_FERMI)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_FERMI)
 
+three_quark_line_reweight_regression: $(FILES_M_TEST_THREE_QUARK)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_THREE_QUARK)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 fermi_statistics_regression.o: tests/matrix_elements/fermi_statistics_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+three_quark_line_reweight_regression.o: \
+		tests/matrix_elements/three_quark_line_reweight_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
@@ -155,6 +166,12 @@ test_fermi_statistics: fermi_statistics_regression \
 	$(PYTHON) tests/matrix_elements/run_fermi_library_regression.py \
 		--generator $(CURDIR)/fermi_statistics_regression \
 		--compiler "$(FC)" --fflags="$(FFLAGS)"
+
+test_three_quark_line_reweight: three_quark_line_reweight_regression \
+		amplicol_reweight tests/matrix_elements/run_three_quark_line_reweight_regression.py
+	./three_quark_line_reweight_regression
+	$(PYTHON) tests/matrix_elements/run_three_quark_line_reweight_regression.py \
+		--reweighter $(CURDIR)/amplicol_reweight
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

@@ -83,14 +83,6 @@ program amplicol_reweight
      do iproc=1,nprocs
         if (all(part(1:next,1).eq.processes(1:next,iproc)))exit
      enddo
-     if (three_quark_lines(part(1,1))) then
-        ! Don't reweight the three-quark-line processes
-        events(nevt)%matrix2(1:3)=1d0
-        max_wgt=max(max_wgt,events(nevt)%matrix2(3)/events(nevt)%matrix2(1))
-        xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
-        xsec_abs=xsec_abs+abs(events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP)
-        cycle
-     endif
      if (iproc.eq.nprocs+1) then
         call cpu_time(tBefore)
         nprocs=nprocs+1
@@ -153,8 +145,8 @@ program amplicol_reweight
      xsec=xsec+events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP
      xsec_abs=xsec_abs+abs(events(nevt)%matrix2(3)/events(nevt)%matrix2(1)*events(nevt)%XWGTUP)
   enddo
-  xsec=xsec/dble(nevt)
-  xsec_abs=xsec_abs/dble(nevt)
+  xsec=xsec/dble(nevents)
+  xsec_abs=xsec_abs/dble(nevents)
   close(11)
 
   ! write event file
@@ -493,24 +485,4 @@ contains
     allocate(events(nevents))
   end subroutine read_init_and_allocate_events
   
-  logical function three_quark_lines(ipdg)
-    implicit none
-    integer,dimension(next),intent(in) :: ipdg
-    integer :: i,nq
-    nq=0
-    do i=1,next
-       if (phys_model%is_quark(ipdg(i)) .or. phys_model%is_antiquark(ipdg(i))) nq=nq+1
-    enddo
-    if (nq.eq.0 .or. nq.eq.2 .or. nq.eq.4) then
-       three_quark_lines=.false.
-       return
-    elseif (nq.eq.6) then
-       three_quark_lines=.true.
-       return
-    else
-       write (*,*) 'Unknown or impossible number of quark lines',nq
-       stop 1
-    endif
-  end function three_quark_lines
-
 end program amplicol_reweight
