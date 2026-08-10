@@ -3,7 +3,8 @@
 .PHONY: test_matrix_elements test_integrated_kernels test_massive_integrated_kernels \
 	test_massive_dipole_mapping test_massive_dipole_kernel \
 	test_simple_integrator_mixed_dims test_simple_integrator_uncertainty_sampling \
-	test_histograms_cli test_integration_histograms test_integration_histograms_physics \
+	test_real_subtraction_strata test_histograms_cli test_integration_histograms \
+	test_integration_histograms_physics \
 	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
@@ -124,7 +125,8 @@ phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o 	\
 simple_integrator.o helper_modules.o amplitude_library.o command_line_parser.o \
 mg_checks.o scales.o pdf_lhapdf62.o phase_space_module.o cs_dipole_mappings.o \
-cs_lc_dipoles.o cs_integrated_kernels.o subtraction.o integrated_dipoles.o
+cs_lc_dipoles.o cs_integrated_kernels.o subtraction.o integrated_dipoles.o \
+real_subtraction_strata.o
 FILES_M_INT_QCD += cs_massive_integrated_kernels.o
 FILES_M_INT_QCD += integration_histograms.o integration_analysis.o
 
@@ -165,6 +167,11 @@ test_simple_integrator_uncertainty_sampling: simple_integrator.o helper_modules.
 	$(FC) $(FFLAGS) -I. -o tests/simple_integrator_uncertainty_sampling.exe \
 		tests/simple_integrator_uncertainty_sampling.f90 simple_integrator.o helper_modules.o ranmar.o
 	./tests/simple_integrator_uncertainty_sampling.exe
+
+test_real_subtraction_strata: real_subtraction_strata.o
+	$(FC) $(FFLAGS) -I. -o tests/real_subtraction_strata.exe \
+		tests/real_subtraction_strata.f90 real_subtraction_strata.o
+	./tests/real_subtraction_strata.exe
 
 test_histograms_cli:
 	python3 tests/histograms_cli.py
@@ -229,7 +236,7 @@ amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_function
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o mg_checks.o scales.o subtraction.o integrated_dipoles.o phase_space_module.o \
 	cs_dipole_mappings.o cs_lc_dipoles.o cs_integrated_kernels.o feynmanrules.o \
-	integration_histograms.o integration_analysis.o
+	integration_histograms.o integration_analysis.o real_subtraction_strata.o
 integration_analysis.o : integration_histograms.o common.o cuts.o
 common.o : particles.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o

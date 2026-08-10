@@ -24,6 +24,7 @@ REPLAY_TAIL_LOG = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_diagnostics.log"
 REPLAY_TAIL_REPLAY = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_replay.dat"
 TEST_BORN_PROCESS = ROOT / "tests_nf_born_processes.txt"
 TEST_REAL_PROCESS = ROOT / "tests_nf_real_processes.txt"
+WJ_MIGRATION_REPLAY = ROOT / "tests" / "wj_migration_tail_replay.dat"
 
 
 def generate_process(process: str, destination: pathlib.Path) -> None:
@@ -93,6 +94,9 @@ def main() -> None:
 
         signed = result_line(output, "    Integral     (accum)")
         born = result_line(output, "Born")
+        real_total = result_line(output, "Real - local dipoles")
+        real_regular = result_line(output, "Real - local dipoles, regular")
+        real_migration = result_line(output, "Real - local dipoles, migration")
         nlo_hwu = hwu_curve(hwu, "NLO")
         lo_hwu = hwu_curve(hwu, "LO")
 
@@ -100,6 +104,18 @@ def main() -> None:
         close(nlo_hwu[1], signed[1], 5e-5, "inclusive NLO uncertainty")
         close(lo_hwu[0], born[0], 5e-6, "inclusive Born central value")
         close(lo_hwu[1], born[1], 5e-5, "inclusive Born uncertainty")
+        close(
+            real_total[0],
+            real_regular[0] + real_migration[0],
+            5e-6,
+            "regular plus migration real-subtraction closure",
+        )
+        close(
+            real_total[1],
+            (real_regular[1] ** 2 + real_migration[1] ** 2) ** 0.5,
+            5e-5,
+            "regular plus migration uncertainty closure",
+        )
 
         required_histograms = [
             "selected jet multiplicity",
@@ -118,19 +134,25 @@ def main() -> None:
                 raise AssertionError(f"missing default histogram: {title}")
         if hwu.count("<histogram>") != 66:
             raise AssertionError("unexpected number of default LO/NLO histogram blocks")
-        if "# AmpliCol subtracted-real tail diagnostics v1" not in tail_log:
+        if "# AmpliCol subtracted-real tail diagnostics v2" not in tail_log:
             raise AssertionError("missing subtracted-real tail diagnostics")
         if (
             "scores total residual component" not in tail_log
             or " residual_records" not in tail_log
             or " component_records" not in tail_log
             or " dipole" not in tail_log
+            or " stratum " not in tail_log
+            or "migration variance_proxy max_point_proxy fraction" not in tail_log
         ):
             raise AssertionError("tail diagnostics omit component or dipole details")
+        if "Migration largest-point variance fraction:" not in output:
+            raise AssertionError("combined run did not report the migration-tail convergence gate")
         if not TAIL_REPLAY.is_file():
             raise AssertionError("missing deterministic tail replay file")
         if not TAIL_RESIDUAL_REPLAY.is_file():
             raise AssertionError("missing deterministic residual-tail replay file")
+        if not TAIL_REPLAY.read_text(encoding="utf-8").startswith("# AmpliCol tail replay v3"):
+            raise AssertionError("tail replay fixture does not encode its integration stratum")
 
         for replay_file, replay_tag in (
             (TAIL_REPLAY, REPLAY_TAG),
@@ -155,6 +177,31 @@ def main() -> None:
             )
             if "Tail replay: PASS" not in replay.stdout:
                 raise AssertionError(f"saved tail point did not replay: {replay_file}")
+
+        generate_process("p p > w+ 1j", TEST_BORN_PROCESS)
+        generate_process("p p > w+ 2j", TEST_REAL_PROCESS)
+        migration_replay = subprocess.run(
+            [
+                str(ROOT / "amplicol_generate"),
+                f"--process={TEST_BORN_PROCESS.name}",
+                f"--real-process={TEST_REAL_PROCESS.name}",
+                "--accuracy=0.9",
+                "--itmax=1",
+                "--seed=13579",
+                "--alpha=0.1",
+                f"--tag={RESIDUAL_REPLAY_TAG}",
+                f"--tail-replay={WJ_MIGRATION_REPLAY}",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if "Tail replay: PASS" not in migration_replay.stdout:
+            raise AssertionError("saved W+j cut-migration point did not replay")
+        if "stratum migration" not in migration_replay.stdout:
+            raise AssertionError("saved W+j point was not assigned to the migration stratum")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(

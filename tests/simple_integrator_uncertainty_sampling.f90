@@ -14,6 +14,8 @@ program simple_integrator_uncertainty_sampling_test
   call sample_accuracy_pilot(10000,.true.,zero_counts_b)
   call sample_accuracy_pilot(1,.false.,signed_counts)
   call sample_quota_growth(growth_counts)
+  call check_external_convergence_gate()
+  call check_independent_adaptation_classes()
 
   call assert_true(sum(accuracy_counts(1,:)).gt.3*sum(accuracy_counts(2,:)),&
        'accuracy mode favours the channel with the largest uncertainty')
@@ -181,6 +183,76 @@ contains
     enddo
     close(99)
   end subroutine sample_quota_growth
+
+  subroutine check_external_convergence_gate()
+    type(integrator) :: integ
+    integer :: ichan,iint,npoint
+    integer :: ndim(1),ndim_extra(1),nintegral(1)
+    real(kind=8) :: f(1),f_abs(1)
+    logical :: to_write(1),done,iteration_finished
+
+    ndim=1
+    ndim_extra=0
+    nintegral=1
+    open(unit=99,status='scratch',action='readwrite')
+    call integ%init(1,ndim,ndim_extra,nintegral,1,2,accuracy=0.9d0)
+    done=.false.
+    do npoint=1,1024
+       call integ%get_points(1,ichan,iint)
+       f=1d0
+       f_abs=1d0
+       call integ%fill_points(1,f_abs,f,to_write,done,iteration_finished=iteration_finished,&
+            external_converged=.false.)
+    enddo
+    call assert_true(iteration_finished,'external convergence test did not finish its pilot iteration')
+    call assert_true(.not.done,'external convergence gate did not defer an otherwise converged integration')
+    do while (.not.done)
+       call integ%get_points(1,ichan,iint)
+       f=1d0
+       f_abs=1d0
+       call integ%fill_points(1,f_abs,f,to_write,done,external_converged=.true.)
+    enddo
+    close(99)
+  end subroutine check_external_convergence_gate
+
+  subroutine check_independent_adaptation_classes()
+    type(integrator) :: integ
+    integer :: ichan,iint
+    integer :: ndim(1),ndim_extra(1),nintegral(1),classes(2,1),counts(2)
+    real(kind=8) :: f(1),f_abs(1),xsum(2)
+    logical :: to_write(1),done,iteration_finished,second_iteration
+
+    ndim=1
+    ndim_extra=0
+    nintegral=2
+    classes(:,1)=[1,2]
+    counts=0
+    xsum=0d0
+    second_iteration=.false.
+    open(unit=99,status='scratch',action='readwrite')
+    call integ%init(1,ndim,ndim_extra,nintegral,1,2,accuracy=0.9d0,adaptation_classes=classes)
+    done=.false.
+    do while (.not.done)
+       call integ%get_points(1,ichan,iint)
+       if (second_iteration) then
+          counts(iint)=counts(iint)+1
+          xsum(iint)=xsum(iint)+integ%x(1,1)
+       endif
+       if (iint.eq.1) then
+          f=exp(12d0*integ%x(1,1))*integ%wgt(1)
+       else
+          f=exp(12d0*(1d0-integ%x(1,1)))*integ%wgt(1)
+       endif
+       f_abs=abs(f)
+       call integ%fill_points(1,f_abs,f,to_write,done,iteration_finished=iteration_finished,&
+            external_converged=second_iteration)
+       if (iteration_finished .and. .not.second_iteration) second_iteration=.true.
+    enddo
+    close(99)
+    call assert_true(all(counts.gt.0),'adaptation-class test did not sample both second-iteration leaves')
+    call assert_true(xsum(1)/counts(1).gt.0.6d0,'upper-tail adaptation class did not move its grid')
+    call assert_true(xsum(2)/counts(2).lt.0.4d0,'lower-tail adaptation class did not move its grid')
+  end subroutine check_independent_adaptation_classes
 
   subroutine test_integrand(x,ichan,iint,value)
     real(kind=8),intent(in) :: x

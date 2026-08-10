@@ -126,16 +126,43 @@ The optional '--real-process=FILE' mode loads the Born processes from
 '--process=FILE' and real-emission processes from the additional file into one
 integration. The Born channels and the local real contribution `R - sum(D)`
 are sampled by the same multichannel integrator, even when their phase spaces
-have different dimensions. Each Born subprocess supplies an endpoint
-integral and one P+K convolution integral for each incoming beam, all in that
-same run. It requires '--accuracy=X' and does not produce unweighted events.
-The final report lists Born, R-sum(D), the three Laurent coefficients of I,
-P, K, and the finite subtotal B+(R-D)+I0+P+K. The virtual term is not
-included. Accuracy-only allocation reserves 25% of every post-pilot iteration
-for uniform exploration across channel/integral leaves; the remaining points
-follow the measured variances. A leaf quota may grow by at most a factor of 16
-per iteration. These safeguards affect sampling only and never clip or modify
-an integration weight.
+have different dimensions. The local contribution is split point by point into
+two exact, disjoint strata. The regular stratum contains points for which the
+real event and every alpha-active mapped dipole have the same cut decision. The
+migration stratum contains points for which at least one active mapped decision
+differs from the real decision. Each real subprocess consequently has separate
+regular and migration estimators and point quotas. Within a physical channel,
+all regular leaves share one adaptive grid and all migration leaves share a
+second, independent grid. Their sum is identically the unsplit local
+contribution. The final report prints both strata and checks this closure.
+
+For jet-cut migrations, the diagnostics record the signed distance of the real
+and mapped configurations from the relevant jet-pT threshold: the required
+Nth-hardest accepted jet pT minus `pTj_min`. When the real and mapped pT
+decisions cross that threshold, the smallest absolute distance involved is
+reported in the tail record; migrations caused only by another cut use -1.
+This derived distance is not an extra integration coordinate; the separate
+migration grid allows the existing phase-space coordinates to adapt to that
+boundary without biasing the integral.
+
+Each Born subprocess supplies an endpoint integral and one P+K convolution
+integral for each incoming beam, all in that same run. It requires
+'--accuracy=X' and does not produce unweighted events. The final report lists
+Born, the total/regular/migration R-sum(D), the three Laurent coefficients of I,
+P, K, and the finite subtotal B+(R-D)+I0+P+K. The virtual term is not included.
+Accuracy-only allocation reserves 25% of every post-pilot iteration for uniform
+exploration across channel/integral leaves; the remaining points follow the
+measured variances. A leaf quota may grow by at most a factor of 16 per
+iteration. These safeguards affect sampling only and never clip or modify an
+integration weight.
+
+The requested-accuracy stop also requires the largest single migration point's
+current variance proxy to be at most 20% of the total migration variance proxy.
+Set another fraction with '--migration-tail-fraction=X'; zero disables this
+additional convergence gate. A failed gate forces another grid refinement and
+doubles the next global point budget, subject to the per-leaf growth cap above.
+The user-specified iteration cap is never overridden, and a warning is printed
+if it is reached while the gate is still unsatisfied.
 
 Combined runs retain separate top-eight lists for the signed real-subtraction
 residual and the individual R/D counterevent envelope in
@@ -144,10 +171,12 @@ coordinates, momenta, real matrix element, individual dipoles, alpha cut
 variables, mapped-cut decisions, PDF/phase-space factors, and its contribution
 to the second moment. Compact fixtures for the global component and residual
 maxima are written to `Outputs/<tag>_tail_replay.dat` and
-`Outputs/<tag>_tail_residual_replay.dat`. Re-run with the original process,
-phase-space and alpha arguments plus `--tail-replay=FILE` to reproduce either
-point; each fixture retains its historical multichannel sampling factors, and
-the executable verifies the signed weight before exiting.
+`Outputs/<tag>_tail_residual_replay.dat`. Version-3 fixtures retain the sampled
+regular/migration leaf; version-2 fixtures from unsplit runs remain accepted.
+Re-run with the original process, phase-space and alpha arguments plus
+`--tail-replay=FILE` to reproduce either point; each fixture retains its
+historical multichannel sampling factors, and the executable verifies the
+signed weight before exiting.
 
 Integrated histories are constructed exclusively from the local
 dipoles and are checked against the supplied Born processes and leading-colour

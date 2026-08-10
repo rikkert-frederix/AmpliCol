@@ -53,15 +53,23 @@ contains
     implicit none
     type(phase_space_order_group),intent(in) :: pgl
     integer,intent(in) :: iint
-    integer :: i,njet_required
+    integer :: njet_required
 
-    njet_required=0
-    do i=3,pgl%next
-       if (phys_model%is_jet(pgl%processes(i,iint))) njet_required=njet_required+1
-    enddo
-    njet_required=max(0,njet_required-1)
+    njet_required=real_subtracted_jet_requirement(pgl%processes(:,iint))
     pass_real_subtracted_cuts=pass_clustered_jet_cuts(pgl%ps(1)%p,pgl%processes(:,iint),njet_required)
   end function pass_real_subtracted_cuts
+
+  integer function real_subtracted_jet_requirement(process) result(njet_required)
+    implicit none
+    integer,intent(in) :: process(:)
+    integer :: i
+
+    njet_required=0
+    do i=3,size(process)
+       if (phys_model%is_jet(process(i))) njet_required=njet_required+1
+    enddo
+    njet_required=max(0,njet_required-1)
+  end function real_subtracted_jet_requirement
 
   logical function pass_mapped_dipole_cuts(p,process)
     ! A mapped dipole has the Born jet multiplicity, so every final-state
@@ -206,6 +214,73 @@ contains
        endif
     enddo
   end subroutine cluster_kt_jets
+
+  real(kind=8) function real_subtracted_jet_pt_margin(pgl,iint) result(margin)
+    implicit none
+    type(phase_space_order_group),intent(in) :: pgl
+    integer,intent(in) :: iint
+    real(kind=8) :: jets(0:3,max(1,pgl%next-2))
+    integer :: njets,njet_required
+
+    njet_required=real_subtracted_jet_requirement(pgl%processes(:,iint))
+    call cluster_kt_jets(pgl%ps(1)%p,pgl%processes(:,iint),jets,njets)
+    margin=jet_pt_cut_margin(jets,njets,njet_required)
+  end function real_subtracted_jet_pt_margin
+
+  real(kind=8) function mapped_dipole_jet_pt_margin(p,process) result(margin)
+    implicit none
+    real(kind=8),intent(in) :: p(0:,:)
+    integer,intent(in) :: process(:)
+    real(kind=8) :: jets(0:3,max(1,size(process)-2))
+    integer :: i,njets
+
+    jets=0d0
+    njets=0
+    do i=3,size(process)
+       if (.not.phys_model%is_jet(process(i))) cycle
+       njets=njets+1
+       jets(:,njets)=p(:,i)
+    enddo
+    margin=jet_pt_cut_margin(jets,njets,njets)
+  end function mapped_dipole_jet_pt_margin
+
+  real(kind=8) function jet_pt_cut_margin(jets,njets,njet_required) result(margin)
+    implicit none
+    real(kind=8),intent(in) :: jets(0:,:)
+    integer,intent(in) :: njets,njet_required
+    real(kind=8) :: transverse_momenta(max(1,njets)),value
+    integer :: i,j,neligible
+
+    if (njet_required.le.0 .or. pTj_min.le.0d0) then
+       margin=huge(1d0)
+       return
+    endif
+    neligible=0
+    do i=1,njets
+       value=pt(jets(:,i))
+       if (value.le.sqrt(tiny(1d0))) cycle
+       if (etaj_max.gt.0d0) then
+          if (abs(eta(jets(:,i))).ge.etaj_max) cycle
+       endif
+       neligible=neligible+1
+       transverse_momenta(neligible)=value
+    enddo
+    if (neligible.lt.njet_required) then
+       margin=-pTj_min
+       return
+    endif
+    do i=2,neligible
+       value=transverse_momenta(i)
+       j=i-1
+       do while (j.ge.1)
+          if (transverse_momenta(j).ge.value) exit
+          transverse_momenta(j+1)=transverse_momenta(j)
+          j=j-1
+       enddo
+       transverse_momenta(j+1)=value
+    enddo
+    margin=transverse_momenta(njet_required)-pTj_min
+  end function jet_pt_cut_margin
 
   subroutine remove_cluster(work,nwork,idx)
     implicit none

@@ -45,11 +45,14 @@
 ! 1. Initialise once:
 !
 !        call integ%init(nchannel, ndim, ndim_extra, nintegral, &
-!             nevts_unw_req, niters)
+!             nevts_unw_req, niters, adaptation_classes=classes)
 !
 !    ndim, ndim_extra, and nintegral are arrays of length nchannel.
 !    nevts_unw_req is the requested number of unweighted events.  niters is the
-!    maximum number of adaptation/generation iterations.
+!    maximum number of adaptation/generation iterations.  The optional
+!    adaptation_classes(:,channel) assigns each integral to a positive,
+!    contiguous class.  Integrals in one class share grids; different classes
+!    have independent grids while retaining independent integral estimates.
 !
 ! 2. Repeatedly request points, evaluate the caller's integrand, and return the
 !    values:
@@ -62,14 +65,19 @@
 !              ! integ%wgt(ip) is the grid Jacobian/volume factor.
 !              ! Compute f_abs(ip) >= 0 and f(ip), including integ%wgt(ip).
 !           end do
-!           call integ%fill_points(npoints, f_abs, f, to_write, done, accepted)
+!           call integ%fill_points(npoints, f_abs, f, to_write, done, accepted, &
+!                external_converged=my_external_test)
 !           ! If to_write(ip) is true, write/store the corresponding event now.
 !        end do
 !
 !    fill_points may be called with fewer points than were returned by
 !    get_points; unused trailing points are discarded.  A new get_points call
 !    must not be made until the previous batch has been returned with
-!    fill_points.
+!    fill_points.  If external_converged is present and false, satisfying the
+!    requested statistical accuracy does not terminate the integration; the
+!    next accuracy-only budget is doubled and its grids are refined.  The
+!    iteration cap remains authoritative, so callers should report when their
+!    external criterion is still false at that cap.
 !
 ! 3. After done is true, retrieve final event weights:
 !
@@ -110,16 +118,17 @@ module simple_integrator_mod
   implicit none
   private
   ! One adaptive sampling channel.  A channel owns one grid per adapted
-  ! dimension and one or more integral estimates sharing those grids.
+  ! dimension and adaptation class.  Integral estimates may share a class.
   type :: channel
      integer :: ndim,nintegral,naux,current_integral,current_iter&
-          &,number,max_iters,nevts_unw_req,ndim_extra
+          &,number,max_iters,nevts_unw_req,ndim_extra,nadaptation
      integer(kind=8) :: npoints,npoints_iter
      real(kind=8),dimension(2) :: res,unc,res_iter,res2_iter,unc_iter
      real(kind=8),allocatable,dimension(:) :: aux_res,aux_unc,aux_res_iter,aux_unc_iter
      real(kind=8) :: overweight
      logical :: done,evgen_done
-     type(grid),allocatable,dimension(:,:) :: grids
+     integer,allocatable,dimension(:) :: adaptation_class
+     type(grid),allocatable,dimension(:,:,:) :: grids
      type(integral),allocatable,dimension(:) :: integrals
    contains
      procedure,private :: init => channel_init
@@ -145,7 +154,7 @@ module simple_integrator_mod
      real(kind=8),allocatable,dimension(:) :: aux_res,aux_unc,aux_res_iter,aux_res2_iter&
           &,aux_accum,aux_accum2,aux_unc_iter
      integer :: ichan,nevts_unw_gen,evnt,nevnt_in_list,ndim &
-          &,current_iter,max_iters,nevts_unw_req
+          &,current_iter,max_iters,nevts_unw_req,adaptation_class
      integer(kind=8) :: npoints_iter,npoints,npoints_requested&
           &,npoints_nonzero,npoints_nonzero_total
      logical :: done,evgen_done
@@ -213,6 +222,7 @@ module simple_integrator_mod
   real(kind=8),parameter :: accuracy_exploration_fraction=0.25d0
   integer(kind=8),parameter :: accuracy_quota_growth_limit=16_8
   logical :: turn_off_evnt_generation=.false.
+  logical :: force_external_refinement=.false.
   real(kind=8) :: requested_accuracy=0d0
   real(kind=8),parameter :: required_accuracy_factor=10d0
   integer,parameter :: min_grid_size=8
@@ -222,14 +232,15 @@ module simple_integrator_mod
 contains
 
   ! Initialise the public integrator object and all channel/integral state.
-  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters,accuracy,naux)
+  subroutine init(this,nchannel,ndim,ndim_extra,nintegral,nevts_unw_req,niters,accuracy,naux,adaptation_classes)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: nchannel,nevts_unw_req,niters
     integer,dimension(nchannel),intent(in) :: ndim,nintegral,ndim_extra
     real(kind=8),intent(in),optional :: accuracy
     integer,intent(in),optional :: naux
-    integer :: i,naux_local
+    integer,dimension(:,:),intent(in),optional :: adaptation_classes
+    integer :: i,naux_local,iclass
     integer(kind=8) :: initial_channel_points
     if (nchannel.lt.1) then
        write (*,*) 'ERROR: nchannel must be at least 1'
@@ -244,6 +255,7 @@ contains
        stop 1
     endif
     turn_off_evnt_generation=.false.
+    force_external_refinement=.false.
     requested_accuracy=0d0
     if (present(accuracy)) then
        if (accuracy.le.0d0 .or. accuracy.ge.1d0) then
@@ -265,6 +277,24 @@ contains
        write (*,*) 'ERROR: all channels must have at least one integral'
        stop 1
     endif
+    if (present(adaptation_classes)) then
+       if (size(adaptation_classes,1).lt.maxval(nintegral) .or. &
+            size(adaptation_classes,2).ne.nchannel) then
+          write (*,*) 'ERROR: adaptation_classes has incompatible shape'
+          stop 1
+       endif
+       do i=1,nchannel
+          if (any(adaptation_classes(1:nintegral(i),i).lt.1)) then
+             write (*,*) 'ERROR: adaptation classes must be positive for channel',i
+             stop 1
+          endif
+          if (any([(count(adaptation_classes(1:nintegral(i),i).eq.iclass),&
+               iclass=1,maxval(adaptation_classes(1:nintegral(i),i)))].eq.0)) then
+             write (*,*) 'ERROR: adaptation classes must be contiguous for channel',i
+             stop 1
+          endif
+       enddo
+    endif
     naux_local=0
     if (present(naux)) naux_local=naux
     if (naux_local.lt.0) then
@@ -285,7 +315,12 @@ contains
        this%npoints_requested=accuracy_pilot_points_per_stratum*sum(int(nintegral,kind=8))
        do i=1,this%nchannel
           initial_channel_points=accuracy_pilot_points_per_stratum*int(nintegral(i),kind=8)
-          call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),initial_channel_points,niters,i,naux_local)
+          if (present(adaptation_classes)) then
+             call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),initial_channel_points,niters,i,&
+                  naux_local,adaptation_classes(1:nintegral(i),i))
+          else
+             call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),initial_channel_points,niters,i,naux_local)
+          endif
        enddo
     else
        ! If we assume 1% unweighting efficiency, we expect ~10% time
@@ -300,7 +335,13 @@ contains
        this%npoints_requested=max(this%npoints_requested,min_points_per_channel*this%nchannel,&
             min_points_per_integral*maxval(nintegral)*this%nchannel)
        do i=1,this%nchannel
-          call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i,naux_local)
+          if (present(adaptation_classes)) then
+             call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,niters,i,&
+                  naux_local,adaptation_classes(1:nintegral(i),i))
+          else
+             call this%channels(i)%init(ndim(i),ndim_extra(i),nintegral(i),this%npoints_requested/nchannel,&
+                  niters,i,naux_local)
+          endif
        enddo
     endif
     this%current_channel=0
@@ -311,26 +352,44 @@ contains
   end subroutine init
 
   ! Initialise one channel, including its first set of grids and integrals.
-  subroutine channel_init(this,ndim,ndim_extra,nintegral,npoints,niters,ichan,naux)
+  subroutine channel_init(this,ndim,ndim_extra,nintegral,npoints,niters,ichan,naux,adaptation_classes)
     implicit none
     class(channel),intent(inout) :: this
     integer,intent(in) :: ndim,nintegral,niters,ichan,ndim_extra,naux
     integer(kind=8) :: npoints
-    integer :: i
+    integer,dimension(:),intent(in),optional :: adaptation_classes
+    integer :: i,iadapt
+    integer(kind=8) :: adaptation_points
     this%ndim=ndim
     this%ndim_extra=ndim_extra
     this%max_iters=niters
     this%nintegral=nintegral
     this%naux=naux
+    this%nadaptation=1
+    allocate(this%adaptation_class(this%nintegral))
+    this%adaptation_class=1
+    if (present(adaptation_classes)) then
+       if (size(adaptation_classes).ne.this%nintegral) then
+          write (*,*) 'ERROR: channel adaptation-class count differs from integral count'
+          stop 1
+       endif
+       this%adaptation_class=adaptation_classes
+       this%nadaptation=maxval(this%adaptation_class)
+    endif
     this%number=ichan
     this%nevts_unw_req=0
-    allocate(this%grids(1:this%ndim,1:this%max_iters+1))
+    allocate(this%grids(1:this%ndim,1:this%max_iters+1,1:this%nadaptation))
     allocate(this%integrals(1:this%nintegral))
-    do i=1,this%ndim
-       call this%grids(i,1)%init(npoints)
+    do iadapt=1,this%nadaptation
+       adaptation_points=max(1_8,npoints*int(count(this%adaptation_class.eq.iadapt),kind=8)/&
+            int(this%nintegral,kind=8))
+       do i=1,this%ndim
+          call this%grids(i,1,iadapt)%init(adaptation_points)
+       enddo
     enddo
     do i=1,this%nintegral
-       call this%integrals(i)%init(ndim,npoints/this%nintegral,this%number,this%max_iters,naux)
+       call this%integrals(i)%init(ndim,npoints/this%nintegral,this%number,this%max_iters,naux,&
+            this%adaptation_class(i))
     enddo
     this%current_integral=0
     this%current_iter=0
@@ -449,13 +508,14 @@ contains
   end subroutine determine_sizefill
   
   ! Initialise one integral estimate and its candidate-event buffer.
-  subroutine integral_init(this,ndim,npoints,ichan,niters,naux)
+  subroutine integral_init(this,ndim,npoints,ichan,niters,naux,adaptation_class)
     implicit none
     class(integral),intent(inout) :: this
-    integer,intent(in) :: ndim,ichan,niters,naux
+    integer,intent(in) :: ndim,ichan,niters,naux,adaptation_class
     integer(kind=8) :: npoints
     this%ndim=ndim
     this%ichan=ichan
+    this%adaptation_class=adaptation_class
     this%npoints=0_8
     this%npoints_iter=0_8
     this%npoints_nonzero=0_8
@@ -539,7 +599,7 @@ contains
   ! finalisation when all active channels/integrals have enough statistics.
   ! iteration_finished lets clients synchronize per-iteration diagnostics
   ! without exposing the integrator's private channel state.
-  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted,f_aux,iteration_finished)
+  subroutine fill_points(this,npoints,f_abs,f,to_write,done,accepted,f_aux,iteration_finished,external_converged)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: npoints
@@ -549,8 +609,12 @@ contains
     logical,dimension(npoints),intent(in),optional :: accepted
     real(kind=8),dimension(:,:),intent(in),optional :: f_aux
     logical,intent(out),optional :: iteration_finished
+    logical,intent(in),optional :: external_converged
     integer :: i
+    logical :: convergence_ok
     done=.false.
+    convergence_ok=.true.
+    if (present(external_converged)) convergence_ok=external_converged
     if (present(iteration_finished)) iteration_finished=.false.
     if (this%npoints_gen.eq.0) then
        write (*,*) 'ERROR: fill_points called before get_points'
@@ -592,7 +656,7 @@ contains
     enddo
     this%npoints_gen=0
     if (all(this%channels%done)) then
-       call this%finalise_iter(done)
+       call this%finalise_iter(done,convergence_ok)
        if (present(iteration_finished)) iteration_finished=.true.
     endif
     deallocate(this%x)
@@ -601,10 +665,11 @@ contains
 
   ! Finish one global iteration: combine rates, unweight candidates, update
   ! grids, and decide whether the requested event sample is complete.
-  subroutine finalise_iter(this,done)
+  subroutine finalise_iter(this,done,external_converged)
     implicit none
     class(integrator),intent(inout) :: this
     logical,intent(out) :: done
+    logical,intent(in) :: external_converged
     character(len=8) :: date
     character(len=10) :: time
     character(len=5) :: zone
@@ -629,12 +694,14 @@ contains
     call this%compute_total_rate()
     if (.not.turn_off_evnt_generation) call this%count_unweighted_evnts()
     call this%print_results()
+    force_external_refinement=turn_off_evnt_generation .and. .not.external_converged
     call this%update_grids()
     call this%init_next_iter()
+    force_external_refinement=.false.
     if (.not.turn_off_evnt_generation .and. all(this%channels%evgen_done)) done=.true.
     if (turn_off_evnt_generation) then
        if (this%res(1).gt.0d0) then
-          if (this%unc(1)/this%res(1).lt.requested_accuracy) done=.true.
+          if (this%unc(1)/this%res(1).lt.requested_accuracy .and. external_converged) done=.true.
        endif
     endif
     if (all(this%channels%done)) done=.true.
@@ -651,6 +718,7 @@ contains
     if (turn_off_evnt_generation .and. this%res(1).gt.0d0) then
        accuracy_refining=this%unc(1)/this%res(1).gt.2d0*requested_accuracy
     endif
+    if (force_external_refinement) accuracy_refining=.true.
     do i=1,this%nchannel
        call this%channels(i)%update_grids(accuracy_refining)
     enddo
@@ -823,11 +891,13 @@ contains
     integer :: i,j
     integer(kind=8) :: npoints,npoints_channel
     if (turn_off_evnt_generation) then
+       if (force_external_refinement) this%npoints_requested=this%npoints_requested*2
        if (this%res(1).gt.0d0) then
           rel_unc=this%unc(1)/this%res(1)
-          if (rel_unc.gt.2d0*requested_accuracy) this%npoints_requested=this%npoints_requested*2
+          if (.not.force_external_refinement .and. rel_unc.gt.2d0*requested_accuracy) &
+               this%npoints_requested=this%npoints_requested*2
        else
-          this%npoints_requested=this%npoints_requested*2
+          if (.not.force_external_refinement) this%npoints_requested=this%npoints_requested*2
        endif
        call update_integration_points_requested(this)
        return
@@ -972,7 +1042,8 @@ contains
     class(channel),intent(inout) :: this
     logical,intent(in) :: accuracy_refining
     type(grid) :: new_grid
-    integer :: i
+    integer :: i,iadapt
+    integer(kind=8) :: adaptation_points
     logical update_grids
     if (turn_off_evnt_generation) then
        ! All grids follow the global absolute-envelope convergence gate.
@@ -988,15 +1059,18 @@ contains
     if (.not.update_grids) then
        write (99,*) 'keeping grids fixed for channel',this%number
     endif
-    do i=1,this%ndim
-       if (update_grids) then
-          call this%grids(i,this%current_iter)%update(this%npoints_iter,new_grid)
-          if (this%current_iter .lt. this%max_iters) then
-             this%grids(i,this%current_iter+1)=new_grid
+    do iadapt=1,this%nadaptation
+       adaptation_points=sum(this%integrals%npoints_iter,mask=this%adaptation_class.eq.iadapt)
+       do i=1,this%ndim
+          if (update_grids .and. adaptation_points.gt.0_8) then
+             call this%grids(i,this%current_iter,iadapt)%update(adaptation_points,new_grid)
+             if (this%current_iter .lt. this%max_iters) then
+                this%grids(i,this%current_iter+1,iadapt)=new_grid
+             endif
+          elseif (this%current_iter .lt. this%max_iters) then
+             this%grids(i,this%current_iter+1,iadapt)=this%grids(i,this%current_iter,iadapt)
           endif
-       else
-          this%grids(i,this%current_iter+1)=this%grids(i,this%current_iter)
-       endif
+       enddo
     enddo
   end subroutine channel_update_grids
 
@@ -1133,7 +1207,7 @@ contains
        do k=iters_without_evnts+1,this%current_iter
           if ( (k.eq.iter .and. iter.ne.this%current_iter) .or. &
                (k.ne.iter .and. iter.eq.this%current_iter) ) then
-             call thischan%recompute_wgt_from_x(k,x,wgt_new)
+             call thischan%recompute_wgt_from_x(k,this%adaptation_class,x,wgt_new)
              this%evnt_list(j)%f_abs(k)=this%evnt_list(j)%f_abs(iter)*wgt_new/wgt
           endif
           fabs(j,k)=this%evnt_list(j)%f_abs(k)
@@ -1172,7 +1246,7 @@ contains
        iter=this%evnt_list(j)%iter
        x=this%evnt_list(j)%x
        wgt=this%evnt_list(j)%wgt
-       call thischan%recompute_wgt_from_x(next_iter,x,wgt_new)
+       call thischan%recompute_wgt_from_x(next_iter,this%adaptation_class,x,wgt_new)
        this%evnt_list(j)%f_abs(next_iter)=this%evnt_list(j)%f_abs(iter)*wgt_new/wgt
        fabs(j)=this%evnt_list(j)%f_abs(next_iter)
     enddo
@@ -1189,16 +1263,16 @@ contains
   
   ! Re-evaluate the adaptive-grid weight for an existing point in a given
   ! channel iteration.
-  subroutine recompute_wgt_from_x(this,iter,x,wgt)
+  subroutine recompute_wgt_from_x(this,iter,adaptation_class,x,wgt)
     implicit none
     class(channel),intent(inout) :: this
-    integer,intent(in) :: iter
+    integer,intent(in) :: iter,adaptation_class
     real(kind=8),dimension(this%ndim),intent(in) :: x
     real(kind=8),intent(out) :: wgt
     integer :: i
     wgt=1d0
     do i=1,this%ndim
-       call this%grids(i,iter)%get_wgt(x(i),wgt)
+       call this%grids(i,iter,adaptation_class)%get_wgt(x(i),wgt)
     enddo
   end subroutine recompute_wgt_from_x
 
@@ -1445,9 +1519,10 @@ contains
        if (turn_off_evnt_generation) then
           ! For a signed integration the variance-optimal density is
           ! proportional to abs(f), after real--dipole cancellation.
-          call this%grids(i,this%current_iter)%add_point(x(i),abs(f),.true.)
+          call this%grids(i,this%current_iter,this%adaptation_class(this%current_integral))%add_point(&
+               x(i),abs(f),.true.)
        else
-          call this%grids(i,this%current_iter)%add_point(x(i),f_abs)
+          call this%grids(i,this%current_iter,this%adaptation_class(this%current_integral))%add_point(x(i),f_abs)
        endif
     enddo
     if (present(f_aux)) then
@@ -1700,10 +1775,11 @@ contains
     class(channel),intent(inout) :: this
     real(kind=8),dimension(this%ndim+this%ndim_extra),intent(out) :: x
     real(kind=8),intent(out) :: wgt
-    integer :: i
+    integer :: i,iadapt
+    iadapt=this%adaptation_class(this%current_integral)
     wgt=1d0
     do i=1,this%ndim
-       call this%grids(i,this%current_iter)%get_x(x(i),wgt)
+       call this%grids(i,this%current_iter,iadapt)%get_x(x(i),wgt)
     enddo
     do i=this%ndim+1,this%ndim+this%ndim_extra
        x(i)=ran2()
@@ -1798,13 +1874,17 @@ contains
   
   ! Public helper: compute the current adaptive-grid weight for an existing
   ! point in channel ichan.
-  subroutine compute_wgt_from_x(this,ichan,x,wgt)
+  subroutine compute_wgt_from_x(this,ichan,x,wgt,iint)
     implicit none
     class(integrator),intent(inout) :: this
     integer,intent(in) :: ichan
+    integer,intent(in),optional :: iint
     real(kind=8),dimension(this%channels(ichan)%ndim),intent(in) :: x
     real(kind=8),intent(out) :: wgt
-    call this%channels(ichan)%recompute_wgt_from_x(this%channels(ichan)%current_iter,x,wgt)
+    integer :: iadapt
+    iadapt=1
+    if (present(iint)) iadapt=this%channels(ichan)%adaptation_class(iint)
+    call this%channels(ichan)%recompute_wgt_from_x(this%channels(ichan)%current_iter,iadapt,x,wgt)
   end subroutine compute_wgt_from_x
 
   ! Return the signed and absolute combined estimates for every channel.

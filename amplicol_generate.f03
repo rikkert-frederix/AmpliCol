@@ -24,18 +24,20 @@ program amplicol_generate
   use integration_histograms, only: histogram_initialize,histogram_begin_point,&
        histogram_commit_point,histogram_finalize_iteration,histogram_write
   use integration_analysis, only: analysis_begin,analysis_fill,analysis_distinguishes_massless_qcd_flavours
+  use real_subtraction_strata
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
-  integer,parameter :: n_tail_records=8
+  integer,parameter :: n_tail_records=8,n_contribution_components=9
   type :: tail_record
      logical :: valid=.false.,real_pass=.false.
-     integer :: ichan=0,iint=0,iteration=0
+     integer :: ichan=0,iint=0,physical_iint=0,stratum=0,iteration=0
      integer(kind=8) :: point=0_8
      real(kind=8) :: score=0d0,residual_score=0d0,component_score=0d0
      real(kind=8) :: f=0d0,f_abs=0d0,grid_volume=0d0,phase_space_jacobian=0d0
      real(kind=8) :: matrix_real=0d0,dipole_sum=0d0,matrix_residual=0d0
      real(kind=8) :: common_weight=0d0,physical_factor=0d0,counterevent_scale=0d0
      real(kind=8) :: renormalization_scale=0d0,alpha_s_value=0d0
+     real(kind=8) :: threshold_distance=-1d0
      real(kind=8),allocatable :: x(:),momenta(:,:),dipole_values(:),alpha_variables(:)
      integer,allocatable :: process(:),dipole_ijk(:,:),dipole_topology(:)
      logical,allocatable :: alpha_active(:),active(:),passes_cuts(:)
@@ -52,6 +54,7 @@ program amplicol_generate
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
   integer,dimension(:),allocatable :: integration_ndim_extra
+  integer,dimension(:,:),allocatable :: integration_adaptation_classes
   integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups,born_flavour_scheme,real_flavour_scheme
   integer :: limit_point
   integer,parameter :: n_limit_points=100,n_limit_failures=5
@@ -59,8 +62,8 @@ program amplicol_generate
   integer,dimension(:,:,:,:),allocatable :: collinear_fail,collinear_tested
   real(kind=8),dimension(:,:),allocatable :: limit_base
   real(kind=8),dimension(1) :: f,f_abs
-  real(kind=8),dimension(7,1) :: f_aux
-  logical :: done,iteration_finished,histogram_active
+  real(kind=8),dimension(n_contribution_components,1) :: f_aux
+  logical :: done,iteration_finished,histogram_active,tail_convergence_ok
   real(kind=8),dimension(:,:),allocatable :: wgts
   character(len=8) :: date
   character(len=10) :: time
@@ -72,12 +75,16 @@ program amplicol_generate
   integer(kind=8) :: timing_point
   real(kind=8) :: tLoopBefore,tLoopAfter,tSampleBefore,tSampleAfter,tFinalBefore,tFinalAfter
   real(kind=8) :: accuracy
+  real(kind=8) :: migration_tail_fraction_limit
   character(len=80) :: dim_reg_scheme
   type(tail_record),allocatable :: tail_residual_records(:,:,:),tail_component_records(:,:,:)
-  integer(kind=8),allocatable :: tail_npoints(:,:)
+  integer(kind=8),allocatable :: tail_npoints(:,:),tail_iteration_npoints(:,:)
   real(kind=8),allocatable :: tail_residual_sum2(:,:),tail_component_sum2(:,:)
+  real(kind=8),allocatable :: tail_iteration_residual_sum2(:,:),tail_iteration_max_residual2(:,:)
   integer :: tail_iteration
-  real(kind=8) :: tail_global_score,tail_global_residual_score
+  real(kind=8) :: tail_global_score,tail_global_residual_score,tail_last_migration_fraction
+  real(kind=8) :: tail_last_migration_variance_proxy,tail_last_migration_max_proxy
+  logical :: tail_last_migration_converged
 
   call get_run_arguments()
   timing_enabled=timing_mode.ne.timing_none
@@ -299,13 +306,27 @@ program amplicol_generate
         nintegrals(igroup)=3*nintegrals(igroup)
         integration_ndim_extra(igroup)=integration_ndim_extra(igroup)+1
      enddo
+     do igroup=nborn_groups+1,ngroups
+        nintegrals(igroup)=n_real_strata*nintegrals(igroup)
+     enddo
+  endif
+  allocate(integration_adaptation_classes(maxval(nintegrals),ngroups))
+  integration_adaptation_classes=1
+  if (has_real_process) then
+     do igroup=nborn_groups+1,ngroups
+        do iint=1,nintegrals(igroup)
+           integration_adaptation_classes(iint,igroup)=mod(iint-1,n_real_strata)+1
+        enddo
+     enddo
   endif
   if (accuracy.gt.0d0) then
      call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
-          integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),accuracy,naux=7)
+          integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),accuracy,naux=n_contribution_components,&
+          adaptation_classes=integration_adaptation_classes)
   else
      call simple_integrator%init(ngroups,pgl(1:ngroups)%ndim,&
-          integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),naux=7)
+          integration_ndim_extra,nintegrals,abs(ncalls0),abs(itmax),naux=n_contribution_components,&
+          adaptation_classes=integration_adaptation_classes)
   endif
   tail_tracking_enabled=has_real_process .and. .not.replay_tail
   if (tail_tracking_enabled) call initialize_tail_diagnostics()
@@ -401,13 +422,20 @@ program amplicol_generate
      call integrand(ichan,iint,simple_integrator%x(:,1),simple_integrator%wgt(1),&
           f(1),f_abs(1),f_aux(:,1))
      if (histogram_active) call histogram_commit_point()
+     tail_convergence_ok=.true.
+     if (tail_tracking_enabled) tail_convergence_ok=migration_tail_convergence_ok()
      if (time_detail_point) call cpu_time(tSampleBefore)
      call simple_integrator%fill_points(1,f_abs,f,to_write,done,f_aux=f_aux,&
-          iteration_finished=iteration_finished)
+          iteration_finished=iteration_finished,external_converged=tail_convergence_ok)
      if (histogram_active .and. iteration_finished) call histogram_finalize_iteration()
      if (tail_tracking_enabled .and. iteration_finished) then
+        call finalize_tail_iteration()
         tail_iteration=tail_iteration+1
         call write_tail_diagnostics()
+        call report_migration_tail_convergence()
+        tail_iteration_npoints=0_8
+        tail_iteration_residual_sum2=0d0
+        tail_iteration_max_residual2=0d0
      endif
      if (time_detail_point) then
         call cpu_time(tSampleAfter)
@@ -496,7 +524,7 @@ contains
   subroutine print_contribution_results()
     implicit none
     real(kind=8),allocatable :: channel_res(:,:),channel_unc(:,:),aux_res(:,:),aux_unc(:,:)
-    real(kind=8) :: component(7),component_unc(7),finite,finite_unc
+    real(kind=8) :: component(n_contribution_components),component_unc(n_contribution_components),finite,finite_unc
     character(len=32),parameter :: labels(7)=[character(len=32) ::&
          'Born','Real - local dipoles','Integrated I coefficient -2',&
          'Integrated I coefficient -1','Integrated I finite',&
@@ -515,6 +543,15 @@ contains
        write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') trim(labels(j))//':',component(j),'+/-',component_unc(j)
        write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') trim(labels(j))//':',component(j),'+/-',component_unc(j)
     enddo
+    write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, regular:',component(8),'+/-',component_unc(8)
+    write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, regular:',component(8),'+/-',component_unc(8)
+    write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, migration:',component(9),'+/-',component_unc(9)
+    write (99,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Real - local dipoles, migration:',component(9),'+/-',component_unc(9)
+    if (abs(component(2)-component(8)-component(9)).gt.&
+         5d-12*max(1d0,abs(component(2)),abs(component(8))+abs(component(9)))) then
+       write(*,*) 'ERROR: regular and migration strata do not close:',component(2),component(8),component(9)
+       stop 1
+    endif
     finite=sum(component((/1,2,5,6,7/)))
     finite_unc=sqrt(sum(component_unc((/1,2,5,6,7/))**2))
     write (*,'(a,2x,e14.7,1x,a,1x,e12.5)') 'Finite B+(R-D)+I0+P+K:',finite,'+/-',finite_unc
@@ -595,7 +632,8 @@ contains
     if (sampled) residual_note='residual'
   end function residual_note
 
-  subroutine integrand(ichan,iint,x,vol,f,f_abs,f_components,replay_physical_factor,replay_counter_scale)
+  subroutine integrand(ichan,iint,x,vol,f,f_abs,f_components,replay_physical_factor,replay_counter_scale,&
+       replay_unsplit)
     use scales
     use amp_lib
     implicit none
@@ -603,24 +641,46 @@ contains
     real(kind=8), dimension(:),intent(in) :: x
     real(kind=8),intent(in) :: vol
     real(kind=8),intent(out) :: f,f_abs
-    real(kind=8),intent(out) :: f_components(7)
+    real(kind=8),intent(out) :: f_components(n_contribution_components)
     real(kind=8),intent(in),optional :: replay_physical_factor,replay_counter_scale
+    logical,intent(in),optional :: replay_unsplit
     real(kind=8), dimension(:),allocatable,save :: val,val_abs,vol_ichan
     real(kind=8),dimension(pgl(ichan)%nproc) :: colour_singlet_multichannel_weight
-    integer :: ih,iproc,eval_iint,integration_role,icopy,idip
+    integer :: ih,iproc,eval_iint,integration_role,icopy,idip,requested_stratum,point_stratum
     integer :: resolution_info,resolution_dipole,kernel_info,kernel_dipole
     real(kind=8), parameter :: pi=3.14159265358979323846d0,conv=389379660d0
     real(kind=8) :: amp2_integrand,amp2_dip,icoeff(-2:0),pterm,kterm,z,real_hist_factor,real_counter_scale
+    real(kind=8) :: full_f,full_f_abs,regular_f,migration_f,real_margin,threshold_distance
     real(kind=8),allocatable :: dipole_values(:),real_hist_weights(:)
+    real(kind=8),allocatable :: mapped_margins(:)
     real(kind=8),allocatable :: icoeff_copy(:,:),pterm_copy(:),kterm_copy(:)
     integer :: mapped_process(pgl(ichan)%next-1)
     real(kind=8) :: unresolved_invariant,resolution_tolerance
     real(kind=8),allocatable :: hard_copy(:)
-    logical :: done,time_physics,real_pass
+    logical :: done,time_physics,real_pass,unsplit_real,stratum_selected
+    logical,allocatable :: alpha_active_flags(:),mapped_pass_flags(:)
     real(kind=8),external :: alphaspdf
     time_physics=(timing_mode.eq.timing_detailed) .and. time_point_sample
+    unsplit_real=.false.
+    if (present(replay_unsplit)) unsplit_real=replay_unsplit
+    integration_role=1
+    requested_stratum=0
+    eval_iint=iint
+    if (has_real_process .and. pgl(ichan)%is_subtracted_real) then
+       if (.not.unsplit_real) then
+          requested_stratum=mod(iint-1,n_real_strata)+1
+          eval_iint=(iint-1)/n_real_strata+1
+       endif
+    elseif (has_real_process) then
+       integration_role=mod(iint-1,3)+1
+       if (keep_processes_separate) then
+          eval_iint=(iint-1)/3+1
+       else
+          eval_iint=1
+       endif
+    endif
     if (create_amplitude_library) then
-       if (pgl(ichan)%amps(iint)%lib_created) return
+       if (pgl(ichan)%amps(eval_iint)%lib_created) return
     endif
     if (.not.allocated(val)) then
        if (keep_processes_separate) then
@@ -637,15 +697,12 @@ contains
     f_abs=0d0
     f_components=0d0
     val_abs=0d0
-    integration_role=1
-    eval_iint=iint
-    if (has_real_process .and. .not.pgl(ichan)%is_subtracted_real) then
-       integration_role=mod(iint-1,3)+1
-       if (keep_processes_separate) then
-          eval_iint=(iint-1)/3+1
-       else
-          eval_iint=1
-       endif
+    point_stratum=real_stratum_regular
+    stratum_selected=.true.
+    threshold_distance=-1d0
+    if (tail_tracking_enabled .and. pgl(ichan)%is_subtracted_real) then
+       tail_npoints(ichan,iint)=tail_npoints(ichan,iint)+1_8
+       tail_iteration_npoints(ichan,iint)=tail_iteration_npoints(ichan,iint)+1_8
     endif
 
     ! Generate phase-space point based on the random numbers 'x(1:ndim)'
@@ -738,6 +795,25 @@ contains
                kernel_dipole,kernel_info
           stop 1
        endif
+       allocate(alpha_active_flags(size(dipole_values)),mapped_pass_flags(size(dipole_values)))
+       allocate(mapped_margins(size(dipole_values)))
+       do idip=1,size(dipole_values)
+          alpha_active_flags(idip)=pgl(ichan)%dpl(eval_iint)%dl(idip)%alpha_active
+          mapped_pass_flags(idip)=pgl(ichan)%dpl(eval_iint)%dl(idip)%passes_cuts
+          mapped_margins(idip)=huge(1d0)
+          if (alpha_active_flags(idip)) then
+             mapped_margins(idip)=mapped_dipole_jet_pt_margin(&
+                  pgl(ichan)%dpl(eval_iint)%dl(idip)%p_mapped,&
+                  pgl(ichan)%dpl(eval_iint)%dl(idip)%process_r)
+          endif
+       enddo
+       point_stratum=classify_real_subtraction_stratum(real_pass,alpha_active_flags,mapped_pass_flags)
+       if (point_stratum.eq.real_stratum_migration) then
+          real_margin=real_subtracted_jet_pt_margin(pgl(ichan),eval_iint)
+          threshold_distance=migration_pt_distance(real_margin,mapped_margins,real_pass,&
+               alpha_active_flags,mapped_pass_flags)
+       endif
+       stratum_selected=unsplit_real .or. requested_stratum.eq.point_stratum
        if (real_pass) then
           amp2_integrand=amp2_integrand-amp2_dip
        else
@@ -808,8 +884,29 @@ contains
        f=sum(val(1:pgl(ichan)%nproc))
     endif
     if (pgl(ichan)%is_subtracted_real) then
+       full_f=f
+       full_f_abs=f_abs
+       call split_real_subtraction_weight(full_f,point_stratum,regular_f,migration_f)
+       if (regular_f+migration_f.ne.full_f) then
+          write(*,*) 'ERROR: real-subtraction strata do not close pointwise:',full_f,regular_f,migration_f
+          stop 1
+       endif
+       if (.not.unsplit_real) then
+          if (requested_stratum.eq.real_stratum_regular) then
+             f=regular_f
+          elseif (requested_stratum.eq.real_stratum_migration) then
+             f=migration_f
+          else
+             write(*,*) 'ERROR: invalid real-subtraction stratum:',requested_stratum
+             stop 1
+          endif
+          if (.not.stratum_selected) f_abs=0d0
+          if (stratum_selected) f_abs=full_f_abs
+       endif
        f_components(2)=f
-       if (histogram_active) then
+       if (point_stratum.eq.real_stratum_regular .and. stratum_selected) f_components(8)=f
+       if (point_stratum.eq.real_stratum_migration .and. stratum_selected) f_components(9)=f
+       if (histogram_active .and. stratum_selected) then
           if (real_pass) then
              if (analysis_distinguishes_massless_qcd_flavours) then
                 do icopy=1,pgl(ichan)%iden_iproc(eval_iint)
@@ -840,8 +937,9 @@ contains
           enddo
        endif
        if (tail_tracking_enabled) then
-          call consider_tail_point(ichan,eval_iint,x,vol,f,f_abs,pgl(ichan)%amp2(1),&
-               amp2_dip,amp2_integrand,weight,real_hist_factor,real_counter_scale,real_pass,dipole_values)
+          call consider_tail_point(ichan,iint,eval_iint,point_stratum,x,vol,f,f_abs,pgl(ichan)%amp2(1),&
+               amp2_dip,amp2_integrand,weight,real_hist_factor,real_counter_scale,real_pass,dipole_values,&
+               threshold_distance,stratum_selected)
        endif
     elseif (has_real_process) then
        if (integration_role.eq.1) then
@@ -953,19 +1051,29 @@ contains
   subroutine initialize_tail_diagnostics()
     implicit none
     integer :: max_integrals,unit
-    max_integrals=maxval(pgl(1:ngroups)%nproc)
+    max_integrals=maxval(nintegrals)
     allocate(tail_residual_records(n_tail_records,ngroups,max_integrals))
     allocate(tail_component_records(n_tail_records,ngroups,max_integrals))
     allocate(tail_npoints(ngroups,max_integrals))
+    allocate(tail_iteration_npoints(ngroups,max_integrals))
     allocate(tail_residual_sum2(ngroups,max_integrals),tail_component_sum2(ngroups,max_integrals))
+    allocate(tail_iteration_residual_sum2(ngroups,max_integrals))
+    allocate(tail_iteration_max_residual2(ngroups,max_integrals))
     tail_residual_records%valid=.false.
     tail_component_records%valid=.false.
     tail_npoints=0_8
+    tail_iteration_npoints=0_8
     tail_residual_sum2=0d0
     tail_component_sum2=0d0
+    tail_iteration_residual_sum2=0d0
+    tail_iteration_max_residual2=0d0
     tail_iteration=0
     tail_global_score=-1d0
     tail_global_residual_score=-1d0
+    tail_last_migration_fraction=-1d0
+    tail_last_migration_variance_proxy=0d0
+    tail_last_migration_max_proxy=0d0
+    tail_last_migration_converged=.true.
     timing_point=0_8
     tail_logfile='Outputs/'//trim(adjustl(tag))//'tail_diagnostics.log'
     tail_replay_output='Outputs/'//trim(adjustl(tag))//'tail_replay.dat'
@@ -981,21 +1089,25 @@ contains
     call write_tail_diagnostics()
   end subroutine initialize_tail_diagnostics
 
-  subroutine consider_tail_point(ichan,iint,x,vol,f_point,f_abs_point,matrix_real,dipole_sum,&
-       matrix_residual,common_weight,physical_factor,counterevent_scale,real_pass,dipole_values)
+  subroutine consider_tail_point(ichan,iint,physical_iint,stratum,x,vol,f_point,f_abs_point,matrix_real,dipole_sum,&
+       matrix_residual,common_weight,physical_factor,counterevent_scale,real_pass,dipole_values,&
+       threshold_distance,stratum_selected)
     implicit none
-    integer,intent(in) :: ichan,iint
+    integer,intent(in) :: ichan,iint,physical_iint,stratum
     real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,matrix_real,dipole_sum,matrix_residual
     real(kind=8),intent(in) :: common_weight,physical_factor,counterevent_scale,dipole_values(:)
-    logical,intent(in) :: real_pass
+    real(kind=8),intent(in) :: threshold_distance
+    logical,intent(in) :: real_pass,stratum_selected
     integer :: residual_slot,component_slot
     real(kind=8) :: score,residual_score,component_score
 
     residual_score=abs(f_point)
     component_score=0d0
-    if (real_pass) component_score=abs(matrix_real)*counterevent_scale
-    if (size(dipole_values).gt.0) then
-       component_score=max(component_score,maxval(abs(dipole_values))*counterevent_scale)
+    if (stratum_selected) then
+       if (real_pass) component_score=abs(matrix_real)*counterevent_scale
+       if (size(dipole_values).gt.0) then
+          component_score=max(component_score,maxval(abs(dipole_values))*counterevent_scale)
+       endif
     endif
     score=max(residual_score,component_score)
     if (.not.ieee_is_finite(score)) then
@@ -1004,22 +1116,25 @@ contains
        stop 1
     endif
 
-    tail_npoints(ichan,iint)=tail_npoints(ichan,iint)+1_8
     tail_residual_sum2(ichan,iint)=tail_residual_sum2(ichan,iint)+f_point*f_point
     tail_component_sum2(ichan,iint)=tail_component_sum2(ichan,iint)+component_score*component_score
+    tail_iteration_residual_sum2(ichan,iint)=tail_iteration_residual_sum2(ichan,iint)+f_point*f_point
+    tail_iteration_max_residual2(ichan,iint)=max(tail_iteration_max_residual2(ichan,iint),f_point*f_point)
     if (score.le.0d0) return
 
     residual_slot=find_tail_record_slot(tail_residual_records(:,ichan,iint),residual_score,.true.)
     component_slot=find_tail_record_slot(tail_component_records(:,ichan,iint),component_score,.false.)
     if (residual_slot.ne.0) then
-       call save_tail_record(tail_residual_records(residual_slot,ichan,iint),ichan,iint,x,vol,f_point,f_abs_point,&
+       call save_tail_record(tail_residual_records(residual_slot,ichan,iint),ichan,iint,physical_iint,stratum,&
+            x,vol,f_point,f_abs_point,&
             matrix_real,dipole_sum,matrix_residual,common_weight,physical_factor,counterevent_scale,&
-            real_pass,dipole_values,residual_score,component_score,score)
+            real_pass,dipole_values,residual_score,component_score,score,threshold_distance)
     endif
     if (component_slot.ne.0) then
-       call save_tail_record(tail_component_records(component_slot,ichan,iint),ichan,iint,x,vol,f_point,f_abs_point,&
+       call save_tail_record(tail_component_records(component_slot,ichan,iint),ichan,iint,physical_iint,stratum,&
+            x,vol,f_point,f_abs_point,&
             matrix_real,dipole_sum,matrix_residual,common_weight,physical_factor,counterevent_scale,&
-            real_pass,dipole_values,residual_score,component_score,score)
+            real_pass,dipole_values,residual_score,component_score,score,threshold_distance)
     endif
     if (score.gt.tail_global_score) then
        tail_global_score=score
@@ -1036,6 +1151,79 @@ contains
        endif
     endif
   end subroutine consider_tail_point
+
+  logical function migration_tail_convergence_ok() result(converged)
+    implicit none
+    real(kind=8) :: fraction,total_proxy,max_proxy
+
+    converged=.true.
+    if (migration_tail_fraction_limit.le.0d0) return
+    call current_migration_tail_fraction(fraction,total_proxy,max_proxy)
+    if (total_proxy.gt.0d0) converged=fraction.le.migration_tail_fraction_limit
+  end function migration_tail_convergence_ok
+
+  subroutine current_migration_tail_fraction(fraction,total_proxy,max_proxy)
+    implicit none
+    real(kind=8),intent(out) :: fraction,total_proxy,max_proxy
+    integer :: ichan_local,iint_local,stratum_local
+    integer(kind=8) :: npoints_local
+    real(kind=8) :: normalization
+
+    total_proxy=0d0
+    max_proxy=0d0
+    do ichan_local=1,ngroups
+       if (.not.pgl(ichan_local)%is_subtracted_real) cycle
+       do iint_local=1,nintegrals(ichan_local)
+          stratum_local=mod(iint_local-1,n_real_strata)+1
+          if (stratum_local.ne.real_stratum_migration) cycle
+          npoints_local=tail_iteration_npoints(ichan_local,iint_local)
+          if (npoints_local.le.0_8) cycle
+          normalization=dble(npoints_local)**2
+          total_proxy=total_proxy+tail_iteration_residual_sum2(ichan_local,iint_local)/normalization
+          max_proxy=max(max_proxy,tail_iteration_max_residual2(ichan_local,iint_local)/normalization)
+       enddo
+    enddo
+    if (total_proxy.gt.0d0) then
+       fraction=max_proxy/total_proxy
+    else
+       fraction=0d0
+    endif
+  end subroutine current_migration_tail_fraction
+
+  subroutine finalize_tail_iteration()
+    implicit none
+
+    call current_migration_tail_fraction(tail_last_migration_fraction,&
+         tail_last_migration_variance_proxy,tail_last_migration_max_proxy)
+    tail_last_migration_converged=.true.
+    if (migration_tail_fraction_limit.gt.0d0 .and. tail_last_migration_variance_proxy.gt.0d0) then
+       tail_last_migration_converged=tail_last_migration_fraction.le.migration_tail_fraction_limit
+    endif
+  end subroutine finalize_tail_iteration
+
+  subroutine report_migration_tail_convergence()
+    implicit none
+    character(len=16) :: status
+
+    if (migration_tail_fraction_limit.le.0d0) then
+       write(*,'(a)') 'Migration-tail convergence gate: disabled'
+       write(99,'(a)') 'Migration-tail convergence gate: disabled'
+       return
+    endif
+    if (tail_last_migration_converged) then
+       status='PASS'
+    else
+       status='NOT SATISFIED'
+    endif
+    write(*,'(a,es12.4,a,es12.4,2a)') 'Migration largest-point variance fraction: ',&
+         tail_last_migration_fraction,' limit ',migration_tail_fraction_limit,' -- ',trim(status)
+    write(99,'(a,es12.4,a,es12.4,2a)') 'Migration largest-point variance fraction: ',&
+         tail_last_migration_fraction,' limit ',migration_tail_fraction_limit,' -- ',trim(status)
+    if (done .and. .not.tail_last_migration_converged) then
+       write(*,'(a)') 'WARNING: iteration cap reached before migration-tail convergence.'
+       write(99,'(a)') 'WARNING: iteration cap reached before migration-tail convergence.'
+    endif
+  end subroutine report_migration_tail_convergence
 
   integer function find_tail_record_slot(records,key,use_residual) result(slot)
     implicit none
@@ -1066,15 +1254,16 @@ contains
     if (key.le.min_key) slot=0
   end function find_tail_record_slot
 
-  subroutine save_tail_record(record,ichan,iint,x,vol,f_point,f_abs_point,matrix_real,dipole_sum,&
+  subroutine save_tail_record(record,ichan,iint,physical_iint,stratum,x,vol,f_point,f_abs_point,matrix_real,dipole_sum,&
        matrix_residual,common_weight,physical_factor,counterevent_scale,real_pass,dipole_values,&
-       residual_score,component_score,score)
+       residual_score,component_score,score,threshold_distance)
     implicit none
     type(tail_record),intent(inout) :: record
-    integer,intent(in) :: ichan,iint
+    integer,intent(in) :: ichan,iint,physical_iint,stratum
     real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,matrix_real,dipole_sum,matrix_residual
     real(kind=8),intent(in) :: common_weight,physical_factor,counterevent_scale,dipole_values(:)
     real(kind=8),intent(in) :: residual_score,component_score,score
+    real(kind=8),intent(in) :: threshold_distance
     logical,intent(in) :: real_pass
     integer :: idip,ndip
 
@@ -1082,6 +1271,8 @@ contains
     record%real_pass=real_pass
     record%ichan=ichan
     record%iint=iint
+    record%physical_iint=physical_iint
+    record%stratum=stratum
     record%iteration=tail_iteration+1
     record%point=timing_point
     record%score=score
@@ -1099,9 +1290,10 @@ contains
     record%counterevent_scale=counterevent_scale
     record%renormalization_scale=scale_ren
     record%alpha_s_value=alphas
+    record%threshold_distance=threshold_distance
     record%x=x
     record%momenta=pgl(ichan)%ps(1)%p
-    record%process=pgl(ichan)%processes(:,iint)
+    record%process=pgl(ichan)%processes(:,physical_iint)
 
     ndip=size(dipole_values)
     if (allocated(record%dipole_values)) deallocate(record%dipole_values)
@@ -1115,12 +1307,12 @@ contains
     allocate(record%dipole_topology(ndip),record%alpha_active(ndip),record%active(ndip),record%passes_cuts(ndip))
     record%dipole_values=dipole_values
     do idip=1,ndip
-       record%alpha_variables(idip)=pgl(ichan)%dpl(iint)%dl(idip)%alpha_variable
-       record%dipole_ijk(:,idip)=pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk
-       record%dipole_topology(idip)=cs_dipole_topology(pgl(ichan)%dpl(iint)%dl(idip)%dip_ijk)
-       record%alpha_active(idip)=pgl(ichan)%dpl(iint)%dl(idip)%alpha_active
-       record%active(idip)=pgl(ichan)%dpl(iint)%dl(idip)%active
-       record%passes_cuts(idip)=pgl(ichan)%dpl(iint)%dl(idip)%passes_cuts
+       record%alpha_variables(idip)=pgl(ichan)%dpl(physical_iint)%dl(idip)%alpha_variable
+       record%dipole_ijk(:,idip)=pgl(ichan)%dpl(physical_iint)%dl(idip)%dip_ijk
+       record%dipole_topology(idip)=cs_dipole_topology(pgl(ichan)%dpl(physical_iint)%dl(idip)%dip_ijk)
+       record%alpha_active(idip)=pgl(ichan)%dpl(physical_iint)%dl(idip)%alpha_active
+       record%active(idip)=pgl(ichan)%dpl(physical_iint)%dl(idip)%active
+       record%passes_cuts(idip)=pgl(ichan)%dpl(physical_iint)%dl(idip)%passes_cuts
     enddo
   end subroutine save_tail_record
 
@@ -1132,7 +1324,7 @@ contains
     real(kind=8),intent(in) :: x(:),vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
     integer :: unit
     open(newunit=unit,file=trim(output_file),status='replace',action='write')
-    write(unit,'(a)') '# AmpliCol tail replay v2'
+    write(unit,'(a)') '# AmpliCol tail replay v3'
     write(unit,*) ichan,iint,size(x),PS_choice,tail_iteration+1,timing_point
     write(unit,'(*(es25.16,1x))') vol,f_point,f_abs_point,score,physical_factor,counterevent_scale
     write(unit,'(*(es25.16,1x))') alpha_dipole
@@ -1144,14 +1336,18 @@ contains
     implicit none
     character(len=256) :: header
     integer :: unit,replay_ichan,replay_iint,nrandom,replay_ps,replay_iteration
+    integer :: replay_physical_iint,replay_stratum
     integer(kind=8) :: replay_point
     real(kind=8) :: replay_vol,expected_f,expected_f_abs,expected_score,replay_alpha(4),tolerance
     real(kind=8) :: replay_physical_factor,replay_counter_scale
     real(kind=8),allocatable :: replay_x(:)
+    logical :: replay_v2
+    character(len=9),parameter :: stratum_name(2)=[character(len=9) :: 'regular','migration']
 
     open(newunit=unit,file=trim(tail_replay_file),status='old',action='read')
     read(unit,'(a)') header
-    if (trim(header).ne.'# AmpliCol tail replay v2') then
+    replay_v2=trim(header).eq.'# AmpliCol tail replay v2'
+    if (.not.replay_v2 .and. trim(header).ne.'# AmpliCol tail replay v3') then
        write(*,*) 'ERROR: unsupported tail replay file: ',trim(header)
        stop 1
     endif
@@ -1180,20 +1376,38 @@ contains
        write(*,*) 'ERROR: tail replay channel is not subtracted real:',replay_ichan
        stop 1
     endif
-    if (replay_iint.lt.1 .or. replay_iint.gt.pgl(replay_ichan)%nproc) then
-       write(*,*) 'ERROR: tail replay integral is out of range:',replay_iint
-       stop 1
+    if (replay_v2) then
+       if (replay_iint.lt.1 .or. replay_iint.gt.pgl(replay_ichan)%nproc) then
+          write(*,*) 'ERROR: v2 tail replay physical integral is out of range:',replay_iint
+          stop 1
+       endif
+    else
+       if (replay_iint.lt.1 .or. replay_iint.gt.nintegrals(replay_ichan)) then
+          write(*,*) 'ERROR: tail replay integration stratum is out of range:',replay_iint
+          stop 1
+       endif
     endif
     if (nrandom.ne.size(pgl(replay_ichan)%ps(1)%x)) then
        write(*,*) 'ERROR: tail replay random-coordinate count differs:',nrandom,size(pgl(replay_ichan)%ps(1)%x)
        stop 1
     endif
 
-    call integrand(replay_ichan,replay_iint,replay_x,replay_vol,f(1),f_abs(1),f_aux(:,1),&
-         replay_physical_factor,replay_counter_scale)
+    if (replay_v2) then
+       call integrand(replay_ichan,replay_iint,replay_x,replay_vol,f(1),f_abs(1),f_aux(:,1),&
+            replay_physical_factor,replay_counter_scale,.true.)
+    else
+       call integrand(replay_ichan,replay_iint,replay_x,replay_vol,f(1),f_abs(1),f_aux(:,1),&
+            replay_physical_factor,replay_counter_scale)
+    endif
     tolerance=5d-11*max(1d0,abs(expected_f),abs(f(1)))
     write(*,'(a,2(i0,1x),a,i0,a,i0)') 'Tail replay channel/integral ',replay_ichan,replay_iint,&
          ' original iteration ',replay_iteration,' point ',replay_point
+    if (.not.replay_v2) then
+       replay_physical_iint=(replay_iint-1)/n_real_strata+1
+       replay_stratum=mod(replay_iint-1,n_real_strata)+1
+       write(*,'(a,i0,a,a)') 'Tail replay physical integral ',replay_physical_iint,&
+            ' stratum ',trim(stratum_name(replay_stratum))
+    endif
     write(*,'(a,es24.16)') 'Saved signed weight:   ',expected_f
     write(*,'(a,es24.16)') 'Replayed signed weight:',f(1)
     write(*,'(a,es24.16)') 'Saved absolute weight: ',expected_f_abs
@@ -1209,18 +1423,27 @@ contains
   subroutine write_tail_diagnostics()
     implicit none
     integer :: unit,ichan_local,iint_local,irecord,nvalid_residual,nvalid_component
+    integer :: physical_iint_local,stratum_local
     real(kind=8) :: residual_top2,component_top2
+    character(len=9),parameter :: stratum_name(2)=[character(len=9) :: 'regular','migration']
 
     open(newunit=unit,file=trim(tail_logfile),status='replace',action='write')
-    write(unit,'(a)') '# AmpliCol subtracted-real tail diagnostics v1'
+    write(unit,'(a)') '# AmpliCol subtracted-real tail diagnostics v2'
     write(unit,'(a,i0)') '# retained records per channel/integral: ',n_tail_records
     write(unit,'(a,4(1x,es16.8))') '# alpha FF FI IF II:',alpha_dipole
     write(unit,'(a)') '# score=max(abs(signed residual weight), largest measured R/D counterevent weight)'
+    write(unit,'(a,1x,es16.8)') '# migration_tail_fraction_limit=',migration_tail_fraction_limit
+    if (tail_iteration.gt.0) then
+       write(unit,'(a,i0)') '# last_completed_iteration=',tail_iteration
+       write(unit,'(a,3(1x,es16.8),a,l1)') '# migration variance_proxy max_point_proxy fraction',&
+            tail_last_migration_variance_proxy,tail_last_migration_max_proxy,tail_last_migration_fraction,&
+            ' converged ',tail_last_migration_converged
+    endif
     write(unit,'(a)') '# component_replay_file='//trim(tail_replay_output)
     write(unit,'(a)') '# residual_replay_file='//trim(tail_residual_replay_output)
     do ichan_local=1,ngroups
        if (.not.pgl(ichan_local)%is_subtracted_real) cycle
-       do iint_local=1,pgl(ichan_local)%nproc
+       do iint_local=1,nintegrals(ichan_local)
           nvalid_residual=count(tail_residual_records(:,ichan_local,iint_local)%valid)
           nvalid_component=count(tail_component_records(:,ichan_local,iint_local)%valid)
           if (nvalid_residual.eq.0 .and. nvalid_component.eq.0) cycle
@@ -1235,7 +1458,10 @@ contains
                      tail_component_records(irecord,ichan_local,iint_local)%component_score**2
              endif
           enddo
-          write(unit,'(a,2(1x,i0),a,i0)') 'leaf channel/integral',ichan_local,iint_local,&
+          physical_iint_local=(iint_local-1)/n_real_strata+1
+          stratum_local=mod(iint_local-1,n_real_strata)+1
+          write(unit,'(a,2(1x,i0),a,i0,a,a,a,i0)') 'leaf channel/integral',ichan_local,iint_local,&
+               ' physical ',physical_iint_local,' stratum ',trim(stratum_name(stratum_local)),&
                ' points ',tail_npoints(ichan_local,iint_local)
           write(unit,'(a,es24.16,a,es14.6)') ' residual_sum_w2 ',tail_residual_sum2(ichan_local,iint_local),&
                ' retained_fraction ',safe_fraction(residual_top2,tail_residual_sum2(ichan_local,iint_local))
@@ -1287,9 +1513,11 @@ contains
     type(tail_record),intent(in) :: record
     integer :: ileg,idip
     character(len=2),parameter :: topology_name(4)=[character(len=2) :: 'FF','FI','IF','II']
+    character(len=9),parameter :: stratum_name(2)=[character(len=9) :: 'regular','migration']
 
-    write(unit,'(a,i0,a,i0,a,i0,a,i0,a,i0)') ' record rank ',rank,' iteration ',record%iteration,&
-         ' point ',record%point,' channel ',record%ichan,' integral ',record%iint
+    write(unit,'(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0,a,a)') ' record rank ',rank,' iteration ',record%iteration,&
+         ' point ',record%point,' channel ',record%ichan,' integral ',record%iint,&
+         ' physical_integral ',record%physical_iint,' stratum ',trim(stratum_name(record%stratum))
     write(unit,'(a,3(1x,es24.16))') ' scores total residual component',record%score,&
          record%residual_score,record%component_score
     write(unit,'(a,2(1x,es24.16),a,l1)') ' weights signed absolute',record%f,record%f_abs,&
@@ -1300,6 +1528,7 @@ contains
          record%physical_factor,record%counterevent_scale
     write(unit,'(a,4(1x,es24.16))') ' kinematics grid_volume ps_jac muR alphaS',record%grid_volume,&
          record%phase_space_jacobian,record%renormalization_scale,record%alpha_s_value
+    write(unit,'(a,1x,es24.16)') ' threshold_distance_pt',record%threshold_distance
     write(unit,'(a,*(1x,es24.16))') ' x',record%x
     write(unit,'(a,*(1x,i0))') ' process',record%process
     do ileg=1,size(record%momenta,2)
@@ -1531,7 +1760,7 @@ contains
     common /to_seed/iseed
     call parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
          limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
-         tail_replay_file,replay_tail)
+         tail_replay_file,replay_tail,migration_tail_fraction_limit)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')

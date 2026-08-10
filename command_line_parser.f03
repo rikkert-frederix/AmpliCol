@@ -3,7 +3,7 @@ module argument_parser
 contains
   subroutine parse_argument(filename,real_filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
        limit_test,timing,timing_sample,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
-       tail_replay_file,replay_tail)
+       tail_replay_file,replay_tail,migration_tail_fraction_limit)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp,tail_replay_file
@@ -13,7 +13,7 @@ contains
     integer(kind=8) :: seed
     logical :: read_momenta,limit_test,has_real_process,replay_tail
     integer :: me_points,timing_sample
-    real(kind=8) :: accuracy,alpha_dipole(4)
+    real(kind=8) :: accuracy,alpha_dipole(4),migration_tail_fraction_limit
 
     ! Default values:
     show_help=.false.
@@ -30,6 +30,7 @@ contains
     has_real_process=.false.
     tail_replay_file=''
     replay_tail=.false.
+    migration_tail_fraction_limit=0.2d0
     timing='basic'
     timing_sample=100
     accuracy=0d0
@@ -91,6 +92,13 @@ contains
        elseif (index(arg, "--tail-replay=").eq.1) then
           tail_replay_file=trim(adjustl(arg(index(arg, "=")+1:)))
           replay_tail=.true.
+       elseif (index(arg, "--migration-tail-fraction=").eq.1) then
+          tmp=arg(index(arg, "=")+1:)
+          read(tmp,*) migration_tail_fraction_limit
+          if (migration_tail_fraction_limit.lt.0d0 .or. migration_tail_fraction_limit.gt.1d0) then
+             write(*,*) 'Migration tail fraction must satisfy 0 <= value <= 1: ',migration_tail_fraction_limit
+             stop 1
+          endif
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -125,6 +133,8 @@ contains
             " values FF,FI,IF,II."
        write (*,'(a)') "  --dim-reg=[hv|fdh]        : Dimensional scheme for integrated dipoles (default: hv)."
        write (*,'(a)') "  --tail-replay=[FILE]      : Re-evaluate the saved maximum-weight point in FILE and exit."
+       write (*,'(a)') "  --migration-tail-fraction=[X] : Require the largest migration point to contribute"// &
+            " at most X of its iteration variance before accuracy-based stopping (default 0.2; 0 disables)."
        write (*,'(a)') ""
        stop
     end if
