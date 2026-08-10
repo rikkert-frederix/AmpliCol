@@ -96,7 +96,7 @@ generate, '--seed=X' to set the random seed.
 
 The limit diagnostic can be run with '--limit_test'. It tests each channel at
 100 generated phase-space points. A limit passes at a given channel and limit
-when fewer than 20 of the tested points fail, and the screen reports the
+when fewer than 5 of the tested points fail, and the screen reports the
 failure fraction separately for every integral (`iint`). At an individual
 point, a limit passes when three consecutive finite
 deformation points have a positive matrix-element/dipole ratio within 1% of

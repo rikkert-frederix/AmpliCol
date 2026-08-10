@@ -37,7 +37,7 @@ program amplicol_generate
   integer,dimension(:),allocatable :: integration_ndim_extra
   integer :: ichan,iint,itmax,ncalls0,iamp,nborn_groups,nreal_groups,born_flavour_scheme,real_flavour_scheme
   integer :: limit_point
-  integer,parameter :: n_limit_points=100,n_limit_failures=20
+  integer,parameter :: n_limit_points=100,n_limit_failures=5
   integer,dimension(:,:,:),allocatable :: soft_fail,soft_tested
   integer,dimension(:,:,:,:),allocatable :: collinear_fail,collinear_tested
   real(kind=8),dimension(:,:),allocatable :: limit_base

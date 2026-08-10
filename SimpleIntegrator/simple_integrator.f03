@@ -630,8 +630,11 @@ contains
     call this%update_grids()
     call this%init_next_iter()
     if (.not.turn_off_evnt_generation .and. all(this%channels%evgen_done)) done=.true.
-    if (turn_off_evnt_generation .and. this%res(1).gt.0d0 .and. &
-         this%unc(1)/this%res(1).lt.requested_accuracy) done=.true.
+    if (turn_off_evnt_generation) then
+       if (this%res(1).gt.0d0) then
+          if (this%unc(1)/this%res(1).lt.requested_accuracy) done=.true.
+       endif
+    endif
     if (all(this%channels%done)) done=.true.
     call flush(99)
   end subroutine finalise_iter

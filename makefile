@@ -205,7 +205,7 @@ tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py 
 tests/matrix_elements/golden.dat: matrix_element_regression tests/matrix_elements/cases.dat
 	./matrix_element_regression --write tests/matrix_elements/cases.dat $@
 
-test_matrix_elements: matrix_element_regression
+test_matrix_elements: matrix_element_regression tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
 	./matrix_element_regression --check tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py

@@ -66,9 +66,12 @@ FAMILIES = (
 
 def parse_process_file(path: Path, family: str) -> list[tuple[str, int, int, int, str, list[int], list[int]]]:
     lines = path.read_text().splitlines()
-    n_external, n_unique = map(int, lines[0].split()[:2])
+    idx = 0
+    if lines and lines[0].startswith("# AmpliCol process-list v2 nf="):
+        idx += 1
+    n_external, n_unique = map(int, lines[idx].split()[:2])
 
-    idx = 1 + n_unique
+    idx += 1 + n_unique
     while idx < len(lines) and not lines[idx].strip():
         idx += 1
     n_groups = int(lines[idx].split()[0])
