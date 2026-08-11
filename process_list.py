@@ -373,49 +373,53 @@ def GenerateAllUniqueProcs(process):
 
     The returned tuples do not yet decide which particles are incoming. They
     contain all requested particles plus enough massless-QCD particles to
-    account for the two beams and requested inclusive jets.
+    account for the two beams and requested inclusive jets.  Generate those
+    particles as multisets directly: enumerating every ordered choice and
+    sorting it afterwards repeats each six-parton multiset up to ``6!`` times.
     """
-    procs=[[]]
     for part in process['initial_state']:
         if part != 'p' and part not in massless_QCD:
             raise ValueError("Initial state should be a proton ('p').")
-    jp=0
-    for part in process['rest']:
-        if part not in massless_QCD : continue
-        jp=jp+1
-    # The following for-loop will generate all processes of length
-    # 'part' that contain all possible massless_QCD particles. Hence,
-    # procs will have a size n^part, where n is the number of
-    # particles in massless_QCD (by default 11=10quarks+1gluon). (This
-    # is slightly reduced when part is large, since only up to 2 (or
-    # 3) qqbar pairs are considered). To check that these are valid
-    # processes (e.g., equal number of quarks and anti-quarks) is done
-    # later in this function. 
-    for part in range(process['jet_count']+2+jp): # number of jets + two incoming + other massless_QCD
-        procs_new=[]
-        for proc in procs:
-            for p in massless_QCD:
-                if (not options["include_3qqbar_processes"]) and part > 3 and p not in gluons: continue
-                if part > 5 and p not in gluons: continue
-                if not procs_new:
-                    procs_new=[sorted(proc+[p])]
-                else:
-                    procs_new.append(sorted(proc+[p]))
-        procs=procs_new.copy()
-    # Add the non-massless_QCD particles in the process to all the
-    # procs.
-    for part in process['rest']:
-        if part in massless_QCD : continue
-        for proc in procs:
-            proc.append(part)
-    unique_procs=[]
-    # Only at this stage check if they are valid (e.g., equal number
-    # of quarks and anti-quarks) and compatible with the input
-    # process.
-    for proc in procs:
-        if ValidProc(proc) and CompatibleUniqueProc(process,proc):
-            unique_procs.append(tuple(proc))
-    return set(unique_procs)
+
+    requested_qcd = sum(part in massless_QCD for part in process['rest'])
+    qcd_slots = process['jet_count'] + 2 + requested_qcd
+    fixed_particles = [
+        part for part in process['rest'] if part not in massless_QCD
+    ]
+
+    # ValidProc requires the complete process to contain equally many quarks
+    # and antiquarks, with at most two (or three) lines.  Enumerate only count
+    # combinations that can meet that condition.  The fixed-particle offsets
+    # matter for processes containing explicit massive quarks, such as t W.
+    fixed_quarks = count_matching_elements(fixed_particles, quarks)
+    fixed_antiquarks = count_matching_elements(fixed_particles, antiquarks)
+    max_quark_lines = 3 if options["include_3qqbar_processes"] else 2
+    massless_quarks = sorted(quarks & massless_QCD)
+    massless_antiquarks = sorted(antiquarks & massless_QCD)
+
+    unique_procs = set()
+    first_line_count = max(fixed_quarks, fixed_antiquarks)
+    for line_count in range(first_line_count, max_quark_lines + 1):
+        nquarks = line_count - fixed_quarks
+        nantiquarks = line_count - fixed_antiquarks
+        ngluons = qcd_slots - nquarks - nantiquarks
+        if ngluons < 0:
+            continue
+        quark_choices = itertools.combinations_with_replacement(
+            massless_quarks, nquarks
+        )
+        for quark_choice in quark_choices:
+            antiquark_choices = itertools.combinations_with_replacement(
+                massless_antiquarks, nantiquarks
+            )
+            for antiquark_choice in antiquark_choices:
+                proc = sorted(
+                    quark_choice + antiquark_choice + ('g',) * ngluons
+                )
+                proc.extend(fixed_particles)
+                if ValidProc(proc) and CompatibleUniqueProc(process, proc):
+                    unique_procs.add(tuple(proc))
+    return unique_procs
 
 def GenerateAllProcs(unique_procs,process):
     """Expand canonical multisets into concrete incoming/outgoing processes.

@@ -7,6 +7,7 @@ import sys
 import unittest
 from collections import Counter, defaultdict
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -302,6 +303,40 @@ class ThreeQuarkLineMultiChannelRegression(unittest.TestCase):
             "rank_one_groups": 18,
             "rank_one_rows": 108,
         })
+
+    def test_inclusive_four_jet_generation_enumerates_multisets(self):
+        saved_options = dict(process_list.options)
+        try:
+            process_list.SwitchFlavourScheme(5)
+            process_list.options.update({
+                "include_3qqbar_processes": True,
+                "include_cc_processes": False,
+                "include_resonance": False,
+                "serial": True,
+            })
+            request = process_list.ParseCollision("p p > 4j")
+            with mock.patch.object(
+                process_list,
+                "ValidProc",
+                wraps=process_list.ValidProc,
+            ) as valid_proc:
+                unique = process_list.GenerateAllUniqueProcs(request)
+
+            # There are only 1 + 5^2 + 15^2 + 35^2 possible flavour
+            # multisets through three quark lines.  The old ordered-product
+            # construction called ValidProc 11^6 times for this request.
+            self.assertLessEqual(valid_proc.call_count, 1476)
+            self.assertEqual(
+                Counter(
+                    sum(part in process_list.quarks for part in proc)
+                    for proc in unique
+                ),
+                Counter({3: 35, 2: 15, 1: 5, 0: 1}),
+            )
+        finally:
+            process_list.SwitchFlavourScheme(5)
+            process_list.options.clear()
+            process_list.options.update(saved_options)
 
     def test_zero_one_and_two_line_metadata_remain_compact(self):
         cases = (
