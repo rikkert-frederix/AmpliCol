@@ -2,7 +2,7 @@
 
 .PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
 	test_three_quark_line_reweight test_three_quark_line_multichannel \
-	update_matrix_cases update_matrix_goldens
+	test_run_parameters update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -100,26 +100,28 @@ $(foreach g,$(AMPGROUPS),$(eval $(call one_lib_template,$(g))))
 
 FILES_M_INT_QCD = bitset.o pdf.o NNPDFDriver.o ranmar.o phase_space.o \
 LUPdecompose.o phase_space_gen23.o color_algebra.o math_functions.o \
-feynmanrules.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
+feynmanrules.o run_parameters.o particles.o amplitude_QCD.o amplicol_generate.o common.o \
 phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 read_process_file.o multichannel.o handling_processes.o simple_integrator.o \
 helper_modules.o amplitude_library.o command_line_parser.o mg_checks.o scales.o \
 pdf_lhapdf62.o
 
-FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+FILES_M_RWGT_QCD = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 amplitude_QCD.o amplicol_reweight.o ranmar.o
 
-FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+FILES_M_TEST_ME = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o matrix_element_regression.o
 
-FILES_M_TEST_FERMI = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+FILES_M_TEST_FERMI = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o fermi_statistics_regression.o
 
-FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o three_quark_line_reweight_regression.o
 
-FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrules.o run_parameters.o particles.o \
 	amplitude_QCD.o mixed_spinor_regression.o
+
+FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
 # ----------------------------------------------------------------------
 # 5. Build executables
@@ -147,6 +149,9 @@ three_quark_line_reweight_regression: $(FILES_M_TEST_THREE_QUARK)
 mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_MIXED_SPINOR)
 
+run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RUN_PARAMETERS)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -159,6 +164,9 @@ three_quark_line_reweight_regression.o: \
 
 mixed_spinor_regression.o: \
 		tests/matrix_elements/mixed_spinor_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
@@ -190,11 +198,15 @@ test_three_quark_line_reweight: three_quark_line_reweight_regression \
 		amplicol_reweight tests/matrix_elements/run_three_quark_line_reweight_regression.py
 	./three_quark_line_reweight_regression
 	$(PYTHON) tests/matrix_elements/run_three_quark_line_reweight_regression.py \
-		--reweighter $(CURDIR)/amplicol_reweight
+		--reweighter $(CURDIR)/amplicol_reweight --input-card $(CURDIR)/run_card.dat
 
 test_three_quark_line_multichannel: \
 		process_list.py tests/process_list_three_quark_multichannel_regression.py
 	$(PYTHON) tests/process_list_three_quark_multichannel_regression.py
+
+test_run_parameters: run_parameters_regression
+	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
+		tests/input/ignore_final_width_run_card.dat
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat
@@ -206,8 +218,8 @@ update_matrix_goldens: matrix_element_regression update_matrix_cases
 # 6. Manual dependency rules
 # ----------------------------------------------------------------------
 
-amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o
-phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o
+amplicol_reweight.o : amplitude_QCD.o math_functions.o particles.o run_parameters.o
+phase_space_gen23.o : phase_space.o LUPdecompose.o particles.o run_parameters.o
 phase_space_genpt.o : phase_space.o particles.o
 phase_space.o : particles.o
 phase_space_haag.o : phase_space.o
@@ -216,9 +228,13 @@ amplicol_generate.o : amplitude_QCD.o phase_space_gen23.o common.o math_function
 	particles.o phase_space_genpt.o phase_space_haag.o cuts.o pdf_wrap.o handling_events.o \
 	read_process_file.o multichannel.o handling_processes.o simple_integrator.o amplitude_library.o \
 	command_line_parser.o mg_checks.o scales.o
-common.o : particles.o simple_integrator.o
+particles.o : run_parameters.o
+run_parameters.o : run_parameters.f03
+	$(FC) $(FFLAGS) -fno-finite-math-only -c -I. $<
+common.o : particles.o run_parameters.o simple_integrator.o
 handling_events.o : common.o handling_processes.o simple_integrator.o
 read_process_file.o : phase_space_gen23.o cuts.o handling_processes.o simple_integrator.o
+amplitude_library.o : pdf_wrap.o
 # The inverse-map guard must distinguish NaN/Inf values.  The finite-math
 # part of -ffast-math otherwise makes ieee_is_finite fold to true.
 multichannel.o : multichannel.f03 handling_processes.o math_functions.o simple_integrator.o

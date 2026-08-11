@@ -84,11 +84,10 @@ contains
     COMMON/QMASS/CMASS,BMASS
     DATA CMASS,BMASS/1.42D0,4.7D0/  ! HEAVY QUARK MASSES FOR THRESHOLDS
 !C
-    REAL*8 ZMASS
-    DATA ZMASS/91.188D0/
 !C
-    SAVE AMZ0,NLOOP0,AMB,AMC
-    DATA AMZ0,NLOOP0/0D0,0/
+    real*8 ZMASS0
+    SAVE AMZ0,NLOOP0,AMB,AMC,ZMASS0
+    DATA AMZ0,NLOOP0,ZMASS0/0D0,0,0D0/
     integer nloop
     real*8 asmz
 
@@ -114,10 +113,11 @@ contains
        BMASS=4.7D0
     ENDIF
 !c--- establish value of coupling at b- and c-mass and save
-    IF ((asmz .NE. AMZ0) .OR. (NLOOP .NE. NLOOP0)) THEN
+    IF ((asmz .NE. AMZ0) .OR. (NLOOP .NE. NLOOP0) .OR. (z_mass .NE. ZMASS0)) THEN
        AMZ0=asmz
        NLOOP0=NLOOP
-       T=2D0*DLOG(BMASS/ZMASS)
+       ZMASS0=z_mass
+       T=2D0*DLOG(BMASS/z_mass)
        CALL NEWTON1(T,asmz,AMB,NLOOP,NF5)
        T=2D0*DLOG(CMASS/BMASS)
        CALL NEWTON1(T,AMB,AMC,NLOOP,NF4)
@@ -133,7 +133,7 @@ contains
           CALL NEWTON1(T,AMB,AS_OUT,NLOOP,NF4)
        ENDIF
     ELSE
-       T=2D0*DLOG(Q/ZMASS)
+       T=2D0*DLOG(Q/z_mass)
        CALL NEWTON1(T,asmz,AS_OUT,NLOOP,NF5)
     ENDIF
     ALPHAS_Q=AS_OUT

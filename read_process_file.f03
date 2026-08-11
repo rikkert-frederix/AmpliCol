@@ -1,5 +1,6 @@
 module read_process_file
   use handling_processes
+  use run_parameters, only: ignore_final_state_width_fix
   implicit none
   integer :: sf_nprocs
   integer,dimension(:,:),allocatable :: unique_procs,processes,color_orders,multi_chans
@@ -11,6 +12,118 @@ module read_process_file
   integer,dimension(:,:,:),allocatable :: iden_processes
   real(kind=8),dimension(:,:),allocatable :: idenCOandMAPfactor
 contains
+  subroutine apply_final_state_widths_from_process_file(filename)
+    implicit none
+    character(len=*),intent(in) :: filename
+    character(len=65536) :: buffer
+    integer :: iunit,ios,n_external,n_unique,version,iproc,igroup,ngroup_file
+    integer :: group_index,nproc_in_group,max_channels,nchannels
+    integer,dimension(:),allocatable :: phase_order,channels
+    integer,dimension(:,:),allocatable :: physical_process
+
+    if (ignore_final_state_width_fix) return
+    open(newunit=iunit,file=trim(filename),status='old',action='read',iostat=ios)
+    if (ios.ne.0) then
+       write (*,*) 'Could not open process file while applying final-state widths: ',trim(filename)
+       stop 1
+    endif
+    read(iunit,'(a)',iostat=ios) buffer
+    if (ios.ne.0) then
+       write (*,*) 'Could not read process-file header while applying final-state widths'
+       stop 1
+    endif
+    version=1
+    read(buffer,*,iostat=ios) n_external,n_unique,version
+    if (ios.ne.0) then
+       read(buffer,*,iostat=ios) n_external,n_unique
+    endif
+    if (ios.ne.0 .or. n_external.lt.3 .or. n_unique.lt.1) then
+       write (*,*) 'Malformed process-file header while applying final-state widths'
+       stop 1
+    endif
+    do iproc=1,n_unique
+       read(iunit,*,iostat=ios)
+       if (ios.ne.0) then
+          write (*,*) 'Could not read unique subprocess while applying final-state widths',iproc
+          stop 1
+       endif
+    enddo
+    ! The first block contains canonical amplitude representatives, not the
+    ! physical subprocess labelling.  Walk the phase-space-group rows instead;
+    ! their first process field is the one later stored in iden_processes and
+    ! has physical incoming/final-state positions.
+    read(iunit,*,iostat=ios)
+    read(iunit,*,iostat=ios)
+    read(iunit,*,iostat=ios) ngroup_file
+    if (ios.ne.0 .or. ngroup_file.lt.1) then
+       write (*,*) 'Could not read phase-space groups while applying final-state widths'
+       stop 1
+    endif
+    read(iunit,*,iostat=ios)
+    allocate(phase_order(n_external))
+    allocate(physical_process(n_external,1))
+    do igroup=1,ngroup_file
+       read(iunit,*,iostat=ios) group_index,nproc_in_group,max_channels,phase_order
+       if (ios.ne.0 .or. group_index.ne.igroup .or. nproc_in_group.lt.1 .or.&
+            max_channels.lt.1) then
+          write (*,*) 'Malformed phase-space group while applying final-state widths',igroup
+          stop 1
+       endif
+       do iproc=1,nproc_in_group
+          read(iunit,'(a)',iostat=ios) buffer
+          if (ios.ne.0 .or. len_trim(buffer).eq.len(buffer)) then
+             write (*,*) 'Could not read subprocess row while applying final-state widths',igroup,iproc
+             stop 1
+          endif
+          read(buffer,*,iostat=ios) nchannels
+          if (ios.ne.0 .or. nchannels.lt.1 .or. nchannels.gt.max_channels) then
+             write (*,*) 'Invalid multichannel count while applying final-state widths',igroup,iproc
+             stop 1
+          endif
+          allocate(channels(nchannels))
+          read(buffer,*,iostat=ios) nchannels,channels,physical_process(:,1)
+          deallocate(channels)
+          if (ios.ne.0) then
+             write (*,*) 'Malformed subprocess process field while applying final-state widths',igroup,iproc
+             stop 1
+          endif
+          call phys_model%apply_final_state_widths(n_external,1,physical_process)
+       enddo
+       read(iunit,*,iostat=ios)
+       read(iunit,*,iostat=ios)
+       read(iunit,*,iostat=ios)
+       if (ios.ne.0 .and. igroup.ne.ngroup_file) then
+          write (*,*) 'Unexpected end of process file while applying final-state widths'
+          stop 1
+       endif
+    enddo
+    close(iunit)
+    deallocate(phase_order)
+    deallocate(physical_process)
+  end subroutine apply_final_state_widths_from_process_file
+
+  subroutine apply_final_state_widths_from_loaded_groups()
+    implicit none
+    integer :: igroup,iproc,iident
+    integer,dimension(:,:),allocatable :: physical_processes
+
+    if (ignore_final_state_width_fix) return
+    do igroup=1,ngroups
+       if (.not.allocated(pgl(igroup)%iden_processes)) cycle
+       allocate(physical_processes(pgl(igroup)%next,&
+            sum(pgl(igroup)%iden_iproc(1:pgl(igroup)%nproc))))
+       iident=0
+       do iproc=1,pgl(igroup)%nproc
+          physical_processes(:,iident+1:iident+pgl(igroup)%iden_iproc(iproc))=&
+               pgl(igroup)%iden_processes(:,1:pgl(igroup)%iden_iproc(iproc),iproc)
+          iident=iident+pgl(igroup)%iden_iproc(iproc)
+       enddo
+       call phys_model%apply_final_state_widths(pgl(igroup)%next,iident,&
+            physical_processes(:,1:iident))
+       deallocate(physical_processes)
+    enddo
+  end subroutine apply_final_state_widths_from_loaded_groups
+
   subroutine read_processes_from_file(filename)
     implicit none
     character(len=80) :: filename
@@ -323,7 +436,7 @@ contains
     real(kind=8),dimension(nevent,pgl%nproc),intent(in) :: amp2
     real(kind=8),dimension(pgl%nproc),intent(out) :: unique_map_value
     integer,dimension(pgl%nproc),intent(out) :: unique_map
-    integer :: i,j
+    integer :: i,j,k
     real(kind=8),dimension(nevent) :: ratio
     real(kind=8) :: ave
     real(kind=8),parameter :: tiny=1d-6
@@ -336,6 +449,14 @@ contains
        endif
        do j=1,i-1
           if (all(amp2(1:nevent,j).eq.0d0)) cycle
+          ! A numerical relation found on the deliberately massless probe
+          ! point is not a valid runtime reduction if it moves a massive
+          ! species to another external leg.
+          do k=1,pgl%next
+             if (phys_model%get_mass(pgl%processes(k,i)).ne.&
+                  phys_model%get_mass(pgl%processes(k,j))) exit
+          enddo
+          if (k.le.pgl%next) cycle
           ratio(1:nevent)=amp2(1:nevent,i)/amp2(1:nevent,j)
           ave=sum(ratio(1:nevent))/nevent
           if (all(abs(ratio(1:nevent)/ave-1d0).lt.tiny)) then
@@ -438,6 +559,20 @@ contains
           endif
        enddo
     endif
+    ! Numerical flavour reduction is constructed on a common massless phase-
+    ! space point.  It is valid only when the reduced representative has the
+    ! same external mass layout as the physical subprocess.  In particular,
+    ! crossing a final-state top into an initial light-quark slot would feed
+    ! massive wavefunctions the wrong labelled momentum.  Retain the exact
+    ! subprocess in that case; light-flavour reductions remain unchanged.
+    do i=1,next
+       if (phys_model%get_mass(process_unique(i)).ne.&
+            phys_model%get_mass(process(i))) then
+          process_unique=process
+          idenMAPfactor=1d0
+          exit
+       endif
+    enddo
     if (pgl_unique%amps(1)%same_flav(iproc)) then
        is_same_flavour=.true.
     else

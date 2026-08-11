@@ -1,6 +1,7 @@
 module phase_space_gen23_mod
   !  use common
   use phase_space_base
+  use run_parameters, only: z_mass,z_width
   implicit none
   type,extends(phase_space_type),public :: phase_space_gen23
    contains
@@ -356,8 +357,8 @@ contains
       real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
       smin=50d0**2
       smax=this%sqrts**2
-      qmass=91.188d0
-      qwidth=2.441404d0
+      qmass=z_mass
+      qwidth=z_width
       A=atan((qmass-smin/qmass)/qwidth)
       B=atan((qmass-smax/qmass)/qwidth)
       ix=ix+1
@@ -1201,8 +1202,8 @@ contains
       real(kind=8) :: A,B,smin,smax,qmass,qwidth,y
       smin=50d0**2
       smax=this%sqrts**2
-      qmass=91.188d0
-      qwidth=2.441404d0
+      qmass=z_mass
+      qwidth=z_width
       A=atan((qmass-smin/qmass)/qwidth)
       B=atan((qmass-smax/qmass)/qwidth)
       ix=ix+1

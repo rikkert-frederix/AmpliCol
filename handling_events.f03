@@ -227,7 +227,7 @@ contains
     IDBMUP(1:2)=2212     ! two protons
     EBMUP(1:2)=sqrts/2d0 ! half of collision energy
     PDFGUP(1:2)=-1
-    PDFSUP(1:2)=244800   ! NNPDF23_nlo_as_0119_qed
+    PDFSUP(1:2)=pdf_lhaid
     IDWTUP=-3
     NPRUP=1
     XSECUP=0d0

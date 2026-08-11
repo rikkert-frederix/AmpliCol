@@ -1,6 +1,10 @@
 module particles
+  use run_parameters, only: sw,configured_top_mass=>top_mass,&
+       configured_top_width=>top_width,configured_z_mass=>z_mass,&
+       configured_z_width=>z_width,configured_w_mass=>w_mass,&
+       configured_w_width=>w_width,configured_higgs_mass=>higgs_mass,&
+       configured_higgs_width=>higgs_width,ignore_final_state_width_fix
   implicit none
-  real(kind=8),parameter :: sw = 0.47143025548407230d0 
   integer,parameter :: model_particle_capacity = 24
   integer,parameter :: model_vertex_capacity = 222
   private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
@@ -9,7 +13,11 @@ module particles
        &, photon_fermion_coupling, z_fermion_coupling&
        &, weak_coupling_squared, weak_cosine_squared&
        &, weak_coupling_over_cosine, higgs_self_coupling&
-       &, model_particle_capacity, model_vertex_capacity
+       &, model_particle_capacity, model_vertex_capacity,sw&
+       &, configured_top_mass,configured_top_width,configured_z_mass&
+       &, configured_z_width,configured_w_mass,configured_w_width&
+       &, configured_higgs_mass,configured_higgs_width&
+       &, ignore_final_state_width_fix
   type particle
      ! weak_isospin and weak_hypercharge use index 1=left, 2=right with Q = T3 + Y/2.
      integer :: type,anti_type,spin,dim,color_rep
@@ -34,7 +42,8 @@ module particles
           &is_gluon,is_tensor_g,is_tensor_z,is_tensor_w&
           &,is_tensor6,is_tensor,is_singlet,is_photon,is_massiveboson&
           &,is_higgs,is_jet,is_higgsor,is_fermion,is_massless_fermion&
-          &,is_chiral_eligible
+          &,is_chiral_eligible,set_width,apply_final_state_widths&
+          &,model_signature
      procedure,public :: get_colour_rep => get_color_rep
      procedure,public :: get_colour_dim => get_color_dim
   end type physics_model
@@ -194,13 +203,30 @@ contains
 
   subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
     implicit none
-    class(physics_model) :: this
+    class(physics_model),intent(inout) :: this
     integer :: i,l
-    real(kind=8) :: tmass,twidth
-    real(kind=8) :: zmass,zwidth
-    real(kind=8) :: wmass,wwidth
-    real(kind=8) :: hmass,hwidth
+    real(kind=8),intent(in),optional :: tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth
+    real(kind=8) :: tmass_local,twidth_local,zmass_local,zwidth_local
+    real(kind=8) :: wmass_local,wwidth_local,hmass_local,hwidth_local
+    tmass_local=configured_top_mass
+    twidth_local=configured_top_width
+    zmass_local=configured_z_mass
+    zwidth_local=configured_z_width
+    wmass_local=configured_w_mass
+    wwidth_local=configured_w_width
+    hmass_local=configured_higgs_mass
+    hwidth_local=configured_higgs_width
+    if (present(tmass)) tmass_local=tmass
+    if (present(twidth)) twidth_local=twidth
+    if (present(zmass)) zmass_local=zmass
+    if (present(zwidth)) zwidth_local=zwidth
+    if (present(wmass)) wmass_local=wmass
+    if (present(wwidth)) wwidth_local=wwidth
+    if (present(hmass)) hmass_local=hmass
+    if (present(hwidth)) hwidth_local=hwidth
     l=0
+    if (allocated(this%particle_list)) deallocate(this%particle_list)
+    if (allocated(this%vertex_list)) deallocate(this%vertex_list)
     this%npart=model_particle_capacity ! gluon, quarks, tensors, bosons, Higgs and leptons
     allocate(this%particle_list(this%npart))
 
@@ -214,7 +240,8 @@ contains
     enddo
 
     ! top quark
-    call append_particle(this,l,6,tmass,twidth,2,-6,4,2d0/3d0,[0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
+    call append_particle(this,l,6,tmass_local,twidth_local,2,-6,4,2d0/3d0,&
+         [0.5d0,0d0],[1d0/3d0,4d0/3d0],3)
 
     ! gluon
     call append_particle(this,l,21,0d0,0d0,2,21,4,0d0,[0d0,0d0],[0d0,0d0],8)
@@ -229,16 +256,19 @@ contains
     call append_particle(this,l,22,0d0,0d0,2,22,4,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! Z-boson
-    call append_particle(this,l,23,zmass,zwidth,3,23,4,0d0,[0d0,0d0],[0d0,0d0],1)
+    call append_particle(this,l,23,zmass_local,zwidth_local,3,23,4,0d0,&
+         [0d0,0d0],[0d0,0d0],1)
 
     ! Ztensor (non-propagator auxiliary particle to decompose 4-Wboson interaction)
     call append_particle(this,l,-23,0d0,0d0,-1,-23,6,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! W-boson
-    call append_particle(this,l,24,wmass,wwidth,3,-24,4,1d0,[1d0,1d0],[0d0,0d0],1)
+    call append_particle(this,l,24,wmass_local,wwidth_local,3,-24,4,1d0,&
+         [1d0,1d0],[0d0,0d0],1)
 
     ! Higgs-boson
-    call append_particle(this,l,25,hmass,hwidth,1,25,1,0d0,[-0.5d0,-0.5d0],[1d0,1d0],1)
+    call append_particle(this,l,25,hmass_local,hwidth_local,1,25,1,0d0,&
+         [-0.5d0,-0.5d0],[1d0,1d0],1)
 
     ! Higgs"or"A (non-propagator scalar auxiliary particle to decompose 4-boson interactions)
     call append_particle(this,l,125,0d0,0d0,-1,125,1,0d0,[0d0,0d0],[0d0,0d0],1)
@@ -269,6 +299,7 @@ contains
     class(physics_model) :: this
     integer :: i,l
     l=0
+    if (allocated(this%vertex_list)) deallocate(this%vertex_list)
     this%nint = model_vertex_capacity ! number of vertices
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
@@ -579,6 +610,54 @@ contains
     write (*,*) 'Particle not in model (width)',ipdg
     stop 1
   end function get_width
+
+  subroutine set_width(this,ipdg,new_width)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(in) :: ipdg
+    real(kind=8),intent(in) :: new_width
+    integer :: i
+    i=find_particle_index(this,ipdg)
+    if (i.le.0) then
+       write (*,*) 'Particle not in model (set width)',ipdg
+       stop 1
+    endif
+    if (new_width.lt.0d0) then
+       write (*,*) 'Cannot assign a negative particle width',ipdg,new_width
+       stop 1
+    endif
+    this%particle_list(i)%width=new_width
+  end subroutine set_width
+
+  subroutine apply_final_state_widths(this,n,nprocs,processes)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(in) :: n,nprocs
+    integer,dimension(n,nprocs),intent(in) :: processes
+    integer :: i,iproc,ipdg
+    real(kind=8) :: old_width
+    if (ignore_final_state_width_fix) return
+    do iproc=1,nprocs
+       do i=3,n
+          ipdg=processes(i,iproc)
+          if (this%get_mass(ipdg).le.0d0) cycle
+          old_width=this%get_width(ipdg)
+          if (old_width.eq.0d0) cycle
+          write (*,'(a,i8,a,es14.6)') 'Setting final-state particle width to zero for PDG ',&
+               ipdg,'; configured width = ',old_width
+          call this%set_width(ipdg,0d0)
+       enddo
+    enddo
+  end subroutine apply_final_state_widths
+
+  function model_signature(this) result(signature)
+    implicit none
+    class(physics_model),intent(in) :: this
+    real(kind=8),dimension(9) :: signature
+    signature=[sw,this%get_mass(6),this%get_width(6),this%get_mass(23),&
+         this%get_width(23),this%get_mass(24),this%get_width(24),&
+         this%get_mass(25),this%get_width(25)]
+  end function model_signature
   integer function get_spin(this,ipdg)
     implicit none
     class(physics_model) :: this

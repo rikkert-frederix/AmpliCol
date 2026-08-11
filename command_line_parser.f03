@@ -1,13 +1,14 @@
 module argument_parser
   implicit none
 contains
-  subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       timing,timing_sample)
+  subroutine parse_argument(filename,input_file,ncalls0,itmax,PS_choice,seed,library,tag,&
+       read_momenta,me_points,timing,timing_sample)
     integer :: i
     character(len=256) :: arg
-    character(len=256) :: input_file,tmp
+    character(len=256) :: tmp
     logical :: verbose, show_help
     character(len=80) :: filename,library,tag,timing
+    character(len=256) :: input_file
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
     logical :: read_momenta 
@@ -16,6 +17,7 @@ contains
     ! Default values:
     show_help=.false.
     filename='processes.txt'
+    input_file='run_card.dat'
     ncalls0=10000
     PS_choice=1
     seed=0
@@ -33,6 +35,8 @@ contains
           show_help = .true.
        elseif (index(arg, "--process=").eq.1 .or. index(arg, "-p=").eq.1) then
           filename = arg(index(arg, "=")+1:)
+       elseif (index(arg, "--input=").eq.1 .or. index(arg, "--card=").eq.1) then
+          input_file = arg(index(arg, "=")+1:)
        elseif (index(arg, "--nevents=").eq.1 .or. index(arg, "-n=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) ncalls0
@@ -70,6 +74,7 @@ contains
        write (*,'(a)') ""
        write (*,'(a)') "  --help,           -h      : Show this message."
        write (*,'(a)') "  --process=[X],    -p=[X]  : Process specified in file [X] (default is './processes.txt')."
+       write (*,'(a)') "  --input=[X], --card=[X]   : Physics/run input card (default is './run_card.dat')."
        write (*,'(a)') "  --nevents=[X],    -n=[X]  : Number of unweighted events to generate (default is 10000)."
        write (*,'(a)') "  --phasespace=[X], -ps=[X] : Phase-space parametrisation to use "// &
             "-- 1=gen23 (default), 2=HAAG, 3=pT-based, 4=t-channel."

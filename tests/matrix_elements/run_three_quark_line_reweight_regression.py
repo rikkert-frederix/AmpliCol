@@ -41,14 +41,16 @@ EXPECTED_REWEIGHT = 0.4485971947600595
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reweighter", required=True)
+    parser.add_argument("--input-card", required=True)
     args = parser.parse_args()
     reweighter = Path(args.reweighter).resolve()
+    input_card = Path(args.input_card).resolve()
 
     with tempfile.TemporaryDirectory(prefix="amplicol-three-line-reweight-") as raw:
         event_file = Path(raw) / "event.lhe"
         event_file.write_text(EVENT, encoding="ascii")
         completed = subprocess.run(
-            [str(reweighter), str(event_file)],
+            [str(reweighter), str(event_file), f"--input={input_card}"],
             check=True,
             text=True,
             capture_output=True,
