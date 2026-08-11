@@ -51,6 +51,8 @@ program amplicol_generate
        tail_residual_replay_output,tail_replay_file
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
+  ! Infer reuse from nine points and validate it on the unseen tenth point.
+  integer,parameter :: n_amplitude_optimisation_samples=nevent_hel_filter-1
   integer :: igroup
   logical,dimension(1) :: to_write
   integer,dimension(:),allocatable :: nintegrals
@@ -311,7 +313,7 @@ program amplicol_generate
         t_lib_check=t_lib_check+tAfter-tBefore
      endif
   endif
-  
+
   if (.not.has_real_process) then
      filename='Outputs/'//trim(adjustl(tag))//'events_tmp.lhe'
      open(unit=11,file=filename,action='readwrite',status='unknown')
@@ -1665,30 +1667,62 @@ contains
     implicit none
     integer,intent(in) :: iint,ichan
     logical,intent(out) :: done
-    real(kind=8), dimension(:),allocatable :: amp2_save
+    integer,dimension(:),allocatable :: helicity_filter
+    real(kind=8),dimension(:),allocatable :: amp2_save,amp2_hel_save,amps_r_save
+    complex(kind=8),dimension(:),allocatable :: amps_save
     done=.false.
+    if (pgl(ichan)%passed(iint).le.n_amplitude_optimisation_samples) then
+       call record_helicity_optimisation_sample(pgl(ichan),iint)
+       call pgl(ichan)%amps(iint)%record_optimisation_sample(&
+            pgl(ichan)%passed(iint),n_amplitude_optimisation_samples)
+    endif
     call find_same_flavour(pgl(ichan),nevent_hel_filter,pgl(ichan)%amp2)
-    call setup_helicity_filter(pgl(ichan),iint)
     if (pgl(ichan)%passed(iint).eq.nevent_hel_filter) then
-       ! recompute the amplitudes (to make sure that helicities are
-       ! all filled correctly). We can also check that they are
-       ! consistent with the non-optimised ones.
-       allocate(amp2_save(1:pgl(ichan)%nproc))
+       ! Validate current sharing and helicity filtering independently at
+       ! the last warm-up point.  This keeps failures attributable and also
+       ! avoids the non-conforming nproc-sized copy used by the old
+       ! keep_processes_separate path.
+       allocate(amp2_save(size(pgl(ichan)%amp2)))
        amp2_save=pgl(ichan)%amp2
-       call compute_the_amps(iint,ichan,use_amplitude_library)
-       call square_the_amps(iint,ichan)
+       allocate(amp2_hel_save(pgl(ichan)%nhel(iint)))
+       amp2_hel_save=pgl(ichan)%amp2_hel(1:pgl(ichan)%nhel(iint))
+       if (use_real_gluons) then
+          allocate(amps_r_save(size(pgl(ichan)%amps(iint)%amps_r)))
+          amps_r_save=pgl(ichan)%amps(iint)%amps_r
+       else
+          allocate(amps_save(size(pgl(ichan)%amps(iint)%amps)))
+          amps_save=pgl(ichan)%amps(iint)%amps
+       endif
        if (use_cross_process_optimisation_of_currents) then
           call pgl(ichan)%amps(iint)%optimise_evaluation(pgl(ichan)%next)
           call compute_the_amps(iint,ichan,use_amplitude_library)
           call square_the_amps(iint,ichan)
+          call check_optimised_matrix_element('current sharing',amp2_save,&
+               pgl(ichan)%amp2,ichan,iint)
+          call check_optimised_matrix_element('current sharing by helicity',&
+               amp2_hel_save,pgl(ichan)%amp2_hel(1:size(amp2_hel_save)),ichan,iint)
+          if (use_real_gluons) then
+             call check_optimised_real_amplitudes('current sharing',amps_r_save,&
+                  pgl(ichan)%amps(iint)%amps_r,ichan,iint)
+          else
+             call check_optimised_complex_amplitudes('current sharing',amps_save,&
+                  pgl(ichan)%amps(iint)%amps,ichan,iint)
+          endif
        endif
-       if (any(abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2).gt.1d-8)) then
-          write (*,*) 'Find same flavour and helicity filter give different matrix elements',ichan,iint
-          write (*,*) amp2_save
-          write (*,*) pgl(ichan)%amp2
-          write (*,*) ''
-          write (*,*) abs(amp2_save-pgl(ichan)%amp2)/(amp2_save+pgl(ichan)%amp2)
-          stop 1
+       call setup_helicity_filter(pgl(ichan),iint,helicity_filter)
+       call pgl(ichan)%amps(iint)%clear_optimisation_samples()
+       call compute_the_amps(iint,ichan,use_amplitude_library)
+       call square_the_amps(iint,ichan)
+       call check_optimised_matrix_element('helicity filtering',amp2_save,&
+            pgl(ichan)%amp2,ichan,iint)
+       call check_filtered_helicity_weights(helicity_filter,amp2_hel_save,&
+            pgl(ichan)%amp2_hel(1:pgl(ichan)%nhel(iint)),ichan,iint)
+       if (use_real_gluons) then
+          call check_filtered_real_amplitudes(helicity_filter,amps_r_save,&
+               pgl(ichan)%amps(iint)%amps_r,ichan,iint)
+       else
+          call check_filtered_complex_amplitudes(helicity_filter,amps_save,&
+               pgl(ichan)%amps(iint)%amps,ichan,iint)
        endif
        deallocate(amp2_save)
        if (create_amplitude_library) then
@@ -1701,46 +1735,239 @@ contains
     endif
   end subroutine optimise_the_amplitudes
 
-  
-  subroutine setup_helicity_filter(pgl,iint)
+  subroutine record_helicity_optimisation_sample(pgl,iint)
     implicit none
     type(phase_space_order_group),intent(inout) :: pgl
-    real(kind=8) :: max_value
-    integer :: ih1,ih2,iproc1,iproc2,iint
+    integer,intent(in) :: iint
+    integer :: isample
+    real(kind=8) :: sample_scale
+    if (.not.allocated(pgl%amp2_hel_samples)) then
+       allocate(pgl%amp2_hel_samples(maxval(pgl%nhel),size(pgl%nhel),&
+            n_amplitude_optimisation_samples))
+       pgl%amp2_hel_samples=0d0
+    endif
+    isample=pgl%passed(iint)
+    if (.not.all(ieee_is_finite(pgl%amp2_hel(1:pgl%nhel(iint))))) then
+       write (*,*) 'Non-finite helicity weight encountered during amplitude optimisation',&
+            iint,isample
+       stop 1
+    endif
+    sample_scale=maxval(abs(pgl%amp2_hel(1:pgl%nhel(iint))))
+    pgl%amp2_hel_samples(:,iint,isample)=0d0
+    if (sample_scale.gt.tiny(1d0)) then
+       pgl%amp2_hel_samples(1:pgl%nhel(iint),iint,isample)=&
+            pgl%amp2_hel(1:pgl%nhel(iint))/sample_scale
+    endif
+  end subroutine record_helicity_optimisation_sample
+
+  subroutine check_optimised_matrix_element(stage,reference,value,ichan,iint)
+    implicit none
+    character(len=*),intent(in) :: stage
+    real(kind=8),intent(in) :: reference(:),value(:)
+    integer,intent(in) :: ichan,iint
+    real(kind=8) :: scale(size(reference)),difference(size(reference))
+    if (size(reference).ne.size(value)) then
+       write (*,*) 'Amplitude optimisation changed matrix-element shape during ',trim(stage)
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(reference)) .or. &
+         .not.all(ieee_is_finite(value))) then
+       write (*,*) 'Non-finite matrix element encountered during ',trim(stage),ichan,iint
+       stop 1
+    endif
+    difference=abs(reference-value)
+    scale=max(abs(reference),abs(value),tiny(1d0))
+    if (any(difference.gt.1d-9*scale)) then
+       write (*,*) 'Amplitude optimisation changed matrix element during ',trim(stage),ichan,iint
+       write (*,*) 'reference:',reference
+       write (*,*) 'optimised:',value
+       write (*,*) 'relative difference:',difference/scale
+       stop 1
+    endif
+  end subroutine check_optimised_matrix_element
+
+  subroutine check_optimised_complex_amplitudes(stage,reference,value,ichan,iint)
+    implicit none
+    character(len=*),intent(in) :: stage
+    complex(kind=8),intent(in) :: reference(:),value(:)
+    integer,intent(in) :: ichan,iint
+    real(kind=8) :: scale(size(reference)),difference(size(reference))
+    if (size(reference).ne.size(value)) then
+       write (*,*) 'Amplitude optimisation changed amplitude shape during ',trim(stage)
+       stop 1
+    endif
+    if (.not.complex_array_is_finite(reference) .or. &
+         .not.complex_array_is_finite(value)) then
+       write (*,*) 'Non-finite complex amplitude encountered during ',trim(stage),ichan,iint
+       stop 1
+    endif
+    difference=abs(reference-value)
+    scale=max(abs(reference),abs(value),tiny(1d0))
+    if (any(difference.gt.1d-9*scale)) then
+       write (*,*) 'Amplitude optimisation changed a complex amplitude during ',&
+            trim(stage),ichan,iint,maxval(difference/scale)
+       stop 1
+    endif
+  end subroutine check_optimised_complex_amplitudes
+
+  subroutine check_optimised_real_amplitudes(stage,reference,value,ichan,iint)
+    implicit none
+    character(len=*),intent(in) :: stage
+    real(kind=8),intent(in) :: reference(:),value(:)
+    integer,intent(in) :: ichan,iint
+    real(kind=8) :: scale(size(reference)),difference(size(reference))
+    if (size(reference).ne.size(value)) then
+       write (*,*) 'Amplitude optimisation changed real-amplitude shape during ',trim(stage)
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(reference)) .or. &
+         .not.all(ieee_is_finite(value))) then
+       write (*,*) 'Non-finite real amplitude encountered during ',trim(stage),ichan,iint
+       stop 1
+    endif
+    difference=abs(reference-value)
+    scale=max(abs(reference),abs(value),tiny(1d0))
+    if (any(difference.gt.1d-9*scale)) then
+       write (*,*) 'Amplitude optimisation changed a real amplitude during ',&
+            trim(stage),ichan,iint,maxval(difference/scale)
+       stop 1
+    endif
+  end subroutine check_optimised_real_amplitudes
+
+  subroutine check_filtered_helicity_weights(filter,reference,value,ichan,iint)
+    implicit none
+    integer,intent(in) :: filter(:),ichan,iint
+    real(kind=8),intent(in) :: reference(:),value(:)
+    integer :: old_hel,new_hel,member,nmembers
+    real(kind=8) :: expected,reference_scale,scale
+    if (size(filter).ne.size(reference) .or. count(filter.gt.0).ne.size(value)) then
+       write (*,*) 'Helicity-filter validation has inconsistent dimensions',ichan,iint
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(reference)) .or. &
+         .not.all(ieee_is_finite(value))) then
+       write (*,*) 'Non-finite helicity-filter weight encountered',ichan,iint
+       stop 1
+    endif
+    reference_scale=max(maxval(abs(reference)),tiny(1d0))
+    do old_hel=1,size(filter)
+       if (filter(old_hel).eq.0 .and. &
+            abs(reference(old_hel)).gt.100d0*helicity_zero_tolerance*reference_scale) then
+          write (*,*) 'A discarded helicity is non-zero at the holdout point',&
+               ichan,iint,old_hel,reference(old_hel)/reference_scale
+          stop 1
+       endif
+    enddo
+    new_hel=0
+    do old_hel=1,size(filter)
+       if (filter(old_hel).le.0) cycle
+       new_hel=new_hel+1
+       expected=reference(old_hel)
+       nmembers=1
+       do member=old_hel+1,size(filter)
+          if (filter(member).eq.-old_hel) then
+             expected=expected+reference(member)
+             nmembers=nmembers+1
+          endif
+       enddo
+       if (nmembers.ne.filter(old_hel)) then
+          write (*,*) 'Helicity-filter multiplicity is inconsistent',&
+               ichan,iint,old_hel,nmembers,filter(old_hel)
+          stop 1
+       endif
+       scale=max(abs(expected),abs(value(new_hel)),tiny(1d0))
+       if (abs(expected-value(new_hel)).gt.1d-9*scale) then
+          write (*,*) 'Helicity filtering changed a grouped helicity weight',&
+               ichan,iint,old_hel,expected,value(new_hel)
+          stop 1
+       endif
+    enddo
+  end subroutine check_filtered_helicity_weights
+
+  subroutine check_filtered_complex_amplitudes(filter,reference,value,ichan,iint)
+    implicit none
+    integer,intent(in) :: filter(:),ichan,iint
+    complex(kind=8),intent(in) :: reference(:),value(:)
+    integer :: old_hel,new_hel
+    real(kind=8) :: scale
+    if (size(filter).ne.size(reference) .or. count(filter.gt.0).ne.size(value)) then
+       write (*,*) 'Complex helicity-filter validation has inconsistent dimensions',ichan,iint
+       stop 1
+    endif
+    if (.not.complex_array_is_finite(reference) .or. &
+         .not.complex_array_is_finite(value)) then
+       write (*,*) 'Non-finite filtered complex amplitude encountered',ichan,iint
+       stop 1
+    endif
+    new_hel=0
+    do old_hel=1,size(filter)
+       if (filter(old_hel).le.0) cycle
+       new_hel=new_hel+1
+       scale=max(abs(reference(old_hel)),abs(value(new_hel)),tiny(1d0))
+       if (abs(reference(old_hel)-value(new_hel)).gt.1d-9*scale) then
+          write (*,*) 'Helicity filtering changed a retained complex amplitude',&
+               ichan,iint,old_hel,new_hel
+          stop 1
+       endif
+    enddo
+  end subroutine check_filtered_complex_amplitudes
+
+  subroutine check_filtered_real_amplitudes(filter,reference,value,ichan,iint)
+    implicit none
+    integer,intent(in) :: filter(:),ichan,iint
+    real(kind=8),intent(in) :: reference(:),value(:)
+    integer :: old_hel,new_hel
+    real(kind=8) :: scale
+    if (size(filter).ne.size(reference) .or. count(filter.gt.0).ne.size(value)) then
+       write (*,*) 'Real helicity-filter validation has inconsistent dimensions',ichan,iint
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(reference)) .or. &
+         .not.all(ieee_is_finite(value))) then
+       write (*,*) 'Non-finite filtered real amplitude encountered',ichan,iint
+       stop 1
+    endif
+    new_hel=0
+    do old_hel=1,size(filter)
+       if (filter(old_hel).le.0) cycle
+       new_hel=new_hel+1
+       scale=max(abs(reference(old_hel)),abs(value(new_hel)),tiny(1d0))
+       if (abs(reference(old_hel)-value(new_hel)).gt.1d-9*scale) then
+          write (*,*) 'Helicity filtering changed a retained real amplitude',&
+               ichan,iint,old_hel,new_hel
+          stop 1
+       endif
+    enddo
+  end subroutine check_filtered_real_amplitudes
+
+  logical function complex_array_is_finite(values)
+    implicit none
+    complex(kind=8),intent(in) :: values(:)
+    complex_array_is_finite=all(ieee_is_finite(real(values,kind=8))) .and. &
+         all(ieee_is_finite(aimag(values)))
+  end function complex_array_is_finite
+
+
+  subroutine setup_helicity_filter(pgl,iint,original_filter)
+    implicit none
+    type(phase_space_order_group),intent(inout) :: pgl
+    integer,dimension(:),allocatable,intent(out),optional :: original_filter
+    integer :: ih1,iint
     if (.not.allocated(pgl%include_hel)) then
        allocate(pgl%include_hel(maxval(pgl%nhel),pgl%nproc))
        pgl%include_hel=0
     endif
-    ! filter zero helicities and helicities that are identical
-    max_value=maxval(pgl%amp2_hel(1:pgl%nhel(iint)))
-    do ih1=1,pgl%nhel(iint)
-       if (pgl%include_hel(ih1,iint).ne.0) cycle
-       if (pgl%amp2_hel(ih1)/max_value.gt.1d-12) then
-          ! non-zero
-          pgl%include_hel(ih1,iint)=1
-       else
-          cycle
-       endif
-       do ih2=ih1+1,pgl%nhel(iint)
-          if (abs(pgl%amp2_hel(ih1)-pgl%amp2_hel(ih2))/abs(pgl%amp2_hel(ih1)+pgl%amp2_hel(ih2)).lt.1d-12) then
-             ! identical value. Now check that they belong to the same process
-             iproc1=1
-             do while (iproc1.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc1+1)-ih1).le.0)
-                iproc1=iproc1+1
-             enddo
-             iproc2=1
-             do while (iproc2.lt.pgl%nproc .and. (pgl%amps(iint)%iproc_start(iproc2+1)-ih2).le.0)
-                iproc2=iproc2+1
-             enddo
-             if (iproc1.ne.iproc2) cycle
-             ! identical process
-             pgl%include_hel(ih2,iint)=-ih1
-             pgl%include_hel(ih1,iint)=pgl%include_hel(ih1,iint)+1
-          endif
-       enddo
-    enddo
-
-    if (pgl%passed(iint).lt.nevent_hel_filter) return
+    if (.not.allocated(pgl%amp2_hel_samples)) then
+       write (*,*) 'Missing helicity warm-up samples',iint
+       stop 1
+    endif
+    call build_helicity_filter(pgl%amps(iint),&
+         pgl%amp2_hel_samples(1:pgl%nhel(iint),iint,1:n_amplitude_optimisation_samples),&
+         pgl%include_hel(1:pgl%nhel(iint),iint),keep_processes_separate)
+    if (present(original_filter)) then
+       allocate(original_filter(pgl%nhel(iint)))
+       original_filter=pgl%include_hel(1:pgl%nhel(iint),iint)
+    endif
 
     do i=1,2
        do ih1=1,pgl%nhel(iint)
@@ -1754,16 +1981,9 @@ contains
        enddo
     enddo
 
-    ih2=0
-    do ih1=1,pgl%nhel(iint)
-       if (pgl%include_hel(ih1,iint).gt.0) ih2=ih2+1
-    enddo
-
-    call pgl%amps(iint)%filter_helicity(pgl%next,pgl%nhel(iint),pgl%include_hel(1,iint)) ! this updates 'nhel' and 'include_hel'
-!!$    deallocate(pgl%hel_fac)
-!!$    allocate(pgl%hel_fac(pgl%nhel))
+    call pgl%amps(iint)%filter_helicity(pgl%next,pgl%nhel(iint),&
+         pgl%include_hel(1:pgl%nhel(iint),iint)) ! updates nhel and include_hel
     pgl%hel_fac(1:pgl%nhel(iint),iint)=pgl%include_hel(1:pgl%nhel(iint),iint)
-!!$    deallocate(pgl%include_hel)
   end subroutine setup_helicity_filter
 
   integer function find_operation(pgl,iint,iamp,idau)

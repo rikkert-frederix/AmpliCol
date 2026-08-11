@@ -1,10 +1,13 @@
 module amplitude_QCD_mod
   use bitset_mod
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
+  private :: complex_value_is_finite
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
   logical,parameter :: use_symm_cm=.true.
   logical,parameter :: use_cm_dict=.true.
+  real(kind=8),parameter :: helicity_zero_tolerance=1d-24
   integer(kind=8),parameter :: max_three_line_color_orders=5000_8
   type :: current
      ! if adding variables here, also update the finalize_current and assign_current subroutines
@@ -45,6 +48,8 @@ module amplitude_QCD_mod
      complex(kind=8),dimension(:),allocatable :: amps
      real(kind=8),dimension(:),allocatable :: amps_r
      real(kind=8),dimension(:,:),allocatable :: pp,diff_col_vals
+     complex(kind=8),dimension(:,:,:),allocatable :: optimisation_current_samples
+     integer :: optimisation_sample_count=0
      integer,dimension(:),allocatable :: n_cur_start,n_cur_end,n_vert_start,n_vert_end, &
           pp_bin_to_i,pp_i_to_bin,col_index,n_col_vals,iproc_start,n_sing,n_qqbar
      integer,dimension(:,:),allocatable :: perm,curr2amp,i_col_i,processes,&
@@ -54,7 +59,7 @@ module amplitude_QCD_mod
      logical :: lib_created=.false.
    contains
      procedure,public :: init,evaluate,init_col,filter_helicity,write_init_amps_to_file,read_init_amps_from_file &
-          ,create_library,optimise_evaluation
+          ,create_library,record_optimisation_sample,clear_optimisation_samples,optimise_evaluation
      procedure,private :: filter_dead_trees
      final :: finalize_amplitude_QCD ! custom deallocation of amplitude_QCD
   end type amplitude_QCD
@@ -2054,6 +2059,7 @@ contains
          deallocate(this%interaction_list)
       endif
       if (allocated(this%pp)) deallocate(this%pp)
+      call this%clear_optimisation_samples()
       if (allocated(this%pp_bin_to_i)) deallocate(this%pp_bin_to_i)
       if (allocated(this%pp_i_to_bin)) deallocate(this%pp_i_to_bin)
       if (allocated(this%iproc_start)) deallocate(this%iproc_start)
@@ -3829,111 +3835,158 @@ contains
 
   end subroutine init_col
 
-  subroutine optimise_evaluation(this,n)
-    !
-    ! Checks all computed currents and checks if some are equal. If
-    ! equal, do not recompute, rather re-use already computed values
-    !
-    ! POTENTIAL OTHER OPTIMISATIONS:
-    !
-    ! 1. REMOVE INTERACTIONS THAT YIELD ZERO RESULT
-    ! 2. INCLUDE MULTIPLICATIVE COUPLING CONSTANT AT LATER STAGE
-    ! 3. WEYL SPINORS & SEPARATE VERTEX ROUTINES FOR LEFT AND RIGHT-HANDED INTERACTIONS?
-    !      
+  subroutine record_optimisation_sample(this,sample_index,nsamples)
+    ! Retain several independent evaluations before identifying reusable
+    ! currents.  A single phase-space point is not enough: distinct helicity
+    ! currents can agree accidentally at special kinematics.
     implicit none
     class(amplitude_QCD),intent(inout) :: this
-    integer :: isize,ic1,ic2,iv1,iv2,i,n_vert,n,ic,iv
+    integer,intent(in) :: sample_index,nsamples
+    integer :: ic,max_dim,value_dim
+
+    if (sample_index.lt.1 .or. sample_index.gt.nsamples) then
+       write (*,*) 'Invalid amplitude-optimisation sample index',sample_index,nsamples
+       stop 1
+    endif
+    if (.not.allocated(this%optimisation_current_samples)) then
+       max_dim=1
+       do ic=1,this%n_cur
+          if (allocated(this%current_list(ic)%val_c)) &
+               max_dim=max(max_dim,size(this%current_list(ic)%val_c))
+          if (allocated(this%current_list(ic)%val_r)) &
+               max_dim=max(max_dim,size(this%current_list(ic)%val_r))
+       enddo
+       allocate(this%optimisation_current_samples(max_dim,this%n_cur,nsamples))
+       this%optimisation_current_samples=(0d0,0d0)
+    elseif (size(this%optimisation_current_samples,2).ne.this%n_cur .or. &
+         size(this%optimisation_current_samples,3).ne.nsamples) then
+       write (*,*) 'Amplitude-optimisation sample storage is inconsistent'
+       stop 1
+    endif
+
+    this%optimisation_current_samples(:,:,sample_index)=(0d0,0d0)
+    do ic=1,this%n_cur
+       if (allocated(this%current_list(ic)%val_c)) then
+          value_dim=size(this%current_list(ic)%val_c)
+          this%optimisation_current_samples(1:value_dim,ic,sample_index)=&
+               this%current_list(ic)%val_c
+       elseif (allocated(this%current_list(ic)%val_r)) then
+          value_dim=size(this%current_list(ic)%val_r)
+          this%optimisation_current_samples(1:value_dim,ic,sample_index)=&
+               cmplx(this%current_list(ic)%val_r,0d0,kind=8)
+       else
+          write (*,*) 'Cannot sample an unevaluated amplitude current',ic
+          stop 1
+       endif
+    enddo
+    if (.not.all(complex_value_is_finite(&
+         this%optimisation_current_samples(:,:,sample_index)))) then
+       write (*,*) 'Non-finite current encountered during amplitude optimisation',&
+            sample_index
+       stop 1
+    endif
+    this%optimisation_sample_count=max(this%optimisation_sample_count,sample_index)
+  end subroutine record_optimisation_sample
+
+  subroutine clear_optimisation_samples(this)
+    implicit none
+    class(amplitude_QCD),intent(inout) :: this
+    if (allocated(this%optimisation_current_samples)) &
+         deallocate(this%optimisation_current_samples)
+    this%optimisation_sample_count=0
+  end subroutine clear_optimisation_samples
+
+  subroutine optimise_evaluation(this,n)
+    ! Re-use currents only when their metadata is compatible and their
+    ! values agree at every recorded warm-up point.  Interactions are merged
+    ! only when they are structurally identical after current remapping.
+    implicit none
+    class(amplitude_QCD),intent(inout) :: this
+    integer,intent(in) :: n
+    integer :: isize,ic1,ic2,iv1,iv2,i,ic,iv
     integer,dimension(:,:),allocatable :: map_cur,map_vert
-    integer,dimension(n-1) :: identical_curr,identical_vert
-    real(kind=8),parameter :: tiny=1d-10
-    logical,dimension(:),allocatable :: include_cur,include_vert,reordered_interactions
-    type(current),dimension(:),allocatable :: current_list_local
-    type(interaction),dimension(:),allocatable :: interaction_list_local
-    integer,dimension(:),allocatable :: interactions_map
-    allocate(include_cur(1:this%n_cur))
-    allocate(include_vert(1:this%n_vert))
+    logical,dimension(:),allocatable :: include_cur,include_vert
+
+    if (.not.allocated(this%optimisation_current_samples) .or. &
+         this%optimisation_sample_count.lt.2) then
+       write (*,*) 'Amplitude-current optimisation requires at least two warm-up samples'
+       stop 1
+    endif
+    allocate(include_cur(1:this%n_cur),include_vert(1:this%n_vert))
     include_cur=.true.
     include_vert=.true.
-    allocate(map_cur(0:this%n_cur,1:2))
-    allocate(map_vert(0:this%n_vert,1:2))
+    allocate(map_cur(0:this%n_cur,1:2),map_vert(0:this%n_vert,1:2))
     map_cur(0,1)=0
     map_vert(0,1)=0
-    identical_curr=0
-    identical_vert=0
+
     do isize=1,n-1
        do ic1=this%n_cur_start(isize),this%n_cur_end(isize)-1
           if (.not.include_cur(ic1)) cycle
-          if (sum(abs(this%current_list(ic1)%val_c)).eq.0d0) then
-             map_cur(0,1)=map_cur(0,1)+1
-             map_cur(map_cur(0,1),1)=ic1
-!!$               map_cur(map_cur(0,1),2)=0
-             map_cur(map_cur(0,1),2)=ic1
-             include_cur(ic1)=.false.
-             cycle
-          endif
           do ic2=ic1+1,this%n_cur_end(isize)
              if (.not.include_cur(ic2)) cycle
-             if (size(this%current_list(ic1)%val_c).ne.size(this%current_list(ic2)%val_c)) cycle
-             if ( sum(abs(this%current_list(ic1)%val_c-this%current_list(ic2)%val_c))/ &
-                  sum(abs(this%current_list(ic1)%val_c)+abs(this%current_list(ic2)%val_c)).lt.tiny) then
-                map_cur(0,1)=map_cur(0,1)+1
-                map_cur(map_cur(0,1),1)=ic2
-                map_cur(map_cur(0,1),2)=ic1
-                identical_curr(isize)=identical_curr(isize)+1
-                include_cur(ic2)=.false.
-             endif
+             if (.not.current_metadata_matches(ic1,ic2)) cycle
+             if (.not.current_samples_match(ic1,ic2)) cycle
+             map_cur(0,1)=map_cur(0,1)+1
+             map_cur(map_cur(0,1),1)=ic2
+             map_cur(map_cur(0,1),2)=ic1
+             include_cur(ic2)=.false.
           enddo
        enddo
     enddo
     do i=1,map_cur(0,1)
        do iv1=1,this%n_vert
-          if (this%interaction_list(iv1)%currents(1).eq.map_cur(i,1)) then
-             this%interaction_list(iv1)%currents(1)=map_cur(i,2)
-          endif
-          if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) then
-             this%interaction_list(iv1)%currents(2)=map_cur(i,2)
-          endif
+          if (this%interaction_list(iv1)%currents(1).eq.map_cur(i,1)) &
+               this%interaction_list(iv1)%currents(1)=map_cur(i,2)
+          if (this%interaction_list(iv1)%currents(2).eq.map_cur(i,1)) &
+               this%interaction_list(iv1)%currents(2)=map_cur(i,2)
        enddo
+       where (this%curr2amp.eq.map_cur(i,1)) this%curr2amp=map_cur(i,2)
+       if (allocated(this%three_line_partner_curr2amp)) then
+          where (this%three_line_partner_curr2amp.eq.map_cur(i,1)) &
+               this%three_line_partner_curr2amp=map_cur(i,2)
+       endif
     enddo
+
     do isize=2,n-1
        do iv1=this%n_vert_start(isize),this%n_vert_end(isize)-1
           if (.not.include_vert(iv1)) cycle
-          if (sum(abs(this%interaction_list(iv1)%val_c)).eq.0d0) then
-             map_vert(0,1)=map_vert(0,1)+1
-             map_vert(map_vert(0,1),1)=iv1
-!!$               map_vert(map_vert(0,1),2)=0
-             map_vert(map_vert(0,1),2)=iv1
-             include_vert(iv1)=.false.
-             cycle
-          endif
           do iv2=iv1+1,this%n_vert_end(isize)
              if (.not.include_vert(iv2)) cycle
-             if (size(this%interaction_list(iv1)%val_c).ne.size(this%interaction_list(iv2)%val_c)) cycle
-             if ( sum(abs(this%interaction_list(iv1)%val_c-this%interaction_list(iv2)%val_c))/ &
-                  sum(abs(this%interaction_list(iv1)%val_c)+abs(this%interaction_list(iv2)%val_c)).lt.tiny) then
-                map_vert(0,1)=map_vert(0,1)+1
-                map_vert(map_vert(0,1),1)=iv2
-                map_vert(map_vert(0,1),2)=iv1
-                identical_vert(isize)=identical_vert(isize)+1
-                include_vert(iv2)=.false.
-             endif
+             if (.not.interactions_match(iv1,iv2)) cycle
+             map_vert(0,1)=map_vert(0,1)+1
+             map_vert(map_vert(0,1),1)=iv2
+             map_vert(map_vert(0,1),2)=iv1
+             include_vert(iv2)=.false.
           enddo
        enddo
     enddo
     do i=1,map_vert(0,1)
        do ic1=1,this%n_cur
           do iv1=1,this%current_list(ic1)%n_vert
-             if (this%current_list(ic1)%vertices(iv1).eq.map_vert(i,1)) then
-                this%current_list(ic1)%vertices(iv1)=map_vert(i,2)
-             endif
+             if (this%current_list(ic1)%vertices(iv1).eq.map_vert(i,1)) &
+                  this%current_list(ic1)%vertices(iv1)=map_vert(i,2)
           enddo
        enddo
     enddo
 
-    allocate(this%include_amp(1:this%n_amps))
-    this%include_amp=.true.
-    call this%filter_dead_trees(n)
-    deallocate(this%include_amp)
+    if (.not.allocated(this%include_amp)) allocate(this%include_amp(1:this%n_amps))
+    this%include_amp(1:this%n_amps)=.true.
+    ! filter_dead_trees conservatively keeps every terminal current unless
+    ! told which ones still close an amplitude.  Supplying the remapped
+    ! closing-current set is what makes terminal-current sharing effective.
+    include_cur=.false.
+    do i=1,this%n_amps
+       do ic=1,2
+          if (this%curr2amp(ic,i).ne.0) include_cur(this%curr2amp(ic,i))=.true.
+          if (allocated(this%three_line_partner_curr2amp)) then
+             if (i.le.size(this%three_line_partner_curr2amp,2)) then
+                if (this%three_line_partner_curr2amp(ic,i).ne.0) &
+                     include_cur(this%three_line_partner_curr2amp(ic,i))=.true.
+             endif
+          endif
+       enddo
+    enddo
+    call this%filter_dead_trees(n,include_cur)
     do ic=1,this%n_cur
        if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
        if (allocated(this%current_list(ic)%val_r)) deallocate(this%current_list(ic)%val_r)
@@ -3942,7 +3995,80 @@ contains
        if (allocated(this%interaction_list(iv)%val_c)) deallocate(this%interaction_list(iv)%val_c)
        if (allocated(this%interaction_list(iv)%val_r)) deallocate(this%interaction_list(iv)%val_r)
     enddo
-    write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',this%n_cur,this%n_vert,this%n_amps
+    call this%clear_optimisation_samples()
+    write (99,*) 'Total number of currents, vertices and amplitudes after optimisation',&
+         this%n_cur,this%n_vert,this%n_amps
+
+  contains
+
+    logical function current_metadata_matches(first,second)
+      integer,intent(in) :: first,second
+      current_metadata_matches=.false.
+      if (this%current_list(first)%type.ne.this%current_list(second)%type) return
+      if (this%current_list(first)%bin.ne.this%current_list(second)%bin) return
+      if (this%current_list(first)%chirality.ne.this%current_list(second)%chirality) return
+      if (this%current_list(first)%mass.ne.this%current_list(second)%mass) return
+      if (this%current_list(first)%width.ne.this%current_list(second)%width) return
+      if (allocated(this%current_list(first)%val_c).neqv.&
+           allocated(this%current_list(second)%val_c)) return
+      if (allocated(this%current_list(first)%val_r).neqv.&
+           allocated(this%current_list(second)%val_r)) return
+      if (allocated(this%current_list(first)%val_c)) then
+         if (size(this%current_list(first)%val_c).ne.&
+              size(this%current_list(second)%val_c)) return
+      endif
+      if (allocated(this%current_list(first)%val_r)) then
+         if (size(this%current_list(first)%val_r).ne.&
+              size(this%current_list(second)%val_r)) return
+      endif
+      current_metadata_matches=.true.
+    end function current_metadata_matches
+
+    logical function current_samples_match(first,second)
+      integer,intent(in) :: first,second
+      integer :: isample
+      real(kind=8) :: difference,scale
+      real(kind=8),parameter :: equality_tolerance=1d-11
+      logical :: compared
+      current_samples_match=.false.
+      compared=.false.
+      do isample=1,this%optimisation_sample_count
+         if (.not.all(complex_value_is_finite(&
+              this%optimisation_current_samples(:,first,isample)))) return
+         if (.not.all(complex_value_is_finite(&
+              this%optimisation_current_samples(:,second,isample)))) return
+         scale=sum(abs(this%optimisation_current_samples(:,first,isample)))+&
+              sum(abs(this%optimisation_current_samples(:,second,isample)))
+         if (scale.le.tiny(1d0)) cycle
+         compared=.true.
+         difference=sum(abs(this%optimisation_current_samples(:,first,isample)-&
+              this%optimisation_current_samples(:,second,isample)))
+         if (difference.gt.equality_tolerance*scale) return
+      enddo
+      current_samples_match=compared
+    end function current_samples_match
+
+    logical function interactions_match(first,second)
+      integer,intent(in) :: first,second
+      interactions_match=.false.
+      if (this%interaction_list(first)%type.ne.this%interaction_list(second)%type) return
+      if (this%interaction_list(first)%chirality.ne.&
+           this%interaction_list(second)%chirality) return
+      if (any(this%interaction_list(first)%currents.ne.&
+           this%interaction_list(second)%currents)) return
+      if (any(this%interaction_list(first)%coupl.ne.&
+           this%interaction_list(second)%coupl)) return
+      if (allocated(this%interaction_list(first)%singlet_mv).neqv.&
+           allocated(this%interaction_list(second)%singlet_mv)) return
+      if (allocated(this%interaction_list(first)%singlet_mv)) then
+         if (size(this%interaction_list(first)%singlet_mv).ne.&
+              size(this%interaction_list(second)%singlet_mv)) return
+         if (any(this%interaction_list(first)%singlet_mv.ne.&
+              this%interaction_list(second)%singlet_mv)) return
+      endif
+      interactions_match=.true.
+    end function interactions_match
+
   end subroutine optimise_evaluation
 
   subroutine create_library(this,n,hel,igroup,iint,pm,p)
@@ -4913,8 +5039,93 @@ contains
     close(iunit)
     deallocate(icount_type)
   end subroutine create_library
+  subroutine build_helicity_filter(this,samples,include_hel,collapse_equivalent)
+    ! Determine removable helicities from several normalized phase-space
+    ! samples.  Equivalent helicities must agree at every non-zero sample;
+    ! this avoids inferring a symmetry from an accidental one-point equality.
+    implicit none
+    class(amplitude_QCD),intent(in) :: this
+    real(kind=8),intent(in) :: samples(:,:)
+    integer,intent(out) :: include_hel(size(samples,1))
+    logical,intent(in),optional :: collapse_equivalent
+    integer :: ih1,ih2,iproc1,iproc2
+    logical :: collapse
 
+    if (size(samples,1).ne.this%n_amps .or. size(samples,2).lt.2) then
+       write (*,*) 'Invalid helicity-filter sample dimensions',shape(samples),this%n_amps
+       stop 1
+    endif
+    if (.not.all(ieee_is_finite(samples))) then
+       write (*,*) 'Non-finite helicity sample encountered during amplitude optimisation'
+       stop 1
+    endif
+    collapse=.true.
+    if (present(collapse_equivalent)) collapse=collapse_equivalent
+    include_hel=0
+    do ih1=1,this%n_amps
+       if (include_hel(ih1).ne.0) cycle
+       if (maxval(abs(samples(ih1,:))).le.helicity_zero_tolerance) cycle
+       include_hel(ih1)=1
+       if (.not.collapse) cycle
+       iproc1=helicity_process(ih1)
+       do ih2=ih1+1,this%n_amps
+          if (include_hel(ih2).ne.0) cycle
+          if (maxval(abs(samples(ih2,:))).le.helicity_zero_tolerance) cycle
+          iproc2=helicity_process(ih2)
+          if (iproc1.ne.iproc2) cycle
+          if (.not.helicity_samples_match(ih1,ih2)) cycle
+          include_hel(ih2)=-ih1
+          include_hel(ih1)=include_hel(ih1)+1
+       enddo
+    enddo
+    ! Ten identically zero warm-up points are not sufficient evidence that
+    ! the entire process vanishes.  Keep the unfiltered amplitude in that
+    ! exceptional case.
+    if (.not.any(include_hel.gt.0)) include_hel=1
 
+  contains
+
+    integer function helicity_process(ihel)
+      integer,intent(in) :: ihel
+      integer :: iproc
+      helicity_process=0
+      do iproc=1,this%nprocs
+         if (ihel.ge.this%iproc_start(iproc) .and. &
+              ihel.lt.this%iproc_start(iproc+1)) then
+            helicity_process=iproc
+            return
+         endif
+      enddo
+      write (*,*) 'Could not assign helicity to a process',ihel
+      stop 1
+    end function helicity_process
+
+    logical function helicity_samples_match(first,second)
+      integer,intent(in) :: first,second
+      integer :: isample
+      real(kind=8) :: difference,scale
+      real(kind=8),parameter :: equality_tolerance=1d-11
+      logical :: compared
+      helicity_samples_match=.false.
+      compared=.false.
+      do isample=1,size(samples,2)
+         scale=max(abs(samples(first,isample)),abs(samples(second,isample)))
+         if (scale.le.helicity_zero_tolerance) cycle
+         compared=.true.
+         difference=abs(samples(first,isample)-samples(second,isample))
+         if (difference.gt.equality_tolerance*scale) return
+      enddo
+      helicity_samples_match=compared
+    end function helicity_samples_match
+
+  end subroutine build_helicity_filter
+
+  elemental logical function complex_value_is_finite(value)
+    implicit none
+    complex(kind=8),intent(in) :: value
+    complex_value_is_finite=ieee_is_finite(real(value,kind=8)) .and. &
+         ieee_is_finite(aimag(value))
+  end function complex_value_is_finite
 
   subroutine filter_helicity(this,n,nhel,include_hel)
     implicit none
@@ -4922,9 +5133,11 @@ contains
     integer,intent(in) :: n
     integer,intent(inout) :: nhel
     integer,intent(inout),dimension(nhel) :: include_hel
-    integer :: nspin,ispin,ic,iv,iamp
+    integer :: nspin,ispin,ic,iv,iamp,max_multiplicity
     logical,dimension(:),allocatable :: include_current
     integer,dimension(:,:,:),allocatable :: tmp_spin
+    integer,dimension(:,:),allocatable :: tmp_perm
+    integer,dimension(:),allocatable :: compact_multiplicity
     ! deallocate a bunch
     do ic=1,this%n_cur
        if (allocated(this%current_list(ic)%val_c)) deallocate(this%current_list(ic)%val_c)
@@ -4938,12 +5151,15 @@ contains
     if (allocated(this%amps_r)) deallocate(this%amps_r)
     
     allocate(include_current(this%n_cur))
-    include_current(this%n_cur_start(n  ):this%n_cur_end(n  ))=.false.
-    include_current(this%n_cur_start(n-1):this%n_cur_end(n-1))=.false.
+    include_current=.false.
 
     this%include_amp(1:this%n_amps)=.false.
-    
-    allocate(tmp_spin(1:n,1:maxval(include_hel),nhel))
+    max_multiplicity=maxval(include_hel,mask=include_hel.gt.0)
+    allocate(tmp_spin(1:n,1:max_multiplicity,nhel))
+    allocate(tmp_perm(size(this%perm,1),nhel),compact_multiplicity(nhel))
+    tmp_spin=0
+    tmp_perm=0
+    compact_multiplicity=0
 
     nspin=0
     do iamp=1,nhel
@@ -4976,6 +5192,7 @@ contains
           endif
           nspin=nspin+1
           tmp_spin(1:n,1,nspin)=this%spins(1:n,1,iamp)
+          tmp_perm(:,nspin)=this%perm(:,iamp)
           ic=1
           do ispin=iamp+1,nhel
              if (-include_hel(ispin).eq.iamp) then
@@ -4983,16 +5200,24 @@ contains
                 tmp_spin(1:n,ic,nspin)=this%spins(1:n,1,ispin)
              endif
           enddo
-          include_hel(nspin)=include_hel(iamp)
+          compact_multiplicity(nspin)=include_hel(iamp)
        endif
     enddo
 
-    deallocate(this%spins)
-    allocate(this%spins(1:n,1:maxval(include_hel),nspin))
-    this%spins(1:n,1:maxval(include_hel),1:nspin)=tmp_spin(1:n,1:maxval(include_hel),1:nspin)
-
     call this%filter_dead_trees(n,include_current)
-    
+    if (this%n_amps.ne.nspin) then
+       write (*,*) 'Helicity filtering retained an inconsistent amplitude count',&
+            this%n_amps,nspin
+       stop 1
+    endif
+    deallocate(this%spins)
+    allocate(this%spins(1:n,1:max_multiplicity,nspin))
+    this%spins=tmp_spin(1:n,1:max_multiplicity,1:nspin)
+    deallocate(this%perm)
+    allocate(this%perm(size(tmp_perm,1),nspin))
+    this%perm=tmp_perm(:,1:nspin)
+    include_hel=0
+    include_hel(1:nspin)=compact_multiplicity(1:nspin)
     nhel=this%n_amps
     write (99,*) 'Total number of currents, vertices and amplitudes after filtering helicities',this%n_cur,this%n_vert,this%n_amps
     deallocate(this%include_amp)
@@ -5319,6 +5544,8 @@ contains
     if (allocated(amp%amps_r)) deallocate(amp%amps_r)
     if (allocated(amp%pp)) deallocate(amp%pp)
     if (allocated(amp%diff_col_vals)) deallocate(amp%diff_col_vals)
+    if (allocated(amp%optimisation_current_samples)) &
+         deallocate(amp%optimisation_current_samples)
     if (allocated(amp%n_cur_start)) deallocate(amp%n_cur_start)
     if (allocated(amp%n_cur_end)) deallocate(amp%n_cur_end)
     if (allocated(amp%n_vert_start)) deallocate(amp%n_vert_start)

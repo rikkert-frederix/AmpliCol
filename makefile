@@ -7,6 +7,7 @@
 	test_integration_histograms_physics \
 	test_fermi_statistics test_mixed_spinors test_three_quark_line_reweight \
 	test_three_quark_line_multichannel test_run_parameters \
+	test_amplitude_optimisation \
 	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
@@ -149,6 +150,9 @@ FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrul
 
 FILES_M_TEST_RUN_PARAMETERS = run_parameters.o particles.o run_parameters_regression.o
 
+FILES_M_TEST_AMPLITUDE_OPTIMISATION = bitset.o color_algebra.o math_functions.o feynmanrules.o \
+	run_parameters.o particles.o amplitude_QCD.o amplitude_optimisation_regression.o
+
 test_integrated_kernels: cs_dipole_mappings.o cs_integrated_kernels.o
 	$(FC) $(FFLAGS) -I. -IPhaseSpace -o tests/integrated_kernels.exe \
 		tests/integrated_kernels.f90 cs_integrated_kernels.o cs_dipole_mappings.o
@@ -228,6 +232,9 @@ mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
 run_parameters_regression: $(FILES_M_TEST_RUN_PARAMETERS)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_RUN_PARAMETERS)
 
+amplitude_optimisation_regression: $(FILES_M_TEST_AMPLITUDE_OPTIMISATION)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_AMPLITUDE_OPTIMISATION)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -243,6 +250,10 @@ mixed_spinor_regression.o: \
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 run_parameters_regression.o: tests/run_parameters_regression.f03 run_parameters.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+amplitude_optimisation_regression.o: \
+		tests/amplitude_optimisation_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
@@ -283,6 +294,9 @@ test_three_quark_line_multichannel: \
 test_run_parameters: run_parameters_regression
 	./run_parameters_regression run_card.dat tests/input/custom_run_card.dat \
 		tests/input/ignore_final_width_run_card.dat
+
+test_amplitude_optimisation: amplitude_optimisation_regression
+	./amplitude_optimisation_regression
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

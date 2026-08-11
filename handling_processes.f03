@@ -54,6 +54,7 @@ module handling_processes
      logical :: is_subtracted_real=.false.
      integer,dimension(:),allocatable :: col_fac
      real(kind=8),dimension(:),allocatable :: amp2,amp2_hel
+     real(kind=8),dimension(:,:,:),allocatable :: amp2_hel_samples
      integer(kind=4),dimension(:),allocatable :: hel,passed
      integer,dimension(:,:),allocatable :: include_hel
      ! cuts
@@ -752,6 +753,7 @@ contains
     if (allocated(pgl%col_fac)) deallocate(pgl%col_fac)
     if (allocated(pgl%amp2)) deallocate(pgl%amp2)
     if (allocated(pgl%amp2_hel)) deallocate(pgl%amp2_hel)
+    if (allocated(pgl%amp2_hel_samples)) deallocate(pgl%amp2_hel_samples)
     if (allocated(pgl%hel)) deallocate(pgl%hel)
     if (allocated(pgl%hel_fac)) deallocate(pgl%hel_fac)
     if (allocated(pgl%include_hel)) deallocate(pgl%include_hel)
