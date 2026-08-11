@@ -64,7 +64,7 @@ contains
     close(14)
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
-    write(14) 2 ! binary amplitude-library format version
+    write(14) 3 ! binary amplitude-library format version
     write(14) pgl_unique%next,pgl_unique%nproc
     write(14) unique_map
     write(14) unique_map_value
@@ -124,7 +124,7 @@ contains
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
     read(14) library_version
-    if (library_version.ne.2) then
+    if (library_version.ne.3) then
        write (*,*) 'Amplitude library has an incompatible binary format; recreate it'
        stop 1
     endif

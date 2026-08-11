@@ -2308,10 +2308,20 @@ contains
                                                   this%interaction_list(iv)%coupl(1:2),&
                                                   this%interaction_list(iv)%chirality)
              else
-                call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                             this%interaction_list(iv)%val_c(1:4),&
-                                             this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0) then
+                   call QuarkGluontoQuark_coupl_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(1))%chirality)
+                else
+                   call QuarkGluontoQuark_coupl(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
           elseif(this%interaction_list(iv)%type.eq.11) then
              if (this%interaction_list(iv)%chirality.ne.0) then
@@ -2321,10 +2331,20 @@ contains
                                                     this%interaction_list(iv)%coupl(1:2),&
                                                     this%interaction_list(iv)%chirality)
              else
-                call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                               this%interaction_list(iv)%val_c(1:4),&
-                                               this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0) then
+                   call AquarkGluontoAquark_coupl_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(1))%chirality)
+                else
+                   call AquarkGluontoAquark_coupl(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
           elseif (this%interaction_list(iv)%type.eq.12) then
              call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2423,10 +2443,20 @@ contains
                                                   this%interaction_list(iv)%coupl(1:2),&
                                                   this%interaction_list(iv)%chirality)
              else
-                call  GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                          this%interaction_list(iv)%val_c(1:4),&
-                                          this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
+                   call GluonQuarktoQuark_coupl_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%chirality)
+                else
+                   call GluonQuarktoQuark_coupl(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
           elseif(this%interaction_list(iv)%type.eq.24) then
              if (this%interaction_list(iv)%chirality.ne.0) then
@@ -2436,10 +2466,20 @@ contains
                                                     this%interaction_list(iv)%coupl(1:2),&
                                                     this%interaction_list(iv)%chirality)
              else
-                call  GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                           this%interaction_list(iv)%val_c(1:4),&
-                                           this%interaction_list(iv)%coupl(1:2))
+                if (this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
+                   call GluonAquarktoAquark_coupl_mixed(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%chirality)
+                else
+                   call GluonAquarktoAquark_coupl(&
+                        this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                        this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                        this%interaction_list(iv)%val_c(1:4),&
+                        this%interaction_list(iv)%coupl(1:2))
+                endif
              endif
 
           else
@@ -2603,11 +2643,17 @@ contains
                   else
                      if (.not.this%same_flav(iproc)) then
                         this%amps(iamp)=contract_currents(iamp)
-                        if (allocated(this%three_line_partner_curr2amp) .and.&
-                             this%three_line_partner_curr2amp(1,iamp).ne.0) then
-                           this%amps(iamp)=this%amps(iamp)+contract_current_pair(&
-                                this%three_line_partner_curr2amp(1,iamp),&
-                                this%three_line_partner_curr2amp(2,iamp))
+                        ! Fortran does not require short-circuit evaluation of
+                        ! .and.; keep the allocation test separate from the
+                        ! array reference (zero-sized partner maps are valid).
+                        if (allocated(this%three_line_partner_curr2amp)) then
+                           if (iamp.le.size(this%three_line_partner_curr2amp,2)) then
+                              if (this%three_line_partner_curr2amp(1,iamp).ne.0) then
+                                 this%amps(iamp)=this%amps(iamp)+contract_current_pair(&
+                                      this%three_line_partner_curr2amp(1,iamp),&
+                                      this%three_line_partner_curr2amp(2,iamp))
+                              endif
+                           endif
                         endif
                      endif
                   endif
@@ -2646,11 +2692,9 @@ contains
     complex(kind=8) function contract_current_pair(ic1,ic2)
       implicit none
       integer,intent(in) :: ic1,ic2
-      if (this%current_list(ic1)%chirality.ne.0 .and. this%current_list(ic2)%chirality.ne.0) then
-         contract_current_pair=sum(this%current_list(ic1)%val_c(1:2)*this%current_list(ic2)%val_c(1:2))
-      else
-         contract_current_pair=sum(this%current_list(ic1)%val_c(1:4)*this%current_list(ic2)%val_c(1:4))
-      endif
+      contract_current_pair=ContractFermionCurrents(&
+           this%current_list(ic1)%val_c,this%current_list(ic1)%chirality,&
+           this%current_list(ic2)%val_c,this%current_list(ic2)%chirality)
     end function contract_current_pair
 
     complex (kind=8) function apply_operation(iamp,idau)
@@ -4060,9 +4104,22 @@ contains
                 chir2=this%current_list(this%interaction_list(iv)%currents(2))%chirality
                 chiri=this%interaction_list(iv)%chirality
                 vkey=4
-                if (itype.eq.4 .or. itype.eq.5 .or. itype.eq.6 .or. itype.eq.7 .or. &
-                    itype.eq.10 .or. itype.eq.11 .or. itype.eq.23 .or. itype.eq.24) then
+                if (itype.eq.4 .or. itype.eq.5 .or. itype.eq.6 .or. itype.eq.7) then
                    vkey=chiri+4
+                elseif (itype.eq.10 .or. itype.eq.11 .or. itype.eq.23 .or. itype.eq.24) then
+                   if (chiri.ne.0) then
+                      ! A compact result uses the Weyl rule and is keyed by
+                      ! its result chirality (vkey 3 or 5).
+                      vkey=chiri+4
+                   elseif (itype.eq.10 .or. itype.eq.11) then
+                      ! A full result may still have a compact first child.
+                      ! Keep the child chirality in the generated vertex key:
+                      ! -1,0,+1 map to vkey 0,4,8.
+                      vkey=4*(chir1+1)
+                   else
+                      ! Types 23 and 24 have the fermion as their second child.
+                      vkey=4*(chir2+1)
+                   endif
                 elseif (itype.eq.8 .or. itype.eq.9 .or. itype.eq.21 .or. itype.eq.22) then
                    vkey=(chir1+1)*3+(chir2+1)
                 endif
@@ -4296,25 +4353,35 @@ contains
                 line=''
              endif
           elseif(itype.eq.10) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
+             if (vkey.eq.3 .or. vkey.eq.5) then
                 write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_mixed(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           elseif(itype.eq.11) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
+             if (vkey.eq.3 .or. vkey.eq.5) then
                 write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_mixed(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           elseif(itype.eq.12) then
@@ -4371,25 +4438,35 @@ contains
              endif
              line=''
           elseif(itype.eq.23) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
+             if (vkey.eq.3 .or. vkey.eq.5) then
                 write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_mixed(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           elseif(itype.eq.24) then
-             if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
-                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
-             else
+             if (vkey.eq.3 .or. vkey.eq.5) then
                 write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             elseif (vkey.eq.0 .or. vkey.eq.8) then
+                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_mixed(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(tmp,*) vkey/4-1
+                line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
+                write(iunit,'(8x,a)') trim(adjustl(line))
+             else
+                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              endif
              line=''
           endif
@@ -4703,20 +4780,15 @@ contains
        do iamp=this%iproc_start(iproc),this%iproc_start(iproc+1)-1
           if (.not.this%same_flav(iproc)) then
              write(tmp,*) iamp
-             if (this%current_list(this%curr2amp(1,iamp))%chirality.ne.0 .and. &
-                 this%current_list(this%curr2amp(2,iamp))%chirality.ne.0) then
-                line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:2,'
-                write(tmp,*) this%curr2amp(1,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:2,'
-                write(tmp,*) this%curr2amp(2,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-             else
-                line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
-                write(tmp,*) this%curr2amp(1,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
-                write(tmp,*) this%curr2amp(2,iamp)
-                line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
-             endif
+             line='amps('//trim(adjustl(tmp))//')=ContractFermionCurrents('
+             write(tmp,*) this%curr2amp(1,iamp)
+             line=trim(adjustl(line))//'val_c(1,'//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%current_list(this%curr2amp(1,iamp))%chirality
+             line=trim(adjustl(line))//trim(adjustl(tmp))//',val_c(1,'
+             write(tmp,*) this%curr2amp(2,iamp)
+             line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
+             write(tmp,*) this%current_list(this%curr2amp(2,iamp))%chirality
+             line=trim(adjustl(line))//trim(adjustl(tmp))//')'
              write(iunit,'(4x,a)') trim(adjustl(line))
           endif
        enddo

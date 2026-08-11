@@ -1,7 +1,8 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements test_fermi_statistics test_three_quark_line_reweight \
-	test_three_quark_line_multichannel update_matrix_cases update_matrix_goldens
+.PHONY: test_matrix_elements test_fermi_statistics test_mixed_spinors \
+	test_three_quark_line_reweight test_three_quark_line_multichannel \
+	update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -117,6 +118,9 @@ FILES_M_TEST_FERMI = bitset.o color_algebra.o math_functions.o feynmanrules.o pa
 FILES_M_TEST_THREE_QUARK = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
 	amplitude_QCD.o three_quark_line_reweight_regression.o
 
+FILES_M_TEST_MIXED_SPINOR = bitset.o color_algebra.o math_functions.o feynmanrules.o particles.o \
+	amplitude_QCD.o mixed_spinor_regression.o
+
 # ----------------------------------------------------------------------
 # 5. Build executables
 # ----------------------------------------------------------------------
@@ -140,6 +144,9 @@ fermi_statistics_regression: $(FILES_M_TEST_FERMI)
 three_quark_line_reweight_regression: $(FILES_M_TEST_THREE_QUARK)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_THREE_QUARK)
 
+mixed_spinor_regression: $(FILES_M_TEST_MIXED_SPINOR)
+	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_MIXED_SPINOR)
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -148,6 +155,10 @@ fermi_statistics_regression.o: tests/matrix_elements/fermi_statistics_regression
 
 three_quark_line_reweight_regression.o: \
 		tests/matrix_elements/three_quark_line_reweight_regression.f03 amplitude_QCD.o particles.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+mixed_spinor_regression.o: \
+		tests/matrix_elements/mixed_spinor_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
 tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py process_list.py
@@ -165,6 +176,14 @@ test_fermi_statistics: fermi_statistics_regression \
 	./fermi_statistics_regression
 	$(PYTHON) tests/matrix_elements/run_fermi_library_regression.py \
 		--generator $(CURDIR)/fermi_statistics_regression \
+		--compiler "$(FC)" --fflags="$(FFLAGS)"
+
+test_mixed_spinors: mixed_spinor_regression \
+		tests/matrix_elements/run_mixed_spinor_library_regression.py \
+		tests/matrix_elements/mixed_spinor_library_regression.f03
+	./mixed_spinor_regression
+	$(PYTHON) tests/matrix_elements/run_mixed_spinor_library_regression.py \
+		--generator $(CURDIR)/mixed_spinor_regression \
 		--compiler "$(FC)" --fflags="$(FFLAGS)"
 
 test_three_quark_line_reweight: three_quark_line_reweight_regression \

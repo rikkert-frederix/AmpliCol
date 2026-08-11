@@ -959,6 +959,115 @@ contains
     endif
   end subroutine GluonAquarktoAquark_coupl_weyl
 
+  subroutine WeylToDirac(wf_weyl,chirality,wf_dirac)
+    ! Embed a compact massless-fermion current in the four-component
+    ! representation used by the massive-fermion Feynman rules.  This is
+    ! needed when a flavour-changing vector vertex connects a massless and
+    ! a massive fermion, for example b-W-t.
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*),intent(in) :: wf_weyl
+    complex(kind=8),dimension(4),intent(out) :: wf_dirac
+
+    wf_dirac=(0d0,0d0)
+    if (chirality.eq.1) then
+       wf_dirac(1:2)=wf_weyl(1:2)
+    elseif (chirality.eq.-1) then
+       wf_dirac(3:4)=wf_weyl(1:2)
+    elseif (chirality.eq.0) then
+       wf_dirac(1:4)=wf_weyl(1:4)
+    else
+       write (*,*) 'Invalid Weyl chirality in WeylToDirac',chirality
+       stop 1
+    endif
+  end subroutine WeylToDirac
+
+  subroutine QuarkGluontoQuark_coupl_mixed(wfq1,wfg2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*),intent(in) :: wfq1
+    complex(kind=8),dimension(4),intent(in) :: wfg2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq1_dirac
+
+    call WeylToDirac(wfq1,chirality,wfq1_dirac)
+    call QuarkGluontoQuark_coupl(wfq1_dirac,wfg2,wfq,coupl)
+  end subroutine QuarkGluontoQuark_coupl_mixed
+
+  subroutine AquarkGluontoAquark_coupl_mixed(wfq1,wfg2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(*),intent(in) :: wfq1
+    complex(kind=8),dimension(4),intent(in) :: wfg2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq1_dirac
+
+    call WeylToDirac(wfq1,chirality,wfq1_dirac)
+    call AquarkGluontoAquark_coupl(wfq1_dirac,wfg2,wfq,coupl)
+  end subroutine AquarkGluontoAquark_coupl_mixed
+
+  subroutine GluonQuarktoQuark_coupl_mixed(wfg1,wfq2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4),intent(in) :: wfg1
+    complex(kind=8),dimension(*),intent(in) :: wfq2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq2_dirac
+
+    call WeylToDirac(wfq2,chirality,wfq2_dirac)
+    call GluonQuarktoQuark_coupl(wfg1,wfq2_dirac,wfq,coupl)
+  end subroutine GluonQuarktoQuark_coupl_mixed
+
+  subroutine GluonAquarktoAquark_coupl_mixed(wfg1,wfq2,wfq,coupl,chirality)
+    implicit none
+    integer,intent(in) :: chirality
+    complex(kind=8),dimension(4),intent(in) :: wfg1
+    complex(kind=8),dimension(*),intent(in) :: wfq2
+    complex(kind=8),dimension(4),intent(out) :: wfq
+    real(kind=8),dimension(2),intent(in) :: coupl
+    complex(kind=8),dimension(4) :: wfq2_dirac
+
+    call WeylToDirac(wfq2,chirality,wfq2_dirac)
+    call GluonAquarktoAquark_coupl(wfg1,wfq2_dirac,wfq,coupl)
+  end subroutine GluonAquarktoAquark_coupl_mixed
+
+  complex(kind=8) function ContractFermionCurrents(wf_terminal,chirality_terminal, &
+       wf_external,chirality_external)
+    ! The terminal current has not received a fermion propagator.  Its compact
+    ! Weyl representation therefore occupies the opposite Dirac block from a
+    ! propagated/external compact current of the same chirality.
+    implicit none
+    integer,intent(in) :: chirality_terminal,chirality_external
+    complex(kind=8),dimension(*),intent(in) :: wf_terminal,wf_external
+
+    if (chirality_terminal.ne.0 .and. chirality_external.ne.0) then
+       ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
+    elseif (chirality_terminal.eq.0 .and. chirality_external.eq.0) then
+       ContractFermionCurrents=sum(wf_terminal(1:4)*wf_external(1:4))
+    elseif (chirality_terminal.eq.0) then
+       if (chirality_external.eq.1) then
+          ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
+       elseif (chirality_external.eq.-1) then
+          ContractFermionCurrents=sum(wf_terminal(3:4)*wf_external(1:2))
+       else
+          write (*,*) 'Invalid external chirality in ContractFermionCurrents',chirality_external
+          stop 1
+       endif
+    else
+       if (chirality_terminal.eq.1) then
+          ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(3:4))
+       elseif (chirality_terminal.eq.-1) then
+          ContractFermionCurrents=sum(wf_terminal(1:2)*wf_external(1:2))
+       else
+          write (*,*) 'Invalid terminal chirality in ContractFermionCurrents',chirality_terminal
+          stop 1
+       endif
+    endif
+  end function ContractFermionCurrents
+
   subroutine TwoGluontoTensor_coupl(wfg1,wfg2,wfT,coupl)
     ! This vertex includes the all factors such that the tensor "propagator"
     ! is simply the identity
