@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := amplicol_generate
 
-.PHONY: test_matrix_elements update_matrix_cases update_matrix_goldens
+.PHONY: test_fd_gauge test_matrix_elements test_matrix_elements_unitary \
+	test_matrix_elements_fd update_matrix_cases update_matrix_goldens
 
 FC = gfortran
 #FFLAGS= -fbounds-check -g -ffpe-trap=invalid,zero,overflow,underflow,denormal
@@ -127,6 +128,15 @@ amplicol_reweight: $(FILES_M_RWGT_QCD)
 matrix_element_regression: $(FILES_M_TEST_ME)
 	$(FC) $(FFLAGS) -o $@ $(FILES_M_TEST_ME)
 
+fd_gauge_components: feynmanrules.o fd_gauge_components.o
+	$(FC) $(FFLAGS) -o $@ feynmanrules.o fd_gauge_components.o
+
+fd_gauge_components.o: tests/fd_gauge/fd_gauge_components.f03 feynmanrules.o
+	$(FC) $(FFLAGS) -c -I. $< -o $@
+
+test_fd_gauge: fd_gauge_components
+	./fd_gauge_components
+
 matrix_element_regression.o: tests/matrix_elements/matrix_element_regression.f03 amplitude_QCD.o particles.o
 	$(FC) $(FFLAGS) -c -I. $< -o $@
 
@@ -136,8 +146,13 @@ tests/matrix_elements/cases.dat: tests/matrix_elements/generate_matrix_cases.py 
 tests/matrix_elements/golden.dat: matrix_element_regression tests/matrix_elements/cases.dat
 	./matrix_element_regression --write tests/matrix_elements/cases.dat $@
 
-test_matrix_elements: matrix_element_regression
+test_matrix_elements: test_matrix_elements_unitary test_matrix_elements_fd
+
+test_matrix_elements_unitary: matrix_element_regression tests/matrix_elements/golden.dat
 	./matrix_element_regression --check tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat
+
+test_matrix_elements_fd: matrix_element_regression tests/matrix_elements/golden.dat
+	./matrix_element_regression --check tests/matrix_elements/cases.dat tests/matrix_elements/golden.dat --gauge=fd
 
 update_matrix_cases: tests/matrix_elements/generate_matrix_cases.py process_list.py
 	$(PYTHON) tests/matrix_elements/generate_matrix_cases.py --output tests/matrix_elements/cases.dat

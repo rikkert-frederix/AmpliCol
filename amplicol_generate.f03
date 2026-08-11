@@ -22,7 +22,7 @@ program amplicol_generate
   real(kind=8) :: weight
   integer :: i
   real(kind=8),dimension(:),allocatable :: mass,width
-  character(len=80) :: filename,logfile,tag
+  character(len=80) :: filename,logfile,tag,gauge
   integer(kind=4) :: PS_choice
   integer,parameter :: nevent_hel_filter=10
   integer :: igroup
@@ -56,12 +56,12 @@ program amplicol_generate
   endif
   
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0,trim(gauge))
   call phys_model%init_vert()
 
   if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
   if (use_amplitude_library) then
-     call read_amplitude_lib()
+     call read_amplitude_lib(phys_model%get_gauge_name())
   else
      call read_processes_from_file(filename)
      do i=1,ngroups
@@ -258,7 +258,7 @@ program amplicol_generate
         enddo
         if (done) then
            if (timing_mode.eq.timing_detailed) call cpu_time(tBefore)
-           call create_amplitude_lib()
+           call create_amplitude_lib(phys_model%get_gauge_name())
            if (timing_mode.eq.timing_detailed) then
               call cpu_time(tAfter)
               t_Amp_opt=t_Amp_opt+tAfter-tBefore
@@ -727,7 +727,7 @@ contains
     integer(kind=8) iseed
     common /to_seed/iseed
     call parse_argument(filename,ncalls0,itmax,PS_choice,iseed,library,tag,read_momenta,me_points,&
-         timing_arg,timing_sample_arg)
+         timing_arg,timing_sample_arg,gauge)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"
     open(unit=99,file=logfile,status='unknown')

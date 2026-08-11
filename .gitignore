@@ -1,0 +1,20 @@
+*.o
+*.mod
+*.so
+
+/amplicol_generate
+/amplicol_reweight
+/matrix_element_regression
+/fd_gauge_components
+
+/Library/amp*_lib.f03
+/Library/amp*_lib.data
+/Library/amplitudes*.bin
+
+__pycache__/
+*.pyc
+
+# The complete matrix-element baseline is intentionally local: golden.dat is
+# roughly 250 MB and is regenerated with `make update_matrix_goldens`.
+/tests/matrix_elements/cases.dat
+/tests/matrix_elements/golden.dat

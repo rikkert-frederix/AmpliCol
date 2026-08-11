@@ -8,13 +8,16 @@ program matrix_element_regression
   real(kind=dp),parameter :: abs_tol=1d-12,rel_tol=5d-10
 
   type(physics_model) :: model
-  character(len=256) :: mode,cases_file,golden_file
+  character(len=256) :: mode,cases_file,golden_file,gauge,family_filter
 
-  call parse_arguments(mode,cases_file,golden_file)
+  call parse_arguments(mode,cases_file,golden_file,gauge,family_filter)
 
   open(unit=99,file='/dev/null',status='unknown',action='write')
-  call model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-                       80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+  ! Fixed widths violate the Ward identities and therefore make otherwise
+  ! equivalent gauges differ.  Stable particles isolate the FD-gauge and
+  ! vertex implementation that this regression is intended to test.
+  call model%init_part(173d0,0d0,91.188d0,0d0,&
+                       80.419002445756163d0,0d0,125d0,0d0,trim(gauge))
   call model%init_vert()
 
   if (trim(mode).eq.'--write') then
@@ -28,22 +31,42 @@ program matrix_element_regression
 
 contains
 
-  subroutine parse_arguments(mode,cases_file,golden_file)
+  subroutine parse_arguments(mode,cases_file,golden_file,gauge,family_filter)
     implicit none
-    character(len=*),intent(out) :: mode,cases_file,golden_file
-    if (command_argument_count().ne.3) then
+    character(len=*),intent(out) :: mode,cases_file,golden_file,gauge,family_filter
+    character(len=256) :: arg
+    integer :: i
+    if (command_argument_count().lt.3.or.command_argument_count().gt.5) then
        call usage()
        stop 2
     endif
     call get_command_argument(1,mode)
     call get_command_argument(2,cases_file)
     call get_command_argument(3,golden_file)
+    gauge='unitary'
+    family_filter=''
+    do i=4,command_argument_count()
+       call get_command_argument(i,arg)
+       if (index(trim(arg),'--gauge=').eq.1) then
+          gauge=arg(index(arg,'=')+1:)
+       elseif (index(trim(arg),'--family=').eq.1) then
+          family_filter=arg(index(arg,'=')+1:)
+       else
+          call usage()
+          stop 2
+       endif
+    enddo
+    if (trim(mode).eq.'--write'.and.len_trim(family_filter).gt.0) then
+       write (*,*) '--family is only available with --check'
+       stop 2
+    endif
   end subroutine parse_arguments
 
   subroutine usage()
     implicit none
-    write (*,'(a)') 'Usage: matrix_element_regression --check cases.dat golden.dat'
-    write (*,'(a)') '   or: matrix_element_regression --write cases.dat golden.dat'
+    write (*,'(a)') 'Usage: matrix_element_regression --check cases.dat golden.dat [--gauge=unitary|fd]'
+    write (*,'(a)') '       [--family=fixture_family]'
+    write (*,'(a)') '   or: matrix_element_regression --write cases.dat golden.dat [--gauge=unitary|fd]'
   end subroutine usage
 
   subroutine read_header(iunit,version,ncases)
@@ -134,6 +157,11 @@ contains
             g_case_id,g_family,g_n,g_group_id,g_row_id,g_process,g_order)) then
           write (*,*) 'Golden metadata mismatch at case:',case_id
           stop 1
+       endif
+
+       if (len_trim(family_filter).gt.0.and.trim(family).ne.trim(family_filter)) then
+          deallocate(process,order,g_process,g_order,g_spins,g_amps)
+          cycle
        endif
 
        call evaluate_case(n,process,order,point,n_amps,spins,amps)

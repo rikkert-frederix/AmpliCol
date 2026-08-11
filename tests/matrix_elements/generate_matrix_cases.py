@@ -61,6 +61,20 @@ FAMILIES = (
     ("pp_ttbar_aa_2j", 80, ("-FS", "1", "p p > t t~ a a 2j")),
     ("pp_ttbar_aa_3j", 40, ("-FS", "1", "p p > t t~ a a 3j")),
     ("pp_ttbar_aa_4j", 20, ("-FS", "1", "p p > t t~ a a 4j")),
+    # Electroweak stress cases.  In particular, the three- and four-boson
+    # families exercise every auxiliary-field decomposition of a four-point
+    # vector/Higgs interaction before the FD-gauge implementation is enabled.
+    ("pp_zzz_0j", None, ("-FS", "2", "p p > z z z")),
+    ("pp_wpwmz_0j", None, ("-FS", "2", "p p > w+ w- z")),
+    ("pp_wpwma_0j", None, ("-FS", "2", "p p > w+ w- a")),
+    ("pp_wpwmh_0j", None, ("-FS", "2", "p p > w+ w- h")),
+    ("pp_zhh_0j", None, ("-FS", "2", "p p > z h h")),
+    ("pp_zzzz_0j", None, ("-FS", "2", "p p > z z z z")),
+    ("pp_wpwmwpwm_0j", None, ("-FS", "2", "p p > w+ w- w+ w-")),
+    ("pp_ttbar_z_0j", None, ("-FS", "2", "p p > t t~ z")),
+    ("pp_ttbar_h_0j", None, ("-FS", "2", "p p > t t~ h")),
+    ("pp_tbbar_wm_0j", None, ("-FS", "2", "p p > t b~ w-")),
+    ("pp_tbarb_wp_0j", None, ("-FS", "2", "p p > t~ b w+")),
 )
 
 

@@ -59,13 +59,14 @@ program amplicol_reweight
   real(kind=8),dimension(:),allocatable :: unique_map_value
   complex(kind=8) :: amp2_c,amp_col_c
   logical :: done
+  character(len=80) :: gauge
   
   call get_run_arguments()
 
   call cpu_time(tTot_B)
   
   call phys_model%init_part(173d0,1.491500d0,91.188d0,2.441404d0,&
-                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0)
+                           80.419002445756163d0,2.0476d0,125d0,0.0063823389999999999d0,trim(gauge))
 !!$  call phys_model%init_part(173d0,0d0,91.188d0,2.441404d0,80.419002445756163d0,2.0476d0)
   call phys_model%init_vert()
 
@@ -194,6 +195,7 @@ contains
     show_help=.false.
     unwgt=.false.
     keep_comments=.true.
+    gauge='unitary'
     
     if (argc.lt.1) then
        show_help=.true.
@@ -208,6 +210,8 @@ contains
              unwgt=.true.
           elseif (index(argv, "--remove_comments").eq.1) then
              keep_comments=.false.
+          elseif (index(argv, "--gauge=").eq.1) then
+             gauge=argv(index(argv,"=")+1:)
           else
              read(argv,'(a)') filename
           endif
@@ -224,6 +228,7 @@ contains
        write (*,'(a)') "  --help,   -h      : Show this message."
        write (*,'(a)') "  --unwgt           : Unweight the reweight events."
        write (*,'(a)') "  --remove_comments : Remove comment lines in the final LHEF."
+       write (*,'(a)') "  --gauge=[X]       : Gauge for vector currents: unitary (default) or fd."
        write (*,'(a)') ""
        stop
     endif

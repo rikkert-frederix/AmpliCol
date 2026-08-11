@@ -1,5 +1,6 @@
 module amplitude_QCD_mod
   use bitset_mod
+  use particles, only: max_vertex_couplings
   implicit none
   logical,parameter :: use_symmetry=.true.
   logical,parameter :: use_real_gluons=.false.
@@ -21,12 +22,12 @@ module amplitude_QCD_mod
   end type current
   type :: interaction
      ! if adding variables here, also update the finalize_interaction and assign_interaction subroutines
-     integer :: type,chirality
+     integer :: type,chirality,result_type,n_coupl
      integer,dimension(2) :: currents
      integer,dimension(:),allocatable :: singlet_mv
      complex(kind=8),dimension(:),allocatable :: val_c
      real(kind=8),dimension(:),allocatable :: val_r
-     real(kind=8),dimension(2) :: coupl
+     real(kind=8),dimension(max_vertex_couplings) :: coupl
    contains
      final :: finalize_interaction ! custom deallocation of interaction
   end type interaction
@@ -661,24 +662,13 @@ contains
       new_max_cur=2*max_cur
       allocate(tmp(new_max_cur))
       do ic=1,max_cur
-         allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
-         allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
+         if (allocated(current_list_local(ic)%vertices)) &
+              allocate(tmp(ic)%vertices(size(current_list_local(ic)%vertices)))
+         if (allocated(current_list_local(ic)%vertex_sign)) &
+              allocate(tmp(ic)%vertex_sign(size(current_list_local(ic)%vertex_sign)))
          tmp(ic)=current_list_local(ic)
       enddo
-      do ic=1,max_cur
-         call finalize_current(current_list_local(ic))
-      enddo
-      deallocate(current_list_local)
-      allocate(current_list_local(new_max_cur))
-      do ic=1,max_cur
-         allocate(current_list_local(ic)%vertices(size(tmp(ic)%vertices)))
-         allocate(current_list_local(ic)%vertex_sign(size(tmp(ic)%vertex_sign)))
-         current_list_local(ic)=tmp(ic)
-      enddo
-      do ic=1,max_cur
-         call finalize_current(tmp(ic))
-      enddo
-      deallocate(tmp)
+      call move_alloc(tmp,current_list_local)
       max_cur=new_max_cur
     end subroutine increase_max_cur
     
@@ -694,24 +684,7 @@ contains
               allocate(tmp(iv)%singlet_mv(0:size(interaction_list_local(iv)%singlet_mv)-1))
          tmp(iv)=interaction_list_local(iv)
       enddo
-      ! empty old list
-      do iv=1,max_vert
-         call finalize_interaction(interaction_list_local(iv))
-      enddo
-      deallocate(interaction_list_local)
-      ! allocate new list
-      allocate(interaction_list_local(new_max_vert))
-      ! copy tmp into new list
-      do iv=1,max_vert
-         if (allocated(tmp(iv)%singlet_mv)) &
-              allocate(interaction_list_local(iv)%singlet_mv(0:size(tmp(iv)%singlet_mv)-1))
-         interaction_list_local(iv)=tmp(iv)
-      enddo
-      ! empty tmp
-      do iv=1,max_vert
-         call finalize_interaction(tmp(iv))
-      enddo
-      deallocate(tmp)
+      call move_alloc(tmp,interaction_list_local)
       max_vert=new_max_vert
     end subroutine increase_max_vert
       
@@ -756,12 +729,12 @@ contains
          if ( current_list_local(ic1)%type.eq.pm%vertex_list(i)%particles(1) .and. &
               current_list_local(ic2)%type.eq.pm%vertex_list(i)%particles(2) ) then
             ichir=vertex_result_chirality(pm%vertex_list(i)%type, &
-                 pm%vertex_list(i)%particles(3),pm%vertex_list(i)%coupl)
+                 pm%vertex_list(i)%particles(3),pm%vertex_list(i)%coupl(1:2))
             if (ichir.eq.-99) cycle
             sgn=1d0
               call add_vertex(pm%vertex_list(i)%type, &
                             pm%vertex_list(i)%particles(3), &
-                            sgn*pm%vertex_list(i)%coupl,ichir)
+                            sgn*pm%vertex_list(i)%coupl,pm%vertex_list(i)%n_coupl,ichir)
          endif
       enddo
     end subroutine add_if_allowed_threevertex
@@ -930,10 +903,10 @@ contains
       valid_current_combination=.true.
     end function valid_current_combination
     
-    subroutine add_vertex(itype,ctype,coupl,ichir)
+    subroutine add_vertex(itype,ctype,coupl,ncoupl,ichir)
       implicit none
-      integer :: itype,ctype,ichir,ic
-      real(kind=8),dimension(2) :: coupl
+      integer :: itype,ctype,ncoupl,ichir,ic
+      real(kind=8),dimension(max_vertex_couplings) :: coupl
       if (isize.eq.n-1) then
          do ic=this%n_cur_start(n),this%n_cur_end(n)
             if (ctype.eq.anti_current(current_list_local(ic)%type)) exit
@@ -944,6 +917,8 @@ contains
       if (this%n_vert.gt.max_vert) call increase_max_vert()
       interaction_list_local(this%n_vert)%type=itype
       interaction_list_local(this%n_vert)%chirality=ichir
+      interaction_list_local(this%n_vert)%result_type=ctype
+      interaction_list_local(this%n_vert)%n_coupl=ncoupl
       interaction_list_local(this%n_vert)%currents(1)=ic1
       interaction_list_local(this%n_vert)%currents(2)=ic2
       interaction_list_local(this%n_vert)%coupl=coupl
@@ -1596,8 +1571,9 @@ contains
     ! interaction_list
     do iv=1,this%n_vert
        write (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%chirality,&
+            this%interaction_list(iv)%result_type,this%interaction_list(iv)%n_coupl,&
             this%interaction_list(iv)%currents(1:2),&
-            this%interaction_list(iv)%coupl(1:2)
+            this%interaction_list(iv)%coupl(1:max_vertex_couplings)
        if (allocated(this%interaction_list(iv)%singlet_mv)) then
           write (iunit) this%interaction_list(iv)%singlet_mv(0:this%interaction_list(iv)%singlet_mv(0))
        else
@@ -1661,7 +1637,9 @@ contains
     allocate(this%interaction_list(1:this%n_vert))
     do iv=1,this%n_vert
        read (iunit) this%interaction_list(iv)%type,this%interaction_list(iv)%chirality,&
-            this%interaction_list(iv)%currents(1:2),this%interaction_list(iv)%coupl(1:2),itmp
+            this%interaction_list(iv)%result_type,this%interaction_list(iv)%n_coupl,&
+            this%interaction_list(iv)%currents(1:2),&
+            this%interaction_list(iv)%coupl(1:max_vertex_couplings),itmp
        if (itmp.gt.0) then
           allocate(this%interaction_list(iv)%singlet_mv(0:itmp))
           this%interaction_list(iv)%singlet_mv(0)=itmp
@@ -1751,6 +1729,7 @@ contains
     real(kind=8),dimension(0:3,n) :: p
     integer :: ic,iv,isize,ih_in,ifinal,dim
     logical :: read_file
+    complex(kind=8),dimension(4) :: vector1,vector2,vector_result,fermion1,fermion2
     if (.not. allocated(this%current_list(1)%val_c) .and. .not.allocated(this%current_list(1)%val_r)) then
        do ic=1,this%n_cur
           if (use_real_gluons .and. &
@@ -1818,8 +1797,13 @@ contains
                         ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
                 endif
              elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
-                call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
-                     ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                if (pm%uses_fd_gauge()) then
+                   call ext_gluon_mass_fd(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:5),this%current_list(ic)%mass)
+                else
+                   call ext_gluon_mass(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
+                        ih_in,ifinal,this%current_list(ic)%val_c(1:4),this%current_list(ic)%mass)
+                endif
              elseif (pm%is_higgs(this%current_list(ic)%type)) then
                 call ext_scalar(this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)), &
                      ifinal,this%current_list(ic)%val_c(1))
@@ -1840,6 +1824,12 @@ contains
                      this%current_list(this%interaction_list(iv)%currents(2))%val_r(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
                      this%interaction_list(iv)%val_r(1:4))
+             elseif (pm%uses_fd_gauge()) then
+                call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
+                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                     this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
+                     this%interaction_list(iv)%val_c(1:4),this%interaction_list(iv)%coupl(1:2))
              else
                 call threeGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
                      this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
@@ -1989,56 +1979,67 @@ contains
              endif
 
           elseif(this%interaction_list(iv)%type.eq.10) then
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
              if (this%interaction_list(iv)%chirality.ne.0) then
                 call QuarkGluontoQuark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                                  this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                                  vector2(1),&
                                                   this%interaction_list(iv)%val_c(1),&
                                                   this%interaction_list(iv)%coupl(1:2),&
                                                   this%interaction_list(iv)%chirality)
              else
-                call QuarkGluontoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                             this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                call get_fermion_current(this%interaction_list(iv)%currents(1),fermion1)
+                call QuarkGluontoQuark_coupl(fermion1,&
+                                             vector2,&
                                              this%interaction_list(iv)%val_c(1:4),&
                                              this%interaction_list(iv)%coupl(1:2))
              endif
           elseif(this%interaction_list(iv)%type.eq.11) then
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
              if (this%interaction_list(iv)%chirality.ne.0) then
                 call AquarkGluontoAquark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                                    this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                                                    vector2(1),&
                                                     this%interaction_list(iv)%val_c(1),&
                                                     this%interaction_list(iv)%coupl(1:2),&
                                                     this%interaction_list(iv)%chirality)
              else
-                call AquarkGluontoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                               this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                call get_fermion_current(this%interaction_list(iv)%currents(1),fermion1)
+                call AquarkGluontoAquark_coupl(fermion1,&
+                                               vector2,&
                                                this%interaction_list(iv)%val_c(1:4),&
                                                this%interaction_list(iv)%coupl(1:2))
              endif
           elseif (this%interaction_list(iv)%type.eq.12) then
-             call threeGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
+             call threeGluon_coupl(vector1,&
                        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(1))%bin)),&
-                       this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+                       vector2,&
                        this%pp(0:3,this%pp_bin_to_i(this%current_list(this%interaction_list(iv)%currents(2))%bin)),&
-                       this%interaction_list(iv)%val_c(1:4),&
+                       vector_result,&
                        this%interaction_list(iv)%coupl(1:2))
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.13) then
-             call TwoGluonToTensor_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                         this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
+             call TwoGluonToTensor_coupl(vector1,vector2,&
                                          this%interaction_list(iv)%val_c(1:6),&
                                          this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.14) then
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
              call TensorGluontoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:6),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                           this%interaction_list(iv)%val_c(1:4),&
+                                           vector2,vector_result,&
                                            this%interaction_list(iv)%coupl(1:2))
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.15) then
-             call GluonTensortoGluon_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
+             call GluonTensortoGluon_coupl(vector1,&
                                            this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:6),&
-                                           this%interaction_list(iv)%val_c(1:4),&
+                                           vector_result,&
                                            this%interaction_list(iv)%coupl(1:2))
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.16) then
              call QuarkScalartoQuark(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
@@ -2047,22 +2048,26 @@ contains
                                      this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.17) then
-             call GluonGluontoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
-                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
+             call GluonGluontoScalar(vector1,vector2,&
                                      this%interaction_list(iv)%val_c(1),&
                                      this%interaction_list(iv)%coupl(1:2))
 
           elseif(this%interaction_list(iv)%type.eq.18) then
+             call get_vector_current(this%interaction_list(iv)%currents(2),vector2)
              call ScalarGluontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1:4),&
-                                     this%interaction_list(iv)%val_c(1:4),&
-                                     this%interaction_list(iv)%coupl)
+                                     vector2,vector_result,&
+                                     this%interaction_list(iv)%coupl(1:2))
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.19) then
-             call GluonScalartoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1:4),&
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
+             call GluonScalartoGluon(vector1,&
                                      this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                     this%interaction_list(iv)%val_c(1:4),&
-                                     this%interaction_list(iv)%coupl)
+                                     vector_result,&
+                                     this%interaction_list(iv)%coupl(1:2))
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.20) then
              call ScalarScalartoScalar(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
@@ -2076,56 +2081,62 @@ contains
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
                 call LeptonAleptontoGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                               this%interaction_list(iv)%val_c(1:4),&
+                                               vector_result,&
                                                this%interaction_list(iv)%coupl(1:2),&
                                                this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                                this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
                 call LeptonAleptontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                          this%interaction_list(iv)%val_c(1:4),&
+                                          vector_result,&
                                           this%interaction_list(iv)%coupl(1:2))
              endif
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.22) then
              if (this%current_list(this%interaction_list(iv)%currents(1))%chirality.ne.0 .or. &
                  this%current_list(this%interaction_list(iv)%currents(2))%chirality.ne.0) then
                 call AleptonLeptontoGluon_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                                this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                               this%interaction_list(iv)%val_c(1:4),&
+                                               vector_result,&
                                                this%interaction_list(iv)%coupl(1:2),&
                                                this%current_list(this%interaction_list(iv)%currents(1))%chirality,&
                                                this%current_list(this%interaction_list(iv)%currents(2))%chirality)
              else
                 call  AleptonLeptontoGluon(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
-                                          this%interaction_list(iv)%val_c(1:4),&
+                                          vector_result,&
                                           this%interaction_list(iv)%coupl(1:2))
              endif
+             call set_vector_result(iv,vector_result)
 
           elseif(this%interaction_list(iv)%type.eq.23) then
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
              if (this%interaction_list(iv)%chirality.ne.0) then
-                call GluonQuarktoQuark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call GluonQuarktoQuark_coupl_weyl(vector1(1),&
                                                   this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                   this%interaction_list(iv)%val_c(1),&
                                                   this%interaction_list(iv)%coupl(1:2),&
                                                   this%interaction_list(iv)%chirality)
              else
-                call  GluonQuarktoQuark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                          this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                call get_fermion_current(this%interaction_list(iv)%currents(2),fermion2)
+                call GluonQuarktoQuark_coupl(vector1,&
+                                          fermion2,&
                                           this%interaction_list(iv)%val_c(1:4),&
                                           this%interaction_list(iv)%coupl(1:2))
              endif
           elseif(this%interaction_list(iv)%type.eq.24) then
+             call get_vector_current(this%interaction_list(iv)%currents(1),vector1)
              if (this%interaction_list(iv)%chirality.ne.0) then
-                call GluonAquarktoAquark_coupl_weyl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
+                call GluonAquarktoAquark_coupl_weyl(vector1(1),&
                                                     this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
                                                     this%interaction_list(iv)%val_c(1),&
                                                     this%interaction_list(iv)%coupl(1:2),&
                                                     this%interaction_list(iv)%chirality)
              else
-                call  GluonAquarktoAquark_coupl(this%current_list(this%interaction_list(iv)%currents(1))%val_c(1),&
-                                           this%current_list(this%interaction_list(iv)%currents(2))%val_c(1),&
+                call get_fermion_current(this%interaction_list(iv)%currents(2),fermion2)
+                call GluonAquarktoAquark_coupl(vector1,&
+                                           fermion2,&
                                            this%interaction_list(iv)%val_c(1:4),&
                                            this%interaction_list(iv)%coupl(1:2))
              endif
@@ -2160,7 +2171,7 @@ contains
              endif
           elseif (pm%is_tensor6(this%current_list(ic)%type)) then
              ! the non-propagating tensor current
-             call combine_interactions(6)
+             call combine_interactions(pm%get_dim(this%current_list(ic)%type))
           elseif (pm%is_antiquark(this%current_list(ic)%type).or.pm%is_antilepton(this%current_list(ic)%type)) then
              ! an anti-quark current
              if (this%current_list(ic)%chirality.ne.0) then
@@ -2176,7 +2187,7 @@ contains
                 endif
              endif
           elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
-             call combine_interactions(4)
+             call combine_interactions(pm%get_dim(this%current_list(ic)%type))
              ! a massive vector boson current
              if (isize.ne.n-1)  then
                 call include_gluon_propagator_mass()
@@ -2218,9 +2229,65 @@ contains
       if (this%interaction_list(ivert)%chirality.ne.0) then
          interaction_dim=2
       else
-         interaction_dim=pm%get_inter_dim(this%interaction_list(ivert)%type)
+         interaction_dim=pm%get_dim(this%interaction_list(ivert)%result_type)
       endif
     end function interaction_dim
+
+    subroutine get_vector_current(icur,value)
+      ! Vertex routines, including the existing six-component auxiliary
+      ! decomposition of four-vector contacts, are written in the legacy
+      ! vector basis.  Converting every massive input here and lifting every
+      ! massive result in set_vector_result applies the full FD/Goldstone
+      ! basis transformation while preserving that three-point decomposition.
+      implicit none
+      integer,intent(in) :: icur
+      complex(kind=8),dimension(4),intent(out) :: value
+      integer :: ip
+      if (pm%uses_fd_gauge().and.pm%is_massiveboson(this%current_list(icur)%type)) then
+         ip=this%pp_bin_to_i(this%current_list(icur)%bin)
+         call fd_massive_to_unitary(this%current_list(icur)%val_c(1:5),this%pp(0:3,ip),&
+              this%current_list(icur)%mass,value)
+      else
+         value=this%current_list(icur)%val_c(1:4)
+      endif
+    end subroutine get_vector_current
+
+    subroutine get_fermion_current(icur,value)
+      ! Embed an optimised two-component Weyl current in the four-component
+      ! Dirac layout required when a flavour-changing vertex produces a
+      ! massive fermion.  Previously these mixed vertices read two elements
+      ! beyond the allocated Weyl current.
+      implicit none
+      integer,intent(in) :: icur
+      complex(kind=8),dimension(4),intent(out) :: value
+      value=(0d0,0d0)
+      if (this%current_list(icur)%chirality.eq.0) then
+         value=this%current_list(icur)%val_c(1:4)
+      elseif (this%current_list(icur)%chirality.eq.1) then
+         value(1:2)=this%current_list(icur)%val_c(1:2)
+      else
+         value(3:4)=this%current_list(icur)%val_c(1:2)
+      endif
+    end subroutine get_fermion_current
+
+    subroutine set_vector_result(ivert,value)
+      implicit none
+      integer,intent(in) :: ivert
+      complex(kind=8),dimension(4),intent(in) :: value
+      integer :: ic1_local,ic2_local,ip1,ip2
+      real(kind=8),dimension(0:3) :: pout
+      if (pm%uses_fd_gauge().and.pm%is_massiveboson(this%interaction_list(ivert)%result_type)) then
+         ic1_local=this%interaction_list(ivert)%currents(1)
+         ic2_local=this%interaction_list(ivert)%currents(2)
+         ip1=this%pp_bin_to_i(this%current_list(ic1_local)%bin)
+         ip2=this%pp_bin_to_i(this%current_list(ic2_local)%bin)
+         pout=this%pp(0:3,ip1)+this%pp(0:3,ip2)
+         call fd_lift_massive_current(value,pout,pm%get_mass(this%interaction_list(ivert)%result_type),&
+              this%interaction_list(ivert)%val_c(1:5))
+      else
+         this%interaction_list(ivert)%val_c(1:4)=value
+      endif
+    end subroutine set_vector_result
 
     subroutine fill_momentum_array
       implicit none
@@ -2324,6 +2391,25 @@ contains
       ic2=this%curr2amp(2,iamp)
       if (this%current_list(ic1)%chirality.ne.0 .and. this%current_list(ic2)%chirality.ne.0) then
          contract_currents=sum(this%current_list(ic1)%val_c(1:2)*this%current_list(ic2)%val_c(1:2))
+      elseif (pm%is_fermion(this%current_list(ic1)%type).and.&
+           pm%is_fermion(this%current_list(ic2)%type)) then
+         call get_fermion_current(ic1,fermion1)
+         call get_fermion_current(ic2,fermion2)
+         contract_currents=sum(fermion1*fermion2)
+      elseif (pm%uses_fd_gauge().and.pm%is_massiveboson(this%current_list(ic1)%type).and.&
+           pm%is_massiveboson(this%current_list(ic2)%type)) then
+         ! The n-1 current is an unpropagated source, while its one-particle
+         ! partner is an FD field.  Contracting the source with the
+         ! reconstructed unitary field is algebraically identical to the
+         ! five-component dual contraction and avoids an index-convention
+         ! ambiguity for non-conserved massive-fermion currents.
+         if (popcnt(this%current_list(ic1)%bin).gt.popcnt(this%current_list(ic2)%bin)) then
+            call get_vector_current(ic2,vector2)
+            contract_currents=sum(this%current_list(ic1)%val_c(1:4)*vector2)
+         else
+            call get_vector_current(ic1,vector1)
+            contract_currents=sum(vector1*this%current_list(ic2)%val_c(1:4))
+         endif
       else
          contract_currents=sum(this%current_list(ic1)%val_c(1:4)*this%current_list(ic2)%val_c(1:4))
       endif
@@ -2372,16 +2458,27 @@ contains
          call GluonPropagator_real(this%current_list(ic)%val_r, &
               this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
       else
-         call GluonPropagator(this%current_list(ic)%val_c, &
-              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+         if (pm%uses_fd_gauge()) then
+            call GluonPropagator_fd(this%current_list(ic)%val_c, &
+                 this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+         else
+            call GluonPropagator(this%current_list(ic)%val_c, &
+                 this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)))
+         endif
       endif
     end subroutine include_gluon_propagator
 
     subroutine include_gluon_propagator_mass()
       implicit none
-      call GluonPropagator_mass(this%current_list(ic)%val_c, &
-           this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
-           this%current_list(ic)%mass,this%current_list(ic)%width)
+      if (pm%uses_fd_gauge()) then
+         call GluonPropagator_mass_fd(this%current_list(ic)%val_c, &
+              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+              this%current_list(ic)%mass,this%current_list(ic)%width)
+      else
+         call GluonPropagator_mass(this%current_list(ic)%val_c, &
+              this%pp(0:3,this%pp_bin_to_i(this%current_list(ic)%bin)),&
+              this%current_list(ic)%mass,this%current_list(ic)%width)
+      endif
     end subroutine include_gluon_propagator_mass
 
     subroutine include_quark_propagator()
@@ -3143,7 +3240,7 @@ contains
     write(tmp,*) igroup
     write(line,*) iint
     line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.data'
-    open(file=line,unit=iunit,form='unformatted',access='stream',status='unknown')
+    open(file=line,unit=iunit,form='unformatted',access='stream',status='replace')
     write(iunit) p
     write(iunit) this%amps
     close(iunit)
@@ -3151,7 +3248,7 @@ contains
     write(tmp,*) igroup
     write(line,*) iint
     line='Library/amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib.f03'
-    open(file=line,unit=iunit,status='unknown')
+    open(file=line,unit=iunit,status='replace')
     write(line,*) iint
     write(iunit,'(a)') 'module amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))//'_lib'
     write(iunit,'(2x,a)') 'use FeynmanRules'
@@ -3173,6 +3270,8 @@ contains
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: val_c'
     write(tmp,*) this%n_vert
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//') :: int_c'
+    write(iunit,'(4x,a)') 'val_c=(0d0,0d0)'
+    write(iunit,'(4x,a)') 'int_c=(0d0,0d0)'
     write(iunit,'(4x,a)') 'call fill_momentum_array(p,pp)'
     write(iunit,'(4x,a)') 'call compute_external_currents(pp,val_c)'
     do isize=2,n-1
@@ -3180,7 +3279,7 @@ contains
        write(iunit,'(4x,a)') 'call compute_vertices'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
        write(iunit,'(4x,a)') 'call compute_currents'//trim(adjustl(tmp))//'(pp,val_c,int_c)'
     enddo
-    write(iunit,'(4x,a)') 'call compute_amps(amps,val_c)'
+    write(iunit,'(4x,a)') 'call compute_amps(amps,val_c,pp)'
     write(tmp,*) igroup
     write(line,*) iint
     write(iunit,'(2x,a)') 'end subroutine evaluate_amp'//trim(adjustl(tmp))//'_'//trim(adjustl(line))
@@ -3280,7 +3379,11 @@ contains
                 endif
              elseif (pm%is_massiveboson(this%current_list(ic)%type)) then
                 write(tmp,*) this%pp_bin_to_i(this%current_list(ic)%bin)
-                line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
+                if (pm%uses_fd_gauge()) then
+                   line='call ext_gluon_mass_fd(pp(0,'//trim(adjustl(tmp))//'),'
+                else
+                   line='call ext_gluon_mass(pp(0,'//trim(adjustl(tmp))//'),'
+                endif
                 write(tmp,*) ih_in
                 line=trim(adjustl(line))//trim(adjustl(tmp))//','
                 write(tmp,*) ifinal
@@ -3389,6 +3492,8 @@ contains
           write(tmp,*) this%n_vert
           write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(inout) :: int_c'
           write(iunit,'(4x,a)') 'integer :: i'
+          write(iunit,'(4x,a)') 'complex(kind=8),dimension(4) :: vector1,vector2,vector_result,fermion1,fermion2'
+          write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3) :: pout'
           write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: cur1=[ &'
           line=''
@@ -3440,7 +3545,7 @@ contains
              endif
           enddo
           write(iunit,'(6x,a)') trim(adjustl(line))//']'
-          if (itype.eq.0 .or. itype.eq.12) then
+          if (itype.eq.0 .or. itype.eq.12 .or. pm%uses_fd_gauge()) then
              write(tmp,*) icount(itype,vkey)
              write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: pp1=[ &'
              line=''
@@ -3476,6 +3581,87 @@ contains
              enddo
              write(iunit,'(6x,a)') trim(adjustl(line))//']'
           endif
+          if ((itype.eq.10 .or. itype.eq.11) .and. vkey.eq.4) then
+             write(tmp,*) icount(itype,vkey)
+             write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: chir1=[ &'
+             line=''
+             do i=1,icount(itype,vkey)
+                write(tmp,*) this%current_list(cur1(i,itype,vkey))%chirality
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
+          elseif ((itype.eq.23 .or. itype.eq.24) .and. vkey.eq.4) then
+             write(tmp,*) icount(itype,vkey)
+             write(iunit,'(4x,a)') 'integer,parameter,dimension('//trim(adjustl(tmp))//') :: chir2=[ &'
+             line=''
+             do i=1,icount(itype,vkey)
+                write(tmp,*) this%current_list(cur2(i,itype,vkey))%chirality
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
+          endif
+          if (pm%uses_fd_gauge().and.itype.ge.10.and.itype.le.24.and.&
+               itype.ne.16.and.itype.ne.20) then
+             write(tmp,*) icount(itype,vkey)
+             write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: vm1=[ &'
+             line=''
+             do i=1,icount(itype,vkey)
+                write(tmp,'(D24.16)') pm%get_mass(this%current_list(cur1(i,itype,vkey))%type)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,5).eq.0 .and. i.ne.icount(itype,vkey)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
+             write(tmp,*) icount(itype,vkey)
+             write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: vm2=[ &'
+             line=''
+             do i=1,icount(itype,vkey)
+                write(tmp,'(D24.16)') pm%get_mass(this%current_list(cur2(i,itype,vkey))%type)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,5).eq.0 .and. i.ne.icount(itype,vkey)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
+             write(tmp,*) icount(itype,vkey)
+             write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: vmo=[ &'
+             line=''
+             do i=1,icount(itype,vkey)
+                write(tmp,'(D24.16)') pm%get_mass(this%interaction_list(int1(i,itype,vkey))%result_type)
+                if (i.eq.1) then
+                   line=trim(adjustl(tmp))
+                else
+                   line=trim(adjustl(line))//','//trim(adjustl(tmp))
+                endif
+                if (mod(i,5).eq.0 .and. i.ne.icount(itype,vkey)) then
+                   line=trim(adjustl(line))//' &'
+                   write(iunit,'(6x,a)') trim(adjustl(line))
+                   line=''
+                endif
+             enddo
+             write(iunit,'(6x,a)') trim(adjustl(line))//']'
+          endif
           if (itype.eq.8 .or. itype.ge.10) then
              write(tmp,*) icount(itype,vkey)*2
              write(iunit,'(4x,a)') 'real(kind=8),parameter,dimension('//trim(adjustl(tmp))//') :: coupl=[ &'
@@ -3504,7 +3690,12 @@ contains
           write(tmp,*) icount(itype,vkey)
           write(iunit,'(4x,a)')'do i=1,'//trim(adjustl(tmp))
           if (itype.eq.0) then
-             line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+             if (pm%uses_fd_gauge()) then
+                line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
+                     'pp(0,pp2(i)),int_c(1,int1(i)),[1d0,0d0])'
+             else
+                line='call threeGluon(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),pp(0,pp2(i)),int_c(1,int1(i)))'
+             endif
           elseif(itype.eq.1) then
              line='call TwoGluonToTensor(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)))'
           elseif(itype.eq.2) then
@@ -3569,97 +3760,329 @@ contains
                 line=''
              endif
           elseif(itype.eq.10) then
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+             endif
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'fermion1=(0d0,0d0)'
+                write(iunit,'(6x,a)') 'if (chir1(i).eq.0) then'
+                write(iunit,'(8x,a)') 'fermion1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'elseif (chir1(i).eq.1) then'
+                write(iunit,'(8x,a)') 'fermion1(1:2)=val_c(1:2,cur1(i))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'fermion1(3:4)=val_c(1:2,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(fermion1,vector2,int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl(fermion1,val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                endif
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),vector2,int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call QuarkGluontoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                endif
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
              endif
              line=''
           elseif(itype.eq.11) then
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+             endif
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'fermion1=(0d0,0d0)'
+                write(iunit,'(6x,a)') 'if (chir1(i).eq.0) then'
+                write(iunit,'(8x,a)') 'fermion1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'elseif (chir1(i).eq.1) then'
+                write(iunit,'(8x,a)') 'fermion1(1:2)=val_c(1:2,cur1(i))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'fermion1(3:4)=val_c(1:2,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(fermion1,vector2,int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl(fermion1,val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                endif
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),vector2,int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call AQuarkGluontoAQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                endif
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
              endif
              line=''
           elseif(itype.eq.12) then
-             line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
-                  'pp(0,pp2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'call threeGluon_coupl(vector1,pp(0,pp1(i)),vector2,pp(0,pp2(i)), &'
+                write(iunit,'(8x,a)') 'vector_result,[coupl(2*i-1),coupl(2*i)])'
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+                line=''
+             else
+                line='call threeGluon_coupl(val_c(1,cur1(i)),pp(0,pp1(i)),val_c(1,cur2(i)),'//&
+                     'pp(0,pp2(i)),int_c(1,int1(i)),[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.13) then
-             line='call TwoGluontoTensor_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
-                  '[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                line='call TwoGluontoTensor_coupl(vector1,vector2,int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             else
+                line='call TwoGluontoTensor_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.14) then
-             line='call TensorGluontoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
-                  '[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'call TensorGluontoGluon_coupl(val_c(1,cur1(i)),vector2,vector_result, &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+                line=''
+             else
+                line='call TensorGluontoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.15) then
-             line='call GluonTensortoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
-                  '[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'call GluonTensortoGluon_coupl(vector1,val_c(1,cur2(i)),vector_result, &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+                line=''
+             else
+                line='call GluonTensortoGluon_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.16) then
              line='call QuarkScalartoQuark(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.17) then
-             line='call GluonGluontoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
-                  '[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                line='call GluonGluontoScalar(vector1,vector2,int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             else
+                line='call GluonGluontoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.18) then
-             line='call ScalarGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
-                  '[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm2(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur2(i)),pp(0:3,pp2(i)),vm2(i),vector2)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'call ScalarGluontoGluon(val_c(1,cur1(i)),vector2,vector_result, &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+                line=''
+             else
+                line='call ScalarGluontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.19) then
-             line='call GluonScalartoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
-                  '[coupl(2*i-1),coupl(2*i)])'
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+                write(iunit,'(6x,a)') 'call GluonScalartoGluon(vector1,val_c(1,cur2(i)),vector_result, &'
+                write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+                line=''
+             else
+                line='call GluonScalartoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
+                     '[coupl(2*i-1),coupl(2*i)])'
+             endif
           elseif(itype.eq.20) then
              line='call ScalarScalartoScalar(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)),'//&
                   '[coupl(2*i-1),coupl(2*i)])'
           elseif(itype.eq.21) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),vector_result, &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call LeptonAleptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),vector_result, &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
+             endif
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+             else
+                write(iunit,'(6x,a)') 'int_c(1:4,int1(i))=vector_result'
              endif
              line=''
           elseif(itype.eq.22) then
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon(val_c(1,cur1(i)),val_c(1,cur2(i)),vector_result, &'
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'call AleptonLeptontoGluon_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),vector_result, &'
                 write(tmp,*) vkey/3-1
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//','
                 write(tmp,*) mod(vkey,3)-1
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
              endif
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vmo(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'pout=pp(0:3,pp1(i))+pp(0:3,pp2(i))'
+                write(iunit,'(8x,a)') 'call fd_lift_massive_current(vector_result,pout,vmo(i),int_c(1:5,int1(i)))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'int_c(1:4,int1(i))=vector_result'
+                write(iunit,'(6x,a)') 'endif'
+             else
+                write(iunit,'(6x,a)') 'int_c(1:4,int1(i))=vector_result'
+             endif
              line=''
           elseif(itype.eq.23) then
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+             endif
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'fermion2=(0d0,0d0)'
+                write(iunit,'(6x,a)') 'if (chir2(i).eq.0) then'
+                write(iunit,'(8x,a)') 'fermion2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'elseif (chir2(i).eq.1) then'
+                write(iunit,'(8x,a)') 'fermion2(1:2)=val_c(1:2,cur2(i))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'fermion2(3:4)=val_c(1:2,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(vector1,fermion2,int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl(val_c(1,cur1(i)),fermion2,int_c(1,int1(i)), &'
+                endif
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_weyl(vector1,val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call GluonQuarktoQuark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                endif
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
              endif
              line=''
           elseif(itype.eq.24) then
+             if (pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'if (vm1(i).gt.0d0) then'
+                write(iunit,'(8x,a)') 'call fd_massive_to_unitary(val_c(1:5,cur1(i)),pp(0:3,pp1(i)),vm1(i),vector1)'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'vector1=val_c(1:4,cur1(i))'
+                write(iunit,'(6x,a)') 'endif'
+             endif
              if (vkey.eq.4) then
-                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                write(iunit,'(6x,a)') 'fermion2=(0d0,0d0)'
+                write(iunit,'(6x,a)') 'if (chir2(i).eq.0) then'
+                write(iunit,'(8x,a)') 'fermion2=val_c(1:4,cur2(i))'
+                write(iunit,'(6x,a)') 'elseif (chir2(i).eq.1) then'
+                write(iunit,'(8x,a)') 'fermion2(1:2)=val_c(1:2,cur2(i))'
+                write(iunit,'(6x,a)') 'else'
+                write(iunit,'(8x,a)') 'fermion2(3:4)=val_c(1:2,cur2(i))'
+                write(iunit,'(6x,a)') 'endif'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(vector1,fermion2,int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl(val_c(1,cur1(i)),fermion2,int_c(1,int1(i)), &'
+                endif
                 write(iunit,'(8x,a)') '[coupl(2*i-1),coupl(2*i)])'
              else
-                write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_weyl(vector1,val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                else
+                   write(iunit,'(6x,a)') 'call GluonAquarktoAquark_coupl_weyl(val_c(1,cur1(i)),val_c(1,cur2(i)),int_c(1,int1(i)), &'
+                endif
                 write(tmp,*) vkey-4
                 line='[coupl(2*i-1),coupl(2*i)],'//trim(adjustl(tmp))//')'
                 write(iunit,'(8x,a)') trim(adjustl(line))
@@ -3918,20 +4341,30 @@ contains
              if (j.eq.6) then
                 write(iunit,'(6x,a)') 'val_c(1:6,int1(0,i))=sum(int_c(1:6,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              elseif (j.eq.5 .or. j.eq.7) then
-                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+                write(iunit,'(6x,a)') 'val_c(1,int1(0,i))=sum(int_c(1,int1(1:'//trim(adjustl(tmp))//',i)))'
              elseif (j.ge.8 .and. j.le.11) then
                 write(iunit,'(6x,a)') 'val_c(1:2,int1(0,i))=sum(int_c(1:2,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
+             elseif (j.eq.4 .and. pm%uses_fd_gauge()) then
+                write(iunit,'(6x,a)') 'val_c(1:5,int1(0,i))=sum(int_c(1:5,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              else
                 write(iunit,'(6x,a)') 'val_c(1:4,int1(0,i))=sum(int_c(1:4,int1(1:'//trim(adjustl(tmp))//',i)),dim=2)'
              endif
              if (j.eq.1 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call GluonPropagator_fd(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+                else
+                   write(iunit,'(6x,a)') 'call GluonPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)))'
+                endif
              elseif(j.eq.2 .and. isize.ne.n-1) then
                 write(iunit,'(6x,a)') 'call QuarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.3 .and. isize.ne.n-1) then
                 write(iunit,'(6x,a)') 'call AquarkPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.4 .and. isize.ne.n-1) then
-                write(iunit,'(6x,a)') 'call GluonPropagator_mass(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                if (pm%uses_fd_gauge()) then
+                   write(iunit,'(6x,a)') 'call GluonPropagator_mass_fd(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                else
+                   write(iunit,'(6x,a)') 'call GluonPropagator_mass(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
+                endif
              elseif(j.eq.5 .and. isize.ne.n-1) then
                 write(iunit,'(6x,a)') 'call ScalarPropagator(val_c(1,int1(0,i)),pp(0,pp1(i)),m(i),w(i))'
              elseif(j.eq.8 .and. isize.ne.n-1) then
@@ -3960,12 +4393,15 @@ contains
        enddo
     enddo
 
-    write(iunit,'(2x,a)') 'subroutine compute_amps(amps,val_c)'
+    write(iunit,'(2x,a)') 'subroutine compute_amps(amps,val_c,pp)'
     write(iunit,'(4x,a)') 'implicit none'
     write(tmp,*) this%n_amps
     write(iunit,'(4x,a)') 'complex(kind=8),dimension('//trim(adjustl(tmp))//'),intent(out) :: amps'
     write(tmp,*) this%n_cur
     write(iunit,'(4x,a)') 'complex(kind=8),dimension(1:6,'//trim(adjustl(tmp))//'),intent(in) :: val_c'
+    write(tmp,*) this%max_pp
+    write(iunit,'(4x,a)') 'real(kind=8),dimension(0:3,'//trim(adjustl(tmp))//'),intent(in) :: pp'
+    write(iunit,'(4x,a)') 'complex(kind=8),dimension(4) :: vector1,vector2,fermion1,fermion2'
 
     ! first the 'non-same-flavour' ones
     do iproc=1,this%nprocs
@@ -3979,14 +4415,71 @@ contains
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:2,'
                 write(tmp,*) this%curr2amp(2,iamp)
                 line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                write(iunit,'(4x,a)') trim(adjustl(line))
+             elseif (pm%is_fermion(this%current_list(this%curr2amp(1,iamp))%type).and.&
+                  pm%is_fermion(this%current_list(this%curr2amp(2,iamp))%type)) then
+                write(iunit,'(4x,a)') 'fermion1=(0d0,0d0)'
+                write(iunit,'(4x,a)') 'fermion2=(0d0,0d0)'
+                if (this%current_list(this%curr2amp(1,iamp))%chirality.eq.0) then
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   write(iunit,'(4x,a)') 'fermion1=val_c(1:4,'//trim(adjustl(tmp))//')'
+                elseif (this%current_list(this%curr2amp(1,iamp))%chirality.eq.1) then
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   write(iunit,'(4x,a)') 'fermion1(1:2)=val_c(1:2,'//trim(adjustl(tmp))//')'
+                else
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   write(iunit,'(4x,a)') 'fermion1(3:4)=val_c(1:2,'//trim(adjustl(tmp))//')'
+                endif
+                if (this%current_list(this%curr2amp(2,iamp))%chirality.eq.0) then
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   write(iunit,'(4x,a)') 'fermion2=val_c(1:4,'//trim(adjustl(tmp))//')'
+                elseif (this%current_list(this%curr2amp(2,iamp))%chirality.eq.1) then
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   write(iunit,'(4x,a)') 'fermion2(1:2)=val_c(1:2,'//trim(adjustl(tmp))//')'
+                else
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   write(iunit,'(4x,a)') 'fermion2(3:4)=val_c(1:2,'//trim(adjustl(tmp))//')'
+                endif
+                write(tmp,*) iamp
+                write(iunit,'(4x,a)') 'amps('//trim(adjustl(tmp))//')=sum(fermion1*fermion2)'
+             elseif (pm%uses_fd_gauge().and.&
+                  pm%is_massiveboson(this%current_list(this%curr2amp(1,iamp))%type).and.&
+                  pm%is_massiveboson(this%current_list(this%curr2amp(2,iamp))%type)) then
+                if (popcnt(this%current_list(this%curr2amp(1,iamp))%bin).gt.&
+                     popcnt(this%current_list(this%curr2amp(2,iamp))%bin)) then
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   line='call fd_massive_to_unitary(val_c(1:5,'//trim(adjustl(tmp))//'),pp(0:3,'
+                   write(tmp,*) this%pp_bin_to_i(this%current_list(this%curr2amp(2,iamp))%bin)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
+                   write(tmp,'(d20.12)') this%current_list(this%curr2amp(2,iamp))%mass
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//',vector2)'
+                   write(iunit,'(4x,a)') trim(adjustl(line))
+                   write(tmp,*) iamp
+                   line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//')*vector2)'
+                else
+                   write(tmp,*) this%curr2amp(1,iamp)
+                   line='call fd_massive_to_unitary(val_c(1:5,'//trim(adjustl(tmp))//'),pp(0:3,'
+                   write(tmp,*) this%pp_bin_to_i(this%current_list(this%curr2amp(1,iamp))%bin)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'),'
+                   write(tmp,'(d20.12)') this%current_list(this%curr2amp(1,iamp))%mass
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//',vector1)'
+                   write(iunit,'(4x,a)') trim(adjustl(line))
+                   write(tmp,*) iamp
+                   line='amps('//trim(adjustl(tmp))//')=sum(vector1*val_c(1:4,'
+                   write(tmp,*) this%curr2amp(2,iamp)
+                   line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                endif
+                write(iunit,'(4x,a)') trim(adjustl(line))
              else
                 line='amps('//trim(adjustl(tmp))//')=sum(val_c(1:4,'
                 write(tmp,*) this%curr2amp(1,iamp)
                 line=trim(adjustl(line))//trim(adjustl(tmp))//')*val_c(1:4,'
                 write(tmp,*) this%curr2amp(2,iamp)
                 line=trim(adjustl(line))//trim(adjustl(tmp))//'))'
+                write(iunit,'(4x,a)') trim(adjustl(line))
              endif
-             write(iunit,'(4x,a)') trim(adjustl(line))
           endif
        enddo
     enddo
@@ -4328,8 +4821,10 @@ contains
     integer :: val_size
     lhs%type=rhs%type
     lhs%chirality=rhs%chirality
+    lhs%result_type=rhs%result_type
+    lhs%n_coupl=rhs%n_coupl
     lhs%currents(1:2)=rhs%currents(1:2)
-    lhs%coupl(1:2)=rhs%coupl(1:2)
+    lhs%coupl(1:max_vertex_couplings)=rhs%coupl(1:max_vertex_couplings)
     if (allocated(rhs%singlet_mv)) then
        if (rhs%singlet_mv(0).gt.0) then
           if (.not.allocated(lhs%singlet_mv)) allocate(lhs%singlet_mv(0:rhs%singlet_mv(0)))

@@ -2,12 +2,12 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       timing,timing_sample)
+       timing,timing_sample,gauge)
     integer :: i
     character(len=256) :: arg
     character(len=256) :: input_file,tmp
     logical :: verbose, show_help
-    character(len=80) :: filename,library,tag,timing
+    character(len=80) :: filename,library,tag,timing,gauge
     integer :: ncalls0,itmax,PS_choice
     integer(kind=8) :: seed
     logical :: read_momenta 
@@ -25,6 +25,7 @@ contains
     read_momenta=.false.
     timing='basic'
     timing_sample=100
+    gauge='unitary'
 
     do i = 1, command_argument_count()
        call get_command_argument(i, arg)
@@ -58,6 +59,8 @@ contains
        elseif (index(arg, "--timing-sample=").eq.1) then
           tmp = arg(index(arg, "=")+1:)
           read(tmp,*) timing_sample
+       elseif (index(arg, "--gauge=").eq.1) then
+          gauge = arg(index(arg, "=")+1:)
        else
           write (*,*) 'Unknown argument: ',arg
           stop 1
@@ -83,6 +86,7 @@ contains
             "with [X] points tested (single PS kinematics)"
        write (*,'(a)') "  --timing=[X]              : Timing mode: none, basic (default), or detailed."
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
+       write (*,'(a)') "  --gauge=[X]               : Gauge for vector currents: unitary (default) or fd."
        write (*,'(a)') ""
        stop
     end if

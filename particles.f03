@@ -1,9 +1,26 @@
 module particles
   implicit none
   real(kind=8),parameter :: sw = 0.47143025548407230d0 
+  integer,parameter,public :: gauge_unitary=0,gauge_fd=1
+  integer,parameter,public :: max_vertex_couplings=8
+  integer,parameter,public :: vertex_three_gluon=0,vertex_vector_vector_aux=1,&
+       vertex_aux_vector_vector=2,vertex_vector_aux_vector=3,&
+       vertex_vector_fermion_fermion=4,vertex_vector_antifermion_antifermion=5,&
+       vertex_fermion_vector_fermion=6,vertex_antifermion_vector_antifermion=7,&
+       vertex_fermion_antifermion_vector=8,vertex_antifermion_fermion_vector=9,&
+       vertex_fermion_vector_fermion_coupled=10,&
+       vertex_antifermion_vector_antifermion_coupled=11,&
+       vertex_three_vector_coupled=12,vertex_vector_vector_aux_coupled=13,&
+       vertex_aux_vector_vector_coupled=14,vertex_vector_aux_vector_coupled=15,&
+       vertex_fermion_scalar_fermion=16,vertex_vector_vector_scalar=17,&
+       vertex_scalar_vector_vector=18,vertex_vector_scalar_vector=19,&
+       vertex_three_scalar=20,vertex_lepton_antilepton_vector=21,&
+       vertex_antilepton_lepton_vector=22,vertex_vector_lepton_lepton=23,&
+       vertex_vector_antilepton_antilepton=24
   integer,parameter :: model_particle_capacity = 24
   integer,parameter :: model_vertex_capacity = 222
-  private :: append_particle, append_vertex, find_particle_index, particle_property_sign&
+  private :: append_particle, append_vertex, grow_particle_list, grow_vertex_list,&
+       &find_particle_index, particle_property_sign&
        &, weak_coupling, weak_cosine, neutral_gauge_coupling&
        &, charged_current_coupling, particle_species_index&
        &, photon_fermion_coupling, z_fermion_coupling&
@@ -17,16 +34,17 @@ module particles
      real(kind=8),dimension(2) :: weak_isospin,weak_hypercharge
   end type particle
   type vertex
-     integer :: type
+     integer :: type,n_coupl
      integer,dimension(3) :: particles
-     real(kind=8),dimension(2) :: coupl
+     real(kind=8),dimension(max_vertex_couplings) :: coupl
   end type vertex
   type physics_model
      type(particle),dimension(:),allocatable :: particle_list
      type(vertex),dimension(:),allocatable :: vertex_list
      integer :: npart,nint
+     integer :: gauge_mode=gauge_unitary
    contains
-     procedure,public :: init_part,get_mass,get_width,get_spin&
+     procedure,public :: init_part,set_gauge,get_gauge_name,uses_fd_gauge,get_mass,get_width,get_spin&
           &,get_antipart,init_vert,get_dim,get_inter_dim,is_quark&
           &,get_charge,get_isospin_l,get_isospin_r,get_hypercharge_l&
           &,get_hypercharge_r,get_color_rep,get_color_dim&
@@ -39,6 +57,38 @@ module particles
      procedure,public :: get_colour_dim => get_color_dim
   end type physics_model
 contains
+  subroutine set_gauge(this,gauge)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    character(len=*),intent(in) :: gauge
+    character(len=:),allocatable :: value
+    value=trim(adjustl(gauge))
+    if (value.eq.'unitary'.or.value.eq.'current'.or.value.eq.'legacy') then
+       this%gauge_mode=gauge_unitary
+    elseif (value.eq.'fd') then
+       this%gauge_mode=gauge_fd
+    else
+       write (*,*) 'Gauge must be unitary or fd: ',trim(gauge)
+       stop 1
+    endif
+  end subroutine set_gauge
+
+  character(len=7) function get_gauge_name(this)
+    implicit none
+    class(physics_model),intent(in) :: this
+    if (this%gauge_mode.eq.gauge_fd) then
+       get_gauge_name='fd'
+    else
+       get_gauge_name='unitary'
+    endif
+  end function get_gauge_name
+
+  logical function uses_fd_gauge(this)
+    implicit none
+    class(physics_model),intent(in) :: this
+    uses_fd_gauge=this%gauge_mode.eq.gauge_fd
+  end function uses_fd_gauge
+
   subroutine append_particle(this,l,ipdg,mass,width,spin,anti_type,dim,charge,&
        &weak_isospin,weak_hypercharge,color_rep)
     implicit none
@@ -48,10 +98,7 @@ contains
     real(kind=8),intent(in) :: mass,width,charge
     real(kind=8),dimension(2),intent(in) :: weak_isospin,weak_hypercharge
     l=l+1
-    if (l.gt.this%npart) then
-       write (*,*) 'ERROR: more particles than allocated',l,this%npart
-       stop 1
-    endif
+    if (l.gt.size(this%particle_list)) call grow_particle_list(this,l)
     this%particle_list(l)%type=ipdg
     this%particle_list(l)%mass=mass
     this%particle_list(l)%width=width
@@ -70,16 +117,47 @@ contains
     integer,intent(inout) :: l
     integer,intent(in) :: itype
     integer,dimension(3),intent(in) :: ipdgs
-    real(kind=8),dimension(2),intent(in) :: coupl
+    real(kind=8),dimension(:),intent(in) :: coupl
     l=l+1
-    if (l.gt.this%nint) then
-       write (*,*) 'ERROR: more vertices than allocated',l,this%nint
-       stop 1
-    endif
+    if (l.gt.size(this%vertex_list)) call grow_vertex_list(this,l)
     this%vertex_list(l)%type=itype
     this%vertex_list(l)%particles=ipdgs
-    this%vertex_list(l)%coupl=coupl
+    if (size(coupl).gt.max_vertex_couplings) then
+       write (*,*) 'ERROR: too many couplings for vertex',itype,size(coupl)
+       stop 1
+    endif
+    this%vertex_list(l)%n_coupl=size(coupl)
+    this%vertex_list(l)%coupl=0d0
+    this%vertex_list(l)%coupl(1:size(coupl))=coupl
   end subroutine append_vertex
+
+  subroutine grow_particle_list(this,required)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(in) :: required
+    type(particle),dimension(:),allocatable :: tmp
+    integer :: old_size,new_size
+    old_size=size(this%particle_list)
+    new_size=max(required,max(1,2*old_size))
+    allocate(tmp(new_size))
+    if (old_size.gt.0) tmp(1:old_size)=this%particle_list(1:old_size)
+    call move_alloc(tmp,this%particle_list)
+    this%npart=new_size
+  end subroutine grow_particle_list
+
+  subroutine grow_vertex_list(this,required)
+    implicit none
+    class(physics_model),intent(inout) :: this
+    integer,intent(in) :: required
+    type(vertex),dimension(:),allocatable :: tmp
+    integer :: old_size,new_size
+    old_size=size(this%vertex_list)
+    new_size=max(required,max(1,2*old_size))
+    allocate(tmp(new_size))
+    if (old_size.gt.0) tmp(1:old_size)=this%vertex_list(1:old_size)
+    call move_alloc(tmp,this%vertex_list)
+    this%nint=new_size
+  end subroutine grow_vertex_list
 
   integer function find_particle_index(this,ipdg)
     implicit none
@@ -192,7 +270,7 @@ contains
          &right_isospin-charge*sw**2]
   end function z_fermion_coupling
 
-  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth)
+  subroutine init_part(this,tmass,twidth,zmass,zwidth,wmass,wwidth,hmass,hwidth,gauge)
     implicit none
     class(physics_model) :: this
     integer :: i,l
@@ -200,8 +278,18 @@ contains
     real(kind=8) :: zmass,zwidth
     real(kind=8) :: wmass,wwidth
     real(kind=8) :: hmass,hwidth
+    character(len=*),intent(in),optional :: gauge
+    integer :: massive_vector_dim
+    if (present(gauge)) then
+       call this%set_gauge(gauge)
+    else
+       this%gauge_mode=gauge_unitary
+    endif
+    massive_vector_dim=4
+    if (this%uses_fd_gauge()) massive_vector_dim=5
     l=0
     this%npart=model_particle_capacity ! gluon, quarks, tensors, bosons, Higgs and leptons
+    if (allocated(this%particle_list)) deallocate(this%particle_list)
     allocate(this%particle_list(this%npart))
 
     ! 5 massless quarks
@@ -229,13 +317,13 @@ contains
     call append_particle(this,l,22,0d0,0d0,2,22,4,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! Z-boson
-    call append_particle(this,l,23,zmass,zwidth,3,23,4,0d0,[0d0,0d0],[0d0,0d0],1)
+    call append_particle(this,l,23,zmass,zwidth,3,23,massive_vector_dim,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! Ztensor (non-propagator auxiliary particle to decompose 4-Wboson interaction)
     call append_particle(this,l,-23,0d0,0d0,-1,-23,6,0d0,[0d0,0d0],[0d0,0d0],1)
 
     ! W-boson
-    call append_particle(this,l,24,wmass,wwidth,3,-24,4,1d0,[1d0,1d0],[0d0,0d0],1)
+    call append_particle(this,l,24,wmass,wwidth,3,-24,massive_vector_dim,1d0,[1d0,1d0],[0d0,0d0],1)
 
     ! Higgs-boson
     call append_particle(this,l,25,hmass,hwidth,1,25,1,0d0,[-0.5d0,-0.5d0],[1d0,1d0],1)
@@ -270,6 +358,7 @@ contains
     integer :: i,l
     l=0
     this%nint = model_vertex_capacity ! number of vertices
+    if (allocated(this%vertex_list)) deallocate(this%vertex_list)
     allocate(this%vertex_list(this%nint))
     ! gluon-gluon to gluon vertex
     call append_vertex(this,l,0,[21,21,21],[1d0,0d0])

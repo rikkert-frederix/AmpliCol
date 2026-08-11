@@ -2,12 +2,15 @@ module amplitude_library
   use handling_processes
   use read_process_file
 contains
-  subroutine create_amplitude_lib()
+  subroutine create_amplitude_lib(gauge)
     implicit none
+    character(len=*),intent(in) :: gauge
     character(len=170) :: tmp,line,filename
+    character(len=16),parameter :: library_magic='AMPICOL_LIB_V2'
+    character(len=8) :: stored_gauge
     integer :: igroup,j,iamp
     filename='Library/amplib.f03'
-    open(unit=14,file=filename,status='unknown')
+    open(unit=14,file=filename,status='replace')
     write(14,*) 'module amp_lib'
     do igroup=1,ngroups
        do j=1,size(pgl(igroup)%amps)
@@ -63,7 +66,9 @@ contains
     write(14,*) 'end module amp_lib'
     close(14)
     filename='Library/amplitudes.bin'
-    open(unit=14,file=filename,form='unformatted',access='stream',status='unknown')
+    open(unit=14,file=filename,form='unformatted',access='stream',status='replace')
+    stored_gauge=trim(adjustl(gauge))
+    write(14) library_magic,stored_gauge
     write(14) pgl_unique%next,pgl_unique%nproc
     write(14) unique_map
     write(14) unique_map_value
@@ -112,12 +117,26 @@ contains
     close(14)
   end subroutine create_amplitude_lib
 
-  subroutine read_amplitude_lib()
+  subroutine read_amplitude_lib(gauge)
     implicit none
+    character(len=*),intent(in) :: gauge
     character(len=170) :: filename
+    character(len=16),parameter :: library_magic='AMPICOL_LIB_V2'
+    character(len=16) :: file_magic
+    character(len=8) :: stored_gauge
     integer :: dim1,dim2,dim3,iamp,igroup
     filename='Library/amplitudes.bin'
     open(unit=14,file=filename,form='unformatted',access='stream',status='old')
+    read(14) file_magic,stored_gauge
+    if (file_magic.ne.library_magic) then
+       write (*,*) 'Amplitude library format is obsolete; recreate the library'
+       stop 1
+    endif
+    if (trim(stored_gauge).ne.trim(adjustl(gauge))) then
+       write (*,*) 'Amplitude library gauge mismatch: file=',trim(stored_gauge),&
+            ' requested=',trim(adjustl(gauge))
+       stop 1
+    endif
     allocate(pgl_unique)
     read(14) pgl_unique%next,pgl_unique%nproc
     allocate(unique_map(pgl_unique%nproc))

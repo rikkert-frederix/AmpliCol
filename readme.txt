@@ -86,7 +86,15 @@ Usage: amplicol_generate <arguments>'. Possible arguments are
   --library=[X],    -l=[X]  : To create or use a library for the amplitudes, set [X] to 'create' or 'use', respectively. (To use a library, re-compile code with 'make amplicol_generate_library' after a library has been created). Default is 'none'.
   --tag=[X],        -t=[X]  : Event file (and log file) names will be prepended with a tag '[X]_'.
   --me_test=[X],    -mt=[X] : Perform ME-level test against MG with [X] points tested (single PS kinematics)
+  --gauge=[X]               : Vector-current gauge: unitary (default) or fd.
 *****************************
+
+The optional FD gauge uses the five-component massive-vector
+representation (four reduced-vector components plus the associated
+Goldstone component) and the momentum-dependent gauge direction
+n(q)=(sgn(q0),-q_vec/|q_vec|).  It follows the formulation in
+arXiv:2003.03003, arXiv:2203.10440, and arXiv:2405.01256.  The default
+'unitary' value preserves the pre-existing implementation.
 
 Most important are the '--nevents=X' to set the number of events to
 generate, '--seed=X' to set the random seed.
@@ -125,6 +133,10 @@ make amplicol_generate
 make amplicol_generate_library
 ./amplicol_generate --library=use --nevents=1000000 --seed=101
 
+An amplitude library is gauge-specific.  Use the same '--gauge=X'
+option when creating and using it; a mismatched or old library is
+rejected and must be recreated.
+
 It might be needed to include the "-mcmodel=large" compilation flag
 when the process library is large, see also lines 5-6 of the
 makefile. Using this option requires a 'make clean' first, before
@@ -161,6 +173,7 @@ Possible arguments are
   --help,   -h      : Show this message.
   --unwgt           : Unweight the reweight events.
   --remove_comments : Remove comment lines in the final LHEF.
+  --gauge=[X]       : Vector-current gauge: unitary (default) or fd.
 *****************************
 
 By default, the code reweights all events and update the event weights
@@ -180,6 +193,26 @@ By default, the produced LHEF also contains some lines starting with
 '#' that contain some information for debugging. The writing of these
 lines is skipped by adding the '--remove_comments' option to the
 execution of the amplicol_reweight code.
+
+
+4. FD-gauge regression tests
+
+The component checks for the five-component propagator, external
+states, and auxiliary-particle decompositions are run with
+
+make test_fd_gauge
+
+The full matrix-element fixture is generated locally because its
+golden file is large:
+
+make update_matrix_goldens
+make test_matrix_elements
+
+The latter command checks both the default unitary gauge and the FD
+gauge against the same golden.dat file. These gauge-equivalence tests
+use zero particle widths: fixed widths violate Ward identities and
+would introduce a gauge difference unrelated to the FD vertices being
+tested.
 
 
 
