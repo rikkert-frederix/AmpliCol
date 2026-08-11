@@ -25,6 +25,7 @@ REPLAY_TAIL_REPLAY = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_replay.dat"
 TEST_BORN_PROCESS = ROOT / "tests_nf_born_processes.txt"
 TEST_REAL_PROCESS = ROOT / "tests_nf_real_processes.txt"
 WJ_MIGRATION_REPLAY = ROOT / "tests" / "wj_migration_tail_replay.dat"
+WJ_AUXILIARY_VECTOR_REPLAY = ROOT / "tests" / "wj_auxiliary_vector_soft_tail_replay.dat"
 ALPHA01_CARD = ROOT / "tests" / "input" / "alpha01_run_card.dat"
 
 
@@ -181,28 +182,29 @@ def main() -> None:
 
         generate_process("p p > w+ 1j", TEST_BORN_PROCESS)
         generate_process("p p > w+ 2j", TEST_REAL_PROCESS)
-        migration_replay = subprocess.run(
-            [
-                str(ROOT / "amplicol_generate"),
-                f"--process={TEST_BORN_PROCESS.name}",
-                f"--real-process={TEST_REAL_PROCESS.name}",
-                "--accuracy=0.9",
-                "--itmax=1",
-                "--seed=13579",
-                f"--input={ALPHA01_CARD}",
-                f"--tag={RESIDUAL_REPLAY_TAG}",
-                f"--tail-replay={WJ_MIGRATION_REPLAY}",
-            ],
-            cwd=ROOT,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        if "Tail replay: PASS" not in migration_replay.stdout:
-            raise AssertionError("saved W+j cut-migration point did not replay")
-        if "stratum migration" not in migration_replay.stdout:
-            raise AssertionError("saved W+j point was not assigned to the migration stratum")
+        for replay_file in (WJ_MIGRATION_REPLAY, WJ_AUXILIARY_VECTOR_REPLAY):
+            migration_replay = subprocess.run(
+                [
+                    str(ROOT / "amplicol_generate"),
+                    f"--process={TEST_BORN_PROCESS.name}",
+                    f"--real-process={TEST_REAL_PROCESS.name}",
+                    "--accuracy=0.9",
+                    "--itmax=1",
+                    "--seed=13579",
+                    f"--input={ALPHA01_CARD}",
+                    f"--tag={RESIDUAL_REPLAY_TAG}",
+                    f"--tail-replay={replay_file}",
+                ],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            if "Tail replay: PASS" not in migration_replay.stdout:
+                raise AssertionError(f"saved W+j cut-migration point did not replay: {replay_file}")
+            if "stratum migration" not in migration_replay.stdout:
+                raise AssertionError(f"saved W+j point was not assigned to migration: {replay_file}")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(

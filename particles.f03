@@ -910,7 +910,8 @@ contains
     implicit none
     class(physics_model) :: this
     integer :: iPDG
-    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.this%is_gluon(iPDG)) .and. &
+    if ((this%is_quark(iPDG).or.this%is_antiquark(iPDG).or.&
+         this%is_colour_flow_vector(iPDG)) .and. &
          this%get_mass(iPDG).eq.0d0) then
        is_jet=.true.
     else

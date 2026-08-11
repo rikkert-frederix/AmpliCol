@@ -94,6 +94,11 @@ program run_parameters_regression
 
   call model%init_part()
   call model%init_vert()
+  if (model%is_gluon(99) .or. (.not.model%is_colour_flow_vector(99)) .or. &
+       (.not.model%is_jet(99))) then
+     write (*,*) 'Auxiliary colour-flow vector classification is inconsistent'
+     stop 1
+  endif
   call assert_close(model%get_mass(6),181d0,'model top mass')
   call assert_close(model%get_width(-6),2.3d0,'model anti-top width')
   call assert_close(model%get_mass(24),81d0,'model W mass')

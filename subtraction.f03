@@ -98,7 +98,7 @@ contains
     logical :: is_vector_parent
 
     ij=dip%dip_r_ijk(1)
-    is_vector_parent=phys_model%is_gluon(dip%dip_r_ijk_f(1))
+    is_vector_parent=phys_model%is_colour_flow_vector(dip%dip_r_ijk_f(1))
     nmatch=0
     do ih1=1,dip%amp%n_amps
        do ih2=1,dip%amp%n_amps
@@ -1087,7 +1087,8 @@ contains
        rho(a,b)=rho(a,b)+term
     enddo
     if (dip%rho_lookup_upper) rho(2,1)=dconjg(rho(1,2))
-    if (.not.dip%rho_hermitian_checked .and. phys_model%is_gluon(dip%dip_r_ijk_f(1))) then
+    if (.not.dip%rho_hermitian_checked .and. &
+         phys_model%is_colour_flow_vector(dip%dip_r_ijk_f(1))) then
        hermitian_scale=max(1d0,maxval(abs(rho)))
        dip%rho_hermitian_checked=(abs(rho(1,2)-dconjg(rho(2,1))).le.1d-10*hermitian_scale .and. &
             abs(aimag(rho(1,1))).le.1d-10*hermitian_scale .and. &
