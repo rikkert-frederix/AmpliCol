@@ -1802,7 +1802,7 @@ contains
     common /to_seed/iseed
     call parse_argument(filename,real_filename,input_filename,ncalls0,itmax,PS_choice,iseed,library,tag,&
          read_momenta,me_points,&
-         limit_test,timing_arg,timing_sample_arg,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
+         limit_test,timing_arg,timing_sample_arg,accuracy,dim_reg_scheme,has_real_process,&
          tail_replay_file,replay_tail,migration_tail_fraction_limit)
 
     logfile="Outputs/"//trim(adjustl(tag))//"log_file.txt"

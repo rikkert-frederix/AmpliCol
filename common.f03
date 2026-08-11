@@ -6,8 +6,6 @@ module common
   ! Model and process parameters
   type(physics_model) :: phys_model
   real(kind=8) :: alphaS
-  ! Real-dipole phase-space restrictions in the order FF, FI, IF, II.
-  real(kind=8) :: alpha_dipole(4)=(/1d0,1d0,1d0,1d0/)
 
   ! technical
   logical,parameter :: use_colour_singlet_multichannel=.true.

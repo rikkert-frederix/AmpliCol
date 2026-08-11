@@ -31,6 +31,10 @@ program run_parameters_regression
   call assert_close(sw,0.47143025548407230d0,'default weak mixing sine')
   call assert_close(alphaS_MZ,0.119d0,'default alphaS')
   call assert_close(alphaEW,0.007546771114d0,'default alphaEW')
+  call assert_close(alpha_dipole(1),1d0,'default FF dipole alpha')
+  call assert_close(alpha_dipole(2),1d0,'default FI dipole alpha')
+  call assert_close(alpha_dipole(3),1d0,'default IF dipole alpha')
+  call assert_close(alpha_dipole(4),1d0,'default II dipole alpha')
   call assert_close(sqrts,14000d0,'default collider energy')
   if (scale_choice.ne.2 .or. (.not.include_pdf) .or. (.not.use_lhapdf) .or.&
        lhapdf_member.ne.0 .or. pdf_lhaid.ne.244800) then
@@ -54,6 +58,10 @@ program run_parameters_regression
   call assert_close(sw,0.5d0,'custom weak mixing sine')
   call assert_close(alphaS_MZ,0.121d0,'custom alphaS')
   call assert_close(alphaEW,0.008d0,'custom alphaEW')
+  call assert_close(alpha_dipole(1),0.11d0,'custom FF dipole alpha')
+  call assert_close(alpha_dipole(2),0.22d0,'custom FI dipole alpha')
+  call assert_close(alpha_dipole(3),0.33d0,'custom IF dipole alpha')
+  call assert_close(alpha_dipole(4),0.44d0,'custom II dipole alpha')
   call assert_close(sqrts,13000d0,'custom collider energy')
   if (scale_choice.ne.5 .or. include_pdf .or. use_lhapdf .or.&
        lhapdf_member.ne.3 .or. pdf_lhaid.ne.999999) then

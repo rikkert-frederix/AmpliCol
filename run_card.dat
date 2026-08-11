@@ -31,6 +31,10 @@
   pdf_lhaid        = 244800
   internal_pdf_grid= 'NNPDF23nlo_as_0119_qed_mem0.grid'
 
+  ! Catani-Seymour dipole restrictions in the order FF, FI, IF, II.
+  ! Every value must satisfy 0 < alpha <= 1.
+  alpha_dipole = 1d0, 1d0, 1d0, 1d0
+
   ! The default safeguard sets the width of every massive final-state species
   ! to zero in every subprocess.  Set this to true to retain nominal widths.
   ignore_final_state_width_fix = .false.

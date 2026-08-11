@@ -18,6 +18,7 @@
   lhapdf_member=3
   pdf_lhaid=999999
   internal_pdf_grid='custom_internal.grid'
+  alpha_dipole=0.11d0,0.22d0,0.33d0,0.44d0
   ignore_final_state_width_fix=.false.
   pTj_min=41d0
   DRjj_min=0.51d0

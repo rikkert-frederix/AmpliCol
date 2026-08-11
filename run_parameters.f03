@@ -28,6 +28,9 @@ module run_parameters
   integer :: pdf_lhaid=244800
   character(len=256) :: internal_pdf_grid='NNPDF23nlo_as_0119_qed_mem0.grid'
 
+  ! Catani-Seymour dipole phase-space restrictions in FF, FI, IF, II order.
+  real(kind=8) :: alpha_dipole(4)=(/1d0,1d0,1d0,1d0/)
+
   ! By default an unstable particle requested in the physical final state is
   ! treated as on shell throughout every subprocess.  Set this switch to true
   ! only to retain its configured width.
@@ -61,7 +64,7 @@ module run_parameters
   namelist /amplicol/ top_mass,top_width,z_mass,z_width,w_mass,w_width,&
        higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,scale_choice,&
        include_pdf,use_lhapdf,lhapdfset,lhapdf_member,pdf_lhaid,&
-       internal_pdf_grid,ignore_final_state_width_fix,&
+       internal_pdf_grid,alpha_dipole,ignore_final_state_width_fix,&
        pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,&
        pTa_min,DRaa_min,etaa_max,sqrt_saa_min,&
        pTl_min,DRll_min,etal_max,sqrt_sll_min,&
@@ -90,6 +93,7 @@ contains
     lhapdf_member=0
     pdf_lhaid=244800
     internal_pdf_grid='NNPDF23nlo_as_0119_qed_mem0.grid'
+    alpha_dipole=(/1d0,1d0,1d0,1d0/)
     ignore_final_state_width_fix=.false.
     pTj_min=30d0
     DRjj_min=0.4d0
@@ -143,7 +147,8 @@ contains
          w_mass,w_width,higgs_mass,higgs_width,sw,alphaS_MZ,alphaEW,sqrts,&
          pTj_min,DRjj_min,etaj_max,sqrt_sjj_min,pTa_min,DRaa_min,etaa_max,&
          sqrt_saa_min,pTl_min,DRll_min,etal_max,sqrt_sll_min,DRja_min,&
-         sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min]))) then
+         sqrt_sja_min,DRjl_min,sqrt_sjl_min,DRla_min,sqrt_sla_min,&
+         alpha_dipole]))) then
        write (*,*) 'All real-valued input parameters must be finite'
        stop 1
     endif
@@ -167,6 +172,10 @@ contains
     endif
     if (sqrts.le.0d0) then
        write (*,*) 'sqrts must be positive',sqrts
+       stop 1
+    endif
+    if (any(alpha_dipole.le.0d0 .or. alpha_dipole.gt.1d0)) then
+       write (*,*) 'alpha_dipole values must satisfy 0 < alpha <= 1',alpha_dipole
        stop 1
     endif
     if (scale_choice.lt.0 .or. scale_choice.gt.5) then

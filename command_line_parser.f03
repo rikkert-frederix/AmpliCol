@@ -2,7 +2,7 @@ module argument_parser
   implicit none
 contains
   subroutine parse_argument(filename,real_filename,input_file,ncalls0,itmax,PS_choice,seed,library,tag,read_momenta,me_points,&
-       limit_test,timing,timing_sample,accuracy,alpha_dipole,dim_reg_scheme,has_real_process,&
+       limit_test,timing,timing_sample,accuracy,dim_reg_scheme,has_real_process,&
        tail_replay_file,replay_tail,migration_tail_fraction_limit)
     integer :: i
     character(len=256) :: arg
@@ -13,7 +13,7 @@ contains
     integer(kind=8) :: seed
     logical :: read_momenta,limit_test,has_real_process,replay_tail
     integer :: me_points,timing_sample
-    real(kind=8) :: accuracy,alpha_dipole(4),migration_tail_fraction_limit
+    real(kind=8) :: accuracy,migration_tail_fraction_limit
 
     ! Default values:
     show_help=.false.
@@ -35,7 +35,6 @@ contains
     timing='basic'
     timing_sample=100
     accuracy=0d0
-    alpha_dipole=(/1d0,1d0,1d0,1d0/)
     dim_reg_scheme='hv'
 
     do i = 1, command_argument_count()
@@ -87,9 +86,6 @@ contains
              write (*,*) 'Accuracy must be between 0 and 1: ',accuracy
              stop 1
           endif
-       elseif (index(arg, "--alpha=").eq.1) then
-          tmp = arg(index(arg, "=")+1:)
-          call parse_alpha(tmp,alpha_dipole)
        elseif (index(arg, "--dim-reg=").eq.1) then
           dim_reg_scheme=trim(adjustl(arg(index(arg, "=")+1:)))
        elseif (index(arg, "--tail-replay=").eq.1) then
@@ -133,8 +129,6 @@ contains
        write (*,'(a)') "  --timing-sample=[X]       : In detailed timing, sample point timers every [X] points. Default is 100."
        write (*,'(a)') "  --accuracy=[X],   -a=[X]  : Disable event generation and integrate until "//&
             "the absolute-envelope relative error is below [X] (0 < X < 1)."
-       write (*,'(a)') "  --alpha=[X]               : Real-dipole restriction; one value or four comma-separated"// &
-            " values FF,FI,IF,II."
        write (*,'(a)') "  --dim-reg=[hv|fdh]        : Dimensional scheme for integrated dipoles (default: hv)."
        write (*,'(a)') "  --tail-replay=[FILE]      : Re-evaluate the saved maximum-weight point in FILE and exit."
        write (*,'(a)') "  --migration-tail-fraction=[X] : Require the largest migration point to contribute"// &
@@ -144,39 +138,4 @@ contains
     end if
   end subroutine parse_argument
 
-  subroutine parse_alpha(text,alpha)
-    implicit none
-    character(len=*),intent(in) :: text
-    real(kind=8),intent(out) :: alpha(4)
-    real(kind=8) :: value
-    integer :: i,ios,ncomma
-
-    ncomma=0
-    do i=1,len_trim(text)
-       if (text(i:i).eq.',') ncomma=ncomma+1
-    enddo
-    if (ncomma.eq.0) then
-       read(text,*,iostat=ios) value
-       if (ios.ne.0) then
-          write (*,*) 'Invalid --alpha value: ',trim(text)
-          stop 1
-       endif
-       alpha=value
-    elseif (ncomma.eq.3) then
-       read(text,*,iostat=ios) alpha
-       if (ios.ne.0) then
-          write (*,*) 'Invalid --alpha list: ',trim(text)
-          stop 1
-       endif
-    else
-       write (*,*) '--alpha requires one value or four comma-separated values: ',trim(text)
-       stop 1
-    endif
-    do i=1,4
-       if (.not.(alpha(i).gt.0d0 .and. alpha(i).le.1d0)) then
-          write (*,*) '--alpha values must satisfy 0 < alpha <= 1: ',alpha(i)
-          stop 1
-       endif
-    enddo
-  end subroutine parse_alpha
 end module argument_parser

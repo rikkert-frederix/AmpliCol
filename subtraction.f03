@@ -2,7 +2,7 @@ module subtraction
   use handling_processes
   use particles
   use amplitude_QCD_mod, only: use_real_gluons
-  use common, only: alpha_dipole
+  use run_parameters, only: alpha_dipole
   use cs_dipole_mappings, only: dot4,cs_dot4_scale,cs_roundoff_tolerance,&
        cs_value_is_resolved
   implicit none
@@ -831,7 +831,7 @@ contains
 
   subroutine compute_the_dipole_amps(iint,ichan)
     use cs_dipole_mappings
-    use common, only: alpha_dipole
+    use run_parameters, only: alpha_dipole
     use cuts, only: pass_mapped_dipole_cuts
     implicit none
     integer,intent(in) :: iint,ichan

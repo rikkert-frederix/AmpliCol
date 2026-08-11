@@ -25,6 +25,7 @@ REPLAY_TAIL_REPLAY = ROOT / "Outputs" / f"{REPLAY_TAG}_tail_replay.dat"
 TEST_BORN_PROCESS = ROOT / "tests_nf_born_processes.txt"
 TEST_REAL_PROCESS = ROOT / "tests_nf_real_processes.txt"
 WJ_MIGRATION_REPLAY = ROOT / "tests" / "wj_migration_tail_replay.dat"
+ALPHA01_CARD = ROOT / "tests" / "input" / "alpha01_run_card.dat"
 
 
 def generate_process(process: str, destination: pathlib.Path) -> None:
@@ -188,7 +189,7 @@ def main() -> None:
                 "--accuracy=0.9",
                 "--itmax=1",
                 "--seed=13579",
-                "--alpha=0.1",
+                f"--input={ALPHA01_CARD}",
                 f"--tag={RESIDUAL_REPLAY_TAG}",
                 f"--tail-replay={WJ_MIGRATION_REPLAY}",
             ],

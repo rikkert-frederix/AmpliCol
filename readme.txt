@@ -120,11 +120,12 @@ weight and passes the built-in cuts before the limiting deformation starts.
 For failed limits, the complete deformation table is written to
 'Outputs/limit_test_failures.log' (or the corresponding tagged filename).
 
-For real Catani-Seymour dipoles, the optional '--alpha=X' argument restricts the
-dipole phase space. A single value applies to all topologies; alternatively use
-four comma-separated values in the order FF, FI, IF, II. Values must satisfy
-0 < X <= 1. The default is one. In a combined Born-plus-real run, the matching topology-specific
-endpoint corrections are applied to the integrated terms as well.
+For real Catani-Seymour dipoles, the `alpha_dipole` entry in the runtime input
+card restricts the dipole phase space. It contains four values in the order FF,
+FI, IF, II. Every value must satisfy 0 < alpha <= 1; the default is one for all
+four topologies. In a combined Born-plus-real run, the matching
+topology-specific endpoint corrections are applied to the integrated terms as
+well.
 
 The optional '--real-process=FILE' mode loads the Born processes from
 '--process=FILE' and real-emission processes from the additional file into one

@@ -327,12 +327,12 @@ mg_checks.o : common.o amplitude_QCD.o command_line_parser.o handling_processes.
 scales.o : common.o particles.o cuts.o
 amplib.o : $(notdir $(AMPSRC:.f03=.o))
 subtraction.o : particles.o handling_processes.o amplitude_QCD.o cuts.o phase_space_module.o \
-	cs_dipole_mappings.o cs_lc_dipoles.o feynmanrules.o
+	cs_dipole_mappings.o cs_lc_dipoles.o feynmanrules.o run_parameters.o
 cs_lc_dipoles.o : cs_dipole_mappings.o
 cs_integrated_kernels.o : cs_dipole_mappings.o
 cs_massive_integrated_kernels.o : cs_dipole_mappings.o cs_integrated_kernels.o
 integrated_dipoles.o : handling_processes.o cs_dipole_mappings.o cs_integrated_kernels.o \
-	cs_massive_integrated_kernels.o pdf_wrap.o
+	cs_massive_integrated_kernels.o pdf_wrap.o run_parameters.o
 
 # ----------------------------------------------------------------------
 # 7. Cleanup

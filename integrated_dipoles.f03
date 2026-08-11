@@ -8,7 +8,7 @@ module integrated_dipoles
   use cs_integrated_kernels
   use cs_massive_integrated_kernels
   use pdf_wrap, only: evaluate_pdf_flavour
-  use common, only: alpha_dipole
+  use run_parameters, only: alpha_dipole
   implicit none
   private
 
